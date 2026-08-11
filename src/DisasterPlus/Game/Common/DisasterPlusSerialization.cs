@@ -24,7 +24,15 @@ namespace DisasterPlus.Game
     public class DisasterPlusSerialization : ISerializableDataExtension
     {
         private const string DataId = "DisasterPlus.FireWhirl";
-        private const int CurrentVersion = 1;
+
+        /// <summary>
+        /// 2: Manual（手動発生）フラグを追加。
+        ///
+        /// 保存しないと、ロード後に手動発生の旋風が自動発生扱いに変わり、
+        /// 周囲に火が無いので条件割り込みの猶予だけで消える。
+        /// 「セーブ・ロードを挟むと勝手に消える」は原因の見えない不具合になるので保存する。
+        /// </summary>
+        private const int CurrentVersion = 2;
 
         /// <summary>
         /// OnLoadData で読み取った復元待ちの一覧。OnLevelLoaded が Clear() の後に取り出すまでの一時置き場。
@@ -59,6 +67,7 @@ namespace DisasterPlus.Game
                     w.Write(v.Radius);
                     w.Write(v.BurningCount);
                     w.Write(v.ElapsedMinutes);
+                    w.Write(v.Manual);          // version 2 以降
                 }
 
                 _data.SaveData(DataId, ms.ToArray());
@@ -103,6 +112,10 @@ namespace DisasterPlus.Game
                         s.Radius = r.ReadSingle();
                         s.BurningCount = r.ReadInt32();
                         s.ElapsedMinutes = r.ReadSingle();
+
+                        // version 1 のセーブには Manual のバイトが無い。読まずに既定の false のままにする
+                        // （ここで読むとストリームがずれて以降の全エントリが壊れる）。
+                        if (version >= 2) s.Manual = r.ReadBoolean();
 
                         if (!IsValid(s))
                         {
@@ -176,5 +189,8 @@ namespace DisasterPlus.Game
         public float Radius;
         public int BurningCount;
         public float ElapsedMinutes;
+
+        /// <summary>手動発生か（version 2 以降）。旧セーブからは false で読む。</summary>
+        public bool Manual;
     }
 }

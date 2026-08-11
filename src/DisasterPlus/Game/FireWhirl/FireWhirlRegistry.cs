@@ -16,6 +16,14 @@ namespace DisasterPlus.Game
 
         /// <summary>終了処理に入った。移動目標を現在地に置いてバニラの解体を待っている状態。</summary>
         public bool Ending;
+
+        /// <summary>
+        /// プレイヤーが災害パネルから手動で置いた旋風。
+        /// 発生条件（R 内に N 棟）の割り込み判定を免除し、絶対上限だけで終わらせる。
+        /// これが無いと、火の無い場所に置いた瞬間に条件割り込みが始まり、
+        /// 猶予（既定 3 分 ≒ 136 フレーム）で消えてしまい、動作確認に使えない。
+        /// </summary>
+        public bool Manual;
     }
 
     /// <summary>
@@ -34,6 +42,7 @@ namespace DisasterPlus.Game
         public readonly int BurningCount;
         public readonly float ElapsedMinutes;
         public readonly bool Ending;
+        public readonly bool Manual;
 
         internal FireWhirlView(ActiveFireWhirl w)
         {
@@ -44,6 +53,7 @@ namespace DisasterPlus.Game
             BurningCount = w.BurningCount;
             ElapsedMinutes = w.Life.ElapsedMinutes;
             Ending = w.Ending;
+            Manual = w.Manual;
         }
     }
 
@@ -67,7 +77,9 @@ namespace DisasterPlus.Game
         private static readonly List<ActiveFireWhirl> _active = new List<ActiveFireWhirl>();
         private static readonly List<CoolingSpot> _cooling = new List<CoolingSpot>();
 
-        public static void Add(ushort disasterId, ushort vehicleId, Vec3 center, float radius, int burningCount)
+        /// <param name="manual">プレイヤーが手動で置いたか。条件割り込みの免除に使う。</param>
+        public static void Add(ushort disasterId, ushort vehicleId, Vec3 center, float radius,
+                               int burningCount, bool manual)
         {
             lock (_gate)
             {
@@ -80,6 +92,7 @@ namespace DisasterPlus.Game
                     BurningCount = burningCount,
                     Life = FireWhirlLifecycle.Start(),
                     Ending = false,
+                    Manual = manual,
                 });
             }
         }
@@ -241,6 +254,13 @@ namespace DisasterPlus.Game
         /// <summary>
         /// Harmony パッチ（VortexAI.SimulationStep の Postfix）から毎ステップ呼ばれる。
         /// 自分が作った渦かどうかを車両 ID で判定し、固定先の座標を返す。
+        ///
+        /// 終了処理中（Ending）でも固定を続ける。ここで固定を解くと、目標に到達するまでの
+        /// スピンダウン（角速度 1.0 から -0.05/step で 0.05 未満まで約 20 ステップ、その後
+        /// ArriveAtDestination が m_waitCounter > 4 になるまで 5 ステップ）の間、渦が
+        /// 自由に動き回ってしまい、炎エフェクトだけが発生地点に取り残される。
+        /// 固定したままなら目標との距離が 0 のままなので、スピンダウンが確実に進む。
+        /// エントリは Unspawn 後に CollectFinished が外す。
         /// </summary>
         public static bool TryGetPinnedCenter(ushort vehicleId, out Vec3 center)
         {
@@ -249,7 +269,6 @@ namespace DisasterPlus.Game
                 for (int i = 0; i < _active.Count; i++)
                 {
                     if (_active[i].VehicleId != vehicleId) continue;
-                    if (_active[i].Ending) break;   // 終了中は固定を解いてバニラに解体させる
                     center = _active[i].Center;
                     return true;
                 }
@@ -297,6 +316,7 @@ namespace DisasterPlus.Game
                         BurningCount = saved[i].BurningCount,
                         Life = FireWhirlLifecycle.Start().Advance(saved[i].ElapsedMinutes, true),
                         Ending = false,
+                        Manual = saved[i].Manual,
                     });
                 }
             }

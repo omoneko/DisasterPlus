@@ -101,29 +101,95 @@ namespace DisasterPlus.Game
         /// <summary>
         /// 寿命が尽きた旋風を、バニラの解体経路に乗せる。
         ///
-        /// 車両を自前で解放しない。移動目標を現在位置に置けば、数ステップ後に
+        /// 車両を自前で解放しない。移動目標を現在位置に置けば、やがて
         /// VortexAI.ArriveAtDestination が true を返し（m_waitCounter > 4）、
         /// バニラが DisasterAI.DeactivateNow と Vehicle.Unspawn を正しく実行する。
+        ///
+        /// スロット 0 だけでは足りない（IL 実測で判明。設計書 5.6 の旧記述は誤り）。
+        /// VortexAI.SimulationStep(6 引数) は冒頭で
+        ///     if (LengthXZ(m_targetPos0 - frame.m_position) &lt; m_info.m_maxSpeed)
+        ///         m_targetPos0 = m_targetPos1;
+        /// を行う。TornadoAI.ActivateDisaster は SetTargetPos(0, m_targetPosition) と
+        /// SetTargetPos(1, m_targetPosition - dir*(intensity*10+400)) を入れているので、
+        /// スロット 0 だけ現在位置に書いても次のステップで 1000m 先のスロット 1 に
+        /// 上書きされ、ArriveAtDestination には永遠に到達しない。両方に書く。
+        ///
+        /// w は 0 にする。バニラは Vector3 -&gt; Vector4 の暗黙変換で目標を入れており
+        /// （ActivateDisaster の IL に op_Implicit）、VortexAI 側も Vector4 -&gt; Vector3 の
+        /// 暗黙変換で読むだけなので w は元から 0 で、意味を持たない。
         /// </summary>
         public static void BeginEnding(FireWhirlView v)
         {
-            FireWhirlRegistry.MarkEnding(v.DisasterId);
-
             if (v.VehicleId == 0)
             {
-                // 車両が付く前に寿命が尽きた。災害だけ落として掃除する。
+                // 車両が付く前に寿命が尽きた。レジストリから外すだけだと、バニラの災害は
+                // 生きたまま追跡不能なドリフト竜巻になる。正規に停止できたときだけ外す。
+                if (!TryDeactivateDisasterNow(v.DisasterId))
+                {
+                    // まだ Active になっていない（DisasterAI.DeactivateNow は
+                    // m_flags に Active が立っていなければ何もしない。IL 確認済み）。
+                    // Ending も付けずにこのまま生かし、次 tick に再判定させる。
+                    // 寿命判定は単調なので、Active になった時点で必ずここへ戻ってくる。
+                    Log.Diag("fwEndWait", "fire whirl " + v.DisasterId +
+                             " is not active yet; deferring teardown");
+                    return;
+                }
+
                 FireWhirlRegistry.Remove(v.DisasterId, ModSettings.MaxLifetimeMinutes.value);
                 return;
             }
 
+            FireWhirlRegistry.MarkEnding(v.DisasterId);
+
             var buffer = VehicleManager.instance.m_vehicles.m_buffer;
             Vector3 here = buffer[v.VehicleId].GetLastFrameData().m_position;
+            var target = new Vector4(here.x, here.y, here.z, 0f);
 
-            // w には元の値を残す（速度・半径の意味を持つため、0 にすると挙動が変わる）。
-            Vector4 t0 = buffer[v.VehicleId].m_targetPos0;
-            buffer[v.VehicleId].SetTargetPos(0, new Vector4(here.x, here.y, here.z, t0.w));
+            buffer[v.VehicleId].SetTargetPos(0, target);
+            buffer[v.VehicleId].SetTargetPos(1, target);
 
-            Log.Info("fire whirl " + v.DisasterId + " ending; target moved to current position");
+            Log.Info("fire whirl " + v.DisasterId + " ending; both target slots moved to current position");
+        }
+
+        /// <summary>
+        /// 渦車両を持たない災害をバニラの経路で止める。sim スレッド専用。
+        ///
+        /// DisasterAI.DeactivateNow は public（IL 確認済み）だが、
+        /// m_flags に Active(8) が立っているときしか DeactivateDisaster に委譲しない。
+        /// まだ Emerging の災害には効かないので、その場合は false を返して呼び出し側に待たせる。
+        /// </summary>
+        /// <returns>災害が停止した（あるいは既に消えていた）なら true。まだ止められないなら false。</returns>
+        private static bool TryDeactivateDisasterNow(ushort disasterId)
+        {
+            try
+            {
+                var disasters = DisasterManager.instance.m_disasters.m_buffer;
+                if (disasterId == 0 || disasterId >= disasters.Length) return true;
+
+                // 既に消えている。掃除するだけでよい。
+                if ((disasters[disasterId].m_flags & DisasterData.Flags.Created) == DisasterData.Flags.None)
+                    return true;
+
+                if ((disasters[disasterId].m_flags & DisasterData.Flags.Active) == DisasterData.Flags.None)
+                    return false;
+
+                var info = disasters[disasterId].Info;
+                if (info == null || info.m_disasterAI == null)
+                {
+                    Log.Warn("fire whirl " + disasterId +
+                             " has no vortex vehicle and no DisasterInfo; leaving it to vanilla");
+                    return true;   // これ以上できることが無いので追跡だけやめる
+                }
+
+                info.m_disasterAI.DeactivateNow(disasterId, ref disasters[disasterId]);
+                Log.Info("fire whirl " + disasterId + " had no vortex vehicle; deactivated directly");
+                return true;
+            }
+            catch (System.Exception e)
+            {
+                Log.Error("could not deactivate vehicle-less fire whirl " + disasterId, e);
+                return true;   // 例外で毎 tick 再突入させない
+            }
         }
 
         /// <summary>バニラに解体された旋風をレジストリから外す。</summary>

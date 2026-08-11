@@ -35,28 +35,45 @@ namespace DisasterPlus.Game
             // Natural Disasters DLC が無いと竜巻の DisasterInfo が存在しない。
             // FindTornadoInfo はその都度警告を出すので、DLC 無しの都市では毎 tick 呼ばない。
             if (!ModCompat.NaturalDisastersOwned) return;
-            if (!ModSettings.FireWhirlEnabled.value) return;
 
-            // 渦車両の紐づけと、バニラに解体済みの旋風の掃除。走査より先に済ませる。
+            // 保守処理（紐づけ・解体済みの回収・クールダウン）は設定に関係なく必ず回す。
+            // ここを設定で止めると、機能を OFF にした瞬間にレジストリだけが残り、
+            // VortexPinPatch が固定を続け FireWhirlFlameFx が描画を続ける不死の渦になる。
             FireWhirlPinner.AttachVehicles();
             FireWhirlPinner.CollectFinished();
+            FireWhirlRegistry.AdvanceCooldowns(deltaMinutes);
+
+            if (!ModSettings.FireWhirlEnabled.value)
+            {
+                // 途中で OFF にされた / OFF のままセーブを読んだ場合。
+                // 生存中の旋風はバニラの解体経路に乗せて畳む。
+                EndAllLiveWhirls();
+                return;
+            }
 
             _scanner.ScanSlice();
 
             var config = ModSettings.ToFireWhirlConfig();
             var burning = _scanner.Current;
 
-            // 消滅地点のクールダウンを進める。これが無いと、消えた直後に同じ大火災が
-            // 同じ場所で再発生し続け、絶対上限の意味が無くなる。
-            FireWhirlRegistry.AdvanceCooldowns(deltaMinutes);
-
             UpdateExisting(config, burning, deltaMinutes);
             TrySpawnNew(config, burning);
 
-            FireWhirlDamage.Apply(frameIndex, config.SpreadStrength);
+            FireWhirlDamage.Apply(frameIndex, deltaMinutes, config.SpreadStrength);
 
             Log.Diag("fireWhirl",
                 "burning=" + burning.Count + " active=" + FireWhirlRegistry.Count);
+        }
+
+        /// <summary>設定が OFF になったときに、生存中の旋風をすべて終了処理へ送る。</summary>
+        private static void EndAllLiveWhirls()
+        {
+            var views = FireWhirlRegistry.Snapshot();
+            for (int i = 0; i < views.Count; i++)
+            {
+                if (views[i].Ending) continue;
+                FireWhirlPinner.BeginEnding(views[i]);
+            }
         }
 
         private void UpdateExisting(FireWhirlConfig config, IList<BurningBuilding> burning, float deltaMinutes)
@@ -76,9 +93,17 @@ namespace DisasterPlus.Game
                 {
                     if (centre2d.DistanceSquaredTo(burning[b].Position) <= r2) near++;
                 }
-                bool conditionMet = near >= config.DetectCount;
+                // 手動発生は発生条件の割り込み判定を免除する。火の無い場所に置けるのが
+                // 手動発生の存在意義で、免除しないと次 tick に near=0 と数えられて
+                // 猶予ぶんだけで消える（絶対上限は下の Evaluate でそのまま効く）。
+                bool conditionMet = v.Manual || near >= config.DetectCount;
 
-                FireWhirlRegistry.UpdateStrength(v.DisasterId, FireWhirlStrength.RadiusFor(near), near);
+                // 手動発生は初期規模より小さくしない。周囲に火が無いと RadiusFor(0) まで
+                // 縮み、発生した次のフレームで目に見えて小さくなってしまう。
+                int strengthCount = v.Manual && near < v.BurningCount ? v.BurningCount : near;
+
+                FireWhirlRegistry.UpdateStrength(
+                    v.DisasterId, FireWhirlStrength.RadiusFor(strengthCount), strengthCount);
                 FireWhirlRegistry.AdvanceLife(v.DisasterId, deltaMinutes, conditionMet);
             }
 
@@ -110,7 +135,8 @@ namespace DisasterPlus.Game
             ushort disasterId;
             if (!FireWhirlSpawner.TrySpawn(center, SpawnIntensityBase, out disasterId)) return;
 
-            FireWhirlRegistry.Add(disasterId, 0, center, FireWhirlStrength.RadiusFor(c.BurningCount), c.BurningCount);
+            FireWhirlRegistry.Add(disasterId, 0, center,
+                FireWhirlStrength.RadiusFor(c.BurningCount), c.BurningCount, false);
         }
 
         public void OnMainThreadUpdate()
@@ -118,8 +144,8 @@ namespace DisasterPlus.Game
             FireWhirlFlameFx.Sync();
 
             // 災害パネルはレベルロード時点ではまだ構築されていないことがある。
-            // Install は _button != null で早期 return するので毎フレーム呼んでも安全。
-            FireWhirlPanelButton.Install();
+            // Tick は間引き（120 フレーム毎）と試行上限を持つので毎フレーム呼んでよい。
+            FireWhirlPanelButton.Tick();
         }
 
         public void OnLevelUnloading()

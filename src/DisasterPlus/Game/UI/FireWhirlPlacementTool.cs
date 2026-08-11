@@ -60,8 +60,10 @@ namespace DisasterPlus.Game
                 ushort disasterId;
                 if (!FireWhirlSpawner.TrySpawn(hit, ManualIntensity, out disasterId)) return;
 
+                // manual: true。周囲に火が無いのが普通なので、発生条件の割り込みでは終わらせない。
+                // 終わりは絶対上限（最大持続時間）だけ。
                 FireWhirlRegistry.Add(disasterId, 0, hit,
-                    FireWhirlStrength.RadiusFor(ManualBurningCount), ManualBurningCount);
+                    FireWhirlStrength.RadiusFor(ManualBurningCount), ManualBurningCount, true);
             });
         }
 
