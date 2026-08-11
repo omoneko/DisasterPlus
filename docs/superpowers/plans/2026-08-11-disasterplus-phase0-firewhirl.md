@@ -23,6 +23,7 @@
 - ゲーム DLL の参照解決は 環境変数 `CITIES_SKYLINES_MANAGED` → 既定 `C:\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed`。**マシン固有パスをリポジトリに焼き込まない**
 - ログは `<Steam>\steamapps\common\Cities_Skylines\Cities_Data\output_log.txt`（AppData ではない）
 - **日本語コメントを含むファイルを PowerShell の `Get-Content -Raw` → `Set-Content` で編集しない**（文字化けする）。Write/Edit ツールか、明示的に UTF-8 を指定した Python を使う
+- **日本語コメントを含む `.ps1` は UTF-8 BOM 付きで保存する。** Windows PowerShell 5.1 は BOM 無し UTF-8 を ANSI コードページとして読むため、日本語コメントが化けてパーサが落ちる（`ParserError: UnexpectedToken '}'`）。Task 6 で実際に踏んだ。`build.ps1` と `tools/*.ps1` が対象
 - コミットは各タスク末尾で 1 回。メッセージは `<type>: <説明>` 形式（`feat` / `fix` / `docs` / `test` / `chore` / `refactor`）
 - `console.log` 相当（`Debug.Log` の垂れ流し）を残さない。診断ログは必ずスロットリングして `[DisasterPlus]` プレフィックスを付ける
 
