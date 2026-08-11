@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build"
+         xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{6E1B0A62-5B4E-4C1F-9C1D-3F0A2D7C4B10}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>DisasterPlus</RootNamespace>
+    <AssemblyName>DisasterPlus</AssemblyName>
+    <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
+    <LangVersion>7.3</LangVersion>
+    <FileAlignment>512</FileAlignment>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugType>none</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <WarningLevel>4</WarningLevel>
+    <!-- CS0184 (常に false になる is 判定) を警告で見逃すと、
+         継承チェーンの取り違えが黙って機能を殺す。エラーに昇格させる。 -->
+    <WarningsAsErrors>0184</WarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- マシン固有パスを焼き込まない。環境変数が無ければ既定の Steam パスを使う。 -->
+  <PropertyGroup>
+    <ManagedDir Condition=" '$(CITIES_SKYLINES_MANAGED)' != '' ">$(CITIES_SKYLINES_MANAGED)</ManagedDir>
+    <ManagedDir Condition=" '$(ManagedDir)' == '' ">C:\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed</ManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="ICities">
+      <HintPath>$(ManagedDir)\ICities.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="ColossalManaged">
+      <HintPath>$(ManagedDir)\ColossalManaged.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(ManagedDir)\UnityEngine.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- glob。新規ファイルを足しても csproj を触らなくてよい。 -->
+  <ItemGroup>
+    <Compile Include="Core\**\*.cs" />
+    <Compile Include="Game\**\*.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
