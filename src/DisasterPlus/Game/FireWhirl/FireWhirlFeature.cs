@@ -22,6 +22,7 @@ namespace DisasterPlus.Game
         {
             _scanner.Reset();
             FireWhirlSpawner.Reset();
+            FireWhirlDamage.Reset();
             HarmonyBootstrap.Install();
         }
 
@@ -47,6 +48,8 @@ namespace DisasterPlus.Game
 
             UpdateExisting(config, burning, deltaMinutes);
             TrySpawnNew(config, burning);
+
+            FireWhirlDamage.Apply(frameIndex, config.SpreadStrength);
 
             Log.Diag("fireWhirl",
                 "burning=" + burning.Count + " active=" + FireWhirlRegistry.Count);
@@ -115,6 +118,7 @@ namespace DisasterPlus.Game
         {
             _scanner.Reset();
             FireWhirlSpawner.Reset();
+            FireWhirlDamage.Reset();
             FireWhirlRegistry.Clear();
             HarmonyBootstrap.Uninstall();
         }
