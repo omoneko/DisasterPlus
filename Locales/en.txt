@@ -17,3 +17,4 @@ EarthquakeOwnerSelf = Disaster +
 FireWhirlName = Fire whirl
 FireWhirlTooltip = Place a stationary, burning vortex
 NdrDetected = Natural Disasters Renewal detected. Vanilla-side destruction follows its tornado settings; fire spread is unaffected.
+FireWhirlNeedsDlc = Fire whirls require the Natural Disasters DLC.

@@ -16,3 +16,4 @@ EarthquakeOwnerSelf = Disaster +
 FireWhirlName = 火災旋風
 FireWhirlTooltip = その場に留まる炎の渦を発生させます
 NdrDetected = Natural Disasters Renewal を検出しました。バニラ由来の破壊はその竜巻設定に従いますが、延焼拡大は影響を受けません。
+FireWhirlNeedsDlc = 火災旋風には Natural Disasters DLC が必要です。

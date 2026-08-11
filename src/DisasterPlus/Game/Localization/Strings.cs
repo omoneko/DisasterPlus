@@ -37,5 +37,8 @@ namespace DisasterPlus.Game
         public static string NdrDetected =
             "Natural Disasters Renewal detected. Vanilla-side destruction follows its tornado settings; "
             + "fire spread is unaffected.";
+
+        public static string FireWhirlNeedsDlc =
+            "Fire whirls require the Natural Disasters DLC.";
     }
 }
