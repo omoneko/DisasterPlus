@@ -70,7 +70,8 @@ namespace DisasterPlus.Game
 
             try
             {
-                var panel = Object.FindObjectOfType<DisastersOptionPanel>();
+                // FindObjectOfType は非アクティブな GameObject を返さない（SceneObjects 参照）。
+                var panel = SceneObjects.FindInScene<DisastersOptionPanel>();
                 if (panel == null)
                 {
                     // まだ構築されていない。Tick が後で再試行する。

@@ -80,8 +80,11 @@ namespace DisasterPlus.Game
                     ?? Shader.Find("Legacy Shaders/Particles/Additive")
                     ?? Shader.Find("Standard");
 
+            // Material.color は書かない。色は main.startColor（Create）が決めている。
+            // Material.color が触るのは _Color だが Particles/Additive のティントは _TintColor なので、
+            // ここで色を入れても何も起きない。「効いているように読める死んだ行」を残すと、
+            // 後から誰かが _TintColor に直してしまい、理由なく見た目が変わる。
             _flameMaterial = new Material(s);
-            _flameMaterial.color = new Color(1f, 0.45f, 0.1f, 1f);
             return _flameMaterial;
         }
 
