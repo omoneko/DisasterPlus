@@ -14,6 +14,16 @@ namespace DisasterPlus.Game
             ModSettings.Ensure();
             FireWhirlRegistry.Clear();
 
+            // OnLoadData（DisasterPlusSerialization）は LoadSimulationData の中で走り、
+            // この OnLevelLoaded より前に完了している。だが Clear() は今しがた実行したばかりなので、
+            // 復元の適用は必ず Clear() の後、ここで行う。順序を逆にすると Clear() が復元を消す。
+            var pendingRestore = DisasterPlusSerialization.TakePendingRestore();
+            if (pendingRestore != null)
+            {
+                FireWhirlRegistry.RestoreFromSave(pendingRestore);
+                Log.Info("restored " + pendingRestore.Count + " fire whirls");
+            }
+
             if (FeatureHost.Features.Count == 0)
             {
                 FeatureHost.Register(new FireWhirlFeature());

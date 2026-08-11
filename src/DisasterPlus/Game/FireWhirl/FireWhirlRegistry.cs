@@ -267,5 +267,39 @@ namespace DisasterPlus.Game
                 _cooling.Clear();
             }
         }
+
+        /// <summary>
+        /// セーブから復元する。現在の _active を置き換える（呼び出し前の内容は消える）。
+        /// 車両 ID は 0 のままにして、FireWhirlPinner.AttachVehicles がロード後に付け直す。
+        /// 経過時間は保存値から積み直すので、ロードしても寿命が延びない。
+        ///
+        /// 呼び出し順の注意: DisasterPlusSerialization.OnLoadData は
+        /// DisasterPlusLoading.OnLevelLoaded（内部で FireWhirlRegistry.Clear() を呼ぶ）より前に
+        /// 完了する。そのため OnLoadData から直接ここを呼ぶと Clear() で消される。
+        /// 呼び出しは OnLevelLoaded 側で Clear() の後に行うこと
+        /// （DisasterPlusSerialization.TakePendingRestore() 経由）。
+        /// </summary>
+        public static void RestoreFromSave(List<SavedFireWhirl> saved)
+        {
+            if (saved == null) return;
+
+            lock (_gate)
+            {
+                _active.Clear();
+                for (int i = 0; i < saved.Count; i++)
+                {
+                    _active.Add(new ActiveFireWhirl
+                    {
+                        DisasterId = saved[i].DisasterId,
+                        VehicleId = 0,
+                        Center = saved[i].Center,
+                        Radius = saved[i].Radius,
+                        BurningCount = saved[i].BurningCount,
+                        Life = FireWhirlLifecycle.Start().Advance(saved[i].ElapsedMinutes, true),
+                        Ending = false,
+                    });
+                }
+            }
+        }
     }
 }

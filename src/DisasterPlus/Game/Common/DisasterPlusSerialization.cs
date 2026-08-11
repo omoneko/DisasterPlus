@@ -1,0 +1,136 @@
+using System.Collections.Generic;
+using System.IO;
+using DisasterPlus.Core.Common;
+using ICities;
+
+namespace DisasterPlus.Game
+{
+    /// <summary>
+    /// 生存中の火災旋風を保存する。
+    ///
+    /// 論理状態のみを保存し、パーティクル・エフェクト・車両参照は再構築する。
+    /// 見た目や実行時の参照まで保存すると、ロード順に依存するバグを作るだけになる。
+    ///
+    /// 先頭にバージョンを書き、読み込み側は追加ブロックごとに if (version >= N) で分岐する。
+    /// 旧セーブは既定値で読める。
+    ///
+    /// ロード順の注意: OnLoadData は LoadingManager.LoadSimulationData の中で呼ばれ、
+    /// LoadingExtensionBase.OnLevelLoaded（DisasterPlusLoading.OnLevelLoaded、
+    /// FireWhirlRegistry.Clear() を呼ぶ）より前に完了する。
+    /// そのためここで直接 FireWhirlRegistry.RestoreFromSave を呼ぶと、
+    /// 直後の Clear() で消される。復元先のリストは一旦ここに保留し、
+    /// DisasterPlusLoading.OnLevelLoaded が Clear() の後に TakePendingRestore() で取り出して適用する。
+    /// </summary>
+    public class DisasterPlusSerialization : ISerializableDataExtension
+    {
+        private const string DataId = "DisasterPlus.FireWhirl";
+        private const int CurrentVersion = 1;
+
+        /// <summary>
+        /// OnLoadData で読み取った復元待ちの一覧。OnLevelLoaded が Clear() の後に取り出すまでの一時置き場。
+        /// メインスレッドのロード処理内でのみ書き / 読みされる（ロード中は sim tick が回っていない）。
+        /// </summary>
+        private static List<SavedFireWhirl> _pendingRestore;
+
+        private ISerializableData _data;
+
+        public void OnCreated(ISerializableData serializedData) { _data = serializedData; }
+        public void OnReleased() { _data = null; }
+
+        public void OnSaveData()
+        {
+            if (_data == null) return;
+
+            var views = FireWhirlRegistry.Snapshot();
+
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms))
+            {
+                w.Write(CurrentVersion);
+                w.Write(views.Count);
+
+                for (int i = 0; i < views.Count; i++)
+                {
+                    var v = views[i];
+                    w.Write(v.DisasterId);
+                    w.Write(v.Center.X);
+                    w.Write(v.Center.Y);
+                    w.Write(v.Center.Z);
+                    w.Write(v.Radius);
+                    w.Write(v.BurningCount);
+                    w.Write(v.ElapsedMinutes);
+                }
+
+                _data.SaveData(DataId, ms.ToArray());
+            }
+
+            Log.Info("saved " + views.Count + " fire whirls");
+        }
+
+        public void OnLoadData()
+        {
+            if (_data == null) return;
+
+            byte[] bytes = _data.LoadData(DataId);
+            if (bytes == null || bytes.Length == 0) return;
+
+            var restored = new List<SavedFireWhirl>();
+
+            try
+            {
+                using (var ms = new MemoryStream(bytes))
+                using (var r = new BinaryReader(ms))
+                {
+                    int version = r.ReadInt32();
+                    if (version < 1) return;
+
+                    int count = r.ReadInt32();
+                    for (int i = 0; i < count; i++)
+                    {
+                        var s = new SavedFireWhirl();
+                        s.DisasterId = r.ReadUInt16();
+                        float x = r.ReadSingle();
+                        float y = r.ReadSingle();
+                        float z = r.ReadSingle();
+                        s.Center = new Vec3(x, y, z);
+                        s.Radius = r.ReadSingle();
+                        s.BurningCount = r.ReadInt32();
+                        s.ElapsedMinutes = r.ReadSingle();
+                        restored.Add(s);
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Error("fire whirl load failed; starting with none", e);
+                return;
+            }
+
+            // ここでは適用しない（Clear() が後から来る）。OnLevelLoaded 側で取り出させる。
+            _pendingRestore = restored;
+            Log.Info("loaded " + restored.Count + " fire whirls; pending apply");
+        }
+
+        /// <summary>
+        /// DisasterPlusLoading.OnLevelLoaded から、FireWhirlRegistry.Clear() の後に呼ぶ。
+        /// 保留分を取り出し、内部の保留状態は消費済みにする（次のロードに前回分を持ち越さない）。
+        /// 復元対象が無ければ null を返す。
+        /// </summary>
+        public static List<SavedFireWhirl> TakePendingRestore()
+        {
+            var pending = _pendingRestore;
+            _pendingRestore = null;
+            return pending;
+        }
+    }
+
+    /// <summary>セーブから読み戻した 1 基。車両 ID は保存しない（ロード後に付け直す）。</summary>
+    public class SavedFireWhirl
+    {
+        public ushort DisasterId;
+        public Vec3 Center;
+        public float Radius;
+        public int BurningCount;
+        public float ElapsedMinutes;
+    }
+}
