@@ -3599,22 +3599,45 @@ git add src/DisasterPlus && git commit -m "feat: 燃焼建物の分割走査と�
 
 - [ ] **Step 1: CitiesHarmony を参照に追加する**
 
-`DisasterPlus.csproj` の `ItemGroup` に追加する。DLL は Workshop の CitiesHarmony
-（ID `2040656402`）が配置するものを使う。
+**HintPath ではなく NuGet の `PackageReference` を使う。** 同じマシンの既存 MOD
+（`NuclearMeltdown` / `MegaCity`）が採っている実績パターンで、`CitiesHarmony.API` が
+`HarmonyLib`（`citiesharmony.harmony`）を推移的に持ち込むため参照は 1 行で済む。
+Workshop フォルダに `CitiesHarmony.API.dll` は入っておらず（各 MOD が再配布する形）、
+HintPath 方式では参照先が安定しない。
+
+`DisasterPlus.csproj` を 3 箇所変更する。
+
+1. 先頭を PackageReference が使える形にする（`ToolsVersion` を上げ、`Common.props` を import）:
 
 ```xml
-    <Reference Include="CitiesHarmony.API">
-      <HintPath>$(LOCALAPPDATA)\Colossal Order\Cities_Skylines\Addons\Mods\CitiesHarmony\CitiesHarmony.API.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="0Harmony">
-      <HintPath>$(LOCALAPPDATA)\Colossal Order\Cities_Skylines\Addons\Mods\CitiesHarmony\0Harmony.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
+<Project ToolsVersion="15.0" DefaultTargets="Build"
+         xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.props"
+          Condition="Exists('$(MSBuildToolsPath)\Microsoft.Common.props')" />
 ```
 
-`build.ps1` に `CitiesHarmony.API.dll` のコピーを足す（`<Private>True</Private>` で
-`bin\Release` に出力されるので、それを配置先にもコピーする）:
+2. 最初の `PropertyGroup` に追加:
+
+```xml
+    <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
+```
+
+3. 参照を追加:
+
+```xml
+  <ItemGroup>
+    <PackageReference Include="CitiesHarmony.API" Version="2.2.0" />
+  </ItemGroup>
+```
+
+`build.ps1` の msbuild 呼び出しに **`Restore` を足す**（PackageReference は復元が要る）:
+
+```powershell
+& $msbuild "src\DisasterPlus\DisasterPlus.csproj" /t:Restore,Build /p:Configuration=Release /v:minimal
+```
+
+そして `CitiesHarmony.API.dll` を配置先にコピーする（この shim だけは MOD 同梱が正しい。
+HarmonyLib 本体は CitiesHarmony MOD が実行時に供給するので同梱しない）:
 
 ```powershell
 $apiDll = "src\DisasterPlus\bin\Release\CitiesHarmony.API.dll"
@@ -3641,11 +3664,22 @@ namespace DisasterPlus.Game
 
         private static Harmony _harmony;
 
+        /// <summary>DoOnHarmonyReady にコールバックを二重登録しないためのフラグ。</summary>
+        private static bool _requested;
+
         public static bool Installed { get { return _harmony != null; } }
 
+        /// <summary>
+        /// パッチ適用を要求する。
+        ///
+        /// PatchAll をその場で呼ばず HarmonyHelper.DoOnHarmonyReady に預ける。
+        /// IsHarmonyInstalled が true でも HarmonyLib のアセンブリがまだ読み込まれていないこと
+        /// があり、直接呼ぶと型初期化で落ちる。同じマシンの既存 MOD もこの形で使っている。
+        /// </summary>
         public static void Install()
         {
-            if (_harmony != null) return;
+            if (_harmony != null || _requested) return;
+            _requested = true;
 
             if (!HarmonyHelper.IsHarmonyInstalled)
             {
@@ -3653,6 +3687,12 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            HarmonyHelper.DoOnHarmonyReady(PatchAll);
+        }
+
+        private static void PatchAll()
+        {
+            if (_harmony != null) return;
             try
             {
                 _harmony = new Harmony(HarmonyId);
@@ -3668,6 +3708,7 @@ namespace DisasterPlus.Game
 
         public static void Uninstall()
         {
+            _requested = false;
             if (_harmony == null) return;
             try { _harmony.UnpatchAll(HarmonyId); }
             catch (System.Exception e) { Log.Error("Harmony unpatch failed", e); }
