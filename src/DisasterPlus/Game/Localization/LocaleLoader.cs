@@ -75,14 +75,31 @@ namespace DisasterPlus.Game
                 if (lang == _appliedLanguage) return;
 
                 RestoreDefaults();
-                _appliedLanguage = lang;
-                if (lang == "en") return;
 
+                if (lang == "en")
+                {
+                    // RestoreDefaults() is pure in-memory reflection (no I/O), so there is nothing
+                    // left that can fail here. Safe to mark "applied" immediately.
+                    _appliedLanguage = lang;
+                    return;
+                }
+
+                // IMPORTANT: do NOT set _appliedLanguage until the overlay below has fully loaded.
+                // Every return between here and the end of the read loop is a "could not apply yet"
+                // outcome, not a "nothing to apply" outcome — _appliedLanguage must stay whatever it
+                // was so the next Apply() call (next OnSettingsUI re-entry) retries from scratch.
+                // If we set it early and then a later step throws (locked file, transient I/O,
+                // PluginManager not ready yet), "if (lang == _appliedLanguage) return;" above would
+                // permanently skip retrying that language for the rest of the session.
                 string dir = ModDirectory();
-                if (dir == null) return;
+                if (dir == null) return;   // couldn't resolve our own mod dir yet; retry next call
 
                 string path = Path.Combine(Path.Combine(dir, "Locales"), lang + ".txt");
-                if (!File.Exists(path)) return;   // 未翻訳の言語は英語のまま
+                // File.Exists() also swallows I/O errors as "false", so a transient lock and a
+                // genuinely untranslated language look the same here. Treat both as retryable
+                // (not applied) rather than sticking on a false negative — Apply() only runs on
+                // language-change events, so the extra check on every retry is essentially free.
+                if (!File.Exists(path)) return;
 
                 var byName = new Dictionary<string, FieldInfo>();
                 foreach (var f in Fields())
@@ -104,6 +121,10 @@ namespace DisasterPlus.Game
                     FieldInfo f;
                     if (byName.TryGetValue(key, out f)) f.SetValue(null, value);
                 }
+
+                // Overlay fully loaded without error: only now is it safe to mark this language
+                // as applied and let future calls short-circuit.
+                _appliedLanguage = lang;
             }
             catch (Exception e)
             {
