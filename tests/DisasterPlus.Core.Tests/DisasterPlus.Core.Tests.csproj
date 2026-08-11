@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <LangVersion>7.3</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>DisasterPlus.Core.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Core だけを直接コンパイルする。ゲーム DLL は net35 で読めないため
+         プロジェクト参照は張らない。 -->
+    <Compile Include="..\..\src\DisasterPlus\Core\**\*.cs" />
+    <!-- EnableDefaultCompileItems=false は既定の include だけでなく既定の exclude も無効にする。
+         bin/obj を明示的に除かないと obj\**\*.AssemblyInfo.cs を拾って重複属性でビルドが壊れる。 -->
+    <Compile Include="**\*.cs" Exclude="bin\**\*.cs;obj\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+</Project>
