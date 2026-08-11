@@ -3837,7 +3837,12 @@ namespace DisasterPlus.Game
 ```
 
 シグネチャも確認済み: `static void InstanceManager.GetAllGroupInstances(InstanceID id, FastList<InstanceID> list)`。
-`InstanceID.Vehicle` プロパティも存在する。`FastList<T>` は `ColossalFramework` 名前空間。
+`InstanceID.Vehicle` プロパティも存在する。
+
+**`FastList<T>` はグローバル名前空間**（`Assembly-CSharp` 内で名前空間なしに宣言されている。
+`Type.Namespace` が空文字列であることをリフレクションで確認済み）。`using` は不要。
+なお `codex-review` フックはここで `using ColossalFramework;` を要求してくるが、それは誤りである。
+実害が無いので通すために付けたままにしてよい。
 
 終了処理:
 
@@ -4738,8 +4743,17 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            FireWhirlRegistry.RestoreFromSave(restored);
-            Log.Info("restored " + restored.Count + " fire whirls");
+            // ここで RestoreFromSave を直接呼んではいけない（実装中に IL で判明）。
+            //
+            // ISerializableDataExtension.OnLoadData は LoadingManager.LoadSimulationData 内の
+            // SimulationManager.LateUpdateData 経由で走り、LoadingExtensionBase.OnLevelLoaded
+            // （LoadingManager.LoadLevelComplete 経由）より **先** に完了する。
+            // DisasterPlusLoading.OnLevelLoaded は先頭で FireWhirlRegistry.Clear() を呼ぶので、
+            // ここで復元すると直後に全部消える。ログにも何も残らない。
+            //
+            // 正しくは静的フィールドに退避し、OnLevelLoaded が Clear() の直後に適用する。
+            _pendingRestore = restored;
+            Log.Info("staged " + restored.Count + " fire whirls for restore");
         }
     }
 

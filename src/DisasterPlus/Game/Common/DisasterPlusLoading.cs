@@ -39,6 +39,9 @@ namespace DisasterPlus.Game
             // ここから直接クリアしてよい（この場面に限り安全）。
             FeatureHost.LevelUnloading();
             FireWhirlRegistry.Clear();
+            // OnLoadData 自身も次回ロードの先頭で必ずクリアするが、二重の安全策として
+            // ここでも捨てる。都市をまたいで保留中の復元データを持ち越さない。
+            DisasterPlusSerialization.TakePendingRestore();
             base.OnLevelUnloading();
         }
     }

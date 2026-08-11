@@ -631,6 +631,20 @@ OnSliderValueChanged(component, float value):
 `DisasterData.m_intensity` は `Byte`。`DisasterTool` 側は `m_intensity` / `m_mouseIntensity` ともに
 `Int32` で保持している。
 
+### A-2b. ロード時のコールバック順序
+
+`ISerializableDataExtension.OnLoadData` は `LoadingManager.LoadSimulationData` 内の
+`SimulationManager.LateUpdateData` 経由で走り、**`LoadingExtensionBase.OnLevelLoaded`
+（`LoadingManager.LoadLevelComplete` 経由）より先に完了する。**
+
+したがって `OnLevelLoaded` で状態をクリアする設計にしている場合、`OnLoadData` で直接復元すると
+**直後に消される**。復元データは静的フィールドに退避し、`OnLevelLoaded` のクリア直後に適用する。
+退避用フィールドは `OnLoadData` の先頭で無条件にクリアすること（ロードが中断して `OnLevelLoaded`
+に到達しなかった場合、次の別都市のロードに前回のデータが漏れる）。（実装中に発覚し IL で確認）
+
+`ISerializableDataExtension` は `PluginManager.GetImplementations<T>()` による自動検出なので、
+`IUserMod` / `ThreadingExtensionBase` / `LoadingExtensionBase` と同じく登録作業は不要。
+
 ### A-3. 建物の火災状態
 
 `Building.Flags` に火災を表すメンバーは無い（`Abandoned = 0x40000`、

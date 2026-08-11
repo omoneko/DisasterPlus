@@ -69,12 +69,19 @@ namespace DisasterPlus.Game
 
         public void OnLoadData()
         {
+            // 前回ロード分の残骸を必ず捨てる。ここより下のどの早期 return でも
+            // （_data == null、blob 無し、version < 1、例外）古い保留が残ったままだと、
+            // 次に読む都市が今回データを持っていない場合に TakePendingRestore() が
+            // 前回都市の一覧を渡してしまい、無関係な都市に火災旋風が湧く。
+            _pendingRestore = null;
+
             if (_data == null) return;
 
             byte[] bytes = _data.LoadData(DataId);
             if (bytes == null || bytes.Length == 0) return;
 
             var restored = new List<SavedFireWhirl>();
+            int rejected = 0;
 
             try
             {
@@ -96,6 +103,13 @@ namespace DisasterPlus.Game
                         s.Radius = r.ReadSingle();
                         s.BurningCount = r.ReadInt32();
                         s.ElapsedMinutes = r.ReadSingle();
+
+                        if (!IsValid(s))
+                        {
+                            rejected++;
+                            continue;
+                        }
+
                         restored.Add(s);
                     }
                 }
@@ -106,9 +120,35 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            if (rejected > 0)
+            {
+                // 壊れた blob の一部が NaN/Infinity を持っていた場合の保険。
+                // FireWhirlLifecycle.Advance/Evaluate は NaN <= / >= 比較が常に false になるため、
+                // 弾かずに通すと絶対寿命の上限が効かなくなる（延焼フィードバックの唯一の安全弁が消える）。
+                // 頻発するものではない（ロード時に一度だけ）ので Diag ではなく Warn でよい。
+                Log.Warn("fire whirl load: rejected " + rejected + " entr" +
+                    (rejected == 1 ? "y" : "ies") + " with invalid data (NaN/Infinity/negative radius)");
+            }
+
             // ここでは適用しない（Clear() が後から来る）。OnLevelLoaded 側で取り出させる。
             _pendingRestore = restored;
             Log.Info("loaded " + restored.Count + " fire whirls; pending apply");
+        }
+
+        /// <summary>
+        /// 壊れたセーブデータへの保険。NaN/Infinity は FireWhirlLifecycle の比較
+        /// （NaN &lt;= / &gt;= は常に false）をすり抜けて絶対寿命の上限を無効化してしまうため、
+        /// ここで弾く。Core 側の契約は変えない（デシリアライズ側の責務）。
+        /// </summary>
+        private static bool IsValid(SavedFireWhirl s)
+        {
+            if (float.IsNaN(s.ElapsedMinutes) || float.IsInfinity(s.ElapsedMinutes)) return false;
+            if (float.IsNaN(s.Radius) || float.IsInfinity(s.Radius)) return false;
+            if (s.Radius < 0f) return false;
+            if (float.IsNaN(s.Center.X) || float.IsInfinity(s.Center.X)) return false;
+            if (float.IsNaN(s.Center.Y) || float.IsInfinity(s.Center.Y)) return false;
+            if (float.IsNaN(s.Center.Z) || float.IsInfinity(s.Center.Z)) return false;
+            return true;
         }
 
         /// <summary>
@@ -124,7 +164,11 @@ namespace DisasterPlus.Game
         }
     }
 
-    /// <summary>セーブから読み戻した 1 基。車両 ID は保存しない（ロード後に付け直す）。</summary>
+    /// <summary>
+    /// セーブから読み戻した 1 基。車両 ID は保存しない（ロード後に付け直す）。
+    /// Ending（終了処理中）フラグは保存しない — 仕様上の既知の制約。
+    /// 終了処理の途中でセーブすると、ロード後は完全に生きた状態から復帰する。
+    /// </summary>
     public class SavedFireWhirl
     {
         public ushort DisasterId;
