@@ -15,10 +15,23 @@ namespace DisasterPlus.Game
         private static DisasterInfo _tornadoInfo;
         private static bool _searched;
 
+        /// <summary>
+        /// 直近の走査が失敗してから何回呼ばれたか。密集火災が続く間、
+        /// TrySpawnNew は毎 tick この関数を呼ぶので、失敗を毎回リトライすると
+        /// 全 prefab 走査が毎 tick 走り、ログも埋まる。この回数ぶんは
+        /// 「失敗キャッシュ」を効かせて呼び出しを間引く。
+        /// </summary>
+        private static int _missCallCount;
+
+        /// <summary>失敗キャッシュを効かせる呼び出し回数。0 にはしない（=毎回リトライになる）。
+        /// 大きすぎると DLC 有効化直後など prefab が後から揃うケースの再検出が遅れる。</summary>
+        private const int MissRetryCalls = 64;
+
         public static void Reset()
         {
             _tornadoInfo = null;
             _searched = false;
+            _missCallCount = 0;
         }
 
         /// <summary>
@@ -30,6 +43,16 @@ namespace DisasterPlus.Game
         {
             // Unity のフェイク null に対応するため、参照だけでなく実体を毎回確認する。
             if (_searched && _tornadoInfo != null) return _tornadoInfo;
+
+            // 直前の走査が失敗している場合は、レベルロード直後で prefab がまだ
+            // 揃っていないだけの可能性がある。「二度と探さない」にはせず、
+            // かといって毎 tick 全 prefab を舐めもしない。呼び出し回数で間引く。
+            if (_searched)
+            {
+                _missCallCount++;
+                if (_missCallCount < MissRetryCalls) return null;
+            }
+            _missCallCount = 0;
 
             _searched = true;
             _tornadoInfo = null;
@@ -47,7 +70,9 @@ namespace DisasterPlus.Game
 
             if (_tornadoInfo == null)
             {
-                Log.Warn("no TornadoAI DisasterInfo found; Natural Disasters DLC required for fire whirls");
+                // Warn はスロットルされないので密集火災が続く間ログを埋め尽くす。Diag に落として間引く。
+                Log.Diag("noTornadoPrefab",
+                    "no TornadoAI DisasterInfo found; Natural Disasters DLC required for fire whirls");
             }
             return _tornadoInfo;
         }
