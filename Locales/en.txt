@@ -1,0 +1,19 @@
+# Disaster + - English template (generated).
+# Copy to <lang>.txt and translate the right-hand side. Use \n for line breaks.
+ModDescription = Adds realistic disaster phenomena: fire whirls, typhoons, volcanoes and hazard visualisation.
+GroupFireWhirl = Fire whirl
+GroupGeneral = General
+FireWhirlEnabled = Enable fire whirls
+DetectRadius = Detection radius (m)
+DetectCount = Buildings required
+MaxLifetime = Maximum lifetime (in-game minutes)
+SpreadStrength = Fire spread strength (0 = off)
+MinSeparation = Minimum separation (m)
+IntensityUnlock = Unlock disaster intensity up to 25.5
+IntensityUnlockHandledByOther = Handled by Natural Disasters Renewal. Enable only if you want Disaster + to control it.
+EarthquakeDamageOwner = Earthquake damage is calculated by
+EarthquakeOwnerOther = Natural Disasters Renewal
+EarthquakeOwnerSelf = Disaster +
+FireWhirlName = Fire whirl
+FireWhirlTooltip = Place a stationary, burning vortex
+NdrDetected = Natural Disasters Renewal detected. Vanilla-side destruction follows its tornado settings; fire spread is unaffected.

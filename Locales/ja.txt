@@ -1,0 +1,18 @@
+# Disaster + - 日本語
+ModDescription = 火災旋風・台風・火山などのリアルな災害現象と、危険度の可視化を追加します。
+GroupFireWhirl = 火災旋風
+GroupGeneral = 全般
+FireWhirlEnabled = 火災旋風を有効にする
+DetectRadius = 発生判定の半径 (m)
+DetectCount = 発生に必要な延焼棟数
+MaxLifetime = 最大持続時間 (ゲーム内分)
+SpreadStrength = 延焼拡大の強さ (0 で無効)
+MinSeparation = 多重発生の最小離隔距離 (m)
+IntensityUnlock = 災害の強度上限を 25.5 まで解放する
+IntensityUnlockHandledByOther = Natural Disasters Renewal が担当しています。Disaster + 側で制御したい場合のみ有効にしてください。
+EarthquakeDamageOwner = 地震の被害計算の担当
+EarthquakeOwnerOther = Natural Disasters Renewal
+EarthquakeOwnerSelf = Disaster +
+FireWhirlName = 火災旋風
+FireWhirlTooltip = その場に留まる炎の渦を発生させます
+NdrDetected = Natural Disasters Renewal を検出しました。バニラ由来の破壊はその竜巻設定に従いますが、延焼拡大は影響を受けません。
