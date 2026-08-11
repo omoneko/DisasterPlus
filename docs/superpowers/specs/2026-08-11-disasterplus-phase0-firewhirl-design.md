@@ -143,17 +143,32 @@ NDR をアンインストールしても保存済み設定値は残る。**NDR �
 軸が異なるため衝突しない。NDR は独自パネルに差し替えているので、NDR 併用時のウチのスライダー解放は
 無害だが冗長 → 既定 OFF にする。
 
-**バニラがどこで 100 にクランプしているかは IL で確定させる。** パネル UI 側か生成側かで実装箇所が
-変わる。推測で実装しない（計画フェーズの最初のタスク）。
+**実装箇所は IL 実測で確定済み（付録 A-2）。Harmony は不要。**
+`DisastersOptionPanel.m_slider`（`Find<UISlider>("Slider")`）の `maxValue` を実行時に 255 へ書き換える
+だけでよい。スライダーの生値がそのまま byte 強度で、ラベルだけが `value / 10` で表示される。
+上限値はコードではなく UI プレハブ側に置かれているため、パッチ対象が存在しない。
 
 **(b) ③火災旋風が NDR に竜巻と誤認される**
 
-NDR の竜巻判定は `burnRadiusMin == 0 && burnRadiusMax == 0`。放置すると火災旋風が竜巻扱いされ、
-破壊力が半減（1.0→0.5）し、NDR の `EnableDestruction` が OFF なら破壊が丸ごと消える。
+NDR の竜巻判定は `burnRadiusMin == 0 && burnRadiusMax == 0`。火災旋風は竜巻扱いされ、破壊確率が
+半減（1.0→0.5）し、NDR の `EnableDestruction` が OFF なら**バニラ由来の破壊が丸ごと消える**。
 
-**対処は仕様から自然に出る。火災旋風は建物に火をつけるのが本質なので `burnRadius > 0` を設定する。**
-これにより NDR の竜巻判定に合致せず、Prefix は `true` を返してバニラ経路に落ちる。
-偶然の回避ではなく、**仕様上そうならざるを得ない形**にする。
+**当初案（`burnRadius > 0` を設定して誤認を避ける）は IL 実測により却下された。**
+`VortexAI.SimulationStep` の `DestroyStuff` 呼び出しで `burnRadiusMin` / `burnRadiusMax` は
+**リテラル `0f` にハードコードされている**（付録 A-1）。フィールドでも引数でもないため設定できない。
+
+**採用する対処: 火災旋風の本質的な挙動を、`DisasterHelpers` を経由しない自前コードに置く。**
+
+| 被害の層 | 実装 | NDR の影響 |
+|---|---|---|
+| 物理破壊（建物・樹木・道路） | バニラの `VortexAI` 由来 | **受ける**（確率半減、`EnableDestruction` で無効化されうる） |
+| **延焼拡大（火災旋風の核心）** | **`FireWhirlDamage` による自前の発火適用** | **受けない** |
+
+自前の発火適用は `DisasterHelpers` を一切呼ばないため、NDR がどう設定されていても火災旋風は
+「周囲に火を撒く」という定義的な挙動を失わない。バニラ由来の物理破壊が NDR の竜巻設定に従うのは、
+**プレイヤーが NDR で行ったチューニングを尊重する**という意味で妥当な挙動であり、そのように扱う。
+
+この事実を設定画面のツールチップに明記する（NDR 検出時のみ）。
 
 **(c) ②地震の被害計算（本質的な競合）**
 
@@ -328,6 +343,11 @@ count = max(100, PI*r*r) * particlesPerSquare      // r = EffectInfo.SpawnArea �
 
 建物バッファは固定長（49152 スロット）でほとんど空。**走査結果の件数を都市の実数として報告しない。**
 
+**`Building.Flags.Fire` は存在しない。** 列挙にあるのは `Abandoned` と
+`Collapsed`（`BurnedDown` と同値 `0x400000` のエイリアス）まで。**燃焼中の判定は
+`Building.m_fireIntensity`（Byte）が 0 より大きいかで行う。** 隣接する `m_fireHazard`（Byte）は
+出火しやすさであって燃焼中フラグではない（①天気予報で使える）。
+
 ### 4.11 ビルドと検証
 
 - `build.ps1` — msbuild（Release）→ `%LOCALAPPDATA%\Colossal Order\Cities_Skylines\Addons\Mods\DisasterPlus`
@@ -420,24 +440,39 @@ count = max(100, PI*r*r) * particlesPerSquare      // r = EffectInfo.SpawnArea �
 **強度スケール** — 燃焼中の棟数に応じて旋風の半径と破壊力をスケールさせる。小さい火災なら小さい
 旋風、大火災なら大きい旋風。単調増加＋クランプ。
 
-### 5.6 実体（位置固定の実装）
+### 5.6 実体（位置固定の実装）— IL 実測で確定
 
-バニラの竜巻災害を `DisasterManager.CreateDisaster` で生成し、**自分が作った災害 ID を記録する。**
-渦のメッシュ・音・破壊判定・災害通知・市民の避難行動がバニラ品質で手に入る。
+バニラの竜巻災害を `DisasterManager.CreateDisaster(out ushort id, DisasterInfo info)` で生成し、
+**自分が作った災害 ID を記録する。** 渦のメッシュ・音・破壊判定・災害通知・市民の避難行動が
+バニラ品質で手に入る。
 
-`burnRadius > 0` を設定する（火災旋風の本質であり、NDR の竜巻誤認を仕様上回避する — 3.3(b)）。
+**当初の案 C（`DisasterData.m_targetPosition` の毎tick書き戻し）は IL 実測により却下された。**
+竜巻の実体は `DisasterData` ではなく、`TornadoAI.m_vortexInfo` を持つ **`VortexAI` の車両**である
+（付録 A-1）。`TornadoAI.GetPosition` はその車両群のバウンディングボックス中心を返し、車両が無い
+ときだけ `m_targetPosition` にフォールバックする。`m_targetPosition` を書き戻しても渦は止まらない。
 
-位置固定の方式は **IL 実測で決める**。
+**採用する方式 — `VortexAI.SimulationStep`(6 引数) への Harmony Postfix。**
 
-- **C（第一候補）** — sim tick ごとに `DisasterData` の座標を発生地点へ書き戻す。Harmony 不要
-- **A（フォールバック）** — `TornadoAI` の移動処理に Harmony パッチ。**自分が作った災害 ID のときだけ**
-  位置更新をスキップする
+```
+VortexAI.SimulationStep(ushort vehicleID, ref Vehicle vehicleData, ref Vehicle.Frame frameData,
+                        ushort leaderID, ref Vehicle leaderData, int lodPhysics)
+```
 
-計画フェーズの最初に `TornadoAI` の IL を読み、「`TornadoAI` が位置をどこに保持し、いつ書くか」を
-確定させてから選ぶ。C が成立すれば Harmony 依存はゼロになる。書き戻しが tick 後になると 1 フレーム
-ぶん振動して見える恐れがあるため、**見た目で確認するまで C を成功と見なさない。**
+自分が生成した渦車両に対してのみ、Postfix で **`frameData.m_position` を発生地点に書き戻す**。
+バニラは同メソッド内で `m_position = m_position + m_velocity * dt` として移動を積算するため、
+毎ステップ書き戻せばドリフトが蓄積せず、その場に留まる。
 
-どちらに転んでも ③ の仕様・見た目・被害モデルは変わらない。
+**`m_velocity` は書き換えない。** 毎ステップ再計算されるので書き換えても無意味であり、かつ
+`DisasterHelpers.AddWind` が向きに使っているため、ゼロにすると風の演出が死ぬ。
+
+**バニラの移動目標（`m_targetPos0`）は遠方のまま維持する。** 到達すると
+`ArriveAtDestination`（`m_waitCounter > 4` で true）が `DisasterAI.DeactivateNow` と
+`Vehicle.Unspawn` を呼び、**災害が消える**（付録 A-1）。目標に届かせないことが存続の条件になる。
+
+**終了はバニラの解体経路に乗せる。** 5.4 の寿命条件を満たしたら
+`vehicleData.m_targetPos0` を現在位置に書き換える。数ステップ後に `ArriveAtDestination` が true を
+返し、バニラが `DeactivateNow` + `Unspawn` を正しく実行する。**車両を自前で解放しない** —
+それはスレッド境界事故の温床であり、バニラの解体処理を丸ごと再実装することになる。
 
 ### 5.7 見た目
 
@@ -466,9 +501,9 @@ CS のマテリアルは借りない（4.9）。`DispatchEffect` を併用する
 | クラス | スレッド | 責務 |
 |---|---|---|
 | `FireWhirlFeature` | — | `IDisasterFeature` 実装。登録と配線 |
-| `BurningBuildingScanner` | sim（読取のみ） | `Building.Flags.Fire` を走査。49152 スロットを**複数 tick に分割して巡回**する |
-| `FireWhirlSpawner` | sim | `CreateDisaster` で竜巻生成、`burnRadius > 0`、自分の災害 ID を記録 |
-| `FireWhirlPinner` | sim | 位置固定（C または A） |
+| `BurningBuildingScanner` | sim（読取のみ） | **`Building.m_fireIntensity > 0`** を走査。49152 スロットを**複数 tick に分割して巡回**する |
+| `FireWhirlSpawner` | sim | `CreateDisaster` で竜巻生成、自分の災害 ID と渦車両 ID を記録 |
+| `FireWhirlPinner` | sim | `VortexAI.SimulationStep` Postfix による位置固定と、寿命到達時の終了（5.6） |
 | `FireWhirlDamage` | sim | Core が選んだ建物に発火を適用 |
 | `FireWhirlFlameFx` | main | 自前 `ParticleSystem` による炎の渦 |
 | `FireWhirlPlacementTool` | main | 手動発生のクリック配置（5.3） |
@@ -507,19 +542,103 @@ CS のマテリアルは借りない（4.9）。`DispatchEffect` を併用する
 
 ---
 
-## 6. IL で確定させる項目（計画フェーズの最初）
+## 6. IL 実測（完了）
 
-推測で実装してはならない項目。リフレクションで分かるのは型・可視性・シグネチャのみで、
-**単位・実際の配列長・フィールドの意味はメソッド本体からしか分からない。**
+計画着手前に 4 項目すべてを `Assembly-CSharp.dll` の IL で確定させた。手順は
+`cities-skylines-modding` スキルの `pitfalls.md#reading-il`。**2 項目で当初の設計が誤りだと判明し、
+本書を訂正した。**
 
-| # | 確定させること | 影響 |
-|---|---|---|
-| 1 | `TornadoAI` が位置をどこに保持し、いつ書くか | 5.6 の C / A の選択 |
-| 2 | バニラが災害強度を byte 100 でクランプしている箇所（パネル UI 側か生成側か） | 3.3(a) の実装箇所 |
-| 3 | `DisasterManager.CreateDisaster` の引数の単位と `burnRadius` の意味 | 5.6 / 3.3(b) |
-| 4 | `Building.Flags.Fire` の立つタイミングと解除条件 | 5.2 の検出精度 |
+| # | 確定させたこと | 結果 | 影響 |
+|---|---|---|---|
+| 1 | `TornadoAI` が位置をどこに保持するか | **`DisasterData` ではなく `VortexAI` の車両**。案 C は不成立 | 5.6 を書き換え |
+| 2 | 強度を byte 100 でクランプしている箇所 | **コードに存在しない**。`DisastersOptionPanel.m_slider.maxValue`（UI プレハブ値）。Harmony 不要 | 3.3(a) を書き換え |
+| 3 | `CreateDisaster` の引数と `burnRadius` の意味 | `CreateDisaster(out ushort, DisasterInfo)`。**`burnRadius` は `VortexAI` 内でリテラル 0 固定、設定不可** | 3.3(b) を書き換え |
+| 4 | 燃焼中建物の判定方法 | **`Building.Flags.Fire` は存在しない**。`Building.m_fireIntensity`（Byte）> 0 | 4.10 / 5.8 を訂正 |
 
-手順は `cities-skylines-modding` スキルの `pitfalls.md#reading-il` に従う。
+詳細は付録 A。
+
+---
+
+## 付録 A: IL 実測結果
+
+### A-1. 竜巻の実体と被害経路
+
+`TornadoAI.SimulationStep` は `DisasterData.m_targetPosition` を**一切書かない**。天候
+（`WeatherManager.m_forceWeatherOn` / `m_targetFog` / `m_targetRain` / `m_targetCloud`）のみを操作する。
+
+`TornadoAI.GetPosition` は災害グループの全インスタンスを走査し、`Info == m_vortexInfo` の**車両**の
+バウンディングボックス中心を位置として返す。該当車両が 1 つも無いときだけ `m_targetPosition` に
+フォールバックする。
+
+`TornadoAI.ActivateDisaster` は `m_targetPosition` からランダム角のオフセット位置を計算して
+`VehicleManager.CreateVehicle` で渦車両を作り、`InstanceManager.CopyGroup` で災害グループに結び付け、
+`Vehicle.SetTargetPos` を 2 回呼んで移動目標を与え、`DisasterManager.FollowDisaster` を呼ぶ。
+
+`VortexAI : VehicleAI` のフィールドは `m_destructionRadiusMin` / `m_destructionRadiusMax` /
+`m_upgradeRadiusMin` / `m_upgradeRadiusMax` / `m_debrisCount`。
+
+`VortexAI.ArriveAtDestination` は `m_waitCounter` をインクリメントし **`m_waitCounter > 4` を返す**。
+`SimulationStep`(6 引数) 内でこれが true になると `DisasterAI.DeactivateNow` と `Vehicle.Unspawn` が
+呼ばれる。
+
+`VortexAI.SimulationStep`(6 引数) の順序:
+
+1. `Frame.m_position` を書く（第 1 段）
+2. `m_targetPos0` までの距離を `VectorUtils.LengthXZ` で測り `m_targetPos0` を更新
+3. `ArriveAtDestination` → true なら `DeactivateNow` + `Unspawn`
+4. `Randomizer` と `TerrainManager.SampleRawHeightSmoothWithWater` から `Frame.m_velocity` を再計算
+5. **`Frame.m_position = m_position + m_velocity * dt`（第 2 段。ここが実際の移動）**
+6. `DisasterHelpers.AddWind` → `DestroyStuff` → `BurnGround` → `UpgradeBuildings`
+7. `VehicleAI.SimulationStep` へ委譲
+
+被害呼び出しの実引数（`loc15 = m_destructionRadiusMin * s`, `loc16 = m_destructionRadiusMax * s`）:
+
+```
+DestroyStuff(seed: vehicleID, group, position: frame.m_position,
+             totalRadius: loc16, preRadius: loc16, removeRadius: 0f,
+             destructionRadiusMin: loc15, destructionRadiusMax: loc16,
+             burnRadiusMin: 0f,   // ldc.r4 0 — リテラル
+             burnRadiusMax: 0f)   // ldc.r4 0 — リテラル
+BurnGround(VectorUtils.XZ(frame.m_position), radius: loc16, intensity: 0.7f)
+```
+
+`burnRadiusMin` / `burnRadiusMax` は**リテラル 0**。フィールド由来でも引数由来でもないため、
+外部から値を与える手段が無い。
+
+### A-2. 災害強度スライダー
+
+`DisastersOptionPanel` のフィールドは `m_slider`（`UISlider`）/ `m_label`（`UILabel`）/
+`m_disasterTool`（`DisasterTool`）の 3 つ。
+
+`Awake` は `Find<UISlider>("Slider")` と `Find<UILabel>("LabelIntensity")` で参照を取り、
+`ToolsModifierControl.GetTool<DisasterTool>()` を保持する。
+
+```
+OnSliderValueChanged(component, float value):
+    m_label.text          = (value / 10).ToString("F1")
+    m_disasterTool.m_intensity = (int)value
+```
+
+**スライダーの生値がそのまま byte 強度**で、表示だけが `/10`。`set_maxValue` の呼び出しは
+アセンブリ内に存在せず、上限は UI プレハブ側に置かれている。よって**実行時に
+`m_slider.maxValue = 255f` を書けばよく、パッチ対象が無い。**
+
+`DisasterData.m_intensity` は `Byte`。`DisasterTool` 側は `m_intensity` / `m_mouseIntensity` ともに
+`Int32` で保持している。
+
+### A-3. 建物の火災状態
+
+`Building.Flags` に火災を表すメンバーは無い（`Abandoned = 0x40000`、
+`Collapsed` = `BurnedDown` = `0x400000` のエイリアス）。
+
+`Building` の Byte フィールド **`m_fireIntensity`** が燃焼中かどうかを表し、**`m_fireHazard`** は
+出火しやすさを表す。③の検出は `m_fireIntensity > 0` で行う。`m_fireHazard` は①天気予報の
+火災リスク表示に使える。
+
+### A-4. 再現手順
+
+IL 逆アセンブラのスクリプトは `docs/tools/` に置く（`ilload.ps1` / `ildasm.ps1`）。
+`Disasm-Method -Method $m -Filter 'stfld'` の形で使う。
 
 ---
 
@@ -532,5 +651,7 @@ CS のマテリアルは借りない（4.9）。`DispatchEffect` を併用する
 - 周囲に延焼が広がり、火が収まるか最大持続時間で消滅する
 - セーブ・ロードで生存中の旋風が復元される
 - **2つ目の都市をロードしても正常に動く**（静的キャッシュと状態漏れの検証）
-- NDR を併用しても火災旋風の破壊が減衰しない
+- 災害パネルの強度スライダーが 25.5 まで動く
+- **NDR を併用し、NDR の `EnableDestruction` を OFF にしても、火災旋風の延焼拡大が動く**
+  （バニラ由来の物理破壊は NDR の竜巻設定に従う — これは仕様。3.3(b)）
 - Core テストが全て緑
