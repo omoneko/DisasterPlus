@@ -143,7 +143,9 @@ README.md
     <!-- Core だけを直接コンパイルする。ゲーム DLL は net35 で読めないため
          プロジェクト参照は張らない。 -->
     <Compile Include="..\..\src\DisasterPlus\Core\**\*.cs" />
-    <Compile Include="**\*.cs" />
+    <!-- EnableDefaultCompileItems=false は既定の include だけでなく既定の exclude も無効にする。
+         bin/obj を明示的に除かないと obj\**\*.AssemblyInfo.cs を拾って重複属性でビルドが壊れる。 -->
+    <Compile Include="**\*.cs" Exclude="bin\**\*.cs;obj\**\*.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
