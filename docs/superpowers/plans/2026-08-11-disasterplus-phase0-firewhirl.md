@@ -3369,7 +3369,12 @@ namespace DisasterPlus.Game
             buffer[id].m_angle = 0f;
 
             // 起動は AI に任せる。StartDisaster -> ActivateDisaster の順で渦車両が作られる。
-            info.m_disasterAI.StartDisaster(id, ref buffer[id]);
+            //
+            // DisasterAI.StartDisaster は protected（IL 確認済み）なので直接は呼べない。
+            // 公開ラッパーの StartNow を使う。StartNow は (m_flags & 0x3C) == 0
+            // （Emerging/Active/Clearing/Finished のいずれでもない）のときだけ
+            // StartDisaster に委譲する。CreateDisaster 直後は Created しか立っていないので必ず通る。
+            info.m_disasterAI.StartNow(id, ref buffer[id]);
 
             disasterId = id;
             Log.Info("fire whirl disaster created id=" + id + " intensity=" + intensity);

@@ -570,6 +570,11 @@ CS のマテリアルは借りない（4.9）。`DispatchEffect` を併用する
 バウンディングボックス中心を位置として返す。該当車両が 1 つも無いときだけ `m_targetPosition` に
 フォールバックする。
 
+**`DisasterAI.StartDisaster` は `protected`。** MOD から起動するときは公開ラッパーの
+`DisasterAI.StartNow(ushort, ref DisasterData)` を使う。`StartNow` は `(m_flags & 0x3C) == 0`
+（Emerging / Active / Clearing / Finished のいずれでもない）のときだけ `StartDisaster` に委譲する。
+`CreateDisaster` 直後は `Created` しか立っていないので必ず通る。（実装中に発覚し IL で確認）
+
 `TornadoAI.ActivateDisaster` は `m_targetPosition` からランダム角のオフセット位置を計算して
 `VehicleManager.CreateVehicle` で渦車両を作り、`InstanceManager.CopyGroup` で災害グループに結び付け、
 `Vehicle.SetTargetPos` を 2 回呼んで移動目標を与え、`DisasterManager.FollowDisaster` を呼ぶ。
