@@ -13,6 +13,30 @@ namespace DisasterPlus.Core.Tests.FireWhirl
             return c;
         }
 
+        /// <summary>
+        /// 既定の猶予は、燃焼中建物の走査 1 周ぶんより十分長くなければならない。
+        ///
+        /// BurningBuildingScanner は 8 tick で 49152 スロットを 1 周する。ゲーム速度 3 では
+        /// 1 tick = 9 sim フレームなので、最悪 72 フレームぶんの結果が「古い」状態になる。
+        /// 1 ゲーム内分 = SimulationManager.DAYTIME_FRAMES(65536) / 1440 ≒ 45.51 フレーム。
+        /// 猶予がこれを下回ると、走査 1 周ぶんの古い結果だけで旋風が消えてしまう。
+        /// （旧既定 1 分は、フレーム換算の誤り 262144 を前提にしていたため実質 4 倍に見えていた）
+        /// </summary>
+        [Fact]
+        public void Defaults_GraceOutlastsOneFullScanSweep()
+        {
+            const float framesPerMinute = 65536f / 1440f;
+            const int scanTicksPerSweep = 8;
+            const int framesPerTickAtMaxSpeed = 9;
+
+            float sweepMinutes = scanTicksPerSweep * framesPerTickAtMaxSpeed / framesPerMinute;
+            float grace = FireWhirlConfig.Defaults().ConditionGraceMinutes;
+
+            Assert.True(grace >= sweepMinutes * 1.5f,
+                "default ConditionGraceMinutes (" + grace + ") must comfortably outlast one scan sweep ("
+                + sweepMinutes + " in-game minutes at simulation speed 3)");
+        }
+
         [Fact]
         public void FreshWhirl_Continues()
         {

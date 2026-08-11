@@ -18,7 +18,14 @@ namespace DisasterPlus.Core.FireWhirl
         /// <summary>絶対上限の寿命（ゲーム内分）。これを超えたら必ず打ち切る。</summary>
         public float MaxLifetimeMinutes;
 
-        /// <summary>発生条件を割り込んでから消滅するまでの猶予（ゲーム内分）。</summary>
+        /// <summary>
+        /// 発生条件を割り込んでから消滅するまでの猶予（ゲーム内分）。
+        ///
+        /// 1 ゲーム内分 = 65536 / 1440 ≒ 45.5 sim フレーム（SimulationManager.DAYTIME_FRAMES）。
+        /// 燃焼中建物の走査は 8 tick で 1 周し、ゲーム速度 3 では 1 tick = 9 フレームなので
+        /// 1 周に最悪 72 フレーム ≒ 1.6 分かかる。猶予がこれを下回ると、走査 1 周ぶんの
+        /// 古い結果だけで旋風が消えてしまう。走査 1 周の 2 倍近い余裕を既定にする。
+        /// </summary>
         public float ConditionGraceMinutes;
 
         /// <summary>延焼拡大の強さ。0 で延焼拡大なし、10 が最大。</summary>
@@ -32,7 +39,7 @@ namespace DisasterPlus.Core.FireWhirl
                 DetectCount = 12,
                 MinSeparation = 300f,
                 MaxLifetimeMinutes = 10f,
-                ConditionGraceMinutes = 1f,
+                ConditionGraceMinutes = 3f,
                 SpreadStrength = 3,
             };
         }
