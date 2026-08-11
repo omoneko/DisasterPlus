@@ -164,6 +164,11 @@ NDR の竜巻判定は `burnRadiusMin == 0 && burnRadiusMax == 0`。火災旋風
 | 物理破壊（建物・樹木・道路） | バニラの `VortexAI` 由来 | **受ける**（確率半減、`EnableDestruction` で無効化されうる） |
 | **延焼拡大（火災旋風の核心）** | **`FireWhirlDamage` による自前の発火適用** | **受けない** |
 
+「自前の発火適用」とは**着火する建物を自分で選ぶ**という意味であって、
+`Building.m_fireIntensity` を自分で書くという意味ではない（付録 A-3）。実際の着火は
+`BuildingAI.BurnBuilding` に委ねる。これは `DisasterHelpers` を経由しないので、
+NDR の差し替えの影響を受けないという以下の性質はそのまま成り立つ。
+
 自前の発火適用は `DisasterHelpers` を一切呼ばないため、NDR がどう設定されていても火災旋風は
 「周囲に火を撒く」という定義的な挙動を失わない。バニラ由来の物理破壊が NDR の竜巻設定に従うのは、
 **プレイヤーが NDR で行ったチューニングを尊重する**という意味で妥当な挙動であり、そのように扱う。
@@ -423,6 +428,14 @@ count = max(100, PI*r*r) * particlesPerSquare      // r = EffectInfo.SpawnArea �
 **時間は全てゲーム内時間で測る**（`SimulationManager.m_currentGameTime` 由来、`Core` には経過時間として
 渡す）。実時間ではない。値は 0 でクランプし、ポーズ中は経過ゼロで早期リターンする。
 
+**発生条件割り込みの猶予は既定 3 ゲーム内分。** 燃焼中建物の走査は 8 tick で 1 周し、
+ゲーム速度 3 では 1 tick = 9 sim フレームなので最悪 72 フレーム ≒ 1.6 分（付録 A-4）。
+猶予がこれを下回ると、走査 1 周ぶんの古い結果だけで旋風が消える。走査 1 周の約 2 倍を既定にする。
+
+**手動発生（災害パネルのボタン）は発生条件の割り込み判定を免除する。** 火の無い場所に置けることが
+手動発生の存在意義なので、免除しないと置いた次の tick から猶予の消化が始まる。終了は絶対上限だけ。
+このフラグはセーブに保存する（保存しないとロードで自動発生扱いに変わり、猶予だけで消えてしまう）。
+
 **絶対上限は必須。** 「その場に留まる」状態に時間上限を付けないと、永久に居座るか、逆にスタック
 ユニット掃除に消される。これは既知の事故パターンであり、**回帰テストで固定する**。
 
@@ -436,6 +449,12 @@ count = max(100, PI*r*r) * particlesPerSquare      // r = EffectInfo.SpawnArea �
 **(2) 延焼拡大** — 旋風の周囲に確率的に新規出火を発生させる。火災旋風という現象の核心であり、
 これが無いと「ただの動かない竜巻」になる。設定で強度を 0〜最大まで調整可能にし、既定は控えめに
 する（放置すると都市が焼き尽くされうるため）。
+
+**着火は `Building.m_fireIntensity` の直接書き込みではなく `BuildingAI.BurnBuilding` で行う**
+（付録 A-3）。直接書くと、火災処理を持たない `BuildingAI` 直系の建物にセーブへ焼き付く火勢が残る。
+
+**判定間隔はフレーム番号の剰余で決めない。** 経過ゲーム内時間を積算して閾値越えで判定する
+（理由は付録 A-4）。
 
 **強度スケール** — 燃焼中の棟数に応じて旋風の半径と破壊力をスケールさせる。小さい火災なら小さい
 旋風、大火災なら大きい旋風。単調増加＋クランプ。
@@ -465,14 +484,34 @@ VortexAI.SimulationStep(ushort vehicleID, ref Vehicle vehicleData, ref Vehicle.F
 **`m_velocity` は書き換えない。** 毎ステップ再計算されるので書き換えても無意味であり、かつ
 `DisasterHelpers.AddWind` が向きに使っているため、ゼロにすると風の演出が死ぬ。
 
-**バニラの移動目標（`m_targetPos0`）は遠方のまま維持する。** 到達すると
+**移動目標に到達させないことが存続の条件になる。** 到達すると
 `ArriveAtDestination`（`m_waitCounter > 4` で true）が `DisasterAI.DeactivateNow` と
-`Vehicle.Unspawn` を呼び、**災害が消える**（付録 A-1）。目標に届かせないことが存続の条件になる。
+`Vehicle.Unspawn` を呼び、**災害が消える**（付録 A-1）。
+
+> **訂正（最終レビュー時の IL 再確認）。** 初版はここに「バニラの移動目標（`m_targetPos0`）は
+> 遠方のまま維持する」と書いていたが**誤り**。`TornadoAI.ActivateDisaster` は
+> `SetTargetPos(0, m_targetPosition)` — つまり**スロット 0 は発生地点そのもの**を入れる。
+> そして `VortexAI.SimulationStep` は冒頭で
+> `if (LengthXZ(m_targetPos0 - frame.m_position) < m_info.m_maxSpeed) m_targetPos0 = m_targetPos1;`
+> を行うため、固定した最初のステップでスロット 0 は 1000m 先のスロット 1 に置き換わる。
+> 正しくは「**スロット 1 が遠方であることによって存続する**」。詳細は付録 A-1。
 
 **終了はバニラの解体経路に乗せる。** 5.4 の寿命条件を満たしたら
-`vehicleData.m_targetPos0` を現在位置に書き換える。数ステップ後に `ArriveAtDestination` が true を
-返し、バニラが `DeactivateNow` + `Unspawn` を正しく実行する。**車両を自前で解放しない** —
-それはスレッド境界事故の温床であり、バニラの解体処理を丸ごと再実装することになる。
+`Vehicle.SetTargetPos` で **スロット 0 と 1 の両方**を現在位置に書き換える。片方だけでは
+上記の入れ替えで打ち消され、`ArriveAtDestination` に永遠に到達しない。
+**終了処理中も位置固定を続ける。** 固定を解くと、スピンダウンが終わるまでの間
+（角速度 1.0 から −0.05/step で 0.05 未満まで約 20 ステップ ＋ `m_waitCounter > 4` の 5 ステップ）
+渦が自由に動き回り、炎エフェクトだけが発生地点に取り残される。固定したままなら目標との距離が
+0 のままなのでスピンダウンが確実に進む。渦車両の `SimulationStep` は 16 sim フレームに 1 回
+（`VehicleManager.SimulationStepImpl` が `m_currentFrameIndex & 15` で 16 分割）なので、
+畳み終わるまで実時間で数秒。破壊は角速度が 0.95 を割った時点で
+`Vehicle.m_flags` の 0x4000 が落ちて止まる。
+**車両を自前で解放しない** — それはスレッド境界事故の温床であり、バニラの解体処理を
+丸ごと再実装することになる。
+
+渦車両がまだ紐づいていないうちに寿命が尽きた場合は、レジストリから外すだけにしない
+（バニラの災害が追跡不能なドリフト竜巻として生き残る）。`DisasterAI.DeactivateNow`
+（public、IL 確認済み）で正規に止める。
 
 ### 5.7 見た目
 
@@ -579,6 +618,50 @@ CS のマテリアルは借りない（4.9）。`DispatchEffect` を併用する
 `VehicleManager.CreateVehicle` で渦車両を作り、`InstanceManager.CopyGroup` で災害グループに結び付け、
 `Vehicle.SetTargetPos` を 2 回呼んで移動目標を与え、`DisasterManager.FollowDisaster` を呼ぶ。
 
+**移動目標の中身（初版の記述は誤り。最終レビューで IL 再確認し訂正）:**
+
+```
+dir  = normalize(sin(m_angle), 0, -cos(m_angle))
+dist = m_intensity * 10 + 400                    // intensity 60 なら 1000
+車両の生成位置 = m_targetPosition + dir * dist
+SetTargetPos(0, m_targetPosition)                // ← スロット 0 は発生地点そのもの
+SetTargetPos(1, m_targetPosition - dir * dist)   // ← 反対側 1000m
+```
+
+`Vector3` → `Vector4` の暗黙変換で入るので **`w` は 0**。`VortexAI` 側も `Vector4` → `Vector3` の
+暗黙変換で読むだけなので `w` に意味は無い。
+
+`VortexAI.SimulationStep`(6 引数) は距離判定の直前に
+
+```
+if (VectorUtils.LengthXZ(m_targetPos0 - frame.m_position) < m_info.m_maxSpeed)
+    m_targetPos0 = m_targetPos1;     // 入れ替えてから測り直す
+```
+
+を行う。したがって**位置を固定した最初のステップでスロット 0 はスロット 1 に置き換わる**。
+`Vehicle.SetTargetPos(0, …)` はスロット 0 しか書かない（IL は `switch` 1 本で
+`m_targetPos0..3` に分岐するだけ）ので、**終了させたいときは 0 と 1 の両方に書く必要がある**。
+
+スピンダウンの算術（同メソッド）:
+
+```
+distance > 1f : m_angleVelocity = Min(1, m_angleVelocity + 0.05); >0.95 なら m_flags |= 0x4000
+distance <= 1f: m_angleVelocity = Max(0, m_angleVelocity - 0.05); <0.95 なら m_flags &= ~0x4000
+                if (m_angleVelocity < 0.05 && ArriveAtDestination()) { DeactivateNow; Unspawn; }
+```
+
+角速度 1.0 → 0.05 未満まで 20 ステップ、`ArriveAtDestination`（`m_waitCounter > 4`）にさらに
+5 ステップ。加えて速度がゼロに落ちるまでの数〜十数ステップがかかる。1 ステップは
+16 sim フレーム（`VehicleManager.SimulationStepImpl` の `m_currentFrameIndex & 15` による 16 分割）。
+破壊（`DestroyStuff` / `BurnGround`）は `m_flags & 0x4000` が立っている間だけなので、
+角速度が 0.95 を割った時点で止まる。
+
+`DisasterAI.CreateDisaster` は `new InstanceManager.Group()` を作り
+`m_ownerInstance.Disaster = 災害ID` を入れて `InstanceManager.SetGroup` で登録する。
+したがって `InstanceManager.GetGroup(new InstanceID { Disaster = id })` で災害グループが引ける。
+`DisasterAI.DeactivateNow(ushort, ref DisasterData)` は **public**（`StartDisaster` /
+`ActivateDisaster` / `DeactivateDisaster` は protected）。
+
 `VortexAI : VehicleAI` のフィールドは `m_destructionRadiusMin` / `m_destructionRadiusMax` /
 `m_upgradeRadiusMin` / `m_upgradeRadiusMax` / `m_debrisCount`。
 
@@ -654,7 +737,53 @@ OnSliderValueChanged(component, float value):
 出火しやすさを表す。③の検出は `m_fireIntensity > 0` で行う。`m_fireHazard` は①天気予報の
 火災リスク表示に使える。
 
-### A-4. 再現手順
+**`m_fireIntensity` を MOD から直接書いてはいけない（最終レビューで判明）。**
+このフィールドを消費するのは `CommonBuildingAI.SimulationStepActive` → `HandleFire` **だけ**で、
+`BuildingAI.SimulationStep` には火災処理が無い。`BuildingAI` を直接継承しているのは
+`PowerPoleAI` / `DecorationBuildingAI` / `WaterJunctionAI` / `OutsideConnectionAI` /
+`IntersectionAI` / `CableCarPylonAI` / `MonorailPylonAI` / `RaceStartGantryAI` /
+`WildlifeSpawnPointAI`（＋ MOD 製 AI）。これらに火勢を書き込むと**誰も消さない**。
+値はバニラの建物配列に入るのでセーブに焼き付き、リロードでも MOD の削除でも消えない。
+`BurningBuildingScanner` はそれを永久に「燃焼中」と数え続ける。
+
+**正しい経路は `BuildingAI.BurnBuilding(ushort buildingID, ref Building data,
+InstanceManager.Group group, bool testOnly)`（public virtual、`InstanceManager.Group` は public
+nested）。** `DisasterHelpers` を経由しないので、競合MOD の設定に左右されない要件（3.3(b)）は保たれる。
+
+- `BuildingAI` の既定実装は `return false` のみ。燃えない建物は自然に弾かれる。
+- `CommonBuildingAI` の実装は `GetFireParameters`（`PlayerBuildingAI` は `m_fireHazard == 0` で
+  false を返す）→ `Collapsed`/`BurnedDown` 拒否 → 水位拒否 の順に判定し、`testOnly` が true なら
+  そこで `true` を返して何も変更しない。false なら
+  `InstanceManager.SetGroup` → `DisasterData.m_buildingFireCount++`（グループの
+  `m_ownerInstance.Disaster != 0` かつ元の火勢 0 のときのみ）→ `Active` フラグ解除 →
+  `m_fireIntensity = Max(現在値, fireSize)` → `Frame.m_fireDamage = Max(現在値, 133)` →
+  `BuildingDeactivated` → レンダラ／色／フラグ更新 → サブ建物への伝播、を行う。
+- **火勢は `GetFireParameters` の `out fireSize` で建物ごとに決まる**（`PlayerBuildingAI` は 255）。
+  MOD 側で固定値を持つ必要はない。
+- 戻り値 `true` = 実際に着火した。
+
+### A-4. ゲーム内時間とフレームの換算（最終レビューで訂正）
+
+`SimulationManager.DAYTIME_FRAMES` は **65536**（`public static UInt32`。const ではないので
+コンパイル時定数にはならない）。同じクラスに `DAYTIME_HOUR_TO_FRAME = 2730.667`（= 65536 / 24）と
+`DAYTIME_FRAME_TO_HOUR = 0.0003662109` があり、整合する。
+
+したがって **1 ゲーム内分 = 65536 / 1440 ≒ 45.51 sim フレーム**。
+初版の実装が使っていた 262144 は**誤り**で、あらゆる持続時間がラベルの 4 倍長く動いていた。
+値は直書きせず `SimulationManager.DAYTIME_FRAMES / 1440f` から求める。
+
+**フレーム番号は tick ごとに 1 ずつ進むとは限らない。** `SimulationManager.SimulationStep()` は
+`FinalSimulationSpeed` 回のループで `m_currentFrameIndex` を加算し、`OnAfterSimulationTick` は
+そのループを抜けてから **1 回だけ**呼ばれる。`FinalSimulationSpeed` はゲームモードで
+速度 1/2/3 に対し **1 / 3 / 9**（エディタでは速度 3 が 4）。
+
+→ **`frameIndex % N` で周期処理を組んではいけない。** ゲーム速度 2 で 3 倍、速度 3 で 9 倍
+まばらになり、処理頻度が黙ってゲーム速度に依存する。周期は経過ゲーム内時間の積算で判定する。
+
+`VehicleManager.SimulationStepImpl` は `m_currentFrameIndex & 15` で車両を 16 分割して回すので、
+**1 台の車両の `SimulationStep` は 16 sim フレームに 1 回**。
+
+### A-5. 再現手順
 
 IL 逆アセンブラのスクリプトは `docs/tools/` に置く（`ilload.ps1` / `ildasm.ps1`）。
 `Disasm-Method -Method $m -Filter 'stfld'` の形で使う。
