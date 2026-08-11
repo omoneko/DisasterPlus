@@ -111,7 +111,7 @@ namespace DisasterPlus.Game
 
         public void OnMainThreadUpdate()
         {
-            // 見た目は Task 13 で足す。
+            FireWhirlFlameFx.Sync();
         }
 
         public void OnLevelUnloading()
@@ -120,6 +120,7 @@ namespace DisasterPlus.Game
             FireWhirlSpawner.Reset();
             FireWhirlDamage.Reset();
             FireWhirlRegistry.Clear();
+            FireWhirlFlameFx.Clear();
             HarmonyBootstrap.Uninstall();
         }
     }
