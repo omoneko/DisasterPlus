@@ -24,6 +24,10 @@ namespace DisasterPlus.Game
             FireWhirlSpawner.Reset();
             FireWhirlDamage.Reset();
             HarmonyBootstrap.Install();
+
+            // ツール登録は毎レベルロード必要（ToolController.m_tools はレベル毎に再構築される）。
+            ToolRegistration.Register<FireWhirlPlacementTool>();
+            FireWhirlPanelButton.Install();
         }
 
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
@@ -112,6 +116,10 @@ namespace DisasterPlus.Game
         public void OnMainThreadUpdate()
         {
             FireWhirlFlameFx.Sync();
+
+            // 災害パネルはレベルロード時点ではまだ構築されていないことがある。
+            // Install は _button != null で早期 return するので毎フレーム呼んでも安全。
+            FireWhirlPanelButton.Install();
         }
 
         public void OnLevelUnloading()
@@ -122,6 +130,7 @@ namespace DisasterPlus.Game
             FireWhirlRegistry.Clear();
             FireWhirlFlameFx.Clear();
             HarmonyBootstrap.Uninstall();
+            FireWhirlPanelButton.Remove();
         }
     }
 }
