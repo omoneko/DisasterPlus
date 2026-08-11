@@ -157,6 +157,20 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>寿命判定。Life を外に漏らさないため、評価もレジストリ内で行う。</summary>
+        public static FireWhirlVerdict EvaluateVerdict(ushort disasterId, FireWhirlConfig config)
+        {
+            lock (_gate)
+            {
+                for (int i = 0; i < _active.Count; i++)
+                {
+                    if (_active[i].DisasterId != disasterId) continue;
+                    return _active[i].Life.Evaluate(config);
+                }
+            }
+            return FireWhirlVerdict.Dissipate;   // 見つからない = 既に消えている
+        }
+
         /// <summary>終了処理に入ったことを記録する。以降は位置固定をやめる。</summary>
         public static void MarkEnding(ushort disasterId)
         {

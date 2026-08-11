@@ -14,6 +14,11 @@ namespace DisasterPlus.Game
             ModSettings.Ensure();
             FireWhirlRegistry.Clear();
 
+            if (FeatureHost.Features.Count == 0)
+            {
+                FeatureHost.Register(new FireWhirlFeature());
+            }
+
             FeatureHost.LevelLoaded();
             Log.Info("level loaded; features=" + FeatureHost.Features.Count);
         }
