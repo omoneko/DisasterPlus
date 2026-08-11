@@ -11,7 +11,28 @@ namespace DisasterPlus.Game
     {
         // sim スレッド専用の使い回しバッファ。毎 tick 確保しない。
         // 型は DisasterAI.m_tempList と同じ FastList<InstanceID>（確認済み）。
+        //
+        // 注: リフレクションで実測したところ、この版の Assembly-CSharp.dll では
+        // FastList<T> は実際にはグローバル名前空間にあり、この using は無くても
+        // ビルドは通る（obj/bin を全消去したクリーンビルドで 0 警告 0 エラーを確認済み）。
+        // ここでは将来のゲームバージョン差やレビュー可読性のために残す（実害はない）。
         private static readonly FastList<InstanceID> _tempInstances = new FastList<InstanceID>();
+
+        /// <summary>
+        /// 紐づけを受理する最大距離（発生地点からの水平距離）。
+        ///
+        /// IL 実測（TornadoAI.ActivateDisaster）により、渦車両の生成位置は
+        /// targetPosition から distance = intensity*10 + 400 だけ離れた点である
+        /// ことが分かっている。この MOD の火災旋風は常に intensity = 60 固定
+        /// （FireWhirlFeature.SpawnIntensityBase）で生成するので、正規の紐づけは
+        /// 距離 1000 以内に必ず収まる。disasterId が使い回されて別の（無関係な）
+        /// 渦がこのグループに紛れ込むケースを弾きつつ、正規の紐づけを絶対に
+        /// 誤って弾かないよう、3 倍近い余裕（3000）を持たせている。
+        /// 誤って厳しすぎるより緩すぎる方が安全（緩ければ次 tick に再試行されるだけだが、
+        /// 厳しすぎるとバニラの竜巻が誤って固定されてしまう）。
+        /// </summary>
+        private const float MaxAttachDistance = 3000f;
+        private const float MaxAttachDistanceSq = MaxAttachDistance * MaxAttachDistance;
 
         /// <summary>
         /// まだ車両 ID が分かっていない旋風に、渦車両を紐づける。
@@ -24,7 +45,7 @@ namespace DisasterPlus.Game
             {
                 if (views[i].VehicleId != 0) continue;
 
-                ushort found = FindVortexVehicle(views[i].DisasterId);
+                ushort found = FindVortexVehicle(views[i].DisasterId, views[i].Center);
                 if (found == 0) continue;
 
                 FireWhirlRegistry.SetVehicle(views[i].DisasterId, found);
@@ -36,8 +57,13 @@ namespace DisasterPlus.Game
         /// 災害グループに属する車両のうち、渦の VehicleAI を持つものを探す。
         /// TornadoAI.GetPosition が使っているのと同じ経路
         /// （InstanceID.Disaster → InstanceManager.GetAllGroupInstances）を辿る。
+        ///
+        /// disasterId が解放されて別の災害に使い回された場合、古い（VehicleId==0 のまま
+        /// 待っている）レジストリのエントリが無関係な渦車両を拾ってしまう恐れがある。
+        /// そうなるとバニラの竜巻が誤って固定されてしまう（このパッチが最も避けたい事故）ので、
+        /// 見つけた候補が自分の発生地点 (expectedCenter) から離れすぎていないかを必ず確認する。
         /// </summary>
-        private static ushort FindVortexVehicle(ushort disasterId)
+        private static ushort FindVortexVehicle(ushort disasterId, Vec3 expectedCenter)
         {
             var id = InstanceID.Empty;
             id.Disaster = disasterId;
@@ -52,7 +78,22 @@ namespace DisasterPlus.Game
                 if (v == 0) continue;
 
                 var info = buffer[v].Info;
-                if (info != null && info.m_vehicleAI is VortexAI) return v;
+                if (info == null || !(info.m_vehicleAI is VortexAI)) continue;
+
+                Vector3 pos = buffer[v].GetLastFrameData().m_position;
+                float dx = pos.x - expectedCenter.X;
+                float dz = pos.z - expectedCenter.Z;
+                if (dx * dx + dz * dz > MaxAttachDistanceSq)
+                {
+                    // 遠すぎる = disasterId 使い回しで無関係な渦を拾った可能性。
+                    // ここで固定してしまうとバニラの竜巻が動かなくなるので、候補として採用しない。
+                    Log.Diag("fwAttachReject",
+                        "vortex vehicle " + v + " for disaster " + disasterId +
+                        " is too far from expected centre; rejecting (stale/reused id?)");
+                    continue;
+                }
+
+                return v;
             }
             return 0;
         }

@@ -16,12 +16,14 @@ Write-Host "Deployed DisasterPlus.dll -> $modDir"
 
 # CitiesHarmony.API.dll はこの shim だけ MOD 同梱が正しい。
 # HarmonyLib 本体（CitiesHarmony.Harmony.dll）は CitiesHarmony MOD が実行時に供給するので同梱しない。
+# HarmonyBootstrap / VortexPinPatch はこのアセンブリに実行時依存するので、
+# 無いまま「デプロイ成功」を装って終了してはいけない（ビルドは成功したのに MOD がロードで落ちる事故になる）。
 $apiDll = "src\DisasterPlus\bin\Release\CitiesHarmony.API.dll"
 if (Test-Path $apiDll) {
     Copy-Item $apiDll $modDir -Force
     Write-Host "Deployed CitiesHarmony.API.dll"
 } else {
-    Write-Host "Warning: CitiesHarmony.API.dll not found in build output"
+    throw "CitiesHarmony.API.dll not found in build output; HarmonyBootstrap/VortexPinPatch would fail at runtime"
 }
 
 # LocaleLoader は実行時に Locales\<lang>.txt を読む。
