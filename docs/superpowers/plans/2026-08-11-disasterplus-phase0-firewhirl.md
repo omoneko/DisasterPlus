@@ -343,7 +343,7 @@ git add src/DisasterPlus/Core tests/DisasterPlus.Core.Tests && git commit -m "fe
   - `DisasterPlus.Core.FireWhirl.FireWhirlConfig` — `class`、`float DetectRadius`、`int DetectCount`、`float MinSeparation`、`float MaxLifetimeMinutes`、`float ConditionGraceMinutes`、`int SpreadStrength`。`static FireWhirlConfig Defaults()`
   - `DisasterPlus.Core.FireWhirl.FireWhirlCandidate` — `struct`、`readonly Vec2 Center`、`readonly int BurningCount`
   - `DisasterPlus.Core.FireWhirl.FireWhirlDetector` — `static List<FireWhirlCandidate> Detect(IList<BurningBuilding> burning, FireWhirlConfig config, IList<Vec2> existingWhirls)`
-  - `DisasterPlus.Core.Common.GridVote` — `class`、`GridVote(float cellSize)`、`void Add(ushort id, Vec2 position)`、`IList<int> CellIndicesNear(Vec2 position)`（内部利用）
+  - `DisasterPlus.Core.Common.GridVote` — `class`、`GridVote(float cellSize)`、`void Add(int index, Vec2 position)`、`void CollectNear(Vec2 position, float radius, List<int> into)`。**セル単位の粗い絞り込みだけを行う。呼び出し側が実距離を必ず再判定すること**
 
 - [ ] **Step 1: 失敗するテストを書く**
 
