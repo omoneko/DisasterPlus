@@ -57,6 +57,10 @@ namespace DisasterPlus.Game
             // 値は保存したまま既定動作（Disaster + が担当）に戻る。
             if (ModCompat.NdrPresent)
             {
+                // 強度解放が既定 OFF になっている理由を明示する（仕様 3.3(a)）。
+                // 黙って OFF だと「設定が効いていない」と見える。
+                helper.AddGroup(Strings.IntensityUnlockHandledByOther);
+
                 var compat = helper.AddGroup(Strings.NdrDetected);
 
                 // ラベル配列は static readonly にしてはいけない。型初期化時の言語で凍結する。

@@ -19,6 +19,9 @@ namespace DisasterPlus.Game
         private static bool _evaluated;
         private static bool _ndrPresent;
 
+        private static bool _dlcEvaluated;
+        private static bool _naturalDisastersOwned;
+
         public static bool NdrPresent
         {
             get
@@ -34,21 +37,38 @@ namespace DisasterPlus.Game
         /// SteamHelper.IsDLCOwned は起動時から使えるので、OnSettingsUI
         /// （メインメニューで 1 回だけ実行）から参照してよい。
         /// レベルロード後にしか分からない情報でオプションを組み立ててはいけない。
+        ///
+        /// NdrPresent と同じく 1 回だけ判定してキャッシュする。DLC の所持状態は
+        /// プロセス内で変わらないうえ、ここは sim tick の先頭から毎 tick 呼ばれるため、
+        /// キャッシュしないと失敗時の Log.Error が tick 頻度で output_log.txt を埋める。
         /// </summary>
         public static bool NaturalDisastersOwned
         {
             get
             {
-                try { return SteamHelper.IsDLCOwned(SteamHelper.DLC.NaturalDisastersDLC); }
-                catch (System.Exception e)
-                {
-                    // 判定できないときは「持っている」に倒す。
-                    // 機能を永久に隠す偽陰性より、実行時に諦める偽陽性の方が害が小さい
-                    // （DisasterInfo が見つからなければ Task 10 が警告を出して黙って止まる）。
-                    Log.Error("DLC check failed; assuming owned", e);
-                    return true;
-                }
+                if (!_dlcEvaluated) EvaluateDlc();
+                return _naturalDisastersOwned;
             }
+        }
+
+        private static void EvaluateDlc()
+        {
+            _dlcEvaluated = true;
+
+            try
+            {
+                _naturalDisastersOwned = SteamHelper.IsDLCOwned(SteamHelper.DLC.NaturalDisastersDLC);
+            }
+            catch (System.Exception e)
+            {
+                // 判定できないときは「持っている」に倒す。
+                // 機能を永久に隠す偽陰性より、実行時に諦める偽陽性の方が害が小さい
+                // （DisasterInfo が見つからなければ Task 10 が警告を出して黙って止まる）。
+                Log.Error("DLC check failed; assuming owned", e);
+                _naturalDisastersOwned = true;
+            }
+
+            Log.Info("Natural Disasters DLC owned: " + _naturalDisastersOwned);
         }
 
         private static void Evaluate()

@@ -48,7 +48,13 @@ namespace DisasterPlus.Game
             MaxLifetimeMinutes    = new SavedInt("fwMaxLifetime", FileName, 10, true);
             SpreadStrength        = new SavedInt("fwSpreadStrength", FileName, 3, true);
             MinSeparation         = new SavedInt("fwMinSeparation", FileName, 300, true);
-            IntensityUnlock       = new SavedBool("intensityUnlock", FileName, true, true);
+            // 競合MOD（NDR）が居るときは既定 OFF。あちらが同じ解放をするので二重にやらない
+            // （仕様 3.2 / 3.3(a)）。手動で ON にはできる。
+            //
+            // SavedBool の既定値はキーがまだ .cgs に無いときだけ効く。よって既に選択した
+            // プレイヤーの値は保たれ、移行処理も要らない。新設キーを .exists で判定する
+            // 方式（全員 false になる）の罠にも掛からない。
+            IntensityUnlock       = new SavedBool("intensityUnlock", FileName, !ModCompat.NdrPresent, true);
             EarthquakeDamageOwner = new SavedInt("eqDamageOwner", FileName, EarthquakeOwnerOther, true);
 
             _ready = true;
