@@ -22,6 +22,7 @@ namespace DisasterPlus.Game
         {
             _scanner.Reset();
             FireWhirlSpawner.Reset();
+            HarmonyBootstrap.Install();
         }
 
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
@@ -30,6 +31,10 @@ namespace DisasterPlus.Game
             // FindTornadoInfo はその都度警告を出すので、DLC 無しの都市では毎 tick 呼ばない。
             if (!ModCompat.NaturalDisastersOwned) return;
             if (!ModSettings.FireWhirlEnabled.value) return;
+
+            // 渦車両の紐づけと、バニラに解体済みの旋風の掃除。走査より先に済ませる。
+            FireWhirlPinner.AttachVehicles();
+            FireWhirlPinner.CollectFinished();
 
             _scanner.ScanSlice();
 
@@ -111,6 +116,7 @@ namespace DisasterPlus.Game
             _scanner.Reset();
             FireWhirlSpawner.Reset();
             FireWhirlRegistry.Clear();
+            HarmonyBootstrap.Uninstall();
         }
     }
 }

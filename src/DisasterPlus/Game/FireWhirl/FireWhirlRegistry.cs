@@ -171,6 +171,23 @@ namespace DisasterPlus.Game
             return FireWhirlVerdict.Dissipate;   // 見つからない = 既に消えている
         }
 
+        /// <summary>
+        /// 渦車両を紐づける。車両は ActivateDisaster が作るので、CreateDisaster 直後には
+        /// まだ存在せず、Add した時点では vehicleId = 0 のまま登録されている。
+        /// </summary>
+        public static void SetVehicle(ushort disasterId, ushort vehicleId)
+        {
+            lock (_gate)
+            {
+                for (int i = 0; i < _active.Count; i++)
+                {
+                    if (_active[i].DisasterId != disasterId) continue;
+                    _active[i].VehicleId = vehicleId;
+                    return;
+                }
+            }
+        }
+
         /// <summary>終了処理に入ったことを記録する。以降は位置固定をやめる。</summary>
         public static void MarkEnding(ushort disasterId)
         {

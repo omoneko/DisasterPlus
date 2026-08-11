@@ -5,13 +5,24 @@ $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuil
            Select-Object -First 1
 if (-not $msbuild) { throw "MSBuild not found" }
 
-& $msbuild "src\DisasterPlus\DisasterPlus.csproj" /t:Build /p:Configuration=Release /v:minimal
+# PackageReference（CitiesHarmony.API）は復元が要るので Restore を足す。
+& $msbuild "src\DisasterPlus\DisasterPlus.csproj" /t:Restore,Build /p:Configuration=Release /v:minimal
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 
 $modDir = Join-Path $env:LOCALAPPDATA "Colossal Order\Cities_Skylines\Addons\Mods\DisasterPlus"
 New-Item -ItemType Directory -Force -Path $modDir | Out-Null
 Copy-Item "src\DisasterPlus\bin\Release\DisasterPlus.dll" $modDir -Force
 Write-Host "Deployed DisasterPlus.dll -> $modDir"
+
+# CitiesHarmony.API.dll はこの shim だけ MOD 同梱が正しい。
+# HarmonyLib 本体（CitiesHarmony.Harmony.dll）は CitiesHarmony MOD が実行時に供給するので同梱しない。
+$apiDll = "src\DisasterPlus\bin\Release\CitiesHarmony.API.dll"
+if (Test-Path $apiDll) {
+    Copy-Item $apiDll $modDir -Force
+    Write-Host "Deployed CitiesHarmony.API.dll"
+} else {
+    Write-Host "Warning: CitiesHarmony.API.dll not found in build output"
+}
 
 # LocaleLoader は実行時に Locales\<lang>.txt を読む。
 if (Test-Path "Locales") {
