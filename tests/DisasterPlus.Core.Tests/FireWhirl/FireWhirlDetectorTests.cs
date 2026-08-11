@@ -133,6 +133,42 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         }
 
         [Fact]
+        public void Detect_DenseCluster_AtNegativeCoordinates_ProducesCandidate()
+        {
+            // CS のマップは原点が中心で、半分は負座標。GridVote のセルキー詰めが
+            // 負で壊れるとマップの片側だけ旋風が出ない、という壊れ方をする。
+            var burning = Cluster(12, new Vec2(-4000f, -3000f), 40f, 1);
+            var result = FireWhirlDetector.Detect(burning, Config(), new List<Vec2>());
+            Assert.Single(result);
+            Assert.Equal(-4000f, result[0].Center.X, 0);
+            Assert.Equal(-3000f, result[0].Center.Z, 0);
+            Assert.Equal(12, result[0].BurningCount);
+        }
+
+        [Fact]
+        public void Detect_ClusterStraddlingTheOrigin_ProducesCandidate()
+        {
+            // 原点をまたぐと符号の違うセルに分かれる。セル境界で分断されないこと。
+            var burning = Cluster(12, new Vec2(0f, 0f), 40f, 1);
+            var result = FireWhirlDetector.Detect(burning, Config(), new List<Vec2>());
+            Assert.Single(result);
+            Assert.Equal(12, result[0].BurningCount);
+        }
+
+        [Fact]
+        public void Detect_MirroredClusters_AreNotConfused()
+        {
+            // (-x, +z) と (+x, -z) はセルキーが畳まれると同一視されうる組み合わせ。
+            // 別々の候補として出ること。
+            var burning = Cluster(12, new Vec2(-2000f, 2000f), 40f, 1);
+            burning.AddRange(Cluster(12, new Vec2(2000f, -2000f), 40f, 100));
+
+            var result = FireWhirlDetector.Detect(burning, Config(), new List<Vec2>());
+            Assert.Equal(2, result.Count);
+            foreach (var c in result) Assert.Equal(12, c.BurningCount);
+        }
+
+        [Fact]
         public void Detect_EmptyInput_ProducesNothing()
         {
             Assert.Empty(FireWhirlDetector.Detect(
