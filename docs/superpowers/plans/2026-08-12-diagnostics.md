@@ -999,16 +999,26 @@ namespace DisasterPlus.Game
 
 ```csharp
         // 機能ごとの例外記録。レベルアンロードでリセットする。
+        //
+        // 必ずロックで守ること。NoteFailure は MainThreadUpdate の catch から
+        // main スレッドで呼ばれ、BuildReport は sim スレッドから読む。
+        // 無防備な Dictionary の同時変更は内部バケットを壊し、まれに再現しない形で
+        // 例外や終わらないルックアップを起こす。
+        // DiagnosticsHub の gate とは別にすることで、ロック順序の問題を作らない。
+        private static readonly object _errorGate = new object();
         private static readonly Dictionary<string, int> _errorCounts = new Dictionary<string, int>();
         private static readonly Dictionary<string, string> _lastErrors = new Dictionary<string, string>();
 
         /// <summary>既存の catch 節から呼ぶ。呼び出しは止めない。</summary>
         private static void NoteFailure(string featureName, System.Exception e)
         {
-            int n;
-            _errorCounts.TryGetValue(featureName, out n);
-            _errorCounts[featureName] = n + 1;
-            _lastErrors[featureName] = e == null ? "unknown" : e.GetType().Name + ": " + e.Message;
+            lock (_errorGate)
+            {
+                int n;
+                _errorCounts.TryGetValue(featureName, out n);
+                _errorCounts[featureName] = n + 1;
+                _lastErrors[featureName] = e == null ? "unknown" : e.GetType().Name + ": " + e.Message;
+            }
         }
 
         /// <summary>
@@ -1028,20 +1038,27 @@ namespace DisasterPlus.Game
             var sections = new List<DiagnosticSection>();
             var builder = new DiagnosticBuilder();
 
+            // 先にロック内でスナップショットを取り、ロックを離してから組み立てる。
+            // WriteDiagnostics は任意の機能コードなので、ロックを保持したまま呼ばない。
+            var errorSnapshot = new Dictionary<string, string>();
+            lock (_errorGate)
+            {
+                foreach (var kv in _errorCounts)
+                {
+                    if (kv.Value <= 0) continue;
+                    string last;
+                    _lastErrors.TryGetValue(kv.Key, out last);
+                    errorSnapshot[kv.Key] = kv.Value + " errors, last: " + (last ?? "unknown");
+                }
+            }
+
             for (int i = 0; i < _features.Count; i++)
             {
                 var f = _features[i];
                 var health = FeatureHealth.Healthy;
-                string note = "";
-
-                int errors;
-                if (_errorCounts.TryGetValue(f.Name, out errors) && errors > 0)
-                {
-                    health = FeatureHealth.Degraded;
-                    string last;
-                    _lastErrors.TryGetValue(f.Name, out last);
-                    note = errors + " errors, last: " + last;
-                }
+                string note;
+                if (errorSnapshot.TryGetValue(f.Name, out note)) health = FeatureHealth.Degraded;
+                else note = "";
 
                 try
                 {
@@ -1050,7 +1067,10 @@ namespace DisasterPlus.Game
                 catch (System.Exception e)
                 {
                     // 診断の失敗で他機能の診断まで巻き込まない。
+                    // バッジも Degraded にする。本文が「失敗」なのに Healthy と出るのは嘘になる。
                     builder.Line(1, "diagnostics failed", e.GetType().Name);
+                    health = FeatureHealth.Degraded;
+                    if (note.Length == 0) note = "WriteDiagnostics threw";
                 }
 
                 sections.Add(new DiagnosticSection(f.Name, health, note, builder.Take()));
@@ -1073,11 +1093,14 @@ namespace DisasterPlus.Game
             }
 ```
 
-`LevelUnloading()` に追加:
+`LevelUnloading()` に追加（**クリアも同じロックの中で行う**）:
 
 ```csharp
-            _errorCounts.Clear();
-            _lastErrors.Clear();
+            lock (_errorGate)
+            {
+                _errorCounts.Clear();
+                _lastErrors.Clear();
+            }
             DiagnosticsHub.Clear();
 ```
 
