@@ -199,5 +199,55 @@ namespace DisasterPlus.Core.Tests.Diagnostics
 
             Assert.Equal(Joined(r), Joined(r));
         }
+
+        [Fact]
+        public void ExactlyMaxLength_NoEllipsis()
+        {
+            // A value of exactly MaxValueLength characters should not get "..."
+            string exact = new string('a', DiagnosticFormatter.MaxValueLength);
+            var r = new DiagnosticReport(
+                new List<DiagnosticLine> { new DiagnosticLine(0, "k", exact) }, null, null);
+
+            string output = Joined(r);
+            Assert.DoesNotContain("...", output);
+        }
+
+        [Fact]
+        public void OneOverMax_HasEllipsis()
+        {
+            // A value of MaxValueLength + 1 should get "..."
+            string over = new string('a', DiagnosticFormatter.MaxValueLength + 1);
+            var r = new DiagnosticReport(
+                new List<DiagnosticLine> { new DiagnosticLine(0, "k", over) }, null, null);
+
+            string output = Joined(r);
+            Assert.Contains("...", output);
+        }
+
+        [Fact]
+        public void OneUnderMax_NoEllipsis()
+        {
+            // A value of MaxValueLength - 1 should not get "..."
+            string under = new string('a', DiagnosticFormatter.MaxValueLength - 1);
+            var r = new DiagnosticReport(
+                new List<DiagnosticLine> { new DiagnosticLine(0, "k", under) }, null, null);
+
+            string output = Joined(r);
+            Assert.DoesNotContain("...", output);
+        }
+
+        [Fact]
+        public void ExcessIsOnlyCarriageReturns_NoEllipsis()
+        {
+            // A value where only the excess characters are \r should not get "..."
+            // For example, 130 characters of which 10 are \r = 120 real output
+            string baseStr = new string('x', DiagnosticFormatter.MaxValueLength);
+            string withCR = baseStr + new string('\r', 10);
+            var r = new DiagnosticReport(
+                new List<DiagnosticLine> { new DiagnosticLine(0, "k", withCR) }, null, null);
+
+            string output = Joined(r);
+            Assert.DoesNotContain("...", output);
+        }
     }
 }

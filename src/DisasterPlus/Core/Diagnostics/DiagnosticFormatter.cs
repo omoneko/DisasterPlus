@@ -91,15 +91,21 @@ namespace DisasterPlus.Core.Diagnostics
             if (string.IsNullOrEmpty(s)) return "";
 
             var sb = new System.Text.StringBuilder(s.Length);
-            for (int i = 0; i < s.Length && sb.Length < MaxValueLength; i++)
+            bool truncated = false;
+
+            for (int i = 0; i < s.Length; i++)
             {
                 char c = s[i];
-                if (c == '\r') continue;
-                if (c == '\n' || c == '\t') { sb.Append(' '); continue; }
-                sb.Append(c < 32 || c > 126 ? '?' : c);
+                if (c == '\r') continue;   // produces no output, skip before cap check
+
+                char emitted = (c == '\n' || c == '\t') ? ' '
+                             : (c < 32 || c > 126) ? '?' : c;
+
+                if (sb.Length >= MaxValueLength) { truncated = true; break; }
+                sb.Append(emitted);
             }
 
-            if (sb.Length >= MaxValueLength) sb.Append("...");
+            if (truncated) sb.Append("...");
             return sb.ToString();
         }
     }
