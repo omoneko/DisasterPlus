@@ -819,15 +819,30 @@ namespace DisasterPlus.Core.Diagnostics
             if (string.IsNullOrEmpty(s)) return "";
 
             var sb = new System.Text.StringBuilder(s.Length);
-            for (int i = 0; i < s.Length && sb.Length < MaxValueLength; i++)
+
+            // 打ち切ったかどうかは「実際に捨てた出力文字があるか」で判断する。
+            //
+            // sb.Length >= MaxValueLength で判断してはいけない。ちょうど
+            // MaxValueLength 文字の値は、切っていないのに "..." が付く。
+            // 残り入力の有無で判断するのも駄目で、'\r' は出力を生まないため
+            // 「超過分が '\r' だけ」の値に嘘の "..." が付く。
+            //
+            // そこで、まず 1 文字ぶんの出力を決めてから上限を判定する。
+            // 上限に達した状態で「出力を生む文字」が来たときだけ truncated を立てる。
+            bool truncated = false;
+            for (int i = 0; i < s.Length; i++)
             {
                 char c = s[i];
-                if (c == '\r') continue;
-                if (c == '\n' || c == '\t') { sb.Append(' '); continue; }
-                sb.Append(c < 32 || c > 126 ? '?' : c);
+                if (c == '\r') continue;   // 出力を生まないので、上限判定より先に飛ばす
+
+                char emitted = (c == '\n' || c == '\t') ? ' '
+                             : (c < 32 || c > 126) ? '?' : c;
+
+                if (sb.Length >= MaxValueLength) { truncated = true; break; }
+                sb.Append(emitted);
             }
 
-            if (sb.Length >= MaxValueLength) sb.Append("...");
+            if (truncated) sb.Append("...");
             return sb.ToString();
         }
     }
