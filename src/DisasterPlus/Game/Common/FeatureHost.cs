@@ -12,6 +12,11 @@ namespace DisasterPlus.Game
         private static bool _hasLastFrame;
 
         // 機能ごとの例外記録。レベルアンロードでリセットする。
+        // NoteFailure は main スレッド（OnMainThreadUpdate 等）からも sim スレッド
+        // （OnSimulationTick）からも呼ばれ、BuildReport は sim スレッドで読む。
+        // DiagnosticsHub の lock とは別に、この 2 つの Dictionary 専用の gate で守る
+        // （FeatureHost はここで DiagnosticsHub にも触るため、lock の順序問題を避けて gate を分ける）。
+        private static readonly object _errorGate = new object();
         private static readonly Dictionary<string, int> _errorCounts = new Dictionary<string, int>();
         private static readonly Dictionary<string, string> _lastErrors = new Dictionary<string, string>();
 
@@ -140,18 +145,24 @@ namespace DisasterPlus.Game
             IntensityUnlock.Reset();
             Log.Reset();
 
-            _errorCounts.Clear();
-            _lastErrors.Clear();
+            lock (_errorGate)
+            {
+                _errorCounts.Clear();
+                _lastErrors.Clear();
+            }
             DiagnosticsHub.Clear();
         }
 
-        /// <summary>既存の catch 節から呼ぶ。呼び出しは止めない。</summary>
+        /// <summary>既存の catch 節から呼ぶ。呼び出しは止めない。main / sim どちらのスレッドからも呼ばれる。</summary>
         private static void NoteFailure(string featureName, System.Exception e)
         {
-            int n;
-            _errorCounts.TryGetValue(featureName, out n);
-            _errorCounts[featureName] = n + 1;
-            _lastErrors[featureName] = e == null ? "unknown" : e.GetType().Name + ": " + e.Message;
+            lock (_errorGate)
+            {
+                int n;
+                _errorCounts.TryGetValue(featureName, out n);
+                _errorCounts[featureName] = n + 1;
+                _lastErrors[featureName] = e == null ? "unknown" : e.GetType().Name + ": " + e.Message;
+            }
         }
 
         /// <summary>
@@ -171,20 +182,36 @@ namespace DisasterPlus.Game
             var sections = new List<DiagnosticSection>();
             var builder = new DiagnosticBuilder();
 
+            // _errorCounts / _lastErrors は先に丸ごとスナップショットしてから lock を離れる。
+            // f.WriteDiagnostics は任意の機能コードで、FeatureHost へコールバックする可能性が
+            // ゼロではない（例えば Log.Diag 経由の何か）。lock を持ったまま呼ぶと、そのコード経路が
+            // 同じ _errorGate を取ろうとした瞬間にデッドロックしうるので、ここでは絶対に避ける。
+            var healths = new FeatureHealth[_features.Count];
+            var notes = new string[_features.Count];
+            lock (_errorGate)
+            {
+                for (int i = 0; i < _features.Count; i++)
+                {
+                    var f = _features[i];
+                    healths[i] = FeatureHealth.Healthy;
+                    notes[i] = "";
+
+                    int errors;
+                    if (_errorCounts.TryGetValue(f.Name, out errors) && errors > 0)
+                    {
+                        healths[i] = FeatureHealth.Degraded;
+                        string last;
+                        _lastErrors.TryGetValue(f.Name, out last);
+                        notes[i] = errors + " errors, last: " + last;
+                    }
+                }
+            }
+
             for (int i = 0; i < _features.Count; i++)
             {
                 var f = _features[i];
-                var health = FeatureHealth.Healthy;
-                string note = "";
-
-                int errors;
-                if (_errorCounts.TryGetValue(f.Name, out errors) && errors > 0)
-                {
-                    health = FeatureHealth.Degraded;
-                    string last;
-                    _lastErrors.TryGetValue(f.Name, out last);
-                    note = errors + " errors, last: " + last;
-                }
+                var health = healths[i];
+                var note = notes[i];
 
                 try
                 {
@@ -193,7 +220,9 @@ namespace DisasterPlus.Game
                 catch (System.Exception e)
                 {
                     // 診断の失敗で他機能の診断まで巻き込まない。
+                    // バッジが本文と矛盾しないよう、この機能の health も Degraded にする。
                     builder.Line(1, "diagnostics failed", e.GetType().Name);
+                    health = FeatureHealth.Degraded;
                 }
 
                 sections.Add(new DiagnosticSection(f.Name, health, note, builder.Take()));
