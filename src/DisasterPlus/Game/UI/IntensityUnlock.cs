@@ -51,7 +51,16 @@ namespace DisasterPlus.Game
             Apply();
         }
 
-        /// <summary>前提検証用。スライダーに到達できるかだけを返す（値は変えない）。</summary>
+        /// <summary>
+        /// スライダーに到達できるかだけを返す（値は変えない）。副作用なし。
+        ///
+        /// Assumptions.Run() はこれを直接呼ばない。パネルはロード直後にはまだ
+        /// 構築されていないことがあり（このクラス自身が Apply() を最大 100 回
+        /// リトライする理由）、ロード直後の 1 回きりの呼び出しでは「まだ無いだけ」を
+        /// 「前提が破れた」と誤報しかねない。確定結果は Apply() が _applied /
+        /// _gaveUp に達した時点で Assumptions.ReportSliderOutcome() 経由で報告する。
+        /// この関数自体は将来のオーバーレイ等からの単発の生存確認用に残している。
+        /// </summary>
         public static bool SliderReachable()
         {
             var panel = SceneObjects.FindInScene<DisastersOptionPanel>();
@@ -72,6 +81,9 @@ namespace DisasterPlus.Game
                 _gaveUp = true;
                 Log.Warn("gave up looking for the disaster intensity slider after "
                          + MaxAttempts + " attempts; cap not raised");
+                // ここは前提が本当に破れたケース（設定でこの機能を切っただけの
+                // 直前の return とは違う）。Assumptions にも確定結果として残す。
+                Assumptions.ReportSliderOutcome(false);
                 return;
             }
 
@@ -96,12 +108,14 @@ namespace DisasterPlus.Game
                 if (slider.maxValue >= MaxIntensityByte)
                 {
                     _applied = true;
+                    Assumptions.ReportSliderOutcome(true);
                     return;   // 他 MOD が既に上げている
                 }
 
                 Log.Info("raising intensity slider cap " + slider.maxValue + " -> " + MaxIntensityByte);
                 slider.maxValue = MaxIntensityByte;
                 _applied = true;
+                Assumptions.ReportSliderOutcome(true);
             }
             catch (System.Exception e)
             {

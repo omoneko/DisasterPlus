@@ -9,7 +9,8 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class HarmonyBootstrap
     {
-        private const string HarmonyId = "jp.disasterplus.mod";
+        /// <summary>internal: Assumptions がパッチ所有者を突き合わせて確認するのに使う。</summary>
+        internal const string HarmonyId = "jp.disasterplus.mod";
 
         private static Harmony _harmony;
 

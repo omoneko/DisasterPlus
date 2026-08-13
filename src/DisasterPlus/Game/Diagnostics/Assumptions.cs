@@ -15,29 +15,54 @@ namespace DisasterPlus.Game
     ///
     /// 前提を 1 ファイルに集約しているのは、付録A と突き合わせて監査するため。
     /// ②〜⑤で前提が増えたらここに足すこと。
+    ///
+    /// スレッド安全性: Run() / Reset() / ReportSliderOutcome() は main スレッドからのみ
+    /// 呼ばれる想定だが、LastResults は DiagnosticsHub.CollectionEnabled が立つと
+    /// FeatureHost.BuildReport() 経由で sim スレッドから毎 tick 読まれる
+    /// （Task 5 以降）。書き込み中の List を読む競合を避けるため、_results への
+    /// 全アクセスを _gate 1 本で直列化する。FeatureHost._errorGate や
+    /// DiagnosticsHub の gate とはロック順序の関係を作らないよう、
+    /// このロックを持ったまま他クラスのコードは一切呼ばない。
     /// </summary>
     public static class Assumptions
     {
+        private const string SliderCheckName = "Disasters panel intensity slider is reachable";
+        private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
+
+        private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
         private static bool _ran;
 
-        public static IList<AssumptionResult> LastResults { get { return _results; } }
+        /// <summary>呼び出し元がリストを保持し続けても _results の以後の変更から保護されるよう、
+        /// 常に防御的コピーを返す。</summary>
+        public static IList<AssumptionResult> LastResults
+        {
+            get
+            {
+                lock (_gate) { return new List<AssumptionResult>(_results); }
+            }
+        }
 
         public static void Reset()
         {
-            _results.Clear();
+            lock (_gate) { _results.Clear(); }
             _ran = false;
         }
 
         /// <summary>
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
+        ///
+        /// ここでは確定的に判定できる 4 件だけを見る。強度スライダーの到達可否は
+        /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
+        /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
+        /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
+        /// その 1 件は ReportSliderOutcome() が IntensityUnlock の確定後に個別に埋める。
         /// </summary>
         public static void Run()
         {
             if (_ran) return;
             _ran = true;
-            _results.Clear();
 
             Check("SimulationManager.DAYTIME_FRAMES == 65536",
                   "all in-game durations will be wrong",
@@ -52,18 +77,37 @@ namespace DisasterPlus.Game
                   delegate
                   {
                       return typeof(BuildingAI).GetMethod("BurnBuilding",
-                          BindingFlags.Public | BindingFlags.Instance) != null;
+                          BindingFlags.Public | BindingFlags.Instance,
+                          null,
+                          new Type[]
+                          {
+                              typeof(ushort), typeof(Building).MakeByRefType(),
+                              typeof(InstanceManager.Group), typeof(bool)
+                          },
+                          null) != null;
                   });
 
             Check("TornadoAI disaster prefab is available",
                   "fire whirls cannot be created",
                   delegate { return FireWhirlSpawner.HasTornadoPrefab(); });
 
-            Check("Disasters panel intensity slider is reachable",
-                  "disaster intensity cannot be unlocked to 25.5",
-                  delegate { return IntensityUnlock.SliderReachable(); });
-
             Report();
+        }
+
+        /// <summary>
+        /// IntensityUnlock がスライダー到達の可否を確定させた時点（成功で _applied、
+        /// あるいは MaxAttempts 尽きての _gaveUp）で呼ぶ。ロード直後の 1 回勝負にせず、
+        /// 「わかった時点で」名指しの結果を残す・ログに出すのが、この検証項目の
+        /// 誤報（false FAIL）を避ける唯一の方法。設定でこの機能自体を無効にした
+        /// 場合（_gaveUp だが ModSettings.IntensityUnlock.value == false）は
+        /// 前提が破れたわけではないので、ここは呼ばれない（IntensityUnlock 側で除外）。
+        /// </summary>
+        public static void ReportSliderOutcome(bool reachable)
+        {
+            var result = new AssumptionResult(
+                SliderCheckName, reachable, reachable ? "" : SliderCheckImpact);
+            SetResult(result);
+            LogResult(result);
         }
 
         private static bool VortexStepIsPatched()
@@ -84,7 +128,16 @@ namespace DisasterPlus.Game
             if (target == null) return false;
 
             var info = HarmonyLib.Harmony.GetPatchInfo(target);
-            return info != null && info.Postfixes != null && info.Postfixes.Count > 0;
+            if (info == null || info.Postfixes == null) return false;
+
+            // 「誰かの postfix が載っている」ではなく「自分の postfix が載っている」を見る。
+            // 同じ private overload に別 MOD が偶然 postfix を当てていた場合、前者だと
+            // 自分のパッチが無言で失敗していてもマスクされて PASS になってしまう。
+            for (int i = 0; i < info.Postfixes.Count; i++)
+            {
+                if (info.Postfixes[i].owner == HarmonyBootstrap.HarmonyId) return true;
+            }
+            return false;
         }
 
         private static void Check(string name, string impact, Func<bool> predicate)
@@ -101,30 +154,54 @@ namespace DisasterPlus.Game
                 passed = false;
                 detail = impact + " (check threw " + e.GetType().Name + ")";
             }
-            _results.Add(new AssumptionResult(name, passed, passed ? "" : detail));
+            SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
+        }
+
+        /// <summary>同名の既存結果があれば置き換える。Run() の 4 件と
+        /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
+        /// 常に最新・単一の結果だけが残るようにする。</summary>
+        private static void SetResult(AssumptionResult result)
+        {
+            lock (_gate)
+            {
+                for (int i = 0; i < _results.Count; i++)
+                {
+                    if (_results[i].Name == result.Name) { _results.RemoveAt(i); break; }
+                }
+                _results.Add(result);
+            }
+        }
+
+        private static void LogResult(AssumptionResult a)
+        {
+            if (a.Passed)
+            {
+                Log.Info("  PASS  " + a.Name);
+            }
+            else
+            {
+                Log.Warn("  FAIL  " + a.Name);
+                Log.Warn("        -> " + a.Impact);
+            }
         }
 
         private static void Report()
         {
+            // ReportSliderOutcome が Run() より前（同じ OnLevelLoaded 内、
+            // IntensityUnlock.Apply() の初回呼び出しが即座に確定した場合）に
+            // 既に 1 件足していることがあるので、その時点のスナップショットをそのまま数える。
+            var snapshot = LastResults;
+
             int passed = 0, failed = 0;
-            for (int i = 0; i < _results.Count; i++)
+            for (int i = 0; i < snapshot.Count; i++)
             {
-                if (_results[i].Passed) passed++; else failed++;
+                if (snapshot[i].Passed) passed++; else failed++;
             }
 
             Log.Info("ASSUMPTIONS  " + passed + " passed, " + failed + " FAILED");
-            for (int i = 0; i < _results.Count; i++)
+            for (int i = 0; i < snapshot.Count; i++)
             {
-                var a = _results[i];
-                if (a.Passed)
-                {
-                    Log.Info("  PASS  " + a.Name);
-                }
-                else
-                {
-                    Log.Warn("  FAIL  " + a.Name);
-                    Log.Warn("        -> " + a.Impact);
-                }
+                LogResult(snapshot[i]);
             }
         }
     }
