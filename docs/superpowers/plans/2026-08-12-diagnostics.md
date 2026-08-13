@@ -344,7 +344,8 @@ namespace DisasterPlus.Core.Diagnostics
             Name = name ?? "";
             Health = health;
             Note = note ?? "";
-            Lines = lines ?? new List<DiagnosticLine>();
+            // DiagnosticReport と同じ理由で複製する（呼び出し側の後からの変更を遮断）。
+            Lines = lines == null ? new List<DiagnosticLine>() : new List<DiagnosticLine>(lines);
         }
     }
 }
@@ -400,10 +401,20 @@ namespace DisasterPlus.Core.Diagnostics
             IList<AssumptionResult> assumptions,
             IList<DiagnosticSection> sections)
         {
-            // Game 層が null を渡してもオーバーレイが毎フレーム落ちないようにする。
-            Header = header ?? new List<DiagnosticLine>();
-            Assumptions = assumptions ?? new List<AssumptionResult>();
-            Sections = sections ?? new List<DiagnosticSection>();
+            // null を渡されてもオーバーレイが毎フレーム落ちないようにする。
+            //
+            // 参照をそのまま持たず複製する。呼び出し側が渡したリストを後から
+            // 書き換えたり空にしたりしても、公開済みのレポートが変わらないため。
+            // 具体的には FeatureHost.BuildReport が Assumptions.LastResults という
+            // 長命な静的リストを渡し、それは Assumptions.Reset() でクリアされる。
+            // 複製しないと、アンロード後にオーバーレイが空の Assumptions を
+            // 古い PassedCount と一緒に読むことになる。
+            Header = header == null
+                ? new List<DiagnosticLine>() : new List<DiagnosticLine>(header);
+            Assumptions = assumptions == null
+                ? new List<AssumptionResult>() : new List<AssumptionResult>(assumptions);
+            Sections = sections == null
+                ? new List<DiagnosticSection>() : new List<DiagnosticSection>(sections);
 
             for (int i = 0; i < Assumptions.Count; i++)
             {
