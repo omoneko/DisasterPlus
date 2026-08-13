@@ -158,5 +158,29 @@ namespace DisasterPlus.Game
             HarmonyBootstrap.Uninstall();
             FireWhirlPanelButton.Remove();
         }
+
+        public void WriteDiagnostics(DiagnosticBuilder b)
+        {
+            b.Line(1, "enabled", ModSettings.FireWhirlEnabled.value ? "yes" : "no");
+            b.Line(1, "scan", _scanner.DiagnosticSummary());
+
+            var views = FireWhirlRegistry.Snapshot();
+            b.Line(1, "active", views.Count.ToString());
+
+            for (int i = 0; i < views.Count; i++)
+            {
+                var v = views[i];
+                string s = "#" + v.DisasterId
+                    + "  (" + (int)v.Center.X + "," + (int)v.Center.Z + ")"
+                    + "  r=" + (int)v.Radius
+                    + "  " + v.ElapsedMinutes.ToString("F1")
+                    + "/" + ModSettings.MaxLifetimeMinutes.value + "min"
+                    + "  n=" + v.BurningCount
+                    + (v.VehicleId != 0 ? "  pinned" : "  NO VEHICLE")
+                    + (v.Manual ? "  manual" : "")
+                    + (v.Ending ? "  ending" : "");
+                b.Line(2, s);
+            }
+        }
     }
 }

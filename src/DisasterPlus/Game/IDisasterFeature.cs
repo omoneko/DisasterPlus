@@ -20,5 +20,14 @@ namespace DisasterPlus.Game
 
         /// <summary>都市のアンロード時。全セッション状態と静的キャッシュをここで捨てる。</summary>
         void OnLevelUnloading();
+
+        /// <summary>
+        /// 自分の状態を診断行として書き出す。sim スレッドから呼ばれる。
+        /// 収集が有効なときだけ呼ばれるので、コストを気にしすぎなくてよい。
+        ///
+        /// インターフェースに置いているのは意図的で、②〜⑤の機能を足すときに
+        /// 診断の実装を忘れられないようにするため。
+        /// </summary>
+        void WriteDiagnostics(DiagnosticBuilder b);
     }
 }

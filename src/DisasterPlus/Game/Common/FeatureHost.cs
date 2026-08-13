@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using ColossalFramework;
+using DisasterPlus.Core.Diagnostics;
 
 namespace DisasterPlus.Game
 {
@@ -9,6 +10,10 @@ namespace DisasterPlus.Game
         private static readonly List<IDisasterFeature> _features = new List<IDisasterFeature>();
         private static uint _lastFrame;
         private static bool _hasLastFrame;
+
+        // 機能ごとの例外記録。レベルアンロードでリセットする。
+        private static readonly Dictionary<string, int> _errorCounts = new Dictionary<string, int>();
+        private static readonly Dictionary<string, string> _lastErrors = new Dictionary<string, string>();
 
         /// <summary>
         /// LevelLoaded() を通過済みか。
@@ -50,7 +55,11 @@ namespace DisasterPlus.Game
             for (int i = 0; i < _features.Count; i++)
             {
                 try { _features[i].OnLevelLoaded(); }
-                catch (System.Exception e) { Log.Error(_features[i].Name + ".OnLevelLoaded", e); }
+                catch (System.Exception e)
+                {
+                    Log.Error(_features[i].Name + ".OnLevelLoaded", e);
+                    NoteFailure(_features[i].Name, e);
+                }
             }
 
             // 全機能のリセットが済んでから初めて tick を許可する。
@@ -79,7 +88,18 @@ namespace DisasterPlus.Game
             for (int i = 0; i < _features.Count; i++)
             {
                 try { _features[i].OnSimulationTick(frame, deltaMinutes); }
-                catch (System.Exception e) { Log.Error(_features[i].Name + ".OnSimulationTick", e); }
+                catch (System.Exception e)
+                {
+                    Log.Error(_features[i].Name + ".OnSimulationTick", e);
+                    NoteFailure(_features[i].Name, e);
+                }
+            }
+
+            // オーバーレイが閉じていてダンプ要求も無ければ何もしない。
+            if (DiagnosticsHub.CollectionEnabled)
+            {
+                try { DiagnosticsHub.Publish(BuildReport()); }
+                catch (System.Exception e) { Log.Error("diagnostics collection failed", e); }
             }
         }
 
@@ -93,7 +113,11 @@ namespace DisasterPlus.Game
             for (int i = 0; i < _features.Count; i++)
             {
                 try { _features[i].OnMainThreadUpdate(); }
-                catch (System.Exception e) { Log.Error(_features[i].Name + ".OnMainThreadUpdate", e); }
+                catch (System.Exception e)
+                {
+                    Log.Error(_features[i].Name + ".OnMainThreadUpdate", e);
+                    NoteFailure(_features[i].Name, e);
+                }
             }
         }
 
@@ -105,12 +129,78 @@ namespace DisasterPlus.Game
             for (int i = 0; i < _features.Count; i++)
             {
                 try { _features[i].OnLevelUnloading(); }
-                catch (System.Exception e) { Log.Error(_features[i].Name + ".OnLevelUnloading", e); }
+                catch (System.Exception e)
+                {
+                    Log.Error(_features[i].Name + ".OnLevelUnloading", e);
+                    NoteFailure(_features[i].Name, e);
+                }
             }
 
             _hasLastFrame = false;
             IntensityUnlock.Reset();
             Log.Reset();
+
+            _errorCounts.Clear();
+            _lastErrors.Clear();
+            DiagnosticsHub.Clear();
+        }
+
+        /// <summary>既存の catch 節から呼ぶ。呼び出しは止めない。</summary>
+        private static void NoteFailure(string featureName, System.Exception e)
+        {
+            int n;
+            _errorCounts.TryGetValue(featureName, out n);
+            _errorCounts[featureName] = n + 1;
+            _lastErrors[featureName] = e == null ? "unknown" : e.GetType().Name + ": " + e.Message;
+        }
+
+        /// <summary>
+        /// 全機能の診断を集めて 1 つの不変レポートにする。sim スレッドから呼ぶこと。
+        /// </summary>
+        public static DiagnosticReport BuildReport()
+        {
+            var header = new List<DiagnosticLine>();
+            header.Add(new DiagnosticLine(0, "DLC:ND",
+                ModCompat.NaturalDisastersOwned ? "owned" : "MISSING"));
+            header.Add(new DiagnosticLine(0, "NDR",
+                ModCompat.NdrPresent ? "detected" : "absent"));
+            header.Add(new DiagnosticLine(0, "Harmony",
+                HarmonyBootstrap.Installed ? "patched" : "NOT PATCHED"));
+            header.Add(new DiagnosticLine(0, "Level", _levelReady ? "ready" : "not ready"));
+
+            var sections = new List<DiagnosticSection>();
+            var builder = new DiagnosticBuilder();
+
+            for (int i = 0; i < _features.Count; i++)
+            {
+                var f = _features[i];
+                var health = FeatureHealth.Healthy;
+                string note = "";
+
+                int errors;
+                if (_errorCounts.TryGetValue(f.Name, out errors) && errors > 0)
+                {
+                    health = FeatureHealth.Degraded;
+                    string last;
+                    _lastErrors.TryGetValue(f.Name, out last);
+                    note = errors + " errors, last: " + last;
+                }
+
+                try
+                {
+                    f.WriteDiagnostics(builder);
+                }
+                catch (System.Exception e)
+                {
+                    // 診断の失敗で他機能の診断まで巻き込まない。
+                    builder.Line(1, "diagnostics failed", e.GetType().Name);
+                }
+
+                sections.Add(new DiagnosticSection(f.Name, health, note, builder.Take()));
+            }
+
+            // Task 4 で Assumptions.LastResults に差し替える
+            return new DiagnosticReport(header, null, sections);
         }
     }
 }

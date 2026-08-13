@@ -61,5 +61,14 @@ namespace DisasterPlus.Game
                 _building = new List<BurningBuilding>();
             }
         }
+
+        /// <summary>診断表示用の 1 行。走査の進み具合が分かる。</summary>
+        public string DiagnosticSummary()
+        {
+            // _cursor は建物バッファ内の走査位置。1 周ぶんの進捗として出す。
+            return "burning " + (_current == null ? 0 : _current.Count)
+                 + " / cursor " + _cursor
+                 + " (+" + SliceSize + "/tick)";
+        }
     }
 }
