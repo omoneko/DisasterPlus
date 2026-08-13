@@ -73,5 +73,64 @@ namespace DisasterPlus.Core.Tests.Diagnostics
             Assert.NotNull(s.Lines);
             Assert.Empty(s.Lines);
         }
+
+        [Fact]
+        public void Report_DefensivesCopy_ProtectsAgainstMutation()
+        {
+            // 呼び出し元がリストを変更しても、レポートの counts は不変のままであること。
+            // これは sim スレッドで作ったレポートが、元のリストをクリアする level unload を
+            // 経ても正しい values を返し続ける必要があるから。
+            var assumptions = new List<AssumptionResult>
+            {
+                new AssumptionResult("a", true, ""),
+                new AssumptionResult("b", false, "fail"),
+            };
+
+            var r = new DiagnosticReport(null, assumptions, null);
+            Assert.Equal(1, r.PassedCount);
+            Assert.Equal(1, r.FailedCount);
+            Assert.Equal(2, r.Assumptions.Count);
+
+            // 元のリストをクリア。
+            assumptions.Clear();
+
+            // レポートの counts は不変のまま。
+            Assert.Equal(1, r.PassedCount);
+            Assert.Equal(1, r.FailedCount);
+            // レポートのコピーも元のリストの変更は反映されない。
+            Assert.Equal(2, r.Assumptions.Count);
+        }
+
+        [Fact]
+        public void DiagnosticLine_NegativeIndent_ClampsToZero()
+        {
+            var line1 = new DiagnosticLine(-5, "label", "value");
+            Assert.Equal(0, line1.Indent);
+
+            var line2 = new DiagnosticLine(0, "label", "value");
+            Assert.Equal(0, line2.Indent);
+
+            var line3 = new DiagnosticLine(3, "label", "value");
+            Assert.Equal(3, line3.Indent);
+        }
+
+        [Fact]
+        public void NullStrings_BecomeEmpty()
+        {
+            // DiagnosticLine
+            var line = new DiagnosticLine(0, null, null);
+            Assert.Equal("", line.Label);
+            Assert.Equal("", line.Value);
+
+            // AssumptionResult
+            var result = new AssumptionResult(null, true, null);
+            Assert.Equal("", result.Name);
+            Assert.Equal("", result.Impact);
+
+            // DiagnosticSection
+            var section = new DiagnosticSection(null, FeatureHealth.Healthy, null, null);
+            Assert.Equal("", section.Name);
+            Assert.Equal("", section.Note);
+        }
     }
 }

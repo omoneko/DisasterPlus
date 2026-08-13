@@ -15,7 +15,8 @@ namespace DisasterPlus.Core.Diagnostics
             Name = name ?? "";
             Health = health;
             Note = note ?? "";
-            Lines = lines ?? new List<DiagnosticLine>();
+            // 呼び出し元が渡したリストを後から変更することから保護するため防御的コピーを作る。
+            Lines = lines == null ? new List<DiagnosticLine>() : new List<DiagnosticLine>(lines);
         }
     }
 }

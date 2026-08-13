@@ -21,9 +21,12 @@ namespace DisasterPlus.Core.Diagnostics
             IList<DiagnosticSection> sections)
         {
             // Game 層が null を渡してもオーバーレイが毎フレーム落ちないようにする。
-            Header = header ?? new List<DiagnosticLine>();
-            Assumptions = assumptions ?? new List<AssumptionResult>();
-            Sections = sections ?? new List<DiagnosticSection>();
+            // また、呼び出し元が渡したリストを後から変更・クリアすることから保護するため、
+            // 防御的コピーを作る。_passed/_failed はここで計算されるため、
+            // 元のリストが変更されても counts は不変のままになる。
+            Header = header == null ? new List<DiagnosticLine>() : new List<DiagnosticLine>(header);
+            Assumptions = assumptions == null ? new List<AssumptionResult>() : new List<AssumptionResult>(assumptions);
+            Sections = sections == null ? new List<DiagnosticSection>() : new List<DiagnosticSection>(sections);
 
             for (int i = 0; i < Assumptions.Count; i++)
             {
