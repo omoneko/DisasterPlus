@@ -77,6 +77,12 @@ namespace DisasterPlus.Game
             return _tornadoInfo;
         }
 
+        /// <summary>前提検証用。副作用なしに prefab の解決可否だけを返す。</summary>
+        public static bool HasTornadoPrefab()
+        {
+            return FindTornadoInfo() != null;
+        }
+
         /// <summary>
         /// 指定地点に竜巻災害を作り、その渦車両の ID を返す。
         /// 渦車両は ActivateDisaster が作るので、生成直後にはまだ存在しない。

@@ -228,8 +228,7 @@ namespace DisasterPlus.Game
                 sections.Add(new DiagnosticSection(f.Name, health, note, builder.Take()));
             }
 
-            // Task 4 で Assumptions.LastResults に差し替える
-            return new DiagnosticReport(header, null, sections);
+            return new DiagnosticReport(header, Assumptions.LastResults, sections);
         }
     }
 }

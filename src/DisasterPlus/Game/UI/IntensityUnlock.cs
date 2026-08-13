@@ -51,6 +51,14 @@ namespace DisasterPlus.Game
             Apply();
         }
 
+        /// <summary>前提検証用。スライダーに到達できるかだけを返す（値は変えない）。</summary>
+        public static bool SliderReachable()
+        {
+            var panel = SceneObjects.FindInScene<DisastersOptionPanel>();
+            if (panel == null) return false;
+            return panel.Find<ColossalFramework.UI.UISlider>("Slider") != null;
+        }
+
         /// <summary>main スレッドから呼ぶ。</summary>
         public static void Apply()
         {
