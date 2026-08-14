@@ -76,10 +76,16 @@ namespace DisasterPlus.Game
                 // 同じ変換であることを IL 実測済み、ForecastPanel 側のコメント参照)であって、
                 // DisasterManager.SimulationStepImpl が実際に tick 毎の発生判定へ使う値
                 // (この値を二乗し面積で補正してから乱数と比較する)そのものではない。
-                b.Line(2, "disaster probability (configured)",
-                    (snapshot.DisasterProbability * 100f).ToString("F1") + "%");
-                b.Line(2, "disaster cooldown", snapshot.DisasterCooldown > 0
-                    ? "active (" + snapshot.DisasterCooldown + ")" : "none");
+                //
+                // DisasterInfoAvailable が false のときは 0f のまま「読めなかった」を
+                // 表しており、"0.0%" とだけ出すと本物のゼロ読み取りと見分けが付かない
+                // (レビュー指摘)。ここは開発者向けテキストなので明示的に unavailable と書く。
+                b.Line(2, "disaster probability (configured)", snapshot.DisasterInfoAvailable
+                    ? (snapshot.DisasterProbability * 100f).ToString("F1") + "%"
+                    : "unavailable (DisasterManager not present)");
+                b.Line(2, "disaster cooldown", !snapshot.DisasterInfoAvailable
+                    ? "unavailable"
+                    : (snapshot.DisasterCooldown > 0 ? "active (" + snapshot.DisasterCooldown + ")" : "none"));
             }
 
             string placement;

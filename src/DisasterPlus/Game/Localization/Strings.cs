@@ -59,7 +59,8 @@ namespace DisasterPlus.Game
 
         public static string GroupForecast = "Weather forecast";
         public static string ForecastEnabled = "Enable the forecast panel";
-        public static string ForecastResetButton = "Reset the forecast button position";
+        public static string ForecastResetButton =
+            "Reset the forecast button position (takes effect next time you load a city)";
         public static string ForecastTitle = "Weather forecast";
         public static string ForecastTemperature = "Temperature";
         public static string ForecastRain = "Rain";
@@ -72,6 +73,15 @@ namespace DisasterPlus.Game
         public static string ForecastUnavailable = "Weather data unavailable";
         public static string ForecastNdrNote =
             "Natural Disasters Renewal governs disaster occurrence.";
+        // レビュー指摘: 無印の確率%はラベル無しだと「降水確率」等と誤読される。
+        // これは実際には設定された確率値であり、tick 毎の実際の発生判定は二乗と
+        // 都市面積補正を経る（ForecastFeature/ForecastPanel のコメント参照）。
+        public static string ForecastProbability = "Disaster probability (setting)";
+        // レビュー指摘: ハザードビューが出ていないときに汎用の ForecastUnavailable を
+        // 使うと「気象データが読めない」という誤った原因を暗示する。実際は気象データは
+        // 生きていて、ハザードビューが出ていないだけ。かつワンクリックで直せる。
+        public static string ForecastSwitchHazardView =
+            "Switch a hazard view on to read a value here.";
         public static string TrendRising = "up";
         public static string TrendFalling = "down";
         public static string TrendSteady = "steady";

@@ -33,19 +33,24 @@ namespace DisasterPlus.Game
 
                 // DisasterManager が居なくても気象スナップショットは有効に返す。
                 // 災害確率が読めないだけで「読み取れません」に落とすのは過剰。
+                // ただし probability=0f のまま Valid=true にすると、呼び出し側からは
+                // 「本当に 0% だった」のか「読めなかった」のか区別が付かない捏造ゼロになる
+                // （レビュー指摘）。disasterInfoAvailable で明示的に区別する。
                 float probability = 0f;
                 int cooldown = 0;
+                bool disasterInfoAvailable = false;
                 if (Singleton<DisasterManager>.exists)
                 {
                     var d = Singleton<DisasterManager>.instance;
                     probability = d.m_randomDisastersProbability;
                     cooldown = d.m_randomDisasterCooldown;
+                    disasterInfoAvailable = true;
                 }
 
                 return new WeatherSnapshot(
                     temperature, rain, cloud, fog,
                     w.m_windDirection, w.m_groundWetness, w.m_lastLightningIntensity,
-                    probability, cooldown, true);
+                    probability, cooldown, disasterInfoAvailable, true);
             }
             catch (System.Exception e)
             {

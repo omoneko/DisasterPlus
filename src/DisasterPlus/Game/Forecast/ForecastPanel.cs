@@ -13,7 +13,10 @@ namespace DisasterPlus.Game
     /// 1 種類ぶん」しか保持していない（HazardMapReader のクラス doc 参照）。
     /// したがって「カーソル位置のハザード」は落雷・竜巻を同時には出さない。
     /// 今どちらのサブモードが表示されているかを見て、そのラベルの数値だけを出す。
-    /// ハザードビューが出ていなければ、数値の代わりに ForecastUnavailable を出す。
+    /// ハザードビューが出ていなければ、数値の代わりに ForecastSwitchHazardView
+    /// （原因を特定したヒント）を出す — カーソル位置が取れないだけの場合は
+    /// ForecastUnavailable と分けている（RefreshCursorHazard のコメント参照。
+    /// レビュー指摘で ForecastUnavailable の使い回しを修正した）。
     /// 表示していない種別のラベルを付けた数値は絶対に出さない。
     ///
     /// 同じ理由で、落雷・竜巻それぞれの見出し行には「傾向」や「レベル」の数値は
@@ -21,16 +24,20 @@ namespace DisasterPlus.Game
     /// m_randomDisasterCooldown は災害種別に依らない単一の市全体の値であり、
     /// 落雷・竜巻それぞれの見出しの下に同じ値を出すと「別々に測った値がたまたま
     /// 一致した」ように読めてしまう（本タスクが戒める「確信を持って誤った数値」と
-    /// 同種の誤解）。そこで確率は落雷・竜巻いずれの見出しにも属さない位置に 1 回だけ出す。
+    /// 同種の誤解）。そこで確率は落雷・竜巻いずれの見出しにも属さない位置に、
+    /// ForecastProbability ラベル付きで 1 回だけ出す — レビュー指摘: ラベル無しの
+    /// 裸の数値は文脈から「降水確率」等と誤読される、これもハザード数値の
+    /// 誤ラベルと同種の欠陥だと判定された。DisasterManager が居らず読めなかった
+    /// 場合は 0.0% という捏造ゼロを出さず、行自体を空にする
+    /// （WeatherSnapshot.DisasterInfoAvailable 参照）。
     ///
     /// 「あと何時間で来る」という断定はしない（設計書 4.1）。出すのは傾向
     /// （Strings.TrendRising/Falling/Steady、矢印記号ではなく単語 —
     /// HazardLevel のバーと同じ理由で、CS の UI フォントに矢印グリフがある保証は無い）
     /// と、相対的な高低（確率のパーセント表示）だけ。クールダウン中かどうかは
     /// WriteDiagnostics（開発者向け、ローカライズ対象外のテキスト）でのみ明示する —
-    /// 「クールダウン中」という状態を表すための追加ローカライズキーがブリーフの
-    /// 18 件に含まれていないため、ユーザー向けパネルでは単語化しない
-    /// （無いキーを勝手に増やすと 26→44 の契約が崩れる）。
+    /// 「クールダウン中」という状態を表すための追加ローカライズキーは今回も
+    /// 確保していないため、ユーザー向けパネルでは単語化しない。
     ///
     /// API 実測（Task 5、docs/tools/ilload.ps1 で ColossalManaged.dll を確認）:
     /// UIPanel / UILabel / UIButton は UIComponent の width/height/relativePosition/
@@ -83,6 +90,17 @@ namespace DisasterPlus.Game
         /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
         public static void Tick()
         {
+            // レビュー指摘: 設定で無効化されたときにパネルが開いたままだと、
+            // OnSimulationTick が publish を止めた古いスナップショットを永遠に
+            // 出し続ける「凍りついたのに生きて見える」パネルになり、閉じる手段の
+            // ボタンも既に撤去済みで消せない。ボタン側（ForecastPanelButton.Tick）
+            // と同じガードをここにも置く。
+            if (!ModSettings.ForecastEnabled.value)
+            {
+                if (IsVisible) Hide();
+                return;
+            }
+
             if (_panel == null || !_panel.isVisible) return;
             Refresh();
         }
@@ -107,6 +125,9 @@ namespace DisasterPlus.Game
             _tornadoLabel = null;
             _cursorHeaderLabel = null;
             _cursorValueLabel = null;
+            // fake-null 経由でも次回 Camera.main を引き直せるが、都市をまたいで
+            // 古い参照を抱え続けない、という本プロジェクトの原則を明示的に守る。
+            _mainCameraCache = null;
         }
 
         private static void EnsureBuilt()
@@ -132,7 +153,29 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            var panel = (UIPanel)view.AddUIComponent(typeof(UIPanel));
+            // レビュー指摘: 以前は _panel への代入が構築の最後の一行だったため、
+            // 途中で例外が出ると EnsureBuilt() の catch が呼ぶ Destroy() は
+            // _panel==null を見て何もせず、UIView に取り付け済みの GameObject が
+            // 孤児のまま残った（クリックのたびに 1 枚ずつ積み上がる）。
+            // ここではローカル変数に保持し、構築失敗時はこの try/catch で
+            // 自分の GameObject を確実に破棄してから外側へ再送出する。
+            UIPanel panel = null;
+            try
+            {
+                panel = (UIPanel)view.AddUIComponent(typeof(UIPanel));
+                BuildContents(panel);
+                _panel = panel;
+                Log.Info("forecast panel built");
+            }
+            catch
+            {
+                if (panel != null) Object.Destroy(panel.gameObject);
+                throw;
+            }
+        }
+
+        private static void BuildContents(UIPanel panel)
+        {
             panel.name = PanelName;
             panel.width = PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
@@ -202,9 +245,6 @@ namespace DisasterPlus.Game
             y += 28f;
 
             panel.height = y;
-
-            _panel = panel;
-            Log.Info("forecast panel built");
         }
 
         private static UILabel AddLabel(UIPanel parent, string suffix, float x, float y, float width, float height)
@@ -250,7 +290,9 @@ namespace DisasterPlus.Game
                 _rainLabel.text = Strings.ForecastRain + ": " + Strings.ForecastUnavailable;
                 _cloudLabel.text = Strings.ForecastCloud + ": " + Strings.ForecastUnavailable;
                 _windLabel.text = Strings.ForecastWind + ": " + Strings.ForecastUnavailable;
-                _probabilityLabel.text = Strings.ForecastUnavailable;
+                // 完全に読めなかった場合（WeatherManager 自体が居ない等）は素直に
+                // 「不明」。DisasterManager だけ居ない場合の抑制（下の分岐）とは別の話。
+                _probabilityLabel.text = Strings.ForecastProbability + ": " + Strings.ForecastUnavailable;
                 RefreshCursorHazard();
                 return;
             }
@@ -272,6 +314,11 @@ namespace DisasterPlus.Game
             // クールダウン中かどうかというブール状態はここでは単語化しない
             // (ローカライズキー未確保。診断には出す)。
             //
+            // レビュー指摘: ラベル無しの裸の "50.0%" は雨・雲の直後に置かれると
+            // 「降水確率」等と誤読される。これはハザード数値を表示中でない種別の
+            // ラベルで出すのと同種の誤りを、ラベルを付け忘れることで起こしたもの。
+            // ForecastProbability ラベルで明示する。
+            //
             // *100 は IL 実測で裏付け済み(Task 5)。DefaultSettings.randomDisastersProbability
             // は 0.5(=50%)で、バニラ自身の PopsTelemetryEventFormatting.DisasterProbability も
             // 同じ値に対して `ldc.r4 100 / mul / Mathf.RoundToInt` と全く同じ変換をテレメトリ用に
@@ -281,8 +328,20 @@ namespace DisasterPlus.Game
             // この値をそのまま使わず(二乗し、都市面積で補正し、乱数と比較する)複雑な式を通す。
             // ここに出すのは「設定された確率」であって「今この瞬間の発生チャンス」の直接値ではない
             // 、という区別は WriteDiagnostics 側のコメントにも書いておく。
-            float probabilityPercent = snapshot.DisasterProbability * 100f;
-            _probabilityLabel.text = probabilityPercent.ToString("F1") + "%";
+            //
+            // レビュー指摘: DisasterManager が居ない場合に以前は 0f のまま "0.0%" と表示していた。
+            // これは「本当に 0% だった」のか「読めなかった」のか区別が付かない捏造ゼロだった。
+            // DisasterInfoAvailable が false のときは行そのものを出さない(数値を一切出さない)。
+            if (snapshot.DisasterInfoAvailable)
+            {
+                float probabilityPercent = snapshot.DisasterProbability * 100f;
+                _probabilityLabel.text = Strings.ForecastProbability + ": "
+                    + probabilityPercent.ToString("F1") + "%";
+            }
+            else
+            {
+                _probabilityLabel.text = "";
+            }
 
             RefreshCursorHazard();
         }
@@ -291,9 +350,27 @@ namespace DisasterPlus.Game
         /// カーソル位置のハザード値。今表示中のサブモードだけを試す。
         /// 表示していない種別のラベルを付けた数値は絶対に出さない
         /// (HazardMapReader.SampleAt が ok=false で保証する)。
+        ///
+        /// レビュー指摘: 以前はハザードビューが出ていない場合も ForecastUnavailable
+        /// （「気象データを読み取れません」）を使い回していたが、これは誤り。
+        /// 気象データ自体は生きており(4 行上の温度・雨・雲・風は表示できている)、
+        /// 出せないのはハザード数値だけで、原因も「ハザードビューが出ていない」と
+        /// 特定できている(§4.2)。しかもパネルを読んでいる間はマウスがほぼ確実に
+        /// パネル自身の上にあり(UIView.IsInsideUI()==true)、地形上のカーソル判定は
+        /// 常に失敗する——つまりユーザーが最も頻繁に見る行がこれになる。そこで
+        /// 「今表示中のハザードビューがあるか」をカーソル位置を問う前に先に見て、
+        /// 無ければ原因を特定したヒント(ForecastSwitchHazardView)を即座に出す。
+        /// カーソル位置が取れない(UI 上・地形の外)のに何らかのハザードビューは
+        /// 出ている、という場合だけ ForecastUnavailable(=カーソル位置が不明)を使う。
         /// </summary>
         private static void RefreshCursorHazard()
         {
+            if (!InfoModeSwitch.IsShowingHazard)
+            {
+                _cursorValueLabel.text = Strings.ForecastSwitchHazardView;
+                return;
+            }
+
             Vec3 hit;
             if (!TryPickCursorGround(out hit))
             {
@@ -320,8 +397,19 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            // IsShowingHazard は true だが、表示中のサブモードが落雷・竜巻の
+            // どちらでもない(洪水・隕石・地盤沈下・地震・森林火災のハザード等)。
+            // この機能が扱う 2 種の外なので、原因を「切り替えてください」と
+            // 断定するのは不正確。汎用の不明扱いに留める。
             _cursorValueLabel.text = Strings.ForecastUnavailable;
         }
+
+        /// <summary>
+        /// Unity 5.6 の Camera.main はタグ検索で、パネル表示中は毎フレーム呼ばれうる
+        /// パスなのでキャッシュする(レビュー指摘)。fake-null(破棄済みカメラ)を
+        /// 拾えるよう Unity の == null 判定に任せ、素の参照比較はしない。
+        /// </summary>
+        private static Camera _mainCameraCache;
 
         private static bool TryPickCursorGround(out Vec3 hit)
         {
@@ -330,7 +418,8 @@ namespace DisasterPlus.Game
             // パネルやその他の UI の上にマウスがあるときは意味のある地点が無い。
             if (UIView.IsInsideUI()) return false;
 
-            var cam = Camera.main;
+            if (_mainCameraCache == null) _mainCameraCache = Camera.main;
+            var cam = _mainCameraCache;
             if (cam == null) return false;
 
             Ray ray = cam.ScreenPointToRay(Input.mousePosition);
