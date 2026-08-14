@@ -147,13 +147,19 @@ namespace DisasterPlus.Game
         public static void Reset()
         {
             Forget();
-            _errorLogged = false;
+            // ★ _errorLogged は戻さない（第 2 層レビュー M4）。
+            //    「この経路は投げる」は、この DLL が参照しているゲームのビルドに対する
+            //    事実であって都市ごとの状態ではないので、都市を替えても変わらない。
+            //    前例は EarthquakeReader._readErrorLogged / LongPeriodDamage._errorLogged
+            //    で、どちらもレベルアンロードで戻していない。ここだけ戻していたのは
+            //    取りこぼしで、同じ質問に 2 つの逆の答えが doc として書かれていた。
         }
 
         /// <summary>
-        /// 監視をやめて表示も畳む。<see cref="Reset"/> と違い <see cref="_errorLogged"/> は
-        /// 触らない —— あれは「同じ例外で output_log を埋めない」ための都市単位の状態で、
-        /// 地震 1 個が終わるたびに巻き戻すと <c>Log.Error</c> の連投を許してしまう。
+        /// 監視をやめて表示も畳む。<see cref="_errorLogged"/> は
+        /// 触らない —— あれは「同じ例外で output_log を埋めない」ための
+        /// **ゲームのビルドに対する事実**で、地震 1 個が終わるたびに巻き戻すと
+        /// <c>Log.Error</c> の連投を許してしまう。
         /// </summary>
         private static void Forget()
         {

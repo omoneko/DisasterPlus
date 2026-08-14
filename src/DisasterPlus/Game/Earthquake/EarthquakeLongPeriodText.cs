@@ -30,6 +30,19 @@ namespace DisasterPlus.Game
         /// **「高さが読めなかった」と「低いので対象外」を混ぜない。**
         /// 前者は読み取り失敗、後者は実測に基づく結論で、同じ文にすると
         /// 読み取り失敗が結論の顔をして出てくる。
+        ///
+        /// ── 数字に「いつ効くか」を必ず添える（第 2 層レビュー I1 / M3）──────────
+        ///
+        /// この行が使う地震は <c>EarthquakeSnapshot.CursorQuakeId</c>、すなわち
+        /// <c>QuakeSelection.SelectDamaging</c> の選定（<b>Active または Emerging</b>）である。
+        /// 一方、追加被害が実際に走るのは <c>LongPeriodDamage.Step</c> が
+        /// <c>Phase == Active</c> を要求するので **Active だけ**である。
+        /// 何も断らずに「追加倒壊リスク 6.4%」と出すと、本震前には
+        /// **何にも適用されていない確率**が確定値の顔で出る（実機項目 90 が
+        /// 被害側の正しい挙動を確かめているのに、表示がそれと食い違う）。
+        ///
+        /// 走査が上限で打ち切られていた場合も同様に名乗る。走査は震央から外へ
+        /// 向かうので打ち切られても震央の周りは評価済みだが、外側はまだである。
         /// </summary>
         internal static string CursorRow(EarthquakeSnapshot snapshot)
         {
@@ -60,7 +73,28 @@ namespace DisasterPlus.Game
                    + Strings.EarthquakeBuildingHeight + " " + height.ToString("F0") + " m"
                    + " / " + Strings.EarthquakeResonance + " " + resonance.ToString("F2")
                    + " / " + Strings.EarthquakeLongPeriodRisk + " "
-                   + (chance * 100f).ToString("F1") + "%";
+                   + (chance * 100f).ToString("F1") + "%"
+                   + Caveat(snapshot, quake);
+        }
+
+        /// <summary>
+        /// 確率の数字に添える但し書き。無いときは空文字。
+        ///
+        /// **本震前を先に言う。** 「まだ 1 度も適用されていない」の方が
+        /// 「走査が途中で止まった」より強い留保なので、両方が当てはまる場面では
+        /// 前者だけを出す（2 つ並べても読み手の行動は変わらない）。
+        /// </summary>
+        private static string Caveat(EarthquakeSnapshot snapshot, EarthquakeReading quake)
+        {
+            if (quake.Phase != EarthquakePhase.Active)
+            {
+                return "   (" + Strings.EarthquakeLongPeriodBeforeShock + ")";
+            }
+            if (snapshot.LongPeriodCapped)
+            {
+                return "   (" + Strings.EarthquakeLongPeriodCapped + ")";
+            }
+            return "";
         }
 
         /// <summary>

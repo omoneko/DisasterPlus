@@ -196,7 +196,15 @@ namespace DisasterPlus.Game
                 + (LongPeriodResponse.WavePeriodFrames
                    / LongPeriodResponse.PeriodFramesPerMetre).ToString("F0")
                 + " m, range = " + LongPeriodResponse.RangeFactor.ToString("F0")
-                + "x the vanilla disc  [Disaster + model, not measured]");
+                + "x the vanilla disc, ceiling "
+                // ★ 0.25 とだけ書かない。時間帯係数はモデルのクランプの**後**に
+                //    掛かるので、実際に使われる上限は 0.25 x 1.15 である
+                //    （LongPeriodResponse.MaxExtraChance の doc / 第 2 層レビュー M8）。
+                + (LongPeriodResponse.MaxExtraChance * 100f).ToString("F1") + "% x up to "
+                + TimeOfDayFactor.NightFactor.ToString("F2") + " time-of-day = "
+                + (LongPeriodResponse.MaxExtraChance * TimeOfDayFactor.NightFactor * 100f)
+                    .ToString("F2") + "% per pass"
+                + "  [Disaster + model, not measured]");
 
             b.Line(2, "passes", LongPeriodDamage.Passes.ToString());
             b.Line(2, "last pass",

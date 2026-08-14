@@ -65,11 +65,25 @@ namespace DisasterPlus.Core.Earthquake
         public const float MinHeightMetres = 20f;
 
         /// <summary>
-        /// 1 回の走査で足せる追加倒壊確率の上限。
+        /// 1 回の走査で <see cref="ExtraCollapseChance"/> が返す追加倒壊確率の上限。
         ///
         /// **バニラの全体円盤が 0.02 なのに対し、これは最大 0.25 と 1 桁大きい。**
         /// 意図的だが、だからこそこの機能は既定 OFF で、強さのスライダーで
         /// 抑えられるようになっている。
+        ///
+        /// ── **これは実際に使われる確率の上限ではない**（第 2 層レビュー M8）─────
+        ///
+        /// 呼び出し側（<c>LongPeriodDamage.IsSelected</c> と、同じ順序を写している
+        /// <c>EarthquakeLongPeriodText.CursorRow</c>）は、このクランプの**後**に
+        /// <c>TimeOfDayFactor.Of(hour)</c>（最大 <c>TimeOfDayFactor.NightFactor</c>
+        /// ＝ 1.15）を掛ける。したがって画面と被害選定に出る実際の上限は
+        /// <c>0.25 × 1.15 ＝ 0.2875</c> である。
+        ///
+        /// 順序を入れ替えないのは、この定数を「**このモデル自身が出す最大値**」という
+        /// 意味のままにしておきたいからで、時間帯係数はモデルの外から掛かる別の量である。
+        /// その代わり、上限を名乗る場所（この doc と診断ダンプの model 行）は
+        /// **必ず 0.2875 まで含めて言う** —— 0.25 とだけ書くと、
+        /// 「確信を持って誤った数値」になる。
         /// </summary>
         public const float MaxExtraChance = 0.25f;
 

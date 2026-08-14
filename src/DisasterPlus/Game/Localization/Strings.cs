@@ -486,6 +486,25 @@ namespace DisasterPlus.Game
         // 裸の「+3.1%」だけを出すと、何の確率なのかがどの言語でも読めない。
         public static string EarthquakeLongPeriodRisk = "extra collapse risk";
 
+        // 第 2 層レビュー I1 / M3 で足した 2 キー。どちらも「確信を持って誤った数値」を
+        // 出さないためだけに在る。
+        //
+        //   - EarthquakeLongPeriodBeforeShock … 追加被害が走るのは Active だけだが
+        //     （LongPeriodDamage.Step）、カーソル行は Emerging も対象にする
+        //     QuakeSelection.SelectDamaging の選定を使う。本震前に「追加倒壊リスク
+        //     6.4%」とだけ出すと、まだ何にも適用されていない確率が確定値の顔で出る
+        //   - EarthquakeLongPeriodCapped … 走査は震央から外へ向かうので打ち切られても
+        //     震央の周りは評価済みだが、外側はまだである。「もう抽選が済んだ」と
+        //     「これからである」を黙って混ぜない
+        //
+        // **短く保つこと。** どちらもカーソル行の末尾に足されるので、
+        // 長いと行が折り返しの高さを超えて途中で切れる（EarthquakeLayer2Rows が
+        // 津波の行で 1 度踏んだ形）。行の高さ 72f との釣り合いで決めてある。
+        public static string EarthquakeLongPeriodBeforeShock =
+            "not applied until the main shock";
+        public static string EarthquakeLongPeriodCapped =
+            "sweep truncated this pass; not rolled yet";
+
         // --- ②地震（Task 11: 時間帯係数 ＝ 第 2 層の 3 つ目） ---
         //
         // **単独の設定は作っていない。** 掛かる先は長周期地震動の追加被害だけなので、

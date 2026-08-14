@@ -1,3 +1,4 @@
+using ColossalFramework;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Earthquake;
 
@@ -49,10 +50,54 @@ namespace DisasterPlus.Game
     /// 小さく、それは読み取り失敗ではなく実測値である。
     /// <see cref="LongPeriodResponse.MinHeightMetres"/> 未満は対象外になる。
     ///
-    /// **既知の粗さ:** <c>m_collisionHeight</c> はプロップとサブ建物の上端も含む。
-    /// アンテナ 1 本で背が高いことになる建物がありうる。メッシュそのものの高さは
-    /// <c>m_size.y</c> だが、そちらは <c>m_collisionHeight</c> の**出所**であり、
-    /// 「ゲーム自身が建物の高さとして使っている値」は前者なので、そちらを採る。
+    /// ── **どちらを採るか（第 2 層レビュー I2 で入れ替えた）** ──────────────
+    ///
+    /// 当初は「ゲーム自身が建物の高さとして使っている値」という理由で
+    /// <c>m_collisionHeight</c> を主にしていた。**それは誤りだった。**
+    /// <c>CheckReferences</c> は敷地上の<b>樹木</b>の高さまで取り込んでいる
+    /// （本修正で IL 実測）:
+    ///
+    /// ```
+    /// BuildingInfo::CheckReferences
+    ///   IL_0019-0025  m_collisionHeight = m_size.y                （出発点）
+    ///   IL_0270-02F6  h = prop.m_generatedInfo.m_center.y
+    ///                     + prop.m_generatedInfo.m_size.y * 0.5
+    ///                 h *= prop.m_maxScale
+    ///                 if (m_props[i].m_fixedHeight) h += m_props[i].m_position.y
+    ///                 m_collisionHeight = Mathf.Max(m_collisionHeight, h)   ※プロップ
+    ///   IL_03EA-0470  同じ式を **TreeInfo** について繰り返す（m_finalTree /
+    ///                 TreeInfoGen::m_center・m_size / TreeInfo::m_maxScale）  ※樹木
+    /// ```
+    ///
+    /// バニラの低密度住宅の敷地には樹木プロップが載っており、
+    /// <c>TreeInfoGen.m_size.y</c> は <c>m_maxScale</c> を掛ける前で 15〜25 m に
+    /// 達しうる。つまり<b>平屋が 20 m 以上を名乗り、長周期の候補になってしまう</b>。
+    /// この機能の前提そのもの（「高層ほど倒れる」）と、実機チェックリスト項目 82
+    /// （同じ距離で高層が低層より多く倒れること）が、**樹木がでっち上げた高さ**で
+    /// 測られることになる。
+    ///
+    /// **したがって主は <c>BuildingInfo.m_size.y</c>（メッシュ境界）にする。**
+    /// この値が汚れていないことも IL で確定させた:
+    ///
+    /// ```
+    /// BuildingInfo::InitializePrefab  IL_09BE  m_size = m_generatedInfo.m_size
+    /// BuildingInfoBase::CalculateGeneratedInfo(MeshFilter[], SkinnedMeshRenderer[])
+    ///   IL_0135-014A  y = Mathf.Max(y, mesh.vertices[k].y)   ← メッシュ頂点だけ
+    ///   IL_05E6       m_generatedInfo.m_size = new Vector3(x*2, y, z*2)
+    /// アセンブリ全体で BuildingInfo::m_size に stfld するのは InitializePrefab だけ、
+    /// BuildingInfoGen::m_size に stfld するのは CalculateGeneratedInfo だけ（全走査で確認）。
+    /// ```
+    ///
+    /// **<c>m_collisionHeight</c> へは退避しない。** 退避が要るのは
+    /// <c>m_size.y</c> が使えないときだけで、その状況では <c>m_collisionHeight</c> の
+    /// 出発点（IL_0019）も同じ使えない値なので、そこから <c>Max</c> で残るのは
+    /// **プロップと樹木がでっち上げた高さそのもの**になる。つまり退避が効く唯一の
+    /// 場面で、退避先が返すのは嘘である。読めなければ 0（＝不明）を返し、
+    /// 呼び出し側は何もしない。
+    ///
+    /// **副作用（引き受ける）:** <c>m_size.y</c> はサブ建物を含まないので、
+    /// 本体メッシュが低くサブ建物で高さを出しているプレハブは低く出る。
+    /// 過小評価は「被害を与えない」側に倒れるので、過大評価より安全である。
     ///
     /// 計画は <c>MetresOf(ushort id, ref Building b)</c> という形を指定していたが、
     /// <b>高さはプレハブ側にしか無く、建物 ID は 1 度も要らない</b>ことが上の実測で
@@ -72,13 +117,19 @@ namespace DisasterPlus.Game
                 // UnityEngine.Object の == オーバーロードで破棄済み(fake-null)も弾く。
                 if (info == null) return 0f;
 
-                float h = info.m_collisionHeight;
-                if (!float.IsNaN(h) && h > 0f) return h;
-
-                // 予備経路。m_collisionHeight の出所そのもの（InitializePrefab IL_0AC2）。
-                // ここが 0 なら、この環境ではこの建物の高さは本当に分からない。
+                // ★ メッシュ境界の高さ。**m_collisionHeight は使わない**
+                //   （クラス doc「どちらを採るか」。敷地の樹木で膨らむ）。
                 float meshHeight = info.m_size.y;
-                return !float.IsNaN(meshHeight) && meshHeight > 0f ? meshHeight : 0f;
+                if (!float.IsNaN(meshHeight) && meshHeight > 0f) return meshHeight;
+
+                // 予備経路は m_size の出所そのもの（InitializePrefab IL_09BE）だけ。
+                // m_size が書かれていないプレハブでも、生成情報が残っていれば読める。
+                var generated = info.m_generatedInfo;
+                if (generated == null) return 0f;
+
+                float generatedHeight = generated.m_size.y;
+                return !float.IsNaN(generatedHeight) && generatedHeight > 0f
+                    ? generatedHeight : 0f;
             }
             catch
             {
@@ -130,16 +181,31 @@ namespace DisasterPlus.Game
     /// <b>建物 <see cref="MaxBuildingsPerPass"/> 棟</b>。到達範囲は最大
     /// 2 × 7100 m ＝ 建物グリッド（270×270、1 セル 64 m）の全域になりうるので、
     /// 上限に達したら**そこで打ち切り、次の走査は続きから**再開する
-    /// （<see cref="_cursorCell"/>）。選定は (地震, 建物) だけで決まり
+    /// （<see cref="_cursorOrdinal"/>）。選定は (地震, 建物) だけで決まり
     /// フレームを混ぜないので、途中で切っても結論は変わらない。
+    ///
+    /// **走査の順序は震央から外側へ**（<see cref="OutwardCellOrder"/>）。行優先だと
+    /// 最初に見るのが矩形の角＝震央からいちばん遠い＝確率がほぼ 0 の場所になり、
+    /// 上限が**いちばん壊れやすい建物を切り捨てる**（第 2 層レビュー I1。
+    /// 順序を発明した理由の全文は <see cref="OutwardCellOrder"/> のクラス doc）。
     ///
     /// 参考: バニラ自身の全体円盤は <c>preRadius + 72</c> ＝ 最大 7172 m の
     /// グリッド走査を **1 シミュレーションステップごとに**、上限なしで行う（§A-3）。
     /// ここの上限はそれよりはるかに保守的である。
     ///
-    /// **地震が変わった直後は 1 間隔ぶん待つ。** <c>SeismographRecorder.Rescan</c> が
-    /// 地震の開始 tick に建物バッファの全スロット走査を行うので、そこへ
-    /// 重ねない（<see cref="Reset"/> / 地震 ID の切り替えで累積を 0 に戻す）。
+    /// **地震が変わった直後の 1 tick は走らせない。** <c>SeismographRecorder.Rescan</c> が
+    /// 地震の開始 tick に建物バッファの全スロット走査を行うので、そこへ重ねない。
+    /// ただし<b>間隔の累積（<see cref="_minutesSincePass"/>）は巻き戻さない</b> ——
+    /// 地震が複数同時に進行して <c>SelectDamaging</c> の選定が入れ替わり続けると、
+    /// 巻き戻す実装では累積が毎回 0 に戻り、**走査が 1 度も走らない**（第 2 層レビュー I3）。
+    ///
+    /// ── 対象は「今いちばん強い地震」1 個だけ（明示する）─────────────────
+    ///
+    /// <c>QuakeSelection.SelectDamaging</c> が選ぶ 1 個だけを追う。同時に 2 個以上の
+    /// 地震が Active でも、追加被害を受けるのは選ばれた 1 個の周りだけである
+    /// （<c>TsunamiChain</c> と同じ制限で、あちらと同じくクラス doc で名乗る）。
+    /// 選定が入れ替わったときは走査の位置（<see cref="_cursorOrdinal"/>）を捨てて
+    /// 新しい震央から測り直し、その事実を診断へ 1 行出す。
     ///
     /// ── 診断（③の失敗を繰り返さない）───────────────────────────
     ///
@@ -166,6 +232,13 @@ namespace DisasterPlus.Game
         private const int GridSide = 270;
 
         /// <summary>
+        /// 1 セルの連結リストを辿る回数の上限（壊れた保存データ対策）。
+        /// バニラの <c>DisasterHelpers.DestroyBuildings</c> の内側ループと同じ
+        /// 49152 ＝ 建物バッファの大きさ（IL_0521 の <c>ldc.i4 49152</c>）。
+        /// </summary>
+        private const int GridChainGuard = 49152;
+
+        /// <summary>
         /// 候補にするフラグ条件。**バニラの <c>DestroyBuildings</c> の一次カリングと
         /// 同じマスク・同じ比較**（§A-3、<c>(m_flags &amp; 0x80013) != 1</c>）に、
         /// <c>Collapsed</c> の除外を足したもの。
@@ -188,7 +261,13 @@ namespace DisasterPlus.Game
 
         private static float _minutesSincePass;
         private static ushort _quakeId;
-        private static int _cursorCell;
+
+        /// <summary>
+        /// 次に見るセルの序数（<see cref="OutwardCellOrder"/> の順序）。0 が震央のセル。
+        /// 上限で打ち切られたときだけ 0 以外で残る。
+        /// </summary>
+        private static int _cursorOrdinal;
+
         private static bool _heightNotePosted;
         private static bool _errorLogged;
 
@@ -238,7 +317,7 @@ namespace DisasterPlus.Game
         {
             _minutesSincePass = 0f;
             _quakeId = 0;
-            _cursorCell = 0;
+            _cursorOrdinal = 0;
             _passes = 0;
             _lastScanned = 0;
             _lastSelected = 0;
@@ -288,6 +367,20 @@ namespace DisasterPlus.Game
 
         private static void Step(EarthquakeSnapshot snapshot, float deltaMinutes)
         {
+            // ★ 間隔の累積は**対象の地震より先に**進める。地震が入れ替わっても、
+            //    無くなっても、時間は流れているという扱いにする。ここを地震ごとの
+            //    状態にすると、複数の地震が Emerging/Active を出入りするたびに
+            //    累積が 0 に戻り、走査が永久に走らなくなる（第 2 層レビュー I3）。
+            float framesPerMinute = FeatureHost.FramesPerMinute;
+            float interval = framesPerMinute > 0f ? IntervalFrames / framesPerMinute : 0f;
+
+            if (deltaMinutes > 0f) _minutesSincePass += deltaMinutes;
+
+            // 累積は間隔ぶんで頭打ちにする。地震が 1 個も無い時間が何時間続いても
+            // 値が伸び続けない（float の桁を食わせない）。頭打ちにしても
+            // 「間隔に達している」という結論は変わらない。
+            if (interval > 0f && _minutesSincePass > interval) _minutesSincePass = interval;
+
             // 破壊が実際に走っている地震だけを対象にする。バニラの全体円盤の
             // DestroyBuildings は SimulationStep の **Active 分岐にしか無い**（§A-3）ので、
             // 本震前（Emerging）に建物を潰すと、揺れる前に倒れることになる。
@@ -300,19 +393,26 @@ namespace DisasterPlus.Game
 
             if (quake.DisasterId != _quakeId)
             {
-                // ★ 地震が変わった直後は 1 間隔ぶん待つ。SeismographRecorder.Rescan が
+                // ★ 地震が変わった tick は走らせない。SeismographRecorder.Rescan が
                 //    同じ tick で建物バッファの全スロット走査を行うので、そこへ重ねない。
+                //    **累積は巻き戻さない**（上のコメント）。走査の位置だけ捨てる ——
+                //    震央が変われば矩形もリングの中心も別物なので、続きから再開する
+                //    意味が無い。
+                ushort previous = _quakeId;
                 Forget();
                 _quakeId = quake.DisasterId;
+
+                // 黙って乗り換えない。「対象は 1 個だけ」という制限（クラス doc）が
+                // 効いた瞬間はログに残す。Log.Diag はキーごとにスロットルされる。
+                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "longPeriodSwitch",
+                    "damaging quake changed #" + previous + " -> #" + quake.DisasterId
+                    + "; sweep position discarded, interval carried over");
                 return;
             }
 
-            if (deltaMinutes > 0f) _minutesSincePass += deltaMinutes;
-
-            float framesPerMinute = FeatureHost.FramesPerMinute;
+            // 換算が取れないときは走らない（間隔が決まらない）。累積は上で
+            // 進んでいるので、取れるようになった tick からふつうに動き出す。
             if (framesPerMinute <= 0f) return;
-
-            float interval = IntervalFrames / framesPerMinute;
             if (_minutesSincePass < interval) return;
 
             // 余りを繰り越さない。ロード直後などに大きな deltaMinutes が来ても
@@ -336,21 +436,34 @@ namespace DisasterPlus.Game
             Sweep(quake, strength, timeFactor);
         }
 
-        /// <summary>監視をやめて累積も巻き戻す。カウンタは診断のために残す。</summary>
+        /// <summary>
+        /// 監視をやめる。**間隔の累積（<see cref="_minutesSincePass"/>）は触らない**
+        /// —— あれは地震ではなく時間の状態で、地震の出入りで巻き戻すと走査が
+        /// 走らなくなる（クラス doc / 第 2 層レビュー I3）。カウンタは診断のために残す。
+        /// </summary>
         private static void Forget()
         {
             _quakeId = 0;
-            _cursorCell = 0;
-            _minutesSincePass = 0f;
+            _cursorOrdinal = 0;
         }
 
         /// <summary>
-        /// 1 回ぶんの走査。上限に達したら打ち切り、次回は <see cref="_cursorCell"/> から
+        /// 1 回ぶんの走査。上限に達したら打ち切り、次回は <see cref="_cursorOrdinal"/> から
         /// 再開する（クラス doc の「1 tick あたりの仕事量の上限」）。
+        ///
+        /// **セルを見る順序は震央から外側へ**（<see cref="OutwardCellOrder"/>）。
+        /// 1 周し終えたら序数を 0 に戻して震央から測り直す —— <see cref="IsSelected"/> は
+        /// フレームもセル順も混ぜないので同じ建物は同じ結論になり、倒れた建物は
+        /// <see cref="CandidateMask"/> の <c>Collapsed</c> で落ちる。
         /// </summary>
         private static void Sweep(EarthquakeReading quake, int strength, float timeFactor)
         {
-            var bm = BuildingManager.instance;
+            // ★ Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
+            //    new GameObject を走らせる main スレッド専用 API なので、exists で先に
+            //    確認する（Log.CurrentFrame と同じ理由。TsunamiChain / EarthquakeReader も同様）。
+            if (!Singleton<BuildingManager>.exists) return;
+
+            var bm = Singleton<BuildingManager>.instance;
             if (bm == null) return;
 
             var buildings = bm.m_buildings != null ? bm.m_buildings.m_buffer : null;
@@ -367,20 +480,27 @@ namespace DisasterPlus.Game
             int minZ = Clamp((int)((epicentre.Z - range) / 64f + 135f));
             int maxZ = Clamp((int)((epicentre.Z + range) / 64f + 135f));
 
-            int width = maxX - minX + 1;
-            int height = maxZ - minZ + 1;
-            int cellCount = width * height;
+            int cellCount = (maxX - minX + 1) * (maxZ - minZ + 1);
             if (cellCount <= 0) return;
-            if (_cursorCell >= cellCount) _cursorCell = 0;
+
+            // リングの中心は震央のセル。矩形と同じクランプを掛けるので、震央が
+            // マップの外でも中心は必ずグリッドの中に落ちる。
+            int centreX = Clamp((int)(epicentre.X / 64f + 135f));
+            int centreZ = Clamp((int)(epicentre.Z / 64f + 135f));
+            int ordinalCount = OutwardCellOrder.OrdinalCount(
+                OutwardCellOrder.RingRadiusFor(centreX, centreZ, minX, maxX, minZ, maxZ));
 
             var group = GroupOf(quake.DisasterId);
 
             int scanned = 0, selected = 0, attempted = 0, refused = 0, collapsed = 0;
             int unknownHeight = 0, cells = 0;
             bool capped = false;
-            int cell = _cursorCell;
 
-            while (cells < cellCount)
+            int ordinal = _cursorOrdinal;
+            if (ordinal < 0 || ordinal >= ordinalCount) ordinal = 0;
+            int startOrdinal = ordinal;
+
+            while (ordinal < ordinalCount)
             {
                 if (cells >= MaxCellsPerPass || scanned >= MaxBuildingsPerPass)
                 {
@@ -388,55 +508,75 @@ namespace DisasterPlus.Game
                     break;
                 }
 
-                int x = minX + cell % width;
-                int z = minZ + cell / width;
-                int index = z * GridSide + x;
+                int dx, dz;
+                bool ok = OutwardCellOrder.Offset(ordinal, out dx, out dz);
+                ordinal++;
+                if (!ok) continue;
 
-                if (index >= 0 && index < grid.Length)
-                {
-                    ushort id = grid[index];
-                    int guard = 0;
+                int x = centreX + dx;
+                int z = centreZ + dz;
 
-                    while (id != 0 && id < buildings.Length)
-                    {
-                        if ((buildings[id].m_flags & CandidateMask) == Building.Flags.Created)
-                        {
-                            var p = buildings[id].m_position;
-                            float d = Distance(epicentre, p.x, p.z);
-                            if (d < range)
-                            {
-                                scanned++;
-                                float metres = BuildingHeight.MetresOf(ref buildings[id]);
-                                if (metres <= 0f)
-                                {
-                                    // ★ 高さが分からない建物には**何もしない**。
-                                    //    推測した高さで「高層ほど壊れる」を適用したら、
-                                    //    それはこの MOD が最も嫌う形の嘘になる。
-                                    unknownHeight++;
-                                }
-                                else if (IsSelected(quake, id, metres, d, strength, timeFactor))
-                                {
-                                    selected++;
-                                    bool accepted;
-                                    if (Collapse(buildings, id, group, out accepted)) collapsed++;
-                                    if (accepted) attempted++; else refused++;
-                                }
-                            }
-                        }
-
-                        id = buildings[id].m_nextGridBuilding;
-
-                        // 連結リストが壊れている保存データで無限ループしないための保険。
-                        if (++guard > 32768) break;
-                    }
-                }
+                // ★ 矩形の外は**数えずに飛ばす**（OutwardCellOrder のクラス doc）。
+                //    数えると上限がはみ出しぶんだけ目減りし、診断の cells が
+                //    「実際に見たセル数」でなくなる。
+                if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
 
                 cells++;
-                cell++;
-                if (cell >= cellCount) cell = 0;
+
+                int index = z * GridSide + x;
+                if (index < 0 || index >= grid.Length) continue;
+
+                ushort id = grid[index];
+                int guard = 0;
+
+                while (id != 0 && id < buildings.Length)
+                {
+                    // ★ 次の ID は**行動する前に**控える。バニラの
+                    //    DisasterHelpers.DestroyBuildings も同じ形で、ループの先頭
+                    //    （IL_00E2）で m_nextGridBuilding をローカルへ写し、
+                    //    CollapseBuilding を 2 回呼んだ後の IL_0516 でそれを使う。
+                    //    バニラの CollapseBuilding 実装に ReleaseBuilding を呼ぶものは
+                    //    無いので今日は同値だが、倒壊で建物を解放するサードパーティの
+                    //    AI が居ると buildings[id] が 0 で埋まり、**このセルの残りが
+                    //    黙って飛ぶ**。ローカル 1 個で塞げる。
+                    ushort next = buildings[id].m_nextGridBuilding;
+
+                    if ((buildings[id].m_flags & CandidateMask) == Building.Flags.Created)
+                    {
+                        var p = buildings[id].m_position;
+                        float d = Distance(epicentre, p.x, p.z);
+                        if (d < range)
+                        {
+                            scanned++;
+                            float metres = BuildingHeight.MetresOf(ref buildings[id]);
+                            if (metres <= 0f)
+                            {
+                                // ★ 高さが分からない建物には**何もしない**。
+                                //    推測した高さで「高層ほど壊れる」を適用したら、
+                                //    それはこの MOD が最も嫌う形の嘘になる。
+                                unknownHeight++;
+                            }
+                            else if (IsSelected(quake, id, metres, d, strength, timeFactor))
+                            {
+                                selected++;
+                                bool accepted;
+                                if (Collapse(buildings, id, group, out accepted)) collapsed++;
+                                if (accepted) attempted++; else refused++;
+                            }
+                        }
+                    }
+
+                    id = next;
+
+                    // 連結リストが壊れている保存データで無限ループしないための保険。
+                    // 上限はバニラの内側ループと同じ 49152（＝建物バッファの大きさ。
+                    // DestroyBuildings IL_0521）。1 セルにそれ以上並ぶことはありえない。
+                    if (++guard > GridChainGuard) break;
+                }
             }
 
-            _cursorCell = cell;
+            // 1 周し終えていれば次回は震央から。打ち切りなら続きから。
+            _cursorOrdinal = ordinal >= ordinalCount ? 0 : ordinal;
             _passes++;
             _lastScanned = scanned;
             _lastSelected = selected;
@@ -458,6 +598,10 @@ namespace DisasterPlus.Game
                 + " timeFactor=" + timeFactor.ToString("F2")
                 + " range=" + range.ToString("F0")
                 + " cells=" + cells + "/" + cellCount
+                // 走査は震央のセル（序数 0）から外へ。次回の再開点も出す
+                // ——「震央まで届いていない」を診断から見えるようにするため。
+                + " ringOrder=" + startOrdinal + ".." + (ordinal - 1)
+                + " next=" + _cursorOrdinal
                 + " scanned=" + scanned + " selected=" + selected
                 + " attempted=" + attempted + " refused=" + refused
                 + " collapsed=" + collapsed
@@ -524,14 +668,21 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// 災害グループ。渡すとバニラ側の集計（災害ごとの被害棟数）が正しく積まれる。
+        /// <c>InstanceManager</c> がまだ居なければ <c>null</c>（<c>Group</c> は参照型で、
+        /// バニラ自身も <c>null</c> を渡す経路を持つ。集計が積まれないだけで倒壊は走る）。
         /// <c>DisasterAI.CreateDisaster</c> が <c>m_ownerInstance.Disaster = 災害ID</c> で
         /// 作って <c>InstanceManager</c> に登録している（③で IL 確認済み）。
         /// </summary>
         private static InstanceManager.Group GroupOf(ushort disasterId)
         {
+            // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
+            // new GameObject を走らせる main スレッド専用 API（Log.CurrentFrame の doc）。
+            // ここは sim スレッドなので exists で先に確認する。
+            if (!Singleton<InstanceManager>.exists) return null;
+
             var groupId = InstanceID.Empty;
             groupId.Disaster = disasterId;
-            return InstanceManager.instance.GetGroup(groupId);
+            return Singleton<InstanceManager>.instance.GetGroup(groupId);
         }
 
         /// <summary>
@@ -548,9 +699,9 @@ namespace DisasterPlus.Game
             if (broken)
             {
                 FeatureHost.NoteDegraded(EarthquakeFeature.FeatureName, HeightNoteKey,
-                    "no building height could be read (BuildingInfo.m_collisionHeight and "
-                    + "m_size.y were both unusable); long-period damage is applying nothing "
-                    + "rather than guessing a height");
+                    "no building height could be read (BuildingInfo.m_size.y and "
+                    + "m_generatedInfo.m_size.y were both unusable); long-period damage is "
+                    + "applying nothing rather than guessing a height");
             }
             else
             {

@@ -214,6 +214,22 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly ushort TsunamiQuakeId;
 
+        /// <summary>
+        /// **第 2 層。** 長周期の直近の走査が 1 回ぶんの上限で打ち切られたか
+        /// （<c>LongPeriodDamage.LastCapped</c>）。
+        ///
+        /// 走査は震央から外へ向かうので（<c>OutwardCellOrder</c>）、打ち切りが起きても
+        /// 震央の周りは必ず評価済みである。しかし**外側はまだ評価されていない**ので、
+        /// 遠くの建物について「追加倒壊リスク N.N%」とだけ出すと、この走査では
+        /// まだ抽選されていない確率を確定値の顔で出すことになる（第 2 層レビュー I1）。
+        /// 表示側はこれを注記として必ず名乗ること。
+        ///
+        /// <see cref="TsunamiState"/> と同じく、<c>EarthquakeReader.Read()</c> は
+        /// <c>LongPeriodDamage.Apply()</c> より**前**に走るので、載るのは最大 1 tick
+        /// 前の状態である。
+        /// </summary>
+        public readonly bool LongPeriodCapped;
+
         public EarthquakeSnapshot(IList<EarthquakeReading> quakes, EarthquakePrefabFacts prefab,
                                   uint currentFrame, float hourOfDay, bool dayNightEnabled,
                                   BuildingMargin cursorBuilding, ushort cursorQuakeId,
@@ -221,9 +237,10 @@ namespace DisasterPlus.Game
                                   int cursorCoverage, bool cursorCoverageValid,
                                   IList<SeismographTrace> traces, ushort waveformQuakeId,
                                   TsunamiChainState tsunamiState, uint tsunamiDueFrame,
-                                  ushort tsunamiQuakeId,
+                                  ushort tsunamiQuakeId, bool longPeriodCapped,
                                   bool valid)
         {
+            LongPeriodCapped = longPeriodCapped;
             TsunamiState = tsunamiState;
             TsunamiDueFrame = tsunamiDueFrame;
             TsunamiQuakeId = tsunamiQuakeId;
@@ -249,7 +266,7 @@ namespace DisasterPlus.Game
                                           BuildingMargin.None(), 0,
                                           BuildingProbeOutcome.NotProbed, 0f, 0, false,
                                           SeismographRecorder.EmptyTraceList, 0,
-                                          TsunamiChainState.Idle, 0u, 0, false);
+                                          TsunamiChainState.Idle, 0u, 0, false, false);
         }
 
         /// <summary>地震が 1 個も無いときに使う共有の空リスト。読み取り側専用。</summary>

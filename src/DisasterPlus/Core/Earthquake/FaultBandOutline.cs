@@ -20,11 +20,31 @@ namespace DisasterPlus.Core.Earthquake
     ///
     /// ── なぜ毎フレーム測らないのか ───────────────────────────
     ///
-    /// 1 回の <see cref="Rebuild"/> は <c>(Segments+1) × (1 + BisectionSteps)</c> 回の
-    /// <c>Contains</c> 呼び出しになり、<c>Contains</c> 自身が最大 145 回の
-    /// <c>Gap</c> 評価を行う。**描画経路では絶対に呼ばないこと。**
+    /// 1 回の <see cref="Rebuild"/> は <c>(Segments+1) × (1 + BisectionSteps)</c>
+    /// ＝ 209 回の <c>Contains</c> 呼び出しになり、<c>Contains</c> 自身が最大 145 回の
+    /// <c>Gap</c> 評価を行う。**描画経路では地震 1 個につき最大 1 回まで。**
     ///
-    /// 呼ばなくて済むのは、この折れ線が <see cref="FaultBand.Length"/> と
+    /// ── 「絶対に呼ぶな」から「1 回までなら可」へ（第 2 層レビュー M1）──────────
+    ///
+    /// この doc はもともと「描画経路では絶対に呼ばないこと」と書いていたが、
+    /// <c>EarthquakeOverlay.DrawQuake</c> は実際に <c>OnPostRender</c> の中から
+    /// <c>Rebuild</c> を呼んでいる（<c>Matches</c> で地震 1 個につき 1 回に絞ってある）。
+    /// **どちらかが間違っているので、量を見積もってから doc の方を直した:**
+    ///
+    ///   209 × 145 ≒ 3 万回の <c>Gap</c> 評価。<c>Gap</c> は分岐 1 個と乗算数個の
+    ///   float 演算で、**1 フレームに 1 回だけ**、地震が現れた最初のフレームに払う。
+    ///   毎フレーム払えば桁違いに重いが、地震 1 個につき 1 回なら
+    ///   <c>OnPostRender</c> の中でも見えない。
+    ///
+    /// パネル側の tick へ移す案は採らなかった。オーバーレイはパネルが閉じていても
+    /// 出るので、パネルの tick に置くと**パネルを開いていないプレイヤーには帯が
+    /// 永久に描かれない**。1 フレーム遅らせて描く案も、帯が 1 フレームだけ欠ける
+    /// （＝「幾何が不明」と見分けが付かない）ので採らない。
+    ///
+    /// **したがって規約はこうである: <see cref="Matches"/> が false のときだけ呼ぶ。
+    /// 毎フレーム呼ぶ経路をこの型に持たせない。**
+    ///
+    /// 1 回で済むのは、この折れ線が <see cref="FaultBand.Length"/> と
     /// <see cref="FaultBand.Width"/> **だけ**の関数だからである
     /// （沿走 / 直交の局所座標で持つので、震央の位置にも <c>m_angle</c> にも依存しない）。
     /// L と W は <c>m_crackLength/Width × (0.5 + intensity×0.005)</c> で、
@@ -99,7 +119,9 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// <b>描画経路から呼ばないこと</b>（クラス doc）。地震ごとに 1 回だけ。
+        /// <b>地震 1 個につき最大 1 回</b>（クラス doc）。呼ぶ前に必ず
+        /// <see cref="Matches"/> を見ること。描画経路（<c>OnPostRender</c>）から
+        /// 呼んでよいのは、その 1 回だけだからである。
         /// </summary>
         public void Rebuild(FaultBand band)
         {

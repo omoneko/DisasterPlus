@@ -124,8 +124,14 @@ namespace DisasterPlus.Game
             Record(_tsunamiNoteLabel, BlockTsunami, t - before);
 
             // 長周期地震動。カーソル直下の建物 1 個について出す。
+            //
+            // ★ **3〜4 行ぶんの高さを取る。** 本文（接頭辞込みで約 110 文字）だけなら
+            //    42f で足りたが、第 2 層レビュー I1 / M3 で末尾に但し書きが付くように
+            //    なった（「本震まで適用されません」「走査が上限で打ち切り」）。
+            //    折り返さない高さに入れると**途中で切れて消える** —— しかも消えるのは
+            //    「この数字はまだ効いていない」という、いちばん切れてほしくない部分である。
             before = t;
-            _longPeriodLabel = EarthquakeRows.AddLayer2Row(root, "LongPeriod", ref t, 42f);
+            _longPeriodLabel = EarthquakeRows.AddLayer2Row(root, "LongPeriod", ref t, 72f);
             Record(_longPeriodLabel, BlockLongPeriod, t - before);
 
             // **常設の注記。** これが無いと「高層ほど倒れる」がゲームの仕様に見える。

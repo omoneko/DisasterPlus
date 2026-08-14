@@ -317,7 +317,10 @@ namespace DisasterPlus.Game
             else if (outline != null)
             {
                 // 折れ線は L と W だけの関数なので、地震ごとに 1 回測れば足りる
-                // （FaultBandOutline のクラス doc）。**測り直しは描画経路では高い。**
+                // （FaultBandOutline のクラス doc）。**Matches を見てから呼ぶ**のが
+                // その 1 回に絞る仕掛けで、ここが描画経路から Rebuild を呼んでよい
+                // 唯一の理由である（第 2 層レビュー M1。209 回の Contains ＝
+                // 約 3 万回の Gap 評価を、地震が現れた最初の 1 フレームだけ払う）。
                 if (!outline.Matches(band.Length, band.Width)) outline.Rebuild(band);
                 if (outline.Known) calls += DrawFaultBand(overlay, cameraInfo, band, outline, epicentre.y);
             }

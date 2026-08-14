@@ -97,5 +97,20 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.Equal(0f, LongPeriodResponse.ExtraCollapseChance(60f, 100f, 100, float.NaN), 5);
             Assert.Equal(0f, LongPeriodResponse.Resonance(float.NaN), 5);
         }
+
+        /// <summary>
+        /// **実際に使われる上限は 0.25 ではない**（第 2 層レビュー M8）。
+        /// 呼び出し側は <see cref="LongPeriodResponse.MaxExtraChance"/> のクランプの
+        /// **後**に時間帯係数を掛けるので、画面と被害選定に出る上限は 0.2875 である。
+        /// doc と診断ダンプがこの数字を名乗っているので、値そのものを固定しておく。
+        /// </summary>
+        [Fact]
+        public void TheCeilingActuallyAppliedIncludesTheTimeOfDayFactor()
+        {
+            Assert.Equal(0.25f, LongPeriodResponse.MaxExtraChance, 5);
+            Assert.Equal(1.15f, TimeOfDayFactor.NightFactor, 5);
+            Assert.Equal(0.2875f,
+                LongPeriodResponse.MaxExtraChance * TimeOfDayFactor.NightFactor, 5);
+        }
     }
 }

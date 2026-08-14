@@ -130,7 +130,11 @@ namespace DisasterPlus.Game
                                               cursorCoverage, cursorCoverageValid,
                                               traces, SeismographRecorder.RecordingQuakeId,
                                               TsunamiChain.State, TsunamiChain.DueFrame,
-                                              TsunamiChain.QuakeId, true);
+                                              TsunamiChain.QuakeId,
+                                              // ★ 第 2 層（長周期）の打ち切りフラグも同じ経路で。
+                                              //    main スレッドが LongPeriodDamage の静的状態を
+                                              //    直接読まないための一本化（TsunamiChain と同じ）。
+                                              LongPeriodDamage.LastCapped, true);
             }
             catch (System.Exception e)
             {

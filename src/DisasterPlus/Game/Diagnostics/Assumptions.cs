@@ -49,7 +49,7 @@ namespace DisasterPlus.Game
         /// RenderManager のオーバーレイ描画 API が届くか）＋
         /// 地震 第 2 層 3 件（TsunamiAI プレハブの実在・
         /// TerrainManager.HasWater と DisasterData.m_waveIndex・
-        /// BuildingAI.CollapseBuilding と BuildingInfo.m_collisionHeight）＋
+        /// BuildingAI.CollapseBuilding と BuildingInfo.m_size / m_generatedInfo）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
@@ -545,11 +545,17 @@ namespace DisasterPlus.Game
             //      迂回先そのものが消えていないかを名指しする。
             //   2. 建物の高さが読めるか。**Building 構造体に高さのフィールドは無い**
             //      （IL 実測。あるのは m_baseHeight / m_width / m_length だけ）。
-            //      高さはプレハブ側の BuildingInfo.m_collisionHeight（Single、m）で、
-            //      InitializePrefab が m_generatedInfo.m_size.y から入れる。
+            //      高さはプレハブ側の BuildingInfo.m_size（Vector3、m）の y で、
+            //      InitializePrefab が m_generatedInfo.m_size から入れる（IL_09BE）。
             //      単位がメートルであることは CommonBuildingAI.CollapseIfFlooded の
             //      `waterLevel > m_position.y + Max(4f, m_collisionHeight)` で確定
-            //      （BuildingHeight のクラス doc に IL 全文がある）。
+            //      （m_collisionHeight の出発点が m_size.y。BuildingHeight の
+            //      クラス doc に IL 全文がある）。
+            //
+            //      ★ **m_collisionHeight は見ない**（第 2 層レビュー I2）。あちらは
+            //      CheckReferences が敷地のプロップと樹木の上端まで Mathf.Max で
+            //      取り込むので、平屋が 20 m 以上を名乗る。読めるかを確かめる相手は、
+            //      実際に使うフィールドでなければ意味が無い。
             //
             // ここが FAIL したとき LongPeriodDamage は**何もしない**（推測した高さで
             // 建物を壊さない）ので、影響の文にもそう書く。
@@ -571,9 +577,18 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      var height = typeof(BuildingInfo).GetField("m_collisionHeight",
+                      var size = typeof(BuildingInfo).GetField("m_size",
                           BindingFlags.Public | BindingFlags.Instance);
-                      return height != null && height.FieldType == typeof(float);
+                      if (size == null || size.FieldType != typeof(UnityEngine.Vector3))
+                      {
+                          return false;
+                      }
+
+                      // 予備経路（BuildingHeight.MetresOf）が使う出所そのもの。
+                      var generated = typeof(BuildingInfo).GetField("m_generatedInfo",
+                          BindingFlags.Public | BindingFlags.Instance);
+                      return generated != null
+                             && typeof(BuildingInfoGen).IsAssignableFrom(generated.FieldType);
                   });
 
             // --- ②地震（Task 10）ここまで ---
