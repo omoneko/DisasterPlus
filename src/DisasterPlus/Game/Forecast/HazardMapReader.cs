@@ -37,15 +37,27 @@ namespace DisasterPlus.Game
     /// （フィールドが見つからなければ例外にせず警告してゼロを返す＝ゲーム更新でフィールド名が
     /// 変わっても静かに壊れるだけで落ちない）。
     ///
-    /// スレッド安全性: SampleDisasterHazardMap の IL 本体は m_hazardAmount に対して
-    /// ldfld と ldelem.u1 のみで stfld が一切無い（読み取り専用）。加えて、同じ配列を
-    /// 読む DisasterManager.UpdateTexture（Texture2D 更新＝Unity API 制約で main/描画
-    /// スレッド専用）もロック無しで同じフィールドを読んでおり、バニラ自身が
-    /// 「sim スレッドが書き込み中でも main スレッドから読んでよい」前提で実装されている。
-    /// byte[] の単一要素読み取りはティアしない（.NET の最小アドレス単位）ので、
-    /// 最悪でも 1 sim tick 古い値を読むだけで安全側に倒れる。よって本クラスも
-    /// main スレッドから直接読んでよい（WeatherReader のような sim スレッド経由・
-    /// スナップショット越しの読み取りは不要）。
+    /// スレッド安全性（**全体レビューで論拠を訂正**。結論は変わらないが、以前ここに
+    /// 書いていた「sim スレッドが書き、main スレッドが読む」という説明は逆で誤りだった。
+    /// 誤ったスレッドモデルを②以降が引き継がないよう書き直す）:
+    ///
+    /// m_hazardAmount に**書き込む**のは DisasterManager.UpdateTexture ただ 1 つで、
+    /// これは自分でグリッドを全ゼロに埋めてから各災害 AI の UpdateHazardMap を呼ぶ
+    /// （IL 実測: 先頭 IL_0000-IL_003D が 256x256 の stelem.i1 による二重ループ）。
+    /// その UpdateTexture へ到達する経路は IL 全走査の結果 2 本しかなく、
+    ///   - DisasterManager.LateUpdate
+    ///   - DisasterManager.UpdateHazardMapping ← set_HazardMapVisible / Awake
+    /// のいずれも **main スレッド**である（LateUpdate は Unity のメッセージ、
+    /// set_HazardMapVisible は情報ビュー切替＝UI 経路）。加えて UpdateTexture は
+    /// Texture2D を更新するので、Unity の API 制約からも main スレッド以外では動けない。
+    ///
+    /// つまり書き手も読み手も main スレッドであり、本クラスを main スレッドから
+    /// 直接呼ぶ限り競合は起きない（WeatherReader のような sim スレッド経由・
+    /// スナップショット越しの読み取りは不要）。逆に言えば、**本クラスを sim スレッドから
+    /// 呼んではいけない**。そちらが新たに競合を持ち込む側になる。
+    ///
+    /// なお SampleDisasterHazardMap（バニラの公開 API）の IL 本体は m_hazardAmount に
+    /// 対して ldfld と ldelem.u1 のみで stfld が無く、読み取り専用であることも確認済み。
     /// </summary>
     public static class HazardMapReader
     {
@@ -75,18 +87,36 @@ namespace DisasterPlus.Game
         // 完全に黙らせない程度に絞る。
         private static bool _sampleErrorLogged;
 
-        // グリッドの解像度・セルサイズはバニラの public const（IL 実測で確認済み:
-        // HAZARDMAP_RESOLUTION=256 Int32, HAZARDMAP_CELL_SIZE=38.4 Single、両方 public
-        // static const）をそのまま使う。ここで自前の定数を持たないのは、将来
-        // 解像度が変われば参照先の const を拾って再ビルドすれば自動的に追従し、
-        // 手でコピーした数字が黙って古いまま残る事故を避けるため。
-        // 原点（グリッド中心）は解像度の半分として導出する（第三の数字を別途持たない）。
+        // グリッドの解像度・セルサイズはバニラの public const を参照する
+        // （IL 実測: HAZARDMAP_RESOLUTION=256 Int32, HAZARDMAP_CELL_SIZE=38.4 Single、
+        // 両方 public static literal）。原点（グリッド中心）は解像度の半分として導出する
+        // （第三の数字を別途持たない）。
+        //
+        // **訂正（全体レビュー指摘）**: ここには以前「参照先の const を拾うので
+        // 手でコピーした数字が古くなる事故を避けられる」と書いてあったが、これは誤り。
+        // C# の const（IL の literal）は**コンパイル時に呼び出し側へ焼き込まれる**ので、
+        // 出荷済みの MOD DLL の中では 256 と 38.4 という即値になっている。ゲーム側が
+        // 値を変えても、この MOD を再ビルドしない限り追従しない——つまり手でコピーした
+        // 数字を持つのと実行時の安全性は同じである。
+        // 再ビルドを挟まずに食い違いを検知できる唯一の方法は、**実行時にロード中の
+        // ゲームのメタデータを読む**ことなので、その検査を Assumptions 側へ足した
+        // （"DisasterManager hazard grid geometry is 256 x 38.4"）。
         private const int GridSize = DisasterManager.HAZARDMAP_RESOLUTION;
         private const float WorldUnitsPerCell = DisasterManager.HAZARDMAP_CELL_SIZE;
         private const float GridOrigin = DisasterManager.HAZARDMAP_RESOLUTION / 2f;
 
         /// <summary>
         /// worldPos 地点のハザード強度を 0-255 で返す。
+        ///
+        /// ok=false になるのは 3 通り: DisasterManager が居ない／要求した subMode が
+        /// 表示中でない（下記）／worldPos がグリッド（±4915.2 m）の外。
+        /// いずれも「読めなかった」であって「0 だった」ではない。
+        ///
+        /// **ok=true でも値が意味を持つとは限らない点に注意。** グリッドは
+        /// 「測位済みかつ進行中の嵐」が 1 つも無ければ全セル 0 になる
+        /// （ForecastPanel.RefreshCursorHazard の doc 参照）。その 0 を
+        /// 「ここは安全」と読ませないための判定は本クラスの責務ではなく、
+        /// WeatherSnapshot の測位済み件数を見る呼び出し側の責務。
         ///
         /// subMode は「これから読みたいハザード種別」の指定であり、単なる形だけの引数
         /// ではない。m_hazardAmount は単一グリッドで、今 InfoManager が表示している
@@ -132,8 +162,18 @@ namespace DisasterPlus.Game
                 var map = (byte[])HazardAmountField.GetValue(Singleton<DisasterManager>.instance);
                 if (map == null || map.Length == 0) return 0;
 
-                int gx = Mathf.Clamp(Mathf.FloorToInt(worldPos.x / WorldUnitsPerCell + GridOrigin), 0, GridSize - 1);
-                int gz = Mathf.Clamp(Mathf.FloorToInt(worldPos.z / WorldUnitsPerCell + GridOrigin), 0, GridSize - 1);
+                int gx = Mathf.FloorToInt(worldPos.x / WorldUnitsPerCell + GridOrigin);
+                int gz = Mathf.FloorToInt(worldPos.z / WorldUnitsPerCell + GridOrigin);
+
+                // グリッドの外は「読めなかった」として返す。以前はここで Clamp して
+                // いたが、それは端のセルの値を「カーソル位置のハザード」として
+                // 返すことになり、この機能が避けたい「確信を持って誤った数値」に当たる
+                // （全体レビュー指摘）。グリッドが覆うのは 256 * 38.4 / 2 = ±4915.2 m で、
+                // 81 タイル系の MOD を入れるとカーソルは普通にこの外へ出る。
+                // そこで返る値は「そこのハザード」ではなく「一番近い端のハザード」であり、
+                // ラベルだけが正しくて中身が別地点、という最も見抜きにくい形の嘘になる。
+                if (gx < 0 || gx >= GridSize || gz < 0 || gz >= GridSize) return 0;
+
                 int index = gz * GridSize + gx;
                 if (index < 0 || index >= map.Length) return 0;
 
