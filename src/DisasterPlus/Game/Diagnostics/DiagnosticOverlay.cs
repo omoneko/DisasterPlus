@@ -56,7 +56,10 @@ namespace DisasterPlus.Game
                 bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
                 if (ctrl)
                 {
-                    DiagnosticDump.Write();
+                    // 依頼を立てるだけ。組み立ては次の sim tick、書き出しはこの下の
+                    // FlushPendingWrite() が拾う。ここで直接書かない
+                    // （BuildReport は sim スレッド専用の契約のため）。
+                    DiagnosticDump.RequestDump();
                 }
                 else
                 {
@@ -71,6 +74,11 @@ namespace DisasterPlus.Game
             {
                 _lines = DiagnosticFormatter.Format(DiagnosticsHub.Latest);
             }
+
+            // sim スレッドが組み立て終えたダンプがあれば、ここ(main スレッド)で書き出す。
+            // オーバーレイを閉じていても(_visible が false でも)この呼び出し自体は続けるので、
+            // 表示していないときの Ctrl+ホットキーでもダンプは書き出される。
+            DiagnosticDump.FlushPendingWrite();
         }
 
         private void Toggle()

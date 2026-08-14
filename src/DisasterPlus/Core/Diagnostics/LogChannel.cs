@@ -6,6 +6,15 @@ namespace DisasterPlus.Core.Diagnostics
     /// このビット位置は .cgs に保存される公開契約であり、凍結扱いとする。
     /// 値を詰め直したり並べ替えたりしてはいけない。チャンネルを廃止するときも
     /// ビットを残し、UI から外すだけにする。
+    ///
+    /// 注意: Assembly-CSharp（ゲーム本体）にもグローバル名前空間の別物の
+    /// LogChannel 型が存在する。Game/ 側のファイルで
+    /// `using DisasterPlus.Core.Diagnostics;` を足すと、C# の名前解決はまず
+    /// 到達可能な名前空間（グローバル名前空間を含む）の型を using より優先するため、
+    /// 不用意な `using` はこの型ではなくゲーム側の LogChannel に無言で解決され、
+    /// CS0117（このメンバーは無い）で発覚する。Game/ から参照するときは
+    /// `DisasterPlus.Core.Diagnostics.LogChannel` と完全修飾すること
+    /// （実例: src/DisasterPlus/Game/Mod.cs）。
     /// </summary>
     public static class LogChannel
     {

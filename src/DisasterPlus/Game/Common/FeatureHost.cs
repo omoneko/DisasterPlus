@@ -100,10 +100,22 @@ namespace DisasterPlus.Game
                 }
             }
 
+            // main スレッド（Ctrl+ホットキー）からの依頼を、ここ sim スレッドで拾う。
+            // BuildReport() は WriteDiagnostics 経由で機能の内部状態に触るため、
+            // 契約どおり sim スレッドから呼ぶ（DiagnosticDump 側のコメント参照）。
+            bool dumpRequested = DiagnosticDump.ConsumeRequest();
+
             // オーバーレイが閉じていてダンプ要求も無ければ何もしない。
-            if (DiagnosticsHub.CollectionEnabled)
+            if (DiagnosticsHub.CollectionEnabled || dumpRequested)
             {
-                try { DiagnosticsHub.Publish(BuildReport()); }
+                try
+                {
+                    var report = BuildReport();
+                    DiagnosticsHub.Publish(report);
+                    // ファイル I/O はここでは行わない。main スレッドの
+                    // DiagnosticDump.FlushPendingWrite() に不変レポートを渡すだけ。
+                    if (dumpRequested) DiagnosticDump.SubmitReport(report);
+                }
                 catch (System.Exception e) { Log.Error("diagnostics collection failed", e); }
             }
         }
@@ -151,6 +163,8 @@ namespace DisasterPlus.Game
                 _lastErrors.Clear();
             }
             DiagnosticsHub.Clear();
+            // テアダウン中に立ったダンプ依頼・組み立て済みレポートを次の都市へ持ち越さない。
+            DiagnosticDump.Reset();
         }
 
         /// <summary>既存の catch 節から呼ぶ。呼び出しは止めない。main / sim どちらのスレッドからも呼ばれる。</summary>
