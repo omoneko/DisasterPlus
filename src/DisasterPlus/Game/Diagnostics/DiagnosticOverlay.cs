@@ -129,11 +129,17 @@ namespace DisasterPlus.Game
             if (_background != null) Object.Destroy(_background);
             _background = null;
             _style = null;
-            if (_instance == this) _instance = null;
-            // 表示中に破棄された場合でも収集を止める。ここが唯一の消費者への
-            // ゲートなので、破棄後に立ちっぱなしだと sim スレッドが毎 tick
-            // 誰も読まないレポートを作り続けることになる。
-            DiagnosticsHub.CollectionEnabled = false;
+            // Object.Destroy は破棄が次フレーム末まで遅延することがある。もし旧
+            // インスタンスの OnDestroy が、新しい生存インスタンスが生成され既に
+            // 収集を有効化した後に発火すると、this が現行の _instance でない限り
+            // ここで収集を止めてはいけない（生きているオーバーレイの分まで
+            // 次の Update まで無効化してしまう）。_instance の判定と同じ
+            // 「古いオブジェクトの発言は無視する」規律をここにも適用する。
+            if (_instance == this)
+            {
+                DiagnosticsHub.CollectionEnabled = false;
+                _instance = null;
+            }
         }
     }
 }
