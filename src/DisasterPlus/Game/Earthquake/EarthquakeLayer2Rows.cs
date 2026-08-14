@@ -74,6 +74,8 @@ namespace DisasterPlus.Game
         private static UILabel _tsunamiNoteLabel;
         private static UILabel _longPeriodLabel;
         private static UILabel _longPeriodNoteLabel;
+        private static UILabel _timeLabel;
+        private static UILabel _timeNoteLabel;
 
         private static bool _built;
         private static bool _tsunamiVisible;
@@ -132,6 +134,18 @@ namespace DisasterPlus.Game
                 Strings.EarthquakeLongPeriodNote, 40f);
             Record(_longPeriodNoteLabel, BlockLongPeriod, t - before);
 
+            // 時間帯係数（Task 11）。**独立した設定は作らない** —— 掛かる先は
+            // 長周期の追加被害だけなので、長周期と同じブロックに置いて一緒に出入りさせる。
+            before = t;
+            _timeLabel = EarthquakeRows.AddLayer2Row(root, "TimeOfDay", ref t);
+            Record(_timeLabel, BlockLongPeriod, t - before);
+
+            // 日夜サイクルが切ってあるときだけ出す注記。**黙って係数が 1.00 に
+            // なるだけで説明が出ないのは、この MOD が最も嫌う形の出力である**（§F-1）。
+            before = t;
+            _timeNoteLabel = EarthquakeRows.AddPlainRow(root, "TimeOfDayNote", ref t, "", 40f);
+            Record(_timeNoteLabel, BlockLongPeriod, t - before);
+
             _built = true;
             _tsunamiVisible = ModSettings.EarthquakeTsunamiChain.value;
             _longPeriodVisible = ModSettings.EarthquakeLongPeriod.value;
@@ -158,6 +172,8 @@ namespace DisasterPlus.Game
             _tsunamiNoteLabel = null;
             _longPeriodLabel = null;
             _longPeriodNoteLabel = null;
+            _timeLabel = null;
+            _timeNoteLabel = null;
             _built = false;
             _tsunamiVisible = false;
             _longPeriodVisible = false;
@@ -201,6 +217,15 @@ namespace DisasterPlus.Game
                 string text = valid ? EarthquakeLongPeriodText.CursorRow(snapshot) : null;
                 EarthquakeRows.SetPlain(_longPeriodLabel, "");
                 if (text != null) EarthquakeRows.SetLayer2(_longPeriodLabel, text);
+
+                // 時間帯の行は**地震が無くても出す**。係数は都市の時計だけで決まり、
+                // 地震の有無とは関係が無い。日夜サイクルを切っている人が
+                // 「なぜ 1.00 のままなのか」をいつでも確かめられるようにする。
+                string time = valid ? EarthquakeLongPeriodText.TimeRow(snapshot) : null;
+                EarthquakeRows.SetPlain(_timeLabel, "");
+                if (time != null) EarthquakeRows.SetLayer2(_timeLabel, time);
+                EarthquakeRows.SetPlain(_timeNoteLabel,
+                    EarthquakeLongPeriodText.TimeNote(snapshot));
             }
         }
 

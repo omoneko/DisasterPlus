@@ -217,6 +217,38 @@ namespace DisasterPlus.Game
             b.Line(2, "cursor building height", snapshot.CursorBuildingHeight > 0f
                 ? snapshot.CursorBuildingHeight.ToString("F1") + " m"
                 : "unread (no building under the cursor, or its prefab height is unusable)");
+
+            WriteTimeOfDay(b, snapshot);
+        }
+
+        /// <summary>
+        /// 時間帯係数（第 2 層その 3）。長周期の追加被害にだけ掛かるので、
+        /// <see cref="WriteLongPeriod"/> の中から呼ぶ（独立した設定は無い）。
+        ///
+        /// **日夜サイクル OFF を隠さない。** その設定では sim スレッドの時刻が
+        /// 永久に 12.0 に固定され（§F-1）、係数は黙って 1.00 の定数になる。
+        /// これは前提の破れではなくプレイヤーの正当な設定なので <c>Assumptions</c> の
+        /// FAIL にはしないが、**黙って無効になったことは必ず名乗る**。
+        /// 「係数 1.00」だけを出すと、それは読めた値に見える。
+        /// </summary>
+        private static void WriteTimeOfDay(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
+        {
+            float hour = snapshot.HourOfDay;
+            b.Line(2, "time of day factor",
+                TimeOfDayFactor.Of(hour).ToString("F2")
+                + "  (hour=" + hour.ToString("F1")
+                + " night=" + (TimeOfDayFactor.IsNight(hour) ? "yes" : "no")
+                + ", day " + TimeOfDayFactor.DayFactor.ToString("F2")
+                + " -> night " + TimeOfDayFactor.NightFactor.ToString("F2")
+                + "  [Disaster + model, vanilla has no basis for this])");
+
+            if (!snapshot.DayNightEnabled)
+            {
+                b.Line(3, "day/night",
+                    "OFF: the game pins the hour at 12.0 every sim frame, so this factor is "
+                    + "permanently 1.00 and the time of day changes nothing. This is a valid "
+                    + "player setting, not a broken assumption");
+            }
         }
 
         /// <summary>

@@ -322,7 +322,18 @@ namespace DisasterPlus.Game
             int strength = ModSettings.EarthquakeLongPeriodStrength.value;
             if (strength < 0) strength = 0;
 
-            Sweep(quake, strength);
+            // ★ 時間帯係数（Task 11）。**第 2 層の追加被害にだけ掛かる唯一の適用点**で、
+            //    バニラの被害にも第 1 層の表示にも触れない（TimeOfDayFactor のクラス doc）。
+            //    時刻は sim スレッドの m_dayTimeFrame 由来で、main スレッドが書く
+            //    m_currentDayTimeHour ではない（§F-1。EarthquakeReader が読んでいる）。
+            //
+            //    **日夜サイクル OFF でも式は変えない。** 時刻が 12.0 に固定される
+            //    （§F-1）ので係数は自然に 1.0 になる。特別扱いの分岐を足すと
+            //    「日夜 OFF のときだけ別の道を通る」という検証しにくい経路が増える。
+            //    その事実はパネルと診断ダンプが名乗る（Strings.EarthquakeNoDayNight）。
+            float timeFactor = TimeOfDayFactor.Of(snapshot.HourOfDay);
+
+            Sweep(quake, strength, timeFactor);
         }
 
         /// <summary>監視をやめて累積も巻き戻す。カウンタは診断のために残す。</summary>
@@ -337,7 +348,7 @@ namespace DisasterPlus.Game
         /// 1 回ぶんの走査。上限に達したら打ち切り、次回は <see cref="_cursorCell"/> から
         /// 再開する（クラス doc の「1 tick あたりの仕事量の上限」）。
         /// </summary>
-        private static void Sweep(EarthquakeReading quake, int strength)
+        private static void Sweep(EarthquakeReading quake, int strength, float timeFactor)
         {
             var bm = BuildingManager.instance;
             if (bm == null) return;
@@ -403,7 +414,7 @@ namespace DisasterPlus.Game
                                     //    それはこの MOD が最も嫌う形の嘘になる。
                                     unknownHeight++;
                                 }
-                                else if (IsSelected(quake, id, metres, d, strength))
+                                else if (IsSelected(quake, id, metres, d, strength, timeFactor))
                                 {
                                     selected++;
                                     bool accepted;
@@ -444,6 +455,7 @@ namespace DisasterPlus.Game
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "longPeriod",
                 "pass#" + _passes + " quake#" + quake.DisasterId
                 + " strength=" + strength
+                + " timeFactor=" + timeFactor.ToString("F2")
                 + " range=" + range.ToString("F0")
                 + " cells=" + cells + "/" + cellCount
                 + " scanned=" + scanned + " selected=" + selected
@@ -463,10 +475,15 @@ namespace DisasterPlus.Game
         /// 時間とともに壊れる建物が際限なく増える。
         /// </summary>
         private static bool IsSelected(EarthquakeReading quake, ushort buildingId,
-                                       float heightMetres, float distance, int strength)
+                                       float heightMetres, float distance, int strength,
+                                       float timeFactor)
         {
             float chance = LongPeriodResponse.ExtraCollapseChance(
                 heightMetres, distance, quake.Intensity, strength);
+            // 時間帯係数は上限（MaxExtraChance）の**後**に掛かる。上限は
+            // 「このモデル自身が出す最大値」という意味のままにしておきたいので、
+            // ここで再クランプはしない（最大 0.25 x 1.15 = 0.2875）。
+            chance *= timeFactor;
             if (chance <= 0f) return false;
 
             float roll = DeterministicRandom.Unit(quake.DisasterId, buildingId);

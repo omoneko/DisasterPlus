@@ -485,5 +485,24 @@ namespace DisasterPlus.Game
         // （「追加倒壊リスク 6.4%」）に必要な語で、表から漏れていた。
         // 裸の「+3.1%」だけを出すと、何の確率なのかがどの言語でも読めない。
         public static string EarthquakeLongPeriodRisk = "extra collapse risk";
+
+        // --- ②地震（Task 11: 時間帯係数 ＝ 第 2 層の 3 つ目） ---
+        //
+        // **単独の設定は作っていない。** 掛かる先は長周期地震動の追加被害だけなので、
+        // 独立したスイッチにすると、長周期が OFF のときに何も制御しない
+        // 死んだスイッチになる。したがって行も長周期と一緒に出入りする。
+        //
+        // EarthquakeNoDayNight がこの機能でいちばん重要な 1 文。日夜サイクルを
+        // 切っているとゲーム内時刻は**永久に 12.0 に固定される**（§F-1。
+        // m_dayTimeOffsetFrames が毎 sim フレーム再設定される）ので、係数は黙って
+        // 定数 1.00 になる。**無効化を隠さない**ためにこれを併記する。
+        // 「昼」「夜」の語は用意しない —— Of() は境界を 1 時間かけて渡すので、
+        // ゲーム自身の硬い判定（hour < 5 || hour > 20）と一致しない時間帯がある。
+
+        public static string EarthquakeTimeOfDay = "Time of day";
+        public static string EarthquakeTimeFactor = "factor";
+        public static string EarthquakeNoDayNight =
+            "The day/night cycle is off, so the in-game hour is pinned at 12:00 and the "
+            + "time-of-day factor never changes.";
     }
 }
