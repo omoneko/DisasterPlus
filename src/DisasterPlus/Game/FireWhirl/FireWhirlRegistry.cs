@@ -18,6 +18,16 @@ namespace DisasterPlus.Game
         public bool Ending;
 
         /// <summary>
+        /// 終了処理に入ってからのゲーム内経過（分）。
+        ///
+        /// Life.ElapsedMinutes では代用できない。FireWhirlFeature.UpdateExisting は
+        /// Ending の旋風を飛ばすので、Ending が立った瞬間に Life の時計は止まる。
+        /// 「終了処理に入ったのに終わらない」（＝m_targetPos0 取り違えの再発シグネチャ）
+        /// を測るには、Ending 専用の別の時計が要る。
+        /// </summary>
+        public float EndingMinutes;
+
+        /// <summary>
         /// プレイヤーが災害パネルから手動で置いた旋風。
         /// 発生条件（R 内に N 棟）の割り込み判定を免除し、絶対上限だけで終わらせる。
         /// これが無いと、火の無い場所に置いた瞬間に条件割り込みが始まり、
@@ -42,6 +52,10 @@ namespace DisasterPlus.Game
         public readonly int BurningCount;
         public readonly float ElapsedMinutes;
         public readonly bool Ending;
+
+        /// <summary>終了処理に入ってからのゲーム内経過（分）。Ending でなければ 0。</summary>
+        public readonly float EndingMinutes;
+
         public readonly bool Manual;
 
         internal FireWhirlView(ActiveFireWhirl w)
@@ -53,6 +67,7 @@ namespace DisasterPlus.Game
             BurningCount = w.BurningCount;
             ElapsedMinutes = w.Life.ElapsedMinutes;
             Ending = w.Ending;
+            EndingMinutes = w.EndingMinutes;
             Manual = w.Manual;
         }
     }
@@ -92,6 +107,7 @@ namespace DisasterPlus.Game
                     BurningCount = burningCount,
                     Life = FireWhirlLifecycle.Start(),
                     Ending = false,
+                    EndingMinutes = 0f,
                     Manual = manual,
                 });
             }
@@ -125,6 +141,18 @@ namespace DisasterPlus.Game
         public static int Count
         {
             get { lock (_gate) { return _active.Count; } }
+        }
+
+        /// <summary>
+        /// クールダウン中（＝再発生が抑制されている）の地点数。
+        ///
+        /// 設計書 7.1 のオーバーレイ例は末尾に cooldown を出しており、
+        /// 「大火災が燃えているのに旋風が出ない」の最有力の原因がこれなので、
+        /// 外から読めないままにしない。
+        /// </summary>
+        public static int CoolingCount
+        {
+            get { lock (_gate) { return _cooling.Count; } }
         }
 
         /// <summary>
@@ -210,7 +238,25 @@ namespace DisasterPlus.Game
                 {
                     if (_active[i].DisasterId != disasterId) continue;
                     _active[i].Ending = true;
+                    _active[i].EndingMinutes = 0f;   // 終了処理の時計をここで始める
                     return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 終了処理中の旋風の「終了してからの経過」を進める。sim スレッドから毎 tick 呼ぶ。
+        /// 機能設定が OFF でも呼ぶこと（OFF にした瞬間に全基が Ending に入るため）。
+        /// </summary>
+        public static void AdvanceEnding(float deltaMinutes)
+        {
+            if (deltaMinutes <= 0f) return;
+            lock (_gate)
+            {
+                for (int i = 0; i < _active.Count; i++)
+                {
+                    if (!_active[i].Ending) continue;
+                    _active[i].EndingMinutes += deltaMinutes;
                 }
             }
         }
@@ -316,6 +362,7 @@ namespace DisasterPlus.Game
                         BurningCount = saved[i].BurningCount,
                         Life = FireWhirlLifecycle.Start().Advance(saved[i].ElapsedMinutes, true),
                         Ending = false,
+                        EndingMinutes = 0f,
                         Manual = saved[i].Manual,
                     });
                 }

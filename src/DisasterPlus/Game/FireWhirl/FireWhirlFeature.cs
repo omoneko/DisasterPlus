@@ -11,18 +11,25 @@ namespace DisasterPlus.Game
     /// </summary>
     public class FireWhirlFeature : IDisasterFeature
     {
-        public string Name { get { return "FireWhirl"; } }
+        /// <summary>FeatureHost.NoteDegraded に渡すキー。Name と必ず同じ文字列にすること。</summary>
+        public const string FeatureName = "FireWhirl";
+
+        public string Name { get { return FeatureName; } }
 
         private readonly BurningBuildingScanner _scanner = new BurningBuildingScanner();
 
         /// <summary>強度は byte。竜巻としては中程度の 60 から始める（表示 6.0）。</summary>
         private const byte SpawnIntensityBase = 60;
 
+        /// <summary>終了処理が終わらない旋風を一度でも報告したか。ログを 1 回に留めるため。</summary>
+        private bool _endingStallLogged;
+
         public void OnLevelLoaded()
         {
             _scanner.Reset();
             FireWhirlSpawner.Reset();
             FireWhirlDamage.Reset();
+            _endingStallLogged = false;
             HarmonyBootstrap.Install();
 
             // ツール登録は毎レベルロード必要（ToolController.m_tools はレベル毎に再構築される）。
@@ -42,6 +49,8 @@ namespace DisasterPlus.Game
             FireWhirlPinner.AttachVehicles();
             FireWhirlPinner.CollectFinished();
             FireWhirlRegistry.AdvanceCooldowns(deltaMinutes);
+            FireWhirlRegistry.AdvanceEnding(deltaMinutes);
+            CheckEndingStall();
 
             if (!ModSettings.FireWhirlEnabled.value)
             {
@@ -61,8 +70,56 @@ namespace DisasterPlus.Game
 
             FireWhirlDamage.Apply(frameIndex, deltaMinutes, config.SpreadStrength);
 
+            // 「選ばれているのに 1 棟も燃えない」が続いた瞬間を 1 回だけ拾う。
+            // m_fireIntensity 直接書込という 3 件目の IL 誤りが再発したときの
+            // 唯一の兆候がこれで、例外もログも出ないまま延焼だけが死ぬ。
+            if (FireWhirlDamage.ConsumeBarrenAlert())
+            {
+                Log.Warn("fire spread attempted ignition but lit nothing in "
+                         + FireWhirlDamage.BarrenThreshold + " consecutive passes"
+                         + " (last pass: candidates=" + FireWhirlDamage.LastCandidates
+                         + " selected=" + FireWhirlDamage.LastSelected
+                         + " attempted=" + FireWhirlDamage.LastAttempted + ")"
+                         + "; BuildingAI.BurnBuilding is refusing every call");
+                FeatureHost.NoteDegraded(FeatureName,
+                    "fire spread lit nothing in " + FireWhirlDamage.BarrenThreshold
+                    + " consecutive passes");
+            }
+
             Log.Diag("fireWhirl",
                 "burning=" + burning.Count + " active=" + FireWhirlRegistry.Count);
+        }
+
+        /// <summary>
+        /// 終了処理に入ったまま終わらない旋風を検出する。
+        ///
+        /// これは m_targetPos0 の取り違え（＝終了処理が原理的に発火しない）が
+        /// 再発したときのシグネチャそのもの。パッチが当たっているかという
+        /// 存在検査は通ってしまうので、実際に終わったかどうかで見るしかない。
+        /// </summary>
+        private void CheckEndingStall()
+        {
+            int maxLifetime = ModSettings.MaxLifetimeMinutes.value;
+            var views = FireWhirlRegistry.Snapshot();
+
+            for (int i = 0; i < views.Count; i++)
+            {
+                if (!views[i].Ending) continue;
+                if (!EndingStall.IsStuck(views[i].EndingMinutes, maxLifetime)) continue;
+
+                if (!_endingStallLogged)
+                {
+                    _endingStallLogged = true;
+                    Log.Warn("fire whirl " + views[i].DisasterId + " has been ending for "
+                             + views[i].EndingMinutes.ToString("F1") + " in-game minutes"
+                             + " (over " + EndingStall.LifetimeMultiplier + "x the "
+                             + maxLifetime + " min limit); vanilla teardown never completed");
+                }
+
+                FeatureHost.NoteDegraded(FeatureName,
+                    "a fire whirl is stuck in the ending state");
+                return;
+            }
         }
 
         /// <summary>設定が OFF になったときに、生存中の旋風をすべて終了処理へ送る。</summary>
@@ -157,6 +214,7 @@ namespace DisasterPlus.Game
             FireWhirlFlameFx.Clear();
             HarmonyBootstrap.Uninstall();
             FireWhirlPanelButton.Remove();
+            _endingStallLogged = false;
         }
 
         public void WriteDiagnostics(DiagnosticBuilder b)
@@ -178,8 +236,46 @@ namespace DisasterPlus.Game
                     + "  n=" + v.BurningCount
                     + (v.VehicleId != 0 ? "  pinned" : "  NO VEHICLE")
                     + (v.Manual ? "  manual" : "")
-                    + (v.Ending ? "  ending" : "");
+                    + (v.Ending ? "  ending " + v.EndingMinutes.ToString("F1") + "min" : "")
+                    + (v.Ending && EndingStall.IsStuck(v.EndingMinutes,
+                                                       ModSettings.MaxLifetimeMinutes.value)
+                        ? "  STUCK" : "");
                 b.Line(2, s);
+            }
+
+            // 設計書 7.1 のオーバーレイ例の末尾。「大火災なのに旋風が出ない」の
+            // 最有力の原因なので必ず出す。
+            b.Line(1, "cooldown", FireWhirlRegistry.CoolingCount.ToString());
+
+            WriteSpreadDiagnostics(b);
+        }
+
+        /// <summary>
+        /// 延焼の診断。
+        ///
+        /// ここが無いあいだ、WriteDiagnostics は enabled / scan / active しか出しておらず、
+        /// 「延焼が 1 棟も燃やしていない」と「近くに燃やす物が無い」が区別できなかった。
+        /// SpreadStrength が 0 なら Apply() は即 return するので、そこも明示する。
+        /// </summary>
+        private static void WriteSpreadDiagnostics(DiagnosticBuilder b)
+        {
+            int strength = ModSettings.SpreadStrength.value;
+            b.Line(1, "spread strength",
+                   strength + (strength <= 0 ? "  (OFF - no ignition at all)" : ""));
+
+            b.Line(1, "spread passes", FireWhirlDamage.Passes.ToString());
+            b.Line(2, "last pass",
+                   "candidates=" + FireWhirlDamage.LastCandidates
+                   + " selected=" + FireWhirlDamage.LastSelected
+                   + " attempted=" + FireWhirlDamage.LastAttempted
+                   + " ignited=" + FireWhirlDamage.LastIgnited);
+            b.Line(2, "session ignited", FireWhirlDamage.TotalIgnited.ToString());
+
+            if (FireWhirlDamage.BarrenStreak > 0 || FireWhirlDamage.SpreadLooksBroken)
+            {
+                b.Line(2, "barren passes",
+                       FireWhirlDamage.BarrenStreak + "/" + FireWhirlDamage.BarrenThreshold
+                       + (FireWhirlDamage.SpreadLooksBroken ? "  SPREAD LOOKS BROKEN" : ""));
             }
         }
     }

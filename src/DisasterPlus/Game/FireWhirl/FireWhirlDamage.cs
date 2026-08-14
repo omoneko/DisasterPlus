@@ -37,11 +37,72 @@ namespace DisasterPlus.Game
         /// <summary>前回の延焼判定からの経過（ゲーム内分）。レベルアンロードで必ず 0 に戻す。</summary>
         private static float _minutesSinceSpread;
 
+        // --- 診断カウンタ -------------------------------------------------
+        // すべて sim スレッドからのみ読み書きする（Apply も WriteDiagnostics も sim スレッド）。
+        // 「延焼が動いているか」は WriteDiagnostics の enabled/active/scan では一切
+        // 見えなかった。IL 前提の誤り 3 件目（m_fireIntensity 直接書込）が生まれ、
+        // かつ何のログも出さなかったのがこの経路なので、ここだけは数字を出す。
+        private static int _passes;
+        private static int _lastCandidates;
+        private static int _lastSelected;
+        private static int _lastAttempted;
+        private static int _lastIgnited;
+        private static int _totalIgnited;
+
+        private static readonly BarrenSpreadTracker _barren = new BarrenSpreadTracker();
+        private static bool _barrenAlertPending;
+
+        /// <summary>これまでに走った延焼判定の回数（セッション累計）。</summary>
+        public static int Passes { get { return _passes; } }
+
+        /// <summary>直近 1 回の判定で半径内に見つけた建物数（全旋風の合計）。</summary>
+        public static int LastCandidates { get { return _lastCandidates; } }
+
+        /// <summary>直近 1 回の判定で確率選定を通った棟数（全旋風の合計）。</summary>
+        public static int LastSelected { get { return _lastSelected; } }
+
+        /// <summary>直近 1 回の判定で実際に BurnBuilding を呼んだ棟数（全旋風の合計）。</summary>
+        public static int LastAttempted { get { return _lastAttempted; } }
+
+        /// <summary>直近 1 回の判定で着火した棟数（全旋風の合計）。</summary>
+        public static int LastIgnited { get { return _lastIgnited; } }
+
+        /// <summary>セッション累計の着火棟数。</summary>
+        public static int TotalIgnited { get { return _totalIgnited; } }
+
+        /// <summary>連続で「試したのに 0 棟」だった回数。</summary>
+        public static int BarrenStreak { get { return _barren.Streak; } }
+
+        /// <summary>空振りが閾値に達しているか。オーバーレイのバッジ用。</summary>
+        public static bool SpreadLooksBroken { get { return _barren.Tripped; } }
+
+        public static int BarrenThreshold { get { return _barren.Threshold; } }
+
+        /// <summary>
+        /// 空振り検出が「今しがた」閾値に達したかを 1 回だけ返す。
+        /// 呼び出し側（FireWhirlFeature）がログと Degraded 記録を 1 回だけ出すために使う。
+        /// </summary>
+        public static bool ConsumeBarrenAlert()
+        {
+            if (!_barrenAlertPending) return false;
+            _barrenAlertPending = false;
+            return true;
+        }
+
         public static void Reset()
         {
             _candidates.Clear();
             _selected.Clear();
             _minutesSinceSpread = 0f;
+
+            _passes = 0;
+            _lastCandidates = 0;
+            _lastSelected = 0;
+            _lastAttempted = 0;
+            _lastIgnited = 0;
+            _totalIgnited = 0;
+            _barren.Reset();
+            _barrenAlertPending = false;
         }
 
         public static void Apply(uint frameIndex, float deltaMinutes, int spreadStrength)
@@ -61,24 +122,50 @@ namespace DisasterPlus.Game
 
             var buildings = BuildingManager.instance.m_buildings.m_buffer;
 
+            int candidates = 0, selected = 0, attempted = 0, ignited = 0;
+
             for (int w = 0; w < views.Count; w++)
             {
                 var v = views[w];
                 if (v.Ending) continue;
 
                 CollectNearby(buildings, v);
+                candidates += _candidates.Count;
                 if (_candidates.Count == 0) continue;
 
                 IgnitionSpread.Select(v.Center.ToVec2(), v.Radius, spreadStrength,
                                       _candidates, frameIndex, _selected);
+                selected += _selected.Count;
                 if (_selected.Count == 0) continue;
 
-                int ignited = Ignite(buildings, v.DisasterId);
-                if (ignited > 0)
+                int tried;
+                int lit = Ignite(buildings, v.DisasterId, out tried);
+                attempted += tried;
+                ignited += lit;
+
+                if (lit > 0)
                 {
-                    Log.Diag("ignite", "fire whirl " + v.DisasterId + " ignited " + ignited);
+                    Log.Diag("ignite", "fire whirl " + v.DisasterId + " ignited " + lit);
                 }
             }
+
+            _passes++;
+            _lastCandidates = candidates;
+            _lastSelected = selected;
+            _lastAttempted = attempted;
+            _lastIgnited = ignited;
+            _totalIgnited += ignited;
+
+            // 出力を ignited > 0 で囲ってはいけない。延焼が完全に死んでいる状態が
+            // 出力ゼロになり、「延焼が壊れている」と「近くに燃やす物が無い」が
+            // ログ上で区別できなくなる（③で実際に起きた失敗の形そのもの）。
+            // Log.Diag はキーごとにスロットルされるので毎回書いても溢れない。
+            Log.Diag("spread",
+                "pass#" + _passes + " strength=" + spreadStrength
+                + " candidates=" + candidates + " selected=" + selected
+                + " attempted=" + attempted + " ignited=" + ignited);
+
+            if (_barren.Record(attempted, ignited)) _barrenAlertPending = true;
         }
 
         /// <summary>
@@ -103,7 +190,13 @@ namespace DisasterPlus.Game
         /// DisasterHelpers は経由しないままなので、競合MOD の設定に左右されない
         /// （クラスの先頭コメントの前提は保たれる）。
         /// </summary>
-        private static int Ignite(Building[] buildings, ushort disasterId)
+        /// <param name="attempted">
+        /// 実際に BurnBuilding を呼んだ棟数。「選ばれた棟数」ではなくこれを診断に使う。
+        /// 選定後に燃え出した建物や AI を持たない建物は呼ぶ前に弾かれるので、
+        /// selected をそのまま使うと「周囲が全部すでに燃えている大火災」を
+        /// 「延焼が壊れている」と誤判定してしまう。
+        /// </param>
+        private static int Ignite(Building[] buildings, ushort disasterId, out int attempted)
         {
             // 災害グループを渡すと m_buildingFireCount が正しく積まれる。
             // グループは DisasterAI.CreateDisaster が m_ownerInstance.Disaster = 災害ID で
@@ -112,6 +205,7 @@ namespace DisasterPlus.Game
             groupId.Disaster = disasterId;
             var group = InstanceManager.instance.GetGroup(groupId);
 
+            attempted = 0;
             int ignited = 0;
             for (int i = 0; i < _selected.Count; i++)
             {
@@ -122,6 +216,7 @@ namespace DisasterPlus.Game
                 var info = buildings[id].Info;
                 if (info == null || info.m_buildingAI == null) continue;
 
+                attempted++;
                 if (info.m_buildingAI.BurnBuilding(id, ref buildings[id], group, false)) ignited++;
             }
             return ignited;
