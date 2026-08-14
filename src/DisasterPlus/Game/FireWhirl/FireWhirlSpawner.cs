@@ -127,12 +127,48 @@ namespace DisasterPlus.Game
             buffer[id].m_intensity = intensity;
             buffer[id].m_angle = 0f;
 
+            // ★ SelfTrigger(64) を立てる。**これを落としていたのが第 2 層レビュー I4。**
+            //
+            //   TornadoAI.StartDisaster は基底を呼んだあと m_flags & 64 で分岐し、
+            //   立っていなければ 4 つとも行わない（IL 実測）:
+            //
+            //     IL_0003  call DisasterAI::StartDisaster    ← 基底。Significant(256) を落とす
+            //     IL_000E  m_flags & 64 が 0 なら IL_0061(ret) へ
+            //     IL_0016  m_targetPosition.y = TerrainManager.SampleDetailHeight(...)
+            //     IL_0031  m_activationFrame = m_startFrame + m_emergingDuration
+            //     IL_0044  m_flags |= 256 (Significant)
+            //     IL_0056  DisasterManager.m_randomDisasterCooldown = 0
+            //
+            //   このうち**効いていなかったのは Significant(256)** である。
+            //   このビットを読むのは CommonBuildingAI.HandleCommonConsumption（と
+            //   DLC の同名オーバーライド群）・CommonBuildingAI.NearObjectInFire・
+            //   FirewatchTowerAI.NearObjectInFire・DisasterManager.FollowDisaster の
+            //   4 系統（アセンブリ全走査で確認）。立っていないと近くの建物が
+            //   DetectDisaster を呼ばず、火災旋風は**発見されない** ——
+            //   ハザードマップにも通知にも出ず、カメラも追えない。
+            //   m_randomDisasterCooldown = 0 も行われず、MOD が起こした災害が
+            //   バニラのランダム災害を先送りしない。
+            //
+            //   m_targetPosition.y はこちらで入れているので上書きされても同じ値になる。
+            //
+            // **Emerging（出現）の 256 フレームは意図して受け入れる。** 立てなければ
+            // m_activationFrame が 0 のままで、TornadoAI.IsStillEmerging は
+            // EarthquakeAI と違い「m_activationFrame == 0 なら true」の特例を持たず
+            // 素の currentFrame < m_activationFrame（clt.un、IL 実測）なので、
+            // 次のステップで即 Active になる —— つまり「出現を飛ばすために落としていた」
+            // と説明することはできた。だが Significant を失う代償が大きすぎるし、
+            // 差は最大 256 フレーム（速度 1 で約 4 秒）である。**飛ばしたいなら
+            // 明示的に飛ばす**べきで、フラグを落とした副作用として飛ばさない。
+            buffer[id].m_flags |= DisasterData.Flags.SelfTrigger;
+
             // DisasterAI.StartDisaster は protected（IL 確認済み）なので直接は呼べない。
             // 公開ラッパーの StartNow を使う。StartNow は data.m_flags & 0x3C
             // （Emerging|Active|Clearing|Finished）が立っていなければ StartDisaster を呼ぶだけで、
             // CreateDisaster 直後は m_flags = Created(0x01) のみなので、ここでは必ず
-            // StartDisaster が呼ばれる（IL 確認済み）。起動後は StartDisaster -> ActivateDisaster
-            // の順で渦車両が作られる。
+            // StartDisaster が呼ばれる（IL 確認済み）。**SelfTrigger(64) は 0x3C に
+            // 含まれないので、先に立てても StartNow の判定は変わらない**（IL_0006 の
+            // ldc.i4.s 60）。起動後は StartDisaster -> ActivateDisaster の順で渦車両が
+            // 作られる。
             info.m_disasterAI.StartNow(id, ref buffer[id]);
 
             disasterId = id;
