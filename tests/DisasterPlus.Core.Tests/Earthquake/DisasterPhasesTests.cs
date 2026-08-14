@@ -64,6 +64,39 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         [Fact]
+        public void PhaseBasedGateAgreesWithTheRawFlagGate()
+        {
+            // Task 4 が足した位相版のゲートが、生の m_flags 版と一致することを固定する。
+            // 一致の根拠は「位相のビットが互いに排他」であること（§A-1: ActivateDisaster は
+            // (m_flags & ~4)|8、DeactivateDisaster は (m_flags & ~12)|16 と、遷移のたびに
+            // 前のビットを落とす）。したがって走査するのも排他な組み合わせだけにする——
+            // Active|Clearing のような**到達しない**組み合わせまで一致を要求すると、
+            // 実在しない状態のために生の m_flags 版の忠実さを曲げることになる。
+            int[] phaseBits =
+            {
+                0,
+                DisasterPhases.Emerging,
+                DisasterPhases.Active,
+                DisasterPhases.Clearing,
+                DisasterPhases.Finished,
+            };
+
+            foreach (int phaseBit in phaseBits)
+            {
+                for (int located = 0; located < 2; located++)
+                {
+                    int flags = DisasterPhases.Created | phaseBit
+                                | (located == 1 ? DisasterPhases.Located : 0);
+
+                    Assert.Equal(
+                        DisasterPhases.PaintsHazardMap(flags),
+                        DisasterPhases.PaintsHazardMap(
+                            DisasterPhases.IsLocated(flags), DisasterPhases.PhaseOf(flags)));
+                }
+            }
+        }
+
+        [Fact]
         public void SelfTriggerIsIndependentOfPhase()
         {
             // 立て忘れると Emerging で永久に止まる（§A-1）。読み側はこの区別が要る。

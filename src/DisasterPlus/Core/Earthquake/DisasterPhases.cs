@@ -75,5 +75,25 @@ namespace DisasterPlus.Core.Earthquake
         {
             return IsLocated(flags) && (flags & (Emerging | Active)) != 0;
         }
+
+        /// <summary>
+        /// 同じゲートを、既に位相へ畳んだ読み取り結果（<c>EarthquakeReading</c>）から見る版。
+        ///
+        /// **計画の変更ファイル一覧に無い追加である。** それでもここに置くのは、
+        /// これを呼ぶ側（Task 4 のパネルと診断）が生の m_flags を持っていないためで、
+        /// 同じ条件を Game 側の 2 箇所へ書き写すと、①が直したばかりの
+        /// 「ゲートを別の場所で読み替えて数値を出す」欠陥をそのまま再生産する。
+        ///
+        /// <see cref="PaintsHazardMap(int)"/> と一致することは、位相のビットが
+        /// **互いに排他**であることに依る（IL 事実文書 §A-1:
+        /// <c>ActivateDisaster</c> は <c>(m_flags &amp; ~4) | 8</c>、
+        /// <c>DeactivateDisaster</c> は <c>(m_flags &amp; ~12) | 16</c> と、
+        /// 遷移のたびに前の位相ビットを落としている）。
+        /// この前提はユニットテストで固定してある。
+        /// </summary>
+        public static bool PaintsHazardMap(bool located, EarthquakePhase phase)
+        {
+            return located && (phase == EarthquakePhase.Emerging || phase == EarthquakePhase.Active);
+        }
     }
 }

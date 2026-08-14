@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 15 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 16 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -40,15 +40,16 @@ namespace DisasterPlus.Game
         /// WeatherManager の current/target フィールド群・
         /// DisasterManager.m_hazardAmount が private Byte[] のままか・
         /// m_disasters の m_buffer/m_size・ハザードグリッドの形状）＋
-        /// 地震 4 件（EarthquakeAI プレハブの 4 調整値・DisasterData の
+        /// 地震 5 件（EarthquakeAI プレハブの 4 調整値・DisasterData の
         /// m_intensity/m_activationFrame/m_startFrame/m_angle・
-        /// EarthquakeCoverage と CheckLocalResource・sim スレッドの時計）＋
+        /// EarthquakeCoverage と CheckLocalResource・sim スレッドの時計・
+        /// SubInfoMode.EarthquakeHazard と EarthquakeAI.UpdateHazardMap）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 16;
+        private const int TotalCheckCount = 17;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -112,7 +113,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 15 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 16 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -351,6 +352,24 @@ namespace DisasterPlus.Game
 
             // --- ②地震（Task 3）ここまで ---
 
+            // --- ②地震（Task 4）ここから ---
+
+            // 地震のハザードビューへの切替と、そこに何かを塗る側の両方。
+            // ここが FAIL すると「ハザードマップが空である理由」——本機能が出す
+            // いちばん重要な説明——を、そもそも見せる場所が無くなる。
+            // 列挙メンバは文字列で見る（コード内の直接参照はコンパイル時に整数へ
+            // 畳み込まれるので、名前の変更を検出できない）。
+            Check("SubInfoMode.EarthquakeHazard exists and EarthquakeAI.UpdateHazardMap exists",
+                  "the earthquake hazard heatmap cannot be shown, so the mod cannot explain "
+                  + "the Located gate",
+                  delegate
+                  {
+                      return Enum.IsDefined(typeof(InfoManager.SubInfoMode), "EarthquakeHazard")
+                          && HasUpdateHazardMap(typeof(EarthquakeAI));
+                  });
+
+            // --- ②地震（Task 4）ここまで ---
+
             Report();
         }
 
@@ -456,7 +475,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 15 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 16 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

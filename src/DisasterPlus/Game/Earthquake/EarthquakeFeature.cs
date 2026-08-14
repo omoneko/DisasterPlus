@@ -69,15 +69,20 @@ namespace DisasterPlus.Game
             // （Task 9: TsunamiChain.Tick / Task 10: LongPeriodDamage.Apply がここに入る）
         }
 
-        /// <summary>main スレッド。Task 4 でパネルとボタンの設置がここに入る。</summary>
+        /// <summary>main スレッド。パネル・ボタンの設置と、表示中のみの内容更新はここから。</summary>
         public void OnMainThreadUpdate()
         {
+            EarthquakePanelButton.Tick();
+            EarthquakePanel.Tick();
         }
 
         public void OnLevelUnloading()
         {
             EarthquakeHub.Clear();
             EarthquakeReader.Reset();
+            // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
+            EarthquakePanelButton.Remove();
+            EarthquakePanel.Destroy();
         }
 
         /// <summary>
@@ -90,11 +95,70 @@ namespace DisasterPlus.Game
 
             var snapshot = EarthquakeHub.Latest;
             b.Line(1, "snapshot", snapshot == null ? "none yet" : (snapshot.Valid ? "valid" : "INVALID"));
+
+            // UI の状態は snapshot の有無に関わらず出す。「パネルが開かない」
+            // 「ボタンが予報ボタンに重なった」の調査に、地震が起きている必要は無い。
+            WriteUiState(b, snapshot);
+
             if (snapshot == null || !snapshot.Valid) return;
 
             WritePrefabFacts(b, snapshot.Prefab);
             WriteSimClock(b, snapshot);
             WriteQuakes(b, snapshot);
+        }
+
+        /// <summary>
+        /// ボタンの配置経緯とハザードビューの状態。
+        ///
+        /// <c>painting quakes</c> の行が**このセクションでいちばん重要**。
+        /// 地震のハザードマップも <c>Located &amp;&amp; (Emerging|Active)</c> の 2 段ゲートを持ち
+        /// （§A-6）、地震に <c>Located</c> を立てられるのは地震計だけ（§A-2）なので、
+        /// ヒートマップが真っ白なとき「地震計が無い（正常）」のか「本当に地震が無い」のか
+        /// を切り分ける手段がこれ以外に無い。
+        /// </summary>
+        private static void WriteUiState(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
+        {
+            string placement;
+            if (!EarthquakePanelButton.Installed)
+            {
+                placement = "button not installed yet";
+            }
+            else if (EarthquakePanelButton.UsedSavedPosition)
+            {
+                placement = "saved position reused";
+            }
+            else
+            {
+                placement = EarthquakePanelButton.FoundFreeSlot
+                    ? "fresh free-slot search succeeded"
+                    : "fresh free-slot search FAILED (fell back to preferred position)";
+            }
+            b.Line(1, "button position", ModSettings.EarthquakeButtonX.value + ","
+                + ModSettings.EarthquakeButtonY.value + "  (" + placement + ")");
+
+            b.Line(1, "showing hazard view", InfoModeSwitch.IsShowingHazard ? "yes" : "no");
+
+            // DLC が無い環境ではパネル本体を構築していない（EarthquakePanel._bodyBuilt）。
+            b.Line(1, "panel body", ModCompat.NaturalDisastersOwned
+                ? "shown"
+                : "hidden (Natural Disasters DLC not owned)");
+
+            if (snapshot == null || !snapshot.Valid)
+            {
+                b.Line(1, "painting quakes", "unknown (no valid snapshot)");
+                return;
+            }
+
+            int painting = 0;
+            var quakes = snapshot.Quakes;
+            for (int i = 0; i < quakes.Count; i++)
+            {
+                if (DisasterPhases.PaintsHazardMap(quakes[i].Located, quakes[i].Phase)) painting++;
+            }
+            b.Line(1, "painting quakes", painting + " of " + quakes.Count
+                + (painting == 0
+                    ? "  (the hazard map is legitimately empty; an Earthquake Sensor is what sets Located)"
+                    : ""));
         }
 
         private static void WritePrefabFacts(DiagnosticBuilder b, EarthquakePrefabFacts prefab)

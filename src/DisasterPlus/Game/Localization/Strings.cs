@@ -123,5 +123,78 @@ namespace DisasterPlus.Game
         public static string EarthquakeNeedsDlc =
             "Earthquakes require the Natural Disasters DLC.";
         public static string LogChannelEarthquake = "Earthquake";
+
+        // --- ②地震（Task 4: パネル） ---
+
+        public static string EarthquakeTitle = "Earthquake";
+
+        // 第 1 層と第 2 層を見分けるための接頭辞。EarthquakePanel の
+        // SetLayer1 / SetLayer2 以外からは絶対に参照しないこと（呼び出し側が
+        // どちらを名乗るか選べる状態にすると、この分離は必ずいつか崩れる）。
+        public static string SourceVanilla = "[measured]";
+        public static string SourceModel = "[Disaster + model]";
+
+        public static string EarthquakeLayer1Header = "What the game actually computes";
+        public static string EarthquakeLayer2Header =
+            "Added by Disaster + (not vanilla behaviour)";
+
+        public static string EarthquakeNoneActive = "No earthquake in progress.";
+        public static string EarthquakeCount = "Earthquakes in progress";
+        public static string EarthquakeIntensity = "Intensity";
+        public static string EarthquakeRadius = "Affected radius";
+        public static string EarthquakePhase = "Phase";
+        public static string EarthquakePhaseEmerging = "before the main shock";
+        public static string EarthquakePhaseActive = "shaking";
+        public static string EarthquakePhaseClearing = "aftermath";
+
+        // 「本震まで」は予測ではなく**予定表の読み上げ**である。m_activationFrame は
+        // StartDisaster が m_startFrame + m_emergingDuration として書き込んだ確定値で
+        // （§A-1）、①が禁じている「あと何時間で嵐が来る」（乱数由来の発生判定）とは
+        // 根拠がまったく違う。設計書 §7-2 がこの区別を要求している。
+        public static string EarthquakeTimeToShock = "Time to the main shock";
+        // ただし m_activationFrame == 0 は「今」ではなく「予定が無い」。
+        public static string EarthquakeTimeUnknown = "not scheduled";
+        public static string EarthquakeMinutes = "min";
+
+        public static string EarthquakeAtCursor = "Shaking at cursor";
+        // 半径 R の外はバニラが preRadius で判定自体を打ち切る領域なので、
+        // 「強度 0.0」ではなく「圏外」と出す（SeismicIntensity.At の doc）。
+        public static string EarthquakeOutOfRange = "outside the shaken area";
+
+        public static string EarthquakeFaultBand = "Fault zone";
+        public static string EarthquakeFaultInside = "inside";
+        public static string EarthquakeFaultOutside = "outside";
+        public static string EarthquakeFaultBandNote =
+            "The four rupture patches move every step, so this zone is where they can land, "
+            + "not where they will.";
+
+        public static string EarthquakeShowOnMap = "Show on map";
+
+        // ①の ForecastNoStormDetected と同じ構図・同じ文体。地震のハザードマップも
+        // Located && (Emerging|Active) の 2 段ゲートを持ち（§A-6）、地震に Located を
+        // 立てられるのは地震計だけ（§A-2 / §C-2）。したがって地震計が無ければ
+        // このビューは恒久的に空で、それが正常。**空を「安全」と読ませない。**
+        public static string EarthquakeNotLocated =
+            "No earthquake is located right now. This map only shows a located, in-progress "
+            + "quake, and an Earthquake Sensor is what locates one.";
+        public static string EarthquakeSwitchHazardView =
+            "Switch the earthquake hazard view on to read a value here.";
+
+        // 計画の 29 件に対する 2 件の追加（意図的な逸脱）。
+        // ①はこの 2 つの状況をどちらも ForecastUnavailable（「気象データを読み取れません」）で
+        // まかなっていたが、②で同じことをすると「地震データが読めない」と「カーソルが
+        // 地形の上に無い」が同じ文言になる。後者はパネルを読んでいる間ほぼ常に起きる
+        // （マウスがパネルの上にある）ので、いちばん頻繁に目に入る行が誤った原因を
+        // 名指しし続けることになる。原因ごとに分ける。
+        public static string EarthquakeUnavailable = "Earthquake data cannot be read right now.";
+        public static string EarthquakeCursorUnknown =
+            "Move the cursor over the terrain to read a value here.";
+
+        // 10 段階のバーに対して名前は 5 区分だけ（SeismicScale の doc）。
+        // **実在の震度階級の名前は使わない**（設計書 §3.1、§7-4）。
+        public static string EarthquakeBandWeak = "weak";
+        public static string EarthquakeBandModerate = "moderate";
+        public static string EarthquakeBandStrong = "strong";
+        public static string EarthquakeBandSevere = "very strong";
     }
 }
