@@ -5,17 +5,17 @@ namespace DisasterPlus.Game
 {
     /// <summary>
     /// 震度分布オーバーレイの操作と凡例。<see cref="EarthquakePanel"/> の一部だが、
-    /// **既に 1592 行あるあのファイルをこれ以上伸ばさない**ために別ファイルにしてある
+    /// **あのファイルをこれ以上伸ばさない**ために別ファイルにしてある
     /// （プロジェクト規約は 800 行）。
     ///
     /// ── 層の分離の担保はそのまま ─────────────────────────────
     ///
     /// このファイルは <c>AddUIComponent(typeof(UILabel))</c> も
     /// <c>UILabel.text</c> への代入も**書かない**。行は
-    /// <see cref="EarthquakePanel.AddPlainRow"/> /
-    /// <see cref="EarthquakePanel.AddLayer1Row"/> を通してしか作れず、
-    /// 中身は <see cref="EarthquakePanel.SetPlain"/> /
-    /// <see cref="EarthquakePanel.SetLayer1"/> を通してしか書けない
+    /// <see cref="EarthquakeRows.AddPlainRow"/> /
+    /// <see cref="EarthquakeRows.AddLayer1Row(UIPanel,string,ref float,float)"/> を
+    /// 通してしか作れず、中身は <see cref="EarthquakeRows.SetPlain"/> /
+    /// <see cref="EarthquakeRows.SetLayer1"/> を通してしか書けない
     /// （<c>Strings.SourceVanilla</c> はあちらのセッターの中にしか現れない）。
     /// つまり「grep 1 回で確認できる」という担保は壊れていない。
     ///
@@ -51,9 +51,9 @@ namespace DisasterPlus.Game
             _button.name = FreeSlotFinder.SelfPrefix + "EarthquakeOverlayToggle";
             _button.text = Strings.EarthquakeOverlayShow;
             _button.tooltip = Strings.EarthquakeOverlayRow;
-            _button.width = EarthquakePanel.PanelWidth - 24f;
+            _button.width = EarthquakeRows.RowWidth;
             _button.height = 24f;
-            _button.relativePosition = new Vector3(12f, y);
+            _button.relativePosition = new Vector3(EarthquakeRows.RowLeft, y);
             _button.normalBgSprite = "ButtonMenu";
             _button.hoveredBgSprite = "ButtonMenuHovered";
             _button.pressedBgSprite = "ButtonMenuPressed";
@@ -61,13 +61,13 @@ namespace DisasterPlus.Game
             y += 30f;
 
             // 状態は第 1 層で名乗る。出している量がバニラの実測値そのものだからである。
-            _statusLabel = EarthquakePanel.AddLayer1Row(panel, "OverlayStatus", ref y, 42f);
+            _statusLabel = EarthquakeRows.AddLayer1Row(panel, "OverlayStatus", ref y, 42f);
 
             // 凡例は**常設**。地震が無くても、読み取りに失敗していても出す
             // （これは「今の観測値」ではなく「この絵の読み方」である。
             //  Strings.EarthquakeSensorEffect と同じ扱いで、一度書いたら
             //  以後どこからも書き換えない＝参照を保持する必要が無い）。
-            EarthquakePanel.AddPlainRow(panel, "OverlayLegend", ref y,
+            EarthquakeRows.AddPlainRow(panel, "OverlayLegend", ref y,
                 Strings.EarthquakeOverlayLegend, 72f);
         }
 
@@ -87,14 +87,14 @@ namespace DisasterPlus.Game
             if (!EarthquakeOverlay.Registered)
             {
                 // 描画経路そのものが取れていない。黙って何も出ないのを避ける。
-                EarthquakePanel.SetLayer1(_statusLabel,
+                EarthquakeRows.SetLayer1(_statusLabel,
                     Strings.EarthquakeOverlayRow + ": " + Strings.EarthquakeOverlayUnavailable);
                 return;
             }
 
             if (!EarthquakeOverlay.Enabled)
             {
-                EarthquakePanel.SetLayer1(_statusLabel,
+                EarthquakeRows.SetLayer1(_statusLabel,
                     Strings.EarthquakeOverlayRow + ": " + Strings.EarthquakeOverlayOff);
                 return;
             }
@@ -127,7 +127,7 @@ namespace DisasterPlus.Game
                 text += "  " + Strings.EarthquakeOverlayBothOn;
             }
 
-            EarthquakePanel.SetLayer1(_statusLabel, text);
+            EarthquakeRows.SetLayer1(_statusLabel, text);
         }
 
         /// <summary>
@@ -142,7 +142,7 @@ namespace DisasterPlus.Game
                     ? Strings.EarthquakeOverlayHide
                     : Strings.EarthquakeOverlayShow;
             }
-            EarthquakePanel.SetPlain(_statusLabel, "");
+            EarthquakeRows.SetPlain(_statusLabel, "");
         }
 
         /// <summary>

@@ -138,6 +138,12 @@ namespace DisasterPlus.Game
         public static string EarthquakeLayer2Header =
             "Added by Disaster + (not vanilla behaviour)";
 
+        // タブの見出し（パネルの構造変更で追加）。行の中身は 1 つも変えていないので、
+        // 増えた文言はこの 2 つだけである。**どちらのタブも第 1 層**で、
+        // 第 2 層の節はタブの外・その下に常設されている（EarthquakePanelTabs の doc）。
+        public static string EarthquakeTabQuake = "Quake, cursor and maps";
+        public static string EarthquakeTabDamage = "Buildings and seismographs";
+
         public static string EarthquakeNoneActive = "No earthquake in progress.";
         public static string EarthquakeCount = "Earthquakes in progress";
         public static string EarthquakeIntensity = "Intensity";
