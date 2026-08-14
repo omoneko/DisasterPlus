@@ -840,6 +840,102 @@ m_currentDayTimeHour = h;                    // ★ ここでしか書かれな�
 
 ---
 
+## G. 建物の高さ（第 2 層レビュー I2 で追測）
+
+### G-1. `m_collisionHeight` は敷地の**樹木**で膨らむ — CONFIRMED
+
+`BuildingInfo.CheckReferences`（実測）:
+
+```
+IL_0019-0025  m_collisionHeight = m_size.y                          ← 出発点
+IL_0270-02F6  h = prop.m_generatedInfo.m_center.y
+                  + prop.m_generatedInfo.m_size.y * 0.5
+              h *= prop.m_maxScale
+              if (m_props[i].m_fixedHeight) h += m_props[i].m_position.y
+              m_collisionHeight = Mathf.Max(m_collisionHeight, h)     ← プロップ
+IL_03EA-0470  同じ式を TreeInfo について繰り返す                        ← 樹木
+              （Prop::m_finalTree / TreeInfoGen::m_center・m_size / TreeInfo::m_maxScale）
+```
+
+`m_fixedHeight` の分岐は `brfalse`（IL_02CB / IL_0445）なので、
+**`m_position.y` が足されるのは `m_fixedHeight` が true のとき**である。
+
+> バニラの低密度住宅の敷地には樹木プロップが載っており、`TreeInfoGen.m_size.y` は
+> `m_maxScale` を掛ける前で 15〜25 m に達しうる。**平屋が 20 m 以上を名乗る。**
+> 「ゲーム自身が建物の高さとして使っている値」だからという理由でこれを採ると、
+> 「高層ほど倒れる」という第 2 層の前提が樹木で測られる。
+
+### G-2. `BuildingInfo.m_size.y` はメッシュ頂点だけ — CONFIRMED
+
+```
+BuildingInfo::InitializePrefab  IL_09BE  m_size = m_generatedInfo.m_size
+BuildingInfoBase::CalculateGeneratedInfo(MeshFilter[], SkinnedMeshRenderer[])
+  IL_0135-014A  y = Mathf.Max(y, mesh.vertices[k].y)        ← メッシュ頂点の最大 y
+  IL_05E6       m_generatedInfo.m_size = new Vector3(x*2, y, z*2)
+```
+
+アセンブリ全走査で、`BuildingInfo::m_size` に `stfld` するのは `InitializePrefab` だけ、
+`BuildingInfoGen::m_size` に `stfld` するのは `CalculateGeneratedInfo` の 2 つの
+オーバーロードだけ。**プロップも樹木もサブ建物も入らない。**
+（サブ建物が入らない副作用として、本体メッシュが低いプレハブは低く出る。
+過小評価は「被害を与えない」側なので過大評価より安全である。）
+
+### G-3. `DisasterData.Flags` の実値と `SelfTrigger` の効き方 — CONFIRMED（③の I4）
+
+```
+None=0 Created=1 Deleted=2 Emerging=4 Active=8 Clearing=16 Finished=32
+SelfTrigger=64 Hidden=128 Significant=256 Detected=512 Follow=1024
+CustomName=2048 Located=4096 UnDetected=8192 Warning=16384
+Persistent=32768 Repeat=65536 UnReported=131072
+```
+
+`DisasterAI.StartDisaster` は `m_flags = (m_flags & 0xFFFC88C7) | Emerging(4)`。
+クリアされるビットは `~0xFFFC88C7 = 0x37738` で、
+**`Significant(256)` は落ちるが `SelfTrigger(64)` は落ちない**（0x37738 のビット 6 は 0）。
+だから派生 AI は基底を呼んだ後に `m_flags & 64` を見られる。
+
+`TornadoAI.StartDisaster` / `EarthquakeAI.StartDisaster`（**同一の形**）:
+
+```
+IL_0003  call DisasterAI::StartDisaster
+IL_000E  if ((m_flags & 64) == 0) return
+IL_0016  m_targetPosition.y = TerrainManager.SampleDetailHeight(m_targetPosition)
+IL_0031  m_activationFrame = m_startFrame + m_emergingDuration
+IL_0044  m_flags |= 256 (Significant)
+IL_0056  DisasterManager.m_randomDisasterCooldown = 0
+```
+
+`Significant(256)` を読むのはアセンブリ全走査で
+`CommonBuildingAI.HandleCommonConsumption`（＋ DLC の同名オーバーライド 7 種）・
+`CommonBuildingAI.NearObjectInFire`・`FirewatchTowerAI.NearObjectInFire`・
+`DisasterManager.FollowDisaster`。立てないと**災害が発見されない**
+（ハザードマップにも通知にも出ず、カメラも追えない）。
+
+`IsStillEmerging` は **AI ごとに違う**:
+
+```
+TornadoAI      : base || (SimulationManager.m_currentFrameIndex < m_activationFrame)   ← clt.un だけ
+EarthquakeAI   : base || m_activationFrame == 0 || (currentFrame < m_activationFrame)  ← 0 の特例あり
+```
+
+したがって `SelfTrigger` を落として `m_activationFrame` が 0 のままでも、
+**竜巻は次のステップで Active になる**（地震は永久に Emerging のままになる）。
+
+`DisasterAI.StartNow` の門は `m_flags & 60`（= Emerging|Active|Clearing|Finished）なので、
+`SelfTrigger(64)` を先に立てても判定は変わらない。
+
+### G-4. `DestroyBuildings` は次の ID をループ先頭で控える — CONFIRMED（M2）
+
+```
+IL_00E2  loc10 = buildings[loc8].m_nextGridBuilding     ← 行動する前
+IL_0100  if ((m_flags & 0x80013) != 1) goto IL_0516
+...      CollapseBuilding x2 / BurnBuilding
+IL_0516  loc8 = loc10                                    ← 控えた値を使う
+IL_0521  内側ループの回数上限は 49152（建物バッファの大きさ）
+```
+
+---
+
 ## 設計への含意
 
 依頼文の 6 つの要求を、上の事実で仕分ける。
