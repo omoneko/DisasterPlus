@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 21 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 22 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -47,14 +47,15 @@ namespace DisasterPlus.Game
         /// VanillaRandomizer と本物の Randomizer のビット一致・
         /// m_cameraShake と m_disableCameraShake が public のままか・
         /// RenderManager のオーバーレイ描画 API が届くか）＋
-        /// 地震 第 2 層 2 件（TsunamiAI プレハブの実在・
-        /// TerrainManager.HasWater と DisasterData.m_waveIndex）＋
+        /// 地震 第 2 層 3 件（TsunamiAI プレハブの実在・
+        /// TerrainManager.HasWater と DisasterData.m_waveIndex・
+        /// BuildingAI.CollapseBuilding と BuildingInfo.m_collisionHeight）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 22;
+        private const int TotalCheckCount = 23;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -118,7 +119,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 19 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 22 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -534,6 +535,49 @@ namespace DisasterPlus.Game
 
             // --- ②地震（Task 9）ここまで ---
 
+            // --- ②地震（Task 10: 第 2 層 — 長周期地震動）ここから ---
+
+            // **この機能は建物を実際に壊す。** だから前提が破れたときに
+            // 「静かに違う挙動」になることを許さない。見るのは 2 つ:
+            //
+            //   1. BuildingAI.CollapseBuilding が引数まで込みで解決できるか。
+            //      DisasterHelpers を経由しないのが NDR 回避の要点（§E-2）なので、
+            //      迂回先そのものが消えていないかを名指しする。
+            //   2. 建物の高さが読めるか。**Building 構造体に高さのフィールドは無い**
+            //      （IL 実測。あるのは m_baseHeight / m_width / m_length だけ）。
+            //      高さはプレハブ側の BuildingInfo.m_collisionHeight（Single、m）で、
+            //      InitializePrefab が m_generatedInfo.m_size.y から入れる。
+            //      単位がメートルであることは CommonBuildingAI.CollapseIfFlooded の
+            //      `waterLevel > m_position.y + Max(4f, m_collisionHeight)` で確定
+            //      （BuildingHeight のクラス doc に IL 全文がある）。
+            //
+            // ここが FAIL したとき LongPeriodDamage は**何もしない**（推測した高さで
+            // 建物を壊さない）ので、影響の文にもそう書く。
+            Check("BuildingAI.CollapseBuilding is resolvable and building height can be read",
+                  "long-period damage cannot be applied; the feature disables itself rather than "
+                  + "guessing a height",
+                  delegate
+                  {
+                      if (typeof(BuildingAI).GetMethod("CollapseBuilding",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[]
+                              {
+                                  typeof(ushort), typeof(Building).MakeByRefType(),
+                                  typeof(InstanceManager.Group), typeof(bool), typeof(bool),
+                                  typeof(int)
+                              },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      var height = typeof(BuildingInfo).GetField("m_collisionHeight",
+                          BindingFlags.Public | BindingFlags.Instance);
+                      return height != null && height.FieldType == typeof(float);
+                  });
+
+            // --- ②地震（Task 10）ここまで ---
+
             Report();
         }
 
@@ -639,7 +683,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 19 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 22 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

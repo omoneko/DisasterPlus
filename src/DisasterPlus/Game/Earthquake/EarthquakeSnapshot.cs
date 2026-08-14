@@ -127,6 +127,18 @@ namespace DisasterPlus.Game
         public readonly BuildingProbeOutcome CursorProbe;
 
         /// <summary>
+        /// <see cref="CursorBuilding"/> の高さ（m）。**第 2 層（長周期地震動）専用。**
+        ///
+        /// **0 は「低い」ではなく「読めなかった」**（<see cref="BuildingHeight.MetresOf"/>）。
+        /// 表示側はこの 2 つを混ぜてはいけない —— 混ぜると、高さが読めない環境で
+        /// 「この建物は低いので長周期の影響を受けません」という、**根拠の無い断定**が出る。
+        ///
+        /// バニラはこの量を揺れにも被害にも一切使っていない（§A-7 / §A-3）。
+        /// したがってこれを使う行は必ず第 2 層である。
+        /// </summary>
+        public readonly float CursorBuildingHeight;
+
+        /// <summary>
         /// カーソル地点の <c>ImmaterialResourceManager.Resource.EarthquakeCoverage</c> の生値。
         /// <see cref="CursorCoverageValid"/> が false のときこの値は無意味。
         ///
@@ -205,7 +217,7 @@ namespace DisasterPlus.Game
         public EarthquakeSnapshot(IList<EarthquakeReading> quakes, EarthquakePrefabFacts prefab,
                                   uint currentFrame, float hourOfDay, bool dayNightEnabled,
                                   BuildingMargin cursorBuilding, ushort cursorQuakeId,
-                                  BuildingProbeOutcome cursorProbe,
+                                  BuildingProbeOutcome cursorProbe, float cursorBuildingHeight,
                                   int cursorCoverage, bool cursorCoverageValid,
                                   IList<SeismographTrace> traces, ushort waveformQuakeId,
                                   TsunamiChainState tsunamiState, uint tsunamiDueFrame,
@@ -225,6 +237,7 @@ namespace DisasterPlus.Game
             CursorBuilding = cursorBuilding;
             CursorQuakeId = cursorQuakeId;
             CursorProbe = cursorProbe;
+            CursorBuildingHeight = cursorBuildingHeight;
             CursorCoverage = cursorCoverage;
             CursorCoverageValid = cursorCoverageValid;
             Valid = valid;
@@ -234,7 +247,7 @@ namespace DisasterPlus.Game
         {
             return new EarthquakeSnapshot(NoQuakes, new EarthquakePrefabFacts(), 0u, 0f, false,
                                           BuildingMargin.None(), 0,
-                                          BuildingProbeOutcome.NotProbed, 0, false,
+                                          BuildingProbeOutcome.NotProbed, 0f, 0, false,
                                           SeismographRecorder.EmptyTraceList, 0,
                                           TsunamiChainState.Idle, 0u, 0, false);
         }

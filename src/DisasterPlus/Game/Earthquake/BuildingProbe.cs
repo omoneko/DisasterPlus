@@ -110,11 +110,19 @@ namespace DisasterPlus.Game
         /// **例外を出さない。** sim スレッドの <c>IndexOutOfRangeException</c> は
         /// スタックトレース無しのポップアップになるので、添字は必ず配列長で守る。
         /// </summary>
+        /// <param name="heightMetres">
+        /// 見つかった建物の高さ（m）。**第 2 層（長周期地震動）専用**で、
+        /// 第 1 層の余裕度は高さを一切使わない —— バニラが使っていないからである
+        /// （§A-3 は <c>m_position</c> の距離しか見ない）。
+        /// **0 は「低い」ではなく「読めなかった」**（<see cref="BuildingHeight.MetresOf"/>）。
+        /// </param>
         public static BuildingMargin ProbeAt(Vec3 worldPos, EarthquakeReading quake,
                                              FaultBand band, bool damageModelReplaced,
-                                             out BuildingProbeOutcome outcome)
+                                             out BuildingProbeOutcome outcome,
+                                             out float heightMetres)
         {
             outcome = BuildingProbeOutcome.NotProbed;
+            heightMetres = 0f;
             if (quake == null) return BuildingMargin.None();
 
             try
@@ -147,6 +155,9 @@ namespace DisasterPlus.Game
                 bool alreadyDown = (flags & Building.Flags.Collapsed) != Building.Flags.None
                                    || buildings[best].m_fireIntensity != 0;
 
+                // 第 2 層が使う量。第 1 層の結論（BuildingMargin）には入れない。
+                heightMetres = BuildingHeight.MetresOf(ref buildings[best]);
+
                 outcome = BuildingProbeOutcome.Found;
                 return BuildingMargin.Evaluate(
                     best, quake.DisasterId,
@@ -168,6 +179,7 @@ namespace DisasterPlus.Game
                     Log.Diag("EqProbe", "building probe failed: " + e.GetType().Name);
                 }
                 outcome = BuildingProbeOutcome.Failed;
+                heightMetres = 0f;
                 return BuildingMargin.None();
             }
         }

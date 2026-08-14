@@ -32,6 +32,7 @@ namespace DisasterPlus.Game
             SeismographRecorder.Reset();
             // ★ 予約は都市をまたいで残らない（第 2 層はセッション状態で、セーブにも入れない）。
             TsunamiChain.Reset();
+            LongPeriodDamage.Reset();
 
             // 震度分布オーバーレイ。**main スレッド。** 登録は
             // RenderManager の静的リストへの追加で、外す API が存在しない
@@ -90,7 +91,13 @@ namespace DisasterPlus.Game
                 TsunamiChain.Tick(snapshot, frameIndex);
             }
 
-            // （Task 10: LongPeriodDamage.Apply がここに入る）
+            // ★ 第 2 層その 2。**既定 OFF**（ModSettings.EarthquakeLongPeriod の doc）。
+            //    これは津波と違い、**バニラなら倒れなかった建物を実際に倒す**。
+            //    設定を見てから呼ぶので、OFF のときは走査そのものが 1 回も走らない。
+            if (ModSettings.EarthquakeLongPeriod.value)
+            {
+                LongPeriodDamage.Apply(snapshot, deltaMinutes);
+            }
         }
 
         /// <summary>main スレッド。パネル・ボタンの設置と、表示中のみの内容更新はここから。</summary>
@@ -118,6 +125,8 @@ namespace DisasterPlus.Game
             // ★ 予約したまま撃っていない津波を、都市をまたいで持ち越さない。
             //    ここを忘れると 2 つ目の都市で、起きてもいない地震の津波が来る。
             TsunamiChain.Reset();
+            // ★ 走査の途中状態と診断カウンタ、そして Degraded の自己申告を下ろす。
+            LongPeriodDamage.Reset();
             // ★ オーバーレイを止める。登録は外せないので、描かないことを
             //    こちらの状態で保証する（EarthquakeOverlay.Reset の doc）。
             //    これを忘れると、都市を出た直後の数フレームに前の都市の
@@ -154,7 +163,60 @@ namespace DisasterPlus.Game
             WriteSensorCoverage(b, snapshot);
             WriteWaveform(b, snapshot);
             WriteTsunamiChain(b, snapshot);
+            WriteLongPeriod(b, snapshot);
             WriteQuakes(b, snapshot);
+        }
+
+        /// <summary>
+        /// 第 2 層（長周期地震動）の状態。**「建物が余分に倒れたか」の切り分けは
+        /// ここでしかできない。** 倒れない理由は 6 通りあり（設定が OFF ／強さ 0 ／
+        /// 進行中の地震が Active でない ／範囲内に高層が無い ／高さが読めない ／
+        /// バニラが倒壊を断った）、画面上はどれも「何も起きない」で同じ顔になる。
+        ///
+        /// **倒壊 0 のときも必ず全数字を出す**（③で「延焼が動いているか診断から
+        /// 一切見えなかった」失敗を繰り返さない）。
+        /// </summary>
+        private static void WriteLongPeriod(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
+        {
+            if (!ModSettings.EarthquakeLongPeriod.value)
+            {
+                b.Line(1, "long period", "off (setting; this is the default)");
+                return;
+            }
+
+            int strength = ModSettings.EarthquakeLongPeriodStrength.value;
+            b.Line(1, "long period", strength <= 0
+                ? "on, but the strength slider is 0 (nothing is added; this is a valid way to "
+                  + "disable it without losing the setting)"
+                : "on, strength " + strength + " of 10");
+
+            b.Line(2, "model", "wave period "
+                + LongPeriodResponse.WavePeriodFrames.ToString("F0")
+                + " frames, resonance peak at height "
+                + (LongPeriodResponse.WavePeriodFrames
+                   / LongPeriodResponse.PeriodFramesPerMetre).ToString("F0")
+                + " m, range = " + LongPeriodResponse.RangeFactor.ToString("F0")
+                + "x the vanilla disc  [Disaster + model, not measured]");
+
+            b.Line(2, "passes", LongPeriodDamage.Passes.ToString());
+            b.Line(2, "last pass",
+                "scanned=" + LongPeriodDamage.LastScanned
+                + " selected=" + LongPeriodDamage.LastSelected
+                + " attempted=" + LongPeriodDamage.LastAttempted
+                + " refused=" + LongPeriodDamage.LastRefused
+                + " collapsed=" + LongPeriodDamage.LastCollapsed
+                + (LongPeriodDamage.LastCapped ? "  (capped; resumes next pass)" : ""));
+            b.Line(2, "total collapsed", LongPeriodDamage.TotalCollapsed.ToString());
+
+            // 高さが読めない建物には何もしていない。0 でないこと自体が合図。
+            b.Line(2, "unreadable height", LongPeriodDamage.LastUnknownHeight
+                + (LongPeriodDamage.LastUnknownHeight > 0
+                    ? "  (these buildings were skipped entirely; the mod never guesses a height)"
+                    : ""));
+
+            b.Line(2, "cursor building height", snapshot.CursorBuildingHeight > 0f
+                ? snapshot.CursorBuildingHeight.ToString("F1") + " m"
+                : "unread (no building under the cursor, or its prefab height is unusable)");
         }
 
         /// <summary>

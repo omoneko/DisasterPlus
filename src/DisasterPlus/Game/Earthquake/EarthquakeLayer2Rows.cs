@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using ColossalFramework.UI;
+using UnityEngine;
 
 namespace DisasterPlus.Game
 {
@@ -9,7 +11,8 @@ namespace DisasterPlus.Game
     ///
     /// 第 1 層（タブの中身）は全て「バニラ自身の式と定数から導いた量」で、
     /// <c>[measured]</c> の接頭辞が付く。この節に出るものは 1 つも実測ではない ——
-    /// バニラは海中の地震から津波を起こさない。したがって:
+    /// バニラは海中の地震から津波を起こさないし、建物の高さを揺れにも被害にも
+    /// 使っていない（§A-7 / §A-3）。したがって:
     ///
     ///   - 行は必ず <see cref="EarthquakeRows.AddLayer2Row(UIPanel,string,ref float)"/> で作る
     ///     （中身は <see cref="EarthquakeRows.SetLayer2"/> でしか書けず、
@@ -23,79 +26,141 @@ namespace DisasterPlus.Game
     /// （<see cref="EarthquakePanelTabs"/> の doc）。どのタブを見ていても、
     /// 本 MOD が足した挙動は常に同じ場所に、第 1 層の全内容より下に見えている。
     ///
-    /// ── 設定が OFF なら節ごと消える ───────────────────────────
+    /// ── 節はブロック単位で畳む（縦の予算は本当に無い）──────────────────
     ///
-    /// 第 2 層は全て既定 OFF である。OFF のときに見出しだけ残すと
-    /// 「何かを足しているが今は何も出ていない」に見えるので、**節ごと畳んで
-    /// パネルの高さもその分縮める**（<see cref="EarthquakePanel.Relayout"/>）。
-    /// 高さの組み直しは状態が変わったフレームだけで、毎フレームは走らない。
+    /// 第 2 層は**独立した機能が複数**ある（津波連鎖 / 長周期地震動）。全部の行を
+    /// 常に確保すると、どれも使っていないプレイヤーのパネルが 150 px 以上高くなり、
+    /// <see cref="EarthquakePanel.ClampToView"/> が「ビューより高い」と警告する側へ
+    /// 一歩近づく。そこで**設定が ON のブロックの行だけを積む**。
+    ///
+    /// 位置の組み直し（<see cref="Layout"/>）が走るのは
+    /// **構築時と、ON/OFF の組み合わせが変わったフレームだけ**である。毎フレーム
+    /// レイアウトを回すと、<see cref="EarthquakePanel.Relayout"/> が
+    /// <c>relativePosition</c> を書き換えるためパネルが微妙に動き続ける。
     ///
     /// ── 文言（できていないことをできているように書かない） ──────────────
     ///
-    /// <c>TsunamiAI</c> は**マップ外周からしか波を出せない**（IL 事実文書 §B-3。
-    /// <c>FindSea</c> は外周セルしか候補にせず、<c>m_targetPosition</c> も
-    /// <c>m_angle</c> も開始時に上書きされる）。したがって
-    /// <c>EarthquakeTsunamiFromShore</c> は「波は震源そのものからではなく、
+    /// <c>TsunamiAI</c> は**マップ外周からしか波を出せない**（IL 事実文書 §B-3）。
+    /// したがって <c>EarthquakeTsunamiFromShore</c> は「波は震源そのものからではなく、
     /// 震源に最も近い海から到達します」と書く。**「震源から波が広がります」ではない。**
+    ///
+    /// 長周期地震動の側は <c>EarthquakeLongPeriodNote</c> が
+    /// 「バニラは揺れにも被害にも建物の高さを一切使っていません」と名乗る。
+    /// この 1 文が無いと、プレイヤーは「高層ほど揺れる」をゲームの仕様だと思う。
     /// </summary>
     internal static class EarthquakeLayer2Rows
     {
+        /// <summary>見出し。ブロックが 1 つでも出ていれば出す。</summary>
+        private const int BlockHeader = 0;
+
+        /// <summary>津波連鎖（Task 9）。<c>ModSettings.EarthquakeTsunamiChain</c> に従う。</summary>
+        private const int BlockTsunami = 1;
+
+        /// <summary>長周期地震動（Task 10）。<c>ModSettings.EarthquakeLongPeriod</c> に従う。</summary>
+        private const int BlockLongPeriod = 2;
+
+        /// <summary>1 行ぶんの配置情報。<see cref="Step"/> は行が y を進める量。</summary>
+        private struct Layer2Row
+        {
+            internal UILabel Label;
+            internal float Step;
+            internal int Block;
+        }
+
+        private static readonly List<Layer2Row> _rows = new List<Layer2Row>();
+
         private static UILabel _headerLabel;
         private static UILabel _tsunamiLabel;
         private static UILabel _tsunamiNoteLabel;
+        private static UILabel _longPeriodLabel;
+        private static UILabel _longPeriodNoteLabel;
 
         private static bool _built;
-        private static bool _visible;
+        private static bool _tsunamiVisible;
+        private static bool _longPeriodVisible;
         private static float _sectionTop;
         private static float _sectionHeight;
 
         /// <summary>節が始まる y（＝第 1 層の下端）。パネルの高さの計算に使う。</summary>
         internal static float SectionTop { get { return _sectionTop; } }
 
-        /// <summary>今この節が占めている高さ。畳んでいるときは 0。</summary>
-        internal static float VisibleHeight { get { return _visible ? _sectionHeight : 0f; } }
+        /// <summary>今この節が占めている高さ。全ブロックが畳まれているときは 0。</summary>
+        internal static float VisibleHeight { get { return _sectionHeight; } }
 
         /// <summary>
         /// パネル構築時に 1 回。**行は常に作る**（設定は実行中に変わるので、
         /// あとから作れる仕組みを持つより、作って隠す方が単純で壊れにくい）。
-        /// <paramref name="y"/> は、節が畳まれているなら進めない。
+        /// <paramref name="y"/> は、実際に見えているぶんだけ進む。
         /// </summary>
         internal static void Build(UIPanel root, ref float y)
         {
             _sectionTop = y;
+            _rows.Clear();
 
-            _headerLabel = EarthquakeRows.AddSectionHeader(root, "Layer2Header", ref y,
+            float t = y;
+            float before = t;
+
+            _headerLabel = EarthquakeRows.AddSectionHeader(root, "Layer2Header", ref t,
                 Strings.EarthquakeLayer2Header);
+            Record(_headerLabel, BlockHeader, t - before);
 
             // ★ **2 行ぶんの高さを取る（＝折り返させる）。** 予定時刻の 1 行だけなら
             //    1 行で足りるが、同じラベルには「十分な広さの海がマップ外周に無いため…」
             //    （英語で約 110 文字）も入る。折り返さない行に入れると**途中で切れて
             //    消える** —— しかもいちばん切れてほしくない、「これは失敗ではない」を
             //    説明している文である。
-            _tsunamiLabel = EarthquakeRows.AddLayer2Row(root, "Tsunami", ref y, 42f);
+            before = t;
+            _tsunamiLabel = EarthquakeRows.AddLayer2Row(root, "Tsunami", ref t, 42f);
+            Record(_tsunamiLabel, BlockTsunami, t - before);
 
             // 「波がどこから来るか」の常設の説明。**観測値ではない**ので接頭辞を付けない
             // （Strings.EarthquakeSensorEffect / EarthquakeOverlayLegend と同じ扱い）。
             // 予定・発生のときだけ出す —— 波が来ないと分かっているとき（NoSea / DLC 無し）に
             // 「波は…から到達します」を残すと、来ない波の到達方向を説明することになる。
-            _tsunamiNoteLabel = EarthquakeRows.AddPlainRow(root, "TsunamiNote", ref y, "", 56f);
+            before = t;
+            _tsunamiNoteLabel = EarthquakeRows.AddPlainRow(root, "TsunamiNote", ref t, "", 56f);
+            Record(_tsunamiNoteLabel, BlockTsunami, t - before);
 
-            _sectionHeight = y - _sectionTop;
+            // 長周期地震動。カーソル直下の建物 1 個について出す。
+            before = t;
+            _longPeriodLabel = EarthquakeRows.AddLayer2Row(root, "LongPeriod", ref t, 42f);
+            Record(_longPeriodLabel, BlockLongPeriod, t - before);
+
+            // **常設の注記。** これが無いと「高層ほど倒れる」がゲームの仕様に見える。
+            before = t;
+            _longPeriodNoteLabel = EarthquakeRows.AddPlainRow(root, "LongPeriodNote", ref t,
+                Strings.EarthquakeLongPeriodNote, 40f);
+            Record(_longPeriodNoteLabel, BlockLongPeriod, t - before);
+
             _built = true;
+            _tsunamiVisible = ModSettings.EarthquakeTsunamiChain.value;
+            _longPeriodVisible = ModSettings.EarthquakeLongPeriod.value;
+            Layout();
 
-            _visible = ShouldShow();
-            ApplyVisibility();
-            if (!_visible) y = _sectionTop;
+            y = _sectionTop + _sectionHeight;
+        }
+
+        /// <summary>
+        /// 行と、その行が y を進める量を控える。<see cref="Layout"/> はこの順序と
+        /// 進み量だけで位置を組み直すので、**行を足す順序 ＝ 画面上の順序**になる。
+        /// </summary>
+        private static void Record(UILabel label, int block, float step)
+        {
+            _rows.Add(new Layer2Row { Label = label, Step = step, Block = block });
         }
 
         /// <summary>レベルアンロード時。参照を捨てるだけ（実体はパネルごと消える）。</summary>
         internal static void Destroy()
         {
+            _rows.Clear();
             _headerLabel = null;
             _tsunamiLabel = null;
             _tsunamiNoteLabel = null;
+            _longPeriodLabel = null;
+            _longPeriodNoteLabel = null;
             _built = false;
-            _visible = false;
+            _tsunamiVisible = false;
+            _longPeriodVisible = false;
             _sectionTop = 0f;
             _sectionHeight = 0f;
         }
@@ -108,46 +173,71 @@ namespace DisasterPlus.Game
         {
             if (!_built) return;
 
-            bool show = ShouldShow();
-            if (show != _visible)
+            bool tsunami = ModSettings.EarthquakeTsunamiChain.value;
+            bool longPeriod = ModSettings.EarthquakeLongPeriod.value;
+            if (tsunami != _tsunamiVisible || longPeriod != _longPeriodVisible)
             {
-                _visible = show;
-                ApplyVisibility();
+                _tsunamiVisible = tsunami;
+                _longPeriodVisible = longPeriod;
+                Layout();
                 // 高さが変わったフレームだけ。毎フレーム位置を書き換えない。
                 EarthquakePanel.Relayout();
             }
-            if (!show) return;
 
-            if (snapshot == null || !snapshot.Valid)
+            bool valid = snapshot != null && snapshot.Valid;
+
+            if (tsunami)
             {
-                EarthquakeRows.SetPlain(_tsunamiLabel, "");
-                EarthquakeRows.SetPlain(_tsunamiNoteLabel, "");
-                return;
+                if (valid) RefreshTsunamiRow(snapshot);
+                else
+                {
+                    EarthquakeRows.SetPlain(_tsunamiLabel, "");
+                    EarthquakeRows.SetPlain(_tsunamiNoteLabel, "");
+                }
             }
 
-            RefreshTsunamiRow(snapshot);
+            if (longPeriod)
+            {
+                string text = valid ? EarthquakeLongPeriodText.CursorRow(snapshot) : null;
+                EarthquakeRows.SetPlain(_longPeriodLabel, "");
+                if (text != null) EarthquakeRows.SetLayer2(_longPeriodLabel, text);
+            }
         }
 
         /// <summary>
-        /// 第 2 層の節を出すか。**今のところ津波連鎖の設定だけ**で、
-        /// Task 10（長周期地震動）と Task 11（時間帯係数）が足す設定を
-        /// ここに OR していくこと。1 つでも ON なら節ごと出す。
+        /// 見えているブロックの行だけを上から詰め直す。
+        /// **構築時と ON/OFF が変わったフレームだけ**呼ぶ（クラス doc）。
         /// </summary>
-        private static bool ShouldShow()
+        private static void Layout()
         {
-            return ModSettings.EarthquakeTsunamiChain.value;
+            bool any = _tsunamiVisible || _longPeriodVisible;
+            float y = _sectionTop;
+
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                var row = _rows[i];
+                if (row.Label == null) continue;
+
+                bool visible = IsBlockVisible(row.Block, any);
+                row.Label.isVisible = visible;
+                if (!visible) continue;
+
+                // 位置だけを動かす。**ラベルの生成も .text の代入もここでは行わない**
+                // （その 2 つは EarthquakeRows の中だけ、という担保を崩さないため）。
+                var p = row.Label.relativePosition;
+                row.Label.relativePosition = new Vector3(p.x, y);
+                y += row.Step;
+            }
+
+            _sectionHeight = y - _sectionTop;
         }
 
-        private static void ApplyVisibility()
+        private static bool IsBlockVisible(int block, bool any)
         {
-            SetVisible(_headerLabel);
-            SetVisible(_tsunamiLabel);
-            SetVisible(_tsunamiNoteLabel);
-        }
-
-        private static void SetVisible(UILabel label)
-        {
-            if (label != null) label.isVisible = _visible;
+            if (block == BlockHeader) return any;
+            if (block == BlockTsunami) return _tsunamiVisible;
+            if (block == BlockLongPeriod) return _longPeriodVisible;
+            return false;
         }
 
         /// <summary>

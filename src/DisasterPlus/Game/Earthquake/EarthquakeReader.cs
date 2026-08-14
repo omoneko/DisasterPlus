@@ -94,8 +94,10 @@ namespace DisasterPlus.Game
 
                 ushort cursorQuakeId;
                 BuildingProbeOutcome cursorProbe;
+                float cursorHeight;
                 var cursorBuilding = ProbeCursorBuilding(quakes, haveCursor, cursor,
-                                                         out cursorQuakeId, out cursorProbe);
+                                                         out cursorQuakeId, out cursorProbe,
+                                                         out cursorHeight);
 
                 // カーソル地点のカバレッジは**地震が 1 個も無くても読む**。
                 // 「ここに地震計は届いているか」は都市の性質であって、
@@ -124,7 +126,8 @@ namespace DisasterPlus.Game
                 //    1 tick 前の状態になる（EarthquakeSnapshot.TsunamiState の doc）。
                 return new EarthquakeSnapshot(quakes, prefab, sim.m_currentFrameIndex,
                                               hour, dayNight, cursorBuilding, cursorQuakeId,
-                                              cursorProbe, cursorCoverage, cursorCoverageValid,
+                                              cursorProbe, cursorHeight,
+                                              cursorCoverage, cursorCoverageValid,
                                               traces, SeismographRecorder.RecordingQuakeId,
                                               TsunamiChain.State, TsunamiChain.DueFrame,
                                               TsunamiChain.QuakeId, true);
@@ -252,10 +255,12 @@ namespace DisasterPlus.Game
         private static BuildingMargin ProbeCursorBuilding(IList<EarthquakeReading> quakes,
                                                           bool haveCursor, Vec3 cursor,
                                                           out ushort cursorQuakeId,
-                                                          out BuildingProbeOutcome outcome)
+                                                          out BuildingProbeOutcome outcome,
+                                                          out float heightMetres)
         {
             cursorQuakeId = 0;
             outcome = BuildingProbeOutcome.NotProbed;
+            heightMetres = 0f;
             if (quakes.Count == 0) return BuildingMargin.None();
 
             // main スレッドが「今カーソルはここ」と言っていないなら何も調べない
@@ -279,7 +284,8 @@ namespace DisasterPlus.Game
             //    （§E-2。BuildingMargin.Evaluate の damageModelReplaced）。
             //    ModCompat.NdrPresent は起動時に 1 回だけ評価してキャッシュされる
             //    ので、ここが毎 tick 走っても PluginManager は舐め直されない。
-            return BuildingProbe.ProbeAt(cursor, target, band, ModCompat.NdrPresent, out outcome);
+            return BuildingProbe.ProbeAt(cursor, target, band, ModCompat.NdrPresent,
+                                         out outcome, out heightMetres);
         }
 
         /// <summary>

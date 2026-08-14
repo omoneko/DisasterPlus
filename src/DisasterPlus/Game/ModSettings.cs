@@ -45,6 +45,8 @@ namespace DisasterPlus.Game
         public static SavedBool EarthquakeShakeBoost;
         public static SavedBool EarthquakeTsunamiChain;
         public static SavedInt EarthquakeTsunamiDelayMinutes;
+        public static SavedBool EarthquakeLongPeriod;
+        public static SavedInt EarthquakeLongPeriodStrength;
 
         public static void Ensure()
         {
@@ -103,6 +105,16 @@ namespace DisasterPlus.Game
             // 範囲外の値が入っていても読み捨てず、そのまま使う——遅延が長いだけで
             // 壊れる値ではない）。
             EarthquakeTsunamiDelayMinutes = new SavedInt("eqTsunamiDelay", FileName, 30, true);
+
+            // ★ 第 2 層。こちらも必ず既定 OFF（上の EarthquakeTsunamiChain と同じ理由）。
+            //    しかも津波より重い —— これは**バニラなら倒れなかった建物を倒す**。
+            //    既定で入れると、プレイヤーは高層ビルが崩れた原因が MOD だと
+            //    気付く手段を持たない（LongPeriodDamage のクラス doc）。
+            EarthquakeLongPeriod = new SavedBool("eqLongPeriod", FileName, false, true);
+            // 0〜10。0 で完全に無効（LongPeriodResponse.ExtraCollapseChance が
+            // 厳密に 0 を返す）。範囲はスライダー側で縛るが、.cgs の値は公開契約なので
+            // 範囲外が入っていても読み捨てず、使う側でクランプする。
+            EarthquakeLongPeriodStrength = new SavedInt("eqLongPeriodStrength", FileName, 3, true);
 
             _ready = true;
         }

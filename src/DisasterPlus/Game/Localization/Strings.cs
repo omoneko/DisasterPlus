@@ -452,5 +452,38 @@ namespace DisasterPlus.Game
         public static string EarthquakeTsunamiNoSea =
             "No sea close enough to this map edge, so no tsunami was raised. This is normal on "
             + "an inland map.";
+
+        // --- ②地震（Task 10: 長周期地震動 ＝ 第 2 層の 2 つ目） ---
+        //
+        // **津波より踏み込んでいる。** 津波はバニラの災害を 1 個起こすだけだったが、
+        // こちらは**バニラなら倒れなかった建物を倒す**。だから:
+        //
+        //   - 設定のラベル（EarthquakeLongPeriodEnabled）自体に
+        //     「バニラには無い被害を足します」と書く。チェックを入れる前に読める場所は
+        //     ここしかない
+        //   - EarthquakeLongPeriodNote は、バニラが建物の高さを揺れにも被害にも
+        //     一切使っていないこと（§A-7 / §A-3）を名乗る。この 1 文が無いと、
+        //     プレイヤーは「高層ほど揺れる」をゲームの仕様だと思う
+        //   - EarthquakeLongPeriodNoHeight は**計画の 6 キー表に無い 7 つ目**である。
+        //     計画 Step 6 は「高さが読めない環境では理由の 1 行だけを出す」と要求して
+        //     いるが、その文言を持つキーが表から漏れていた。既存キーの流用では
+        //     「読めなかった」と「低いので対象外」が同じ文になってしまうので新設した
+
+        public static string EarthquakeLongPeriod = "Long-period ground motion";
+        public static string EarthquakeLongPeriodEnabled =
+            "Enable long-period ground motion (adds damage vanilla never does)";
+        public static string EarthquakeLongPeriodStrength = "Long-period strength (0 = off)";
+        public static string EarthquakeLongPeriodNote =
+            "Vanilla ignores building height entirely, both in the shaking and in the damage. "
+            + "This is a model Disaster + invented, not something the game computes.";
+        public static string EarthquakeLongPeriodNoHeight =
+            "This building's height could not be read, so no long-period damage is applied to it. "
+            + "The mod never guesses a height.";
+        public static string EarthquakeBuildingHeight = "Building height";
+        public static string EarthquakeResonance = "Resonance";
+        // 計画の 6 キー表に無い 8 つ目。計画自身が示している行の見本
+        // （「追加倒壊リスク 6.4%」）に必要な語で、表から漏れていた。
+        // 裸の「+3.1%」だけを出すと、何の確率なのかがどの言語でも読めない。
+        public static string EarthquakeLongPeriodRisk = "extra collapse risk";
     }
 }

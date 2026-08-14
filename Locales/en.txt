@@ -143,3 +143,11 @@ EarthquakeTsunamiPending = Tsunami expected in
 EarthquakeTsunamiRaised = Tsunami raised
 EarthquakeTsunamiFromShore = The wave arrives from the sea nearest the epicentre, not from the epicentre itself. The game can only start a tsunami at the map edge.
 EarthquakeTsunamiNoSea = No sea close enough to this map edge, so no tsunami was raised. This is normal on an inland map.
+EarthquakeLongPeriod = Long-period ground motion
+EarthquakeLongPeriodEnabled = Enable long-period ground motion (adds damage vanilla never does)
+EarthquakeLongPeriodStrength = Long-period strength (0 = off)
+EarthquakeLongPeriodNote = Vanilla ignores building height entirely, both in the shaking and in the damage. This is a model Disaster + invented, not something the game computes.
+EarthquakeLongPeriodNoHeight = This building's height could not be read, so no long-period damage is applied to it. The mod never guesses a height.
+EarthquakeBuildingHeight = Building height
+EarthquakeResonance = Resonance
+EarthquakeLongPeriodRisk = extra collapse risk

@@ -116,6 +116,16 @@ namespace DisasterPlus.Game
                 earthquake.AddSlider(Strings.EarthquakeTsunamiDelay, 5f, 120f, 5f,
                     ModSettings.EarthquakeTsunamiDelayMinutes.value,
                     v => ModSettings.EarthquakeTsunamiDelayMinutes.value = (int)v);
+
+                // ★ 長周期地震動。**既定 OFF。** 津波と違い、これは
+                //    「バニラなら倒れなかった建物を倒す」ので、チェックボックスの
+                //    ラベル自体にその事実を書く（Strings.EarthquakeLongPeriodEnabled）。
+                earthquake.AddCheckbox(Strings.EarthquakeLongPeriodEnabled,
+                    ModSettings.EarthquakeLongPeriod.value,
+                    v => ModSettings.EarthquakeLongPeriod.value = v);
+                earthquake.AddSlider(Strings.EarthquakeLongPeriodStrength, 0f, 10f, 1f,
+                    ModSettings.EarthquakeLongPeriodStrength.value,
+                    v => ModSettings.EarthquakeLongPeriodStrength.value = (int)v);
             }
 
             earthquake.AddButton(Strings.EarthquakeResetButton, delegate
@@ -128,6 +138,13 @@ namespace DisasterPlus.Game
             // 足すだけで、強度 55（バニラ既定）では追加分が厳密に 0 になる（§A-7）。
             // 注記の出し方は IntensityUnlockHandledByOther と同じ（root への AddGroup）。
             helper.AddGroup(Strings.EarthquakeShakeBoostNote);
+
+            // 長周期地震動が「バニラのどこにも無い量」であることを、設定画面でも名乗る。
+            // パネルの第 2 層の注記と同じ文（EarthquakeLongPeriodNote）。
+            if (ModCompat.NaturalDisastersOwned)
+            {
+                helper.AddGroup(Strings.EarthquakeLongPeriodNote);
+            }
 
             // ②は機能そのものが DLC 依存（EarthquakeAI のプレハブが存在しない）。
             // ForecastHazardNeedsDlc / FireWhirlNeedsDlc と同じ形で理由を書く。
