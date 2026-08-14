@@ -56,7 +56,7 @@ namespace DisasterPlus.Game
                 bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
                 if (ctrl)
                 {
-                    // Task 6: DiagnosticDump.Write() をここで呼ぶ。
+                    DiagnosticDump.Write();
                 }
                 else
                 {

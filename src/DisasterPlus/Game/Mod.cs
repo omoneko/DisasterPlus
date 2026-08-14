@@ -21,6 +21,24 @@ namespace DisasterPlus.Game
             LocaleLoader.Apply();
             ModSettings.Ensure();
 
+            // Assumptions はレベルロード後に走るので、初回起動時はまだ空。
+            // つまり警告は「一度都市を読み込んだ後、次にオプションを開いたとき」に出る。
+            // OnSettingsUI はメインメニュー起動時に 1 回しか走らないため、これは避けられない。
+            var failures = Assumptions.LastResults;
+            bool anyFailed = false;
+            for (int i = 0; i < failures.Count; i++) { if (!failures[i].Passed) anyFailed = true; }
+
+            if (anyFailed)
+            {
+                var warn = helper.AddGroup(Strings.AssumptionsFailedTitle);
+                for (int i = 0; i < failures.Count; i++)
+                {
+                    if (failures[i].Passed) continue;
+                    warn.AddGroup("- " + failures[i].Impact);
+                }
+                warn.AddGroup(Strings.AssumptionsFailedHint);
+            }
+
             if (ModCompat.NaturalDisastersOwned)
             {
                 var fw = helper.AddGroup(Strings.GroupFireWhirl);
@@ -73,6 +91,38 @@ namespace DisasterPlus.Game
                 compat.AddDropdown(Strings.EarthquakeDamageOwner, owners, current,
                     v => ModSettings.EarthquakeDamageOwner.value = v);
             }
+
+            var dbg = helper.AddGroup(Strings.GroupDebug);
+            dbg.AddCheckbox(Strings.OverlayEnabled, ModSettings.OverlayEnabled.value,
+                v => ModSettings.OverlayEnabled.value = v);
+
+            // ラベル配列は static にしないこと。型初期化時の言語で凍結する。
+            string[] keys = { "F9", "F10", "F11", "F12" };
+            int[] codes = { (int)UnityEngine.KeyCode.F9, (int)UnityEngine.KeyCode.F10,
+                            (int)UnityEngine.KeyCode.F11, (int)UnityEngine.KeyCode.F12 };
+            int current2 = 2;
+            for (int i = 0; i < codes.Length; i++)
+                if (codes[i] == ModSettings.OverlayHotkey.value) current2 = i;
+
+            dbg.AddDropdown(Strings.OverlayHotkey, keys, current2,
+                v => ModSettings.OverlayHotkey.value = codes[v]);
+
+            // Assembly-CSharp にも同名の LogChannel (ゲーム側の別物) があるため、
+            // using を足すと解決が衝突する。常に完全修飾で参照する。
+            var channels = dbg.AddGroup(Strings.LogChannels);
+            channels.AddCheckbox(Strings.LogChannelGeneral,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.General, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.General)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.General));
+
+            channels.AddCheckbox(Strings.LogChannelFireWhirl,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.FireWhirl, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.FireWhirl)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.FireWhirl));
         }
     }
 }

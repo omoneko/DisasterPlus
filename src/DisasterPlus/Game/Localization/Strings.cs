@@ -40,5 +40,16 @@ namespace DisasterPlus.Game
 
         public static string FireWhirlNeedsDlc =
             "Fire whirls require the Natural Disasters DLC.";
+
+        public static string GroupDebug = "Debug";
+        public static string OverlayEnabled = "Enable diagnostic overlay";
+        public static string OverlayHotkey = "Overlay hotkey (Ctrl + key writes a dump file)";
+        public static string LogChannels = "Verbose log channels";
+        public static string LogChannelGeneral = "General";
+        public static string LogChannelFireWhirl = "Fire whirl";
+
+        public static string AssumptionsFailedTitle = "Some features are unavailable";
+        public static string AssumptionsFailedHint =
+            "Load a city once, then reopen this page to refresh.";
     }
 }

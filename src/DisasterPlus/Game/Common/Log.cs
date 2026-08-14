@@ -45,5 +45,32 @@ namespace DisasterPlus.Game
         {
             _lastDiag.Clear();
         }
+
+        /// <summary>
+        /// チャンネル付きの診断ログ。マスクで無効なら何も出さない。
+        ///
+        /// 既存の Diag(key, message) は General 扱いのまま残してある。
+        /// 本フェーズで既存呼び出しを機能チャンネルへ移行しないこと。移行すると
+        /// 既定 OFF になり、docs/playtest-checklist.md の手順が壊れる。
+        /// </summary>
+        public static void Diag(int channel, string key, string message)
+        {
+            if (!DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(channel, CurrentMask())) return;
+            Diag(key, message);
+        }
+
+        private static int CurrentMask()
+        {
+            try
+            {
+                ModSettings.Ensure();
+                return ModSettings.LogChannelMask.value;
+            }
+            catch
+            {
+                // 設定がまだ用意できていない場面でもログで落ちない。
+                return DisasterPlus.Core.Diagnostics.LogChannel.DefaultMask;
+            }
+        }
     }
 }

@@ -35,6 +35,7 @@ namespace DisasterPlus.Game
         public static SavedInt EarthquakeDamageOwner;
         public static SavedBool OverlayEnabled;
         public static SavedInt OverlayHotkey;
+        public static SavedInt LogChannelMask;
 
         public static void Ensure()
         {
@@ -62,6 +63,8 @@ namespace DisasterPlus.Game
             // 診断オーバーレイ。既定は OFF（開発者向け機能なので一般プレイヤーには出さない）。
             OverlayEnabled        = new SavedBool("diagOverlayEnabled", FileName, false, true);
             OverlayHotkey         = new SavedInt("diagOverlayHotkey", FileName, (int)KeyCode.F11, true);
+            LogChannelMask        = new SavedInt("diagLogChannels", FileName,
+                                                  DisasterPlus.Core.Diagnostics.LogChannel.DefaultMask, true);
 
             _ready = true;
         }

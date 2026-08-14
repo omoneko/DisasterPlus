@@ -47,7 +47,7 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>MOD の配置フォルダ。Workshop 版とローカル版の両方に対応する。</summary>
-        private static string ModDirectory()
+        public static string ModDirectoryPath()
         {
             foreach (var p in PluginManager.instance.GetPluginsInfo())
             {
@@ -91,7 +91,7 @@ namespace DisasterPlus.Game
                 // If we set it early and then a later step throws (locked file, transient I/O,
                 // PluginManager not ready yet), "if (lang == _appliedLanguage) return;" above would
                 // permanently skip retrying that language for the rest of the session.
-                string dir = ModDirectory();
+                string dir = ModDirectoryPath();
                 if (dir == null) return;   // couldn't resolve our own mod dir yet; retry next call
 
                 string path = Path.Combine(Path.Combine(dir, "Locales"), lang + ".txt");
