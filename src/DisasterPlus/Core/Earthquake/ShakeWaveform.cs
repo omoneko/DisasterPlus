@@ -66,13 +66,89 @@ namespace DisasterPlus.Core.Earthquake
             return elapsedPlusOffset > 0 && elapsedPlusOffset < activeDuration;
         }
 
+        /// <summary>
+        /// 変位が理論上取りうる絶対値の上限 ＝ <c>|sin + sin| ≦ 2</c> 倍の
+        /// <see cref="BaseAmplitude"/>。距離 0・包絡線の頂点で到達する 0.6。
+        ///
+        /// 波形の最大振幅をバー表示するときの**満目盛り**はこれである。
+        /// 局所係数 s（0-1）の目盛りを流用すると、実際には 0.6 までしか伸びない値を
+        /// 0-1 の尺度で描くことになり、隣の s のバーと見た目が揃わない。
+        /// </summary>
+        public const float MaxDisplacement = 2f * BaseAmplitude;
+
+        /// <summary>
+        /// 包絡線を掛ける**前**の振幅（IL_0069: <c>amp = 0.3f / (1f + v.magnitude * 0.001f)</c>）。
+        ///
+        /// **これがバニラの「揺れ」そのものであり、半径による打ち切りは無い**（§A-7）。
+        /// 全体円盤の <c>R = 2000 + 20i</c> は倒壊・出火の判定範囲であって、
+        /// 揺れの範囲ではない。10 km 離れていても震央の 9% で揺れ続ける。
+        ///
+        /// バニラはこの distance を**カメラから**測る。呼び出し側が震央からの距離を
+        /// 渡す場合、それは同じ式の別評価であって近似ではない（設計書 §3.5）。
+        /// その差は UI に必ず書くこと。
+        /// </summary>
+        public static float PeakAmplitudeAt(float distance)
+        {
+            if (float.IsNaN(distance)) return 0f;
+            if (distance < 0f) distance = 0f;
+            return BaseAmplitude / (1f + distance * DistanceFalloff);
+        }
+
+        /// <summary>
+        /// 変位（あるいはその最大値）を 0-1 の目盛りに写す。満目盛りは
+        /// <see cref="MaxDisplacement"/>。バー表示の入力にのみ使い、
+        /// **数値そのものは正規化前の値を出すこと**。
+        /// </summary>
+        public static float NormalisedDisplacement(float value)
+        {
+            if (float.IsNaN(value)) return 0f;
+            if (value < 0f) value = -value;
+            float n = value / MaxDisplacement;
+            return n > 1f ? 1f : n;
+        }
+
+        /// <summary>
+        /// 前回サンプルしたフレームと今のフレームから、**今回埋めるべき最初のフレーム**を返す。
+        ///
+        /// ── なぜ 1 tick に 1 サンプルでは足りないのか ──────────────────────
+        ///
+        /// <c>SimulationManager.m_currentFrameIndex</c> は 1 sim tick で
+        /// <c>FinalSimulationSpeed</c>（ゲーム速度 1/2/3 で 1/3/9）進む。一方
+        /// 揺れの主成分は 0.63 rad/frame（周期 ≒10 フレーム）なので、
+        /// **9 フレームおきに 1 点だけ取ると周期 ≒92 フレームの偽の波**に化ける
+        /// （エイリアシング）。しかもその見た目は「長周期地震動」そのもので、
+        /// §A-7 は**バニラに長周期成分は無い**と確定させている。つまり第 1 層の
+        /// グラフが、第 2 層でしか足せないはずの現象を描いてしまう。
+        ///
+        /// <see cref="DisplacementAt"/> は e の閉じた式なので、tick の中の各フレームで
+        /// 評価するのは 1 回評価するのとまったく同じ「実測」である。飛んだぶんを
+        /// 埋めれば標本化定理を満たす（周期 10 フレームに対し 1 フレーム間隔）。
+        ///
+        /// <paramref name="maxSubSamples"/> はゲーム速度 3 の 9 で足りるが、
+        /// 保存データやポーズ跨ぎで frame が大きく飛ぶことがあるので上限として使う
+        /// （飛びすぎたぶんは埋めずに捨てる —— 貯めても窓の外である）。
+        /// </summary>
+        public static uint FirstUnsampledFrame(uint lastSampledFrame, bool hasLastSample,
+                                               uint currentFrame, int maxSubSamples)
+        {
+            if (maxSubSamples < 1) maxSubSamples = 1;
+
+            uint oldest = currentFrame >= (uint)(maxSubSamples - 1)
+                ? currentFrame - (uint)(maxSubSamples - 1)
+                : 0u;
+
+            if (!hasLastSample || lastSampledFrame >= currentFrame) return currentFrame;
+
+            uint next = lastSampledFrame + 1u;
+            return next < oldest ? oldest : next;
+        }
+
         /// <summary>包絡線込みの振幅。<paramref name="t"/> はフレーム（小数を含む）。</summary>
         public static float AmplitudeAt(float distance, float t)
         {
             if (float.IsNaN(distance) || float.IsNaN(t)) return 0f;
-            if (distance < 0f) distance = 0f;
 
-            float amp = BaseAmplitude / (1f + distance * DistanceFalloff);
+            float amp = PeakAmplitudeAt(distance);
             amp *= 0.5f - 0.5f * (float)System.Math.Cos(t * EnvelopeRate);
             return amp < 0f ? 0f : amp;
         }

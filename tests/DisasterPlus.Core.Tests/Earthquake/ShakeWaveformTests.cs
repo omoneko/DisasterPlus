@@ -95,5 +95,95 @@ namespace DisasterPlus.Core.Tests.Earthquake
             // m_activeDuration が読めていない（0）ときは常に false。
             Assert.False(ShakeWaveform.IsShaking(1, 0u));
         }
+
+        // ── 揺れの振幅そのもの（全体レビュー C3）────────────────────────
+
+        [Fact]
+        public void PeakAmplitudeIsTheVanillaAmpBeforeTheEnvelope()
+        {
+            // IL_0069: amp = 0.3f / (1f + dist * 0.001f)。包絡線の頂点で一致する。
+            float t = ShakeWaveform.EnvelopePeriodFrames / 2f;
+            foreach (float d in new[] { 0f, 250f, 1000f, 9000f })
+            {
+                Assert.Equal(ShakeWaveform.PeakAmplitudeAt(d), ShakeWaveform.AmplitudeAt(d, t), 4);
+            }
+        }
+
+        [Fact]
+        public void ShakingHasNoRadiusCutOff()
+        {
+            // **これが C3 の核心。** 全体円盤の R（強度 55 で 3100 m）を超えても
+            // 揺れは 0 にならない。10 km で震央の 9% 前後。
+            float epicentre = ShakeWaveform.PeakAmplitudeAt(0f);
+            float tenKm = ShakeWaveform.PeakAmplitudeAt(10000f);
+            Assert.True(tenKm > 0f, "vanilla's shaking never cuts off with distance");
+            Assert.Equal(1f / 11f, tenKm / epicentre, 4);
+        }
+
+        // ── バーの満目盛り（全体レビュー I4）───────────────────────────
+
+        [Fact]
+        public void MaxDisplacementIsTwiceTheBaseAmplitude()
+        {
+            Assert.Equal(0.6f, ShakeWaveform.MaxDisplacement, 4);
+
+            // 実際の変位がこれを超えないこと（超えると正規化が 1 で頭打ちになる）。
+            for (float t = 0f; t < 1024f; t += 0.31f)
+            {
+                Assert.True(System.Math.Abs(ShakeWaveform.DisplacementAt(0f, t))
+                            <= ShakeWaveform.MaxDisplacement + 1e-4f);
+            }
+        }
+
+        [Fact]
+        public void NormalisedDisplacementFillsTheBarOnlyAtTheTheoreticalMaximum()
+        {
+            Assert.Equal(0f, ShakeWaveform.NormalisedDisplacement(0f), 4);
+            Assert.Equal(0.5f, ShakeWaveform.NormalisedDisplacement(0.3f), 4);
+            Assert.Equal(1f, ShakeWaveform.NormalisedDisplacement(ShakeWaveform.MaxDisplacement), 4);
+            // 符号は落とす（バーは大きさだけを見る）。
+            Assert.Equal(0.5f, ShakeWaveform.NormalisedDisplacement(-0.3f), 4);
+            // 上限で頭打ち。
+            Assert.Equal(1f, ShakeWaveform.NormalisedDisplacement(99f), 4);
+        }
+
+        // ── サンプリング間隔（全体レビュー I5）───────────────────────────
+
+        [Fact]
+        public void FirstUnsampledFrameFillsTheGapLeftByTheSimulationSpeed()
+        {
+            // 速度 3 では m_currentFrameIndex が 9 ずつ飛ぶ。飛んだ 9 フレームを
+            // 全部埋めないと、周期 10 フレームの主成分が偽の長周期波に折り返す。
+            Assert.Equal(1001u, ShakeWaveform.FirstUnsampledFrame(1000u, true, 1009u, 9));
+            // 速度 1（1 フレームずつ）なら、その 1 フレームだけ。
+            Assert.Equal(1001u, ShakeWaveform.FirstUnsampledFrame(1000u, true, 1001u, 9));
+        }
+
+        [Fact]
+        public void FirstUnsampledFrameNeverExceedsTheSubSampleBudget()
+        {
+            // ポーズやセーブ跨ぎで大きく飛んだときは、窓の外まで遡らない。
+            Assert.Equal(1992u, ShakeWaveform.FirstUnsampledFrame(10u, true, 2000u, 9));
+        }
+
+        [Fact]
+        public void FirstUnsampledFrameTakesOnlyTheCurrentFrameWithoutHistory()
+        {
+            // フレーム 0 は実在しうるので、「まだ 1 件も取っていない」を 0 で表さない。
+            Assert.Equal(500u, ShakeWaveform.FirstUnsampledFrame(0u, false, 500u, 9));
+            // 同じフレームで 2 回呼ばれても遡らない（重複サンプルを作らない）。
+            Assert.Equal(500u, ShakeWaveform.FirstUnsampledFrame(500u, true, 500u, 9));
+            Assert.Equal(500u, ShakeWaveform.FirstUnsampledFrame(900u, true, 500u, 9));
+        }
+
+        [Fact]
+        public void FirstUnsampledFrameIsSafeNearFrameZero()
+        {
+            Assert.Equal(0u, ShakeWaveform.FirstUnsampledFrame(0u, false, 0u, 9));
+            // frame 0 を既に取っているなら 1 から。予算より手前なので遡り制限は効かない。
+            Assert.Equal(1u, ShakeWaveform.FirstUnsampledFrame(0u, true, 3u, 9));
+            // 予算 1 なら常に現在フレームだけ（＝以前の挙動）。
+            Assert.Equal(1009u, ShakeWaveform.FirstUnsampledFrame(1000u, true, 1009u, 1));
+        }
     }
 }
