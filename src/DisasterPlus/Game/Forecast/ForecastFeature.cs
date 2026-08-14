@@ -135,6 +135,9 @@ namespace DisasterPlus.Game
             b.Line(1, "button position", ModSettings.ForecastButtonX.value + ","
                 + ModSettings.ForecastButtonY.value + "  (" + placement + ")");
 
+            // sim スレッドから main の持ち物を読んでいるが、これは InfoModeSwitch の
+            // クラス doc が IL 実測つきで明示的に許可している唯一の例外である
+            // （get_CurrentMode は単一フィールドの読み出しで、最悪でも 1 tick 古い値）。
             b.Line(1, "showing hazard view", InfoModeSwitch.IsShowingHazard ? "yes" : "no");
 
             // ハザードの半分は DLC 依存（I2）。無い環境では「マップに表示」も
