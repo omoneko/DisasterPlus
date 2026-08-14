@@ -29,9 +29,30 @@ namespace DisasterPlus.Game
         private const string SliderCheckName = "Disasters panel intensity slider is reachable";
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
+        /// <summary>
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 4 件 ＋
+        /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
+        /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
+        /// </summary>
+        private const int TotalCheckCount = 5;
+
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
         private static bool _ran;
+
+        /// <summary>
+        /// _results が前の都市のものか。Reset() で立て、この都市で最初の結果を
+        /// 書き込むときに SetResult が捨てる（＝遅延クリア）。
+        ///
+        /// 「Run() の先頭でクリア」にはできない。ReportSliderOutcome() は
+        /// FeatureHost.LevelLoaded() → IntensityUnlock.Apply() の経路で
+        /// Assumptions.Run() より先に走ることがあり（DisasterPlusLoading の呼び出し順）、
+        /// Run() の先頭で消すとその 1 件だけ黙って失われる。
+        /// 「次の書き込みで消す」なら、どちらが先でも積み増しにならず、
+        /// かつメインメニューでは前の都市の結果が残る。
+        /// _gate の内側でだけ触ること。
+        /// </summary>
+        private static bool _stale;
 
         /// <summary>呼び出し元がリストを保持し続けても _results の以後の変更から保護されるよう、
         /// 常に防御的コピーを返す。</summary>
@@ -43,10 +64,22 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>
+        /// レベルアンロード時に呼ぶ。次のロードで Run() を再実行できるようにするだけで、
+        /// 結果は消さない。
+        ///
+        /// ここで _results を消してはいけない。OnSettingsUI（設計書 4.4 が要求する
+        /// 3 つの出力先のひとつ）はメインメニューで走る＝必ずこの Reset() より後になるため、
+        /// ここで消すと LastResults は常に空になり、設定画面の前提警告が原理的に
+        /// 出せなくなる（Strings.AssumptionsFailedHint が案内している手順そのものが
+        /// 何も表示しない手順になる）。
+        /// 前の都市の結果はメインメニューまで持ち越す。積み増しにならないよう、
+        /// 次の都市で最初に結果が書かれた時点で SetResult がまとめて捨てる（_stale 参照）。
+        /// </summary>
         public static void Reset()
         {
-            lock (_gate) { _results.Clear(); }
             _ran = false;
+            lock (_gate) { _stale = true; }
         }
 
         /// <summary>
@@ -159,11 +192,20 @@ namespace DisasterPlus.Game
 
         /// <summary>同名の既存結果があれば置き換える。Run() の 4 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
-        /// 常に最新・単一の結果だけが残るようにする。</summary>
+        /// 常に最新・単一の結果だけが残るようにする。
+        ///
+        /// 前の都市の結果はここで（この都市の最初の書き込み時に）まとめて捨てる。
+        /// _stale の説明を参照。</summary>
         private static void SetResult(AssumptionResult result)
         {
             lock (_gate)
             {
+                if (_stale)
+                {
+                    _results.Clear();
+                    _stale = false;
+                }
+
                 for (int i = 0; i < _results.Count; i++)
                 {
                     if (_results[i].Name == result.Name) { _results.RemoveAt(i); break; }
@@ -193,12 +235,24 @@ namespace DisasterPlus.Game
             var snapshot = LastResults;
 
             int passed = 0, failed = 0;
+            bool sliderSettled = false;
             for (int i = 0; i < snapshot.Count; i++)
             {
                 if (snapshot[i].Passed) passed++; else failed++;
+                if (snapshot[i].Name == SliderCheckName) sliderSettled = true;
             }
 
-            Log.Info("ASSUMPTIONS  " + passed + " passed, " + failed + " FAILED");
+            // 未確定の検証があるまま「4 passed, 0 FAILED」とだけ出すと、
+            // 「全部通った」と読める。本基盤が消したいのは、まさにその
+            // 「信じたが実は違う出力」なので、母数を必ず名乗る。
+            string summary = "ASSUMPTIONS  " + passed + " passed, " + failed + " FAILED";
+            if (!sliderSettled)
+            {
+                summary = "ASSUMPTIONS  " + snapshot.Count + " of " + TotalCheckCount
+                          + " checks: " + passed + " passed, " + failed
+                          + " FAILED  (slider check pending)";
+            }
+            Log.Info(summary);
             for (int i = 0; i < snapshot.Count; i++)
             {
                 LogResult(snapshot[i]);
