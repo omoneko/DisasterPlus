@@ -74,7 +74,17 @@ namespace DisasterPlus.Game
             if (_applied || _gaveUp) return;
 
             ModSettings.Ensure();
-            if (!ModSettings.IntensityUnlock.value) { _gaveUp = true; return; }
+            if (!ModSettings.IntensityUnlock.value)
+            {
+                // 設定でこの機能を切っている＝前提が破れたわけではない。
+                // ただし黙って諦めてはいけない。NDR を検出した環境ではこれが既定値
+                // （ModSettings: IntensityUnlock の既定は !NdrPresent）なので、
+                // 何も報告しないと「スライダー検証は保留中」が永久に残り、
+                // 検証の母数まで狂ったままになる。「対象外」として確定させる。
+                _gaveUp = true;
+                Assumptions.ReportSliderNotApplicable();
+                return;
+            }
 
             if (++_attempts > MaxAttempts)
             {

@@ -33,12 +33,26 @@ namespace DisasterPlus.Game
         /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 4 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
+        ///
+        /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
+        /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
         private const int TotalCheckCount = 5;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
         private static bool _ran;
+
+        /// <summary>
+        /// スライダー検証が「この環境では対象外」に確定したか。
+        ///
+        /// 設定で強度解放を切っている環境では、そもそも検証すべき前提が無い。
+        /// これは NDR を検出した環境の既定値なので、「保留中」のまま放置すると
+        /// 該当ユーザーには永久に未確定の集計が出続ける。母数から外して
+        /// 「4 件中 4 件」と正直に名乗るのがこちらの選択。
+        /// Run() / Reset() / ReportSlider* と同じく main スレッド専用（_ran と同じ扱い）。
+        /// </summary>
+        private static bool _sliderNotApplicable;
 
         /// <summary>
         /// _results が前の都市のものか。Reset() で立て、この都市で最初の結果を
@@ -79,6 +93,7 @@ namespace DisasterPlus.Game
         public static void Reset()
         {
             _ran = false;
+            _sliderNotApplicable = false;
             lock (_gate) { _stale = true; }
         }
 
@@ -133,7 +148,8 @@ namespace DisasterPlus.Game
         /// 「わかった時点で」名指しの結果を残す・ログに出すのが、この検証項目の
         /// 誤報（false FAIL）を避ける唯一の方法。設定でこの機能自体を無効にした
         /// 場合（_gaveUp だが ModSettings.IntensityUnlock.value == false）は
-        /// 前提が破れたわけではないので、ここは呼ばれない（IntensityUnlock 側で除外）。
+        /// 前提が破れたわけではないので、ここではなく
+        /// <see cref="ReportSliderNotApplicable"/> を呼ぶこと。
         /// </summary>
         public static void ReportSliderOutcome(bool reachable)
         {
@@ -141,6 +157,18 @@ namespace DisasterPlus.Game
                 SliderCheckName, reachable, reachable ? "" : SliderCheckImpact);
             SetResult(result);
             LogResult(result);
+        }
+
+        /// <summary>
+        /// 強度解放を設定で切っているため、スライダー検証がこの環境では対象外だと確定させる。
+        ///
+        /// PASS を publish してはいけない（通っていない前提を通ったと名乗ることになる）。
+        /// 代わりに母数から外し、集計行にその旨を書く。
+        /// </summary>
+        public static void ReportSliderNotApplicable()
+        {
+            _sliderNotApplicable = true;
+            Log.Info("  n/a   " + SliderCheckName + " (intensity unlock is off in settings)");
         }
 
         private static bool VortexStepIsPatched()
@@ -245,10 +273,23 @@ namespace DisasterPlus.Game
             // 未確定の検証があるまま「4 passed, 0 FAILED」とだけ出すと、
             // 「全部通った」と読める。本基盤が消したいのは、まさにその
             // 「信じたが実は違う出力」なので、母数を必ず名乗る。
-            string summary = "ASSUMPTIONS  " + passed + " passed, " + failed + " FAILED";
-            if (!sliderSettled)
+            //
+            // 「対象外」は未確定ではない。母数から外して確定扱いにする。
+            // 外さないと、NDR を検出した環境（強度解放が既定で OFF）では
+            // 永久に「slider check pending」が出続けることになる。
+            int total = _sliderNotApplicable ? TotalCheckCount - 1 : TotalCheckCount;
+            string summary;
+            if (sliderSettled || _sliderNotApplicable)
             {
-                summary = "ASSUMPTIONS  " + snapshot.Count + " of " + TotalCheckCount
+                summary = "ASSUMPTIONS  " + passed + " passed, " + failed + " FAILED";
+                if (_sliderNotApplicable)
+                {
+                    summary += "  (" + total + " checks; slider check n/a: intensity unlock is off)";
+                }
+            }
+            else
+            {
+                summary = "ASSUMPTIONS  " + snapshot.Count + " of " + total
                           + " checks: " + passed + " passed, " + failed
                           + " FAILED  (slider check pending)";
             }
