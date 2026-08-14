@@ -23,7 +23,7 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class FireWhirlPanelButton
     {
-        private const string ButtonName = "DisasterPlusFireWhirlButton";
+        private const string ButtonName = FreeSlotFinder.SelfPrefix + "FireWhirlButton";
 
         /// <summary>再試行の間隔（main スレッド更新の回数）。シーン全体の走査は毎フレーム回すには重い。</summary>
         private const int RetryIntervalFrames = 120;
