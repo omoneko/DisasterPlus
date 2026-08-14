@@ -104,9 +104,16 @@ namespace DisasterPlus.Game
                     && TryReadCoverage(new Vector3(cursor.X, cursor.Y, cursor.Z),
                                        out cursorCoverage);
 
+                // 波形は**前の tick までに貯まったもの**である。今 tick ぶんの
+                // サンプリングは EarthquakeFeature がポーズガードより下で行うので、
+                // ここで読めるのは常に 1 tick 前までの状態になる（BuildingProbe の
+                // カーソル追従と同じ性質の、設計上の遅延）。
+                var traces = SeismographRecorder.Snapshot();
+
                 return new EarthquakeSnapshot(quakes, prefab, sim.m_currentFrameIndex,
                                               hour, dayNight, cursorBuilding, cursorQuakeId,
-                                              cursorCoverage, cursorCoverageValid, true);
+                                              cursorCoverage, cursorCoverageValid,
+                                              traces, SeismographRecorder.RecordingQuakeId, true);
             }
             catch (System.Exception e)
             {

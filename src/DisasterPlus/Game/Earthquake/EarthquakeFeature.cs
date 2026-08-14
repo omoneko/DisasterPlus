@@ -29,6 +29,7 @@ namespace DisasterPlus.Game
             EarthquakeHub.Clear();
             EarthquakeReader.Reset();
             CameraShakeBooster.Reset();
+            SeismographRecorder.Reset();
         }
 
         /// <summary>
@@ -67,6 +68,11 @@ namespace DisasterPlus.Game
             //    このコメントを消すと「ポーズ中に地震の被害が進む」が起きる。
             if (deltaMinutes <= 0f) return;
 
+            // 地震計の位置で 1 サンプル取る。**必ずポーズガードより下**。
+            // ポーズ中はゲーム内時間が進んでいないので地動も進んでおらず、
+            // ここで貯め続けると波形だけが伸びる嘘になる。
+            SeismographRecorder.Sample(snapshot, frameIndex);
+
             // （Task 9: TsunamiChain.Tick / Task 10: LongPeriodDamage.Apply がここに入る）
         }
 
@@ -90,7 +96,12 @@ namespace DisasterPlus.Game
             // 揺れの加算を止める。バニラが毎フレーム m_cameraShake をゼロに戻すので、
             // ここで止めれば残留オフセットは残らない（§A-7）。
             CameraShakeBooster.Reset();
+            // 波形は**セーブにも次の都市にも持ち越さない**（設計書 §3.5）。
+            SeismographRecorder.Reset();
             // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
+            // EarthquakePanel.Destroy() が波形テクスチャ（Texture2D）も破棄する
+            // —— GameObject と違って Unity は勝手に回収しないので、これを
+            // 忘れると都市をまたぐたびに 320x80 のテクスチャが 1 枚ずつ残る。
             EarthquakePanelButton.Remove();
             EarthquakePanel.Destroy();
         }
@@ -116,7 +127,47 @@ namespace DisasterPlus.Game
             WriteShakeBoost(b, snapshot);
             WriteSimClock(b, snapshot);
             WriteSensorCoverage(b, snapshot);
+            WriteWaveform(b, snapshot);
             WriteQuakes(b, snapshot);
+        }
+
+        /// <summary>
+        /// 波形の観測状態。**「グラフが出ない」の切り分けはここでしかできない。**
+        /// 出ない理由は 4 通りあり（記録対象の地震が無い／地震計が 0 個／
+        /// サンプルがまだ 0 件／描画経路が使えない）、画面上はどれも「絵が無い」で
+        /// 同じ顔になる。
+        ///
+        /// <c>rendering</c> の行は main スレッドが書いた値をここ（sim スレッド）で
+        /// 読んでいる。構築時に 1 回決まったきり変わらない bool なので、
+        /// スナップショット経路には載せていない（<c>CameraShakeBooster.LastAdded</c>
+        /// と同じ判断）。
+        /// </summary>
+        private static void WriteWaveform(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
+        {
+            var traces = snapshot.Traces;
+
+            b.Line(1, "waveform", snapshot.WaveformQuakeId == 0
+                ? "not recording (no Emerging/Active quake)"
+                : "recording quake #" + snapshot.WaveformQuakeId
+                  + ", " + traces.Count + " observation point(s)"
+                  + (traces.Count == 0
+                      ? "  (no Earthquake Sensor exists; the game keeps no ground-motion history "
+                        + "of its own, so there is nothing else to plot)"
+                      : ""));
+
+            b.Line(2, "rendering", WaveformView.Available
+                ? "UITextureSprite + Texture2D"
+                : "unavailable (falls back to the peak amplitude row)");
+
+            for (int i = 0; i < traces.Count; i++)
+            {
+                var t = traces[i];
+                b.Line(2, "#" + t.BuildingId,
+                    "distance=" + t.DistanceToEpicentre.ToString("F0") + "m"
+                    + " samples=" + t.Count
+                    + " newestFrame=" + t.NewestFrame
+                    + " peak=" + t.PeakAbsolute.ToString("F3"));
+            }
         }
 
         /// <summary>

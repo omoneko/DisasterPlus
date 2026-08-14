@@ -143,11 +143,39 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly bool CursorCoverageValid;
 
+        /// <summary>
+        /// 地震計の位置で観測した地動の波形。**震央に近い順**に並ぶ（先頭が最も近い）。
+        ///
+        /// これは<b>ゲーム内のセンサーが計測した値ではない</b> ——
+        /// <c>EarthquakeSensorAI</c> は時系列データを一切持たない（§C-1）。
+        /// この MOD が**バニラ自身の揺れの式**（§A-7）を地震計の位置で評価して
+        /// 貯めたものである（<see cref="SeismographRecorder"/> のクラス doc）。
+        ///
+        /// 空になるのは 2 通りで、**表示側はこれを言い分けること**:
+        ///   - <see cref="WaveformQuakeId"/> == 0 … そもそも記録していない（地震が無い）
+        ///   - <see cref="WaveformQuakeId"/> != 0 … 記録対象の地震はあるが地震計が 0 個
+        ///
+        /// さらに「観測点はあるがサンプルが 0 件」（本震前で揺れの窓がまだ開いていない）は
+        /// <c>SeismographTrace.Count == 0</c> で表す。**空のグラフと平らなグラフは
+        /// 別の意味**なので、0 件を「変位 0」として描いてはいけない。
+        /// </summary>
+        public readonly IList<SeismographTrace> Traces;
+
+        /// <summary>
+        /// <see cref="Traces"/> がどの地震についての記録か（災害バッファ上の添字）。
+        /// **0 は「記録していない」** —— 進行中（Emerging|Active）の地震が 1 つも無い。
+        /// </summary>
+        public readonly ushort WaveformQuakeId;
+
         public EarthquakeSnapshot(IList<EarthquakeReading> quakes, EarthquakePrefabFacts prefab,
                                   uint currentFrame, float hourOfDay, bool dayNightEnabled,
                                   BuildingMargin cursorBuilding, ushort cursorQuakeId,
-                                  int cursorCoverage, bool cursorCoverageValid, bool valid)
+                                  int cursorCoverage, bool cursorCoverageValid,
+                                  IList<SeismographTrace> traces, ushort waveformQuakeId,
+                                  bool valid)
         {
+            Traces = traces == null ? SeismographRecorder.EmptyTraceList : traces;
+            WaveformQuakeId = waveformQuakeId;
             Quakes = quakes == null ? NoQuakes : quakes;
             Prefab = prefab;
             CurrentFrame = currentFrame;
@@ -163,7 +191,8 @@ namespace DisasterPlus.Game
         public static EarthquakeSnapshot Invalid()
         {
             return new EarthquakeSnapshot(NoQuakes, new EarthquakePrefabFacts(), 0u, 0f, false,
-                                          BuildingMargin.None(), 0, 0, false, false);
+                                          BuildingMargin.None(), 0, 0, false,
+                                          SeismographRecorder.EmptyTraceList, 0, false);
         }
 
         /// <summary>地震が 1 個も無いときに使う共有の空リスト。読み取り側専用。</summary>

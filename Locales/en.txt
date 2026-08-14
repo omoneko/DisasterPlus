@@ -104,3 +104,7 @@ EarthquakeCoverageAtCursor = Sensor coverage at cursor
 EarthquakeWarningLead = Warning lead time
 EarthquakeNoSensor = no Earthquake Sensor reaches the epicentre
 EarthquakeSensorEffect = An Earthquake Sensor extends the warning from 38.6 minutes to up to 3 hours, and makes the quake appear on the hazard map at all. Only sensors whose range covers the epicentre count.
+EarthquakeWaveform = Ground motion at the sensor
+EarthquakeWaveformNeedsSensor = Build an Earthquake Sensor to record ground motion. The game itself keeps no ground-motion history at all, so Disaster + samples it at the sensor.
+EarthquakeWaveformNote = This is the game's own shake formula, evaluated at the sensor using the distance from the epicentre instead of the distance from the camera.
+EarthquakeWaveformUnavailable = Waveform drawing is unavailable on this build; showing the peak amplitude instead.

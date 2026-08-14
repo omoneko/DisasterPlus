@@ -103,3 +103,7 @@ EarthquakeCoverageAtCursor = カーソル地点のカバレッジ
 EarthquakeWarningLead = 警報のリードタイム
 EarthquakeNoSensor = 震央に届いている地震計がありません
 EarthquakeSensorEffect = 地震計を建てると、警報が 38.6 分前から最大 3 時間前まで延び、そもそも地震がハザードマップに描かれるようになります。効果範囲が震央に届いている地震計だけが数に入ります。
+EarthquakeWaveform = 地震計の地動
+EarthquakeWaveformNeedsSensor = 地動を記録するには地震計が必要です。ゲーム自身は地動の履歴を一切保持していないため、Disaster + が地震計の位置で観測しています。
+EarthquakeWaveformNote = ゲーム自身の揺れの式を、カメラからの距離ではなく震源からの距離を使って観測点で評価したものです。
+EarthquakeWaveformUnavailable = このビルドでは波形の描画が利用できないため、最大振幅のみを表示しています。

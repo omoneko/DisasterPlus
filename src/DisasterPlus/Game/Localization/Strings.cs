@@ -267,5 +267,23 @@ namespace DisasterPlus.Game
             "An Earthquake Sensor extends the warning from 38.6 minutes to up to 3 hours, and "
             + "makes the quake appear on the hazard map at all. Only sensors whose range covers "
             + "the epicentre count.";
+
+        // --- ②地震（Task 8: 波形グラフ） ---
+        //
+        // **この 4 件はどれも「誰が測ったのか」を名乗るためにある。**
+        // EarthquakeSensorAI は時系列データを一切持たない（§C-1、ABSENT）ので、
+        // ここに出る線はゲーム内のセンサーが計測した値では**ない**。バニラ自身の
+        // 揺れの式（§A-7、カメラを動かしているのと同じ式）を、カメラの代わりに
+        // 地震計の位置で評価したものである。その 1 点を隠すと、この機能は
+        // 「もっともらしいが出所の分からないグラフ」に落ちる。
+        public static string EarthquakeWaveform = "Ground motion at the sensor";
+        public static string EarthquakeWaveformNeedsSensor =
+            "Build an Earthquake Sensor to record ground motion. The game itself keeps no "
+            + "ground-motion history at all, so Disaster + samples it at the sensor.";
+        public static string EarthquakeWaveformNote =
+            "This is the game's own shake formula, evaluated at the sensor using the distance "
+            + "from the epicentre instead of the distance from the camera.";
+        public static string EarthquakeWaveformUnavailable =
+            "Waveform drawing is unavailable on this build; showing the peak amplitude instead.";
     }
 }

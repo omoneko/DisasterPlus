@@ -120,6 +120,8 @@ namespace DisasterPlus.Game
         private static UILabel _sensorEpicentreLabel;
         private static UILabel _sensorLeadLabel;
         private static UILabel _sensorCursorLabel;
+        private static UILabel _waveformLabel;
+        private static UILabel _waveformNoteLabel;
         private static UILabel _hazardLabel;
 
         /// <summary>
@@ -201,6 +203,12 @@ namespace DisasterPlus.Game
         /// <summary>レベルアンロード時。**セッション状態を 1 つも持ち越さない。**</summary>
         public static void Destroy()
         {
+            // ★ パネルの GameObject より先に。Texture2D は Component ではないので
+            //    親を Destroy しても道連れにならず、都市を読み込み直すたびに 1 枚ずつ
+            //    残る（③で実際に起きた「都市をまたいで静的キャッシュが腐る」形の
+            //    リーク版）。WaveformView.Destroy() が自分で Object.Destroy する。
+            WaveformView.Destroy();
+
             if (_panel != null)
             {
                 Object.Destroy(_panel.gameObject);
@@ -221,6 +229,8 @@ namespace DisasterPlus.Game
             _sensorEpicentreLabel = null;
             _sensorLeadLabel = null;
             _sensorCursorLabel = null;
+            _waveformLabel = null;
+            _waveformNoteLabel = null;
             _hazardLabel = null;
             _bodyBuilt = false;
             _cursorPublishedValid = false;
@@ -362,6 +372,37 @@ namespace DisasterPlus.Game
             //    （Refresh 側に「消す」経路を作らないことがその保証になっている）。
             AddPlainRow(panel, "SensorEffect", ref y, Strings.EarthquakeSensorEffect, 54f);
 
+            // ── 波形（Task 8）───────────────────────────────────
+            // ここも第 1 層である。プロットしているのは**バニラ自身の揺れの式**
+            // （§A-7、カメラを動かしているのと同じ式・同じ定数・同じ窓）を、
+            // カメラの代わりに地震計の位置で評価した値で、この MOD は物理を
+            // 1 つも足していない。**ただしゲームの地震計が測った値ではない** ——
+            // EarthquakeSensorAI は時系列データを一切持たない（§C-1）。
+            // その区別は EarthquakeWaveformNote が毎回グラフの真下で名乗る。
+            //
+            // 地震計の節の直下に置いている。「地震計を建てると何が変わるか」の
+            // 説明のすぐ次に、建てた地震計が実際に何を見ているかが来る。
+            // 3 行ぶんの高さを取る。この行は最も長いとき
+            // Strings.EarthquakeWaveformNeedsSensor（約 150 文字）を丸ごと入れる。
+            _waveformLabel = AddLayer1Row(panel, "Waveform", ref y, 54f);
+
+            WaveformView.Build(panel, "WaveformPlot", 12f, y);
+            if (WaveformView.Available)
+            {
+                y += WaveformView.PlotHeight + 6f;
+            }
+            else
+            {
+                // ★ 黙って空欄にしない。最大振幅の行（_waveformLabel）は出したうえで、
+                //    グラフが出ない理由を名乗る。劣化であって嘘ではない。
+                AddPlainRow(panel, "WaveformUnavailable", ref y,
+                    Strings.EarthquakeWaveformUnavailable, 36f);
+            }
+
+            // グラフが何の絵なのかを、グラフのすぐ下で毎回言う。
+            // 内容はグラフを出しているときだけ入れる（Refresh 側で設定する）。
+            _waveformNoteLabel = AddPlainRow(panel, "WaveformNote", ref y, "", 54f);
+
             y += 6f;
 
             var showButton = (UIButton)panel.AddUIComponent(typeof(UIButton));
@@ -434,6 +475,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
+        /// 折り返す第 1 層の行。**新しいラベル生成経路ではない**（<see cref="AddLabel"/> を
+        /// 共有している）。1 行に収まらない内容を持つ行のためにあり、
+        /// 中身は同じく <see cref="SetLayer1"/> でしか書けない。
+        /// </summary>
+        private static UILabel AddLayer1Row(UIPanel p, string suffix, ref float y, float height)
+        {
+            var label = AddLabel(p, suffix, 12f, y, PanelWidth - 24f, height, Layer1Color);
+            y += height + 4f;
+            return label;
+        }
+
+        /// <summary>
         /// **第 2 層の行。** この MOD が発明した物理にのみ使う。
         /// Task 4 の時点で呼び出し側は無い（第 1 層しか出さないため）。
         /// Task 9〜11 が行を足すときは、必ず第 1 層のセクションより**下**に構築すること。
@@ -481,6 +534,7 @@ namespace DisasterPlus.Game
                 PublishCursor(new Vec3(0f, 0f, 0f), false);
                 ClearQuakeRows();
                 ClearSensorRows();
+                ClearWaveformRows();
                 // 「まだ 1 回も読んでいない」と「読んだが読めなかった」を同じ文言に
                 // しないこと（①のレビュー指摘）。ロード直後にポーズしたままだと
                 // 前者が普通に起きる（最初の tick の deltaMinutes は必ず 0）。
@@ -514,6 +568,7 @@ namespace DisasterPlus.Game
 
             var primary = RefreshQuakeRows(snapshot, haveCursor, cursor);
             RefreshSensorRows(snapshot, primary, haveCursor);
+            RefreshWaveformRows(snapshot);
             RefreshHazardRow(snapshot, hazardViewOn, haveCursor, cursor);
         }
 
@@ -607,6 +662,120 @@ namespace DisasterPlus.Game
         {
             RefreshEpicentreCoverageRows(primary);
             RefreshCursorCoverageRow(snapshot, haveCursor);
+        }
+
+        /// <summary>
+        /// 波形の行を全部消し、プロットを隠す。**注記も消す** —— あれは
+        /// 「今出ているこのグラフが何なのか」の説明であって、グラフが無いときに
+        /// 残しておくと、存在しない絵の出所を説明していることになる。
+        /// </summary>
+        private static void ClearWaveformRows()
+        {
+            SetPlain(_waveformLabel, "");
+            SetPlain(_waveformNoteLabel, "");
+            WaveformView.Render(null);
+        }
+
+        /// <summary>
+        /// **依頼の「地震計があるのに波形グラフが見られない」への回答そのもの。**
+        ///
+        /// ここに出る線は<b>ゲーム内の地震計が計測した値ではない</b>。
+        /// <c>EarthquakeSensorAI</c> は時系列データを一切持たない（§C-1、ABSENT）——
+        /// フィールドは <c>m_detectionRange</c> だけで、毎 tick 免疫的リソースを
+        /// 撒くだけの装置である。**プロットしているのはバニラ自身の揺れの式**
+        /// （§A-7、<c>EarthquakeAI.RenderInstance</c> がカメラを動かすのに使っている
+        /// のと同じ式・定数・窓）を、カメラの代わりに地震計の位置で評価した値である。
+        /// これは同じ式の別評価であって近似ではない。
+        ///
+        /// **その区別は必ずグラフの真下に書く**（<c>EarthquakeWaveformNote</c>、
+        /// 設計書 §3.5 が設計書と UI の両方に書けと要求している）。書かないと、
+        /// この機能は「ゲームが計測しているように見えるが実際は誰も測っていない絵」になる。
+        ///
+        /// **3 つの「空」を言い分ける**（①から続く、捏造ゼロを作らない規律）:
+        ///   - 記録対象の地震が無い … 行ごと出さない
+        ///   - 地震はあるが地震計が 0 個 … 「地震計を建ててください」
+        ///   - 地震計はあるがサンプル 0 件 … 本震前で揺れの窓がまだ開いていない
+        /// 最後の 1 つを平らな線で描くと「揺れていない」に化ける。
+        /// </summary>
+        private static void RefreshWaveformRows(EarthquakeSnapshot snapshot)
+        {
+            // 進行中（Emerging|Active）の地震が 1 つも無い。揺れの式自体が動かない
+            // 区間なので、波形について言えることは何も無い。
+            if (snapshot.WaveformQuakeId == 0)
+            {
+                ClearWaveformRows();
+                return;
+            }
+
+            var traces = snapshot.Traces;
+            if (traces.Count == 0)
+            {
+                // ★ カメラ位置や市の中心で代用しない。「地震計があるのに波形が
+                //    見られない」への回答なので、地震計に紐づかない波形は意味が違う。
+                SetPlain(_waveformLabel, Strings.EarthquakeWaveformNeedsSensor);
+                SetPlain(_waveformNoteLabel, "");
+                WaveformView.Render(null);
+                return;
+            }
+
+            // 震央に最も近い 1 個だけを描く（SeismographRecorder が近い順に並べている）。
+            // グラフを 4 枚並べても読めないので、残りは件数として添えるだけ。
+            var trace = traces[0];
+
+            string header = Strings.EarthquakeWaveform + ": #" + trace.BuildingId
+                            + "   " + trace.DistanceToEpicentre.ToString("F0") + " m";
+            if (traces.Count > 1)
+            {
+                header += "   (" + Strings.EarthquakeSensorSection + ": " + traces.Count + ")";
+            }
+
+            if (trace.Count > 0)
+            {
+                // 縦軸は最大振幅で正規化して描くので、その最大振幅を数値でも名乗る。
+                // これが無いと、グラフの高さだけを見て地震の強さを比べてしまう。
+                float peak = trace.PeakAbsolute;
+                header += "\n" + peak.ToString("F2") + "  [" + SeismicScale.BarOf(peak) + "]";
+            }
+            else
+            {
+                // 観測点はある。まだ揺れの窓（§A-7 の e > 0）が開いていないだけ。
+                // 「サンプルが無い」と「サンプルが全部 0」は別のことなので、
+                // ここで 0.00 と出してはいけない。
+                header += "   " + WaitingReason(snapshot);
+            }
+
+            SetLayer1(_waveformLabel, header);
+
+            // 注記はグラフ（あるいは最大振幅の行）が出ているときだけ添える。
+            SetPlain(_waveformNoteLabel, Strings.EarthquakeWaveformNote);
+            WaveformView.Render(trace);
+        }
+
+        /// <summary>
+        /// サンプルがまだ 1 件も無い理由。**「揺れていない」とは言わない。**
+        ///
+        /// 記録できない理由は 3 通りあり、どれも観測値ではないので出所の接頭辞を
+        /// 付けない語を選んでいる。<c>m_activeDuration</c> はプレハブ値で
+        /// **誰もまだ実測していない**（§A-0）ので、読めていない可能性が現実にある。
+        /// </summary>
+        private static string WaitingReason(EarthquakeSnapshot snapshot)
+        {
+            if (!snapshot.Prefab.Resolved || snapshot.Prefab.ActiveDuration == 0u)
+            {
+                // 揺れの窓が分からない。窓を決め打ちで補うと、地震が終わった後も
+                // 伸び続ける波形になる（CameraShakeBooster と同じ判断）。
+                return Strings.EarthquakeUnavailable;
+            }
+
+            for (int i = 0; i < snapshot.Quakes.Count; i++)
+            {
+                if (snapshot.Quakes[i].DisasterId != snapshot.WaveformQuakeId) continue;
+                return snapshot.Quakes[i].ActivationScheduled
+                    ? Strings.EarthquakePhaseEmerging     // 本震前。揺れの窓がまだ開いていない。
+                    : Strings.EarthquakeTimeUnknown;      // SelfTrigger が立っていない（§A-1）。
+            }
+
+            return Strings.EarthquakePhaseEmerging;
         }
 
         private static void RefreshEpicentreCoverageRows(EarthquakeReading primary)
