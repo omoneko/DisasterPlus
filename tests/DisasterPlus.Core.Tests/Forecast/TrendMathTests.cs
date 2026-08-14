@@ -71,5 +71,39 @@ namespace DisasterPlus.Core.Tests.Forecast
             Assert.Equal(Trend.Steady, TrendMath.Of(float.NaN, 0.5f, 0.02f));
             Assert.Equal(Trend.Steady, TrendMath.Of(0.5f, float.NaN, 0.02f));
         }
+
+        [Fact]
+        public void TemperatureDeadband_IsWiderThanDefault()
+        {
+            // 気温は 0.0-1.0 の正規化値ではなく摂氏の実値なので、既定の不感帯では
+            // 実質ゼロになる。「広い」ことがこの定数の存在理由そのものなので固定する。
+            Assert.True(TrendMath.TemperatureDeadband > TrendMath.DefaultDeadband);
+        }
+
+        [Fact]
+        public void TemperatureDeadband_PinnedToHalfADegree()
+        {
+            // WeatherReader からベタ書きの 0.5f を移してきた値。挙動を変えずに
+            // 移設したことを固定する（ここが動くと予報の傾向表示が黙って変わる）。
+            Assert.Equal(0.5f, TrendMath.TemperatureDeadband);
+        }
+
+        [Fact]
+        public void TemperatureDeadband_SuppressesSubDegreeDrift()
+        {
+            // 季節補間中の毎 tick のごく小さな変化で Rising/Falling がちらつかないこと。
+            // 既定の不感帯だと同じ入力が Rising になってしまう（対比のため両方見る）。
+            Assert.Equal(Trend.Steady, TrendMath.Of(18.0f, 18.3f, TrendMath.TemperatureDeadband));
+            Assert.Equal(Trend.Steady, TrendMath.Of(18.3f, 18.0f, TrendMath.TemperatureDeadband));
+            Assert.Equal(Trend.Rising, TrendMath.Of(18.0f, 18.3f, TrendMath.DefaultDeadband));
+        }
+
+        [Fact]
+        public void TemperatureDeadband_StillSeesRealSeasonalChange()
+        {
+            // 鈍すぎて季節変化を取り逃してもいけない。1 度動けば必ず拾う。
+            Assert.Equal(Trend.Rising, TrendMath.Of(18.0f, 19.0f, TrendMath.TemperatureDeadband));
+            Assert.Equal(Trend.Falling, TrendMath.Of(19.0f, 18.0f, TrendMath.TemperatureDeadband));
+        }
     }
 }
