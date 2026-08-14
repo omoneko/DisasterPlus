@@ -118,6 +118,15 @@ namespace DisasterPlus.Game
         public readonly ushort CursorQuakeId;
 
         /// <summary>
+        /// カーソル直下の建物走査が**どう終わったか**（<see cref="BuildingProbeOutcome"/>）。
+        ///
+        /// <see cref="CursorQuakeId"/> だけでは「調べたが建物が無かった」と
+        /// 「調べようとして失敗した」を区別できない。前者は実測値、後者は読み取り失敗で、
+        /// 同じ文言にすると読み取り失敗が実測値の顔で出てくる。
+        /// </summary>
+        public readonly BuildingProbeOutcome CursorProbe;
+
+        /// <summary>
         /// カーソル地点の <c>ImmaterialResourceManager.Resource.EarthquakeCoverage</c> の生値。
         /// <see cref="CursorCoverageValid"/> が false のときこの値は無意味。
         ///
@@ -170,6 +179,7 @@ namespace DisasterPlus.Game
         public EarthquakeSnapshot(IList<EarthquakeReading> quakes, EarthquakePrefabFacts prefab,
                                   uint currentFrame, float hourOfDay, bool dayNightEnabled,
                                   BuildingMargin cursorBuilding, ushort cursorQuakeId,
+                                  BuildingProbeOutcome cursorProbe,
                                   int cursorCoverage, bool cursorCoverageValid,
                                   IList<SeismographTrace> traces, ushort waveformQuakeId,
                                   bool valid)
@@ -183,6 +193,7 @@ namespace DisasterPlus.Game
             DayNightEnabled = dayNightEnabled;
             CursorBuilding = cursorBuilding;
             CursorQuakeId = cursorQuakeId;
+            CursorProbe = cursorProbe;
             CursorCoverage = cursorCoverage;
             CursorCoverageValid = cursorCoverageValid;
             Valid = valid;
@@ -191,7 +202,8 @@ namespace DisasterPlus.Game
         public static EarthquakeSnapshot Invalid()
         {
             return new EarthquakeSnapshot(NoQuakes, new EarthquakePrefabFacts(), 0u, 0f, false,
-                                          BuildingMargin.None(), 0, 0, false,
+                                          BuildingMargin.None(), 0,
+                                          BuildingProbeOutcome.NotProbed, 0, false,
                                           SeismographRecorder.EmptyTraceList, 0, false);
         }
 

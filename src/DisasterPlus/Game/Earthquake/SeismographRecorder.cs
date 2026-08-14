@@ -78,9 +78,16 @@ namespace DisasterPlus.Game
     ///
     /// 地震計を探すには建物バッファ全スロットの走査が要る。**地震が新しく始まった
     /// ときに 1 回だけ**走査し、震央に近い順に <see cref="MaxObservationPoints"/> 個まで
-    /// 覚える。毎 tick は走査しない。**地震の途中で建てられた地震計は次の地震まで
-    /// 反映されない** —— これは既知の制限としてチェックリストに書いてある
-    /// （毎 tick 走査するより、動かないことが分かっている方がよい）。
+    /// 覚える。毎 tick は走査しない。
+    ///
+    /// **例外が 1 つだけある: 観測点が 0 個のとき。** その状態のパネルは
+    /// 「地動を記録するには地震計を建ててください」と書いており、言われたとおりに
+    /// 建てても次の地震まで何も起きない —— 説明の直後に、その説明どおりに
+    /// 動かない画面が出る。ここだけは <see cref="RescanIntervalFrames"/> フレームに
+    /// 1 回だけ走査をやり直す。**観測点が 1 個でも見つかっていれば二度と走査しない**
+    /// ので、通常のプレイでは追加コストはゼロである（走査が走るのは、地震計を
+    /// 持たない都市で地震が起きている間だけ）。地震の途中で**2 個目以降**を建てても
+    /// その地震には反映されない —— これは既知の制限として残す。
     ///
     /// ── セーブには残さない（設計書 §3.5）──────────────────────────
     ///
@@ -92,8 +99,9 @@ namespace DisasterPlus.Game
         public const int MaxObservationPoints = 4;
 
         /// <summary>
-        /// 1 観測点あたりの保持サンプル数。速度 1 なら 512 tick ぶん、速度 3 でも
-        /// 表示窓の <c>PlotFrameWindow</c> フレームは常に覆える。
+        /// 1 観測点あたりの保持サンプル数。サンプルは**フレームごと**に取る
+        /// （ゲーム速度によらず 1 フレーム 1 点。<see cref="MaxSubSamplesPerTick"/>）ので、
+        /// 512 件はちょうど表示窓の <see cref="PlotFrameWindow"/> フレームぶんになる。
         /// </summary>
         public const int Capacity = 512;
 
@@ -110,6 +118,20 @@ namespace DisasterPlus.Game
         /// 512 フレームの窓を 320 px で描くので、8 フレームは 5 px 未満のずれである。
         /// </summary>
         private const int SnapshotIntervalFrames = 8;
+
+        /// <summary>
+        /// 観測点が 0 個のときだけ走る、地震計の再走査の間隔（フレーム）。
+        /// 512 フレームは速度 1 でおよそ 10 秒。建てた地震計が「そのうち」出てくる
+        /// 程度には短く、全スロット走査（65536 件）が体感に出ない程度には長い。
+        /// </summary>
+        private const int RescanIntervalFrames = 512;
+
+        /// <summary>
+        /// 1 sim tick で埋める最大サンプル数。<c>FinalSimulationSpeed</c> の最大値
+        /// （ゲーム速度 3 で 9）に合わせてある。<see cref="ShakeWaveform.FirstUnsampledFrame"/>
+        /// の doc に、なぜ 1 tick 1 サンプルでは足りないかの導出がある。
+        /// </summary>
+        private const int MaxSubSamplesPerTick = 9;
 
         /// <summary>観測点 1 個。バッファは使い回し、識別情報だけを再走査で上書きする。</summary>
         private class ObservationPoint
@@ -137,6 +159,16 @@ namespace DisasterPlus.Game
         private static uint _cachedAtFrame;
         private static bool _dirty;
         private static uint _lastSampleFrame;
+
+        /// <summary>
+        /// <see cref="_lastSampleFrame"/> に意味があるか。フレーム 0 は実在しうるので、
+        /// 「まだ 1 件も取っていない」を 0 で表さない（この機能が他の全ての行で
+        /// 守っている、ゼロと未読を分ける規律の内部版）。
+        /// </summary>
+        private static bool _hasLastSample;
+
+        /// <summary>観測点 0 個での再走査を最後に行ったフレーム。0 は「まだ」。</summary>
+        private static uint _lastRescanFrame;
 
         private static bool _scanErrorLogged;
 
@@ -174,6 +206,8 @@ namespace DisasterPlus.Game
             _cachedAtFrame = 0u;
             _dirty = false;
             _lastSampleFrame = 0u;
+            _hasLastSample = false;
+            _lastRescanFrame = 0u;
             // _scanErrorLogged は戻さない。「投げる」はこの DLL が参照しているゲームの
             // ビルドに対する事実であって、都市ごとの状態ではない
             // （EarthquakeReader._readErrorLogged と同じ判断）。
@@ -190,7 +224,9 @@ namespace DisasterPlus.Game
         {
             if (snapshot == null || !snapshot.Valid) return;
 
-            var quake = SelectRecordingQuake(snapshot.Quakes);
+            // 順位付けは QuakeSelection に一本化してある（以前ここには
+            // EarthquakeReader.SelectDamagingQuake と 1 バイトも違わない複製があった）。
+            var quake = QuakeSelection.SelectDamaging(snapshot.Quakes);
             if (quake == null)
             {
                 // 進行中の地震が無い。設計書 §3.5 のとおり、ここで捨てる。
@@ -202,10 +238,21 @@ namespace DisasterPlus.Game
             {
                 ClearAll();
                 _quakeId = quake.DisasterId;
+                _lastRescanFrame = frame;
                 Rescan(quake);
             }
 
-            if (_pointCount == 0) return;
+            if (_pointCount == 0)
+            {
+                // ★ 唯一の再走査経路（クラス doc）。地震計を 1 個も持たない都市で
+                //    地震が起きている間だけ走り、1 個でも見つかれば以後は走らない。
+                if (frame - _lastRescanFrame >= RescanIntervalFrames)
+                {
+                    _lastRescanFrame = frame;
+                    Rescan(quake);
+                }
+                if (_pointCount == 0) return;
+            }
 
             // m_activationFrame == 0 は「今」ではなく「未定」（§A-1 の罠）。
             // 引き算に使うと途方も無い e になる。
@@ -219,24 +266,43 @@ namespace DisasterPlus.Game
             uint activeDuration = snapshot.Prefab.ActiveDuration;
             if (activeDuration == 0u) return;
 
-            long e = (long)frame - quake.ActivationFrame + ShakeWaveform.FrameOffset;
-            if (!ShakeWaveform.IsShaking(e, activeDuration)) return;
+            // ★ 1 tick に 1 サンプルでは足りない。m_currentFrameIndex は
+            //    FinalSimulationSpeed（1/3/9）ずつ飛ぶのに、揺れの主成分は
+            //    0.63 rad/frame（周期 ≒10 フレーム）なので、速度 3 では
+            //    周期 ≒92 フレームの**偽の長周期波**に折り返す。しかも §A-7 は
+            //    バニラに長周期成分が無いことを確定させているので、それは
+            //    第 1 層のグラフが第 2 層の現象を描いている状態になる。
+            //    DisplacementAt は e の閉じた式なので、飛んだフレームで評価するのは
+            //    1 回評価するのと同じだけ「実測」である（ShakeWaveform の doc）。
+            uint first = ShakeWaveform.FirstUnsampledFrame(
+                _lastSampleFrame, _hasLastSample, frame, MaxSubSamplesPerTick);
 
-            // t に m_referenceTimer は足さない。あれは main スレッドの描画補間用の
-            // 値で、sim スレッドから読むべきものではない（フレーム単位の整数で足りる）。
-            float t = e;
-
-            for (int i = 0; i < _pointCount; i++)
+            bool wrote = false;
+            for (uint f = first; f <= frame; f++)
             {
-                var point = _points[i];
+                long e = (long)f - quake.ActivationFrame + ShakeWaveform.FrameOffset;
+                if (!ShakeWaveform.IsShaking(e, activeDuration)) continue;
 
-                // ★ バニラ式の distance を「カメラから」→「震源から」に置き換えた版
-                //    （設計書 §3.5）。式・定数・窓はバニラのまま。
-                float value = ShakeWaveform.DisplacementAt(point.DistanceToEpicentre, t);
-                point.Buffer.Add(frame, value);
+                // t に m_referenceTimer は足さない。あれは main スレッドの描画補間用の
+                // 値で、sim スレッドから読むべきものではない（フレーム単位の整数で足りる）。
+                float t = e;
+
+                for (int i = 0; i < _pointCount; i++)
+                {
+                    var point = _points[i];
+
+                    // ★ バニラ式の distance を「カメラから」→「震源から」に置き換えた版
+                    //    （設計書 §3.5）。式・定数・窓はバニラのまま。
+                    float value = ShakeWaveform.DisplacementAt(point.DistanceToEpicentre, t);
+                    point.Buffer.Add(f, value);
+                }
+                wrote = true;
             }
 
+            if (!wrote) return;
+
             _lastSampleFrame = frame;
+            _hasLastSample = true;
             _dirty = true;
         }
 
@@ -280,40 +346,6 @@ namespace DisasterPlus.Game
             return _cached;
         }
 
-        /// <summary>
-        /// 記録対象にする地震を 1 個選ぶ。無ければ null。
-        ///
-        /// 揺れの式が動くのは <c>Emerging | Active</c> のときだけ（§A-7 の
-        /// <c>if ((m_flags &amp; 12) == 0) return</c>）なので、そこに合わせる。
-        /// 選定順は <c>EarthquakeReader.SelectDamagingQuake</c> と同じ
-        /// （Active &gt; Emerging、同位なら強度が大きい方）。
-        /// </summary>
-        private static EarthquakeReading SelectRecordingQuake(IList<EarthquakeReading> quakes)
-        {
-            EarthquakeReading best = null;
-            int bestRank = 0;
-
-            for (int i = 0; i < quakes.Count; i++)
-            {
-                var q = quakes[i];
-                int rank = q.Phase == EarthquakePhase.Active ? 2
-                         : q.Phase == EarthquakePhase.Emerging ? 1
-                         : 0;
-                if (rank == 0) continue;
-
-                bool better;
-                if (best == null) better = true;
-                else if (rank != bestRank) better = rank > bestRank;
-                else better = q.Intensity > best.Intensity;
-
-                if (!better) continue;
-                best = q;
-                bestRank = rank;
-            }
-
-            return best;
-        }
-
         private static void ClearAll()
         {
             for (int i = 0; i < _points.Length; i++) _points[i].Buffer.Clear();
@@ -323,11 +355,14 @@ namespace DisasterPlus.Game
             _cachedAtFrame = 0u;
             _dirty = false;
             _lastSampleFrame = 0u;
+            _hasLastSample = false;
         }
 
         /// <summary>
         /// 地震計を探し、震央に近い順に <see cref="MaxObservationPoints"/> 個まで覚える。
-        /// **地震が新しく始まったときだけ**呼ぶ（全スロット走査なので毎 tick は不可）。
+        /// 呼んでよいのは**地震が新しく始まったとき**と、**観測点が 0 個のまま
+        /// <see cref="RescanIntervalFrames"/> フレーム経ったとき**の 2 箇所だけ
+        /// （全スロット走査なので毎 tick は不可。クラス doc に経緯がある）。
         ///
         /// 条件は <c>Created</c> が立っていることと <c>m_buildingAI is EarthquakeSensorAI</c>
         /// の 2 つだけ。稼働率は見ない —— 見るとしたら

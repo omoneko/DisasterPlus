@@ -93,8 +93,9 @@ namespace DisasterPlus.Game
                 bool haveCursor = EarthquakeHub.TakeCursor(out cursor);
 
                 ushort cursorQuakeId;
+                BuildingProbeOutcome cursorProbe;
                 var cursorBuilding = ProbeCursorBuilding(quakes, haveCursor, cursor,
-                                                         out cursorQuakeId);
+                                                         out cursorQuakeId, out cursorProbe);
 
                 // カーソル地点のカバレッジは**地震が 1 個も無くても読む**。
                 // 「ここに地震計は届いているか」は都市の性質であって、
@@ -108,11 +109,17 @@ namespace DisasterPlus.Game
                 // サンプリングは EarthquakeFeature がポーズガードより下で行うので、
                 // ここで読めるのは常に 1 tick 前までの状態になる（BuildingProbe の
                 // カーソル追従と同じ性質の、設計上の遅延）。
+                //
+                // ★ RecordingQuakeId も同じ 1 tick ぶん古い。新しい地震が選ばれる
+                //    tick では、ここで載る WaveformQuakeId は**前の地震の ID**
+                //    （あるいは 0）になる。Sample() がまだ走っていないためで、
+                //    次の tick で自動的に揃う。Traces は同じ時点の値なので、
+                //    ID と中身が食い違うことはない（両方が 1 tick 古い）。
                 var traces = SeismographRecorder.Snapshot();
 
                 return new EarthquakeSnapshot(quakes, prefab, sim.m_currentFrameIndex,
                                               hour, dayNight, cursorBuilding, cursorQuakeId,
-                                              cursorCoverage, cursorCoverageValid,
+                                              cursorProbe, cursorCoverage, cursorCoverageValid,
                                               traces, SeismographRecorder.RecordingQuakeId, true);
             }
             catch (System.Exception e)
@@ -231,21 +238,24 @@ namespace DisasterPlus.Game
         /// **Active 分岐にしか無い**（§A-3）。収束済みの地震について「倒壊します」と
         /// 出すのは、もう起きないことを起きると言うことになる。
         ///
-        /// 選定順: Active &gt; Emerging、同位なら強度が大きい方、それも同じなら添字が小さい方。
+        /// 選定順は <see cref="QuakeSelection.SelectDamaging"/> に任せる（順位付けを
+        /// 複数箇所に写さないため。あちらのクラス doc に経緯がある）。
         /// どの地震を選んだかは <see cref="EarthquakeSnapshot.CursorQuakeId"/> で名乗る。
         /// </summary>
         private static BuildingMargin ProbeCursorBuilding(IList<EarthquakeReading> quakes,
                                                           bool haveCursor, Vec3 cursor,
-                                                          out ushort cursorQuakeId)
+                                                          out ushort cursorQuakeId,
+                                                          out BuildingProbeOutcome outcome)
         {
             cursorQuakeId = 0;
+            outcome = BuildingProbeOutcome.NotProbed;
             if (quakes.Count == 0) return BuildingMargin.None();
 
             // main スレッドが「今カーソルはここ」と言っていないなら何も調べない
             // （パネルが閉じている、マウスが UI の上にある、地形を外している）。
             if (!haveCursor) return BuildingMargin.None();
 
-            var target = SelectDamagingQuake(quakes);
+            var target = QuakeSelection.SelectDamaging(quakes);
             if (target == null) return BuildingMargin.None();
 
             // ★ 建物が見つかる前にここで立てる。CursorQuakeId != 0 は
@@ -258,36 +268,11 @@ namespace DisasterPlus.Game
             var band = new FaultBand(target.Epicentre.ToVec2(), target.AngleRadians,
                                      target.CrackLength, target.CrackWidth);
 
-            ushort found;
-            var margin = BuildingProbe.ProbeAt(cursor, target, band, out found);
-            return found != 0 ? margin : BuildingMargin.None();
-        }
-
-        /// <summary>破壊判定の対象になる地震を 1 個選ぶ。無ければ null。</summary>
-        private static EarthquakeReading SelectDamagingQuake(IList<EarthquakeReading> quakes)
-        {
-            EarthquakeReading best = null;
-            int bestRank = 0;
-
-            for (int i = 0; i < quakes.Count; i++)
-            {
-                var q = quakes[i];
-                int rank = q.Phase == EarthquakePhase.Active ? 2
-                         : q.Phase == EarthquakePhase.Emerging ? 1
-                         : 0;
-                if (rank == 0) continue;
-
-                bool better;
-                if (best == null) better = true;
-                else if (rank != bestRank) better = rank > bestRank;
-                else better = q.Intensity > best.Intensity;
-
-                if (!better) continue;
-                best = q;
-                bestRank = rank;
-            }
-
-            return best;
+            // ★ 破壊コードが他 MOD に置き換えられていれば、余裕度は結論を出さない
+            //    （§E-2。BuildingMargin.Evaluate の damageModelReplaced）。
+            //    ModCompat.NdrPresent は起動時に 1 回だけ評価してキャッシュされる
+            //    ので、ここが毎 tick 走っても PluginManager は舐め直されない。
+            return BuildingProbe.ProbeAt(cursor, target, band, ModCompat.NdrPresent, out outcome);
         }
 
         /// <summary>

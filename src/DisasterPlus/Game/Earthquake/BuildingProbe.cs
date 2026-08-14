@@ -4,6 +4,34 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
+    /// カーソル直下の建物を探した**結果の種類**。
+    ///
+    /// **「建物が無かった」と「調べられなかった」を同じ顔にしないためだけに存在する。**
+    /// 以前は両方が <see cref="BuildingMargin.None"/> になり、表示側が区別できずに
+    /// 「カーソルの下に建物がありません」と書いていた —— 読み取り失敗が
+    /// 意味のあるゼロの顔をして出てくる、この機能が他の全ての行で禁じている壊れ方
+    /// そのものである（<c>EarthquakeReading.CoverageKnown</c> /
+    /// <c>EarthquakeSnapshot.CursorCoverageValid</c> と同じ理由）。
+    /// </summary>
+    public enum BuildingProbeOutcome
+    {
+        /// <summary>そもそも調べていない（カーソルが無効、対象の地震が無い等）。</summary>
+        NotProbed,
+
+        /// <summary>調べて、建物が 1 個見つかった。</summary>
+        Found,
+
+        /// <summary>調べて、<c>PickRadius</c> 以内に候補が 1 個も無かった。**これは実測値である。**</summary>
+        Empty,
+
+        /// <summary>
+        /// 調べられなかった。<c>BuildingManager</c> / バッファ / グリッドが取れないか、
+        /// 走査が例外を投げた。**この状態で建物の有無を名乗ってはいけない。**
+        /// </summary>
+        Failed,
+    }
+
+    /// <summary>
     /// カーソル直下の建物を 1 個特定し、その建物の余裕度を出す。**sim スレッド専用。**
     ///
     /// ── なぜカーソルの建物特定を sim スレッドでやるのか ──────────────
@@ -71,40 +99,59 @@ namespace DisasterPlus.Game
         private static bool _probeErrorLogged;
 
         /// <summary>
-        /// カーソル直下の建物 1 個の余裕度。見つからなければ
-        /// <c>foundBuilding = 0</c> と <see cref="BuildingMargin.None"/>。
+        /// カーソル直下の建物 1 個の余裕度。
+        /// <paramref name="outcome"/> が <see cref="BuildingProbeOutcome.Found"/> の
+        /// ときだけ戻り値に意味がある。
+        ///
+        /// **3 状態を返すこと自体が仕様である**（<see cref="BuildingProbeOutcome"/> の doc）。
+        /// 「調べたが空だった」と「調べられなかった」を混ぜると、読み取り失敗が
+        /// 「カーソルの下に建物がありません」という実測値の顔で出てくる。
         ///
         /// **例外を出さない。** sim スレッドの <c>IndexOutOfRangeException</c> は
         /// スタックトレース無しのポップアップになるので、添字は必ず配列長で守る。
         /// </summary>
         public static BuildingMargin ProbeAt(Vec3 worldPos, EarthquakeReading quake,
-                                             FaultBand band, out ushort foundBuilding)
+                                             FaultBand band, bool damageModelReplaced,
+                                             out BuildingProbeOutcome outcome)
         {
-            foundBuilding = 0;
+            outcome = BuildingProbeOutcome.NotProbed;
             if (quake == null) return BuildingMargin.None();
 
             try
             {
                 var bm = BuildingManager.instance;
-                if (bm == null) return BuildingMargin.None();
+                if (bm == null)
+                {
+                    outcome = BuildingProbeOutcome.Failed;
+                    return BuildingMargin.None();
+                }
 
                 var buildings = bm.m_buildings != null ? bm.m_buildings.m_buffer : null;
                 var grid = bm.m_buildingGrid;
-                if (buildings == null || grid == null) return BuildingMargin.None();
+                if (buildings == null || grid == null)
+                {
+                    outcome = BuildingProbeOutcome.Failed;
+                    return BuildingMargin.None();
+                }
 
                 ushort best = FindNearest(buildings, grid, worldPos);
-                if (best == 0) return BuildingMargin.None();
+                if (best == 0)
+                {
+                    // ★ ここだけが「調べて、無かった」。走査は最後まで走っている。
+                    outcome = BuildingProbeOutcome.Empty;
+                    return BuildingMargin.None();
+                }
 
                 var p = buildings[best].m_position;
                 var flags = buildings[best].m_flags;
                 bool alreadyDown = (flags & Building.Flags.Collapsed) != Building.Flags.None
                                    || buildings[best].m_fireIntensity != 0;
 
-                foundBuilding = best;
+                outcome = BuildingProbeOutcome.Found;
                 return BuildingMargin.Evaluate(
                     best, quake.DisasterId,
                     new Vec2(p.x, p.z), quake.Epicentre.ToVec2(),
-                    quake.Intensity, band, alreadyDown);
+                    quake.Intensity, band, alreadyDown, damageModelReplaced);
             }
             catch (System.Exception e)
             {
@@ -120,7 +167,7 @@ namespace DisasterPlus.Game
                 {
                     Log.Diag("EqProbe", "building probe failed: " + e.GetType().Name);
                 }
-                foundBuilding = 0;
+                outcome = BuildingProbeOutcome.Failed;
                 return BuildingMargin.None();
             }
         }
