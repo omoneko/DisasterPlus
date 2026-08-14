@@ -43,7 +43,17 @@ namespace DisasterPlus.Core.Earthquake
         /// <summary>IL: rnd.Int32(10000)。UInt32 版のオーバーロードが呼ばれている。</summary>
         public const uint Draws = 10000u;
 
-        /// <summary>全体円盤の probability（IL: ldc.r4 0.02）。震央で 2%。</summary>
+        /// <summary>
+        /// 全体円盤の probability（IL: ldc.r4 0.02）。震央で 2%。
+        ///
+        /// **この値は Natural Disasters Renewal の識別子でもある**（IL 事実文書 §E-2）。
+        /// NDR は <c>DisasterHelpers.DestroyBuildings</c> を Prefix が false を返す形で
+        /// **完全置換**し、<c>probability == 0.02f</c> をバニラ地震の目印にして
+        /// 0.04 に差し替える。したがって NDR が入っている環境では、この定数から
+        /// 導いた倒壊・出火の結論は**バニラの答えでも NDR の答えでもない**。
+        /// <see cref="BuildingMargin.Evaluate"/> の <c>damageModelReplaced</c> を
+        /// 立てて、判定そのものを取り下げること。
+        /// </summary>
         public const float GlobalDiscProbability = 0.02f;
 
         /// <summary>
@@ -78,6 +88,10 @@ namespace DisasterPlus.Core.Earthquake
         /// <see cref="GlobalDiscHits"/> を使うこと。断層 4 円盤の fD は
         /// <c>(2w - dist) / Max(1, 2w - w)</c> であって全体円盤の <c>1 - d/R</c> とは
         /// 別式なので、両者を取り違えると数字は出るが意味が無くなる。
+        ///
+        /// なお断層 4 円盤ではこの比較を**呼ぶ意味自体が無い**。<c>preRadius = w</c> が
+        /// <c>dist &gt;= w</c> を先に切り捨て、残った範囲では fD &gt; 1 かつ
+        /// probability = 1 なので比較は常に真になる（<see cref="FaultBand"/> の doc）。
         /// </summary>
         public static bool Hits(int threshold, float localFactor, float probability)
         {
@@ -114,9 +128,37 @@ namespace DisasterPlus.Core.Earthquake
         /// <c>probability = 1</c> を渡すと「もっともらしいが何の意味も無い距離」が返っていた。
         /// 禁止事項として doc に書くだけでは、いつか誰かが渡す。**引数を消して
         /// 構造的に不可能にした。** 断層帯の到達距離が要るなら
-        /// <see cref="FaultBand.HalfWidthAt"/> を使うこと（あちらは別のモデルである）。
+        /// <see cref="FaultBand.PatchRadiusAt"/> を使うこと（あちらは別のモデルである）。
         /// </summary>
         public static float GlobalDiscCollapseDistance(int threshold, byte intensity)
+        {
+            return GlobalDiscHitDistance(threshold, intensity);
+        }
+
+        /// <summary>
+        /// **出火**が始まる震央距離。全体円盤では
+        /// <c>burnRadiusMin = 0, burnRadiusMax = R</c>（§A-3）なので
+        /// <c>fB = 1 - d/R</c> となり、倒壊のランプと**同じ式**になる。
+        /// 違うのは引くしきい値（2 回目の引き）だけである。
+        ///
+        /// **倒壊が優先する。** IL は <c>else if (hitB &amp;&amp; ...)</c> なので、
+        /// 同じ建物で倒壊も当たっているならこちらの分岐へは来ない
+        /// （倒壊側が <c>burnAmount = Round(fB*255)</c> を持って行く）。
+        /// その順序は表示側が併記する。
+        /// </summary>
+        public static float GlobalDiscBurnDistance(int threshold, byte intensity)
+        {
+            return GlobalDiscHitDistance(threshold, intensity);
+        }
+
+        /// <summary>
+        /// 全体円盤のランプ（<c>1 - d/R</c>）と probability 0.02 に対して、
+        /// しきい値 <paramref name="threshold"/> が当たり始める震央距離。
+        ///
+        ///   threshold &lt; (1 - d/R) * 0.02 * 10000
+        ///   d &lt; R * (1 - threshold / (0.02 * 10000))
+        /// </summary>
+        private static float GlobalDiscHitDistance(int threshold, byte intensity)
         {
             // 定数なので 0 にも NaN にもならない。分母のガードは不要。
             const float denominator = GlobalDiscProbability * Draws;

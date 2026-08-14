@@ -5,12 +5,29 @@ using Xunit;
 
 namespace DisasterPlus.Core.Tests.Earthquake
 {
+    /// <summary>
+    /// 断層帯の幾何。**全体レビュー(C1) で 33% 広すぎることが判明して作り直した。**
+    ///
+    /// 誤りの中身: 到達距離を <c>destructionRadiusMax = 2w</c> としていた。実際の
+    /// 呼び出しは <c>preRadius: w</c>（§A-3 の呼び出し一覧）で、
+    /// <c>DisasterHelpers.DestroyBuildings</c> は <c>if (dist &gt;= preRadius) continue;</c>
+    /// を**種の生成よりランプの計算より前**に置いている（IL_0130 の <c>bge.un</c>）。
+    /// 2w が効くのは fD の分子だけで、<c>dist &lt; w</c> では fD &gt; 1 かつ
+    /// probability = 1 なので比較は無条件に真 —— つまり 2w はどこにも現れない。
+    ///
+    /// このファイルのテストは**導出を書く**（生の数値を 1 つ置いて固定しない）。
+    /// 前回の版は 200 という数値そのものを固定していたので、誤ったモデルを
+    /// 「テストで守られている」状態にしてしまっていた。
+    /// </summary>
     public class FaultBandTests
     {
+        private const float L = 1000f;
+        private const float W = 100f;
+
         // 角度 0 のとき dir = (-sin 0, cos 0) = (0, 1)、つまり断層は Z 軸に沿う。
         private static FaultBand Sample()
         {
-            return new FaultBand(new Vec2(0f, 0f), 0f, length: 1000f, width: 100f);
+            return new FaultBand(new Vec2(0f, 0f), 0f, length: L, width: W);
         }
 
         [Fact]
@@ -20,20 +37,46 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.Equal(0f, band.Direction.X, 4);
             Assert.Equal(1f, band.Direction.Z, 4);
 
-            var rotated = new FaultBand(new Vec2(0f, 0f), (float)(Math.PI / 2), 1000f, 100f);
+            var rotated = new FaultBand(new Vec2(0f, 0f), (float)(Math.PI / 2), L, W);
             Assert.Equal(-1f, rotated.Direction.X, 3);
             Assert.Equal(0f, rotated.Direction.Z, 3);
         }
 
         [Fact]
-        public void HalfWidthTapersToZeroAtTheEnds()
+        public void PatchRadiusIsTheTaperedWidth()
         {
             var band = Sample();
-            // w = W * (1 - 4t²) なので、|t| = 0.5 でちょうど 0。
-            Assert.Equal(200f, band.HalfWidthAt(0f), 3);      // 2 * W * (1-0)
+            // IL_01D6–01EA: w = W * (1 - 4t²)。|t| = 0.5 でちょうど 0。
+            Assert.Equal(W, band.PatchRadiusAt(0f), 3);
+            Assert.Equal(W * (1f - 4f * 0.4f * 0.4f), band.PatchRadiusAt(0.4f), 3);
+            Assert.Equal(0f, band.PatchRadiusAt(0.5f), 3);
+        }
+
+        [Fact]
+        public void HalfWidthIsTheReachPlusTheMeander()
+        {
+            var band = Sample();
+
+            // 直交方向の包絡線 = 円盤の到達距離 w（= preRadius）
+            //                  + 蛇行が中心をずらせる幅 0.5w（s ∈ [-1,1] に対し s*w*0.5）
+            //                  = 1.5w
+            foreach (float t in new[] { 0f, 0.2f, 0.4f })
+            {
+                float w = band.PatchRadiusAt(t);
+                Assert.Equal(w + 0.5f * w, band.HalfWidthAt(t), 3);
+            }
+
             Assert.Equal(0f, band.HalfWidthAt(0.5f), 3);
-            Assert.True(band.HalfWidthAt(0.4f) > 0f);
             Assert.True(band.HalfWidthAt(0.4f) < band.HalfWidthAt(0f));
+        }
+
+        [Fact]
+        public void HalfWidthIsNotTheOldTwoWModel()
+        {
+            // 回帰テスト。以前は 2w * taper を返しており、震央では 200 だった。
+            var band = Sample();
+            Assert.Equal(1.5f * W, band.HalfWidthAt(0f), 3);
+            Assert.NotEqual(2f * W, band.HalfWidthAt(0f), 3);
         }
 
         [Fact]
@@ -43,20 +86,45 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         [Fact]
-        public void BeyondTheRuptureRangeIsOutside()
+        public void AcrossTheFaultIsBoundedByOnePointFiveW()
         {
             var band = Sample();
-            // 円盤の中心は t ∈ [-0.4, 0.4]。L = 1000 なので |z| > 400 は帯の外。
-            Assert.False(band.Contains(new Vec2(0f, 450f)));
-            Assert.True(band.Contains(new Vec2(0f, 350f)));
+            float limit = band.HalfWidthAt(0f);   // = 1.5 * W = 150
+
+            Assert.True(band.Contains(new Vec2(limit - 5f, 0f)));
+            Assert.False(band.Contains(new Vec2(limit + 5f, 0f)));
+
+            // 旧モデル（2w = 200）の縁は、今は帯の外である。
+            Assert.False(band.Contains(new Vec2(190f, 0f)));
         }
 
         [Fact]
-        public void AcrossTheFaultIsBoundedByTwiceTheTaperedWidth()
+        public void AlongTheFaultReachesPastTheLastPatchCentreByItsRadius()
         {
             var band = Sample();
-            Assert.True(band.Contains(new Vec2(190f, 0f)));    // 2w(0) = 200
-            Assert.False(band.Contains(new Vec2(210f, 0f)));
+
+            // 円盤中心は t ∈ [-0.4, 0.4]、つまり |z| ≦ 0.4L = 400 までしか置けない。
+            // だがその円盤は自分の半径 w(0.4) ぶん先まで壊す。以前の Contains は
+            // |t| > 0.4 を無条件に外側としていたので、両端をちょうど w ぶん取りこぼしていた。
+            float endW = band.PatchRadiusAt(FaultBand.MaxOffset);   // = 36
+            float lastCentre = FaultBand.MaxOffset * L;             // = 400
+
+            Assert.True(band.Contains(new Vec2(0f, lastCentre + endW * 0.5f)));
+            Assert.True(band.Contains(new Vec2(0f, -(lastCentre + endW * 0.5f))));
+            Assert.False(band.Contains(new Vec2(0f, lastCentre + endW * 2f)));
+        }
+
+        [Fact]
+        public void PastTheEndTheCrossSectionShrinks()
+        {
+            var band = Sample();
+            float endW = band.PatchRadiusAt(FaultBand.MaxOffset);
+            float lastCentre = FaultBand.MaxOffset * L;
+
+            // 端の円盤の縁ぎりぎりでは、直交方向に使える余裕がほとんど残らない。
+            // （円との交差なので、沿走方向に使い切ると直交方向は 0 に近づく）
+            Assert.False(band.Contains(
+                new Vec2(band.HalfWidthAt(FaultBand.MaxOffset), lastCentre + endW * 0.95f)));
         }
 
         [Fact]
@@ -67,6 +135,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
             var unknown = new FaultBand(new Vec2(0f, 0f), 0f, 0f, 0f);
             Assert.False(unknown.Known);
             Assert.False(unknown.Contains(new Vec2(0f, 0f)));
+            Assert.Equal(0f, unknown.HalfWidthAt(0f), 4);
+            Assert.Equal(0f, unknown.PatchRadiusAt(0f), 4);
         }
     }
 }
