@@ -46,6 +46,11 @@ namespace DisasterPlus.Game
         public static string OverlayHotkey = "Overlay hotkey (Ctrl + key writes a dump file)";
         public static string LogChannels = "Verbose log channels";
         public static string LogChannelGeneral = "General";
+
+        // 現在 UI からは出していない。FireWhirl チャンネルを付けた Log.Diag 呼び出しが
+        // 1 件も無く、チェックボックスが何も制御しないため（Mod.OnSettingsUI 参照）。
+        // ②〜⑤がチャンネル付きログを出すときに復活させる。キーは 3 ファイル
+        // （Strings / Locales\en.txt / Locales\ja.txt）で一致させ続ける必要があるので消さない。
         public static string LogChannelFireWhirl = "Fire whirl";
 
         public static string AssumptionsFailedTitle = "Some features are unavailable";

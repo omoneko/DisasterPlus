@@ -24,6 +24,10 @@ namespace DisasterPlus.Game
             // Assumptions はレベルロード後に走るので、初回起動時はまだ空。
             // つまり警告は「一度都市を読み込んだ後、次にオプションを開いたとき」に出る。
             // OnSettingsUI はメインメニュー起動時に 1 回しか走らないため、これは避けられない。
+            //
+            // これが成立するのは Assumptions.Reset()（レベルアンロード時）が結果を
+            // 消さないから。ここは必ずアンロードより後に走るので、Reset() でクリアすると
+            // LastResults は常に空になり、この警告は原理的に出せなくなる。
             var failures = Assumptions.LastResults;
             bool anyFailed = false;
             for (int i = 0; i < failures.Count; i++) { if (!failures[i].Passed) anyFailed = true; }
@@ -109,6 +113,14 @@ namespace DisasterPlus.Game
 
             // Assembly-CSharp にも同名の LogChannel (ゲーム側の別物) があるため、
             // using を足すと解決が衝突する。常に完全修飾で参照する。
+            //
+            // ここに出すのは「実際にそのチャンネルのログを出している機能」だけにする。
+            // Log.Diag(key, msg) は General へ委譲されるので General は本物のスイッチだが、
+            // FireWhirl チャンネルを付けた呼び出しは 1 件も無い（設計書 5.2 が本フェーズでの
+            // 移行を禁じている: 移行すると既定 OFF になり docs/playtest-checklist.md の
+            // 手順が壊れる）。チェックボックスだけ置くと「切っても何も変わらない」
+            // 死んだ設定になるので、②〜⑤がチャンネル付きログを出すまで UI から外す。
+            // ビットと保存キーは公開契約なので消さない（LogChannel.FireWhirl は据え置き）。
             var channels = dbg.AddGroup(Strings.LogChannels);
             channels.AddCheckbox(Strings.LogChannelGeneral,
                 DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
@@ -116,13 +128,6 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.General)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.General));
-
-            channels.AddCheckbox(Strings.LogChannelFireWhirl,
-                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
-                    DisasterPlus.Core.Diagnostics.LogChannel.FireWhirl, ModSettings.LogChannelMask.value),
-                v => ModSettings.LogChannelMask.value =
-                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.FireWhirl)
-                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.FireWhirl));
         }
     }
 }
