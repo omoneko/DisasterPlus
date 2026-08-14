@@ -88,7 +88,25 @@ namespace DisasterPlus.Game
             _lastFrame = frame;
             _hasLastFrame = true;
 
-            if (deltaMinutes <= 0f) return;   // ポーズ中は何もしない。負にも絶対にしない。
+            // main スレッド（Ctrl+ホットキー）からの依頼を、この pause guard より前で拾う。
+            // OnAfterSimulationTick はポーズ中も呼ばれ続ける（止まるのはゲーム内時間の
+            // 進みだけで、sim スレッド自体は止まらない）。この guard が守っているのは
+            // 「経過 0 分で機能の状態を進めない」ことであって、スレッドの所有権とは
+            // 無関係。ダンプはどの機能の状態も変更しないので、guard より前で
+            // BuildReport() してもここが守ろうとしているものを壊さない。
+            //
+            // ここで ConsumeRequest() を呼ぶのは 1 回だけ（このメソッド内で 2 度呼ぶと
+            // 依頼を取りこぼす側が out-of-sync になる）。ポーズ中に消費した分はこの下の
+            // return で終わり、非ポーズ時は dumpRequested として後段で使う。
+            bool dumpRequested = DiagnosticDump.ConsumeRequest();
+
+            if (deltaMinutes <= 0f)
+            {
+                // ポーズ中でもダンプ依頼だけは処理する。OnSimulationTick は呼ばない
+                // （＝機能の状態は進めない）ので、pause guard 本来の目的は保たれる。
+                if (dumpRequested) ServiceDumpRequest();
+                return;   // ポーズ中は何もしない。負にも絶対にしない。
+            }
 
             for (int i = 0; i < _features.Count; i++)
             {
@@ -99,11 +117,6 @@ namespace DisasterPlus.Game
                     NoteFailure(_features[i].Name, e);
                 }
             }
-
-            // main スレッド（Ctrl+ホットキー）からの依頼を、ここ sim スレッドで拾う。
-            // BuildReport() は WriteDiagnostics 経由で機能の内部状態に触るため、
-            // 契約どおり sim スレッドから呼ぶ（DiagnosticDump 側のコメント参照）。
-            bool dumpRequested = DiagnosticDump.ConsumeRequest();
 
             // オーバーレイが閉じていてダンプ要求も無ければ何もしない。
             if (DiagnosticsHub.CollectionEnabled || dumpRequested)
@@ -118,6 +131,22 @@ namespace DisasterPlus.Game
                 }
                 catch (System.Exception e) { Log.Error("diagnostics collection failed", e); }
             }
+        }
+
+        /// <summary>
+        /// ポーズ中に拾ったダンプ依頼をここで単独処理する。BuildReport() は
+        /// WriteDiagnostics 経由で機能の内部状態を読むだけで書き換えないので、
+        /// OnSimulationTick を呼ばないポーズ経路から呼んでも安全。
+        /// </summary>
+        private static void ServiceDumpRequest()
+        {
+            try
+            {
+                var report = BuildReport();
+                DiagnosticsHub.Publish(report);
+                DiagnosticDump.SubmitReport(report);
+            }
+            catch (System.Exception e) { Log.Error("diagnostics dump failed", e); }
         }
 
         public static void MainThreadUpdate()
