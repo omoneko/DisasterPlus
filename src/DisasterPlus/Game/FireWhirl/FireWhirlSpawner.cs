@@ -55,18 +55,7 @@ namespace DisasterPlus.Game
             _missCallCount = 0;
 
             _searched = true;
-            _tornadoInfo = null;
-
-            int count = PrefabCollection<DisasterInfo>.LoadedCount();
-            for (uint i = 0; i < count; i++)
-            {
-                DisasterInfo info;
-                try { info = PrefabCollection<DisasterInfo>.GetLoaded(i); }
-                catch { continue; }   // 境界チェックをしない API なので 1 件ずつ守る
-
-                if (info == null) continue;
-                if (info.m_disasterAI is TornadoAI) { _tornadoInfo = info; break; }
-            }
+            _tornadoInfo = ScanForTornadoInfo();
 
             if (_tornadoInfo == null)
             {
@@ -77,10 +66,41 @@ namespace DisasterPlus.Game
             return _tornadoInfo;
         }
 
-        /// <summary>前提検証用。副作用なしに prefab の解決可否だけを返す。</summary>
+        /// <summary>
+        /// prefab を走査するだけの純粋関数。キャッシュもミス回数も一切触らない。
+        /// このクラスの他のメンバーと違い、どのスレッドから呼んでもこのクラスの
+        /// 状態を壊さない（読むのは PrefabCollection だけ）。
+        /// </summary>
+        private static DisasterInfo ScanForTornadoInfo()
+        {
+            int count = PrefabCollection<DisasterInfo>.LoadedCount();
+            for (uint i = 0; i < count; i++)
+            {
+                DisasterInfo info;
+                try { info = PrefabCollection<DisasterInfo>.GetLoaded(i); }
+                catch { continue; }   // 境界チェックをしない API なので 1 件ずつ守る
+
+                if (info == null) continue;
+                if (info.m_disasterAI is TornadoAI) return info;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 前提検証用。副作用なしに prefab の解決可否だけを返す。
+        ///
+        /// FindTornadoInfo() へ委譲してはいけない。あちらは _searched / _tornadoInfo /
+        /// _missCallCount を書き換える「sim スレッドからのみ呼ぶこと」の関数で、
+        /// Assumptions.Run() は _levelReady が立った後の main スレッドから呼ぶ
+        /// ＝ sim スレッドが TrySpawnNew → FindTornadoInfo を回している最中に重なる。
+        /// 破壊的ではないが、ミスキャッシュが巻き戻ったり、見つけた prefab が
+        /// 捨てられたりする。そもそも「調べるだけの関数が調べる対象を書き換える」のが
+        /// この場所では間違った形なので、純粋な走査に置き換える。
+        /// 走査コストはレベルロード 1 回ぶんなので気にしなくてよい。
+        /// </summary>
         public static bool HasTornadoPrefab()
         {
-            return FindTornadoInfo() != null;
+            return ScanForTornadoInfo() != null;
         }
 
         /// <summary>
