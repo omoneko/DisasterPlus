@@ -132,7 +132,13 @@ namespace DisasterPlus.Game
 
             UsedSavedPosition = false;
             bool foundFree;
-            Vector2 pos = FreeSlotFinder.Find(PreferredPosition, ButtonSize, StepY, MaxSlotTries, out foundFree);
+            // owner は null。ここは初回配置で、ボタンはこの呼び出しの後に
+            // 生成される（＝除外すべき「自分自身」がまだ画面に存在しない）。
+            // 逆に言えば、いま画面にある DisasterPlus 製のコンポーネントは全て
+            // 本物の占有物なので、除外せずに避ける対象として数えるのが正しい
+            // （FreeSlotFinder.SelfPrefix の doc、全体レビュー指摘 I4）。
+            Vector2 pos = FreeSlotFinder.Find(
+                PreferredPosition, ButtonSize, StepY, MaxSlotTries, null, out foundFree);
             FoundFreeSlot = foundFree;
 
             if (!foundFree)

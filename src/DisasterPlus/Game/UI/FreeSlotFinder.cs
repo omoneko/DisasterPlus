@@ -23,9 +23,19 @@ namespace DisasterPlus.Game
     public static class FreeSlotFinder
     {
         /// <summary>
-        /// DisasterPlus 製 UI コンポーネントの命名接頭辞。自分自身（と自分の子孫）を
-        /// 衝突判定から除外するのに使う。後続タスクはこの定数からコンポーネント名を
+        /// DisasterPlus 製 UI コンポーネントの命名接頭辞。ログや識別のために
+        /// 名前を揃えるのに使う。後続タスクはこの定数からコンポーネント名を
         /// 組み立てること（文字列 "DisasterPlus" をそれぞれの箇所で書き直さない）。
+        ///
+        /// **衝突判定の除外には使わない**（全体レビュー指摘 I4）。以前はこの接頭辞を
+        /// 持つコンポーネント（と、その子孫）を丸ごと走査対象から外していたが、
+        /// それは「自分の中身と衝突しない」ためのつもりが、実際には
+        /// **この MOD が置いた全てのボタンを、以後のあらゆる配置探索から見えなくする**
+        /// 動作だった。設計書 §6 はこのクラスを②〜⑤の共用基盤と定めており、
+        /// ②が同じ preferred で Find を呼ぶと予報ボタンが見えないまま真上に重ねて
+        /// 置くことになる——このファイルが存在する理由そのものを、このファイルが
+        /// 引き起こす形になっていた。除外は「今まさに配置しようとしている当人」
+        /// だけに限る（<see cref="Find"/> の owner 引数）。
         /// </summary>
         public const string SelfPrefix = "DisasterPlus";
 
@@ -37,8 +47,20 @@ namespace DisasterPlus.Game
         /// 見つからなければ preferred を返し foundFree=false にする
         /// （隠れて見つからないより、見えて重なる方がマシ）。
         /// </summary>
+        /// <param name="owner">
+        /// 今まさに配置しようとしているコンポーネント。これ自身とその子孫だけを
+        /// 衝突判定から外す（再配置のときに自分の現在位置と衝突しないため）。
+        ///
+        /// **初回配置のようにまだコンポーネントが存在しない場合は null を渡す。**
+        /// その場合は何も除外しない。null を渡すこと自体は正常な使い方であって、
+        /// 手抜きではない。
+        ///
+        /// 他の DisasterPlus 製コンポーネント（別機能のボタン、開いている予報パネル等）は
+        /// **除外してはいけない**。それらは画面上の場所を実際に占有しており、
+        /// 避けるべき相手である（SelfPrefix の doc 参照）。
+        /// </param>
         public static Vector2 Find(Vector2 preferred, Vector2 size, float stepY,
-                                   int maxTries, out bool foundFree)
+                                   int maxTries, UIComponent owner, out bool foundFree)
         {
             foundFree = false;
             try
@@ -80,7 +102,7 @@ namespace DisasterPlus.Game
                 for (int attempt = 0; attempt < effectiveTries; attempt++)
                 {
                     var candidate = new Vector2(preferred.x, preferred.y + stepY * attempt);
-                    if (!OverlapsAny(all, candidate, size))
+                    if (!OverlapsAny(all, candidate, size, owner))
                     {
                         foundFree = true;
                         return candidate;
@@ -98,7 +120,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        private static bool OverlapsAny(UIComponent[] all, Vector2 pos, Vector2 size)
+        private static bool OverlapsAny(UIComponent[] all, Vector2 pos, Vector2 size, UIComponent owner)
         {
             for (int i = 0; i < all.Length; i++)
             {
@@ -109,11 +131,10 @@ namespace DisasterPlus.Game
                 // 常駐させるので、これを数えると空きが永久に見つからない。
                 if (!c.isVisible) continue;
 
-                // 我々自身のコンポーネント、またはその子孫は無視する
-                // （再配置のたびに自分自身のパネルの中身と衝突しないように）。
-                // ②以降で追加される複合パネルの内部ラベルやアイコンは既定の無接頭辞名を
-                // 持つので、自分自身の name だけでなく祖先チェーンも見る必要がある。
-                if (IsOwnComponentOrDescendant(c)) continue;
+                // 配置しようとしている当人（とその子孫）だけを無視する。
+                // 複合パネルを再配置する場合、その内部ラベルやアイコンは既定の
+                // 無接頭辞名を持つので、owner との参照一致だけでなく祖先チェーンも辿る。
+                if (IsOwnedBy(c, owner)) continue;
 
                 Vector2 cp = c.absolutePosition;
                 Vector2 cs = c.size;
@@ -130,16 +151,26 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// c 自身、または祖先のいずれかが SelfPrefix で始まる名前を持てば true。
+        /// c が owner そのもの、または owner の子孫なら true。
+        /// owner が null（まだ存在しない初回配置）なら常に false ＝ 何も除外しない。
+        ///
+        /// 名前ではなく参照の一致で見るのが要点。名前（接頭辞）で見ると、この MOD の
+        /// **他の**コンポーネントまで巻き添えで除外され、後続機能が既存ボタンの真上に
+        /// 配置されるようになる（SelfPrefix の doc、全体レビュー指摘 I4）。
+        ///
         /// MaxAncestorDepth で打ち切るので、万一 parent が循環していてもハングしない。
         /// </summary>
-        private static bool IsOwnComponentOrDescendant(UIComponent c)
+        private static bool IsOwnedBy(UIComponent c, UIComponent owner)
         {
+            if (owner == null) return false;
+
             UIComponent cur = c;
             int depth = 0;
             while (cur != null && depth < MaxAncestorDepth)
             {
-                if (cur.name != null && cur.name.StartsWith(SelfPrefix)) return true;
+                // UnityEngine.Object の == オーバーロード経由で比較する
+                // （破棄済みの fake-null を素の参照比較で取り違えない）。
+                if (cur == owner) return true;
                 cur = cur.parent;
                 depth++;
             }
