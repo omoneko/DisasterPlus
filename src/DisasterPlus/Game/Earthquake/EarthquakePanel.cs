@@ -65,6 +65,32 @@ namespace DisasterPlus.Game
         private const float PanelWidth = 420f;
         private const float MaxRayDistance = 8000f;
 
+        /// <summary>
+        /// カーソル地点のレイを実際に引き直す間隔（描画フレーム数）。
+        ///
+        /// ── なぜ間引くのか（①からの持ち越しの是正）─────────────────────
+        ///
+        /// <see cref="TryPickCursorGround"/> は地形と交差するまで
+        /// <c>MaxRayDistance / 16m</c> ＝ **最大 500 回**の高さサンプリングを行い、
+        /// 当たれば二分法が 20 回追加される。**いちばん高くつくのは「外す」場合**
+        /// （地平線をかすめるレイ）で、これは視点を動かしている間に普通に起きる。
+        ///
+        /// ①はこの費用を「ハザード情報ビューを開いている間しか走らないので許容」と
+        /// して意図的に未最適化のまま残した。**Task 4 でその前提が変わった** ——
+        /// 地震が進行中ならパネルは毎フレームこのレイを引くので、カメラが揺れ、
+        /// 建物が倒れ、パーティクルが出ている**いちばん重いフレーム**に重なる。
+        ///
+        /// 直し方は「引く回数を上限で縛る」。4 フレームに 1 回だけ引き、それ以外の
+        /// フレームは直前の結果を返す。**表示する値そのものは変えない**（同じ計算の
+        /// 結果を、最大 3 フレーム（60fps で 50ms 未満）遅れて出すだけ）。
+        /// 建物の余裕度が既に 1 sim tick 遅れて届く設計（<see cref="BuildingProbe"/>）と
+        /// 同じ性質の、目に見えない遅延である。
+        ///
+        /// 1 にすると毎フレーム引く（＝この是正が無効になる）。大きくすると
+        /// カーソル追従が目に見えて遅れる。
+        /// </summary>
+        private const int RepickIntervalFrames = 4;
+
         private const float RowStep = 22f;
         private const float RowHeight = 20f;
 
@@ -192,6 +218,11 @@ namespace DisasterPlus.Game
             _hazardLabel = null;
             _bodyBuilt = false;
             _cursorPublishedValid = false;
+            // 次の都市が前の都市のカーソル地点を 1 回でも返さないようにする。
+            _pickCached = false;
+            _pickFrame = 0;
+            _pickOk = false;
+            _pickHit = new Vec3(0f, 0f, 0f);
             // fake-null 経由でも次回 Camera.main を引き直せるが、都市をまたいで
             // 古い参照を抱え続けない、という本プロジェクトの原則を明示的に守る。
             _mainCameraCache = null;
@@ -434,10 +465,11 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // カーソル地点は 1 フレームに 1 回だけ求める。①の申し送りのとおり、
-            // 地形をかすめて外すレイでは 501 回の高さサンプリングが走るので、
-            // 同じフレームで 2 回引いてはいけない（強度の行とハザードの行で共有する）。
-            // 誰も使わないフレームでは引かない。
+            // カーソル地点は 1 フレームに 1 回だけ求める。地形をかすめて外すレイでは
+            // 501 回の高さサンプリングが走るので、同じフレームで 2 回引いてはいけない
+            // （強度の行とハザードの行で共有する）。誰も使わないフレームでは引かない。
+            // 実際にレイを引くのはさらに RepickIntervalFrames フレームに 1 回だけで、
+            // 残りのフレームは直前の結果を返す（TryPickCursorGround の doc）。
             bool hazardViewOn =
                 InfoModeSwitch.IsShowingHazardFor(InfoManager.SubInfoMode.EarthquakeHazard);
             var cursor = new Vec3(0f, 0f, 0f);
@@ -862,36 +894,70 @@ namespace DisasterPlus.Game
         /// </summary>
         private static Camera _mainCameraCache;
 
+        /// <summary>直近に実際にレイを引いたフレーム（<c>Time.frameCount</c>）と、その結果。</summary>
+        private static int _pickFrame;
+        private static bool _pickCached;
+        private static Vec3 _pickHit;
+        private static bool _pickOk;
+
         /// <summary>
-        /// ①の <c>ForecastPanel.TryPickCursorGround</c> と全く同じ実装。
-        /// **共通化しない** —— ①の実機確認の申し送りに「かすめて外すレイでは
-        /// 501 回の高さサンプリングが毎フレーム走る。今回は意図的に最適化していない」が
-        /// あり、そこへ手を入れるのは②のスコープ外だからである。②も同じ性質を持つ
-        /// ことは playtest チェックリストに書いてある。
+        /// カーソル直下の地面。計算そのものは①の <c>ForecastPanel.TryPickCursorGround</c> と
+        /// 同じで、**引く頻度だけ**を <see cref="RepickIntervalFrames"/> で縛ってある。
         ///
-        /// 幸い最初の 1 行（<c>UIView.IsInsideUI()</c>）が、パネルを読んでいる間
-        /// ——つまりマウスがパネルの上にある間——サンプリングに入る前に打ち切る。
+        /// **共通化しない。** ①のレイは予報パネルを開いている間だけ走り、②のレイは
+        /// 地震の最中に走る——費用の許容範囲が違うので、今は片方だけを縛っている。
+        /// （①側を同じ形にするかは①の判断であって、ここで勝手に変えない。）
+        ///
+        /// <c>UIView.IsInsideUI()</c> の 1 行は間引きの**外**に置く。パネルを読んでいる間
+        /// ——マウスがパネルの上にある間——はサンプリング自体が起きないので、
+        /// これがいちばん効く早期打ち切りであり、キャッシュより先に判定したい。
+        /// またこの経路では「カーソルが無効になったこと」を遅らせずに伝えられる
+        /// （遅らせると、UI の上にマウスを載せた後も数フレーム古い地点を指し続ける）。
         /// </summary>
         private static bool TryPickCursorGround(out Vec3 hit)
         {
             hit = new Vec3(0f, 0f, 0f);
 
             // パネルやその他の UI の上にマウスがあるときは意味のある地点が無い。
-            if (UIView.IsInsideUI()) return false;
+            if (UIView.IsInsideUI())
+            {
+                // 次にカーソルが地形へ戻ったとき、UI の上に載る前の古い地点を
+                // そのまま返さないよう、キャッシュを捨てる。
+                _pickCached = false;
+                return false;
+            }
 
             if (_mainCameraCache == null) _mainCameraCache = Camera.main;
             var cam = _mainCameraCache;
-            if (cam == null) return false;
+            if (cam == null)
+            {
+                _pickCached = false;
+                return false;
+            }
+
+            // ★ ここが持ち越しの是正。最大 501 回の高さサンプリングは
+            //    RepickIntervalFrames フレームに 1 回しか走らない。
+            int frame = Time.frameCount;
+            if (_pickCached && frame - _pickFrame < RepickIntervalFrames)
+            {
+                hit = _pickHit;
+                return _pickOk;
+            }
 
             Ray ray = cam.ScreenPointToRay(Input.mousePosition);
             Vector3 d = ray.direction.normalized;
 
-            return RayGeometry.IntersectTerrain(
+            _pickOk = RayGeometry.IntersectTerrain(
                 new Vec3(ray.origin.x, ray.origin.y, ray.origin.z),
                 new Vec3(d.x, d.y, d.z),
                 TerrainHeightSampler.Instance,
                 MaxRayDistance,
-                out hit);
+                out _pickHit);
+            _pickFrame = frame;
+            _pickCached = true;
+
+            hit = _pickHit;
+            return _pickOk;
         }
     }
 }

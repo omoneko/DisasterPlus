@@ -95,3 +95,5 @@ EarthquakeVerdictSurviveAnyDistance = この強度ではどれだけ近くても
 EarthquakeAlreadyDown = 既に倒壊または炎上しています
 EarthquakeVerdictUnknown = 判定できません（EarthquakeAI プレハブから断層の幾何を読めていません）
 EarthquakeGlobalDiscOnly = これは全体円盤についての判定で、地震が始まった瞬間に既に決まっています。断層帯の内側では 4 つの破壊円盤が別に判定します。
+EarthquakeShakeBoost = カメラの揺れを強度と距離に連動させる
+EarthquakeShakeBoostNote = バニラは揺れの振幅に強度を入れていないため、25.5 の地震も 5.5 と同じ揺れになります。強度が既定の 5.5 のときは、この設定を入れても挙動は一切変わりません。

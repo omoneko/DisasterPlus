@@ -42,6 +42,7 @@ namespace DisasterPlus.Game
         public static SavedBool EarthquakeEnabled;
         public static SavedInt EarthquakeButtonX;
         public static SavedInt EarthquakeButtonY;
+        public static SavedBool EarthquakeShakeBoost;
 
         public static void Ensure()
         {
@@ -83,6 +84,11 @@ namespace DisasterPlus.Game
             // （EarthquakePanelButton が空き位置を決めて書き戻す。Task 4）。
             EarthquakeButtonX = new SavedInt("earthquakeButtonX", FileName, -1, true);
             EarthquakeButtonY = new SavedInt("earthquakeButtonY", FileName, -1, true);
+            // 既定 ON にできるのは、強度 55（バニラ既定）で追加分が厳密に 0 になり、
+            // そのとき CameraShakeBooster が m_cameraShake に一切書き込まないから
+            // ——つまり既定の地震では挙動がバニラとビット単位で同一になる
+            // （ShakeWaveform.IntensityFactor とそのユニットテストが固定している）。
+            EarthquakeShakeBoost = new SavedBool("eqShakeBoost", FileName, true, true);
 
             _ready = true;
         }

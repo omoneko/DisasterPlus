@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 17 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 18 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -40,17 +40,18 @@ namespace DisasterPlus.Game
         /// WeatherManager の current/target フィールド群・
         /// DisasterManager.m_hazardAmount が private Byte[] のままか・
         /// m_disasters の m_buffer/m_size・ハザードグリッドの形状）＋
-        /// 地震 5 件（EarthquakeAI プレハブの 4 調整値・DisasterData の
+        /// 地震 7 件（EarthquakeAI プレハブの 4 調整値・DisasterData の
         /// m_intensity/m_activationFrame/m_startFrame/m_angle・
         /// EarthquakeCoverage と CheckLocalResource・sim スレッドの時計・
         /// SubInfoMode.EarthquakeHazard と EarthquakeAI.UpdateHazardMap・
-        /// VanillaRandomizer と本物の Randomizer のビット一致）＋
+        /// VanillaRandomizer と本物の Randomizer のビット一致・
+        /// m_cameraShake と m_disableCameraShake が public のままか）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 18;
+        private const int TotalCheckCount = 19;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -114,7 +115,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 17 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 18 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -403,6 +404,34 @@ namespace DisasterPlus.Game
 
             // --- ②地震（Task 5）ここまで ---
 
+            // --- ②地震（Task 6）ここから ---
+
+            // カメラの揺れの補正は、この 2 つの public フィールドの上にしか成り立たない。
+            // どちらも Harmony を使わずに触れることが前提で（§A-7）、片方でも
+            // 非公開化・改名・型変更されると CameraShakeBooster は例外を 1 回吐いた後
+            // 黙って何も足さなくなる——そして**追加分 0 は強度 55 では正常な状態**
+            // なので、画面を見ても機能が死んでいることに気付けない。
+            //
+            // m_disableCameraShake の方が重い。読めなければ「揺らすな」という
+            // プレイヤーの明示的な選択を無視して足すことになるので、
+            // CameraShakeBooster は読めない場合に**何も足さない**側へ倒している。
+            Check("CameraController.m_cameraShake and DisasterManager.m_disableCameraShake "
+                  + "are public fields",
+                  "camera shake cannot be scaled with intensity and distance, and the mod cannot "
+                  + "honour the player's \"disable camera shake\" choice",
+                  delegate
+                  {
+                      var shake = typeof(CameraController).GetField("m_cameraShake",
+                          BindingFlags.Public | BindingFlags.Instance);
+                      if (shake == null || shake.FieldType != typeof(UnityEngine.Vector3)) return false;
+
+                      var disable = typeof(DisasterManager).GetField("m_disableCameraShake",
+                          BindingFlags.Public | BindingFlags.Instance);
+                      return disable != null && disable.FieldType == typeof(bool);
+                  });
+
+            // --- ②地震（Task 6）ここまで ---
+
             Report();
         }
 
@@ -508,7 +537,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 17 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 18 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

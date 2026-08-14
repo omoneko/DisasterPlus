@@ -232,5 +232,15 @@ namespace DisasterPlus.Game
         public static string EarthquakeGlobalDiscOnly =
             "This is decided for the city-wide disc, and it was already decided the moment the "
             + "quake started. Inside the fault zone the four rupture patches judge separately.";
+
+        // --- ②地震（Task 6: カメラの揺れ） ---
+        //
+        // 注記の最後の 1 文が本質。「既定の強度では何も変わらない」は言い訳ではなく、
+        // この設定を既定 ON にしてよい根拠そのものである（強度 55 で追加分が厳密に 0）。
+        public static string EarthquakeShakeBoost =
+            "Scale camera shake with intensity and distance";
+        public static string EarthquakeShakeBoostNote =
+            "Vanilla ignores intensity here, so a 25.5 quake shakes exactly as much as a 5.5 one. "
+            + "At the vanilla default intensity (5.5) this option changes nothing.";
     }
 }

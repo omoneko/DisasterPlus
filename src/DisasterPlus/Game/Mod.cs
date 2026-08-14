@@ -97,11 +97,18 @@ namespace DisasterPlus.Game
             var earthquake = helper.AddGroup(Strings.GroupEarthquake);
             earthquake.AddCheckbox(Strings.EarthquakeEnabled, ModSettings.EarthquakeEnabled.value,
                 v => ModSettings.EarthquakeEnabled.value = v);
+            earthquake.AddCheckbox(Strings.EarthquakeShakeBoost, ModSettings.EarthquakeShakeBoost.value,
+                v => ModSettings.EarthquakeShakeBoost.value = v);
             earthquake.AddButton(Strings.EarthquakeResetButton, delegate
             {
                 ModSettings.EarthquakeButtonX.value = -1;
                 ModSettings.EarthquakeButtonY.value = -1;
             });
+
+            // 揺れの補正が「既定の強度では何も変えない」ことを名乗る。バニラを抑制せず
+            // 足すだけで、強度 55（バニラ既定）では追加分が厳密に 0 になる（§A-7）。
+            // 注記の出し方は IntensityUnlockHandledByOther と同じ（root への AddGroup）。
+            helper.AddGroup(Strings.EarthquakeShakeBoostNote);
 
             // ②は機能そのものが DLC 依存（EarthquakeAI のプレハブが存在しない）。
             // ForecastHazardNeedsDlc / FireWhirlNeedsDlc と同じ形で理由を書く。

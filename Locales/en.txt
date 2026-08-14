@@ -96,3 +96,5 @@ EarthquakeVerdictSurviveAnyDistance = will not collapse at any distance at this 
 EarthquakeAlreadyDown = already collapsed or burning
 EarthquakeVerdictUnknown = no verdict (the fault geometry could not be read from the EarthquakeAI prefab)
 EarthquakeGlobalDiscOnly = This is decided for the city-wide disc, and it was already decided the moment the quake started. Inside the fault zone the four rupture patches judge separately.
+EarthquakeShakeBoost = Scale camera shake with intensity and distance
+EarthquakeShakeBoostNote = Vanilla ignores intensity here, so a 25.5 quake shakes exactly as much as a 5.5 one. At the vanilla default intensity (5.5) this option changes nothing.

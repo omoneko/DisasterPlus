@@ -28,6 +28,7 @@ namespace DisasterPlus.Game
         {
             EarthquakeHub.Clear();
             EarthquakeReader.Reset();
+            CameraShakeBooster.Reset();
         }
 
         /// <summary>
@@ -74,12 +75,21 @@ namespace DisasterPlus.Game
         {
             EarthquakePanelButton.Tick();
             EarthquakePanel.Tick();
+
+            // ★ パネルが閉じていても必ず呼ぶ。カメラの揺れはパネルの表示物ではなく、
+            //    ゲーム側が毎フレーム消費してリセットする値なので（§A-7、
+            //    CameraController.LateUpdate の最後の 1 行が Vector3.zero を書く）、
+            //    毎フレーム足し続けない限り効かない。
+            CameraShakeBooster.Update();
         }
 
         public void OnLevelUnloading()
         {
             EarthquakeHub.Clear();
             EarthquakeReader.Reset();
+            // 揺れの加算を止める。バニラが毎フレーム m_cameraShake をゼロに戻すので、
+            // ここで止めれば残留オフセットは残らない（§A-7）。
+            CameraShakeBooster.Reset();
             // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
             EarthquakePanelButton.Remove();
             EarthquakePanel.Destroy();
@@ -103,8 +113,45 @@ namespace DisasterPlus.Game
             if (snapshot == null || !snapshot.Valid) return;
 
             WritePrefabFacts(b, snapshot.Prefab);
+            WriteShakeBoost(b, snapshot);
             WriteSimClock(b, snapshot);
             WriteQuakes(b, snapshot);
+        }
+
+        /// <summary>
+        /// カメラシェイク補正の状態。**実機で効いているかを確かめる唯一の手段。**
+        /// 画面の揺れは目で見ても「強度が入った揺れ」と「バニラの揺れ」を区別できず、
+        /// しかも強度 55 では追加分が厳密に 0 になるのが**正しい**——つまり
+        /// 「何も起きない」が仕様である状態と、機能が黙って死んでいる状態が、
+        /// 見た目では完全に同じになる。だから数値で名乗る。
+        ///
+        /// <c>added</c> は main スレッドが書いた値をここ（sim スレッド）で読んでいる。
+        /// 表示専用の float 1 個で、遅れて読めても意味が壊れないため、
+        /// スナップショット経路には載せていない。
+        /// </summary>
+        private static void WriteShakeBoost(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
+        {
+            if (!ModSettings.EarthquakeShakeBoost.value)
+            {
+                b.Line(1, "camera shake boost", "off (setting)");
+                return;
+            }
+
+            // DisasterManager は sim スレッドの持ち物なので、ここで読むのが正しい。
+            string state = "on";
+            if (ColossalFramework.Singleton<DisasterManager>.exists
+                && ColossalFramework.Singleton<DisasterManager>.instance.m_disableCameraShake)
+            {
+                state = "on, but the game's 'disable camera shake' option wins (nothing is added)";
+            }
+            else if (!snapshot.Prefab.Resolved || snapshot.Prefab.ActiveDuration == 0u)
+            {
+                state = "on, but m_activeDuration is unreadable (nothing is added: the shaking "
+                        + "window is unknown, and guessing it would keep shaking after the quake ends)";
+            }
+
+            b.Line(1, "camera shake boost", state);
+            b.Line(2, "added last frame", CameraShakeBooster.LastAdded.ToString("F3"));
         }
 
         /// <summary>
