@@ -35,6 +35,33 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>
+        /// 今まさに DisasterHazard ビューが表示されていて、かつ表示中のサブモードが
+        /// <paramref name="subMode"/> と一致しているか。
+        ///
+        /// なぜ要るか（IL 実測で確定、Task 4 フォローアップ）: DisasterManager.UpdateTexture
+        /// は各災害 AI の GetHazardSubMode を見て、単一の m_hazardAmount 配列へ
+        /// 「今表示中のサブモードのハザード」だけを書き込む。つまりグリッドは常に
+        /// 1 種類のサブモード分の値しか保持していない。表示中のサブモードと一致しない
+        /// 状態でグリッドを読むと、無関係な災害種別の値を要求したサブモードの値として
+        /// 返してしまう——「確信を持って誤った数値」になる。HazardMapReader.SampleAt は
+        /// この判定を必ず経由するので、呼び出し元がチェックを忘れる余地は無い。
+        ///
+        /// IL 実測: InfoManager.CurrentSubMode は public な読み取り専用プロパティ
+        /// （型 InfoManager.SubInfoMode）として実在する。
+        /// </summary>
+        public static bool IsShowingHazardFor(InfoManager.SubInfoMode subMode)
+        {
+            try
+            {
+                if (!Singleton<InfoManager>.exists) return false;
+                var im = Singleton<InfoManager>.instance;
+                return im.CurrentMode == InfoManager.InfoMode.DisasterHazard
+                       && im.CurrentSubMode == subMode;
+            }
+            catch { return false; }
+        }
+
         public static void ShowHazard(InfoManager.SubInfoMode subMode)
         {
             try

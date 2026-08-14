@@ -11,14 +11,26 @@ namespace DisasterPlus.Game
     /// IL 実測（Task 4 Step 1）でブリーフの想定が崩れた点:
     ///   ブリーフの推測: Byte DisasterManager.SampleDisasterHazardMap(Vector3, SubInfoMode)
     ///   実際の宣言:     Color DisasterManager.SampleDisasterHazardMap(Vector3 pos)
-    /// SubInfoMode は引数に無く（呼んでも絞り込みは効かない）、戻り値は byte ではなく
-    /// UI 描画用に補間済みの Color。中身は private フィールド m_hazardAmount
-    /// （256x256 の byte グリッド、z*256+x でインデックス）をバイリニア補間し、
-    /// InfoProperties.m_modeProperties[29]（DisasterHazard の固定インデックス、IL の
-    /// ldc.i4.s 29）の neutral/active/target 色へブレンドするだけで、数値そのものは
-    /// 呼び出し元に渡ってこない。Color から数値を逆算しようとすると、その 3 色の
-    /// 実際の RGBA（データ駆動でシリアライズされており IL からは読めない）を知らないと
-    /// 一般には不可能なので、Color 経由での近似は行わない。
+    /// バニラの SampleDisasterHazardMap 自体は SubInfoMode を引数に取らない（呼んでも
+    /// 絞り込みは効かない）。戻り値も byte ではなく UI 描画用に補間済みの Color。
+    /// 中身は private フィールド m_hazardAmount（256x256 の byte グリッド、z*256+x で
+    /// インデックス）をバイリニア補間し、InfoProperties.m_modeProperties[29]
+    /// （DisasterHazard の固定インデックス、IL の ldc.i4.s 29）の
+    /// neutral/active/target 色へブレンドするだけで、数値そのものは呼び出し元に
+    /// 渡ってこない。Color から数値を逆算しようとすると、その 3 色の実際の RGBA
+    /// （データ駆動でシリアライズされており IL からは読めない）を知らないと一般には
+    /// 不可能なので、Color 経由での近似は行わない。
+    ///
+    /// ただし m_hazardAmount という配列自体は単一グリッドで、サブモードごとに
+    /// 分かれてはいない（Task 4 フォローアップ、IL 実測で確定）。
+    /// DisasterManager.UpdateTexture が各災害 AI の GetHazardSubMode を見て、
+    /// 「今 InfoManager が表示しているサブモード」のハザードだけをこの配列へ
+    /// 書き込む。つまりグリッドの中身は常に「現在表示中のサブモード 1 種類分」
+    /// であり、SampleAt の subMode 引数はバニラ API に渡すためのものではなく、
+    /// 「今表示中のサブモードと一致しているか」を確認するガードとして使う
+    /// （下記 SampleAt の doc、および InfoModeSwitch.IsShowingHazardFor 参照）。
+    /// これを怠ると、表示中と違う災害種別の値を要求したラベルで返す
+    /// 「確信を持って誤った数値」になる。
     ///
     /// そこで本クラスは m_hazardAmount を直接読む。private フィールドへの反射アクセスは
     /// この MOD で初めてではなく、ToolRegistration.Register&lt;T&gt;() と同じ手口
@@ -76,9 +88,14 @@ namespace DisasterPlus.Game
         /// <summary>
         /// worldPos 地点のハザード強度を 0-255 で返す。
         ///
-        /// subMode は現状のバニラ実装（m_hazardAmount は単一グリッド）では絞り込みに
-        /// 使われない。Task 5 の呼び出し契約と、将来サブモード別グリッドに変わった場合の
-        /// 拡張点として引数だけ残してある。
+        /// subMode は「これから読みたいハザード種別」の指定であり、単なる形だけの引数
+        /// ではない。m_hazardAmount は単一グリッドで、今 InfoManager が表示している
+        /// サブモードのハザードしか保持していない（クラス doc 参照）ため、subMode が
+        /// 現在表示中のサブモードと一致しているかを
+        /// <see cref="InfoModeSwitch.IsShowingHazardFor"/> で確認し、一致しなければ
+        /// グリッドの値を返さず ok=false にする。ここで弾かないと、呼び出し元が
+        /// 気付かないまま無関係な災害種別の数値に要求したラベルを付けて表示して
+        /// しまう（この MOD が避けたい「確信を持って誤った数値」そのもの）。
         ///
         /// 格子の左下（floor）側 1 セルだけを読む点に注意。バニラの
         /// SampleDisasterHazardMap は 4 隅をバイリニア補間した Color を返すが、
@@ -94,6 +111,13 @@ namespace DisasterPlus.Game
             try
             {
                 if (!Singleton<DisasterManager>.exists) return 0;
+
+                // グリッドは「今表示中のサブモード」の値しか保持していない
+                // （クラス doc 参照）。要求した subMode が表示中でなければ、
+                // グリッドの値は無関係な災害種別のものなので「読み取れなかった」
+                // として扱う。ラベルと数値が食い違う「確信を持って誤った数値」を
+                // 呼び出し元に渡さないための必須ガード。
+                if (!InfoModeSwitch.IsShowingHazardFor(subMode)) return 0;
 
                 if (HazardAmountField == null)
                 {
