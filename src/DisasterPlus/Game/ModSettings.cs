@@ -1,5 +1,6 @@
 using ColossalFramework;
 using DisasterPlus.Core.FireWhirl;
+using UnityEngine;
 
 namespace DisasterPlus.Game
 {
@@ -32,6 +33,8 @@ namespace DisasterPlus.Game
         public static SavedInt MinSeparation;
         public static SavedBool IntensityUnlock;
         public static SavedInt EarthquakeDamageOwner;
+        public static SavedBool OverlayEnabled;
+        public static SavedInt OverlayHotkey;
 
         public static void Ensure()
         {
@@ -56,6 +59,9 @@ namespace DisasterPlus.Game
             // 方式（全員 false になる）の罠にも掛からない。
             IntensityUnlock       = new SavedBool("intensityUnlock", FileName, !ModCompat.NdrPresent, true);
             EarthquakeDamageOwner = new SavedInt("eqDamageOwner", FileName, EarthquakeOwnerOther, true);
+            // 診断オーバーレイ。既定は OFF（開発者向け機能なので一般プレイヤーには出さない）。
+            OverlayEnabled        = new SavedBool("diagOverlayEnabled", FileName, false, true);
+            OverlayHotkey         = new SavedInt("diagOverlayHotkey", FileName, (int)KeyCode.F11, true);
 
             _ready = true;
         }

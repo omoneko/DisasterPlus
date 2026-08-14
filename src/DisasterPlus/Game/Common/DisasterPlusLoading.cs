@@ -34,6 +34,8 @@ namespace DisasterPlus.Game
 
             // Harmony の適用と prefab の解決を見るので、機能の初期化が終わってから走らせる。
             Assumptions.Run();
+
+            if (ModSettings.OverlayEnabled.value) DiagnosticOverlay.Create();
         }
 
         public override void OnLevelUnloading()
@@ -43,6 +45,7 @@ namespace DisasterPlus.Game
             FeatureHost.LevelUnloading();
             FireWhirlRegistry.Clear();
             Assumptions.Reset();
+            DiagnosticOverlay.Destroy();
             // OnLoadData 自身も次回ロードの先頭で必ずクリアするが、二重の安全策として
             // ここでも捨てる。都市をまたいで保留中の復元データを持ち越さない。
             DisasterPlusSerialization.TakePendingRestore();
