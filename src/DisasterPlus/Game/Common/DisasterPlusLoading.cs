@@ -35,7 +35,9 @@ namespace DisasterPlus.Game
             // Harmony の適用と prefab の解決を見るので、機能の初期化が終わってから走らせる。
             Assumptions.Run();
 
-            if (ModSettings.OverlayEnabled.value) DiagnosticOverlay.Create();
+            // オーバーレイはここでは作らない。ロード時の設定値で固定すると、
+            // 途中で ON にしても何も起きない片道の設定になる。
+            // FeatureHost.MainThreadUpdate() が毎フレーム現在値に追従させる。
         }
 
         public override void OnLevelUnloading()

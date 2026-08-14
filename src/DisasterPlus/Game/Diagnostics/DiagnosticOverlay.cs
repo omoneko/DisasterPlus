@@ -75,10 +75,10 @@ namespace DisasterPlus.Game
                 _lines = DiagnosticFormatter.Format(DiagnosticsHub.Latest);
             }
 
-            // sim スレッドが組み立て終えたダンプがあれば、ここ(main スレッド)で書き出す。
-            // オーバーレイを閉じていても(_visible が false でも)この呼び出し自体は続けるので、
-            // 表示していないときの Ctrl+ホットキーでもダンプは書き出される。
-            DiagnosticDump.FlushPendingWrite();
+            // ダンプの書き出し(DiagnosticDump.FlushPendingWrite)をここでやってはいけない。
+            // このオブジェクト自体が設定次第で存在しないので、書き出しがこの Update に
+            // 相乗りしていると「オーバーレイ OFF ならダンプも出ない」という
+            // 隠れた依存になる。呼び出しは FeatureHost.MainThreadUpdate() に置く。
         }
 
         private void Toggle()
