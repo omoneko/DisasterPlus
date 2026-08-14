@@ -45,11 +45,33 @@ namespace DisasterPlus.Game
 
         // フィールドが見つからない場合の警告は起動あたり 1 回に抑える
         // （呼び出し頻度が高いので Log.Warn を毎回出すとログが溢れる）。
+        //
+        // レベルアンロードでリセットしないのは意図的。「見つからない」はこの DLL が
+        // 参照しているゲームのビルドに対する事実であり、都市ごとの状態ではない
+        // （プロセス寿命＝ゲーム起動から終了まで変わらない）。「セッション状態は
+        // アンロードでリセットする」という本プロジェクトの原則をここに機械的に
+        // 当てはめて Reset() を足すと、都市を切り替えるたびに同じ 1 行が再び
+        // 出るだけの「リセットのためのリセット」になってしまう。
         private static bool _missingFieldWarned;
 
-        private const int GridSize = 256;
-        private const float WorldUnitsPerCell = 38.4f; // IL 実測: SampleDisasterHazardMap の座標変換（除算）
-        private const float GridOrigin = 128f;          // IL 実測: 同上のオフセット
+        // SampleAt() 内の想定外例外（GetValue の型不一致等）も同じ理由で 1 回だけ
+        // Log.Error で鳴らし、以後は Log.Diag（キー単位で 512 sim フレームに 1 回）へ
+        // 落とす。ここは毎フレーム呼ばれ得るパスなので、Log.Error を無条件で
+        // 置いたままだと、1 回きりの取りこぼしではなく恒常的な例外（将来ゲーム更新で
+        // m_hazardAmount の型が変わり GetValue が InvalidCastException を出し続ける、等）
+        // が起きたときにログが埋まる。1 回目は確実に目立たせつつ、そのあとは
+        // 完全に黙らせない程度に絞る。
+        private static bool _sampleErrorLogged;
+
+        // グリッドの解像度・セルサイズはバニラの public const（IL 実測で確認済み:
+        // HAZARDMAP_RESOLUTION=256 Int32, HAZARDMAP_CELL_SIZE=38.4 Single、両方 public
+        // static const）をそのまま使う。ここで自前の定数を持たないのは、将来
+        // 解像度が変われば参照先の const を拾って再ビルドすれば自動的に追従し、
+        // 手でコピーした数字が黙って古いまま残る事故を避けるため。
+        // 原点（グリッド中心）は解像度の半分として導出する（第三の数字を別途持たない）。
+        private const int GridSize = DisasterManager.HAZARDMAP_RESOLUTION;
+        private const float WorldUnitsPerCell = DisasterManager.HAZARDMAP_CELL_SIZE;
+        private const float GridOrigin = DisasterManager.HAZARDMAP_RESOLUTION / 2f;
 
         /// <summary>
         /// worldPos 地点のハザード強度を 0-255 で返す。
@@ -57,6 +79,14 @@ namespace DisasterPlus.Game
         /// subMode は現状のバニラ実装（m_hazardAmount は単一グリッド）では絞り込みに
         /// 使われない。Task 5 の呼び出し契約と、将来サブモード別グリッドに変わった場合の
         /// 拡張点として引数だけ残してある。
+        ///
+        /// 格子の左下（floor）側 1 セルだけを読む点に注意。バニラの
+        /// SampleDisasterHazardMap は 4 隅をバイリニア補間した Color を返すが、
+        /// こちらは補間せず生の格子値を返す（Color 経由の逆算は不正確になるため、
+        /// 上のクラス doc の通り意図して採用していない）。そのため、セルの境界付近では
+        /// この戻り値とバニラのヒートマップの見た目が最大 1 セル分ずれ得る。
+        /// これはバグではなく「不正確な色からの逆算より、生の格子値の方がマシ」という
+        /// トレードオフの結果。
         /// </summary>
         public static byte SampleAt(Vector3 worldPos, InfoManager.SubInfoMode subMode, out bool ok)
         {
@@ -88,7 +118,19 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                Log.Error("hazard sample failed", e);
+                // SampleAt はカーソルが地図上にある間ずっと毎フレーム呼ばれ得るパス。
+                // 1 回目だけ確実に目立たせ（Log.Error）、以後は Log.Diag のキー単位
+                // スロットル（512 sim フレームに 1 回）に落として流量を抑える
+                // （完全に黙らせるのではなく、間隔を空けて出し続ける）。
+                if (!_sampleErrorLogged)
+                {
+                    _sampleErrorLogged = true;
+                    Log.Error("hazard sample failed", e);
+                }
+                else
+                {
+                    Log.Diag("HazardSample", "hazard sample failed: " + e.GetType().Name);
+                }
                 return 0;
             }
         }
