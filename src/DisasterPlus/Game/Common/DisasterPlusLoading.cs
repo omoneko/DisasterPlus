@@ -27,6 +27,7 @@ namespace DisasterPlus.Game
             if (FeatureHost.Features.Count == 0)
             {
                 FeatureHost.Register(new FireWhirlFeature());
+                FeatureHost.Register(new ForecastFeature());
             }
 
             FeatureHost.LevelLoaded();

@@ -56,5 +56,25 @@ namespace DisasterPlus.Game
         public static string AssumptionsFailedTitle = "Some features are unavailable";
         public static string AssumptionsFailedHint =
             "Load a city once, then reopen this page to refresh.";
+
+        public static string GroupForecast = "Weather forecast";
+        public static string ForecastEnabled = "Enable the forecast panel";
+        public static string ForecastResetButton = "Reset the forecast button position";
+        public static string ForecastTitle = "Weather forecast";
+        public static string ForecastTemperature = "Temperature";
+        public static string ForecastRain = "Rain";
+        public static string ForecastCloud = "Cloud";
+        public static string ForecastWind = "Wind";
+        public static string ForecastLightning = "Lightning";
+        public static string ForecastTornado = "Tornado";
+        public static string ForecastShowOnMap = "Show on map";
+        public static string ForecastAtCursor = "Hazard at cursor";
+        public static string ForecastUnavailable = "Weather data unavailable";
+        public static string ForecastNdrNote =
+            "Natural Disasters Renewal governs disaster occurrence.";
+        public static string TrendRising = "up";
+        public static string TrendFalling = "down";
+        public static string TrendSteady = "steady";
+        public static string LogChannelForecast = "Forecast";
     }
 }

@@ -71,6 +71,18 @@ namespace DisasterPlus.Game
                 helper.AddGroup(Strings.FireWhirlNeedsDlc);
             }
 
+            var forecast = helper.AddGroup(Strings.GroupForecast);
+            forecast.AddCheckbox(Strings.ForecastEnabled, ModSettings.ForecastEnabled.value,
+                v => ModSettings.ForecastEnabled.value = v);
+            // 探索のやり直しは次回のレベルロードで自然に起きる（ForecastPanelButton.Install
+            // は保存済み座標が -1 のときだけ FreeSlotFinder を再度呼ぶ）。ここでは保存値を
+            // 戻すだけで十分（設計書 5.1 の「ボタン位置をリセット」）。
+            forecast.AddButton(Strings.ForecastResetButton, delegate
+            {
+                ModSettings.ForecastButtonX.value = -1;
+                ModSettings.ForecastButtonY.value = -1;
+            });
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
@@ -128,6 +140,15 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.General)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.General));
+
+            // FireWhirl と違い、Forecast チャンネル付きの Log.Diag 呼び出しが実在する
+            // （ForecastFeature.OnSimulationTick）。このチェックボックスは死んだ設定ではない。
+            channels.AddCheckbox(Strings.LogChannelForecast,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.Forecast, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Forecast)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Forecast));
         }
     }
 }

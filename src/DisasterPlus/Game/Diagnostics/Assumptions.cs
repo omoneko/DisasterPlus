@@ -30,14 +30,21 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 4 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 9 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
+        ///
+        /// 内訳: 火災旋風 4 件（既存）＋ 天気予報 5 件
+        /// （SetCurrentMode 解決可否・SubInfoMode 2 種の存在・
+        /// ThunderStormAI/TornadoAI.UpdateHazardMap の存在・
+        /// WeatherManager の current/target フィールド群・
+        /// DisasterManager.m_hazardAmount が private Byte[] のままか）＋
+        /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 5;
+        private const int TotalCheckCount = 10;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -139,7 +146,85 @@ namespace DisasterPlus.Game
                   "fire whirls cannot be created",
                   delegate { return FireWhirlSpawner.HasTornadoPrefab(); });
 
+            // --- ①天気予報タブ（Task 5）ここから ---
+
+            Check("InfoManager.SetCurrentMode is resolvable",
+                  "cannot switch to the vanilla disaster hazard heatmap view",
+                  delegate
+                  {
+                      return typeof(InfoManager).GetMethod("SetCurrentMode",
+                          BindingFlags.Public | BindingFlags.Instance,
+                          null,
+                          new Type[] { typeof(InfoManager.InfoMode), typeof(InfoManager.SubInfoMode) },
+                          null) != null;
+                  });
+
+            Check("SubInfoMode.LightningHazard / TornadoHazard exist",
+                  "lightning/tornado hazard display cannot be shown",
+                  delegate
+                  {
+                      var t = typeof(InfoManager.SubInfoMode);
+                      // 文字列ベースで見る。列挙メンバへのコード内の直接参照はコンパイル時に
+                      // 整数値へ畳み込まれるため、将来ゲーム側で名前が変わったり削除されたり
+                      // しても再ビルドしない限り検出できない。ここは実行時に「今のゲームの
+                      // アセンブリにその名前のメンバが実在するか」を毎回問い直す。
+                      return Enum.IsDefined(t, "LightningHazard") && Enum.IsDefined(t, "TornadoHazard");
+                  });
+
+            Check("ThunderStormAI/TornadoAI.UpdateHazardMap exist",
+                  "the hazard map will not be filled in; showing it would display empty/stale data",
+                  delegate
+                  {
+                      return HasUpdateHazardMap(typeof(ThunderStormAI))
+                          && HasUpdateHazardMap(typeof(TornadoAI));
+                  });
+
+            Check("WeatherManager current/target fields are resolvable",
+                  "trend cannot be computed (the core of the forecast feature)",
+                  delegate
+                  {
+                      var t = typeof(WeatherManager);
+                      return HasField(t, "m_currentRain") && HasField(t, "m_targetRain")
+                          && HasField(t, "m_currentCloud") && HasField(t, "m_targetCloud")
+                          && HasField(t, "m_currentFog") && HasField(t, "m_targetFog")
+                          && HasField(t, "m_currentTemperature") && HasField(t, "m_targetTemperature")
+                          && HasField(t, "m_windDirection") && HasField(t, "m_targetDirection")
+                          && HasField(t, "m_groundWetness") && HasField(t, "m_lastLightningIntensity");
+                  });
+
+            // Task 4 レビュー指摘の持ち越し分。HazardMapReader は m_hazardAmount を
+            // リフレクションで直接読む（公開 API は Color しか返さないため）。
+            // このフィールドがゲーム更新で改名・型変更されても HazardMapReader 自身は
+            // 例外にせず黙って 0/ok=false へ倒れるので、ここで名指ししないと
+            // 「もっともらしいがずっと 0 のハザード数値」が起動時の ASSUMPTIONS 要約に
+            // 一切現れないまま静かに壊れる。
+            Check("DisasterManager.m_hazardAmount is a private Byte[] field",
+                  "hazard numbers may silently read wrong data if the game renames or retypes this field",
+                  delegate
+                  {
+                      var f = typeof(DisasterManager).GetField("m_hazardAmount",
+                          BindingFlags.NonPublic | BindingFlags.Instance);
+                      return f != null && f.FieldType == typeof(byte[]);
+                  });
+
+            // --- ①天気予報タブ（Task 5）ここまで ---
+
             Report();
+        }
+
+        private static bool HasUpdateHazardMap(Type aiType)
+        {
+            return aiType.GetMethod("UpdateHazardMap",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                null,
+                new Type[] { typeof(ushort), typeof(DisasterData).MakeByRefType(), typeof(byte[]) },
+                null) != null;
+        }
+
+        private static bool HasField(Type declaringType, string fieldName)
+        {
+            return declaringType.GetField(fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) != null;
         }
 
         /// <summary>
