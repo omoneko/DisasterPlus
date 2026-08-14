@@ -20,6 +20,22 @@ namespace DisasterPlus.Core.Earthquake
 
         /// <summary>震央距離が R 以上。バニラは判定すらしていない。</summary>
         OutOfRange,
+
+        /// <summary>
+        /// 破壊のコードそのものが他 MOD に置き換えられている。
+        ///
+        /// Natural Disasters Renewal は <c>DisasterHelpers.DestroyBuildings</c> を
+        /// **Prefix が false を返す形で完全置換**し、<c>probability == 0.02f</c> を
+        /// 目印にバニラ地震だと判定して 0.04 を使う（IL 事実文書 §E-2）。
+        /// つまりこの MOD が読んでいる 0.02 のランプは、その環境では
+        /// **誰も実行していない式**である。
+        ///
+        /// ここで「倒れません」と言うと、実際には倒れる建物について、
+        /// 実測を名乗ったまま反対のことを断言することになる
+        /// （強度 55 / tD = 300 の建物は NDR 下では 775 m まで倒れる）。
+        /// **数値ではなく判定のほうを取り下げる。**
+        /// </summary>
+        DamageModelReplaced,
     }
 
     /// <summary>
@@ -43,6 +59,14 @@ namespace DisasterPlus.Core.Earthquake
     /// <see cref="CollapseVerdict.Unknown"/> を返す。**しきい値も距離も出せるが、
     /// 判定だけは出せない**——帯の内外が分からない以上、全体円盤の結論を
     /// この建物の結論として名乗る根拠が無いからである。
+    ///
+    /// **他 MOD が破壊コードを置き換えている場合も同じ扱い。**
+    /// Natural Disasters Renewal は <c>DisasterHelpers.DestroyBuildings</c> を丸ごと
+    /// 置き換えるので（§E-2）、そのときここが読んでいる 0.02 のランプは
+    /// **どこでも実行されていない**。<c>damageModelReplaced</c> を立てると
+    /// <see cref="CollapseVerdict.DamageModelReplaced"/> になり、距離も伏せる。
+    /// 「この MOD は <c>DisasterHelpers</c> を経由しない」という②の方針は
+    /// **被害を書く側の話**であって、**読む側にはまったく効かない**。
     /// </summary>
     public struct BuildingMargin
     {
@@ -57,14 +81,40 @@ namespace DisasterPlus.Core.Earthquake
         public readonly int CollapseThresholdValue;
         public readonly int BurnThresholdValue;
 
-        /// <summary>この距離より内側なら全体円盤で倒壊する。0 ならどの距離でも倒壊しない。</summary>
+        /// <summary>
+        /// この距離より内側なら全体円盤で倒壊する。0 ならどの距離でも倒壊しない。
+        /// **<see cref="Verdict"/> が <see cref="CollapseVerdict.DamageModelReplaced"/> の
+        /// ときは 0 が入る** —— バニラの 0.02 から出した距離は、その環境では
+        /// 誰も使っていない数字だからである。
+        /// </summary>
         public readonly float CollapseWithin;
+
+        /// <summary>
+        /// この距離より内側なら全体円盤で出火する。0 ならどの距離でも出火しない。
+        /// 倒壊と同じランプ・同じ probability で、違うのはしきい値だけ（§A-3）。
+        /// </summary>
+        public readonly float BurnWithin;
 
         public readonly CollapseVerdict Verdict;
 
+        /// <summary>
+        /// **出火の結論。** 依頼文が明示的に挙げていた「揺れによる火災」の答えで、
+        /// 材料（2 回目の引き）は最初から <see cref="BurnThresholdValue"/> にあった。
+        ///
+        /// <see cref="CollapseVerdict"/> を流用しているのは、分岐の構造が
+        /// 倒壊とまったく同じだからである（<see cref="CollapseVerdict.WillCollapse"/> は
+        /// 「2 回目の引きが当たる」＝出火する、の意味になる）。表示側は
+        /// 出火用の文言に読み替えること。
+        ///
+        /// **倒壊が優先する。** IL は <c>else if (hitB &amp;&amp; ...)</c> なので、
+        /// 同じ建物で倒壊も当たっていればここへは来ない。その順序も表示側が併記する。
+        /// </summary>
+        public readonly CollapseVerdict BurnVerdict;
+
         private BuildingMargin(ushort buildingId, float distance, float localFactor,
                                int collapseThreshold, int burnThreshold,
-                               float collapseWithin, CollapseVerdict verdict)
+                               float collapseWithin, float burnWithin,
+                               CollapseVerdict verdict, CollapseVerdict burnVerdict)
         {
             BuildingId = buildingId;
             Distance = distance;
@@ -72,13 +122,16 @@ namespace DisasterPlus.Core.Earthquake
             CollapseThresholdValue = collapseThreshold;
             BurnThresholdValue = burnThreshold;
             CollapseWithin = collapseWithin;
+            BurnWithin = burnWithin;
             Verdict = verdict;
+            BurnVerdict = burnVerdict;
         }
 
         /// <summary>カーソルの下に建物が無い、あるいは地震が無い。</summary>
         public static BuildingMargin None()
         {
-            return new BuildingMargin(0, 0f, 0f, 0, 0, 0f, CollapseVerdict.Unknown);
+            return new BuildingMargin(0, 0f, 0f, 0, 0, 0f, 0f,
+                                      CollapseVerdict.Unknown, CollapseVerdict.Unknown);
         }
 
         /// <summary>
@@ -87,9 +140,16 @@ namespace DisasterPlus.Core.Earthquake
         /// </summary>
         public bool HasBuilding { get { return BuildingId != 0; } }
 
+        /// <summary>
+        /// <paramref name="damageModelReplaced"/> は「<c>DisasterHelpers.DestroyBuildings</c> が
+        /// 他 MOD に完全置換されている」の意味（実質 Natural Disasters Renewal、§E-2）。
+        /// **true のとき、この関数は結論を一切出さない。** 出せば「実測」を名乗ったまま
+        /// 誰も実行していない式の答えを断言することになる。
+        /// </summary>
         public static BuildingMargin Evaluate(ushort buildingId, ushort disasterId,
                                               Vec2 buildingPos, Vec2 epicentre,
-                                              byte intensity, FaultBand band, bool alreadyDown)
+                                              byte intensity, FaultBand band, bool alreadyDown,
+                                              bool damageModelReplaced)
         {
             float dx = buildingPos.X - epicentre.X;
             float dz = buildingPos.Z - epicentre.Z;
@@ -98,47 +158,63 @@ namespace DisasterPlus.Core.Earthquake
             var thresholds = CollapseThreshold.For(buildingId, disasterId);
             float local = SeismicIntensity.At(distance, intensity);
 
+            // ★ 他 MOD が破壊コードを置き換えているなら、距離も判定も出さない。
+            //    AlreadyDown より先に見ないこと —— 「もう倒れている」は建物の
+            //    現在の状態であって、これから何が起きるかの予測ではないので、
+            //    どの MOD が破壊を計算していても正しい。
+            if (!alreadyDown && damageModelReplaced)
+            {
+                return new BuildingMargin(buildingId, distance, local,
+                                          thresholds.Collapse, thresholds.Burn, 0f, 0f,
+                                          CollapseVerdict.DamageModelReplaced,
+                                          CollapseVerdict.DamageModelReplaced);
+            }
+
             // probability を渡す余地の無い入口を使う。断層 4 円盤は別のランプ
             // （min = w, max = 2w、しかも中心が毎ステップ振り直される）なので、
             // この距離は全体円盤についてしか意味を持たない。
             float within = CollapseThreshold.GlobalDiscCollapseDistance(
                 thresholds.Collapse, intensity);
+            float burnWithin = CollapseThreshold.GlobalDiscBurnDistance(
+                thresholds.Burn, intensity);
 
-            CollapseVerdict verdict;
-            if (alreadyDown)
-            {
-                verdict = CollapseVerdict.AlreadyDown;
-            }
-            else if (!SeismicIntensity.IsInside(distance, intensity))
-            {
-                // preRadius による一次カリングの外。バニラは乱数すら引いていない。
-                verdict = CollapseVerdict.OutOfRange;
-            }
-            else if (!band.Known)
-            {
-                // 帯の内外が分からないので、生存も倒壊も断定しない。
-                verdict = CollapseVerdict.Unknown;
-            }
-            else if (band.Contains(buildingPos))
-            {
-                // ★ この分岐が Survives へ至る唯一の経路の手前にあること自体が、
-                //    「断層帯の内側の建物に『倒れません』と言わない」の保証である。
-                //    下の 2 分岐より上から動かさないこと。断層帯の内側では
-                //    probability = 1 の破壊円盤が別に判定しており、全体円盤の
-                //    しきい値はその判定について何ひとつ語っていない。
-                verdict = CollapseVerdict.InsideFaultZone;
-            }
-            else if (CollapseThreshold.GlobalDiscHits(thresholds.Collapse, local))
-            {
-                verdict = CollapseVerdict.WillCollapse;
-            }
-            else
-            {
-                verdict = CollapseVerdict.Survives;
-            }
+            var verdict = VerdictFor(thresholds.Collapse, buildingPos, distance, local,
+                                     intensity, band, alreadyDown);
+            var burnVerdict = VerdictFor(thresholds.Burn, buildingPos, distance, local,
+                                         intensity, band, alreadyDown);
 
             return new BuildingMargin(buildingId, distance, local,
-                                      thresholds.Collapse, thresholds.Burn, within, verdict);
+                                      thresholds.Collapse, thresholds.Burn,
+                                      within, burnWithin, verdict, burnVerdict);
+        }
+
+        /// <summary>
+        /// しきい値 1 個ぶんの結論。倒壊と出火で**分岐の構造が同じ**なので共有する
+        /// （全体円盤の fD と fB はどちらも <c>1 - d/R</c>、probability も同じ 0.02）。
+        /// 分岐の順序には意味があるので入れ替えないこと。
+        /// </summary>
+        private static CollapseVerdict VerdictFor(int threshold, Vec2 buildingPos,
+                                                  float distance, float local, byte intensity,
+                                                  FaultBand band, bool alreadyDown)
+        {
+            if (alreadyDown) return CollapseVerdict.AlreadyDown;
+
+            // preRadius による一次カリングの外。バニラは乱数すら引いていない。
+            if (!SeismicIntensity.IsInside(distance, intensity)) return CollapseVerdict.OutOfRange;
+
+            // 帯の内外が分からないので、生存も倒壊も断定しない。
+            if (!band.Known) return CollapseVerdict.Unknown;
+
+            // ★ この分岐が Survives へ至る唯一の経路の手前にあること自体が、
+            //    「断層帯の内側の建物に『倒れません』と言わない」の保証である。
+            //    下の 2 分岐より上から動かさないこと。断層帯の内側では
+            //    probability = 1 の破壊円盤が別に判定しており、全体円盤の
+            //    しきい値はその判定について何ひとつ語っていない。
+            if (band.Contains(buildingPos)) return CollapseVerdict.InsideFaultZone;
+
+            return CollapseThreshold.GlobalDiscHits(threshold, local)
+                ? CollapseVerdict.WillCollapse
+                : CollapseVerdict.Survives;
         }
     }
 }
