@@ -85,11 +85,28 @@ namespace DisasterPlus.Game
                 // （EarthquakeSnapshot.DayNightEnabled の doc 参照）。
                 bool dayNight = sim.m_enableDayNight;
 
+                // ★ カーソルは 1 回だけ取る。建物の走査（地震があるときだけ）と
+                //    カバレッジの読み取り（地震の有無に関わらず）で共有する。
+                //    2 回 TakeCursor すると、その間に main スレッドが publish し直した
+                //    別の座標について 2 つの値を作ることになる。
+                Vec3 cursor;
+                bool haveCursor = EarthquakeHub.TakeCursor(out cursor);
+
                 ushort cursorQuakeId;
-                var cursorBuilding = ProbeCursorBuilding(quakes, out cursorQuakeId);
+                var cursorBuilding = ProbeCursorBuilding(quakes, haveCursor, cursor,
+                                                         out cursorQuakeId);
+
+                // カーソル地点のカバレッジは**地震が 1 個も無くても読む**。
+                // 「ここに地震計は届いているか」は都市の性質であって、
+                // 今地震が起きているかとは関係が無い（設計書 §3.4）。
+                int cursorCoverage = 0;
+                bool cursorCoverageValid = haveCursor
+                    && TryReadCoverage(new Vector3(cursor.X, cursor.Y, cursor.Z),
+                                       out cursorCoverage);
 
                 return new EarthquakeSnapshot(quakes, prefab, sim.m_currentFrameIndex,
-                                              hour, dayNight, cursorBuilding, cursorQuakeId, true);
+                                              hour, dayNight, cursorBuilding, cursorQuakeId,
+                                              cursorCoverage, cursorCoverageValid, true);
             }
             catch (System.Exception e)
             {
@@ -211,15 +228,15 @@ namespace DisasterPlus.Game
         /// どの地震を選んだかは <see cref="EarthquakeSnapshot.CursorQuakeId"/> で名乗る。
         /// </summary>
         private static BuildingMargin ProbeCursorBuilding(IList<EarthquakeReading> quakes,
+                                                          bool haveCursor, Vec3 cursor,
                                                           out ushort cursorQuakeId)
         {
             cursorQuakeId = 0;
             if (quakes.Count == 0) return BuildingMargin.None();
 
-            Vec3 cursor;
             // main スレッドが「今カーソルはここ」と言っていないなら何も調べない
             // （パネルが閉じている、マウスが UI の上にある、地形を外している）。
-            if (!EarthquakeHub.TakeCursor(out cursor)) return BuildingMargin.None();
+            if (!haveCursor) return BuildingMargin.None();
 
             var target = SelectDamagingQuake(quakes);
             if (target == null) return BuildingMargin.None();
@@ -267,8 +284,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 震央の地震計カバレッジ。**クランプしない**（生値を持ち、
-        /// <c>Min(cov, 100)</c> は表示側の <c>WarningLeadTime</c> が行う）。
+        /// 指定地点の地震計カバレッジ。**クランプしない**（生値を持ち、
+        /// <c>Min(cov, 100)</c> は表示側の <see cref="WarningLeadTime"/> が行う）。
+        ///
+        /// 呼び出し箇所は 2 つあり、**意味がまったく違う**:
+        ///   - 震央（<c>m_targetPosition</c>）… バニラが警報リードタイムと
+        ///     <c>located</c> の判定に実際に使う 1 点（§A-2）。
+        ///   - カーソル地点 … 「今この場所に地震計は届いているか」を確かめるためだけの値。
+        ///     **ここからリードタイムを出してはいけない。**
         ///
         /// 読めなかったときに 0 を返して true にしてはいけない。カバレッジ 0 は
         /// 「地震計が無い＝ハザードマップが空なのは正常」という**意味のある実測値**で、

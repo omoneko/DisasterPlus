@@ -115,7 +115,24 @@ namespace DisasterPlus.Game
             WritePrefabFacts(b, snapshot.Prefab);
             WriteShakeBoost(b, snapshot);
             WriteSimClock(b, snapshot);
+            WriteSensorCoverage(b, snapshot);
             WriteQuakes(b, snapshot);
+        }
+
+        /// <summary>
+        /// カーソル地点の地震計カバレッジ。**震央のカバレッジとは別物**で、
+        /// 警報リードタイムを決めるのは震央のほうである（§A-2）。震央の値と
+        /// そこから決まるリードタイムは <see cref="WriteQuakes"/> が地震ごとに出す。
+        ///
+        /// 「読めなかった」を 0 と混ぜない。カバレッジ 0 は「ここに地震計が届いて
+        /// いない」という意味のある実測値で、これがハザードマップが空である理由を
+        /// 説明する唯一の根拠になる。
+        /// </summary>
+        private static void WriteSensorCoverage(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
+        {
+            b.Line(1, "sensor coverage at cursor", snapshot.CursorCoverageValid
+                ? snapshot.CursorCoverage.ToString()
+                : "unread (no valid cursor point, or the resource could not be read)");
         }
 
         /// <summary>
@@ -261,6 +278,14 @@ namespace DisasterPlus.Game
                     ? q.ActivationFrame.ToString()
                     : "0 (not scheduled - SelfTrigger was never set)";
                 b.Line(3, "frames", "start=" + q.StartFrame + " activation=" + activation);
+
+                // 警報リードタイム。カバレッジが読めていないときに 1755（＝カバレッジ 0）を
+                // 出すと、それは「地震計が無い」という断定になる。読めていなければ出さない。
+                // 換算の guard も含めて FramesWithHours に任せる（カバレッジ 100 なら
+                // ちょうど 3.00 in-game hours になるはずで、そこが合っているかを見る行）。
+                b.Line(3, "warning lead", q.CoverageKnown
+                    ? FramesWithHours((uint)WarningLeadTime.FramesFor(q.CoverageAtEpicentre))
+                    : "unknown (the coverage at the epicentre could not be read)");
 
                 b.Line(3, "fault (L/W)", q.CrackLength <= 0f && q.CrackWidth <= 0f
                     ? "unknown (prefab not resolved)"

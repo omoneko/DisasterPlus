@@ -117,6 +117,9 @@ namespace DisasterPlus.Game
         private static UILabel _marginBuildingLabel;
         private static UILabel _marginVerdictLabel;
         private static UILabel _marginNoteLabel;
+        private static UILabel _sensorEpicentreLabel;
+        private static UILabel _sensorLeadLabel;
+        private static UILabel _sensorCursorLabel;
         private static UILabel _hazardLabel;
 
         /// <summary>
@@ -215,6 +218,9 @@ namespace DisasterPlus.Game
             _marginBuildingLabel = null;
             _marginVerdictLabel = null;
             _marginNoteLabel = null;
+            _sensorEpicentreLabel = null;
+            _sensorLeadLabel = null;
+            _sensorCursorLabel = null;
             _hazardLabel = null;
             _bodyBuilt = false;
             _cursorPublishedValid = false;
@@ -337,6 +343,25 @@ namespace DisasterPlus.Game
             _marginNoteLabel = AddPlainRow(panel, "MarginNote", ref y,
                 Strings.EarthquakeGlobalDiscOnly, 54f);
 
+            // ── 地震計（Task 7）──────────────────────────────────
+            // ここも第 1 層である。リードタイムの式も上限 100 もバニラのリテラルで
+            // （§A-2）、この MOD は 1 つも係数を足していない。
+            //
+            // 位置は意図的にここ ——「マップに表示」ボタンとハザードの行の**すぐ上**。
+            // 地震計はハザードマップが空である理由そのものなので、説明を読んだ直後に
+            // ボタンとその結果が目に入る。第 2 層のセクション（Task 9〜11）は
+            // これより下に足すこと。
+            AddSectionHeader(panel, "SensorSection", ref y, Strings.EarthquakeSensorSection);
+            _sensorEpicentreLabel = AddLayer1Row(panel, "SensorEpicentre", ref y);
+            _sensorLeadLabel = AddLayer1Row(panel, "SensorLead", ref y);
+            _sensorCursorLabel = AddLayer1Row(panel, "SensorCursor", ref y);
+
+            // ★ この 1 行は**建てたら何が変わるか**の説明であって観測値ではないので、
+            //    地震が起きていなくても、スナップショットが読めていなくても出す。
+            //    したがってここで一度書いたら以後どこからも書き換えない
+            //    （Refresh 側に「消す」経路を作らないことがその保証になっている）。
+            AddPlainRow(panel, "SensorEffect", ref y, Strings.EarthquakeSensorEffect, 54f);
+
             y += 6f;
 
             var showButton = (UIButton)panel.AddUIComponent(typeof(UIButton));
@@ -455,6 +480,7 @@ namespace DisasterPlus.Game
                 // 読めていない間は sim 側に建物を探させない。
                 PublishCursor(new Vec3(0f, 0f, 0f), false);
                 ClearQuakeRows();
+                ClearSensorRows();
                 // 「まだ 1 回も読んでいない」と「読んだが読めなかった」を同じ文言に
                 // しないこと（①のレビュー指摘）。ロード直後にポーズしたままだと
                 // 前者が普通に起きる（最初の tick の deltaMinutes は必ず 0）。
@@ -467,24 +493,27 @@ namespace DisasterPlus.Game
 
             // カーソル地点は 1 フレームに 1 回だけ求める。地形をかすめて外すレイでは
             // 501 回の高さサンプリングが走るので、同じフレームで 2 回引いてはいけない
-            // （強度の行とハザードの行で共有する）。誰も使わないフレームでは引かない。
-            // 実際にレイを引くのはさらに RepickIntervalFrames フレームに 1 回だけで、
-            // 残りのフレームは直前の結果を返す（TryPickCursorGround の doc）。
+            // （強度の行・ハザードの行・地震計の行で共有する）。実際にレイを引くのは
+            // さらに RepickIntervalFrames フレームに 1 回だけで、残りのフレームは
+            // 直前の結果を返す（TryPickCursorGround の doc）。
+            //
+            // **地震が 1 個も無くても引く。** カーソル地点の地震計カバレッジは
+            // 「この場所に地震計が届いているか」であって、地震の有無とは関係が無い
+            // （設計書 §3.4）。地震計を建てる場所の下見に使えることがこの行の値打ちで、
+            // 地震が起きている間しか読めないなら下見にならない。
+            // Task 6 の間引きが入るまでは、この「常に引く」は許容できなかった。
             bool hazardViewOn =
                 InfoModeSwitch.IsShowingHazardFor(InfoManager.SubInfoMode.EarthquakeHazard);
-            var cursor = new Vec3(0f, 0f, 0f);
-            bool haveCursor = false;
-            if (snapshot.Quakes.Count > 0 || hazardViewOn)
-            {
-                haveCursor = TryPickCursorGround(out cursor);
-            }
+            Vec3 cursor;
+            bool haveCursor = TryPickCursorGround(out cursor);
 
             // ★ 建物バッファは main スレッドから触らない。座標だけを sim 側へ渡し、
             //    その下に何が建っているかは次の tick のスナップショットで受け取る
             //    （BuildingProbe のクラス doc。1 tick ぶんの遅延はその設計上の代償）。
             PublishCursor(cursor, haveCursor);
 
-            RefreshQuakeRows(snapshot, haveCursor, cursor);
+            var primary = RefreshQuakeRows(snapshot, haveCursor, cursor);
+            RefreshSensorRows(snapshot, primary, haveCursor);
             RefreshHazardRow(snapshot, hazardViewOn, haveCursor, cursor);
         }
 
@@ -502,7 +531,24 @@ namespace DisasterPlus.Game
             SetPlain(_marginNoteLabel, "");
         }
 
-        private static void RefreshQuakeRows(EarthquakeSnapshot snapshot, bool haveCursor, Vec3 cursor)
+        /// <summary>
+        /// 地震計の行の値だけを消す。**説明文（<c>SensorEffect</c>）は消さない** ——
+        /// あれは「建てたら何が変わるか」であって観測値ではないので、
+        /// 何も読めていないときこそ読む価値がある。
+        /// </summary>
+        private static void ClearSensorRows()
+        {
+            SetPlain(_sensorEpicentreLabel, "");
+            SetPlain(_sensorLeadLabel, "");
+            SetPlain(_sensorCursorLabel, "");
+        }
+
+        /// <summary>
+        /// 地震の行を書き、以後の行が指すべき地震（<see cref="SelectPrimary"/> の結果）を返す。
+        /// 地震が 1 個も無ければ null。
+        /// </summary>
+        private static EarthquakeReading RefreshQuakeRows(EarthquakeSnapshot snapshot,
+                                                          bool haveCursor, Vec3 cursor)
         {
             var quakes = snapshot.Quakes;
             if (quakes.Count == 0)
@@ -510,7 +556,7 @@ namespace DisasterPlus.Game
                 ClearQuakeRows();
                 // 「0」という裸の数字ではなく、文で言う。走査した結果なので第 1 層。
                 SetLayer1(_countLabel, Strings.EarthquakeNoneActive);
-                return;
+                return null;
             }
 
             var primary = SelectPrimary(quakes, haveCursor, cursor);
@@ -533,6 +579,101 @@ namespace DisasterPlus.Game
             RefreshCursorRow(primary, haveCursor, cursor);
             RefreshFaultRow(primary, haveCursor, cursor);
             RefreshMarginRows(snapshot);
+            return primary;
+        }
+
+        /// <summary>
+        /// **地震計を建てると何が変わるか。** ゲーム内のどこにも書かれていない 2 つの効果を
+        /// 名指しする（§A-2 / §C-2）:
+        ///
+        ///   1. 警報リードタイムが 1755 → 最大 8192 フレーム（38.6 分 → ちょうど 3.0 時間）
+        ///   2. <c>located</c> が立ち、**そもそも地震がハザードマップに描かれるようになる**
+        ///
+        /// **因果の向きを間違えないこと。** 地震計は <c>DetectDisaster</c> を呼ばない。
+        /// 呼ぶのは <c>EarthquakeAI.SimulationStep</c> で、判断材料は
+        /// **震央 1 点のカバレッジ**である。したがってここでリードタイムを出してよいのは
+        /// <see cref="EarthquakeReading.CoverageAtEpicentre"/> からだけで、
+        /// カーソル地点の値から出してはいけない（効果範囲が震央に届いていない地震計は、
+        /// その地震について何も寄与しない）。
+        ///
+        /// **カバレッジ 0 と「読めなかった」を同じ顔にしない。** 0 は
+        /// 「震央に届いている地震計が 1 つも無い」という本機能の看板の実測値であり、
+        /// そのときは数値も出す。読めなかったときだけ数値を伏せる
+        /// （<see cref="EarthquakeReading.CoverageKnown"/> /
+        /// <see cref="EarthquakeSnapshot.CursorCoverageValid"/>）。
+        /// </summary>
+        private static void RefreshSensorRows(EarthquakeSnapshot snapshot,
+                                              EarthquakeReading primary, bool haveCursor)
+        {
+            RefreshEpicentreCoverageRows(primary);
+            RefreshCursorCoverageRow(snapshot, haveCursor);
+        }
+
+        private static void RefreshEpicentreCoverageRows(EarthquakeReading primary)
+        {
+            // 地震が無ければ震央も無い。ここで 0 を出すと「地震計が無い」に見える。
+            if (primary == null)
+            {
+                SetPlain(_sensorEpicentreLabel, "");
+                SetPlain(_sensorLeadLabel, "");
+                return;
+            }
+
+            if (!primary.CoverageKnown)
+            {
+                // ★ 捏造ゼロを作らない。読めなかったことを言い、リードタイムは伏せる
+                //    （カバレッジ不明のまま 38.6 分と出すと、それは 0 の断定になる）。
+                SetPlain(_sensorEpicentreLabel,
+                    Strings.EarthquakeCoverageAtEpicentre + ": " + Strings.EarthquakeUnavailable);
+                SetPlain(_sensorLeadLabel, "");
+                return;
+            }
+
+            int raw = primary.CoverageAtEpicentre;
+            int used = WarningLeadTime.ClampCoverage(raw);
+
+            string text = Strings.EarthquakeCoverageAtEpicentre + ": " + raw;
+            // バニラが Min(cov, 100) で頭打ちにしている事実を、実際に頭打ちに
+            // なっているときだけ見せる（§A-2）。
+            if (raw != used) text += " -> " + used;
+            if (used == 0) text += "   (" + Strings.EarthquakeNoSensor + ")";
+            SetLayer1(_sensorEpicentreLabel, text);
+
+            // 換算は必ず FeatureHost.FramesPerMinute から出す（定数を直書きして
+            // 4 倍ずれた前科がある）。換算できないときは 0 が返るので行ごと伏せる。
+            float minutes = WarningLeadTime.MinutesFor(raw, FeatureHost.FramesPerMinute);
+            if (minutes <= 0f)
+            {
+                SetPlain(_sensorLeadLabel, "");
+                return;
+            }
+
+            // これは「あと何分で警報が出る」ではなく、**本震の何分前に警報が出るか**
+            // という長さである。ポーズしていても縮まない（ゲーム内分の尺度）。
+            SetLayer1(_sensorLeadLabel, Strings.EarthquakeWarningLead + ": "
+                + minutes.ToString("F1") + " " + Strings.EarthquakeMinutes);
+        }
+
+        private static void RefreshCursorCoverageRow(EarthquakeSnapshot snapshot, bool haveCursor)
+        {
+            // 「カーソルが地形の上に無い」と「読めなかった」を言い分ける。
+            // 前者はパネルを読んでいる間ほぼ常に起きる（マウスがパネルの上にある）。
+            if (!haveCursor)
+            {
+                SetPlain(_sensorCursorLabel, Strings.EarthquakeCursorUnknown);
+                return;
+            }
+
+            if (!snapshot.CursorCoverageValid)
+            {
+                SetPlain(_sensorCursorLabel, Strings.EarthquakeUnavailable);
+                return;
+            }
+
+            // 上限 100 の注記は付けない。ここは「この場所に地震計が届いているか」を
+            // 見る行であって、リードタイムの式に入る値ではない。
+            SetLayer1(_sensorCursorLabel,
+                Strings.EarthquakeCoverageAtCursor + ": " + snapshot.CursorCoverage);
         }
 
         /// <summary>
@@ -904,9 +1045,10 @@ namespace DisasterPlus.Game
         /// カーソル直下の地面。計算そのものは①の <c>ForecastPanel.TryPickCursorGround</c> と
         /// 同じで、**引く頻度だけ**を <see cref="RepickIntervalFrames"/> で縛ってある。
         ///
-        /// **共通化しない。** ①のレイは予報パネルを開いている間だけ走り、②のレイは
-        /// 地震の最中に走る——費用の許容範囲が違うので、今は片方だけを縛っている。
-        /// （①側を同じ形にするかは①の判断であって、ここで勝手に変えない。）
+        /// **共通化はしていないが、①側も同じ形に揃えてある**（Task 7 で
+        /// <c>ForecastPanel.TryPickCursorGround</c> にも同じ間引きを入れた）。
+        /// 片方だけ直すと、この MOD に無制限なサンプリング経路が 1 本残る。
+        /// 一方を変えるときはもう一方も見ること。
         ///
         /// <c>UIView.IsInsideUI()</c> の 1 行は間引きの**外**に置く。パネルを読んでいる間
         /// ——マウスがパネルの上にある間——はサンプリング自体が起きないので、

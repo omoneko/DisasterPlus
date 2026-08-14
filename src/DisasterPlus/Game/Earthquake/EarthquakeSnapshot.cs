@@ -117,9 +117,36 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly ushort CursorQuakeId;
 
+        /// <summary>
+        /// カーソル地点の <c>ImmaterialResourceManager.Resource.EarthquakeCoverage</c> の生値。
+        /// <see cref="CursorCoverageValid"/> が false のときこの値は無意味。
+        ///
+        /// **これはリードタイムの根拠ではない。** バニラがリードタイムに使うのは
+        /// **震央**のカバレッジ 1 点だけで（<see cref="EarthquakeReading.CoverageAtEpicentre"/>、
+        /// §A-2）、カーソル地点の値は「今この場所に地震計が届いているか」を
+        /// プレイヤーが確かめるためだけにある。この 2 つを取り違えて
+        /// カーソル地点からリードタイムを出すと、地震計を建てる場所の判断が丸ごと狂う。
+        /// </summary>
+        public readonly int CursorCoverage;
+
+        /// <summary>
+        /// カーソル地点のカバレッジを実際に読めたか。
+        ///
+        /// <see cref="EarthquakeReading.CoverageKnown"/> と同じ理由で分けてある。
+        /// **カバレッジ 0 は「地震計が届いていない」という意味のある実測値**であり、
+        /// 本機能の看板の説明そのものなので、読み取り失敗と同じ 0 に潰してはいけない。
+        ///
+        /// false になるのは 2 通り —— main スレッドがまだ有効なカーソル座標を
+        /// publish していない（パネルが閉じている／マウスが UI の上／地形を外している）か、
+        /// <c>ImmaterialResourceManager</c> が読めなかったか。表示側は自分が持っている
+        /// 「今カーソルが地形の上にあるか」と突き合わせて、この 2 つを言い分ける。
+        /// </summary>
+        public readonly bool CursorCoverageValid;
+
         public EarthquakeSnapshot(IList<EarthquakeReading> quakes, EarthquakePrefabFacts prefab,
                                   uint currentFrame, float hourOfDay, bool dayNightEnabled,
-                                  BuildingMargin cursorBuilding, ushort cursorQuakeId, bool valid)
+                                  BuildingMargin cursorBuilding, ushort cursorQuakeId,
+                                  int cursorCoverage, bool cursorCoverageValid, bool valid)
         {
             Quakes = quakes == null ? NoQuakes : quakes;
             Prefab = prefab;
@@ -128,13 +155,15 @@ namespace DisasterPlus.Game
             DayNightEnabled = dayNightEnabled;
             CursorBuilding = cursorBuilding;
             CursorQuakeId = cursorQuakeId;
+            CursorCoverage = cursorCoverage;
+            CursorCoverageValid = cursorCoverageValid;
             Valid = valid;
         }
 
         public static EarthquakeSnapshot Invalid()
         {
             return new EarthquakeSnapshot(NoQuakes, new EarthquakePrefabFacts(), 0u, 0f, false,
-                                          BuildingMargin.None(), 0, false);
+                                          BuildingMargin.None(), 0, 0, false, false);
         }
 
         /// <summary>地震が 1 個も無いときに使う共有の空リスト。読み取り側専用。</summary>

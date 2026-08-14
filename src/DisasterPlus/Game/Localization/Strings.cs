@@ -242,5 +242,30 @@ namespace DisasterPlus.Game
         public static string EarthquakeShakeBoostNote =
             "Vanilla ignores intensity here, so a 25.5 quake shakes exactly as much as a 5.5 one. "
             + "At the vanilla default intensity (5.5) this option changes nothing.";
+
+        // --- ②地震（Task 7: 地震計の既存効果） ---
+        //
+        // 地震計を建てると何が変わるかは、ゲーム内のどこにも書かれていない。
+        // 変わるのは 2 つだけで、どちらもバニラの実測（第 1 層）である（§A-2 / §C-2）:
+        //   1. 警報リードタイムが 1755 → 最大 8192 フレーム（38.6 分 → ちょうど 3.0 時間）
+        //   2. located が立ち、**そもそも地震がハザードマップに描かれるようになる**
+        //
+        // 計画 Step 5 の表は 5 件だが、Step 4 の本文が参照している EarthquakeNoSensor が
+        // その表から漏れている。カバレッジ 0（＝本機能の看板の説明そのもの）を裸の「0」
+        // だけで済ませないために、計画本文のほうに従って 6 件目として足す。
+        public static string EarthquakeSensorSection = "Earthquake sensors";
+        // 上限 100 はキーの側に入れる。値の隣に "max" と英語を直書きすると、
+        // 日本語表示のときにそこだけ翻訳から外れる。
+        public static string EarthquakeCoverageAtEpicentre =
+            "Sensor coverage at the epicentre (capped at 100)";
+        public static string EarthquakeCoverageAtCursor = "Sensor coverage at cursor";
+        public static string EarthquakeWarningLead = "Warning lead time";
+        public static string EarthquakeNoSensor = "no Earthquake Sensor reaches the epicentre";
+        // 地震が起きているかどうかに関わらず**常に**出す。これは地震計という建物の
+        // 性質の説明であって、今この瞬間の観測値ではない。
+        public static string EarthquakeSensorEffect =
+            "An Earthquake Sensor extends the warning from 38.6 minutes to up to 3 hours, and "
+            + "makes the quake appear on the hazard map at all. Only sensors whose range covers "
+            + "the epicentre count.";
     }
 }
