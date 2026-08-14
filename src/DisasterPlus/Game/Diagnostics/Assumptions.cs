@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 18 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 19 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -40,18 +40,19 @@ namespace DisasterPlus.Game
         /// WeatherManager の current/target フィールド群・
         /// DisasterManager.m_hazardAmount が private Byte[] のままか・
         /// m_disasters の m_buffer/m_size・ハザードグリッドの形状）＋
-        /// 地震 7 件（EarthquakeAI プレハブの 4 調整値・DisasterData の
+        /// 地震 8 件（EarthquakeAI プレハブの 4 調整値・DisasterData の
         /// m_intensity/m_activationFrame/m_startFrame/m_angle・
         /// EarthquakeCoverage と CheckLocalResource・sim スレッドの時計・
         /// SubInfoMode.EarthquakeHazard と EarthquakeAI.UpdateHazardMap・
         /// VanillaRandomizer と本物の Randomizer のビット一致・
-        /// m_cameraShake と m_disableCameraShake が public のままか）＋
+        /// m_cameraShake と m_disableCameraShake が public のままか・
+        /// RenderManager のオーバーレイ描画 API が届くか）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 19;
+        private const int TotalCheckCount = 20;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -115,7 +116,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 18 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 19 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -432,6 +433,63 @@ namespace DisasterPlus.Game
 
             // --- ②地震（Task 6）ここまで ---
 
+            // --- ②地震（震度分布の地図オーバーレイ）ここから ---
+
+            // **この機能はまるごとこの 4 つの API の上に乗っている。**
+            // どれか 1 つでも消えると、オーバーレイは例外を 1 回吐いた後
+            // 黙って何も描かなくなる —— そして「何も描かない」は
+            // 「地震が無い」「トグルが OFF」とも見分けが付かない。
+            //
+            // IL 実測（この機能の着手時に自分で逆アセンブルして確認した）:
+            //   RenderManager::RegisterRenderableManager  public static、m_renderables へ Add するだけ
+            //   OverlayEffect::OnPostRender  IL_00A3  → RenderManager::Managers_RenderOverlay
+            //   Managers_RenderOverlay       IL_0050  → 各 IRenderableManager::EndOverlay
+            //   OverlayEffect::DrawCircle / DrawQuad → DrawEffect → Graphics::DrawMeshNow（即時描画）
+            //
+            // 列挙メンバではなくメソッドなので、型引数まで込みで照合する
+            // （オーバーロードが増えたときに GetMethod(name) が
+            //  AmbiguousMatchException を投げて偽 FAIL になるのを避ける）。
+            Check("RenderManager overlay drawing API is reachable "
+                  + "(RegisterRenderableManager / OverlayEffect.DrawCircle / DrawQuad)",
+                  "the earthquake intensity distribution cannot be drawn on the map at all; "
+                  + "the panel would keep offering a toggle that does nothing",
+                  delegate
+                  {
+                      if (typeof(RenderManager).GetMethod("RegisterRenderableManager",
+                              BindingFlags.Public | BindingFlags.Static,
+                              null, new Type[] { typeof(IRenderableManager) }, null) == null)
+                      {
+                          return false;
+                      }
+
+                      var effect = typeof(RenderManager).GetProperty("OverlayEffect",
+                          BindingFlags.Public | BindingFlags.Instance);
+                      if (effect == null || effect.PropertyType != typeof(OverlayEffect)) return false;
+
+                      if (typeof(OverlayEffect).GetMethod("DrawCircle",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[]
+                              {
+                                  typeof(RenderManager.CameraInfo), typeof(UnityEngine.Color),
+                                  typeof(UnityEngine.Vector3), typeof(float), typeof(float),
+                                  typeof(float), typeof(bool), typeof(bool)
+                              }, null) == null)
+                      {
+                          return false;
+                      }
+
+                      return typeof(OverlayEffect).GetMethod("DrawQuad",
+                          BindingFlags.Public | BindingFlags.Instance, null,
+                          new Type[]
+                          {
+                              typeof(RenderManager.CameraInfo), typeof(UnityEngine.Color),
+                              typeof(ColossalFramework.Math.Quad3), typeof(float), typeof(float),
+                              typeof(bool), typeof(bool)
+                          }, null) != null;
+                  });
+
+            // --- ②地震（震度分布の地図オーバーレイ）ここまで ---
+
             Report();
         }
 
@@ -537,7 +595,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 18 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 19 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

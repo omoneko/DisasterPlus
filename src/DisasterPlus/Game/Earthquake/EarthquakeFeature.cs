@@ -30,6 +30,13 @@ namespace DisasterPlus.Game
             EarthquakeReader.Reset();
             CameraShakeBooster.Reset();
             SeismographRecorder.Reset();
+
+            // 震度分布オーバーレイ。**main スレッド。** 登録は
+            // RenderManager の静的リストへの追加で、外す API が存在しない
+            // （OverlayRenderable のクラス doc）ので、この呼び出しは
+            // プロセスにつき 1 回しか効かない。以後の都市では
+            // 「このセッションでは描いてよい」を立て直すだけになる。
+            EarthquakeOverlay.EnsureRegistered();
         }
 
         /// <summary>
@@ -98,6 +105,11 @@ namespace DisasterPlus.Game
             CameraShakeBooster.Reset();
             // 波形は**セーブにも次の都市にも持ち越さない**（設計書 §3.5）。
             SeismographRecorder.Reset();
+            // ★ オーバーレイを止める。登録は外せないので、描かないことを
+            //    こちらの状態で保証する（EarthquakeOverlay.Reset の doc）。
+            //    これを忘れると、都市を出た直後の数フレームに前の都市の
+            //    震央が地図に描かれる。
+            EarthquakeOverlay.Reset();
             // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
             // EarthquakePanel.Destroy() が波形テクスチャ（Texture2D）も破棄する
             // —— GameObject と違って Unity は勝手に回収しないので、これを
@@ -274,6 +286,34 @@ namespace DisasterPlus.Game
             // クラス doc が IL 実測つきで明示的に許可している唯一の例外である
             // （get_CurrentMode は単一フィールドの読み出しで、最悪でも 1 tick 古い値）。
             b.Line(1, "showing hazard view", InfoModeSwitch.IsShowingHazard ? "yes" : "no");
+
+            // 震度分布オーバーレイ。**「絵が出ない」の切り分けはここでしかできない。**
+            // 出ない理由は 4 通りあり（登録に失敗／トグルが OFF／描くべき地震が無い／
+            // 予算切れ）、画面上はどれも「何も出ない」で同じ顔になる。
+            //
+            // 数値は main スレッド（描画）が書いたものをここ（sim スレッド）で
+            // 読んでいる。表示専用の int / bool で、遅れて読めても意味が壊れない
+            // （CameraShakeBooster.LastAdded / WaveformView.State と同じ扱い）。
+            string overlay;
+            if (!EarthquakeOverlay.Registered)
+            {
+                overlay = "NOT REGISTERED with RenderManager (nothing will ever be drawn)";
+            }
+            else if (!EarthquakeOverlay.Enabled)
+            {
+                overlay = "registered, toggled off";
+            }
+            else
+            {
+                overlay = "on, " + EarthquakeOverlay.DrawnQuakes + " quake(s), "
+                          + EarthquakeOverlay.LastDrawCalls + " of "
+                          + EarthquakeOverlay.MaxDrawCallsPerFrame + " draw calls last frame"
+                          + (EarthquakeOverlay.FaultGeometryMissing
+                              ? "  (fault zone omitted: prefab geometry unreadable)" : "")
+                          + (EarthquakeOverlay.BudgetExhausted
+                              ? "  (draw budget exhausted; some quakes omitted)" : "");
+            }
+            b.Line(1, "intensity overlay", overlay);
 
             // DLC が無い環境ではパネル本体を構築していない（EarthquakePanel._bodyBuilt）。
             b.Line(1, "panel body", ModCompat.NaturalDisastersOwned

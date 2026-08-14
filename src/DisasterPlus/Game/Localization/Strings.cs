@@ -185,7 +185,8 @@ namespace DisasterPlus.Game
         public static string EarthquakeCursorModelsNote =
             "The destruction factor above and this hazard value are different quantities: a linear "
             + "ramp from the epicentre, versus the game's own map (distance to the crack segment, "
-            + "squared falloff, radius 400 m larger). Both are read from the game.";
+            + "squared falloff, radius 400 m larger, and only for a located quake). Both are read "
+            + "from the game. The map overlay below draws the first one.";
 
         public static string EarthquakeFaultBand = "Fault zone";
         public static string EarthquakeFaultInside = "inside";
@@ -194,7 +195,12 @@ namespace DisasterPlus.Game
             "The four rupture patches move every step, so this zone is where they can land, "
             + "not where they will.";
 
-        public static string EarthquakeShowOnMap = "Show on map";
+        // ★ 「マップに表示」から改名した（震度分布オーバーレイの追加に伴う）。
+        //    ボタンが 2 つ並ぶようになり、片方が「マップに表示」のままだと
+        //    **どちらがどちらの絵を出すのかが名前から分からない**。
+        //    こちらはバニラの情報ビュー（§A-6 のグリッド）、隣は本 MOD の
+        //    震央からのランプで、塗る形も、地震計を要るか要らないかも違う。
+        public static string EarthquakeShowOnMap = "Show the game's own hazard view";
 
         // ①の ForecastNoStormDetected と同じ構図・同じ文体。地震のハザードマップも
         // Located && (Emerging|Active) の 2 段ゲートを持ち（§A-6）、地震に Located を
@@ -362,5 +368,54 @@ namespace DisasterPlus.Game
         // （WaveformView のクラス doc が禁じている壊れ方そのもの、全体レビュー I6）。
         public static string EarthquakeWaveformDrawFailed =
             "Waveform drawing stopped after an error; showing the peak amplitude instead.";
+
+        // --- ②地震（震度分布の地図オーバーレイ） ---
+        //
+        // 依頼文の「都市内での震源からの距離に応じた震度の分布の概念もありません」に
+        // **地図として**答える部分。全体レビューの判定は「カーソル 1 点の数値と
+        // 10 文字のバーでは分布ではない」であり、その通りである。
+        //
+        // ここの文言でいちばん重要なのは EarthquakeOverlayLegend の後半 ——
+        // このオーバーレイと、すぐ隣のボタンが出すバニラのハザードビューは
+        // **別の量**である（§A-6: 亀裂線分までの距離・2 次減衰・Rmax = R+400・
+        // 地震計が要る／こちらは震央からの線形ランプ・地震計不要）。
+        // 2 つを同じものだと読ませないことが、この機能の誠実さの担保になる。
+
+        public static string EarthquakeOverlayShow = "Show the intensity distribution on the map";
+        public static string EarthquakeOverlayHide = "Hide the intensity distribution";
+        public static string EarthquakeOverlayRow = "Intensity distribution overlay";
+        public static string EarthquakeOverlayOff = "off";
+        public static string EarthquakeOverlayOn = "on";
+        public static string EarthquakeOverlayQuakes = "earthquake(s) drawn";
+        // 描くべき地震が 1 つも無い。**「安全」ではない**ので理由を書く。
+        public static string EarthquakeOverlayNothingToDraw =
+            "on, but nothing to draw: no earthquake is in its pre-shock or shaking phase. "
+            + "The game only runs its destruction pass while a quake is shaking.";
+        // 断層帯だけが出ない理由。推測した大きさで描かないことの説明でもある。
+        public static string EarthquakeOverlayFaultUnknown =
+            "The fault zone is not drawn: the four EarthquakeAI prefab values could not be read, "
+            + "so its size is unknown. Drawing a guessed size on the map would be indistinguishable "
+            + "from a measured one.";
+        // 予算切れ。地震は同時に 256 個まで存在しうる（§E-1）。
+        public static string EarthquakeOverlayCapped =
+            "More earthquakes are in progress than the overlay draws at once; the rest are omitted "
+            + "rather than drawn partially.";
+        public static string EarthquakeOverlayUnavailable =
+            "The map overlay could not be registered with the game's renderer on this build.";
+        // 両方出ているときの注意。いちばん誤解が起きる状態なので名指しする。
+        public static string EarthquakeOverlayBothOn =
+            "The game's hazard info view is on at the same time. The two pictures are different "
+            + "quantities - see the legend below.";
+
+        // 凡例は**色の読み方だけ**にしてある。「バニラのハザードビューとは別の量だ」は
+        // すぐ上の EarthquakeCursorModelsNote が既に言っており（そちらは 2 つの量の
+        // 違いそのものを説明する行）、同じ内容を 2 箇所に書くと縦が足りなくなる。
+        // 代わりにあちらの末尾に「下のオーバーレイが描いているのは前者だ」を足した。
+        public static string EarthquakeOverlayLegend =
+            "Legend. Blue-green: the destruction factor s, in the same 10 steps as the bar above "
+            + "(densest at the epicentre, zero at the rim). Magenta: the fault zone, drawn at a flat "
+            + "density because its patches destroy with probability 1, not along a ramp. White: the "
+            + "epicentre and the fault strike. Shaking has no radius limit, so the ground moves "
+            + "outside the disc too.";
     }
 }

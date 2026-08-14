@@ -63,16 +63,25 @@ namespace DisasterPlus.Game
         private const string PanelName = FreeSlotFinder.SelfPrefix + "EarthquakePanel";
 
         /// <summary>
-        /// パネル幅。**全体レビューの修正で 420 → 520 に広げた。**
+        /// パネル幅。420 →（全体レビュー）520 →（震度分布オーバーレイ）**640**。
         ///
-        /// 行が 5 本増えた（揺れの振幅・その注記・出火・波形の不可用理由・
-        /// 2 モデルの注記）ぶん、折り返しの説明文で縦が伸びる。UIView の座標系は
-        /// 高さ 1080 に正規化されているので、縦は貴重で横は余っている
-        /// （x=600 + 520 = 1120 は 16:9 のおよそ 1920 に対して十分内側で、
-        ///  ①の予報パネル（x=200、幅 380）とも重ならない）。
-        /// 1 行あたりの文字数が増えれば、同じ説明文が少ない行数で収まる。
+        /// **縦は貴重で横は余っている。** UIView の座標系は高さ 1080 に正規化されて
+        /// いる（<see cref="ClampToView"/>）ので、縦に伸ばせる余地はもう無い ——
+        /// 本タスクの直前の時点で、パネルはすでに約 1050 まで積み上がっていた。
+        /// 一方 x=600 + 640 = 1240 は、16:9（幅 1920）でも 4:3（1440）でも
+        /// 5:4（1350）でも内側に収まり、①の予報パネル（x=200、幅 380 ＝ 右端 580）
+        /// とも重ならない。
+        ///
+        /// 幅を 520 → 640 にすると 1 行あたりの文字数が約 24% 増えるので、
+        /// 同じ説明文が少ない行数で収まる。オーバーレイの 3 行（ボタン・状態・凡例）を
+        /// 足すぶんは、折り返し行の予約高さをその比率で詰めて捻出している。
         /// </summary>
-        private const float PanelWidth = 520f;
+        /// <remarks>
+        /// <c>internal</c> なのは <see cref="EarthquakeOverlayRows"/> が同じ幅で
+        /// 行を作るため。**行の生成と <c>.text</c> の代入はこのファイルに閉じたまま**で、
+        /// 向こうは下の 4 ヘルパー経由でしか行を作れない（クラス doc の担保）。
+        /// </remarks>
+        internal const float PanelWidth = 640f;
         private const float MaxRayDistance = 8000f;
 
         /// <summary>
@@ -177,6 +186,11 @@ namespace DisasterPlus.Game
             if (_panel != null) _panel.Hide();
             // 閉じた瞬間に sim 側の建物走査を止める。
             PublishCursor(new Vec3(0f, 0f, 0f), false);
+            // ★ 震度分布オーバーレイも一緒に消す。凡例はこのパネルの中にしか
+            //    無いので、パネルを閉じたまま絵だけが地図に残ると
+            //    「何の量を見ているのか」を名乗るものが画面から消える
+            //    （EarthquakeOverlay.Disable の doc）。
+            EarthquakeOverlay.Disable();
         }
 
         public static void Toggle()
@@ -224,6 +238,10 @@ namespace DisasterPlus.Game
             //    残る（③で実際に起きた「都市をまたいで静的キャッシュが腐る」形の
             //    リーク版）。WaveformView.Destroy() が自分で Object.Destroy する。
             WaveformView.Destroy();
+            // 参照を捨てるだけ。実体はパネルの GameObject と一緒に消える。
+            EarthquakeOverlayRows.Destroy();
+            // 凡例ごとパネルが消えるので、絵も消す（Hide() と同じ理由）。
+            EarthquakeOverlay.Disable();
 
             if (_panel != null)
             {
@@ -364,7 +382,7 @@ namespace DisasterPlus.Game
             //    非ゼロの変位を書き続けている。3 つの部品が同じ物理量について
             //    食い違う主張をしていたので、揺れは揺れとして別行で出す。
             _shakeLabel = AddLayer1Row(panel, "ShakeAtCursor", ref y);
-            _shakeNoteLabel = AddPlainRow(panel, "ShakeNote", ref y, Strings.EarthquakeShakeNote, 40f);
+            _shakeNoteLabel = AddPlainRow(panel, "ShakeNote", ref y, Strings.EarthquakeShakeNote, 32f);
 
             _faultLabel = AddLayer1Row(panel, "FaultBand", ref y);
 
@@ -372,7 +390,7 @@ namespace DisasterPlus.Game
             // 4 円盤の位置は毎ステップ振り直されるので、帯は「当たりうる範囲」であって
             // 「当たる場所」ではない。テキストは固定なのでここで一度だけ入れる。
             _faultNoteLabel = AddPlainRow(panel, "FaultBandNote", ref y,
-                Strings.EarthquakeFaultBandNote, 36f);
+                Strings.EarthquakeFaultBandNote, 28f);
 
             // ── 建物ごとの余裕度（Task 5、本機能の目玉）──────────────────
             // ここも第 1 層である。バニラが (建物, 災害) の組ごとに引く固定のしきい値を
@@ -383,12 +401,12 @@ namespace DisasterPlus.Game
             // ★ 出火の行（全体レビュー M1）。依頼文が「揺れによる火災や建物の倒壊」と
             //    名指ししていたうちの半分がここで、材料（2 回目の引き）は
             //    BuildingMargin.BurnThresholdValue に最初から入っていた。
-            _marginBurnLabel = AddLayer1Row(panel, "MarginBurn", ref y, 36f);
+            _marginBurnLabel = AddLayer1Row(panel, "MarginBurn", ref y, 28f);
 
             // この注記は**常に**併記する。全体円盤についての判定でしかないことと、
             // それが地震開始の瞬間に既に決まっていることの両方を、行の隣で名乗る。
             _marginNoteLabel = AddPlainRow(panel, "MarginNote", ref y,
-                Strings.EarthquakeGlobalDiscOnly, 54f);
+                Strings.EarthquakeGlobalDiscOnly, 38f);
 
             // ★ NDR が居るなら、倒壊・出火の判定は**この環境では出せない**ことを
             //    常設で名乗る（全体レビュー C2、§E-2）。NDR は
@@ -398,7 +416,7 @@ namespace DisasterPlus.Game
             if (ModCompat.NdrPresent)
             {
                 _ndrNoteLabel = AddPlainRow(panel, "NdrNote", ref y,
-                    Strings.EarthquakeNdrNote, 54f);
+                    Strings.EarthquakeNdrNote, 38f);
             }
 
             // ── 地震計（Task 7）──────────────────────────────────
@@ -418,7 +436,7 @@ namespace DisasterPlus.Game
             //    地震が起きていなくても、スナップショットが読めていなくても出す。
             //    したがってここで一度書いたら以後どこからも書き換えない
             //    （Refresh 側に「消す」経路を作らないことがその保証になっている）。
-            AddPlainRow(panel, "SensorEffect", ref y, Strings.EarthquakeSensorEffect, 54f);
+            AddPlainRow(panel, "SensorEffect", ref y, Strings.EarthquakeSensorEffect, 42f);
 
             // ── 波形（Task 8）───────────────────────────────────
             // ここも第 1 層である。プロットしているのは**バニラ自身の揺れの式**
@@ -432,7 +450,7 @@ namespace DisasterPlus.Game
             // 説明のすぐ次に、建てた地震計が実際に何を見ているかが来る。
             // 3 行ぶんの高さを取る。この行は最も長いとき
             // Strings.EarthquakeWaveformNeedsSensor（約 150 文字）を丸ごと入れる。
-            _waveformLabel = AddLayer1Row(panel, "Waveform", ref y, 54f);
+            _waveformLabel = AddLayer1Row(panel, "Waveform", ref y, 42f);
 
             WaveformView.Build(panel, "WaveformPlot", 12f, y);
             if (WaveformView.Available) y += WaveformView.PlotHeight + 6f;
@@ -447,11 +465,11 @@ namespace DisasterPlus.Game
             //    空白だけが残り、それは WaveformView のクラス doc が
             //    「黙って空欄にならず…劣化であって嘘ではない」と約束している
             //    ことの正反対である。中身は Refresh 側が状態を見て入れる。
-            _waveformUnavailableLabel = AddPlainRow(panel, "WaveformUnavailable", ref y, "", 36f);
+            _waveformUnavailableLabel = AddPlainRow(panel, "WaveformUnavailable", ref y, "", 28f);
 
             // グラフが何の絵なのかを、グラフのすぐ下で毎回言う。
             // 内容はグラフを出しているときだけ入れる（Refresh 側で設定する）。
-            _waveformNoteLabel = AddPlainRow(panel, "WaveformNote", ref y, "", 54f);
+            _waveformNoteLabel = AddPlainRow(panel, "WaveformNote", ref y, "", 38f);
 
             y += 6f;
 
@@ -473,7 +491,7 @@ namespace DisasterPlus.Game
             // この 1 行が、数値か「空である理由」かのどちらか一方だけを出す。
             // 2 つのラベルに分けないのは意図的で、「理由を書いたのに隣に数値も残っている」
             // という状態を構造的に作れなくするため。3 行ぶんの高さを取る。
-            _hazardLabel = AddPlainRow(panel, "Hazard", ref y, Strings.EarthquakeSwitchHazardView, 54f);
+            _hazardLabel = AddPlainRow(panel, "Hazard", ref y, Strings.EarthquakeSwitchHazardView, 42f);
 
             // ★ カーソル 1 点について 2 つの別モデルの数字が並ぶ（全体レビュー M3）。
             //    上は震央からの線形ランプ（R = 2000+20i）、こちらはバニラのハザード
@@ -481,6 +499,14 @@ namespace DisasterPlus.Game
             //    どちらも実測なのに一致しないので、一致しない理由を画面で名乗る。
             _cursorModelsNoteLabel = AddPlainRow(panel, "CursorModelsNote", ref y,
                 Strings.EarthquakeCursorModelsNote, 54f);
+
+            // ── 震度分布の地図オーバーレイ ──────────────────────────
+            // 上の「マップに表示」（バニラのハザードビュー）の**すぐ下**に置く。
+            // 2 つは別の量を塗るので（§A-6 と §3.1）、並べたうえで凡例に
+            // その違いを名乗らせるのが、取り違えを防ぐいちばん確実な形になる。
+            // 中身は EarthquakeOverlayRows（行を作るのはこのファイルのヘルパー）。
+            y += 6f;
+            EarthquakeOverlayRows.Build(panel, ref y);
 
             panel.height = y;
             ClampToView(panel);
@@ -515,7 +541,18 @@ namespace DisasterPlus.Game
                 {
                     top = viewHeight - Margin - panel.height;
                 }
-                if (top < Margin) top = Margin;
+                if (top < Margin)
+                {
+                    // ★ ここに来たら**内容がビューより高い** ＝ 上端に寄せても
+                    //    いちばん下の行（現状は震度分布オーバーレイの凡例）が
+                    //    画面外に出る。行の高さは折り返しの実測ができないまま
+                    //    予約しているので、言語やフォントによってはここへ落ちうる。
+                    //    **黙って切れさせない。** 構築時の 1 回だけなのでスロットル不要。
+                    top = Margin;
+                    Log.Warn("earthquake panel is taller than the view ("
+                             + panel.height.ToString("F0") + " > " + viewHeight.ToString("F0")
+                             + "); the bottom rows will be off-screen");
+                }
                 panel.relativePosition = new Vector3(pos.x, top);
             }
             catch (System.Exception e)
@@ -551,8 +588,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>出典の接頭辞を持たない行（見出しの注記・状態の説明）。</summary>
-        private static UILabel AddPlainRow(UIPanel p, string suffix, ref float y,
-                                           string text, float height)
+        internal static UILabel AddPlainRow(UIPanel p, string suffix, ref float y,
+                                            string text, float height)
         {
             var label = AddLabel(p, suffix, 12f, y, PanelWidth - 24f, height, Layer1Color);
             SetPlain(label, text);
@@ -576,7 +613,7 @@ namespace DisasterPlus.Game
         /// 共有している）。1 行に収まらない内容を持つ行のためにあり、
         /// 中身は同じく <see cref="SetLayer1"/> でしか書けない。
         /// </summary>
-        private static UILabel AddLayer1Row(UIPanel p, string suffix, ref float y, float height)
+        internal static UILabel AddLayer1Row(UIPanel p, string suffix, ref float y, float height)
         {
             var label = AddLabel(p, suffix, 12f, y, PanelWidth - 24f, height, Layer1Color);
             y += height + 4f;
@@ -597,14 +634,14 @@ namespace DisasterPlus.Game
 
         // ── テキスト設定（UILabel.text への代入はこの 1 箇所だけ） ──────────
 
-        private static void SetPlain(UILabel label, string text)
+        internal static void SetPlain(UILabel label, string text)
         {
             if (label == null) return;
             label.text = text == null ? "" : text;
         }
 
         /// <summary>第 1 層の行に書く。接頭辞は呼び出し側に選ばせない。</summary>
-        private static void SetLayer1(UILabel label, string body)
+        internal static void SetLayer1(UILabel label, string body)
         {
             SetPlain(label, Strings.SourceVanilla + " " + body);
         }
@@ -639,6 +676,8 @@ namespace DisasterPlus.Game
                     ? Strings.ForecastWaiting
                     : Strings.EarthquakeUnavailable);
                 SetPlain(_hazardLabel, Strings.EarthquakeUnavailable);
+                // ボタンの見た目だけは実状に合わせる（凡例は消さない）。
+                EarthquakeOverlayRows.Clear();
                 return;
             }
 
@@ -667,6 +706,8 @@ namespace DisasterPlus.Game
             RefreshSensorRows(snapshot, primary, haveCursor);
             RefreshWaveformRows(snapshot);
             RefreshHazardRow(snapshot, hazardViewOn, haveCursor, cursor);
+            // hazardViewOn を渡すのは、同じフレームで InfoManager を 2 回引かないため。
+            EarthquakeOverlayRows.Refresh(hazardViewOn);
         }
 
         private static void ClearQuakeRows()
