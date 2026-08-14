@@ -178,10 +178,14 @@ namespace DisasterPlus.Core.Earthquake
             float burnWithin = CollapseThreshold.GlobalDiscBurnDistance(
                 thresholds.Burn, intensity);
 
-            var verdict = VerdictFor(thresholds.Collapse, buildingPos, distance, local,
-                                     intensity, band, alreadyDown);
-            var burnVerdict = VerdictFor(thresholds.Burn, buildingPos, distance, local,
-                                         intensity, band, alreadyDown);
+            // 帯の内外は倒壊と出火で同じ答えなので 1 回だけ引く
+            // （FaultBand.Contains は u の全域を走査するので、安い呼び出しではない）。
+            bool insideBand = band.Known && band.Contains(buildingPos);
+
+            var verdict = VerdictFor(thresholds.Collapse, distance, local,
+                                     intensity, band.Known, insideBand, alreadyDown);
+            var burnVerdict = VerdictFor(thresholds.Burn, distance, local,
+                                         intensity, band.Known, insideBand, alreadyDown);
 
             return new BuildingMargin(buildingId, distance, local,
                                       thresholds.Collapse, thresholds.Burn,
@@ -193,9 +197,9 @@ namespace DisasterPlus.Core.Earthquake
         /// （全体円盤の fD と fB はどちらも <c>1 - d/R</c>、probability も同じ 0.02）。
         /// 分岐の順序には意味があるので入れ替えないこと。
         /// </summary>
-        private static CollapseVerdict VerdictFor(int threshold, Vec2 buildingPos,
-                                                  float distance, float local, byte intensity,
-                                                  FaultBand band, bool alreadyDown)
+        private static CollapseVerdict VerdictFor(int threshold, float distance, float local,
+                                                  byte intensity, bool bandKnown, bool insideBand,
+                                                  bool alreadyDown)
         {
             if (alreadyDown) return CollapseVerdict.AlreadyDown;
 
@@ -203,14 +207,14 @@ namespace DisasterPlus.Core.Earthquake
             if (!SeismicIntensity.IsInside(distance, intensity)) return CollapseVerdict.OutOfRange;
 
             // 帯の内外が分からないので、生存も倒壊も断定しない。
-            if (!band.Known) return CollapseVerdict.Unknown;
+            if (!bandKnown) return CollapseVerdict.Unknown;
 
             // ★ この分岐が Survives へ至る唯一の経路の手前にあること自体が、
             //    「断層帯の内側の建物に『倒れません』と言わない」の保証である。
             //    下の 2 分岐より上から動かさないこと。断層帯の内側では
             //    probability = 1 の破壊円盤が別に判定しており、全体円盤の
             //    しきい値はその判定について何ひとつ語っていない。
-            if (band.Contains(buildingPos)) return CollapseVerdict.InsideFaultZone;
+            if (insideBand) return CollapseVerdict.InsideFaultZone;
 
             return CollapseThreshold.GlobalDiscHits(threshold, local)
                 ? CollapseVerdict.WillCollapse

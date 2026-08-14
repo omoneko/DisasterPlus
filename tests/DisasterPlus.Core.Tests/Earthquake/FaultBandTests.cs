@@ -115,6 +115,77 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         [Fact]
+        public void AFatterDiscFurtherAlongTheFaultStillCounts()
+        {
+            // **独立レビューが見つけた欠陥の回帰テスト。**
+            // Contains は最初、点にいちばん近い 1 つの t だけで円との交差を見ていた。
+            // w は t とともに細るので、沿走方向の残差を最小にする t が到達距離を
+            // 最大にする t とは限らない —— もっと中央寄りの太い円盤が届くことがある。
+            //
+            //   t = 0.30 … w = 64.00、残差 0、直交の余り 99 - 32.00 = 67.00 → 外
+            //   t = 0.28 … w = 68.64、残差 20、直交の余り 99 - 34.32 = 64.68 → **内**
+            //              20² + 64.68² = 4583 < 68.64² = 4712
+            //
+            // 誤りの向きが最悪だった: 帯の内側の建物を外側と言い、その建物について
+            // 全体円盤の「倒壊しません」を名乗ることになる。
+            var band = Sample();
+            Assert.True(band.Contains(new Vec2(99f, 300f)));
+
+            // その t = 0.28 の円盤が届くこと自体を、独立に確かめる。
+            float w = band.PatchRadiusAt(0.28f);
+            double da = 300.0 - 0.28 * L;
+            double dacross = 99.0 - 0.5 * w;
+            Assert.True(da * da + dacross * dacross <= (double)w * w);
+        }
+
+        [Fact]
+        public void ContainsAgreesWithABruteForceSweepOverAllPatchPositions()
+        {
+            // Contains の走査（96 分割 + 24 回の細分）が、素朴な全数探索と一致すること。
+            // 真の境界のすぐ近く（±1 m）は判定がぶれうるので、そこは除いて比べる。
+            var band = Sample();
+
+            for (float along = -520f; along <= 520f; along += 13f)
+            {
+                for (float across = 0f; across <= 170f; across += 3f)
+                {
+                    double best = BruteForceGap(along, across);
+                    if (System.Math.Abs(best) < 200.0) continue;   // 境界の近傍は除く
+
+                    Assert.Equal(best <= 0.0, band.Contains(new Vec2(across, along)));
+                }
+            }
+        }
+
+        /// <summary>
+        /// 素朴な全数探索。円盤中心の沿走位置を 1/20000 刻みで舐めて、
+        /// はみ出しの最小値を返す（0 以下なら届く）。
+        /// </summary>
+        private static double BruteForceGap(double along, double across)
+        {
+            const int Steps = 20000;
+            double half = FaultBand.MaxOffset * L;
+            double best = double.MaxValue;
+
+            for (int i = 0; i <= Steps; i++)
+            {
+                double u = -half + 2.0 * half * i / Steps;
+                double ratio = u / L;
+                double w = W * (1.0 - 4.0 * ratio * ratio);
+                if (w <= 0.0) continue;
+
+                double da = along - u;
+                double dacross = across - 0.5 * w;
+                if (dacross < 0.0) dacross = 0.0;
+
+                double gap = da * da + dacross * dacross - w * w;
+                if (gap < best) best = gap;
+            }
+
+            return best;
+        }
+
+        [Fact]
         public void PastTheEndTheCrossSectionShrinks()
         {
             var band = Sample();

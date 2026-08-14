@@ -39,8 +39,26 @@ namespace DisasterPlus.Core.Earthquake
     /// **直交方向の包絡線は 1.5w** になる。以前の doc は「2w の内側に収まるので
     /// 算入しない」としていたが、その 2w 自体が誤りだったので、蛇行は算入する。
     ///
-    /// 沿走方向も同じ理屈で、円盤中心の上限 0.4·L に到達距離 w が足される
-    /// （<see cref="Contains"/> はこれを円との交差として厳密に扱う）。
+    /// 沿走方向も同じ理屈で、円盤中心の上限 0.4·L に到達距離 w が足される。
+    ///
+    /// ── 到達範囲は「1 つの t」では決まらない ──────────────────────────
+    ///
+    /// <see cref="Contains"/> は最初、点にいちばん近い**ただ 1 つ**の t
+    /// （＝ along/L をクランプしたもの）で円との交差を見ていた。**これは誤りである。**
+    /// w は t とともに細るので、沿走方向の残差を最小にする t が到達距離を最大にする t
+    /// とは限らない。**もっと中央寄りの、より太い円盤が、沿走方向に少し離れていても
+    /// 届く**ことがある。
+    ///
+    /// 反例（L = 1000、W = 100、点は 沿走 300 / 直交 99）:
+    ///   t = 0.30 … w = 64.00、残差 0、直交の余り 99 - 32.00 = 67.00 → 67.00² &gt; 64.00² で外
+    ///   t = 0.28 … w = 68.64、残差 20、直交の余り 99 - 34.32 = 64.68
+    ///              → 20² + 64.68² = 4583 &lt; 68.64² = 4712 で**内側**
+    /// L : W = 10 : 1 はバニラの断層の代表的な比なので、これは稀な縁の話ではない。
+    /// 誤りの向きも最悪で、**帯の内側の建物を外側と言い**、その建物について
+    /// 全体円盤の「倒壊しません」を名乗ることになる（probability = 1 の円盤が
+    /// 別に判定しているのに、である）。
+    ///
+    /// したがって <see cref="Contains"/> は t の**全域**を探す。詳細はそちらの doc。
     ///
     /// Length / Width が 0（＝プレハブ 4 値が読めなかった）ときは
     /// <see cref="Known"/> が false になり、Contains は常に false を返す。
@@ -99,21 +117,38 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
+        /// 円盤中心の沿走位置を走査する分割数。
+        ///
+        /// 探しているのは <c>u ∈ [-0.4L, 0.4L]</c> における <see cref="Gap"/> の最小値だが、
+        /// <c>w(u)</c> が 2 次なので Gap は 4 次の区分多項式であり、**単峰である保証が無い**
+        /// （三分探索も黄金分割も使えない）。一様走査で谷を掴んでから
+        /// <see cref="RefineSteps"/> で詰める。
+        ///
+        /// 刻みは <c>0.8L / 96</c>。L : W = 10 : 1 のとき成立する u の区間はおよそ 2w ≒ 0.2L
+        /// 幅あるので、刻み <c>0.0083L</c> は 20 倍以上細かい。判定がぶれうるのは
+        /// 真の境界からこの刻みの半分ぶん以内だけで、そこは細分が拾う。
+        /// </summary>
+        private const int ScanSteps = 96;
+
+        /// <summary>走査で掴んだ谷を半分ずつ詰める回数。0.8L/96 が 2^-24 倍まで縮む。</summary>
+        private const int RefineSteps = 24;
+
+        /// <summary>
         /// p が破壊円盤の落ちうる範囲の内側か。**「当たる」ではない。**
         ///
-        /// 円盤中心は (t·L, s·w·0.5)（t ∈ [-0.4, 0.4]、s ∈ [-1, 1]）に落ち、
-        /// そこから半径 w まで届く。p にいちばん近づける中心は
-        /// **t を [-0.4, 0.4] にクランプし、s を p 側へ振り切った**ものなので、
-        /// 沿走方向の余り <c>da</c> と直交方向の余り <c>max(0, across - 0.5w)</c> の
-        /// 二乗和を w² と比べればよい。
+        /// 円盤中心は <c>(u, s·w(u)·0.5)</c>（<c>u = t·L ∈ [-0.4L, 0.4L]</c>、
+        /// <c>s ∈ [-1, 1]</c>）に落ち、そこから半径 <c>w(u)</c> まで届く。
+        /// s は連続なので、ある u に対する到達範囲は
+        /// **長さ <c>w(u)</c> の縦線分から距離 <c>w(u)</c> 以内**（＝スタジアム形）である。
+        /// 求める答えは、それを u について**全部合わせた**集合に p が入るか。
         ///
-        /// da = 0（＝両端より内側）なら条件は across ≤ 1.5w に退化し、
-        /// <see cref="HalfWidthAt"/> と厳密に一致する。
+        /// <c>u = along</c> の 1 点だけを見るのでは足りない —— クラス doc の反例のとおり、
+        /// **もっと中央寄りの太い円盤が届く**ことがある。1 点だけを見ていた版は
+        /// 帯の内側の建物を外側と誤判定し、その建物について「倒壊しません」を
+        /// 名乗っていた。
         ///
-        /// w は t によって細るので、厳密には「隣の t のもっと太い円盤が届く」
-        /// 可能性が残る。ただしそれが起きるのは w が L と同程度に大きいときだけで、
-        /// バニラの断層は L ≫ W（診断ダンプの `fault (L/W)` 行で確認できる）。
-        /// **細い側に倒す近似**なので、帯の外と断定する範囲が広がることはない。
+        /// <c>u = along</c> が置ける（<c>|along| ≤ 0.4L</c>）ときは沿走方向の残差が 0 になり、
+        /// 条件は <c>across ≤ 1.5·w</c> に退化して <see cref="HalfWidthAt"/> と厳密に一致する。
         /// </summary>
         public bool Contains(Vec2 p)
         {
@@ -126,24 +161,74 @@ namespace DisasterPlus.Core.Earthquake
             float along = dx * Direction.X + dz * Direction.Z;
             float across = dx * Direction.Z - dz * Direction.X;
             if (across < 0f) across = -across;
+            if (float.IsNaN(along) || float.IsNaN(across)) return false;
 
-            // 円盤中心が置ける範囲へクランプした t。両端の外側では
-            // 「端の円盤から見て、まだ w ぶん届くか」を見ることになる。
-            float t = along / Length;
-            if (t < -MaxOffset) t = -MaxOffset;
-            else if (t > MaxOffset) t = MaxOffset;
+            float half = MaxOffset * Length;   // 円盤中心が置ける沿走方向の上限
 
-            float w = PatchRadiusAt(t);
-            if (w <= 0f) return false;
+            // 早い棄却。どの円盤も W より太くならないので、この 2 つを外れていれば
+            // 走査するまでもなく外側である（カーソルは普通ここで落ちる）。
+            if (across > 1.5f * Width) return false;
+            if (along > half + Width || along < -(half + Width)) return false;
 
-            float da = along - t * Length;
-            if (da < 0f) da = -da;
+            float step = 2f * half / ScanSteps;
+            float bestU = -half;
+            float bestGap = Gap(-half, along, across);
+            if (bestGap <= 0f) return true;
 
-            // 蛇行は円盤中心を直交方向へ最大 0.5w ずらせる。使い切れる分だけ引く。
+            for (int i = 1; i <= ScanSteps; i++)
+            {
+                float u = -half + step * i;
+                float gap = Gap(u, along, across);
+                if (gap <= 0f) return true;
+                if (gap < bestGap) { bestGap = gap; bestU = u; }
+            }
+
+            // 走査の谷間に最小が落ちている場合を拾う。左右を半分ずつ詰める。
+            float h = step * 0.5f;
+            for (int i = 0; i < RefineSteps; i++)
+            {
+                float lo = bestU - h;
+                if (lo < -half) lo = -half;
+                float hi = bestU + h;
+                if (hi > half) hi = half;
+
+                float gapLo = Gap(lo, along, across);
+                if (gapLo <= 0f) return true;
+                float gapHi = Gap(hi, along, across);
+                if (gapHi <= 0f) return true;
+
+                if (gapLo < bestGap) { bestGap = gapLo; bestU = lo; }
+                if (gapHi < bestGap) { bestGap = gapHi; bestU = hi; }
+                h *= 0.5f;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 沿走位置 <paramref name="u"/> に落ちた円盤の到達範囲から見た、点の**はみ出し**。
+        /// 0 以下なら、その u の円盤（蛇行を最大限使った位置）が点に届く。
+        ///
+        ///   Gap(u) = (along - u)² + max(0, across - 0.5·w(u))² - w(u)²
+        ///
+        /// 第 2 項の <c>max</c> が、蛇行で中心を点の側へ 0.5w まで寄せられることを表す。
+        /// 点が線分の真横にある（<c>across ≤ 0.5w</c>）ときは 0 になり、条件は
+        /// <c>|along - u| ≤ w</c> に退化する。
+        /// </summary>
+        private float Gap(float u, float along, float across)
+        {
+            float ratio = u / Length;
+            float w = Width * (1f - 4f * ratio * ratio);
+
+            // ここには円盤が落ちない（|t| ≧ 0.5 で幅が 0 に細る）。
+            if (w <= 0f) return float.MaxValue;
+
+            float da = along - u;
+
             float dacross = across - 0.5f * w;
             if (dacross < 0f) dacross = 0f;
 
-            return da * da + dacross * dacross <= w * w;
+            return da * da + dacross * dacross - w * w;
         }
     }
 }
