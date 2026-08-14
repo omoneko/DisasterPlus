@@ -18,9 +18,38 @@ namespace DisasterPlus.Game
     ///
     /// **main スレッドから呼ぶこと**（InfoManager は UI/描画向けの状態で、CS1 の他の
     /// InfoMode 切替コードと同じく main スレッド専用として扱う）。
+    ///
+    /// ── 唯一の例外: <see cref="IsShowingHazard"/> の診断からの読み取り ─────────
+    ///
+    /// <c>IDisasterFeature.WriteDiagnostics</c> は sim スレッド専用の契約で
+    /// （<c>DiagnosticDump</c> のクラス doc）、そこから <see cref="IsShowingHazard"/> を
+    /// 読んでいる箇所が 2 つある（<c>ForecastFeature.WriteUiState</c> /
+    /// <c>EarthquakeFeature.WriteUiState</c>）。**これは意図的に許可する。**
+    /// 根拠は IL の実測（本レビューで再確認）:
+    ///
+    /// <code>
+    /// InfoManager::get_CurrentMode     IL_0000 ldarg.0 ; ldfld m_actualMode    ; ret
+    /// InfoManager::get_CurrentSubMode  IL_0000 ldarg.0 ; ldfld m_actualSubMode ; ret
+    /// </code>
+    ///
+    /// **どちらも単一フィールドの読み出しだけで、配列も遅延初期化も無い。**
+    /// この MOD がスレッド境界で恐れているのは
+    /// <c>IndexOutOfRangeException</c>（バッファへの添字アクセス）であり、
+    /// enum 1 個の非同期読み出しは最悪でも「1 tick 古い値」にしかならない。
+    /// 用途も診断ダンプの 1 行（<c>showing hazard view: yes/no</c>）だけで、
+    /// 古い値でも意味が壊れない（<c>CameraShakeBooster.LastAdded</c> /
+    /// <c>WaveformView.State</c> と同じ扱い）。
+    ///
+    /// **<see cref="ShowHazard"/> / <see cref="Clear"/> は例外ではない。**
+    /// あちらは <c>SetCurrentMode</c> を呼んで UI の状態を書き換えるので、
+    /// main スレッド専用のままである。
     /// </summary>
     public static class InfoModeSwitch
     {
+        /// <summary>
+        /// 災害ハザードビューが表示中か。**診断からは sim スレッドでも読んでよい**
+        /// （クラス doc の「唯一の例外」。IL 実測で単一フィールドの読み出しと確定済み）。
+        /// </summary>
         public static bool IsShowingHazard
         {
             get

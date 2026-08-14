@@ -3,6 +3,17 @@ namespace DisasterPlus.Core.Common
     /// <summary>
     /// (tick, id) から再現可能な乱数を作る。
     /// System.Random を使うと、セーブ・ロード・ユニットテストで同じ結果にならない。
+    ///
+    /// **Core/Earthquake/VanillaRandomizer とは別物。取り違えないこと。**
+    /// こちらは状態を持たないハッシュで、**この MOD が自分で決めること**
+    /// （③の延焼選定、②第 2 層の被害選定）に使う。中身はこの MOD の内部仕様なので
+    /// 変えてよい。あちらはゲームの ColossalFramework.Math.Randomizer を
+    /// ビット単位で写したもので、**バニラが引く値を先読みする**ためだけにあり、
+    /// 1 ビットも変えてはいけない。
+    ///
+    /// 判別の規則:
+    ///   その数字が「この MOD が発明した判断」を決めるなら DeterministicRandom。
+    ///   「バニラが引く値と一致しなければならない」なら VanillaRandomizer。
     /// </summary>
     public static class DeterministicRandom
     {

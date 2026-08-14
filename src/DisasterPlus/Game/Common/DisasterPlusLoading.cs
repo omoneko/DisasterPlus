@@ -28,6 +28,7 @@ namespace DisasterPlus.Game
             {
                 FeatureHost.Register(new FireWhirlFeature());
                 FeatureHost.Register(new ForecastFeature());
+                FeatureHost.Register(new EarthquakeFeature());
             }
 
             FeatureHost.LevelLoaded();

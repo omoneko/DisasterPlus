@@ -93,6 +93,10 @@ IL_0056  DisasterManager.m_randomDisasterCooldown = 0
 > **落とし穴（重要）。** `SelfTrigger` が無いと `m_activationFrame` が 0 のままになり、
 > `EarthquakeAI.IsStillEmerging` は `if (m_activationFrame == 0) return true;` なので **Emerging のまま永久に止まる**。
 > `TsunamiAI.StartDisaster` も同じ `& 64` ゲートを持つ。
+> **ただし「Emerging で永久に固まる」のは地震だけである（Task 9 で再実測して訂正）。**
+> `TsunamiAI` の 3 つの位相判定は `m_activationFrame` を**一度も読まない**（下記 B-2a）。
+> 津波で `SelfTrigger` を落とすと、位相は普通に進みながら**波が 1 つも作られない**。
+> 結論（必ず立てる）は同じだが、失敗の形が違うので切り分けのときに取り違えないこと。
 > フラグ 64 を立てているのは `DisasterManager.StartRandomDisaster` / `DisasterTool.CreateDisaster`(iterator) /
 > `DisasterWrapper.CreateDisaster` / `DeveloperUI.StartDisaster` の 4 箇所だけ（全アセンブリ走査）。
 
@@ -458,6 +462,50 @@ Int32  GetSeaLevel(int original, int x, int z)   // public
 API: `WaterSimulation.CreateWaterWave(out ushort wave, WaterWave waveData) : bool`（public）/
 `ReleaseWaterWave(ushort)`（public）。取得は `TerrainManager.instance.WaterSimulation`（public property）。
 
+### B-2a. 波が立たなかったときに津波は固まるか → **固まらない** — CONFIRMED（Task 9 で実測）
+
+設計書 §4.1 と A-1 の注記は「`SelfTrigger` を立てないと地震・津波の**両方**が
+Emerging のまま永久に固まる」としていたが、津波については誤りだった。
+
+`TsunamiAI` の 3 つの位相判定はいずれも `m_activationFrame` を**一度も読まない**:
+
+```
+IsStillEmerging   elapsed = m_currentFrameIndex - m_startFrame
+                  travel  = elapsed * 0.125
+                  dir     = (-sin(m_angle), 0, cos(m_angle))
+                  corner  = (dir.x > 0 ? -4800 : 4800, m_targetPosition.y,
+                             dir.z > 0 ? -4800 : 4800)          // 進行方向の「手前」側
+                  return Dot(corner - m_targetPosition, dir) > travel
+IsStillActive     同じ形。travel から 3000 を引く（IL_002A の ldc.r4 3000）
+IsStillClearing   同じ形。corner を進行方向「奥」側（符号が反転）に取る
+```
+
+一方 `DisasterAI.StartDisaster`（base）は `m_flags |= Emerging` と
+`m_startFrame = m_currentFrameIndex` を**必ず**書き（`m_activationFrame` には触らない）、
+しかも `TsunamiAI.StartDisaster` の `& 64` ゲートより**前**に呼ばれている。
+
+→ `FindSea` が false を返しても（＝波が 1 つも立たなくても）位相は `m_startFrame` を
+基準に自然に進み、`Finished` になった時点で `DisasterManager.SimulationStepImpl` が
+`ReleaseDisaster` を呼んでスロットを解放する（§E-1）。上限は `m_targetPosition` が
+マップ端にある最悪の場合で `elapsed = 107520` フレーム ≒ **39 ゲーム内時間**。
+
+**したがって後始末は不要である**（計画 Task 9 Step 1 の対応表の 1 行目）。
+併せて確認した周辺の事実:
+
+| 対象 | 実測 |
+|---|---|
+| `DisasterManager.ReleaseDisaster(ushort)` | **public** void。`InstanceManager.ReleaseInstance` → `HazardModified` → `DisasterAI.ReleaseDisaster` → `ReleaseWaterWave`（`m_waveIndex != 0` のとき）→ スロットをゼロ埋め → `m_disasterCount--` |
+| `DisasterData.m_waveIndex` | **public UInt16**。波が立ったかの唯一の判定材料 |
+| `DisasterAI.StartNow` / `DeactivateNow` / `ClampDisasterTarget` | いずれも **public**。`StartNow` は `(m_flags & 60) == 0`（Emerging\|Active\|Clearing\|Finished のどれも立っていない）のときだけ `StartDisaster` を呼ぶ |
+| `DisasterAI.StartDisaster` / `EndDisaster` / `ActivateDisaster` / `DeactivateDisaster` | いずれも **protected** |
+| `TsunamiAI.StartDisaster` の `Significant(256)` | `FindSea` 成功の分岐の**内側**。波が立たなかった災害は Significant にならない |
+
+`ReleaseDisaster` が public であることは確認したが、**Task 9 では使っていない**。
+`base.StartDisaster` は既に `DisasterWrapper.OnDisasterStarted(id)` を呼んでおり、
+その直後にスロットを消すのは `IDisastersExtension` を実装した MOD から見て
+「開始したのに終了通知の無い災害」になる。固まらないと分かっている以上、
+検証していない副作用を足す理由が無い。
+
 ### B-3. 原点は任意に置けるか → **ABSENT（置けない）**
 
 `TsunamiAI.FindSea`（IL_0000–043E）:
@@ -646,6 +694,36 @@ IL_0122  TerrainManager.instance.WaterSimulation.CreateWaterWave(out _, wave)
 | 海面 | `WaterSimulation.m_currentSeaLevel` / `m_nextSeaLevel`（public float）。`DEFAULT_SEA_LEVEL = 40`、`MAX_SEA_LEVEL = 500` |
 | 継続的な水源 | `CreateWaterSource(out ushort, WaterSource)` / `LockWaterSource` / `UnlockWaterSource` / `ReleaseWaterSource`（すべて public） |
 
+### D-3. `TerrainManager.HasWater` — CONFIRMED（Task 9 で実測。設計書 付録の未確定項目）
+
+設計書 付録は「存在・シグネチャ・public 性を IL で確認すること」としていた。結果:
+
+```
+public bool HasWater(Vector2 position)                    // インスタンスメソッド
+public bool HasWater(Segment2 segment, float radius, bool any)
+```
+
+`HasWater(Vector2)` の中身（IL_0000–0286）:
+
+```
+x = FloorToInt((position.x + 8640) * 16) >> 8      // = (position.x + 8640)/16、16 m セル
+z = FloorToInt((position.y + 8640) * 16) >> 8      // ★ Vector2.y は「ワールドの z」
+x, x+1, z, z+1 を [0, 1080] にクランプし、行幅 1081 の 4 隅を取る
+cells = m_waterSimulation.BeginRead()              // ★ ロックを取る → sim スレッドで呼ぶ
+4 隅の Cell.m_height が全て 0 なら → return false  // 水がまったく無い
+そうでなければ 水面高 = m_blockHeights[i] + m_height、地形高 = m_rawHeights2[i]
+両方を下位 8 bit を重みにした双一次補間で内挿し、
+return (水面高 - 地形高) >= 8                      // 1/64 m 単位 ＝ 深さ 0.125 m 以上
+m_waterSimulation.EndRead() は finally
+```
+
+| 問い | 答え |
+|---|---|
+| 座標系 | **ワールド XZ**。`VectorUtils.XZ(Vector3)` の結果をそのまま渡してよい |
+| 単位 | 8 = 1/64 m 単位 ＝ **深さ 0.125 m 以上を「水」と呼ぶ**。水たまりも true になりうる |
+| スレッド | `WaterSimulation.BeginRead()` / `EndRead()` を取るので **sim スレッド専用** |
+| 空の値 | 4 隅の `m_height` が全て 0 なら早期に false。水が無いことと読めなかったことは区別しない |
+
 ---
 
 ## E. 並行実行と共存
@@ -759,6 +837,102 @@ m_currentDayTimeHour = h;                    // ★ ここでしか書かれな�
 > つまり日夜サイクルを切っているプレイヤーにとって、**時間帯係数は黙って定数になる**。
 > ②で時間帯を使うなら、`m_enableDayNight` を見て「この設定では時間帯差は出ません」と明示するか、
 > 別の時間軸（`m_currentFrameIndex` ベースの自前の周期）を使うこと。
+
+---
+
+## G. 建物の高さ（第 2 層レビュー I2 で追測）
+
+### G-1. `m_collisionHeight` は敷地の**樹木**で膨らむ — CONFIRMED
+
+`BuildingInfo.CheckReferences`（実測）:
+
+```
+IL_0019-0025  m_collisionHeight = m_size.y                          ← 出発点
+IL_0270-02F6  h = prop.m_generatedInfo.m_center.y
+                  + prop.m_generatedInfo.m_size.y * 0.5
+              h *= prop.m_maxScale
+              if (m_props[i].m_fixedHeight) h += m_props[i].m_position.y
+              m_collisionHeight = Mathf.Max(m_collisionHeight, h)     ← プロップ
+IL_03EA-0470  同じ式を TreeInfo について繰り返す                        ← 樹木
+              （Prop::m_finalTree / TreeInfoGen::m_center・m_size / TreeInfo::m_maxScale）
+```
+
+`m_fixedHeight` の分岐は `brfalse`（IL_02CB / IL_0445）なので、
+**`m_position.y` が足されるのは `m_fixedHeight` が true のとき**である。
+
+> バニラの低密度住宅の敷地には樹木プロップが載っており、`TreeInfoGen.m_size.y` は
+> `m_maxScale` を掛ける前で 15〜25 m に達しうる。**平屋が 20 m 以上を名乗る。**
+> 「ゲーム自身が建物の高さとして使っている値」だからという理由でこれを採ると、
+> 「高層ほど倒れる」という第 2 層の前提が樹木で測られる。
+
+### G-2. `BuildingInfo.m_size.y` はメッシュ頂点だけ — CONFIRMED
+
+```
+BuildingInfo::InitializePrefab  IL_09BE  m_size = m_generatedInfo.m_size
+BuildingInfoBase::CalculateGeneratedInfo(MeshFilter[], SkinnedMeshRenderer[])
+  IL_0135-014A  y = Mathf.Max(y, mesh.vertices[k].y)        ← メッシュ頂点の最大 y
+  IL_05E6       m_generatedInfo.m_size = new Vector3(x*2, y, z*2)
+```
+
+アセンブリ全走査で、`BuildingInfo::m_size` に `stfld` するのは `InitializePrefab` だけ、
+`BuildingInfoGen::m_size` に `stfld` するのは `CalculateGeneratedInfo` の 2 つの
+オーバーロードだけ。**プロップも樹木もサブ建物も入らない。**
+（サブ建物が入らない副作用として、本体メッシュが低いプレハブは低く出る。
+過小評価は「被害を与えない」側なので過大評価より安全である。）
+
+### G-3. `DisasterData.Flags` の実値と `SelfTrigger` の効き方 — CONFIRMED（③の I4）
+
+```
+None=0 Created=1 Deleted=2 Emerging=4 Active=8 Clearing=16 Finished=32
+SelfTrigger=64 Hidden=128 Significant=256 Detected=512 Follow=1024
+CustomName=2048 Located=4096 UnDetected=8192 Warning=16384
+Persistent=32768 Repeat=65536 UnReported=131072
+```
+
+`DisasterAI.StartDisaster` は `m_flags = (m_flags & 0xFFFC88C7) | Emerging(4)`。
+クリアされるビットは `~0xFFFC88C7 = 0x37738` で、
+**`Significant(256)` は落ちるが `SelfTrigger(64)` は落ちない**（0x37738 のビット 6 は 0）。
+だから派生 AI は基底を呼んだ後に `m_flags & 64` を見られる。
+
+`TornadoAI.StartDisaster` / `EarthquakeAI.StartDisaster`（**同一の形**）:
+
+```
+IL_0003  call DisasterAI::StartDisaster
+IL_000E  if ((m_flags & 64) == 0) return
+IL_0016  m_targetPosition.y = TerrainManager.SampleDetailHeight(m_targetPosition)
+IL_0031  m_activationFrame = m_startFrame + m_emergingDuration
+IL_0044  m_flags |= 256 (Significant)
+IL_0056  DisasterManager.m_randomDisasterCooldown = 0
+```
+
+`Significant(256)` を読むのはアセンブリ全走査で
+`CommonBuildingAI.HandleCommonConsumption`（＋ DLC の同名オーバーライド 7 種）・
+`CommonBuildingAI.NearObjectInFire`・`FirewatchTowerAI.NearObjectInFire`・
+`DisasterManager.FollowDisaster`。立てないと**災害が発見されない**
+（ハザードマップにも通知にも出ず、カメラも追えない）。
+
+`IsStillEmerging` は **AI ごとに違う**:
+
+```
+TornadoAI      : base || (SimulationManager.m_currentFrameIndex < m_activationFrame)   ← clt.un だけ
+EarthquakeAI   : base || m_activationFrame == 0 || (currentFrame < m_activationFrame)  ← 0 の特例あり
+```
+
+したがって `SelfTrigger` を落として `m_activationFrame` が 0 のままでも、
+**竜巻は次のステップで Active になる**（地震は永久に Emerging のままになる）。
+
+`DisasterAI.StartNow` の門は `m_flags & 60`（= Emerging|Active|Clearing|Finished）なので、
+`SelfTrigger(64)` を先に立てても判定は変わらない。
+
+### G-4. `DestroyBuildings` は次の ID をループ先頭で控える — CONFIRMED（M2）
+
+```
+IL_00E2  loc10 = buildings[loc8].m_nextGridBuilding     ← 行動する前
+IL_0100  if ((m_flags & 0x80013) != 1) goto IL_0516
+...      CollapseBuilding x2 / BurnBuilding
+IL_0516  loc8 = loc10                                    ← 控えた値を使う
+IL_0521  内側ループの回数上限は 49152（建物バッファの大きさ）
+```
 
 ---
 

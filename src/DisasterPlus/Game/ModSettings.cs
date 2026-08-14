@@ -39,6 +39,14 @@ namespace DisasterPlus.Game
         public static SavedBool ForecastEnabled;
         public static SavedInt ForecastButtonX;
         public static SavedInt ForecastButtonY;
+        public static SavedBool EarthquakeEnabled;
+        public static SavedInt EarthquakeButtonX;
+        public static SavedInt EarthquakeButtonY;
+        public static SavedBool EarthquakeShakeBoost;
+        public static SavedBool EarthquakeTsunamiChain;
+        public static SavedInt EarthquakeTsunamiDelayMinutes;
+        public static SavedBool EarthquakeLongPeriod;
+        public static SavedInt EarthquakeLongPeriodStrength;
 
         public static void Ensure()
         {
@@ -74,6 +82,39 @@ namespace DisasterPlus.Game
             // 空き位置を探し、決まった座標をここへ書き戻す。以後はその座標を再利用する。
             ForecastButtonX  = new SavedInt("forecastButtonX", FileName, -1, true);
             ForecastButtonY  = new SavedInt("forecastButtonY", FileName, -1, true);
+
+            EarthquakeEnabled = new SavedBool("earthquakeEnabled", FileName, true, true);
+            // -1 = 未決定。ForecastButtonX/Y と全く同じ扱い
+            // （EarthquakePanelButton が空き位置を決めて書き戻す。Task 4）。
+            EarthquakeButtonX = new SavedInt("earthquakeButtonX", FileName, -1, true);
+            EarthquakeButtonY = new SavedInt("earthquakeButtonY", FileName, -1, true);
+            // 既定 ON にできるのは、強度 55（バニラ既定）で追加分が厳密に 0 になり、
+            // そのとき CameraShakeBooster が m_cameraShake に一切書き込まないから
+            // ——つまり既定の地震では挙動がバニラとビット単位で同一になる
+            // （ShakeWaveform.IntensityFactor とそのユニットテストが固定している）。
+            EarthquakeShakeBoost = new SavedBool("eqShakeBoost", FileName, true, true);
+
+            // ★ 第 2 層は必ず既定 OFF にする（計画「第 2 層 — 足す」の共通規則）。
+            //    バニラに存在しない挙動を既定で入れると、プレイヤーは
+            //    「地震のあと勝手に津波が来る」原因が MOD だと気付く手段を持たない。
+            //    上の EarthquakeShakeBoost が既定 ON にできるのは、既定の強度で
+            //    追加分が厳密に 0 ＝ バニラとビット単位で同一になるからで、
+            //    こちらにはその逃げ道が無い。
+            EarthquakeTsunamiChain = new SavedBool("eqTsunamiChain", FileName, false, true);
+            // ゲーム内分。範囲 5〜120 はスライダー側で縛る（.cgs の値は公開契約なので
+            // 範囲外の値が入っていても読み捨てず、そのまま使う——遅延が長いだけで
+            // 壊れる値ではない）。
+            EarthquakeTsunamiDelayMinutes = new SavedInt("eqTsunamiDelay", FileName, 30, true);
+
+            // ★ 第 2 層。こちらも必ず既定 OFF（上の EarthquakeTsunamiChain と同じ理由）。
+            //    しかも津波より重い —— これは**バニラなら倒れなかった建物を倒す**。
+            //    既定で入れると、プレイヤーは高層ビルが崩れた原因が MOD だと
+            //    気付く手段を持たない（LongPeriodDamage のクラス doc）。
+            EarthquakeLongPeriod = new SavedBool("eqLongPeriod", FileName, false, true);
+            // 0〜10。0 で完全に無効（LongPeriodResponse.ExtraCollapseChance が
+            // 厳密に 0 を返す）。範囲はスライダー側で縛るが、.cgs の値は公開契約なので
+            // 範囲外が入っていても読み捨てず、使う側でクランプする。
+            EarthquakeLongPeriodStrength = new SavedInt("eqLongPeriodStrength", FileName, 3, true);
 
             _ready = true;
         }

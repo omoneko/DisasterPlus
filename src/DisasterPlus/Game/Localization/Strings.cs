@@ -112,5 +112,416 @@ namespace DisasterPlus.Game
         public static string TrendFalling = "down";
         public static string TrendSteady = "steady";
         public static string LogChannelForecast = "Forecast";
+
+        // --- ②地震（Task 3） ---
+        // 既存の EarthquakeDamageOwner / EarthquakeOwnerOther / EarthquakeOwnerSelf は
+        // ③の NDR 互換ドロップダウン用で別物。名前を衝突させないこと。
+        public static string GroupEarthquake = "Earthquake";
+        public static string EarthquakeEnabled = "Enable the earthquake panel";
+        public static string EarthquakeResetButton =
+            "Reset the earthquake button position (takes effect next time you load a city)";
+        public static string EarthquakeNeedsDlc =
+            "Earthquakes require the Natural Disasters DLC.";
+        public static string LogChannelEarthquake = "Earthquake";
+
+        // --- ②地震（Task 4: パネル） ---
+
+        public static string EarthquakeTitle = "Earthquake";
+
+        // 第 1 層と第 2 層を見分けるための接頭辞。EarthquakePanel の
+        // SetLayer1 / SetLayer2 以外からは絶対に参照しないこと（呼び出し側が
+        // どちらを名乗るか選べる状態にすると、この分離は必ずいつか崩れる）。
+        public static string SourceVanilla = "[measured]";
+        public static string SourceModel = "[Disaster + model]";
+
+        public static string EarthquakeLayer1Header = "What the game actually computes";
+        public static string EarthquakeLayer2Header =
+            "Added by Disaster + (not vanilla behaviour)";
+
+        // タブの見出し（パネルの構造変更で追加）。行の中身は 1 つも変えていないので、
+        // 増えた文言はこの 2 つだけである。**どちらのタブも第 1 層**で、
+        // 第 2 層の節はタブの外・その下に常設されている（EarthquakePanelTabs の doc）。
+        public static string EarthquakeTabQuake = "Quake, cursor and maps";
+        public static string EarthquakeTabDamage = "Buildings and seismographs";
+
+        public static string EarthquakeNoneActive = "No earthquake in progress.";
+        public static string EarthquakeCount = "Earthquakes in progress";
+        public static string EarthquakeIntensity = "Intensity";
+        public static string EarthquakeRadius = "Affected radius";
+        public static string EarthquakePhase = "Phase";
+        public static string EarthquakePhaseEmerging = "before the main shock";
+        public static string EarthquakePhaseActive = "shaking";
+        public static string EarthquakePhaseClearing = "aftermath";
+
+        // 「本震まで」は予測ではなく**予定表の読み上げ**である。m_activationFrame は
+        // StartDisaster が m_startFrame + m_emergingDuration として書き込んだ確定値で
+        // （§A-1）、①が禁じている「あと何時間で嵐が来る」（乱数由来の発生判定）とは
+        // 根拠がまったく違う。設計書 §7-2 がこの区別を要求している。
+        public static string EarthquakeTimeToShock = "Time to the main shock";
+        // ただし m_activationFrame == 0 は「今」ではなく「予定が無い」。
+        public static string EarthquakeTimeUnknown = "not scheduled";
+        public static string EarthquakeMinutes = "min";
+
+        // ★ この 2 つの文言は全体レビュー(C3)で直したもの。以前は
+        //    "Shaking at cursor" / "outside the shaken area" だったが、
+        //    s = 1 - d/R は**倒壊・出火のランプ**であって揺れではない。バニラの揺れは
+        //    amp = 0.3/(1 + dist*0.001) で、**半径による打ち切りが一切無い**（§A-7）。
+        //    つまり以前の文言は、同じフレームで CameraShakeBooster が揺れを足し続け
+        //    SeismographRecorder が非ゼロの変位を書き続けている地点について
+        //    「揺れていません」と書いていた。揺れは EarthquakeShakeAtCursor が別に出す。
+        public static string EarthquakeAtCursor = "Destruction factor at cursor";
+        public static string EarthquakeOutOfRange = "outside the destruction radius";
+
+        // バニラ自身の揺れの振幅（§A-7 IL_0069 の amp、包絡線を掛ける前）。
+        // 倒壊ランプとは別の量なので別の行にする。
+        public static string EarthquakeShakeAtCursor = "Ground shaking at cursor";
+        public static string EarthquakeShakeNote =
+            "Vanilla's shaking has no radius limit at all: it only falls off with distance, and "
+            + "it ignores intensity. The destruction radius above is a different quantity.";
+        // 揺れの窓（Emerging|Active かつ e が m_activeDuration の内側）が開いていない。
+        public static string EarthquakeNotShaking = "not shaking right now";
+
+        // 収束中（Clearing）の地震では DestroyBuildings がそもそも呼ばれない
+        // （§A-3: 呼び出しは Active 分岐にしか無い）。数値を出さずに理由を書く。
+        public static string EarthquakeNoDamageInPhase =
+            "this quake is past its shaking phase; the game runs no destruction for it any more";
+
+        // カーソル位置には 2 つの別のモデルの値が並ぶ。違う数字が出るのが正常なので、
+        // なぜ違うのかを画面で名乗る（全体レビュー M3）。
+        public static string EarthquakeCursorModelsNote =
+            "The destruction factor above and this hazard value are different quantities: a linear "
+            + "ramp from the epicentre, versus the game's own map (distance to the crack segment, "
+            + "squared falloff, radius 400 m larger, and only for a located quake). Both are read "
+            + "from the game. The map overlay below draws the first one.";
+
+        public static string EarthquakeFaultBand = "Fault zone";
+        public static string EarthquakeFaultInside = "inside";
+        public static string EarthquakeFaultOutside = "outside";
+        public static string EarthquakeFaultBandNote =
+            "The four rupture patches move every step, so this zone is where they can land, "
+            + "not where they will.";
+
+        // ★ 「マップに表示」から改名した（震度分布オーバーレイの追加に伴う）。
+        //    ボタンが 2 つ並ぶようになり、片方が「マップに表示」のままだと
+        //    **どちらがどちらの絵を出すのかが名前から分からない**。
+        //    こちらはバニラの情報ビュー（§A-6 のグリッド）、隣は本 MOD の
+        //    震央からのランプで、塗る形も、地震計を要るか要らないかも違う。
+        public static string EarthquakeShowOnMap = "Show the game's own hazard view";
+
+        // ①の ForecastNoStormDetected と同じ構図・同じ文体。地震のハザードマップも
+        // Located && (Emerging|Active) の 2 段ゲートを持ち（§A-6）、地震に Located を
+        // 立てられるのは地震計だけ（§A-2 / §C-2）。したがって地震計が無ければ
+        // このビューは恒久的に空で、それが正常。**空を「安全」と読ませない。**
+        public static string EarthquakeNotLocated =
+            "No earthquake is located right now. This map only shows a located, in-progress "
+            + "quake, and an Earthquake Sensor is what locates one.";
+        public static string EarthquakeSwitchHazardView =
+            "Switch the earthquake hazard view on to read a value here.";
+
+        // 計画の 29 件に対する 2 件の追加（意図的な逸脱）。
+        // ①はこの 2 つの状況をどちらも ForecastUnavailable（「気象データを読み取れません」）で
+        // まかなっていたが、②で同じことをすると「地震データが読めない」と「カーソルが
+        // 地形の上に無い」が同じ文言になる。後者はパネルを読んでいる間ほぼ常に起きる
+        // （マウスがパネルの上にある）ので、いちばん頻繁に目に入る行が誤った原因を
+        // 名指しし続けることになる。原因ごとに分ける。
+        public static string EarthquakeUnavailable = "Earthquake data cannot be read right now.";
+        public static string EarthquakeCursorUnknown =
+            "Move the cursor over the terrain to read a value here.";
+
+        // 10 段階のバーに対して名前は 5 区分だけ（SeismicScale の doc）。
+        // **実在の震度階級の名前は使わない**（設計書 §3.1、§7-4）。
+        //
+        // ★ 全体レビュー(C3)以降、この 4 件はどこからも表示していない。
+        //    弱い/中程度/強い/非常に強い は**この MOD が付けた名前**であって、
+        //    バニラは probability の係数を計算しているだけである。それを
+        //    [measured] の接頭辞の下に出すと、ゲームが「非常に強い」と判断している
+        //    という嘘になる。数値とバーだけを第 1 層で出し、区分名は第 2 層
+        //    （Task 9 以降）が名乗るときまで表示しない。
+        //    **キーは消さない** —— Strings / en.txt / ja.txt のキー集合は一致させ続ける
+        //    必要があり、SeismicScale.BandOf も現役のまま（LogChannelFireWhirl と同じ扱い）。
+        public static string EarthquakeBandWeak = "weak";
+        public static string EarthquakeBandModerate = "moderate";
+        public static string EarthquakeBandStrong = "strong";
+        public static string EarthquakeBandSevere = "very strong";
+
+        // --- ②地震（Task 5: 建物ごとの余裕度） ---
+        //
+        // 計画の 7 件に対する 3 件の追加（意図的な逸脱。Task 4 と同じ理由付けで、
+        // 「文言が足りないので既存キーを流用する」を避けるための追加である）。
+        // 計画 Step 7 は「AlreadyDown / Unknown の文言は既存キーを使い回す」と
+        // 書いているが、既存キーにその意味を持つものが実際には無かった:
+        //   - AlreadyDown  … 「圏外」でも「断層帯の内側」でもない。流用すると
+        //                     瓦礫の上で誤った理由を名乗ることになる。
+        //   - Unknown      … 「プレハブ 4 値が読めていないので判定を出せない」は
+        //                     この機能でいちばん出してはいけない嘘（＝断定）を
+        //                     避けるための文言そのものなので、代用が効かない。
+        //   - SurviveAnyDistance … 計画 5.2 の表が「X ≦ 0 なら『どれだけ近くても
+        //                     倒壊しません』」と明示的に別の文言を要求している。
+        // InsideFaultZone は計画どおり EarthquakeFaultBand / EarthquakeFaultInside と
+        // 常設の EarthquakeFaultBandNote を流用する（新しいキーを増やさない）。
+
+        public static string EarthquakeBuildingUnderCursor = "Building under the cursor";
+        public static string EarthquakeNoBuilding = "no building under the cursor";
+        // 「調べたが無かった」と「調べられなかった」を同じ文言にしない
+        // （BuildingProbeOutcome の doc）。前者は実測値、後者は読み取り失敗である。
+        public static string EarthquakeProbeFailed =
+            "the buildings under the cursor could not be read right now";
+        public static string EarthquakeCollapseWithin = "Collapses within";
+        public static string EarthquakeCurrentDistance = "current distance";
+        public static string EarthquakeVerdictCollapse = "will collapse";
+        public static string EarthquakeVerdictSurvive = "will not collapse";
+        public static string EarthquakeVerdictSurviveAnyDistance =
+            "will not collapse at any distance at this intensity";
+        public static string EarthquakeAlreadyDown = "already collapsed or burning";
+
+        // --- 出火（全体レビュー M1）---
+        //
+        // 依頼文が名指ししていた「揺れによる火災」の答え。材料（2 回目の引き）は
+        // 最初から BuildingMargin.BurnThresholdValue にあり、スナップショットにも
+        // 載っていて、ユニットテストまであったのに、**どこにも表示していなかった**。
+        public static string EarthquakeBurnLabel = "Catches fire";
+        public static string EarthquakeBurnWithin = "Catches fire within";
+        public static string EarthquakeVerdictBurn = "will catch fire";
+        public static string EarthquakeVerdictNoBurn = "will not catch fire";
+        public static string EarthquakeVerdictNoBurnAnyDistance =
+            "will not catch fire at any distance at this intensity";
+        // IL は else if (hitB && ...) なので、倒壊が当たっていれば出火の分岐へは来ない。
+        public static string EarthquakeBurnAfterCollapse =
+            "(the collapse happens first; the same draw becomes the burn damage of the rubble)";
+
+        // --- 破壊コードが他 MOD に置き換えられている場合（全体レビュー C2）---
+        //
+        // NDR は DisasterHelpers.DestroyBuildings を Prefix が false を返す形で完全置換し、
+        // probability == 0.02f をバニラ地震の目印にして 0.04 を使う（§E-2）。
+        // 「DisasterHelpers を経由しない」という②の方針は**被害を書く側**の話で、
+        // **読む側にはまったく効かない**。強度 55 / しきい値 300 の建物について、
+        // この MOD は「どの距離でも倒壊しません」、NDR は「775 m まで倒れる」と言う。
+        public static string EarthquakeVerdictNdr =
+            "no verdict (another mod replaces the game's destruction code)";
+        public static string EarthquakeNdrNote =
+            "Natural Disasters Renewal replaces the routine that destroys and ignites buildings and "
+            + "doubles the city-wide probability, so the collapse and fire verdicts are withheld. "
+            + "Every other row here is read straight from the game and is unaffected.";
+        // 「分からない」を「外側」と言い換えないための行。判定を出さない理由を書く。
+        public static string EarthquakeVerdictUnknown =
+            "no verdict (the fault geometry could not be read from the EarthquakeAI prefab)";
+
+        // この機能でいちばん重要な 1 文。倒壊は乱数ではなく、地震が始まった瞬間に
+        // 既に決まっている（§A-3: 種は (建物, 災害) の組に対して定数）。ただし
+        // それが言えるのは全体円盤についてだけである。
+        public static string EarthquakeGlobalDiscOnly =
+            "This is decided for the city-wide disc, and it was already decided the moment the "
+            + "quake started. Inside the fault zone the four rupture patches judge separately.";
+
+        // --- ②地震（Task 6: カメラの揺れ） ---
+        //
+        // 注記の最後の 1 文が本質。「既定の強度では何も変わらない」は言い訳ではなく、
+        // この設定を既定 ON にしてよい根拠そのものである（強度 55 で追加分が厳密に 0）。
+        public static string EarthquakeShakeBoost =
+            "Scale camera shake with intensity and distance";
+        public static string EarthquakeShakeBoostNote =
+            "Vanilla ignores intensity here, so a 25.5 quake shakes exactly as much as a 5.5 one. "
+            + "At the vanilla default intensity (5.5) this option changes nothing.";
+
+        // --- ②地震（Task 7: 地震計の既存効果） ---
+        //
+        // 地震計を建てると何が変わるかは、ゲーム内のどこにも書かれていない。
+        // 変わるのは 2 つだけで、どちらもバニラの実測（第 1 層）である（§A-2 / §C-2）:
+        //   1. 警報リードタイムが 1755 → 最大 8192 フレーム（38.6 分 → ちょうど 3.0 時間）
+        //   2. located が立ち、**そもそも地震がハザードマップに描かれるようになる**
+        //
+        // 計画 Step 5 の表は 5 件だが、Step 4 の本文が参照している EarthquakeNoSensor が
+        // その表から漏れている。カバレッジ 0（＝本機能の看板の説明そのもの）を裸の「0」
+        // だけで済ませないために、計画本文のほうに従って 6 件目として足す。
+        public static string EarthquakeSensorSection = "Earthquake sensors";
+        // 上限 100 はキーの側に入れる。値の隣に "max" と英語を直書きすると、
+        // 日本語表示のときにそこだけ翻訳から外れる。
+        public static string EarthquakeCoverageAtEpicentre =
+            "Sensor coverage at the epicentre (capped at 100)";
+        // 震央の行と同じ量なのに片方だけ「(上限 100)」と書いてあると、こちらが
+        // パーセントに見える。実体は免疫的リソースの生のセル値（ushort）で、
+        // 100 を超えることも普通にある（全体レビュー M9）。
+        public static string EarthquakeCoverageAtCursor =
+            "Sensor coverage at cursor (raw cell value, not a percentage)";
+        public static string EarthquakeWarningLead = "Warning lead time";
+        public static string EarthquakeNoSensor = "no Earthquake Sensor reaches the epicentre";
+        // 地震が起きているかどうかに関わらず**常に**出す。これは地震計という建物の
+        // 性質の説明であって、今この瞬間の観測値ではない。
+        public static string EarthquakeSensorEffect =
+            "An Earthquake Sensor extends the warning from 38.6 minutes to up to 3 hours, and "
+            + "makes the quake appear on the hazard map at all. Only sensors whose range covers "
+            + "the epicentre count.";
+
+        // --- ②地震（Task 8: 波形グラフ） ---
+        //
+        // **この 4 件はどれも「誰が測ったのか」を名乗るためにある。**
+        // EarthquakeSensorAI は時系列データを一切持たない（§C-1、ABSENT）ので、
+        // ここに出る線はゲーム内のセンサーが計測した値では**ない**。バニラ自身の
+        // 揺れの式（§A-7、カメラを動かしているのと同じ式）を、カメラの代わりに
+        // 地震計の位置で評価したものである。その 1 点を隠すと、この機能は
+        // 「もっともらしいが出所の分からないグラフ」に落ちる。
+        public static string EarthquakeWaveform = "Ground motion at the sensor";
+        public static string EarthquakeWaveformNeedsSensor =
+            "Build an Earthquake Sensor to record ground motion. The game itself keeps no "
+            + "ground-motion history at all, so Disaster + samples it at the sensor.";
+        public static string EarthquakeWaveformNote =
+            "This is the game's own shake formula, evaluated at the sensor using the distance "
+            + "from the epicentre instead of the distance from the camera.";
+        public static string EarthquakeWaveformUnavailable =
+            "Waveform drawing is unavailable on this build; showing the peak amplitude instead.";
+        // 構築には成功したが、描画中に落ちて以後描かなくなった状態。以前はこの行が
+        // パネル構築時にしか作られず、実行時に落ちると**黙って空欄**になっていた
+        // （WaveformView のクラス doc が禁じている壊れ方そのもの、全体レビュー I6）。
+        public static string EarthquakeWaveformDrawFailed =
+            "Waveform drawing stopped after an error; showing the peak amplitude instead.";
+
+        // --- ②地震（震度分布の地図オーバーレイ） ---
+        //
+        // 依頼文の「都市内での震源からの距離に応じた震度の分布の概念もありません」に
+        // **地図として**答える部分。全体レビューの判定は「カーソル 1 点の数値と
+        // 10 文字のバーでは分布ではない」であり、その通りである。
+        //
+        // ここの文言でいちばん重要なのは EarthquakeOverlayLegend の後半 ——
+        // このオーバーレイと、すぐ隣のボタンが出すバニラのハザードビューは
+        // **別の量**である（§A-6: 亀裂線分までの距離・2 次減衰・Rmax = R+400・
+        // 地震計が要る／こちらは震央からの線形ランプ・地震計不要）。
+        // 2 つを同じものだと読ませないことが、この機能の誠実さの担保になる。
+
+        public static string EarthquakeOverlayShow = "Show the intensity distribution on the map";
+        public static string EarthquakeOverlayHide = "Hide the intensity distribution";
+        public static string EarthquakeOverlayRow = "Intensity distribution overlay";
+        public static string EarthquakeOverlayOff = "off";
+        public static string EarthquakeOverlayOn = "on";
+        public static string EarthquakeOverlayQuakes = "earthquake(s) drawn";
+        // 描くべき地震が 1 つも無い。**「安全」ではない**ので理由を書く。
+        public static string EarthquakeOverlayNothingToDraw =
+            "on, but nothing to draw: no earthquake is in its pre-shock or shaking phase. "
+            + "The game only runs its destruction pass while a quake is shaking.";
+        // 断層帯だけが出ない理由。推測した大きさで描かないことの説明でもある。
+        public static string EarthquakeOverlayFaultUnknown =
+            "The fault zone is not drawn: the four EarthquakeAI prefab values could not be read, "
+            + "so its size is unknown. Drawing a guessed size on the map would be indistinguishable "
+            + "from a measured one.";
+        // 予算切れ。地震は同時に 256 個まで存在しうる（§E-1）。
+        public static string EarthquakeOverlayCapped =
+            "More earthquakes are in progress than the overlay draws at once; the rest are omitted "
+            + "rather than drawn partially.";
+        public static string EarthquakeOverlayUnavailable =
+            "The map overlay could not be registered with the game's renderer on this build.";
+        // 両方出ているときの注意。いちばん誤解が起きる状態なので名指しする。
+        public static string EarthquakeOverlayBothOn =
+            "The game's hazard info view is on at the same time. The two pictures are different "
+            + "quantities - see the legend below.";
+
+        // 凡例は**色の読み方だけ**にしてある。「バニラのハザードビューとは別の量だ」は
+        // すぐ上の EarthquakeCursorModelsNote が既に言っており（そちらは 2 つの量の
+        // 違いそのものを説明する行）、同じ内容を 2 箇所に書くと縦が足りなくなる。
+        // 代わりにあちらの末尾に「下のオーバーレイが描いているのは前者だ」を足した。
+        public static string EarthquakeOverlayLegend =
+            "Legend. Blue-green: the destruction factor s, in the same 10 steps as the bar above "
+            + "(densest at the epicentre, zero at the rim). Magenta: the fault zone, drawn at a flat "
+            + "density because its patches destroy with probability 1, not along a ramp. White: the "
+            + "epicentre and the fault strike. Shaking has no radius limit, so the ground moves "
+            + "outside the disc too.";
+
+        // --- ②地震（Task 9: 海中震源からの津波連鎖 ＝ 第 2 層の 1 つ目） ---
+        //
+        // **ここから先はバニラに存在しない挙動である。** 全て既定 OFF で、
+        // パネルでは EarthquakeLayer2Header の節の下に [Disaster + model] 付きで出る。
+        //
+        // EarthquakeTsunamiFromShore がこの機能でいちばん重要な 1 文。依頼は
+        // 「海中で地震を起こしてもプレート境界型の津波が来ない」だったが、
+        // **「震源から波が広がる」は TsunamiAI では literally 不可能**である
+        // （FindSea はマップ外周セルしか候補にせず、m_targetPosition も m_angle も
+        //  開始時に上書きされる。§B-3）。実現しているのは「震源に最も近い海側の
+        // 外周から津波が来る」であり、**できていないことをできているように書かない**。
+        //
+        // EarthquakeTsunamiNoSea は**失敗の文言ではない**。内陸マップでは
+        // 海側外周区間が 10 セルに満たず、何も起きないのが正常な結果である。
+        // ①の ForecastNoStormDetected と同じ扱いで、「0 を安全と読ませない」の裏返し
+        // ——「何も起きなかった」を「壊れた」と読ませない。
+
+        public static string EarthquakeTsunamiChain =
+            "Raise a tsunami after an undersea earthquake";
+        public static string EarthquakeTsunamiDelay = "Tsunami delay (in-game minutes)";
+        public static string EarthquakeTsunamiPending = "Tsunami expected in";
+        public static string EarthquakeTsunamiRaised = "Tsunami raised";
+        public static string EarthquakeTsunamiFromShore =
+            "The wave arrives from the sea nearest the epicentre, not from the epicentre itself. "
+            + "The game can only start a tsunami at the map edge.";
+        public static string EarthquakeTsunamiNoSea =
+            "No sea close enough to this map edge, so no tsunami was raised. This is normal on "
+            + "an inland map.";
+
+        // --- ②地震（Task 10: 長周期地震動 ＝ 第 2 層の 2 つ目） ---
+        //
+        // **津波より踏み込んでいる。** 津波はバニラの災害を 1 個起こすだけだったが、
+        // こちらは**バニラなら倒れなかった建物を倒す**。だから:
+        //
+        //   - 設定のラベル（EarthquakeLongPeriodEnabled）自体に
+        //     「バニラには無い被害を足します」と書く。チェックを入れる前に読める場所は
+        //     ここしかない
+        //   - EarthquakeLongPeriodNote は、バニラが建物の高さを揺れにも被害にも
+        //     一切使っていないこと（§A-7 / §A-3）を名乗る。この 1 文が無いと、
+        //     プレイヤーは「高層ほど揺れる」をゲームの仕様だと思う
+        //   - EarthquakeLongPeriodNoHeight は**計画の 6 キー表に無い 7 つ目**である。
+        //     計画 Step 6 は「高さが読めない環境では理由の 1 行だけを出す」と要求して
+        //     いるが、その文言を持つキーが表から漏れていた。既存キーの流用では
+        //     「読めなかった」と「低いので対象外」が同じ文になってしまうので新設した
+
+        public static string EarthquakeLongPeriod = "Long-period ground motion";
+        public static string EarthquakeLongPeriodEnabled =
+            "Enable long-period ground motion (adds damage vanilla never does)";
+        public static string EarthquakeLongPeriodStrength = "Long-period strength (0 = off)";
+        public static string EarthquakeLongPeriodNote =
+            "Vanilla ignores building height entirely, both in the shaking and in the damage. "
+            + "This is a model Disaster + invented, not something the game computes.";
+        public static string EarthquakeLongPeriodNoHeight =
+            "This building's height could not be read, so no long-period damage is applied to it. "
+            + "The mod never guesses a height.";
+        public static string EarthquakeBuildingHeight = "Building height";
+        public static string EarthquakeResonance = "Resonance";
+        // 計画の 6 キー表に無い 8 つ目。計画自身が示している行の見本
+        // （「追加倒壊リスク 6.4%」）に必要な語で、表から漏れていた。
+        // 裸の「+3.1%」だけを出すと、何の確率なのかがどの言語でも読めない。
+        public static string EarthquakeLongPeriodRisk = "extra collapse risk";
+
+        // 第 2 層レビュー I1 / M3 で足した 2 キー。どちらも「確信を持って誤った数値」を
+        // 出さないためだけに在る。
+        //
+        //   - EarthquakeLongPeriodBeforeShock … 追加被害が走るのは Active だけだが
+        //     （LongPeriodDamage.Step）、カーソル行は Emerging も対象にする
+        //     QuakeSelection.SelectDamaging の選定を使う。本震前に「追加倒壊リスク
+        //     6.4%」とだけ出すと、まだ何にも適用されていない確率が確定値の顔で出る
+        //   - EarthquakeLongPeriodCapped … 走査は震央から外へ向かうので打ち切られても
+        //     震央の周りは評価済みだが、外側はまだである。「もう抽選が済んだ」と
+        //     「これからである」を黙って混ぜない
+        //
+        // **短く保つこと。** どちらもカーソル行の末尾に足されるので、
+        // 長いと行が折り返しの高さを超えて途中で切れる（EarthquakeLayer2Rows が
+        // 津波の行で 1 度踏んだ形）。行の高さ 72f との釣り合いで決めてある。
+        public static string EarthquakeLongPeriodBeforeShock =
+            "not applied until the main shock";
+        public static string EarthquakeLongPeriodCapped =
+            "sweep truncated this pass; not rolled yet";
+
+        // --- ②地震（Task 11: 時間帯係数 ＝ 第 2 層の 3 つ目） ---
+        //
+        // **単独の設定は作っていない。** 掛かる先は長周期地震動の追加被害だけなので、
+        // 独立したスイッチにすると、長周期が OFF のときに何も制御しない
+        // 死んだスイッチになる。したがって行も長周期と一緒に出入りする。
+        //
+        // EarthquakeNoDayNight がこの機能でいちばん重要な 1 文。日夜サイクルを
+        // 切っているとゲーム内時刻は**永久に 12.0 に固定される**（§F-1。
+        // m_dayTimeOffsetFrames が毎 sim フレーム再設定される）ので、係数は黙って
+        // 定数 1.00 になる。**無効化を隠さない**ためにこれを併記する。
+        // 「昼」「夜」の語は用意しない —— Of() は境界を 1 時間かけて渡すので、
+        // ゲーム自身の硬い判定（hour < 5 || hour > 20）と一致しない時間帯がある。
+
+        public static string EarthquakeTimeOfDay = "Time of day";
+        public static string EarthquakeTimeFactor = "factor";
+        public static string EarthquakeNoDayNight =
+            "The day/night cycle is off, so the in-game hour is pinned at 12:00 and the "
+            + "time-of-day factor never changes.";
     }
 }

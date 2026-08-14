@@ -94,6 +94,65 @@ namespace DisasterPlus.Game
                 helper.AddGroup(Strings.ForecastHazardNeedsDlc);
             }
 
+            var earthquake = helper.AddGroup(Strings.GroupEarthquake);
+            earthquake.AddCheckbox(Strings.EarthquakeEnabled, ModSettings.EarthquakeEnabled.value,
+                v => ModSettings.EarthquakeEnabled.value = v);
+            earthquake.AddCheckbox(Strings.EarthquakeShakeBoost, ModSettings.EarthquakeShakeBoost.value,
+                v => ModSettings.EarthquakeShakeBoost.value = v);
+
+            // ── 第 2 層（Disaster + が足した挙動。バニラにはありません）──────────
+            //
+            // **既定 OFF。** 海中の地震から津波を起こすのはバニラの挙動ではないので、
+            // 既定で入れるとプレイヤーは「地震のあと勝手に津波が来る」原因が MOD だと
+            // 気付く手段を持たない（ModSettings.EarthquakeTsunamiChain の doc）。
+            //
+            // DLC が無い環境では出さない。TsunamiAI のプレハブが存在しないので
+            // （§B-5）、この設定は何も制御しない死んだチェックボックスになる。
+            if (ModCompat.NaturalDisastersOwned)
+            {
+                earthquake.AddCheckbox(Strings.EarthquakeTsunamiChain,
+                    ModSettings.EarthquakeTsunamiChain.value,
+                    v => ModSettings.EarthquakeTsunamiChain.value = v);
+                earthquake.AddSlider(Strings.EarthquakeTsunamiDelay, 5f, 120f, 5f,
+                    ModSettings.EarthquakeTsunamiDelayMinutes.value,
+                    v => ModSettings.EarthquakeTsunamiDelayMinutes.value = (int)v);
+
+                // ★ 長周期地震動。**既定 OFF。** 津波と違い、これは
+                //    「バニラなら倒れなかった建物を倒す」ので、チェックボックスの
+                //    ラベル自体にその事実を書く（Strings.EarthquakeLongPeriodEnabled）。
+                earthquake.AddCheckbox(Strings.EarthquakeLongPeriodEnabled,
+                    ModSettings.EarthquakeLongPeriod.value,
+                    v => ModSettings.EarthquakeLongPeriod.value = v);
+                earthquake.AddSlider(Strings.EarthquakeLongPeriodStrength, 0f, 10f, 1f,
+                    ModSettings.EarthquakeLongPeriodStrength.value,
+                    v => ModSettings.EarthquakeLongPeriodStrength.value = (int)v);
+            }
+
+            earthquake.AddButton(Strings.EarthquakeResetButton, delegate
+            {
+                ModSettings.EarthquakeButtonX.value = -1;
+                ModSettings.EarthquakeButtonY.value = -1;
+            });
+
+            // 揺れの補正が「既定の強度では何も変えない」ことを名乗る。バニラを抑制せず
+            // 足すだけで、強度 55（バニラ既定）では追加分が厳密に 0 になる（§A-7）。
+            // 注記の出し方は IntensityUnlockHandledByOther と同じ（root への AddGroup）。
+            helper.AddGroup(Strings.EarthquakeShakeBoostNote);
+
+            // 長周期地震動が「バニラのどこにも無い量」であることを、設定画面でも名乗る。
+            // パネルの第 2 層の注記と同じ文（EarthquakeLongPeriodNote）。
+            if (ModCompat.NaturalDisastersOwned)
+            {
+                helper.AddGroup(Strings.EarthquakeLongPeriodNote);
+            }
+
+            // ②は機能そのものが DLC 依存（EarthquakeAI のプレハブが存在しない）。
+            // ForecastHazardNeedsDlc / FireWhirlNeedsDlc と同じ形で理由を書く。
+            if (!ModCompat.NaturalDisastersOwned)
+            {
+                helper.AddGroup(Strings.EarthquakeNeedsDlc);
+            }
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
@@ -160,6 +219,15 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Forecast)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Forecast));
+
+            // Forecast と同じく、Earthquake チャンネル付きの Log.Diag 呼び出しが実在する
+            // （EarthquakeFeature.OnSimulationTick）。死んだ設定ではない。
+            channels.AddCheckbox(Strings.LogChannelEarthquake,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Earthquake)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Earthquake));
         }
     }
 }
