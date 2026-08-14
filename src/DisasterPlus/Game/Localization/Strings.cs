@@ -156,10 +156,36 @@ namespace DisasterPlus.Game
         public static string EarthquakeTimeUnknown = "not scheduled";
         public static string EarthquakeMinutes = "min";
 
-        public static string EarthquakeAtCursor = "Shaking at cursor";
-        // 半径 R の外はバニラが preRadius で判定自体を打ち切る領域なので、
-        // 「強度 0.0」ではなく「圏外」と出す（SeismicIntensity.At の doc）。
-        public static string EarthquakeOutOfRange = "outside the shaken area";
+        // ★ この 2 つの文言は全体レビュー(C3)で直したもの。以前は
+        //    "Shaking at cursor" / "outside the shaken area" だったが、
+        //    s = 1 - d/R は**倒壊・出火のランプ**であって揺れではない。バニラの揺れは
+        //    amp = 0.3/(1 + dist*0.001) で、**半径による打ち切りが一切無い**（§A-7）。
+        //    つまり以前の文言は、同じフレームで CameraShakeBooster が揺れを足し続け
+        //    SeismographRecorder が非ゼロの変位を書き続けている地点について
+        //    「揺れていません」と書いていた。揺れは EarthquakeShakeAtCursor が別に出す。
+        public static string EarthquakeAtCursor = "Destruction factor at cursor";
+        public static string EarthquakeOutOfRange = "outside the destruction radius";
+
+        // バニラ自身の揺れの振幅（§A-7 IL_0069 の amp、包絡線を掛ける前）。
+        // 倒壊ランプとは別の量なので別の行にする。
+        public static string EarthquakeShakeAtCursor = "Ground shaking at cursor";
+        public static string EarthquakeShakeNote =
+            "Vanilla's shaking has no radius limit at all: it only falls off with distance, and "
+            + "it ignores intensity. The destruction radius above is a different quantity.";
+        // 揺れの窓（Emerging|Active かつ e が m_activeDuration の内側）が開いていない。
+        public static string EarthquakeNotShaking = "not shaking right now";
+
+        // 収束中（Clearing）の地震では DestroyBuildings がそもそも呼ばれない
+        // （§A-3: 呼び出しは Active 分岐にしか無い）。数値を出さずに理由を書く。
+        public static string EarthquakeNoDamageInPhase =
+            "this quake is past its shaking phase; the game runs no destruction for it any more";
+
+        // カーソル位置には 2 つの別のモデルの値が並ぶ。違う数字が出るのが正常なので、
+        // なぜ違うのかを画面で名乗る（全体レビュー M3）。
+        public static string EarthquakeCursorModelsNote =
+            "The destruction factor above and this hazard value are different quantities: a linear "
+            + "ramp from the epicentre, versus the game's own map (distance to the crack segment, "
+            + "squared falloff, radius 400 m larger). Both are read from the game.";
 
         public static string EarthquakeFaultBand = "Fault zone";
         public static string EarthquakeFaultInside = "inside";
@@ -192,6 +218,15 @@ namespace DisasterPlus.Game
 
         // 10 段階のバーに対して名前は 5 区分だけ（SeismicScale の doc）。
         // **実在の震度階級の名前は使わない**（設計書 §3.1、§7-4）。
+        //
+        // ★ 全体レビュー(C3)以降、この 4 件はどこからも表示していない。
+        //    弱い/中程度/強い/非常に強い は**この MOD が付けた名前**であって、
+        //    バニラは probability の係数を計算しているだけである。それを
+        //    [measured] の接頭辞の下に出すと、ゲームが「非常に強い」と判断している
+        //    という嘘になる。数値とバーだけを第 1 層で出し、区分名は第 2 層
+        //    （Task 9 以降）が名乗るときまで表示しない。
+        //    **キーは消さない** —— Strings / en.txt / ja.txt のキー集合は一致させ続ける
+        //    必要があり、SeismicScale.BandOf も現役のまま（LogChannelFireWhirl と同じ扱い）。
         public static string EarthquakeBandWeak = "weak";
         public static string EarthquakeBandModerate = "moderate";
         public static string EarthquakeBandStrong = "strong";
@@ -215,6 +250,10 @@ namespace DisasterPlus.Game
 
         public static string EarthquakeBuildingUnderCursor = "Building under the cursor";
         public static string EarthquakeNoBuilding = "no building under the cursor";
+        // 「調べたが無かった」と「調べられなかった」を同じ文言にしない
+        // （BuildingProbeOutcome の doc）。前者は実測値、後者は読み取り失敗である。
+        public static string EarthquakeProbeFailed =
+            "the buildings under the cursor could not be read right now";
         public static string EarthquakeCollapseWithin = "Collapses within";
         public static string EarthquakeCurrentDistance = "current distance";
         public static string EarthquakeVerdictCollapse = "will collapse";
@@ -222,6 +261,35 @@ namespace DisasterPlus.Game
         public static string EarthquakeVerdictSurviveAnyDistance =
             "will not collapse at any distance at this intensity";
         public static string EarthquakeAlreadyDown = "already collapsed or burning";
+
+        // --- 出火（全体レビュー M1）---
+        //
+        // 依頼文が名指ししていた「揺れによる火災」の答え。材料（2 回目の引き）は
+        // 最初から BuildingMargin.BurnThresholdValue にあり、スナップショットにも
+        // 載っていて、ユニットテストまであったのに、**どこにも表示していなかった**。
+        public static string EarthquakeBurnLabel = "Catches fire";
+        public static string EarthquakeBurnWithin = "Catches fire within";
+        public static string EarthquakeVerdictBurn = "will catch fire";
+        public static string EarthquakeVerdictNoBurn = "will not catch fire";
+        public static string EarthquakeVerdictNoBurnAnyDistance =
+            "will not catch fire at any distance at this intensity";
+        // IL は else if (hitB && ...) なので、倒壊が当たっていれば出火の分岐へは来ない。
+        public static string EarthquakeBurnAfterCollapse =
+            "(the collapse happens first; the same draw becomes the burn damage of the rubble)";
+
+        // --- 破壊コードが他 MOD に置き換えられている場合（全体レビュー C2）---
+        //
+        // NDR は DisasterHelpers.DestroyBuildings を Prefix が false を返す形で完全置換し、
+        // probability == 0.02f をバニラ地震の目印にして 0.04 を使う（§E-2）。
+        // 「DisasterHelpers を経由しない」という②の方針は**被害を書く側**の話で、
+        // **読む側にはまったく効かない**。強度 55 / しきい値 300 の建物について、
+        // この MOD は「どの距離でも倒壊しません」、NDR は「775 m まで倒れる」と言う。
+        public static string EarthquakeVerdictNdr =
+            "no verdict (another mod replaces the game's destruction code)";
+        public static string EarthquakeNdrNote =
+            "Natural Disasters Renewal replaces the routine that destroys and ignites buildings and "
+            + "doubles the city-wide probability, so the collapse and fire verdicts are withheld. "
+            + "Every other row here is read straight from the game and is unaffected.";
         // 「分からない」を「外側」と言い換えないための行。判定を出さない理由を書く。
         public static string EarthquakeVerdictUnknown =
             "no verdict (the fault geometry could not be read from the EarthquakeAI prefab)";
@@ -258,7 +326,11 @@ namespace DisasterPlus.Game
         // 日本語表示のときにそこだけ翻訳から外れる。
         public static string EarthquakeCoverageAtEpicentre =
             "Sensor coverage at the epicentre (capped at 100)";
-        public static string EarthquakeCoverageAtCursor = "Sensor coverage at cursor";
+        // 震央の行と同じ量なのに片方だけ「(上限 100)」と書いてあると、こちらが
+        // パーセントに見える。実体は免疫的リソースの生のセル値（ushort）で、
+        // 100 を超えることも普通にある（全体レビュー M9）。
+        public static string EarthquakeCoverageAtCursor =
+            "Sensor coverage at cursor (raw cell value, not a percentage)";
         public static string EarthquakeWarningLead = "Warning lead time";
         public static string EarthquakeNoSensor = "no Earthquake Sensor reaches the epicentre";
         // 地震が起きているかどうかに関わらず**常に**出す。これは地震計という建物の
@@ -285,5 +357,10 @@ namespace DisasterPlus.Game
             + "from the epicentre instead of the distance from the camera.";
         public static string EarthquakeWaveformUnavailable =
             "Waveform drawing is unavailable on this build; showing the peak amplitude instead.";
+        // 構築には成功したが、描画中に落ちて以後描かなくなった状態。以前はこの行が
+        // パネル構築時にしか作られず、実行時に落ちると**黙って空欄**になっていた
+        // （WaveformView のクラス doc が禁じている壊れ方そのもの、全体レビュー I6）。
+        public static string EarthquakeWaveformDrawFailed =
+            "Waveform drawing stopped after an error; showing the peak amplitude instead.";
     }
 }

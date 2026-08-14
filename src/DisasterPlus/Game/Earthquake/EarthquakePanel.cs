@@ -62,7 +62,17 @@ namespace DisasterPlus.Game
     {
         private const string PanelName = FreeSlotFinder.SelfPrefix + "EarthquakePanel";
 
-        private const float PanelWidth = 420f;
+        /// <summary>
+        /// パネル幅。**全体レビューの修正で 420 → 520 に広げた。**
+        ///
+        /// 行が 5 本増えた（揺れの振幅・その注記・出火・波形の不可用理由・
+        /// 2 モデルの注記）ぶん、折り返しの説明文で縦が伸びる。UIView の座標系は
+        /// 高さ 1080 に正規化されているので、縦は貴重で横は余っている
+        /// （x=600 + 520 = 1120 は 16:9 のおよそ 1920 に対して十分内側で、
+        ///  ①の予報パネル（x=200、幅 380）とも重ならない）。
+        /// 1 行あたりの文字数が増えれば、同じ説明文が少ない行数で収まる。
+        /// </summary>
+        private const float PanelWidth = 520f;
         private const float MaxRayDistance = 8000f;
 
         /// <summary>
@@ -112,16 +122,22 @@ namespace DisasterPlus.Game
         private static UILabel _phaseLabel;
         private static UILabel _timeLabel;
         private static UILabel _cursorLabel;
+        private static UILabel _shakeLabel;
+        private static UILabel _shakeNoteLabel;
         private static UILabel _faultLabel;
         private static UILabel _faultNoteLabel;
         private static UILabel _marginBuildingLabel;
         private static UILabel _marginVerdictLabel;
+        private static UILabel _marginBurnLabel;
         private static UILabel _marginNoteLabel;
+        private static UILabel _ndrNoteLabel;
         private static UILabel _sensorEpicentreLabel;
         private static UILabel _sensorLeadLabel;
         private static UILabel _sensorCursorLabel;
         private static UILabel _waveformLabel;
+        private static UILabel _waveformUnavailableLabel;
         private static UILabel _waveformNoteLabel;
+        private static UILabel _cursorModelsNoteLabel;
         private static UILabel _hazardLabel;
 
         /// <summary>
@@ -221,16 +237,22 @@ namespace DisasterPlus.Game
             _phaseLabel = null;
             _timeLabel = null;
             _cursorLabel = null;
+            _shakeLabel = null;
+            _shakeNoteLabel = null;
             _faultLabel = null;
             _faultNoteLabel = null;
             _marginBuildingLabel = null;
             _marginVerdictLabel = null;
+            _marginBurnLabel = null;
             _marginNoteLabel = null;
+            _ndrNoteLabel = null;
             _sensorEpicentreLabel = null;
             _sensorLeadLabel = null;
             _sensorCursorLabel = null;
             _waveformLabel = null;
+            _waveformUnavailableLabel = null;
             _waveformNoteLabel = null;
+            _cursorModelsNoteLabel = null;
             _hazardLabel = null;
             _bodyBuilt = false;
             _cursorPublishedValid = false;
@@ -334,6 +356,16 @@ namespace DisasterPlus.Game
             _phaseLabel = AddLayer1Row(panel, "Phase", ref y);
             _timeLabel = AddLayer1Row(panel, "TimeToShock", ref y);
             _cursorLabel = AddLayer1Row(panel, "AtCursor", ref y);
+
+            // ★ 揺れは倒壊ランプとは別の量である（§A-7）。以前は s の行が
+            //    「カーソル地点の揺れ」を名乗り、半径 R の外を「揺れていない」と
+            //    書いていたが、バニラの揺れの式には半径の打ち切りが無く、同じ
+            //    フレームで CameraShakeBooster は揺れを足し、SeismographRecorder は
+            //    非ゼロの変位を書き続けている。3 つの部品が同じ物理量について
+            //    食い違う主張をしていたので、揺れは揺れとして別行で出す。
+            _shakeLabel = AddLayer1Row(panel, "ShakeAtCursor", ref y);
+            _shakeNoteLabel = AddPlainRow(panel, "ShakeNote", ref y, Strings.EarthquakeShakeNote, 40f);
+
             _faultLabel = AddLayer1Row(panel, "FaultBand", ref y);
 
             // 断層帯の行には**常に**この注記が付く（計画の共通規則）。
@@ -348,10 +380,26 @@ namespace DisasterPlus.Game
             _marginBuildingLabel = AddLayer1Row(panel, "MarginBuilding", ref y);
             _marginVerdictLabel = AddLayer1Row(panel, "MarginVerdict", ref y);
 
+            // ★ 出火の行（全体レビュー M1）。依頼文が「揺れによる火災や建物の倒壊」と
+            //    名指ししていたうちの半分がここで、材料（2 回目の引き）は
+            //    BuildingMargin.BurnThresholdValue に最初から入っていた。
+            _marginBurnLabel = AddLayer1Row(panel, "MarginBurn", ref y, 36f);
+
             // この注記は**常に**併記する。全体円盤についての判定でしかないことと、
             // それが地震開始の瞬間に既に決まっていることの両方を、行の隣で名乗る。
             _marginNoteLabel = AddPlainRow(panel, "MarginNote", ref y,
                 Strings.EarthquakeGlobalDiscOnly, 54f);
+
+            // ★ NDR が居るなら、倒壊・出火の判定は**この環境では出せない**ことを
+            //    常設で名乗る（全体レビュー C2、§E-2）。NDR は
+            //    DisasterHelpers.DestroyBuildings を完全置換して probability を
+            //    0.02 → 0.04 に差し替えるので、この MOD が読んでいるランプは
+            //    どこでも実行されていない。①の ForecastNdrNote と同じ扱い。
+            if (ModCompat.NdrPresent)
+            {
+                _ndrNoteLabel = AddPlainRow(panel, "NdrNote", ref y,
+                    Strings.EarthquakeNdrNote, 54f);
+            }
 
             // ── 地震計（Task 7）──────────────────────────────────
             // ここも第 1 層である。リードタイムの式も上限 100 もバニラのリテラルで
@@ -387,17 +435,19 @@ namespace DisasterPlus.Game
             _waveformLabel = AddLayer1Row(panel, "Waveform", ref y, 54f);
 
             WaveformView.Build(panel, "WaveformPlot", 12f, y);
-            if (WaveformView.Available)
-            {
-                y += WaveformView.PlotHeight + 6f;
-            }
-            else
-            {
-                // ★ 黙って空欄にしない。最大振幅の行（_waveformLabel）は出したうえで、
-                //    グラフが出ない理由を名乗る。劣化であって嘘ではない。
-                AddPlainRow(panel, "WaveformUnavailable", ref y,
-                    Strings.EarthquakeWaveformUnavailable, 36f);
-            }
+            if (WaveformView.Available) y += WaveformView.PlotHeight + 6f;
+
+            // ★ 黙って空欄にしない。最大振幅の行（_waveformLabel）は出したうえで、
+            //    グラフが出ない理由を名乗る。劣化であって嘘ではない。
+            //
+            //    **この行は構築の成否に関わらず作る**（全体レビュー I6）。以前は
+            //    構築時に失敗したときしか作っておらず、**実行時**に描画が落ちて
+            //    WaveformView.Destroy() がスプライトを隠したときには、
+            //    理由を書く場所が存在しなかった —— プレイヤーには何の説明も無い
+            //    空白だけが残り、それは WaveformView のクラス doc が
+            //    「黙って空欄にならず…劣化であって嘘ではない」と約束している
+            //    ことの正反対である。中身は Refresh 側が状態を見て入れる。
+            _waveformUnavailableLabel = AddPlainRow(panel, "WaveformUnavailable", ref y, "", 36f);
 
             // グラフが何の絵なのかを、グラフのすぐ下で毎回言う。
             // 内容はグラフを出しているときだけ入れる（Refresh 側で設定する）。
@@ -425,7 +475,54 @@ namespace DisasterPlus.Game
             // という状態を構造的に作れなくするため。3 行ぶんの高さを取る。
             _hazardLabel = AddPlainRow(panel, "Hazard", ref y, Strings.EarthquakeSwitchHazardView, 54f);
 
+            // ★ カーソル 1 点について 2 つの別モデルの数字が並ぶ（全体レビュー M3）。
+            //    上は震央からの線形ランプ（R = 2000+20i）、こちらはバニラのハザード
+            //    グリッド（亀裂**線分**までの距離・2 次減衰・Rmax = 2000+20i+400、§A-6）。
+            //    どちらも実測なのに一致しないので、一致しない理由を画面で名乗る。
+            _cursorModelsNoteLabel = AddPlainRow(panel, "CursorModelsNote", ref y,
+                Strings.EarthquakeCursorModelsNote, 54f);
+
             panel.height = y;
+            ClampToView(panel);
+        }
+
+        /// <summary>
+        /// パネルの下端がビューからはみ出さない位置まで上げる。
+        ///
+        /// **行を足すたびにパネルは伸びる**（本レビューで 5 行増えた）。位置を
+        /// 決め打ちのままにしておくと、いちばん下の行——注記や「空である理由」——が
+        /// 静かに画面外へ出る。**説明を書いたのに読めない**のは、書いていないのと
+        /// 同じかそれより悪い。
+        ///
+        /// IL 実測: <c>ColossalFramework.UI.UIView.fixedHeight</c> は
+        /// <c>Int32</c> の読み書き可能プロパティとして実在する（既定 1080、
+        /// <c>relativePosition</c> と同じ正規化座標系）。読めない環境や
+        /// 内容がビューより高い場合は上端に寄せる —— 非スクロールのパネルに
+        /// できる最善で、少なくとも先頭から読める。
+        /// </summary>
+        private static void ClampToView(UIPanel panel)
+        {
+            try
+            {
+                var view = panel.GetUIView();
+                float viewHeight = view != null ? view.fixedHeight : 0f;
+                if (viewHeight <= 0f) return;
+
+                const float Margin = 8f;
+                var pos = panel.relativePosition;
+                float top = pos.y;
+                if (top + panel.height > viewHeight - Margin)
+                {
+                    top = viewHeight - Margin - panel.height;
+                }
+                if (top < Margin) top = Margin;
+                panel.relativePosition = new Vector3(pos.x, top);
+            }
+            catch (System.Exception e)
+            {
+                // 位置の微調整で構築を失敗させない（構築時の 1 回だけなのでスロットル不要）。
+                Log.Warn("earthquake panel clamp failed: " + e.GetType().Name);
+            }
         }
 
         // ── ラベル生成（UILabel を作ってよいのはこの 1 箇所だけ） ──────────
@@ -579,10 +676,14 @@ namespace DisasterPlus.Game
             SetPlain(_phaseLabel, "");
             SetPlain(_timeLabel, "");
             SetPlain(_cursorLabel, "");
+            SetPlain(_shakeLabel, "");
+            // 注記は行が出ているときだけ（RefreshShakeRow が入れ直す）。
+            SetPlain(_shakeNoteLabel, "");
             SetPlain(_faultLabel, "");
             SetPlain(_faultNoteLabel, "");
             SetPlain(_marginBuildingLabel, "");
             SetPlain(_marginVerdictLabel, "");
+            SetPlain(_marginBurnLabel, "");
             SetPlain(_marginNoteLabel, "");
         }
 
@@ -632,6 +733,7 @@ namespace DisasterPlus.Game
             RefreshPhaseRow(primary);
             RefreshTimeRow(snapshot, primary);
             RefreshCursorRow(primary, haveCursor, cursor);
+            RefreshShakeRow(snapshot, primary, haveCursor, cursor);
             RefreshFaultRow(primary, haveCursor, cursor);
             RefreshMarginRows(snapshot);
             return primary;
@@ -673,7 +775,35 @@ namespace DisasterPlus.Game
         {
             SetPlain(_waveformLabel, "");
             SetPlain(_waveformNoteLabel, "");
+            RefreshWaveformAvailability();
             WaveformView.Render(null);
+        }
+
+        /// <summary>
+        /// 「グラフが出ない理由」の 1 行（全体レビュー I6）。
+        ///
+        /// **毎回状態を見に行く。** 描画は実行時にも落ちうる（<see cref="WaveformView.Render"/>
+        /// の catch が <c>Destroy()</c> を呼んで以後描かない）。構築時にしか判定して
+        /// いなかった頃は、そこから先が**説明の無い空白**になっていた。
+        ///
+        /// 「まだ作っていない」には何も書かない —— パネルが開いていればここは
+        /// 構築済みなので通らないが、状態を 4 つに分けている以上、
+        /// 未構築を「使えません」と言い換えないことを構造で示しておく。
+        /// </summary>
+        private static void RefreshWaveformAvailability()
+        {
+            switch (WaveformView.State)
+            {
+                case WaveformViewState.BuildFailed:
+                    SetPlain(_waveformUnavailableLabel, Strings.EarthquakeWaveformUnavailable);
+                    break;
+                case WaveformViewState.RenderFailed:
+                    SetPlain(_waveformUnavailableLabel, Strings.EarthquakeWaveformDrawFailed);
+                    break;
+                default:
+                    SetPlain(_waveformUnavailableLabel, "");
+                    break;
+            }
         }
 
         /// <summary>
@@ -707,6 +837,8 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            RefreshWaveformAvailability();
+
             var traces = snapshot.Traces;
             if (traces.Count == 0)
             {
@@ -722,8 +854,15 @@ namespace DisasterPlus.Game
             // グラフを 4 枚並べても読めないので、残りは件数として添えるだけ。
             var trace = traces[0];
 
+            // ★ どの地震の波形なのかを必ず名乗る（全体レビュー I1）。
+            //    EarthquakeSnapshot.CursorQuakeId の doc が「表示側はこれを必ず出す」と
+            //    要求しているのと同じ理由で、波形の地震にも同じ規律が要る。
+            //    地震が 2 個同時に進んでいると、上の 6 行が指す地震
+            //    （SelectPrimary）と、この絵の地震（QuakeSelection.SelectDamaging）は
+            //    一致しないことがある。
             string header = Strings.EarthquakeWaveform + ": #" + trace.BuildingId
-                            + "   " + trace.DistanceToEpicentre.ToString("F0") + " m";
+                            + "   " + trace.DistanceToEpicentre.ToString("F0") + " m"
+                            + "   (#" + snapshot.WaveformQuakeId + ")";
             if (traces.Count > 1)
             {
                 header += "   (" + Strings.EarthquakeSensorSection + ": " + traces.Count + ")";
@@ -733,8 +872,17 @@ namespace DisasterPlus.Game
             {
                 // 縦軸は最大振幅で正規化して描くので、その最大振幅を数値でも名乗る。
                 // これが無いと、グラフの高さだけを見て地震の強さを比べてしまう。
+                //
+                // ★ バーの満目盛りは s（0-1）ではなく変位の理論最大 0.60 である
+                //    （全体レビュー I4）。s の目盛りを流用していた頃は、最大でも
+                //    0.6 にしかならない量を 0-1 の尺度で描いていたため、常に
+                //    1〜2 マスしか埋まらず、しかもすぐ上の s のバーと見分けが
+                //    付かなかった。満目盛りを数値でも併記する。
                 float peak = trace.PeakAbsolute;
-                header += "\n" + peak.ToString("F2") + "  [" + SeismicScale.BarOf(peak) + "]";
+                header += "\n" + peak.ToString("F2")
+                          + " / " + ShakeWaveform.MaxDisplacement.ToString("F2")
+                          + "  [" + SeismicScale.BarOf(
+                              ShakeWaveform.NormalisedDisplacement(peak)) + "]";
             }
             else
             {
@@ -880,6 +1028,20 @@ namespace DisasterPlus.Game
             {
                 SetPlain(_marginBuildingLabel, "");
                 SetPlain(_marginVerdictLabel, "");
+                SetPlain(_marginBurnLabel, "");
+                return;
+            }
+
+            // ★ 「調べたが建物が無かった」と「調べられなかった」を言い分ける
+            //    （全体レビュー I3）。以前は BuildingManager が取れなくても走査が
+            //    例外を投げても、同じ「カーソルの下に建物がありません」が出ていた
+            //    —— 読み取り失敗が実測値の顔で出てくる、この機能が他の全ての行で
+            //    禁じている壊れ方そのものである。
+            if (snapshot.CursorProbe == BuildingProbeOutcome.Failed)
+            {
+                SetPlain(_marginBuildingLabel, Strings.EarthquakeProbeFailed);
+                SetPlain(_marginVerdictLabel, "");
+                SetPlain(_marginBurnLabel, "");
                 return;
             }
 
@@ -888,17 +1050,19 @@ namespace DisasterPlus.Game
                 SetLayer1(_marginBuildingLabel,
                     Strings.EarthquakeBuildingUnderCursor + ": " + Strings.EarthquakeNoBuilding);
                 SetPlain(_marginVerdictLabel, "");
+                SetPlain(_marginBurnLabel, "");
                 return;
             }
 
             // どの地震についての判定かを必ず名乗る。複数同時進行のとき、上の行が
             // 選んでいる地震（SelectPrimary）とここで判定した地震（sim 側の
-            // SelectDamagingQuake）は一致しないことがある。
+            // QuakeSelection.SelectDamaging）は一致しないことがある。
             SetLayer1(_marginBuildingLabel,
                 Strings.EarthquakeBuildingUnderCursor + ": #" + margin.BuildingId
                 + "   (#" + snapshot.CursorQuakeId + ")");
 
             SetLayer1(_marginVerdictLabel, VerdictText(margin));
+            SetLayer1(_marginBurnLabel, BurnVerdictText(margin));
             SetPlain(_marginNoteLabel, Strings.EarthquakeGlobalDiscOnly);
         }
 
@@ -929,6 +1093,13 @@ namespace DisasterPlus.Game
                     return within + " / " + current + "   -> "
                            + Strings.EarthquakeVerdictUnknown;
 
+                case CollapseVerdict.DamageModelReplaced:
+                    // ★ 破壊コードが他 MOD に置き換えられている（§E-2）。
+                    //    **距離も出さない。** バニラの 0.02 から導いた「X m 以内」は、
+                    //    その環境では誰も使っていない数字であり、隣に書けば
+                    //    判定を伏せた意味が無くなる。
+                    return current + "   -> " + Strings.EarthquakeVerdictNdr;
+
                 case CollapseVerdict.InsideFaultZone:
                     // 倒壊距離は出す。しかし「倒れません」とは言わない
                     // （帯の内側は probability = 1 の破壊円盤が別に判定する）。
@@ -954,6 +1125,65 @@ namespace DisasterPlus.Game
                     //    知らない結論は「判定できません」に倒す。
                     return Strings.EarthquakeVerdictUnknown;
             }
+        }
+
+        /// <summary>
+        /// 出火の結論の 1 行（全体レビュー M1）。**構造は倒壊とまったく同じ**で、
+        /// 違うのは引くしきい値（2 回目の引き）と文言だけである（§A-3）。
+        ///
+        /// **倒壊が優先する。** IL は <c>else if (hitB &amp;&amp; ...)</c> なので、
+        /// 同じ建物で倒壊も当たっているならバニラは出火の分岐へ行かない
+        /// （倒壊側が <c>burnAmount = Round(fB*255)</c> を持って行く）。
+        /// その順序を隠すと、「倒壊します」と「出火します」が同時に出て
+        /// 両方起きるように読める。
+        /// </summary>
+        private static string BurnVerdictText(BuildingMargin margin)
+        {
+            string within = Strings.EarthquakeBurnWithin + " "
+                            + margin.BurnWithin.ToString("F0") + " m";
+
+            string body;
+            switch (margin.BurnVerdict)
+            {
+                case CollapseVerdict.AlreadyDown:
+                    return Strings.EarthquakeBurnLabel + ": " + Strings.EarthquakeAlreadyDown;
+
+                case CollapseVerdict.OutOfRange:
+                    return Strings.EarthquakeBurnLabel + ": " + Strings.EarthquakeOutOfRange;
+
+                case CollapseVerdict.Unknown:
+                    body = within + "   -> " + Strings.EarthquakeVerdictUnknown;
+                    break;
+
+                case CollapseVerdict.DamageModelReplaced:
+                    return Strings.EarthquakeBurnLabel + ": " + Strings.EarthquakeVerdictNdr;
+
+                case CollapseVerdict.InsideFaultZone:
+                    body = within + "   -> " + Strings.EarthquakeFaultBand + ": "
+                           + Strings.EarthquakeFaultInside;
+                    break;
+
+                case CollapseVerdict.WillCollapse:
+                    body = within + "   -> " + Strings.EarthquakeVerdictBurn;
+                    break;
+
+                case CollapseVerdict.Survives:
+                    body = margin.BurnWithin > 0f
+                        ? within + "   -> " + Strings.EarthquakeVerdictNoBurn
+                        : Strings.EarthquakeVerdictNoBurnAnyDistance;
+                    break;
+
+                default:
+                    // 倒壊側と同じ理由で、知らない結論は「判定できません」に倒す。
+                    return Strings.EarthquakeBurnLabel + ": " + Strings.EarthquakeVerdictUnknown;
+            }
+
+            // 倒壊が確定しているなら、出火の分岐には来ないことを併記する。
+            if (margin.Verdict == CollapseVerdict.WillCollapse)
+            {
+                body += "\n" + Strings.EarthquakeBurnAfterCollapse;
+            }
+            return body;
         }
 
         private static void RefreshPhaseRow(EarthquakeReading primary)
@@ -1011,14 +1241,40 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カーソル地点の局所係数 s。**全体円盤（probability = 0.02）の話であって、
-        /// 断層帯の話ではない**（別行で出す）。
+        /// カーソル地点の局所係数 s。**全体円盤（probability = 0.02）の倒壊・出火ランプ**
+        /// であって、揺れでも断層帯でもない（どちらも別行で出す）。
         ///
-        /// 半径 R の外は「揺れが 0」ではなく「バニラが判定すらしていない」なので、
+        /// ── この行が名乗ってよいもの・いけないもの（全体レビュー C3）─────────
+        ///
+        /// 数字（<c>s = 1 - d/R</c>）はバニラの <c>fD</c> そのもので正しい。だが
+        /// 以前この行は「カーソル地点の揺れ」を名乗り、R の外を「揺れの範囲外」と
+        /// 書いていた。バニラの揺れは <c>amp = 0.3/(1 + dist*0.001)</c> で
+        /// **半径の打ち切りが一切無い**（§A-7）ので、それは同じフレームで
+        /// <c>CameraShakeBooster</c> が揺れを足し <c>SeismographRecorder</c> が
+        /// 非ゼロの変位を書いている地点についての、真っ向から反対の主張だった。
+        ///
+        /// **区分名（弱い/強い…）も出さない。** あれはこの MOD が付けた名前であって、
+        /// バニラは probability の係数を計算しているだけである。<c>[measured]</c> の
+        /// 下に置くと、ゲームがそう判断していることになる（<c>Strings</c> の
+        /// <c>EarthquakeBandWeak</c> 付近のコメント）。
+        ///
+        /// 半径 R の外は「係数が 0」ではなく「バニラが判定すらしていない」なので、
         /// <c>0.0</c> と出さずに「圏外」と書く（<see cref="SeismicIntensity.At"/> の doc）。
         /// </summary>
         private static void RefreshCursorRow(EarthquakeReading primary, bool haveCursor, Vec3 cursor)
         {
+            // ★ 収束中（Clearing）の地震には破壊判定が走らない。全体円盤の
+            //    DestroyBuildings は SimulationStep の Active 分岐にしか無い（§A-3）ので、
+            //    ここで係数を出すと「もう起きないこと」の強さを名乗ることになる。
+            //    sim 側（QuakeSelection.SelectDamaging）が同じ理由で Clearing を
+            //    除いているので、表示側だけ含めていた食い違いを解消する。
+            if (!QuakeSelection.RunsDamage(primary.Phase))
+            {
+                SetPlain(_cursorLabel,
+                    Strings.EarthquakeAtCursor + ": " + Strings.EarthquakeNoDamageInPhase);
+                return;
+            }
+
             if (!haveCursor)
             {
                 SetPlain(_cursorLabel, Strings.EarthquakeCursorUnknown);
@@ -1034,9 +1290,64 @@ namespace DisasterPlus.Game
             }
 
             float s = SeismicIntensity.At(distance, primary.Intensity);
-            string band = BandWord(SeismicScale.BandOf(s));
             SetLayer1(_cursorLabel, Strings.EarthquakeAtCursor + ": " + s.ToString("F2")
-                + "  [" + SeismicScale.BarOf(s) + "]  " + band);
+                + "  [" + SeismicScale.BarOf(s) + "]");
+        }
+
+        /// <summary>
+        /// **カーソル地点で地面が実際にどれだけ揺れているか。** 上の倒壊ランプとは
+        /// 別の量で、こちらが依頼文の「揺れ」に当たる。
+        ///
+        /// 出しているのは <c>EarthquakeAI.RenderInstance</c> の <c>amp</c>
+        /// （§A-7 IL_0069、包絡線を掛ける前）そのものである。バニラはこの距離を
+        /// **カメラから**測るが、ここは震央からの距離で評価する —— 波形グラフと
+        /// まったく同じ置き換えで、同じ式の別評価であって近似ではない（設計書 §3.5）。
+        ///
+        /// **半径の打ち切りは無い。** 10 km 離れていても震央の 9% で揺れている。
+        /// それが常設の注記（<c>EarthquakeShakeNote</c>）の内容である。
+        ///
+        /// 窓（<c>Emerging|Active</c> かつ <c>0 &lt; e &lt; m_activeDuration</c>）が
+        /// 開いていなければ数値を出さない。<c>m_activeDuration</c> はプレハブ値で
+        /// まだ誰も実測していないので、読めていないときも数値を出さない
+        /// （<c>CameraShakeBooster</c> / <c>SeismographRecorder</c> と同じ判断）。
+        /// </summary>
+        private static void RefreshShakeRow(EarthquakeSnapshot snapshot, EarthquakeReading primary,
+                                            bool haveCursor, Vec3 cursor)
+        {
+            // 「半径による打ち切りが無い」ことは、数値が出ていない状態でこそ
+            // 誤解されうる（上の倒壊ランプが「圏外」と言っている隣なので）。
+            SetPlain(_shakeNoteLabel, Strings.EarthquakeShakeNote);
+
+            if (!haveCursor)
+            {
+                SetPlain(_shakeLabel, Strings.EarthquakeCursorUnknown);
+                return;
+            }
+
+            if (!snapshot.Prefab.Resolved || snapshot.Prefab.ActiveDuration == 0u)
+            {
+                SetPlain(_shakeLabel,
+                    Strings.EarthquakeShakeAtCursor + ": " + Strings.EarthquakeUnavailable);
+                return;
+            }
+
+            long e = (long)snapshot.CurrentFrame - primary.ActivationFrame
+                     + ShakeWaveform.FrameOffset;
+            if (!primary.ActivationScheduled
+                || !QuakeSelection.RunsDamage(primary.Phase)
+                || !ShakeWaveform.IsShaking(e, snapshot.Prefab.ActiveDuration))
+            {
+                SetPlain(_shakeLabel,
+                    Strings.EarthquakeShakeAtCursor + ": " + Strings.EarthquakeNotShaking);
+                return;
+            }
+
+            float amplitude = ShakeWaveform.PeakAmplitudeAt(
+                DistanceXZ(cursor, primary.Epicentre));
+            SetLayer1(_shakeLabel, Strings.EarthquakeShakeAtCursor + ": "
+                + amplitude.ToString("F3") + " / " + ShakeWaveform.MaxDisplacement.ToString("F2")
+                + "  [" + SeismicScale.BarOf(
+                    ShakeWaveform.NormalisedDisplacement(amplitude)) + "]");
         }
 
         /// <summary>
@@ -1050,6 +1361,10 @@ namespace DisasterPlus.Game
             SetPlain(_faultNoteLabel, "");
 
             if (!haveCursor) return;
+
+            // ★ 収束中の地震には破壊円盤が落ちない（§A-3、Active 分岐にしか無い）。
+            //    「断層帯: 内側」はこれから壊れうる場所の話なので、行ごと出さない。
+            if (!QuakeSelection.RunsDamage(primary.Phase)) return;
 
             var band = new FaultBand(primary.Epicentre.ToVec2(), primary.AngleRadians,
                                      primary.CrackLength, primary.CrackWidth);
@@ -1142,6 +1457,18 @@ namespace DisasterPlus.Game
         ///
         /// 優先順: 進行中 &gt; カーソル地点で強く効いている &gt; 強度が大きい &gt; 添字が小さい。
         /// 「進行中」を先に見るのは、Finished の残骸を主役にしないため。
+        ///
+        /// ── ここが <c>Clearing</c> を含むのは意図的である（全体レビュー I2）──────
+        ///
+        /// sim 側の <see cref="QuakeSelection.SelectDamaging"/> は <c>Clearing</c> を
+        /// 含めない（破壊判定が <c>Active</c> 分岐にしか無いため、§A-3）。こちらは
+        /// **件数・強度・位相**を出すための選定なので、収束中の地震も主役になれる
+        /// ——「余震処理中」と表示できないのはむしろ情報の欠落である。
+        ///
+        /// **代わりに、破壊が走らない位相では破壊由来の行を出さない。**
+        /// <see cref="RefreshCursorRow"/> と <see cref="RefreshFaultRow"/> が
+        /// <see cref="QuakeSelection.RunsDamage"/> で自分から降りる。以前は
+        /// この 2 行が収束中の地震について係数と「断層帯: 内側」を出していた。
         /// </summary>
         private static EarthquakeReading SelectPrimary(IList<EarthquakeReading> quakes,
                                                        bool haveCursor, Vec3 cursor)
@@ -1180,21 +1507,12 @@ namespace DisasterPlus.Game
             return Mathf.Sqrt(a.ToVec2().DistanceSquaredTo(b.ToVec2()));
         }
 
-        /// <summary>
-        /// 区分名。**実在の震度階級の名前は使わない**（設計書 §3.1 / §7-4）。
-        /// s は加速度でも計測震度でもなく、ゲームの倒壊係数である。
-        /// </summary>
-        private static string BandWord(SeismicBand band)
-        {
-            switch (band)
-            {
-                case SeismicBand.Weak: return Strings.EarthquakeBandWeak;
-                case SeismicBand.Moderate: return Strings.EarthquakeBandModerate;
-                case SeismicBand.Strong: return Strings.EarthquakeBandStrong;
-                case SeismicBand.Severe: return Strings.EarthquakeBandSevere;
-                default: return "";
-            }
-        }
+        // 区分名（弱い/中程度/強い/非常に強い）をここで文字列に落とすヘルパーは
+        // 全体レビュー(C3)で撤去した。あれは**この MOD が付けた名前**であって、
+        // バニラが計算しているのは probability の係数だけである。[measured] の
+        // 接頭辞の下に置くと、ゲームがその判断をしていることになってしまう。
+        // SeismicScale.BandOf と Strings.EarthquakeBand* は、第 2 層（Task 9 以降）が
+        // 自分の名前として名乗るときのために残してある。
 
         /// <summary>
         /// Unity 5.6 の <c>Camera.main</c> はタグ検索で、パネル表示中は毎フレーム
