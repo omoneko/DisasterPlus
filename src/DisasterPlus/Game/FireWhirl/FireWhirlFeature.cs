@@ -14,6 +14,13 @@ namespace DisasterPlus.Game
         /// <summary>FeatureHost.NoteDegraded に渡すキー。Name と必ず同じ文字列にすること。</summary>
         public const string FeatureName = "FireWhirl";
 
+        /// <summary>
+        /// 自己申告した Degraded の識別キー。1 機能が複数の理由で Degraded に
+        /// なりうるので、回復時に「自分が立てた分だけ」を下ろせるようにする。
+        /// </summary>
+        private const string EndingStallNote = "endingStall";
+        private const string BarrenSpreadNote = "barrenSpread";
+
         public string Name { get { return FeatureName; } }
 
         private readonly BurningBuildingScanner _scanner = new BurningBuildingScanner();
@@ -81,9 +88,18 @@ namespace DisasterPlus.Game
                          + " selected=" + FireWhirlDamage.LastSelected
                          + " attempted=" + FireWhirlDamage.LastAttempted + ")"
                          + "; BuildingAI.BurnBuilding is refusing every call");
-                FeatureHost.NoteDegraded(FeatureName,
+                FeatureHost.NoteDegraded(FeatureName, BarrenSpreadNote,
                     "fire spread lit nothing in " + FireWhirlDamage.BarrenThreshold
                     + " consecutive passes");
+            }
+
+            // 延焼が戻ったら申告も取り下げる。Core 側の streak だけを 0 に戻しても
+            // オーバーレイのバッジは Degraded のまま残り、「barren passes」の行が
+            // 消えているのにセクションだけ赤い、という自己矛盾になる。
+            if (FireWhirlDamage.ConsumeBarrenRecovery())
+            {
+                Log.Info("fire spread ignited again; clearing the barren-spread alert");
+                FeatureHost.ClearDegraded(FeatureName, BarrenSpreadNote);
             }
 
             Log.Diag("fireWhirl",
@@ -100,26 +116,37 @@ namespace DisasterPlus.Game
         private void CheckEndingStall()
         {
             int maxLifetime = ModSettings.MaxLifetimeMinutes.value;
+            float framesPerMinute = FeatureHost.FramesPerMinute;
             var views = FireWhirlRegistry.Snapshot();
 
             for (int i = 0; i < views.Count; i++)
             {
                 if (!views[i].Ending) continue;
-                if (!EndingStall.IsStuck(views[i].EndingMinutes, maxLifetime)) continue;
+                if (!EndingStall.IsStuck(views[i].EndingMinutes, maxLifetime, framesPerMinute)) continue;
 
                 if (!_endingStallLogged)
                 {
                     _endingStallLogged = true;
                     Log.Warn("fire whirl " + views[i].DisasterId + " has been ending for "
                              + views[i].EndingMinutes.ToString("F1") + " in-game minutes"
-                             + " (over " + EndingStall.LifetimeMultiplier + "x the "
-                             + maxLifetime + " min limit); vanilla teardown never completed");
+                             + " (threshold "
+                             + EndingStall.ThresholdMinutes(maxLifetime, framesPerMinute)
+                                 .ToString("F1")
+                             + " min; a healthy teardown is "
+                             + (EndingStall.TeardownFrames / framesPerMinute).ToString("F1")
+                             + " min); vanilla teardown never completed");
                 }
 
-                FeatureHost.NoteDegraded(FeatureName,
+                FeatureHost.NoteDegraded(FeatureName, EndingStallNote,
                     "a fire whirl is stuck in the ending state");
                 return;
             }
+
+            // 詰まりが解消した（あるいは詰まった旋風が回収された）。バッジを下ろす。
+            // 下ろさないと、オーバーレイが Degraded のまま「STUCK な旋風は 1 基も無い」
+            // 本文を出し続けて自己矛盾する。
+            FeatureHost.ClearDegraded(FeatureName, EndingStallNote);
+            _endingStallLogged = false;
         }
 
         /// <summary>設定が OFF になったときに、生存中の旋風をすべて終了処理へ送る。</summary>
@@ -225,6 +252,9 @@ namespace DisasterPlus.Game
             var views = FireWhirlRegistry.Snapshot();
             b.Line(1, "active", views.Count.ToString());
 
+            int maxLifetime = ModSettings.MaxLifetimeMinutes.value;
+            float framesPerMinute = FeatureHost.FramesPerMinute;
+
             for (int i = 0; i < views.Count; i++)
             {
                 var v = views[i];
@@ -232,13 +262,12 @@ namespace DisasterPlus.Game
                     + "  (" + (int)v.Center.X + "," + (int)v.Center.Z + ")"
                     + "  r=" + (int)v.Radius
                     + "  " + v.ElapsedMinutes.ToString("F1")
-                    + "/" + ModSettings.MaxLifetimeMinutes.value + "min"
+                    + "/" + maxLifetime + "min"
                     + "  n=" + v.BurningCount
                     + (v.VehicleId != 0 ? "  pinned" : "  NO VEHICLE")
                     + (v.Manual ? "  manual" : "")
                     + (v.Ending ? "  ending " + v.EndingMinutes.ToString("F1") + "min" : "")
-                    + (v.Ending && EndingStall.IsStuck(v.EndingMinutes,
-                                                       ModSettings.MaxLifetimeMinutes.value)
+                    + (v.Ending && EndingStall.IsStuck(v.EndingMinutes, maxLifetime, framesPerMinute)
                         ? "  STUCK" : "");
                 b.Line(2, s);
             }
@@ -268,6 +297,7 @@ namespace DisasterPlus.Game
                    "candidates=" + FireWhirlDamage.LastCandidates
                    + " selected=" + FireWhirlDamage.LastSelected
                    + " attempted=" + FireWhirlDamage.LastAttempted
+                   + " refused=" + FireWhirlDamage.LastRefused
                    + " ignited=" + FireWhirlDamage.LastIgnited);
             b.Line(2, "session ignited", FireWhirlDamage.TotalIgnited.ToString());
 

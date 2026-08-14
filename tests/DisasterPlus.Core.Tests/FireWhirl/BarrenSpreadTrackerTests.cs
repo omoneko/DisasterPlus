@@ -92,15 +92,17 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         }
 
         [Fact]
-        public void DefaultThresholdIsEight()
+        public void DefaultThresholdIsAWholeWhirlLifetime()
         {
-            // 既定値の根拠（旋風 1 基の寿命およそ 28 パスの約 1/4）を固定する。
-            Assert.Equal(8, BarrenSpreadTracker.DefaultThreshold);
-            Assert.Equal(8, new BarrenSpreadTracker().Threshold);
+            // 既定値の根拠（1 パス ≒ 0.35 ゲーム内分 × 24 ≒ 8.4 分 ≒ 旋風 1 基の寿命）を固定する。
+            // 8 だった頃はゲーム内 2.8 分＝実時間 3 秒足らずで、しかも証拠に
+            // 「バニラが設計上断る棟」が混ざっていたため正常な街で必ず踏んだ。
+            Assert.Equal(24, BarrenSpreadTracker.DefaultThreshold);
+            Assert.Equal(24, new BarrenSpreadTracker().Threshold);
         }
 
         [Fact]
-        public void DefaultTracker_TripsOnlyAfterEightBarrenPasses()
+        public void DefaultTracker_TripsOnlyAtTheDefaultThreshold()
         {
             var t = new BarrenSpreadTracker();
             for (int i = 0; i < BarrenSpreadTracker.DefaultThreshold - 1; i++)
@@ -108,6 +110,40 @@ namespace DisasterPlus.Core.Tests.FireWhirl
                 Assert.False(t.Record(3, 0));
             }
             Assert.True(t.Record(3, 0));
+        }
+
+        [Fact]
+        public void RefusedByDesignCandidatesAreNotEvidence()
+        {
+            // この修正の動機。火災旋風が成功した跡地の定常状態は
+            // 「まだ燃えている建物（Select が除外）＋ 燃え尽きた瓦礫（必ず拒否される）」で、
+            // 瓦礫を attempted に数えていたころは正常な街で無限に証拠が積み上がった。
+            // FireWhirlDamage.CanBurn がそれらを attempted から外すので、
+            // 呼び出し側から見れば「試行 0 の回」が延々と続くだけになる。
+            var t = new BarrenSpreadTracker();
+            for (int i = 0; i < BarrenSpreadTracker.DefaultThreshold * 4; i++)
+            {
+                Assert.False(t.Record(0, 0));
+            }
+            Assert.Equal(0, t.Streak);
+            Assert.False(t.Tripped);
+        }
+
+        [Fact]
+        public void OccasionalIgnitionKeepsTheDetectorQuietForever()
+        {
+            // 正常系。閾値に届く手前で 1 棟でも着火すれば証拠は毎回捨てられる。
+            var t = new BarrenSpreadTracker();
+            for (int round = 0; round < 10; round++)
+            {
+                for (int i = 0; i < BarrenSpreadTracker.DefaultThreshold - 1; i++)
+                {
+                    Assert.False(t.Record(3, 0));
+                }
+                Assert.False(t.Record(3, 1));
+                Assert.Equal(0, t.Streak);
+            }
+            Assert.False(t.Tripped);
         }
     }
 }

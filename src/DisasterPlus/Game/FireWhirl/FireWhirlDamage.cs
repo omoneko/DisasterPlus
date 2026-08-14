@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using ColossalFramework;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.FireWhirl;
+using UnityEngine;
 
 namespace DisasterPlus.Game
 {
@@ -31,6 +32,19 @@ namespace DisasterPlus.Game
         /// </summary>
         private const int IntervalFrames = 16;
 
+        /// <summary>
+        /// 候補に採るフラグ条件。Created が立っていて Collapsed が立っていないこと。
+        ///
+        /// Collapsed（= BurnedDown、実測 0x400000。同じ値）を弾くのが要点。
+        /// 燃え尽きた瓦礫は Created を持ったまま m_fireIntensity == 0 に戻るので、
+        /// この除外が無いと「まだ燃えていない建物」として選ばれ続け、
+        /// CommonBuildingAI.BurnBuilding に必ず断られる。火災旋風が成功した跡地は
+        /// これで埋まるため、候補数・選定数まで恒常的に水増しされ、
+        /// オーバーレイの数字が読めなくなる。
+        /// </summary>
+        private const Building.Flags CollectMask =
+            Building.Flags.Created | Building.Flags.Collapsed;
+
         private static readonly List<IgnitionCandidate> _candidates = new List<IgnitionCandidate>();
         private static readonly List<ushort> _selected = new List<ushort>();
 
@@ -46,11 +60,13 @@ namespace DisasterPlus.Game
         private static int _lastCandidates;
         private static int _lastSelected;
         private static int _lastAttempted;
+        private static int _lastRefused;
         private static int _lastIgnited;
         private static int _totalIgnited;
 
         private static readonly BarrenSpreadTracker _barren = new BarrenSpreadTracker();
         private static bool _barrenAlertPending;
+        private static bool _barrenRecoveryPending;
 
         /// <summary>これまでに走った延焼判定の回数（セッション累計）。</summary>
         public static int Passes { get { return _passes; } }
@@ -61,8 +77,17 @@ namespace DisasterPlus.Game
         /// <summary>直近 1 回の判定で確率選定を通った棟数（全旋風の合計）。</summary>
         public static int LastSelected { get { return _lastSelected; } }
 
-        /// <summary>直近 1 回の判定で実際に BurnBuilding を呼んだ棟数（全旋風の合計）。</summary>
+        /// <summary>
+        /// 直近 1 回の判定で「バニラが受け付けるはずの建物に」BurnBuilding を呼んだ棟数
+        /// （全旋風の合計）。空振り検出の証拠になるのはこの数。
+        /// </summary>
         public static int LastAttempted { get { return _lastAttempted; } }
+
+        /// <summary>
+        /// 直近 1 回の判定で、選ばれたがバニラが設計上断る棟数（全旋風の合計）。
+        /// 瓦礫・公園・消防署・水没中など。証拠には数えない。
+        /// </summary>
+        public static int LastRefused { get { return _lastRefused; } }
 
         /// <summary>直近 1 回の判定で着火した棟数（全旋風の合計）。</summary>
         public static int LastIgnited { get { return _lastIgnited; } }
@@ -89,6 +114,17 @@ namespace DisasterPlus.Game
             return true;
         }
 
+        /// <summary>
+        /// 閾値に達していた空振りが「今しがた」解消したかを 1 回だけ返す。
+        /// 呼び出し側（FireWhirlFeature）が Degraded の自己申告を取り下げるために使う。
+        /// </summary>
+        public static bool ConsumeBarrenRecovery()
+        {
+            if (!_barrenRecoveryPending) return false;
+            _barrenRecoveryPending = false;
+            return true;
+        }
+
         public static void Reset()
         {
             _candidates.Clear();
@@ -99,10 +135,12 @@ namespace DisasterPlus.Game
             _lastCandidates = 0;
             _lastSelected = 0;
             _lastAttempted = 0;
+            _lastRefused = 0;
             _lastIgnited = 0;
             _totalIgnited = 0;
             _barren.Reset();
             _barrenAlertPending = false;
+            _barrenRecoveryPending = false;
         }
 
         public static void Apply(uint frameIndex, float deltaMinutes, int spreadStrength)
@@ -122,7 +160,7 @@ namespace DisasterPlus.Game
 
             var buildings = BuildingManager.instance.m_buildings.m_buffer;
 
-            int candidates = 0, selected = 0, attempted = 0, ignited = 0;
+            int candidates = 0, selected = 0, attempted = 0, refused = 0, ignited = 0;
 
             for (int w = 0; w < views.Count; w++)
             {
@@ -138,9 +176,10 @@ namespace DisasterPlus.Game
                 selected += _selected.Count;
                 if (_selected.Count == 0) continue;
 
-                int tried;
-                int lit = Ignite(buildings, v.DisasterId, out tried);
+                int tried, refusedHere;
+                int lit = Ignite(buildings, v.DisasterId, out tried, out refusedHere);
                 attempted += tried;
+                refused += refusedHere;
                 ignited += lit;
 
                 if (lit > 0)
@@ -153,6 +192,7 @@ namespace DisasterPlus.Game
             _lastCandidates = candidates;
             _lastSelected = selected;
             _lastAttempted = attempted;
+            _lastRefused = refused;
             _lastIgnited = ignited;
             _totalIgnited += ignited;
 
@@ -163,9 +203,12 @@ namespace DisasterPlus.Game
             Log.Diag("spread",
                 "pass#" + _passes + " strength=" + spreadStrength
                 + " candidates=" + candidates + " selected=" + selected
-                + " attempted=" + attempted + " ignited=" + ignited);
+                + " attempted=" + attempted + " refused=" + refused
+                + " ignited=" + ignited);
 
+            bool wasTripped = _barren.Tripped;
             if (_barren.Record(attempted, ignited)) _barrenAlertPending = true;
+            if (wasTripped && !_barren.Tripped) _barrenRecoveryPending = true;
         }
 
         /// <summary>
@@ -191,12 +234,16 @@ namespace DisasterPlus.Game
         /// （クラスの先頭コメントの前提は保たれる）。
         /// </summary>
         /// <param name="attempted">
-        /// 実際に BurnBuilding を呼んだ棟数。「選ばれた棟数」ではなくこれを診断に使う。
-        /// 選定後に燃え出した建物や AI を持たない建物は呼ぶ前に弾かれるので、
-        /// selected をそのまま使うと「周囲が全部すでに燃えている大火災」を
-        /// 「延焼が壊れている」と誤判定してしまう。
+        /// 「バニラが受け付けるはずの建物に BurnBuilding を呼んだ」棟数。
+        /// 診断（BarrenSpreadTracker）の証拠になるのはこの数だけ。
+        /// <see cref="CanBurn"/> が false の棟にも BurnBuilding は呼ぶが、ここには数えない。
         /// </param>
-        private static int Ignite(Building[] buildings, ushort disasterId, out int attempted)
+        /// <param name="refused">
+        /// 選ばれたが「バニラが設計上断る」棟数。attempted &lt; selected の理由が
+        /// オーバーレイから読めるように残すだけで、証拠には使わない。
+        /// </param>
+        private static int Ignite(Building[] buildings, ushort disasterId,
+                                  out int attempted, out int refused)
         {
             // 災害グループを渡すと m_buildingFireCount が正しく積まれる。
             // グループは DisasterAI.CreateDisaster が m_ownerInstance.Disaster = 災害ID で
@@ -206,6 +253,7 @@ namespace DisasterPlus.Game
             var group = InstanceManager.instance.GetGroup(groupId);
 
             attempted = 0;
+            refused = 0;
             int ignited = 0;
             for (int i = 0; i < _selected.Count; i++)
             {
@@ -216,10 +264,53 @@ namespace DisasterPlus.Game
                 var info = buildings[id].Info;
                 if (info == null || info.m_buildingAI == null) continue;
 
-                attempted++;
+                bool burnable = CanBurn(id, ref buildings[id], info.m_buildingAI);
+                if (burnable) attempted++; else refused++;
+
+                // burnable が false でも呼ぶ。CanBurn はバニラの拒否条件の写しであって
+                // バニラそのものではないので、写しが将来ずれたときに本物の着火を
+                // こちらが握り潰さないようにする。着火すれば ignited が増えて
+                // 空振り判定は解除されるので、証拠としての正しさも壊れない。
                 if (info.m_buildingAI.BurnBuilding(id, ref buildings[id], group, false)) ignited++;
             }
             return ignited;
+        }
+
+        /// <summary>
+        /// この建物への BurnBuilding が「バニラの設計として」通りうるか。
+        ///
+        /// これが要る理由: 空振り検出の証拠から「バニラが設計上断るもの」を除くため。
+        /// 除かないと、火災旋風が成功した後の定常状態
+        /// （＝まだ燃えている建物＋燃え尽きた瓦礫）で瓦礫だけが延々と試行・拒否され、
+        /// 空振りの連続が正常な街でも必ず積み上がる。streak は着火でしか下りないので
+        /// 閾値には確実に到達し、「BurnBuilding が全部拒否している」という
+        /// 字義どおり正しく完全に誤解を招く警告が出る。
+        ///
+        /// IL 実測（CommonBuildingAI.BurnBuilding が false を返す経路は次の 3 つだけ。
+        /// それ以外の出口は ldc.i4.1 / ret）:
+        ///   1. GetFireParameters(...) が false
+        ///        BuildingAI の既定実装        : ldc.i4.0; ret（＝常に false）
+        ///        PlayerBuildingAI             : return m_fireHazard != 0（プレハブ側の値）
+        ///        FireStationAI                : ldc.i4.0; ret（消防署は絶対に燃えない）
+        ///        ParkAI / PlazaAI / MonumentAI 等は PlayerBuildingAI を継承したまま
+        ///        なので、m_fireHazard が 0 の公園・広場はここで落ちる。
+        ///   2. m_flags &amp; 0x400000（Building.Flags.Collapsed。BurnedDown と同値。実測）
+        ///   3. TerrainManager.WaterLevel(pos.xz) &gt; m_position.y（水没中）
+        ///
+        /// さらに BuildingAI.BurnBuilding 自体が ldc.i4.0; ret なので、
+        /// CommonBuildingAI を継承していない AI は何をしても燃えない。
+        /// </summary>
+        private static bool CanBurn(ushort id, ref Building b, BuildingAI ai)
+        {
+            if (!(ai is CommonBuildingAI)) return false;
+            if ((b.m_flags & Building.Flags.Collapsed) != Building.Flags.None) return false;
+
+            int fireHazard, fireSize, fireTolerance;
+            if (!ai.GetFireParameters(id, ref b, out fireHazard, out fireSize, out fireTolerance))
+                return false;
+
+            var pos = b.m_position;
+            return TerrainManager.instance.WaterLevel(new Vector2(pos.x, pos.z)) <= pos.y;
         }
 
         /// <summary>
@@ -251,7 +342,7 @@ namespace DisasterPlus.Game
 
                     while (id != 0)
                     {
-                        if ((buildings[id].m_flags & Building.Flags.Created) != Building.Flags.None)
+                        if ((buildings[id].m_flags & CollectMask) == Building.Flags.Created)
                         {
                             var p = buildings[id].m_position;
                             var pos = new Vec2(p.x, p.z);

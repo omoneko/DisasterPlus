@@ -24,7 +24,13 @@ namespace DisasterPlus.Game
         // このプロジェクトで実際に 3 回起きた失敗の形なので、機能側から明示的に
         // Degraded を申告できる口を用意する。_errorCounts と同じ gate で守り、
         // レベルアンロードで一緒に消す。
-        private static readonly Dictionary<string, string> _degradeNotes = new Dictionary<string, string>();
+        //
+        // 機能名 → (申告キー → 理由) の 2 段。1 機能が複数の理由で同時に Degraded に
+        // なりうる（③なら「終了処理が詰まった」と「延焼が空振り」）ので、単純な
+        // 機能名 1 本のキーだと後勝ちで上書きされ、しかも回復時に取り下げると
+        // 他方の申告まで巻き添えで消える。
+        private static readonly Dictionary<string, Dictionary<string, string>> _degradeNotes =
+            new Dictionary<string, Dictionary<string, string>>();
 
         /// <summary>
         /// LevelLoaded() を通過済みか。
@@ -226,16 +232,48 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// 例外は出ていないが振る舞いがおかしいことを機能が自己申告する口。
-        /// 同じ機能から複数回呼ぶと直近の理由で上書きされる。
-        /// レベルアンロードまで残る（＝一度立ったバッジは下がらない）。
+        /// 同じ (featureName, noteKey) に複数回呼ぶと直近の理由で上書きされる。
+        /// noteKey が違えば併記される。
+        /// ClearDegraded か レベルアンロードまで残る。
         /// main / sim どちらのスレッドから呼んでもよい。
         /// </summary>
-        public static void NoteDegraded(string featureName, string reason)
+        /// <param name="noteKey">
+        /// 申告の識別子。回復時に <see cref="ClearDegraded"/> へ同じ値を渡して
+        /// 「自分が立てた分だけ」を取り下げる。
+        /// </param>
+        public static void NoteDegraded(string featureName, string noteKey, string reason)
         {
-            if (string.IsNullOrEmpty(featureName)) return;
+            if (string.IsNullOrEmpty(featureName) || string.IsNullOrEmpty(noteKey)) return;
             lock (_errorGate)
             {
-                _degradeNotes[featureName] = string.IsNullOrEmpty(reason) ? "degraded" : reason;
+                Dictionary<string, string> notes;
+                if (!_degradeNotes.TryGetValue(featureName, out notes))
+                {
+                    notes = new Dictionary<string, string>();
+                    _degradeNotes[featureName] = notes;
+                }
+                notes[noteKey] = string.IsNullOrEmpty(reason) ? "degraded" : reason;
+            }
+        }
+
+        /// <summary>
+        /// 自己申告した Degraded を取り下げる。無かった場合は何もしない。
+        ///
+        /// 回復経路が無いと、症状が消えた後もバッジだけが Degraded のまま残り、
+        /// 本文（症状の行）が消えているのに見出しは赤い、という自己矛盾した
+        /// オーバーレイになる。狼少年を作らないのがこの基盤の目的なので、
+        /// 立てた側は必ず下ろす経路も持つこと。
+        /// main / sim どちらのスレッドから呼んでもよい。
+        /// </summary>
+        public static void ClearDegraded(string featureName, string noteKey)
+        {
+            if (string.IsNullOrEmpty(featureName) || string.IsNullOrEmpty(noteKey)) return;
+            lock (_errorGate)
+            {
+                Dictionary<string, string> notes;
+                if (!_degradeNotes.TryGetValue(featureName, out notes)) return;
+                if (!notes.Remove(noteKey)) return;
+                if (notes.Count == 0) _degradeNotes.Remove(featureName);
             }
         }
 
@@ -296,8 +334,8 @@ namespace DisasterPlus.Game
                     }
 
                     // 例外を伴わない自己申告（NoteDegraded）。例外記録と両方あれば併記する。
-                    string degraded;
-                    if (_degradeNotes.TryGetValue(names[i], out degraded))
+                    string degraded = JoinDegradeNotes(names[i]);
+                    if (degraded.Length > 0)
                     {
                         healths[i] = FeatureHealth.Degraded;
                         notes[i] = notes[i].Length == 0 ? degraded : notes[i] + "; " + degraded;
@@ -326,6 +364,30 @@ namespace DisasterPlus.Game
             }
 
             return new DiagnosticReport(header, Assumptions.LastResults, sections);
+        }
+
+        /// <summary>
+        /// 1 機能ぶんの自己申告を 1 本の文にまとめる。_errorGate を持ったまま呼ぶこと。
+        ///
+        /// 申告キーで並べ替えてから連結する。Dictionary の列挙順は取り下げ
+        /// （ClearDegraded）を挟むと変わりうるので、そのままだとオーバーレイの
+        /// 1 行が理由もなく入れ替わって見える。
+        /// </summary>
+        private static string JoinDegradeNotes(string featureName)
+        {
+            Dictionary<string, string> notes;
+            if (!_degradeNotes.TryGetValue(featureName, out notes) || notes.Count == 0) return "";
+
+            var keys = new List<string>(notes.Keys);
+            keys.Sort(System.StringComparer.Ordinal);
+
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < keys.Count; i++)
+            {
+                if (sb.Length > 0) sb.Append("; ");
+                sb.Append(notes[keys[i]]);
+            }
+            return sb.ToString();
         }
 
         /// <summary>MOD 版。アセンブリのバージョンをそのまま出す（AssemblyInfo.cs が唯一の情報源）。</summary>
