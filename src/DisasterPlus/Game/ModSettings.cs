@@ -36,6 +36,9 @@ namespace DisasterPlus.Game
         public static SavedBool OverlayEnabled;
         public static SavedInt OverlayHotkey;
         public static SavedInt LogChannelMask;
+        public static SavedBool ForecastEnabled;
+        public static SavedInt ForecastButtonX;
+        public static SavedInt ForecastButtonY;
 
         public static void Ensure()
         {
@@ -65,6 +68,12 @@ namespace DisasterPlus.Game
             OverlayHotkey         = new SavedInt("diagOverlayHotkey", FileName, (int)KeyCode.F11, true);
             LogChannelMask        = new SavedInt("diagLogChannels", FileName,
                                                   DisasterPlus.Core.Diagnostics.LogChannel.DefaultMask, true);
+
+            ForecastEnabled  = new SavedBool("forecastEnabled", FileName, true, true);
+            // -1 = 未決定。ForecastPanelButton が初回インストール時に FreeSlotFinder で
+            // 空き位置を探し、決まった座標をここへ書き戻す。以後はその座標を再利用する。
+            ForecastButtonX  = new SavedInt("forecastButtonX", FileName, -1, true);
+            ForecastButtonY  = new SavedInt("forecastButtonY", FileName, -1, true);
 
             _ready = true;
         }

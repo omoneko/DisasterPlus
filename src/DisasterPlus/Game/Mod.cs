@@ -71,6 +71,29 @@ namespace DisasterPlus.Game
                 helper.AddGroup(Strings.FireWhirlNeedsDlc);
             }
 
+            var forecast = helper.AddGroup(Strings.GroupForecast);
+            forecast.AddCheckbox(Strings.ForecastEnabled, ModSettings.ForecastEnabled.value,
+                v => ModSettings.ForecastEnabled.value = v);
+            // 探索のやり直しは次回のレベルロードで自然に起きる（ForecastPanelButton.Install
+            // は保存済み座標が -1 のときだけ FreeSlotFinder を再度呼ぶ）。ここでは保存値を
+            // 戻すだけで十分（設計書 5.1 の「ボタン位置をリセット」）。
+            forecast.AddButton(Strings.ForecastResetButton, delegate
+            {
+                ModSettings.ForecastButtonX.value = -1;
+                ModSettings.ForecastButtonY.value = -1;
+            });
+
+            // 予報パネルの気象・傾向の行は DLC 無しでも正しく動くので、機能そのものは
+            // 隠さない。ただしハザードの 2 行（落雷・竜巻の「マップに表示」とカーソル
+            // 位置の数値）は DLC が無いと prefab も気象レーダーも存在せず、永久に
+            // 空のビューと 0 になる。パネル側では行ごと出さないようにしてあるが
+            // （ForecastPanel._hazardRowsBuilt）、設定画面にも理由を書いておかないと
+            // 「機能の一部が黙って無い」ように見える。FireWhirlNeedsDlc と同じ扱い。
+            if (!ModCompat.NaturalDisastersOwned)
+            {
+                helper.AddGroup(Strings.ForecastHazardNeedsDlc);
+            }
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
@@ -128,6 +151,15 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.General)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.General));
+
+            // FireWhirl と違い、Forecast チャンネル付きの Log.Diag 呼び出しが実在する
+            // （ForecastFeature.OnSimulationTick）。このチェックボックスは死んだ設定ではない。
+            channels.AddCheckbox(Strings.LogChannelForecast,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.Forecast, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Forecast)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Forecast));
         }
     }
 }

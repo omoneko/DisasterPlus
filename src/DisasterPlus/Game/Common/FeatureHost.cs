@@ -114,13 +114,20 @@ namespace DisasterPlus.Game
 
             if (deltaMinutes <= 0f)
             {
-                // ポーズ中でも収集はする。OnSimulationTick は呼ばない
-                // （＝機能の状態は進めない）ので、pause guard 本来の目的は保たれる。
+                // ポーズ中でも収集はする。状態を進める機能の OnSimulationTick は
+                // 呼ばない（＝機能の状態は進めない）ので、pause guard 本来の目的は保たれる。
                 //
                 // 収集をダンプ依頼のときだけにしてはいけない。プレイヤーが
                 // 手を止めて中を見るためにポーズしてオーバーレイを開く、というのが
                 // 最も自然な使い方で、そこで箱が空のまま更新されないのでは
                 // オーバーレイの意味が無い。
+                //
+                // 同じ理屈が表示専用の機能にも当てはまる（全体レビュー指摘）。
+                // ロード直後の最初の tick は必ず 0 分なので、ここで一律に返すと
+                // ロードしてすぐポーズしている間、天気予報パネルは 1 度もデータを
+                // 受け取れず全行が「読み取れません」になる。IPausedTickFeature を
+                // 名乗る機能（状態を進めないことを自分で保証する機能）だけは通す。
+                TickPausedFeatures(frame);
                 CollectAndPublish(dumpRequested);
                 return;   // ポーズ中は機能の状態を進めない。負にも絶対にしない。
             }
@@ -136,6 +143,28 @@ namespace DisasterPlus.Game
             }
 
             CollectAndPublish(dumpRequested);
+        }
+
+        /// <summary>
+        /// ポーズ中（ゲーム内経過 0 分）でも tick を受け取る機能だけを回す。sim スレッド専用。
+        ///
+        /// deltaMinutes は 0f を渡す。<see cref="IPausedTickFeature"/> を名乗る機能は
+        /// 「deltaMinutes で状態を進めない」ことを契約として保証している
+        /// （そちらの doc 参照）。ここで別の値を渡してはいけない。
+        /// </summary>
+        private static void TickPausedFeatures(uint frame)
+        {
+            for (int i = 0; i < _features.Count; i++)
+            {
+                if (!(_features[i] is IPausedTickFeature)) continue;
+
+                try { _features[i].OnSimulationTick(frame, 0f); }
+                catch (System.Exception e)
+                {
+                    Log.Error(_features[i].Name + ".OnSimulationTick (paused)", e);
+                    NoteFailure(_features[i].Name, e);
+                }
+            }
         }
 
         /// <summary>

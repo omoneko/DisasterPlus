@@ -90,6 +90,26 @@ namespace DisasterPlus.Game
             Debug.Log(Prefix + "DIAG " + key + ": " + message);
         }
 
+        /// <summary>
+        /// channel の Diag が今の設定で出力されうるか。
+        ///
+        /// <see cref="Diag(int, string, string)"/> は同じ判定を自分でも行うので、
+        /// これは**正しさのためではなく、引数の評価コストを避けるためだけ**にある。
+        /// C# は呼び出し前に引数を評価し切るので、Diag の内側でいくら弾いても
+        /// 文字列連結と ToString() は既に済んでしまっている。既定で OFF の
+        /// チャンネル（Forecast 等）を毎 sim tick 呼ぶ経路では、その組み立てが
+        /// 丸ごと無駄になる（全体レビュー指摘）。
+        ///
+        /// スロットル判定（<see cref="ShouldEmit"/>）はここでは見ない。見てしまうと
+        /// この問い合わせ自体が枠を消費するか、あるいは呼び出し側が枠の状態に
+        /// 依存して分岐することになる。ここが true でも Diag が実際には
+        /// 出さないことはある（それで正しい）。
+        /// </summary>
+        public static bool DiagEnabled(int channel)
+        {
+            return DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(channel, CurrentMask());
+        }
+
         /// <summary>レベルアンロード時に呼ぶ。都市をまたいでスロットル状態を持ち越さない。</summary>
         public static void Reset()
         {
