@@ -91,20 +91,50 @@ namespace DisasterPlus.Game
         /// <summary>読み取りに成功したか。false なら表示側は「読み取れません」と出す。</summary>
         public readonly bool Valid;
 
+        /// <summary>
+        /// main スレッドが publish したカーソル座標の直下にあった建物 1 個の余裕度
+        /// （<see cref="BuildingProbe"/> が sim スレッドで作る）。
+        ///
+        /// 建物が見つからなかった／カーソルが無効だったときは
+        /// <c>HasBuilding == false</c> の <see cref="BuildingMargin.None"/>。
+        /// **main スレッドはこれを描くだけで、建物バッファには一切触らない。**
+        /// </summary>
+        public readonly BuildingMargin CursorBuilding;
+
+        /// <summary>
+        /// <see cref="CursorBuilding"/> がどの地震についての判定か（災害バッファ上の添字）。
+        ///
+        /// **0 は「建物が無かった」ではなく「そもそも調べていない」**——カーソルが
+        /// 無効（パネルが閉じている／マウスが UI の上／地形を外している）か、
+        /// 破壊判定が走る地震（Active / Emerging）が 1 つも無かったか。
+        /// 「調べたが建物が無かった」は <c>CursorQuakeId != 0</c> かつ
+        /// <c>CursorBuilding.HasBuilding == false</c> で表す。この 2 つを混ぜると、
+        /// 建物の上にカーソルを置いているのに「建物がありません」と出る。
+        ///
+        /// **表示側はこれを必ず出すこと。** 地震は同時に複数進行しうる（§E-1）。
+        /// 1 個ぶんの判定だけを出して黙っていると、他の地震について何も言っていない
+        /// ことが読み手に伝わらず、また「確信を持って誤った数値」になる。
+        /// </summary>
+        public readonly ushort CursorQuakeId;
+
         public EarthquakeSnapshot(IList<EarthquakeReading> quakes, EarthquakePrefabFacts prefab,
-                                  uint currentFrame, float hourOfDay, bool dayNightEnabled, bool valid)
+                                  uint currentFrame, float hourOfDay, bool dayNightEnabled,
+                                  BuildingMargin cursorBuilding, ushort cursorQuakeId, bool valid)
         {
             Quakes = quakes == null ? NoQuakes : quakes;
             Prefab = prefab;
             CurrentFrame = currentFrame;
             HourOfDay = hourOfDay;
             DayNightEnabled = dayNightEnabled;
+            CursorBuilding = cursorBuilding;
+            CursorQuakeId = cursorQuakeId;
             Valid = valid;
         }
 
         public static EarthquakeSnapshot Invalid()
         {
-            return new EarthquakeSnapshot(NoQuakes, new EarthquakePrefabFacts(), 0u, 0f, false, false);
+            return new EarthquakeSnapshot(NoQuakes, new EarthquakePrefabFacts(), 0u, 0f, false,
+                                          BuildingMargin.None(), 0, false);
         }
 
         /// <summary>地震が 1 個も無いときに使う共有の空リスト。読み取り側専用。</summary>

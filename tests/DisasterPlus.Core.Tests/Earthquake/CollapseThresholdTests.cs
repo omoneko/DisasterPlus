@@ -79,38 +79,56 @@ namespace DisasterPlus.Core.Tests.Earthquake
         public void CollapseDistanceAgreesWithHits()
         {
             // 「震央から X m 以内なら倒れる」という主張そのものを固定する。
+            //
+            // Task 5 で署名が変わった。以前の CollapseDistance(threshold, intensity,
+            // probability) は probability を受け取りながらランプの分母を
+            // R = RadiusOf(intensity)（＝全体円盤の幾何）に決め打ちしていたので、
+            // 断層 4 円盤の probability = 1 を渡すと意味の無い数字が返っていた。
+            // 引数を消して、対になる GlobalDiscHits と揃えてある。
             const byte intensity = 100;
             for (int threshold = 0; threshold < 250; threshold += 7)
             {
-                float limit = CollapseThreshold.CollapseDistance(
-                    threshold, intensity, CollapseThreshold.GlobalDiscProbability);
+                float limit = CollapseThreshold.GlobalDiscCollapseDistance(threshold, intensity);
 
                 if (limit <= 0f)
                 {
                     // どの距離でも倒れないこと（震央でも）。
-                    Assert.False(CollapseThreshold.Hits(
-                        threshold, SeismicIntensity.At(0f, intensity),
-                        CollapseThreshold.GlobalDiscProbability));
+                    Assert.False(CollapseThreshold.GlobalDiscHits(
+                        threshold, SeismicIntensity.At(0f, intensity)));
                     continue;
                 }
 
                 float inside = limit * 0.99f;
                 float outside = limit * 1.01f;
-                Assert.True(CollapseThreshold.Hits(
-                    threshold, SeismicIntensity.At(inside, intensity),
-                    CollapseThreshold.GlobalDiscProbability));
-                Assert.False(CollapseThreshold.Hits(
-                    threshold, SeismicIntensity.At(outside, intensity),
-                    CollapseThreshold.GlobalDiscProbability));
+                Assert.True(CollapseThreshold.GlobalDiscHits(
+                    threshold, SeismicIntensity.At(inside, intensity)));
+                Assert.False(CollapseThreshold.GlobalDiscHits(
+                    threshold, SeismicIntensity.At(outside, intensity)));
             }
         }
 
         [Fact]
         public void CollapseDistanceGrowsWithIntensity()
         {
-            float at55 = CollapseThreshold.CollapseDistance(50, 55, CollapseThreshold.GlobalDiscProbability);
-            float at255 = CollapseThreshold.CollapseDistance(50, 255, CollapseThreshold.GlobalDiscProbability);
+            float at55 = CollapseThreshold.GlobalDiscCollapseDistance(50, 55);
+            float at255 = CollapseThreshold.GlobalDiscCollapseDistance(50, 255);
             Assert.True(at255 > at55, "a stronger quake must reach further");
+        }
+
+        [Fact]
+        public void GlobalDiscHelpersUseTheVanillaProbability()
+        {
+            // 2 つの入口が同じ 0.02 を使っていること。片方だけ書き換えると、
+            // 表示された倒壊距離と実際の判定が静かに食い違う。
+            Assert.Equal(
+                CollapseThreshold.Hits(199, 1f, CollapseThreshold.GlobalDiscProbability),
+                CollapseThreshold.GlobalDiscHits(199, 1f));
+            Assert.True(CollapseThreshold.GlobalDiscHits(199, 1f));
+            Assert.False(CollapseThreshold.GlobalDiscHits(200, 1f));
+
+            // しきい値 0 の建物は震央で必ず倒れ、その境界は R そのものになる。
+            Assert.Equal(SeismicIntensity.RadiusOf(100),
+                         CollapseThreshold.GlobalDiscCollapseDistance(0, 100), 3);
         }
     }
 }

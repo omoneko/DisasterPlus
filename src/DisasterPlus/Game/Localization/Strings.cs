@@ -196,5 +196,41 @@ namespace DisasterPlus.Game
         public static string EarthquakeBandModerate = "moderate";
         public static string EarthquakeBandStrong = "strong";
         public static string EarthquakeBandSevere = "very strong";
+
+        // --- ②地震（Task 5: 建物ごとの余裕度） ---
+        //
+        // 計画の 7 件に対する 3 件の追加（意図的な逸脱。Task 4 と同じ理由付けで、
+        // 「文言が足りないので既存キーを流用する」を避けるための追加である）。
+        // 計画 Step 7 は「AlreadyDown / Unknown の文言は既存キーを使い回す」と
+        // 書いているが、既存キーにその意味を持つものが実際には無かった:
+        //   - AlreadyDown  … 「圏外」でも「断層帯の内側」でもない。流用すると
+        //                     瓦礫の上で誤った理由を名乗ることになる。
+        //   - Unknown      … 「プレハブ 4 値が読めていないので判定を出せない」は
+        //                     この機能でいちばん出してはいけない嘘（＝断定）を
+        //                     避けるための文言そのものなので、代用が効かない。
+        //   - SurviveAnyDistance … 計画 5.2 の表が「X ≦ 0 なら『どれだけ近くても
+        //                     倒壊しません』」と明示的に別の文言を要求している。
+        // InsideFaultZone は計画どおり EarthquakeFaultBand / EarthquakeFaultInside と
+        // 常設の EarthquakeFaultBandNote を流用する（新しいキーを増やさない）。
+
+        public static string EarthquakeBuildingUnderCursor = "Building under the cursor";
+        public static string EarthquakeNoBuilding = "no building under the cursor";
+        public static string EarthquakeCollapseWithin = "Collapses within";
+        public static string EarthquakeCurrentDistance = "current distance";
+        public static string EarthquakeVerdictCollapse = "will collapse";
+        public static string EarthquakeVerdictSurvive = "will not collapse";
+        public static string EarthquakeVerdictSurviveAnyDistance =
+            "will not collapse at any distance at this intensity";
+        public static string EarthquakeAlreadyDown = "already collapsed or burning";
+        // 「分からない」を「外側」と言い換えないための行。判定を出さない理由を書く。
+        public static string EarthquakeVerdictUnknown =
+            "no verdict (the fault geometry could not be read from the EarthquakeAI prefab)";
+
+        // この機能でいちばん重要な 1 文。倒壊は乱数ではなく、地震が始まった瞬間に
+        // 既に決まっている（§A-3: 種は (建物, 災害) の組に対して定数）。ただし
+        // それが言えるのは全体円盤についてだけである。
+        public static string EarthquakeGlobalDiscOnly =
+            "This is decided for the city-wide disc, and it was already decided the moment the "
+            + "quake started. Inside the fault zone the four rupture patches judge separately.";
     }
 }

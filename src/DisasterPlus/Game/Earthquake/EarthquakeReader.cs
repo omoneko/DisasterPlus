@@ -85,8 +85,11 @@ namespace DisasterPlus.Game
                 // （EarthquakeSnapshot.DayNightEnabled の doc 参照）。
                 bool dayNight = sim.m_enableDayNight;
 
+                ushort cursorQuakeId;
+                var cursorBuilding = ProbeCursorBuilding(quakes, out cursorQuakeId);
+
                 return new EarthquakeSnapshot(quakes, prefab, sim.m_currentFrameIndex,
-                                              hour, dayNight, true);
+                                              hour, dayNight, cursorBuilding, cursorQuakeId, true);
             }
             catch (System.Exception e)
             {
@@ -191,6 +194,76 @@ namespace DisasterPlus.Game
                 coverageKnown,
                 crackLength,
                 crackWidth);
+        }
+
+        /// <summary>
+        /// カーソル直下の建物の余裕度。**sim スレッド専用**（建物バッファに触る）。
+        ///
+        /// 対象にするのは**破壊判定がこれから走る、あるいは今走っている地震 1 個だけ**で、
+        /// 全地震ぶんは走査しない（毎 sim tick のコストを地震の数に比例させない）。
+        ///
+        /// Clearing / Finished を外しているのは性能のためではなく**正確さのため**である。
+        /// 全体円盤の <c>DestroyBuildings</c> は <c>EarthquakeAI.SimulationStep</c> の
+        /// **Active 分岐にしか無い**（§A-3）。収束済みの地震について「倒壊します」と
+        /// 出すのは、もう起きないことを起きると言うことになる。
+        ///
+        /// 選定順: Active &gt; Emerging、同位なら強度が大きい方、それも同じなら添字が小さい方。
+        /// どの地震を選んだかは <see cref="EarthquakeSnapshot.CursorQuakeId"/> で名乗る。
+        /// </summary>
+        private static BuildingMargin ProbeCursorBuilding(IList<EarthquakeReading> quakes,
+                                                          out ushort cursorQuakeId)
+        {
+            cursorQuakeId = 0;
+            if (quakes.Count == 0) return BuildingMargin.None();
+
+            Vec3 cursor;
+            // main スレッドが「今カーソルはここ」と言っていないなら何も調べない
+            // （パネルが閉じている、マウスが UI の上にある、地形を外している）。
+            if (!EarthquakeHub.TakeCursor(out cursor)) return BuildingMargin.None();
+
+            var target = SelectDamagingQuake(quakes);
+            if (target == null) return BuildingMargin.None();
+
+            // ★ 建物が見つかる前にここで立てる。CursorQuakeId != 0 は
+            //    「この地震について、この座標を実際に調べた」の印であって
+            //    「建物があった」の印ではない。区別しないと、収束中の地震しか
+            //    無いとき（破壊判定はもう走らない）に、表示側が建物の上で
+            //    「カーソルの下に建物がありません」という誤った説明を出す。
+            cursorQuakeId = target.DisasterId;
+
+            var band = new FaultBand(target.Epicentre.ToVec2(), target.AngleRadians,
+                                     target.CrackLength, target.CrackWidth);
+
+            ushort found;
+            var margin = BuildingProbe.ProbeAt(cursor, target, band, out found);
+            return found != 0 ? margin : BuildingMargin.None();
+        }
+
+        /// <summary>破壊判定の対象になる地震を 1 個選ぶ。無ければ null。</summary>
+        private static EarthquakeReading SelectDamagingQuake(IList<EarthquakeReading> quakes)
+        {
+            EarthquakeReading best = null;
+            int bestRank = 0;
+
+            for (int i = 0; i < quakes.Count; i++)
+            {
+                var q = quakes[i];
+                int rank = q.Phase == EarthquakePhase.Active ? 2
+                         : q.Phase == EarthquakePhase.Emerging ? 1
+                         : 0;
+                if (rank == 0) continue;
+
+                bool better;
+                if (best == null) better = true;
+                else if (rank != bestRank) better = rank > bestRank;
+                else better = q.Intensity > best.Intensity;
+
+                if (!better) continue;
+                best = q;
+                bestRank = rank;
+            }
+
+            return best;
         }
 
         /// <summary>

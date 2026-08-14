@@ -72,6 +72,12 @@ namespace DisasterPlus.Core.Earthquake
         /// <summary>
         /// IL の比較そのもの: <c>threshold &lt; localFactor * probability * 10000</c>。
         /// int が float へ昇格して比較される。等号は含まない。
+        ///
+        /// **これは円盤の種類を問わない汎用の比較である。** localFactor（＝IL の fD）を
+        /// どの円盤の幾何から計算するかは呼び出し側の責任で、全体円盤なら
+        /// <see cref="GlobalDiscHits"/> を使うこと。断層 4 円盤の fD は
+        /// <c>(2w - dist) / Max(1, 2w - w)</c> であって全体円盤の <c>1 - d/R</c> とは
+        /// 別式なので、両者を取り違えると数字は出るが意味が無くなる。
         /// </summary>
         public static bool Hits(int threshold, float localFactor, float probability)
         {
@@ -80,18 +86,40 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// この建物が全体円盤で倒壊し始める震央距離。0 以下ならどの距離でも倒れない。
+        /// 全体円盤での当たり判定。<paramref name="localFactor"/> は
+        /// <see cref="SeismicIntensity.At"/> が返す s（＝<c>1 - d/R</c>）でなければならない。
+        /// probability を呼び出し側に選ばせないための入口で、
+        /// <see cref="GlobalDiscCollapseDistance"/> と必ず対で使う。
+        /// </summary>
+        public static bool GlobalDiscHits(int threshold, float localFactor)
+        {
+            return Hits(threshold, localFactor, GlobalDiscProbability);
+        }
+
+        /// <summary>
+        /// この建物が**全体円盤で**倒壊し始める震央距離。0 以下ならどの距離でも倒れない。
         ///
-        ///   threshold &lt; (1 - d/R) * p * 10000
-        ///   d &lt; R * (1 - threshold / (p * 10000))
+        ///   threshold &lt; (1 - d/R) * 0.02 * 10000
+        ///   d &lt; R * (1 - threshold / (0.02 * 10000))
         ///
         /// 「予言」ではなく、バニラが既に決めた値から導いた**事実**である。
         /// ただし全体円盤についてのみ（クラス doc の限界を参照）。
+        ///
+        /// ── なぜ probability を引数に取らないのか（この設計は意図的） ──────
+        ///
+        /// 以前の署名は <c>CollapseDistance(threshold, intensity, probability)</c> だったが、
+        /// **ランプの分母を <c>R = RadiusOf(intensity)</c> に決め打ちしていた**。R は
+        /// 全体円盤の幾何そのものである。断層 4 円盤は毎ステップ振り直される**別の中心**の
+        /// まわりで <c>min = w, max = 2w</c> のランプを持つので、あの署名に
+        /// <c>probability = 1</c> を渡すと「もっともらしいが何の意味も無い距離」が返っていた。
+        /// 禁止事項として doc に書くだけでは、いつか誰かが渡す。**引数を消して
+        /// 構造的に不可能にした。** 断層帯の到達距離が要るなら
+        /// <see cref="FaultBand.HalfWidthAt"/> を使うこと（あちらは別のモデルである）。
         /// </summary>
-        public static float CollapseDistance(int threshold, byte intensity, float probability)
+        public static float GlobalDiscCollapseDistance(int threshold, byte intensity)
         {
-            float denominator = probability * Draws;
-            if (denominator <= 0f || float.IsNaN(denominator)) return 0f;
+            // 定数なので 0 にも NaN にもならない。分母のガードは不要。
+            const float denominator = GlobalDiscProbability * Draws;
 
             float d = SeismicIntensity.RadiusOf(intensity) * (1f - threshold / denominator);
             return d > 0f ? d : 0f;

@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 16 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 17 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -43,13 +43,14 @@ namespace DisasterPlus.Game
         /// 地震 5 件（EarthquakeAI プレハブの 4 調整値・DisasterData の
         /// m_intensity/m_activationFrame/m_startFrame/m_angle・
         /// EarthquakeCoverage と CheckLocalResource・sim スレッドの時計・
-        /// SubInfoMode.EarthquakeHazard と EarthquakeAI.UpdateHazardMap）＋
+        /// SubInfoMode.EarthquakeHazard と EarthquakeAI.UpdateHazardMap・
+        /// VanillaRandomizer と本物の Randomizer のビット一致）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 17;
+        private const int TotalCheckCount = 18;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -113,7 +114,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 16 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 17 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -370,6 +371,38 @@ namespace DisasterPlus.Game
 
             // --- ②地震（Task 4）ここまで ---
 
+            // --- ②地震（Task 5）ここから ---
+
+            // **これが Task 1 のビット一致を実際に保証する唯一の検査である。**
+            // 建物ごとの倒壊判定は全て VanillaRandomizer の再現の上に乗っており、
+            // 1 ビットずれても何も壊れない——もっともらしい数字が出続けたまま、
+            // パネルの断定だけが全部嘘になる。ユニットテストは LCG の定義からの
+            // 逸脱しか捕まえられない（本物の DLL を参照できない）ので、
+            // ゲーム本体との一致はここでしか見られない。
+            Check("VanillaRandomizer reproduces ColossalFramework.Math.Randomizer bit for bit",
+                  "every per-building collapse verdict is wrong; the panel would keep showing "
+                  + "plausible numbers that do not match what the game draws",
+                  delegate
+                  {
+                      // 本物と自前の実装を並べて回す。ビット列だけでなく「引く順序」も見る
+                      // （1 個ずれる壊れ方をこの検査で捕まえるため、必ず 2 回以上引く）。
+                      // Randomizer は struct なので、必ずローカル変数に置いて使うこと
+                      // （プロパティやフィールド経由で呼ぶとコピーが進んで列が分岐する）。
+                      int[] seeds = { 0, 1, -1, 12345, 0x00070000 | 1234, int.MinValue, int.MaxValue };
+                      for (int i = 0; i < seeds.Length; i++)
+                      {
+                          var real = new ColossalFramework.Math.Randomizer(seeds[i]);
+                          var ours = new DisasterPlus.Core.Earthquake.VanillaRandomizer(seeds[i]);
+                          for (int k = 0; k < 4; k++)
+                          {
+                              if (real.Int32(10000u) != ours.Int32(10000u)) return false;
+                          }
+                      }
+                      return true;
+                  });
+
+            // --- ②地震（Task 5）ここまで ---
+
             Report();
         }
 
@@ -475,7 +508,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 16 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 17 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

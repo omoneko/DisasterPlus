@@ -88,6 +88,9 @@ namespace DisasterPlus.Game
         private static UILabel _cursorLabel;
         private static UILabel _faultLabel;
         private static UILabel _faultNoteLabel;
+        private static UILabel _marginBuildingLabel;
+        private static UILabel _marginVerdictLabel;
+        private static UILabel _marginNoteLabel;
         private static UILabel _hazardLabel;
 
         /// <summary>
@@ -102,6 +105,16 @@ namespace DisasterPlus.Game
         /// </summary>
         private static bool _bodyBuilt;
 
+        /// <summary>
+        /// 直近に <see cref="EarthquakeHub.PublishCursor"/> へ渡した有効フラグ。
+        ///
+        /// パネルが閉じている間に「無効」を毎フレーム publish し直す意味は無いので、
+        /// 状態が変わるときだけロックを取る。**逆に、無効になったことは必ず 1 回
+        /// 伝える** —— 伝えないと sim 側は最後に見た座標を永久に調べ続け、
+        /// 閉じたパネルのために毎 tick 建物グリッドを走査することになる。
+        /// </summary>
+        private static bool _cursorPublishedValid;
+
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
 
         public static void Show()
@@ -115,6 +128,8 @@ namespace DisasterPlus.Game
         public static void Hide()
         {
             if (_panel != null) _panel.Hide();
+            // 閉じた瞬間に sim 側の建物走査を止める。
+            PublishCursor(new Vec3(0f, 0f, 0f), false);
         }
 
         public static void Toggle()
@@ -135,8 +150,23 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            if (_panel == null || !_panel.isVisible) return;
+            if (_panel == null || !_panel.isVisible)
+            {
+                PublishCursor(new Vec3(0f, 0f, 0f), false);
+                return;
+            }
             Refresh();
+        }
+
+        /// <summary>
+        /// カーソル座標を sim 側へ渡す。**この 1 箇所からしか publish しない。**
+        /// 状態が変わらない「無効」の連投は握り潰す（<see cref="_cursorPublishedValid"/>）。
+        /// </summary>
+        private static void PublishCursor(Vec3 pos, bool valid)
+        {
+            if (!valid && !_cursorPublishedValid) return;
+            _cursorPublishedValid = valid;
+            EarthquakeHub.PublishCursor(pos, valid);
         }
 
         /// <summary>レベルアンロード時。**セッション状態を 1 つも持ち越さない。**</summary>
@@ -156,8 +186,12 @@ namespace DisasterPlus.Game
             _cursorLabel = null;
             _faultLabel = null;
             _faultNoteLabel = null;
+            _marginBuildingLabel = null;
+            _marginVerdictLabel = null;
+            _marginNoteLabel = null;
             _hazardLabel = null;
             _bodyBuilt = false;
+            _cursorPublishedValid = false;
             // fake-null 経由でも次回 Camera.main を引き直せるが、都市をまたいで
             // 古い参照を抱え続けない、という本プロジェクトの原則を明示的に守る。
             _mainCameraCache = null;
@@ -260,6 +294,17 @@ namespace DisasterPlus.Game
             // 「当たる場所」ではない。テキストは固定なのでここで一度だけ入れる。
             _faultNoteLabel = AddPlainRow(panel, "FaultBandNote", ref y,
                 Strings.EarthquakeFaultBandNote, 36f);
+
+            // ── 建物ごとの余裕度（Task 5、本機能の目玉）──────────────────
+            // ここも第 1 層である。バニラが (建物, 災害) の組ごとに引く固定のしきい値を
+            // 同じ種から再構成しているだけで、新しい物理は 1 つも足していない（§A-3）。
+            _marginBuildingLabel = AddLayer1Row(panel, "MarginBuilding", ref y);
+            _marginVerdictLabel = AddLayer1Row(panel, "MarginVerdict", ref y);
+
+            // この注記は**常に**併記する。全体円盤についての判定でしかないことと、
+            // それが地震開始の瞬間に既に決まっていることの両方を、行の隣で名乗る。
+            _marginNoteLabel = AddPlainRow(panel, "MarginNote", ref y,
+                Strings.EarthquakeGlobalDiscOnly, 54f);
 
             y += 6f;
 
@@ -376,6 +421,8 @@ namespace DisasterPlus.Game
             var snapshot = EarthquakeHub.Latest;
             if (snapshot == null || !snapshot.Valid)
             {
+                // 読めていない間は sim 側に建物を探させない。
+                PublishCursor(new Vec3(0f, 0f, 0f), false);
                 ClearQuakeRows();
                 // 「まだ 1 回も読んでいない」と「読んだが読めなかった」を同じ文言に
                 // しないこと（①のレビュー指摘）。ロード直後にポーズしたままだと
@@ -400,6 +447,11 @@ namespace DisasterPlus.Game
                 haveCursor = TryPickCursorGround(out cursor);
             }
 
+            // ★ 建物バッファは main スレッドから触らない。座標だけを sim 側へ渡し、
+            //    その下に何が建っているかは次の tick のスナップショットで受け取る
+            //    （BuildingProbe のクラス doc。1 tick ぶんの遅延はその設計上の代償）。
+            PublishCursor(cursor, haveCursor);
+
             RefreshQuakeRows(snapshot, haveCursor, cursor);
             RefreshHazardRow(snapshot, hazardViewOn, haveCursor, cursor);
         }
@@ -413,6 +465,9 @@ namespace DisasterPlus.Game
             SetPlain(_cursorLabel, "");
             SetPlain(_faultLabel, "");
             SetPlain(_faultNoteLabel, "");
+            SetPlain(_marginBuildingLabel, "");
+            SetPlain(_marginVerdictLabel, "");
+            SetPlain(_marginNoteLabel, "");
         }
 
         private static void RefreshQuakeRows(EarthquakeSnapshot snapshot, bool haveCursor, Vec3 cursor)
@@ -445,6 +500,118 @@ namespace DisasterPlus.Game
             RefreshTimeRow(snapshot, primary);
             RefreshCursorRow(primary, haveCursor, cursor);
             RefreshFaultRow(primary, haveCursor, cursor);
+            RefreshMarginRows(snapshot);
+        }
+
+        /// <summary>
+        /// **本機能の目玉。** カーソル下の建物が、その地震で倒れるかどうか。
+        ///
+        /// バニラは建物ごとに <c>new Randomizer(buildingID | (disasterID &lt;&lt; 16))</c> から
+        /// 固定のしきい値を引く（§A-3）。この種はフレームにもステップにも依存せず、
+        /// 全体円盤の震央も動かないので、**結論は地震が始まった瞬間に既に確定している**。
+        /// 依頼文の「揺れによる火災や倒壊はおそらくランダム」への回答がこれで、
+        /// だからこの行だけは「予測」ではなく事実として書ける。
+        ///
+        /// ただし断定してよい範囲は狭い。ここで扱っているのは全体円盤
+        /// （probability = 0.02、震央中心）だけで、断層 4 円盤（probability = 1、
+        /// 毎ステップ位置が振り直される）については何も言えない。**帯の内側と、
+        /// 帯の幾何が読めていないときは、「倒壊しません」と言わない**
+        /// —— それを保証しているのは <see cref="BuildingMargin.Evaluate"/> 側の分岐順で、
+        /// ここはその結論を書き出すだけである。
+        ///
+        /// 値は全て 1 tick 前の sim スレッドの読み取りで、**このメソッドは建物バッファに
+        /// 一切触らない**（<see cref="BuildingProbe"/> のクラス doc）。
+        /// </summary>
+        private static void RefreshMarginRows(EarthquakeSnapshot snapshot)
+        {
+            var margin = snapshot.CursorBuilding;
+
+            // 注記は行が出ているときだけ添える（空行の下に注記だけ残さない）。
+            SetPlain(_marginNoteLabel, "");
+
+            // CursorQuakeId == 0 は「まだ調べていない」——カーソルが地形の上に無い、
+            // あるいは破壊判定が走る地震（Active / Emerging）が 1 つも無い。
+            // **この状態で「カーソルの下に建物がありません」と書いてはいけない。**
+            // 建物の上にカーソルがあっても同じ 0 になるので、それは嘘になる。
+            // 言えることが無いときは、何も言わない。
+            if (snapshot.CursorQuakeId == 0)
+            {
+                SetPlain(_marginBuildingLabel, "");
+                SetPlain(_marginVerdictLabel, "");
+                return;
+            }
+
+            if (!margin.HasBuilding)
+            {
+                SetLayer1(_marginBuildingLabel,
+                    Strings.EarthquakeBuildingUnderCursor + ": " + Strings.EarthquakeNoBuilding);
+                SetPlain(_marginVerdictLabel, "");
+                return;
+            }
+
+            // どの地震についての判定かを必ず名乗る。複数同時進行のとき、上の行が
+            // 選んでいる地震（SelectPrimary）とここで判定した地震（sim 側の
+            // SelectDamagingQuake）は一致しないことがある。
+            SetLayer1(_marginBuildingLabel,
+                Strings.EarthquakeBuildingUnderCursor + ": #" + margin.BuildingId
+                + "   (#" + snapshot.CursorQuakeId + ")");
+
+            SetLayer1(_marginVerdictLabel, VerdictText(margin));
+            SetPlain(_marginNoteLabel, Strings.EarthquakeGlobalDiscOnly);
+        }
+
+        /// <summary>
+        /// 結論の 1 行。**設計書 §3.2 と計画 5.2 の表がそのままこの switch である。**
+        /// 断定してよい状態としてはいけない状態を、ここで取り違えないこと。
+        /// </summary>
+        private static string VerdictText(BuildingMargin margin)
+        {
+            string current = Strings.EarthquakeCurrentDistance + " "
+                             + margin.Distance.ToString("F0") + " m";
+            // 「倒壊するのは震央から X m 以内」。X ≦ 0 の建物は、震央に居ても
+            // 全体円盤では倒れない（しきい値が 200 以上）。
+            string within = Strings.EarthquakeCollapseWithin + " "
+                            + margin.CollapseWithin.ToString("F0") + " m";
+
+            switch (margin.Verdict)
+            {
+                case CollapseVerdict.AlreadyDown:
+                    return Strings.EarthquakeAlreadyDown;
+
+                case CollapseVerdict.OutOfRange:
+                    // バニラが preRadius で判定自体を打ち切っている領域。
+                    return Strings.EarthquakeOutOfRange + "   (" + current + ")";
+
+                case CollapseVerdict.Unknown:
+                    // 断層の幾何が読めていない。数値は出すが、判定は出さない。
+                    return within + " / " + current + "   -> "
+                           + Strings.EarthquakeVerdictUnknown;
+
+                case CollapseVerdict.InsideFaultZone:
+                    // 倒壊距離は出す。しかし「倒れません」とは言わない
+                    // （帯の内側は probability = 1 の破壊円盤が別に判定する）。
+                    return within + " / " + current + "   -> "
+                           + Strings.EarthquakeFaultBand + ": " + Strings.EarthquakeFaultInside;
+
+                case CollapseVerdict.WillCollapse:
+                    return within + " / " + current + "   -> "
+                           + Strings.EarthquakeVerdictCollapse;
+
+                case CollapseVerdict.Survives:
+                    // 全体円盤についてのみの「倒壊しません」。
+                    // ここへ来られるのは断層帯の**外側**の建物だけである
+                    // （BuildingMargin.Evaluate の分岐順がそれを保証している）。
+                    return margin.CollapseWithin > 0f
+                        ? within + " / " + current + "   -> " + Strings.EarthquakeVerdictSurvive
+                        : current + "   -> " + Strings.EarthquakeVerdictSurviveAnyDistance;
+
+                default:
+                    // ★ 既定を「倒壊しません」にしない。将来 CollapseVerdict に
+                    //    値が増えてここを直し忘れたとき、黙って生存を断定することに
+                    //    なる——この機能がいちばん避けたい壊れ方そのもの。
+                    //    知らない結論は「判定できません」に倒す。
+                    return Strings.EarthquakeVerdictUnknown;
+            }
         }
 
         private static void RefreshPhaseRow(EarthquakeReading primary)
