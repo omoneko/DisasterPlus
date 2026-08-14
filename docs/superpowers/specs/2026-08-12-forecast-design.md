@@ -104,7 +104,30 @@
 
 - **傾向の矢印**は current と target の差から出す。バニラに無い情報
 - **「マップに表示」**が `InfoManager.SetCurrentMode(InfoMode.DisasterHazard, <各サブモード>)` を呼ぶ
-- **カーソル位置の数値**は `SampleDisasterHazardMap` から
+- **カーソル位置の数値**は `m_hazardAmount` から
+
+### 4.2 ハザード値は種別ごとに同時取得できない（実装中に IL で判明）
+
+当初のモックは「落雷 34 / 竜巻 12」と**同時に 2 種**を出していた。これは**不可能**である。
+
+`DisasterManager.UpdateTexture` は各災害 AI の `GetHazardSubMode` を見て、**単一の共有配列**
+`m_hazardAmount` に `UpdateHazardMap` で書き込む。つまりグリッドが保持しているのは
+**いま表示中のサブモード 1 種ぶん**であり、`SampleDisasterHazardMap` に
+サブモード引数が無いのもそのためである（公開シグネチャは `Color SampleDisasterHazardMap(Vector3)`）。
+
+**したがってパネルは「現在表示中のハザード」を 1 つだけ出す。**
+
+```
+  カーソル位置のハザード: 落雷 34
+     （竜巻を見るには「マップに表示」を切り替えてください）
+```
+
+ハザードビューが出ていないときは数値を出さず、その旨を書く。
+**表示中でない種別のラベルを付けた数値を出してはならない** — もっともらしく、かつ確実に嘘になる。
+
+この制約を API にも反映する。`HazardMapReader.SampleAt` は期待するサブモードを受け取り、
+**現在の情報ビューがそのサブモードでなければ `ok = false` を返す**。引数を受け取りながら
+黙って別種の値を返す形にはしない。
 
 ### 4.1 出してよい断定の範囲
 
