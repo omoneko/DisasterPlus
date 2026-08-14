@@ -86,14 +86,19 @@ function Disasm-Method {
                     try { $text = '"' + $mod.ResolveString($tok) + '"' } catch { $text = "str" }
                 }
                 'InlineI'            { $text = [BitConverter]::ToInt32($il, $i) }
-                'ShortInlineI'       { $text = [sbyte]$il[$i] }
+                # [sbyte]$byte は PowerShell では 127 超で例外になる（キャストは
+                # ビットの再解釈ではなく範囲検査つき変換）。ldc.i4.s に負の即値が
+                # 入っている実メソッドで逆アセンブルごと落ちるので手で折り返す。
+                'ShortInlineI'       { $v = [int]$il[$i]; if ($v -gt 127) { $v -= 256 }; $text = $v }
                 'InlineI8'           { $text = [BitConverter]::ToInt64($il, $i) }
                 'ShortInlineR'       { $text = [BitConverter]::ToSingle($il, $i) }
                 'InlineR'            { $text = [BitConverter]::ToDouble($il, $i) }
                 'InlineVar'          { $text = [BitConverter]::ToUInt16($il, $i) }
                 'ShortInlineVar'     { $text = $il[$i] }
                 'InlineBrTarget'     { $text = "IL_{0:X4}" -f ($i + 4 + [BitConverter]::ToInt32($il, $i)) }
-                'ShortInlineBrTarget'{ $text = "IL_{0:X4}" -f ($i + 1 + [sbyte]$il[$i]) }
+                # 同上。後方分岐（ループ）は必ず負のオフセットなので、こちらは
+                # 折り返しを忘れると分岐先が数百バイト先の存在しない位置になる。
+                'ShortInlineBrTarget'{ $o = [int]$il[$i]; if ($o -gt 127) { $o -= 256 }; $text = "IL_{0:X4}" -f ($i + 1 + $o) }
                 default              { $text = "" }
             }
             $i += $size
