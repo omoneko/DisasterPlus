@@ -235,7 +235,13 @@ y    = (sin(t * 0.63) + sin(t * 0.17)) * amp
 - `CreateDisaster` の**戻り値を見る**。false のとき `disasterIndex = 0` になり、
   無視すると他人の災害スロットを書き潰す（§E-1）
 - `m_flags |= SelfTrigger (64)` を立てる。**立てないと `StartDisaster` が即 return し、
-  災害が Emerging のまま永久に固まる**（§A-1、地震・津波の両方）
+  波が 1 つも作られない**（§A-1 / §B-2）。
+  > **訂正（Task 9 の実測、事実文書 §B-2a）。** 当初ここには「地震・津波の両方が
+  > Emerging のまま永久に固まる」と書いていたが、**固まるのは地震だけ**である。
+  > `TsunamiAI` の 3 つの位相判定は `m_activationFrame` を一度も読まず、
+  > `m_startFrame`（base の `StartDisaster` が必ず書く）だけで進む。
+  > したがって `FindSea` が失敗しても位相は自然に進み、最悪 39 ゲーム内時間で
+  > `Finished` になってスロットが解放される —— **後始末のコードは不要**。
 - `FindDisasterInfo<TsunamiAI>()` が null なら DLC が無い。**何もせず理由を診断に出す**（§B-5）
 - `FindSea` は海側区間が 10 セル未満だと false を返し、**津波は起きない**（§B-3）。
   内陸マップでは正常に何も起きない。これを失敗として扱わない
@@ -364,7 +370,7 @@ src/DisasterPlus/
 | 対象 | なぜ要るか | どのタスク |
 |---|---|---|
 | ~~`Randomizer` のビット列~~ | **確定済み。下記 A-1 を参照** | — |
-| `TerrainManager.HasWater` の存在・シグネチャ・public 性 | 第 4.1 節の入口 | 7 |
+| ~~`TerrainManager.HasWater` の存在・シグネチャ・public 性~~ | **確定済み（事実文書 §D-3）。** `public bool HasWater(Vector2)`、引数はワールド XZ、深さ 0.125 m 以上で true、`BeginRead`/`EndRead` を取るので sim スレッド専用 | — |
 | 建物高さのフィールド（`m_generatedInfo` 配下の実名） | 第 4.2 節。事実文書は「系」としか書いていない | 8 |
 | `EarthquakeAI` の 4 つのプレハブ実数値 | 持続時間の設計の土台。実機で 1 回取る | 2 |
 | `WaterSimulation.SimulateWater` | **今回は不要**（決定 A で `TsunamiAI` に任せるため）。直叩きに変更する場合のみ | — |

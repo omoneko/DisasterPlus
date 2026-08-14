@@ -117,10 +117,17 @@ namespace DisasterPlus.Game
                 //    ID と中身が食い違うことはない（両方が 1 tick 古い）。
                 var traces = SeismographRecorder.Snapshot();
 
+                // ★ 第 2 層（津波連鎖）の状態も sim スレッドのここで読む。TsunamiChain は
+                //    同じスレッドの持ち物なので、これは単なるローカルな読み出しである
+                //    （main スレッドへ渡す唯一の経路をスナップショットに一本化している）。
+                //    Read() は TsunamiChain.Tick() より前に走るので、載るのは最大
+                //    1 tick 前の状態になる（EarthquakeSnapshot.TsunamiState の doc）。
                 return new EarthquakeSnapshot(quakes, prefab, sim.m_currentFrameIndex,
                                               hour, dayNight, cursorBuilding, cursorQuakeId,
                                               cursorProbe, cursorCoverage, cursorCoverageValid,
-                                              traces, SeismographRecorder.RecordingQuakeId, true);
+                                              traces, SeismographRecorder.RecordingQuakeId,
+                                              TsunamiChain.State, TsunamiChain.DueFrame,
+                                              TsunamiChain.QuakeId, true);
             }
             catch (System.Exception e)
             {

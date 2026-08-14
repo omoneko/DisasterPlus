@@ -176,14 +176,45 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly ushort WaveformQuakeId;
 
+        /// <summary>
+        /// **第 2 層。** 海中震源からの津波連鎖が今どうなっているか
+        /// （<see cref="TsunamiChain"/>）。これはバニラが計算している量ではなく、
+        /// **本 MOD が発明した挙動の状態**なので、表示側は必ず第 2 層の行として出す。
+        ///
+        /// <see cref="TsunamiChain"/> の静的状態を main スレッドから直接読まないための
+        /// 経路である。<c>EarthquakeReader.Read()</c> は <c>TsunamiChain.Tick()</c> より
+        /// **前**に走るので、ここに載るのは最大 1 tick 前の状態になる
+        /// （<see cref="CursorBuilding"/> が既に 1 tick 遅れているのと同じ性質の遅延）。
+        /// </summary>
+        public readonly TsunamiChainState TsunamiState;
+
+        /// <summary>
+        /// 津波の予約が満了するフレーム。<see cref="TsunamiState"/> が
+        /// <see cref="TsunamiChainState.Scheduled"/> のときだけ意味を持つ。
+        /// </summary>
+        public readonly uint TsunamiDueFrame;
+
+        /// <summary>
+        /// 津波連鎖が監視している地震（災害バッファ上の添字）。0 なら監視していない。
+        /// **表示側はこれを名乗る** —— 地震は同時に複数進行しうるので（§E-1）、
+        /// どの地震から連鎖したのかを黙っていると、他の地震について何も
+        /// 言っていないことが読み手に伝わらない。
+        /// </summary>
+        public readonly ushort TsunamiQuakeId;
+
         public EarthquakeSnapshot(IList<EarthquakeReading> quakes, EarthquakePrefabFacts prefab,
                                   uint currentFrame, float hourOfDay, bool dayNightEnabled,
                                   BuildingMargin cursorBuilding, ushort cursorQuakeId,
                                   BuildingProbeOutcome cursorProbe,
                                   int cursorCoverage, bool cursorCoverageValid,
                                   IList<SeismographTrace> traces, ushort waveformQuakeId,
+                                  TsunamiChainState tsunamiState, uint tsunamiDueFrame,
+                                  ushort tsunamiQuakeId,
                                   bool valid)
         {
+            TsunamiState = tsunamiState;
+            TsunamiDueFrame = tsunamiDueFrame;
+            TsunamiQuakeId = tsunamiQuakeId;
             Traces = traces == null ? SeismographRecorder.EmptyTraceList : traces;
             WaveformQuakeId = waveformQuakeId;
             Quakes = quakes == null ? NoQuakes : quakes;
@@ -204,7 +235,8 @@ namespace DisasterPlus.Game
             return new EarthquakeSnapshot(NoQuakes, new EarthquakePrefabFacts(), 0u, 0f, false,
                                           BuildingMargin.None(), 0,
                                           BuildingProbeOutcome.NotProbed, 0, false,
-                                          SeismographRecorder.EmptyTraceList, 0, false);
+                                          SeismographRecorder.EmptyTraceList, 0,
+                                          TsunamiChainState.Idle, 0u, 0, false);
         }
 
         /// <summary>地震が 1 個も無いときに使う共有の空リスト。読み取り側専用。</summary>

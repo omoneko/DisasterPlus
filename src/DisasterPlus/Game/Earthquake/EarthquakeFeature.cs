@@ -30,6 +30,8 @@ namespace DisasterPlus.Game
             EarthquakeReader.Reset();
             CameraShakeBooster.Reset();
             SeismographRecorder.Reset();
+            // ★ 予約は都市をまたいで残らない（第 2 層はセッション状態で、セーブにも入れない）。
+            TsunamiChain.Reset();
 
             // 震度分布オーバーレイ。**main スレッド。** 登録は
             // RenderManager の静的リストへの追加で、外す API が存在しない
@@ -80,7 +82,15 @@ namespace DisasterPlus.Game
             // ここで貯め続けると波形だけが伸びる嘘になる。
             SeismographRecorder.Sample(snapshot, frameIndex);
 
-            // （Task 9: TsunamiChain.Tick / Task 10: LongPeriodDamage.Apply がここに入る）
+            // ★ 第 2 層。**既定 OFF**（ModSettings.EarthquakeTsunamiChain の doc）。
+            //    設定を見てから呼ぶことで、OFF のときは TsunamiChain の状態が
+            //    Idle のまま一切進まない＝パネルにも節が出ない。
+            if (ModSettings.EarthquakeTsunamiChain.value)
+            {
+                TsunamiChain.Tick(snapshot, frameIndex);
+            }
+
+            // （Task 10: LongPeriodDamage.Apply がここに入る）
         }
 
         /// <summary>main スレッド。パネル・ボタンの設置と、表示中のみの内容更新はここから。</summary>
@@ -105,6 +115,9 @@ namespace DisasterPlus.Game
             CameraShakeBooster.Reset();
             // 波形は**セーブにも次の都市にも持ち越さない**（設計書 §3.5）。
             SeismographRecorder.Reset();
+            // ★ 予約したまま撃っていない津波を、都市をまたいで持ち越さない。
+            //    ここを忘れると 2 つ目の都市で、起きてもいない地震の津波が来る。
+            TsunamiChain.Reset();
             // ★ オーバーレイを止める。登録は外せないので、描かないことを
             //    こちらの状態で保証する（EarthquakeOverlay.Reset の doc）。
             //    これを忘れると、都市を出た直後の数フレームに前の都市の
@@ -140,7 +153,56 @@ namespace DisasterPlus.Game
             WriteSimClock(b, snapshot);
             WriteSensorCoverage(b, snapshot);
             WriteWaveform(b, snapshot);
+            WriteTsunamiChain(b, snapshot);
             WriteQuakes(b, snapshot);
+        }
+
+        /// <summary>
+        /// 第 2 層（津波連鎖）の状態。**「津波が来ない」の切り分けはここでしかできない。**
+        /// 来ない理由は 5 通りあり（設定が OFF ／震源が陸 ／DLC 無し ／海側外周が足りない ／
+        /// 災害スロット満杯）、画面上はどれも「何も起きない」で同じ顔になる。
+        ///
+        /// **内陸マップの <c>NoSea</c> は失敗ではない**ことを、ここでも文で名乗る（§B-3）。
+        /// </summary>
+        private static void WriteTsunamiChain(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
+        {
+            if (!ModSettings.EarthquakeTsunamiChain.value)
+            {
+                b.Line(1, "tsunami chain", "off (setting; this is the default)");
+                return;
+            }
+
+            string state;
+            switch (snapshot.TsunamiState)
+            {
+                case TsunamiChainState.Scheduled:
+                    state = "scheduled for frame " + snapshot.TsunamiDueFrame;
+                    break;
+                case TsunamiChainState.Raised:
+                    state = "raised (a wave was actually created)";
+                    break;
+                case TsunamiChainState.NoSea:
+                    state = "no wave: TsunamiAI.FindSea found no run of 10+ sea cells on the map "
+                            + "border. This is normal on an inland map and is NOT a failure";
+                    break;
+                case TsunamiChainState.NoDlc:
+                    state = "no TsunamiAI prefab (the Natural Disasters DLC is not owned)";
+                    break;
+                case TsunamiChainState.Failed:
+                    state = "FAILED (see the EqTsunami* diagnostic lines; the disaster buffer "
+                            + "may be full)";
+                    break;
+                default:
+                    state = "idle (no undersea main shock has been observed)";
+                    break;
+            }
+
+            b.Line(1, "tsunami chain", state);
+            b.Line(2, "watching quake", snapshot.TsunamiQuakeId == 0
+                ? "none"
+                : "#" + snapshot.TsunamiQuakeId);
+            b.Line(2, "delay setting",
+                ModSettings.EarthquakeTsunamiDelayMinutes.value + " in-game minutes");
         }
 
         /// <summary>

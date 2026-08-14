@@ -43,6 +43,8 @@ namespace DisasterPlus.Game
         public static SavedInt EarthquakeButtonX;
         public static SavedInt EarthquakeButtonY;
         public static SavedBool EarthquakeShakeBoost;
+        public static SavedBool EarthquakeTsunamiChain;
+        public static SavedInt EarthquakeTsunamiDelayMinutes;
 
         public static void Ensure()
         {
@@ -89,6 +91,18 @@ namespace DisasterPlus.Game
             // ——つまり既定の地震では挙動がバニラとビット単位で同一になる
             // （ShakeWaveform.IntensityFactor とそのユニットテストが固定している）。
             EarthquakeShakeBoost = new SavedBool("eqShakeBoost", FileName, true, true);
+
+            // ★ 第 2 層は必ず既定 OFF にする（計画「第 2 層 — 足す」の共通規則）。
+            //    バニラに存在しない挙動を既定で入れると、プレイヤーは
+            //    「地震のあと勝手に津波が来る」原因が MOD だと気付く手段を持たない。
+            //    上の EarthquakeShakeBoost が既定 ON にできるのは、既定の強度で
+            //    追加分が厳密に 0 ＝ バニラとビット単位で同一になるからで、
+            //    こちらにはその逃げ道が無い。
+            EarthquakeTsunamiChain = new SavedBool("eqTsunamiChain", FileName, false, true);
+            // ゲーム内分。範囲 5〜120 はスライダー側で縛る（.cgs の値は公開契約なので
+            // 範囲外の値が入っていても読み捨てず、そのまま使う——遅延が長いだけで
+            // 壊れる値ではない）。
+            EarthquakeTsunamiDelayMinutes = new SavedInt("eqTsunamiDelay", FileName, 30, true);
 
             _ready = true;
         }

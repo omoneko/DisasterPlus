@@ -170,6 +170,7 @@ namespace DisasterPlus.Game
             EarthquakeMapRows.Destroy();
             EarthquakeDamageRows.Destroy();
             EarthquakeSensorRows.Destroy();
+            EarthquakeLayer2Rows.Destroy();
             // 凡例ごとパネルが消えるので、絵も消す（Hide() と同じ理由）。
             EarthquakeOverlay.Disable();
 
@@ -290,12 +291,27 @@ namespace DisasterPlus.Game
 
             _tabs.Finish(ref y);
 
-            // ★ 第 2 層（Task 9〜11）はタブの**外**、ここから下に足すこと
+            // ★ 第 2 層（Task 9〜11）はタブの**外**、ここから下に足す
             //    （計画の共通規則「第 2 層は第 1 層の下に構築し、実行時の
             //    並べ替えはしない」）。どのタブを見ていても同じ場所に見える。
+            EarthquakeLayer2Rows.Build(panel, ref y);
 
             panel.height = y;
             ClampToView(panel);
+        }
+
+        /// <summary>
+        /// パネルの高さを組み直す。第 2 層の節は設定で丸ごと消えるので
+        /// （<see cref="EarthquakeLayer2Rows"/>）、その切り替えの瞬間だけここを通る。
+        /// **毎フレーム呼んではいけない** —— <see cref="ClampToView"/> は
+        /// <c>relativePosition</c> を書き換えるので、毎フレーム走らせるとパネルが
+        /// 微妙に動き続ける。
+        /// </summary>
+        internal static void Relayout()
+        {
+            if (_panel == null || !_bodyBuilt) return;
+            _panel.height = EarthquakeLayer2Rows.SectionTop + EarthquakeLayer2Rows.VisibleHeight;
+            ClampToView(_panel);
         }
 
         /// <summary>
@@ -422,6 +438,7 @@ namespace DisasterPlus.Game
                     : Strings.EarthquakeUnavailable);
                 // ボタンの見た目だけは実状に合わせる（凡例は消さない）。
                 EarthquakeMapRows.ShowUnavailable();
+                EarthquakeLayer2Rows.Refresh(snapshot);
                 return;
             }
 
@@ -450,6 +467,8 @@ namespace DisasterPlus.Game
             EarthquakeSensorRows.RefreshSensor(snapshot, primary, haveCursor);
             EarthquakeSensorRows.RefreshWaveform(snapshot);
             EarthquakeMapRows.Refresh(snapshot, hazardViewOn, haveCursor, cursor);
+            // ★ 最後に呼ぶ。第 1 層を全部書き終えたあとに、本 MOD が足したものを書く。
+            EarthquakeLayer2Rows.Refresh(snapshot);
         }
 
         private static void ClearQuakeRows()

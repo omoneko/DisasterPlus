@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 19 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 21 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -47,12 +47,14 @@ namespace DisasterPlus.Game
         /// VanillaRandomizer と本物の Randomizer のビット一致・
         /// m_cameraShake と m_disableCameraShake が public のままか・
         /// RenderManager のオーバーレイ描画 API が届くか）＋
+        /// 地震 第 2 層 2 件（TsunamiAI プレハブの実在・
+        /// TerrainManager.HasWater と DisasterData.m_waveIndex）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 20;
+        private const int TotalCheckCount = 22;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -489,6 +491,48 @@ namespace DisasterPlus.Game
                   });
 
             // --- ②地震（震度分布の地図オーバーレイ）ここまで ---
+
+            // --- ②地震（Task 9: 第 2 層 — 海中震源からの津波連鎖）ここから ---
+
+            // **DLC が無い環境ではここが FAIL するのが正常である。** TsunamiAI の
+            // *型* は DLC の有無に関わらず Assembly-CSharp に同梱されているので、
+            // 型の存在検査は通ってしまう。実在を決めるのは PrefabCollection に
+            // TsunamiAI を持つ DisasterInfo が居るかどうかで（§B-5）、
+            // ModCompat.NaturalDisastersOwned は UI を出すかどうかの事前判定にすぎない。
+            // 影響の文にその期待を書いておかないと、正常な環境の FAIL が不具合に見える。
+            //
+            // 走査は副作用の無い純粋な問い合わせを使う（FireWhirlSpawner.HasTornadoPrefab
+            // と同じ理由。ここは main スレッドで、sim スレッドのキャッシュを
+            // 巻き戻してはいけない）。
+            Check("TsunamiAI disaster prefab is available",
+                  "the tsunami chain cannot run (this also FAILs when the Natural Disasters DLC "
+                  + "is not owned, which is expected)",
+                  delegate { return TsunamiChain.HasTsunamiPrefab(); });
+
+            // 津波連鎖の入口と出口。HasWater が解決できなければ「震源が水中か」を
+            // 判断できず、m_waveIndex が読めなければ「波が実際に立ったか」を判断できない
+            // ——後者が読めないと、内陸マップの正常な「何も起きない」を
+            // 「起こしたつもり」と取り違える。
+            //
+            // 引数の型まで込みで照合する（オーバーロードが 2 つあり、名前だけで
+            // GetMethod を引くと AmbiguousMatchException で偽 FAIL になる。
+            // 実測: HasWater(Vector2) と HasWater(Segment2, float, bool)）。
+            Check("TerrainManager.HasWater is resolvable and DisasterData exposes m_waveIndex",
+                  "the mod cannot tell whether the epicentre is under water, nor whether a wave "
+                  + "was actually raised",
+                  delegate
+                  {
+                      var hasWater = typeof(TerrainManager).GetMethod("HasWater",
+                          BindingFlags.Public | BindingFlags.Instance, null,
+                          new Type[] { typeof(UnityEngine.Vector2) }, null);
+                      if (hasWater == null || hasWater.ReturnType != typeof(bool)) return false;
+
+                      var wave = typeof(DisasterData).GetField("m_waveIndex",
+                          BindingFlags.Public | BindingFlags.Instance);
+                      return wave != null && wave.FieldType == typeof(ushort);
+                  });
+
+            // --- ②地震（Task 9）ここまで ---
 
             Report();
         }

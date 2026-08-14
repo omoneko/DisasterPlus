@@ -136,3 +136,9 @@ EarthquakeOverlayCapped = 進行中の地震が、このオーバーレイが一
 EarthquakeOverlayUnavailable = このビルドでは、ゲームの描画系に地図オーバーレイを登録できませんでした。
 EarthquakeOverlayBothOn = ゲームのハザード情報ビューも同時に表示されています。2 つの絵は別の量です（下の凡例を参照）。
 EarthquakeOverlayLegend = 凡例。青緑: 破壊係数 s。上のバーと同じ 10 段階で、震央がいちばん濃く、縁で 0 になります。紅紫: 断層帯。破壊円盤は probability = 1 で壊すのでランプではなく、濃さを一様にしてあります。白: 震央と断層の走向。揺れには半径の打ち切りが無いので、円盤の外でも地面は揺れています。
+EarthquakeTsunamiChain = 海中で地震が起きたら津波を発生させる
+EarthquakeTsunamiDelay = 津波までの遅延 (ゲーム内分)
+EarthquakeTsunamiPending = 津波の到達予定
+EarthquakeTsunamiRaised = 津波が発生しました
+EarthquakeTsunamiFromShore = 波は震源そのものからではなく、震源に最も近い海から到達します。ゲームは津波をマップ外周からしか起こせません。
+EarthquakeTsunamiNoSea = 十分な広さの海がマップ外周に無いため、津波は起きませんでした。内陸マップでは正常な結果です。

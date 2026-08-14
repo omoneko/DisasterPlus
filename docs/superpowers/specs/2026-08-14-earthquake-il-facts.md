@@ -93,6 +93,10 @@ IL_0056  DisasterManager.m_randomDisasterCooldown = 0
 > **落とし穴（重要）。** `SelfTrigger` が無いと `m_activationFrame` が 0 のままになり、
 > `EarthquakeAI.IsStillEmerging` は `if (m_activationFrame == 0) return true;` なので **Emerging のまま永久に止まる**。
 > `TsunamiAI.StartDisaster` も同じ `& 64` ゲートを持つ。
+> **ただし「Emerging で永久に固まる」のは地震だけである（Task 9 で再実測して訂正）。**
+> `TsunamiAI` の 3 つの位相判定は `m_activationFrame` を**一度も読まない**（下記 B-2a）。
+> 津波で `SelfTrigger` を落とすと、位相は普通に進みながら**波が 1 つも作られない**。
+> 結論（必ず立てる）は同じだが、失敗の形が違うので切り分けのときに取り違えないこと。
 > フラグ 64 を立てているのは `DisasterManager.StartRandomDisaster` / `DisasterTool.CreateDisaster`(iterator) /
 > `DisasterWrapper.CreateDisaster` / `DeveloperUI.StartDisaster` の 4 箇所だけ（全アセンブリ走査）。
 
@@ -458,6 +462,50 @@ Int32  GetSeaLevel(int original, int x, int z)   // public
 API: `WaterSimulation.CreateWaterWave(out ushort wave, WaterWave waveData) : bool`（public）/
 `ReleaseWaterWave(ushort)`（public）。取得は `TerrainManager.instance.WaterSimulation`（public property）。
 
+### B-2a. 波が立たなかったときに津波は固まるか → **固まらない** — CONFIRMED（Task 9 で実測）
+
+設計書 §4.1 と A-1 の注記は「`SelfTrigger` を立てないと地震・津波の**両方**が
+Emerging のまま永久に固まる」としていたが、津波については誤りだった。
+
+`TsunamiAI` の 3 つの位相判定はいずれも `m_activationFrame` を**一度も読まない**:
+
+```
+IsStillEmerging   elapsed = m_currentFrameIndex - m_startFrame
+                  travel  = elapsed * 0.125
+                  dir     = (-sin(m_angle), 0, cos(m_angle))
+                  corner  = (dir.x > 0 ? -4800 : 4800, m_targetPosition.y,
+                             dir.z > 0 ? -4800 : 4800)          // 進行方向の「手前」側
+                  return Dot(corner - m_targetPosition, dir) > travel
+IsStillActive     同じ形。travel から 3000 を引く（IL_002A の ldc.r4 3000）
+IsStillClearing   同じ形。corner を進行方向「奥」側（符号が反転）に取る
+```
+
+一方 `DisasterAI.StartDisaster`（base）は `m_flags |= Emerging` と
+`m_startFrame = m_currentFrameIndex` を**必ず**書き（`m_activationFrame` には触らない）、
+しかも `TsunamiAI.StartDisaster` の `& 64` ゲートより**前**に呼ばれている。
+
+→ `FindSea` が false を返しても（＝波が 1 つも立たなくても）位相は `m_startFrame` を
+基準に自然に進み、`Finished` になった時点で `DisasterManager.SimulationStepImpl` が
+`ReleaseDisaster` を呼んでスロットを解放する（§E-1）。上限は `m_targetPosition` が
+マップ端にある最悪の場合で `elapsed = 107520` フレーム ≒ **39 ゲーム内時間**。
+
+**したがって後始末は不要である**（計画 Task 9 Step 1 の対応表の 1 行目）。
+併せて確認した周辺の事実:
+
+| 対象 | 実測 |
+|---|---|
+| `DisasterManager.ReleaseDisaster(ushort)` | **public** void。`InstanceManager.ReleaseInstance` → `HazardModified` → `DisasterAI.ReleaseDisaster` → `ReleaseWaterWave`（`m_waveIndex != 0` のとき）→ スロットをゼロ埋め → `m_disasterCount--` |
+| `DisasterData.m_waveIndex` | **public UInt16**。波が立ったかの唯一の判定材料 |
+| `DisasterAI.StartNow` / `DeactivateNow` / `ClampDisasterTarget` | いずれも **public**。`StartNow` は `(m_flags & 60) == 0`（Emerging\|Active\|Clearing\|Finished のどれも立っていない）のときだけ `StartDisaster` を呼ぶ |
+| `DisasterAI.StartDisaster` / `EndDisaster` / `ActivateDisaster` / `DeactivateDisaster` | いずれも **protected** |
+| `TsunamiAI.StartDisaster` の `Significant(256)` | `FindSea` 成功の分岐の**内側**。波が立たなかった災害は Significant にならない |
+
+`ReleaseDisaster` が public であることは確認したが、**Task 9 では使っていない**。
+`base.StartDisaster` は既に `DisasterWrapper.OnDisasterStarted(id)` を呼んでおり、
+その直後にスロットを消すのは `IDisastersExtension` を実装した MOD から見て
+「開始したのに終了通知の無い災害」になる。固まらないと分かっている以上、
+検証していない副作用を足す理由が無い。
+
 ### B-3. 原点は任意に置けるか → **ABSENT（置けない）**
 
 `TsunamiAI.FindSea`（IL_0000–043E）:
@@ -645,6 +693,36 @@ IL_0122  TerrainManager.instance.WaterSimulation.CreateWaterWave(out _, wave)
 | スレッド | 呼び出し元はどちらも sim スレッド（`EarthquakeAI.SimulationStep` / `TsunamiAI.StartDisaster`）。`WaterSimulation` は専用スレッド（`m_simulationThread` / `WaterThread`）を持つので、**MOD からも sim スレッドで呼ぶ** |
 | 海面 | `WaterSimulation.m_currentSeaLevel` / `m_nextSeaLevel`（public float）。`DEFAULT_SEA_LEVEL = 40`、`MAX_SEA_LEVEL = 500` |
 | 継続的な水源 | `CreateWaterSource(out ushort, WaterSource)` / `LockWaterSource` / `UnlockWaterSource` / `ReleaseWaterSource`（すべて public） |
+
+### D-3. `TerrainManager.HasWater` — CONFIRMED（Task 9 で実測。設計書 付録の未確定項目）
+
+設計書 付録は「存在・シグネチャ・public 性を IL で確認すること」としていた。結果:
+
+```
+public bool HasWater(Vector2 position)                    // インスタンスメソッド
+public bool HasWater(Segment2 segment, float radius, bool any)
+```
+
+`HasWater(Vector2)` の中身（IL_0000–0286）:
+
+```
+x = FloorToInt((position.x + 8640) * 16) >> 8      // = (position.x + 8640)/16、16 m セル
+z = FloorToInt((position.y + 8640) * 16) >> 8      // ★ Vector2.y は「ワールドの z」
+x, x+1, z, z+1 を [0, 1080] にクランプし、行幅 1081 の 4 隅を取る
+cells = m_waterSimulation.BeginRead()              // ★ ロックを取る → sim スレッドで呼ぶ
+4 隅の Cell.m_height が全て 0 なら → return false  // 水がまったく無い
+そうでなければ 水面高 = m_blockHeights[i] + m_height、地形高 = m_rawHeights2[i]
+両方を下位 8 bit を重みにした双一次補間で内挿し、
+return (水面高 - 地形高) >= 8                      // 1/64 m 単位 ＝ 深さ 0.125 m 以上
+m_waterSimulation.EndRead() は finally
+```
+
+| 問い | 答え |
+|---|---|
+| 座標系 | **ワールド XZ**。`VectorUtils.XZ(Vector3)` の結果をそのまま渡してよい |
+| 単位 | 8 = 1/64 m 単位 ＝ **深さ 0.125 m 以上を「水」と呼ぶ**。水たまりも true になりうる |
+| スレッド | `WaterSimulation.BeginRead()` / `EndRead()` を取るので **sim スレッド専用** |
+| 空の値 | 4 隅の `m_height` が全て 0 なら早期に false。水が無いことと読めなかったことは区別しない |
 
 ---
 

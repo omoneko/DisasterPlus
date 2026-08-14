@@ -99,6 +99,25 @@ namespace DisasterPlus.Game
                 v => ModSettings.EarthquakeEnabled.value = v);
             earthquake.AddCheckbox(Strings.EarthquakeShakeBoost, ModSettings.EarthquakeShakeBoost.value,
                 v => ModSettings.EarthquakeShakeBoost.value = v);
+
+            // ── 第 2 層（Disaster + が足した挙動。バニラにはありません）──────────
+            //
+            // **既定 OFF。** 海中の地震から津波を起こすのはバニラの挙動ではないので、
+            // 既定で入れるとプレイヤーは「地震のあと勝手に津波が来る」原因が MOD だと
+            // 気付く手段を持たない（ModSettings.EarthquakeTsunamiChain の doc）。
+            //
+            // DLC が無い環境では出さない。TsunamiAI のプレハブが存在しないので
+            // （§B-5）、この設定は何も制御しない死んだチェックボックスになる。
+            if (ModCompat.NaturalDisastersOwned)
+            {
+                earthquake.AddCheckbox(Strings.EarthquakeTsunamiChain,
+                    ModSettings.EarthquakeTsunamiChain.value,
+                    v => ModSettings.EarthquakeTsunamiChain.value = v);
+                earthquake.AddSlider(Strings.EarthquakeTsunamiDelay, 5f, 120f, 5f,
+                    ModSettings.EarthquakeTsunamiDelayMinutes.value,
+                    v => ModSettings.EarthquakeTsunamiDelayMinutes.value = (int)v);
+            }
+
             earthquake.AddButton(Strings.EarthquakeResetButton, delegate
             {
                 ModSettings.EarthquakeButtonX.value = -1;

@@ -423,5 +423,34 @@ namespace DisasterPlus.Game
             + "density because its patches destroy with probability 1, not along a ramp. White: the "
             + "epicentre and the fault strike. Shaking has no radius limit, so the ground moves "
             + "outside the disc too.";
+
+        // --- ②地震（Task 9: 海中震源からの津波連鎖 ＝ 第 2 層の 1 つ目） ---
+        //
+        // **ここから先はバニラに存在しない挙動である。** 全て既定 OFF で、
+        // パネルでは EarthquakeLayer2Header の節の下に [Disaster + model] 付きで出る。
+        //
+        // EarthquakeTsunamiFromShore がこの機能でいちばん重要な 1 文。依頼は
+        // 「海中で地震を起こしてもプレート境界型の津波が来ない」だったが、
+        // **「震源から波が広がる」は TsunamiAI では literally 不可能**である
+        // （FindSea はマップ外周セルしか候補にせず、m_targetPosition も m_angle も
+        //  開始時に上書きされる。§B-3）。実現しているのは「震源に最も近い海側の
+        // 外周から津波が来る」であり、**できていないことをできているように書かない**。
+        //
+        // EarthquakeTsunamiNoSea は**失敗の文言ではない**。内陸マップでは
+        // 海側外周区間が 10 セルに満たず、何も起きないのが正常な結果である。
+        // ①の ForecastNoStormDetected と同じ扱いで、「0 を安全と読ませない」の裏返し
+        // ——「何も起きなかった」を「壊れた」と読ませない。
+
+        public static string EarthquakeTsunamiChain =
+            "Raise a tsunami after an undersea earthquake";
+        public static string EarthquakeTsunamiDelay = "Tsunami delay (in-game minutes)";
+        public static string EarthquakeTsunamiPending = "Tsunami expected in";
+        public static string EarthquakeTsunamiRaised = "Tsunami raised";
+        public static string EarthquakeTsunamiFromShore =
+            "The wave arrives from the sea nearest the epicentre, not from the epicentre itself. "
+            + "The game can only start a tsunami at the map edge.";
+        public static string EarthquakeTsunamiNoSea =
+            "No sea close enough to this map edge, so no tsunami was raised. This is normal on "
+            + "an inland map.";
     }
 }
