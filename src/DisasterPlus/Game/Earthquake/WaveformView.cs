@@ -5,6 +5,28 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
+    /// 波形プロットが今どの状態にあるか。**4 つを 1 つの bool に潰さない。**
+    ///
+    /// 「まだ作っていない」「作れなかった」「途中で描けなくなった」は原因も対処も違い、
+    /// 画面上はどれも「絵が無い」で同じ顔になる。切り分けの手掛かりは
+    /// 診断ダンプのこの 1 行しかない。
+    /// </summary>
+    public enum WaveformViewState
+    {
+        /// <summary>パネルをまだ一度も開いていない（＝何も試していない）。</summary>
+        NotBuilt,
+
+        /// <summary>使える。</summary>
+        Ready,
+
+        /// <summary>構築時に失敗した（<c>Texture2D</c> / <c>UITextureSprite</c> が作れない）。</summary>
+        BuildFailed,
+
+        /// <summary>一度は作れたが、描画中に例外が出て以後は描かない。</summary>
+        RenderFailed,
+    }
+
+    /// <summary>
     /// 波形を 1 枚のテクスチャに描く。**main スレッド専用。**
     ///
     /// ── なぜ文字ではなくテクスチャなのか ─────────────────────────
@@ -68,6 +90,19 @@ namespace DisasterPlus.Game
         private static Color32[] _pixels;
         private static bool _available;
 
+        /// <summary>
+        /// <see cref="Build"/> が一度でも走ったか。**「まだ作っていない」と
+        /// 「作ろうとして駄目だった」を分ける**ためだけにある。
+        ///
+        /// 診断ダンプはパネルを一度も開いていなくても出せるので、これが無いと
+        /// 起動直後のダンプが「描画不可（最大振幅の行で代替）」と書く —— 実際には
+        /// 何も試していない状態で、原因の切り分けを丸ごと誤らせる。
+        /// </summary>
+        private static bool _built;
+
+        /// <summary>一度描けた後に描画が落ちたか（構築失敗と区別する）。</summary>
+        private static bool _renderFailed;
+
         /// <summary>直近に描いた内容の指紋。同じなら塗り直さない。</summary>
         private static ushort _drawnBuildingId;
         private static int _drawnCount;
@@ -79,6 +114,19 @@ namespace DisasterPlus.Game
         /// false のとき、パネルは波形の代わりに最大振幅の行と理由の 1 行を出す。
         /// </summary>
         public static bool Available { get { return _available; } }
+
+        /// <summary>
+        /// 今の状態。パネルの「描画できない理由」の行と診断ダンプの両方がこれを見る。
+        /// </summary>
+        public static WaveformViewState State
+        {
+            get
+            {
+                if (_available) return WaveformViewState.Ready;
+                if (_renderFailed) return WaveformViewState.RenderFailed;
+                return _built ? WaveformViewState.BuildFailed : WaveformViewState.NotBuilt;
+            }
+        }
 
         /// <summary>
         /// プロット用のスプライトを親パネルに作る。**main スレッド、パネル構築時に 1 回。**
@@ -125,6 +173,12 @@ namespace DisasterPlus.Game
                          + " (" + e.Message + ")");
                 Destroy();
             }
+            finally
+            {
+                // ★ catch の中の Destroy() が _built を戻すので、その後に立てる。
+                //    「試して駄目だった」を「まだ試していない」と混ぜないため。
+                _built = true;
+            }
         }
 
         /// <summary>
@@ -170,18 +224,33 @@ namespace DisasterPlus.Game
                 // 例外が出たら二度と描かない（毎フレーム投げ続けるより無害）。
                 Log.Warn("earthquake waveform draw failed: " + e.GetType().Name);
                 Destroy();
+                // ★ Destroy() が全部倒すので、そのあとで「構築はできていた」と
+                //    「描画中に落ちた」を立て直す。ここを黙って空欄にすると、
+                //    このクラスの doc が約束している「劣化であって嘘ではない」が
+                //    破れる（パネルは State を見て理由を出す）。
+                _built = true;
+                _renderFailed = true;
             }
         }
 
         /// <summary>
-        /// レベルアンロード時。**<c>Texture2D</c> は GameObject の道連れにならないので
-        /// 明示的に破棄する。** スプライト自体は親パネルと一緒に消える。
+        /// レベルアンロード時、および実行時の描画失敗時。
+        /// **<c>Texture2D</c> は GameObject の道連れにならないので明示的に破棄する。**
+        ///
+        /// **スプライトも明示的に破棄する。** 以前はフィールドを null にするだけで、
+        /// 実行時の描画失敗（<see cref="Render"/> の catch）から呼ばれたときに
+        /// 「隠れたまま誰も参照していない子コンポーネント」がパネルに残っていた。
+        /// パネルと一緒に消えるのは**パネルが破棄されるときだけ**である。
         /// </summary>
         public static void Destroy()
         {
             // 実行時の描画失敗でここへ来たときのために、先に隠す。パネルより先に
             // 破棄されている（fake-null）場合は Unity の == null が拾う。
-            if (_sprite != null) _sprite.isVisible = false;
+            if (_sprite != null)
+            {
+                _sprite.isVisible = false;
+                Object.Destroy(_sprite.gameObject);
+            }
 
             if (_texture != null) Object.Destroy(_texture);
 
@@ -189,6 +258,8 @@ namespace DisasterPlus.Game
             _sprite = null;
             _pixels = null;
             _available = false;
+            _built = false;
+            _renderFailed = false;
             _drawnAnything = false;
             _drawnBuildingId = 0;
             _drawnCount = 0;

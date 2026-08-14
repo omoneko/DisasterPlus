@@ -155,9 +155,28 @@ namespace DisasterPlus.Game
                         + "of its own, so there is nothing else to plot)"
                       : ""));
 
-            b.Line(2, "rendering", WaveformView.Available
-                ? "UITextureSprite + Texture2D"
-                : "unavailable (falls back to the peak amplitude row)");
+            // ★ 「まだ作っていない」を「使えない」と書かない（全体レビュー I6）。
+            //    以前は bool 1 個だったので、パネルを一度も開いていない起動直後の
+            //    ダンプが「描画不可（最大振幅の行で代替）」と主張していた。
+            //    切り分けの手掛かりはこの 1 行しかないので、4 状態のまま出す。
+            string rendering;
+            switch (WaveformView.State)
+            {
+                case WaveformViewState.Ready:
+                    rendering = "UITextureSprite + Texture2D";
+                    break;
+                case WaveformViewState.BuildFailed:
+                    rendering = "build failed (falls back to the peak amplitude row)";
+                    break;
+                case WaveformViewState.RenderFailed:
+                    rendering = "drawing stopped after a runtime error "
+                                + "(falls back to the peak amplitude row)";
+                    break;
+                default:
+                    rendering = "not built yet (the earthquake panel has never been opened)";
+                    break;
+            }
+            b.Line(2, "rendering", rendering);
 
             for (int i = 0; i < traces.Count; i++)
             {
@@ -251,6 +270,9 @@ namespace DisasterPlus.Game
             b.Line(1, "button position", ModSettings.EarthquakeButtonX.value + ","
                 + ModSettings.EarthquakeButtonY.value + "  (" + placement + ")");
 
+            // sim スレッドから main の持ち物を読んでいるが、これは InfoModeSwitch の
+            // クラス doc が IL 実測つきで明示的に許可している唯一の例外である
+            // （get_CurrentMode は単一フィールドの読み出しで、最悪でも 1 tick 古い値）。
             b.Line(1, "showing hazard view", InfoModeSwitch.IsShowingHazard ? "yes" : "no");
 
             // DLC が無い環境ではパネル本体を構築していない（EarthquakePanel._bodyBuilt）。
