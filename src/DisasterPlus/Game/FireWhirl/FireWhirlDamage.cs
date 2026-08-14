@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using ColossalFramework;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.FireWhirl;
-using UnityEngine;
 
 namespace DisasterPlus.Game
 {
@@ -234,9 +233,11 @@ namespace DisasterPlus.Game
         /// （クラスの先頭コメントの前提は保たれる）。
         /// </summary>
         /// <param name="attempted">
-        /// 「バニラが受け付けるはずの建物に BurnBuilding を呼んだ」棟数。
+        /// 「バニラ自身が dry-run で受け付けると答えた建物に BurnBuilding を呼んだ」棟数。
         /// 診断（BarrenSpreadTracker）の証拠になるのはこの数だけ。
         /// <see cref="CanBurn"/> が false の棟にも BurnBuilding は呼ぶが、ここには数えない。
+        /// この定義のおかげで attempted &gt; 0 かつ ignited == 0 は
+        /// 「バニラが自分の dry-run の答えを裏切った」の意味になり、証拠として強い。
         /// </param>
         /// <param name="refused">
         /// 選ばれたが「バニラが設計上断る」棟数。attempted &lt; selected の理由が
@@ -264,13 +265,14 @@ namespace DisasterPlus.Game
                 var info = buildings[id].Info;
                 if (info == null || info.m_buildingAI == null) continue;
 
-                bool burnable = CanBurn(id, ref buildings[id], info.m_buildingAI);
+                bool burnable = CanBurn(id, ref buildings[id], info.m_buildingAI, group);
                 if (burnable) attempted++; else refused++;
 
-                // burnable が false でも呼ぶ。CanBurn はバニラの拒否条件の写しであって
-                // バニラそのものではないので、写しが将来ずれたときに本物の着火を
-                // こちらが握り潰さないようにする。着火すれば ignited が増えて
-                // 空振り判定は解除されるので、証拠としての正しさも壊れない。
+                // burnable が false でも本番の呼び出しは行う。dry-run を信じて
+                // 呼ばないことにすると、dry-run と本番が食い違う実装（他 MOD の
+                // パッチなど）で本物の着火を握り潰してしまう。
+                // 逆にここで着火すれば ignited が増えて空振り判定は解除されるので、
+                // 証拠としての正しさも壊れない。
                 if (info.m_buildingAI.BurnBuilding(id, ref buildings[id], group, false)) ignited++;
             }
             return ignited;
@@ -278,6 +280,7 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// この建物への BurnBuilding が「バニラの設計として」通りうるか。
+        /// バニラ自身に dry-run で訊く（testOnly = true）。
         ///
         /// これが要る理由: 空振り検出の証拠から「バニラが設計上断るもの」を除くため。
         /// 除かないと、火災旋風が成功した後の定常状態
@@ -286,31 +289,43 @@ namespace DisasterPlus.Game
         /// 閾値には確実に到達し、「BurnBuilding が全部拒否している」という
         /// 字義どおり正しく完全に誤解を招く警告が出る。
         ///
-        /// IL 実測（CommonBuildingAI.BurnBuilding が false を返す経路は次の 3 つだけ。
-        /// それ以外の出口は ldc.i4.1 / ret）:
-        ///   1. GetFireParameters(...) が false
-        ///        BuildingAI の既定実装        : ldc.i4.0; ret（＝常に false）
-        ///        PlayerBuildingAI             : return m_fireHazard != 0（プレハブ側の値）
-        ///        FireStationAI                : ldc.i4.0; ret（消防署は絶対に燃えない）
-        ///        ParkAI / PlazaAI / MonumentAI 等は PlayerBuildingAI を継承したまま
-        ///        なので、m_fireHazard が 0 の公園・広場はここで落ちる。
-        ///   2. m_flags &amp; 0x400000（Building.Flags.Collapsed。BurnedDown と同値。実測）
-        ///   3. TerrainManager.WaterLevel(pos.xz) &gt; m_position.y（水没中）
+        /// 拒否条件を自前で写さないこと。ここは実際には多態呼び出しであり、
+        /// 「CommonBuildingAI.BurnBuilding の本体」を読んだだけでは足りない。
+        /// アセンブリ内で BurnBuilding を宣言している型は 4 つある（実測）:
+        ///     BuildingAI        (PrefabAI 直下)              ldc.i4.0; ret  = 常に false
+        ///     CommonBuildingAI  (BuildingAI)                 168 命令       = 本体
+        ///     ShelterAI         (PlayerBuildingAI 経由)      ldc.i4.0; ret  = 常に false
+        ///     TsunamiBuoyAI     (PlayerBuildingAI 経由)      ldc.i4.0; ret  = 常に false
+        /// ShelterAI と TsunamiBuoyAI は PlayerBuildingAI → CommonBuildingAI の
+        /// 派生なので `is CommonBuildingAI` は true になるが、GetFireParameters を
+        /// 宣言せず（＝PlayerBuildingAI の「m_fireHazard != 0 なら可燃」を継承）、
+        /// BurnBuilding では条件を一切見ずに false を返す。
+        /// つまり「3 条件の写し」では可燃と誤判定する。どちらも Natural Disasters
+        /// DLC の建物、すなわちこの機能を使うプレイヤーがまさに建てているものなので、
+        /// これは机上の穴ではない。
         ///
-        /// さらに BuildingAI.BurnBuilding 自体が ldc.i4.0; ret なので、
-        /// CommonBuildingAI を継承していない AI は何をしても燃えない。
+        /// 型名を並べて弾く手もあるが、その一覧はゲーム更新で新しい override が
+        /// 増えた瞬間に黙って古くなる（この基盤が捕まえようとしている失敗の形そのもの）。
+        /// 他 MOD 製の BuildingAI 派生もカバーできない。
+        /// 代わりに実物へ委譲する。testOnly = true が正確にこの問いに答える:
+        ///
+        ///   IL 実測 (CommonBuildingAI.BurnBuilding):
+        ///     IL_000F callvirt GetFireParameters / brfalse -> false
+        ///     IL_0019 m_flags &amp; 0x400000 (Collapsed。BurnedDown と同値) -> false
+        ///     IL_003A TerrainManager.WaterLevel(pos.xz) &gt; m_position.y -> false
+        ///     IL_0053 ldarg.s 4 (testOnly) / brtrue IL_020C -> ldc.i4.1; ret
+        ///   メソッド内の書き込み（m_buildingFireCount / m_flags / m_fireIntensity /
+        ///   Frame.m_fireDamage）はすべて IL_00BB 以降＝この分岐より後にしか無い。
+        ///   よって testOnly = true の経路は純粋な問い合わせで、副作用は無い
+        ///   （GetFireParameters の全 16 実装にも stfld/stsfld が無いことを実測済み）。
+        ///
+        /// この委譲なら、判定はつねに実際に呼ばれるものと同じ override から返る。
+        /// 将来 override が増えても、MOD が差し替えても、自動的に追従する。
         /// </summary>
-        private static bool CanBurn(ushort id, ref Building b, BuildingAI ai)
+        private static bool CanBurn(ushort id, ref Building b, BuildingAI ai,
+                                    InstanceManager.Group group)
         {
-            if (!(ai is CommonBuildingAI)) return false;
-            if ((b.m_flags & Building.Flags.Collapsed) != Building.Flags.None) return false;
-
-            int fireHazard, fireSize, fireTolerance;
-            if (!ai.GetFireParameters(id, ref b, out fireHazard, out fireSize, out fireTolerance))
-                return false;
-
-            var pos = b.m_position;
-            return TerrainManager.instance.WaterLevel(new Vector2(pos.x, pos.z)) <= pos.y;
+            return ai.BurnBuilding(id, ref b, group, true);
         }
 
         /// <summary>
