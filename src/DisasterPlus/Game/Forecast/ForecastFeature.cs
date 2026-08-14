@@ -3,9 +3,15 @@ namespace DisasterPlus.Game
     /// <summary>
     /// ①天気予報タブ。バニラのハザードヒートマップは自前で描かず流用し
     /// （InfoModeSwitch / HazardMapReader）、本機能が足すのは時間軸（傾向）と
-    /// ハザード値の数値化だけ（設計書 2）。
+    /// ハザード値の数値化、そして**ハザードマップが何を意味しているかの説明**
+    /// （設計書 2、および全体レビューでの前提の訂正 — ForecastPanel のクラス doc 参照）。
+    ///
+    /// IPausedTickFeature を実装しているのは、ロード直後にポーズしたままでも
+    /// パネルが「読み取れません」で埋まらないようにするため。本機能は
+    /// WeatherReader で読んで ForecastHub へ publish するだけでゲームの状態を
+    /// 一切進めないので、この印を名乗る条件を満たす（そちらの doc 参照）。
     /// </summary>
-    public class ForecastFeature : IDisasterFeature
+    public class ForecastFeature : IDisasterFeature, IPausedTickFeature
     {
         public const string FeatureName = "Forecast";
 
@@ -22,6 +28,9 @@ namespace DisasterPlus.Game
         /// sim スレッド。WeatherManager / DisasterManager の読み取りは必ずここで行う。
         /// main スレッドから直接触ると、スタックトレースの出ない
         /// IndexOutOfRangeException が後から出る（WeatherReader のクラス doc 参照）。
+        ///
+        /// ポーズ中（deltaMinutes == 0）にも呼ばれる（IPausedTickFeature）。
+        /// deltaMinutes は使っていないので、それで挙動は変わらない。
         /// </summary>
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
@@ -30,12 +39,21 @@ namespace DisasterPlus.Game
             var snapshot = WeatherReader.Read();
             ForecastHub.Publish(snapshot);
 
+            // Forecast チャンネルは既定 OFF。この if が無いと、下の 5 回の ToString と
+            // 文字列連結が毎 sim tick（通常速度でおよそ 50 回/秒）実行されてから
+            // Log.Diag に捨てられる——C# は引数を呼び出し前に評価し切るので、
+            // Diag の内側のマスク判定では手遅れになる（全体レビュー指摘）。
+            if (!Log.DiagEnabled(DisasterPlus.Core.Diagnostics.LogChannel.Forecast)) return;
+
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Forecast, "forecast",
                 snapshot.Valid
                     ? "temp=" + snapshot.Temperature.Current.ToString("F1")
                       + " rain=" + snapshot.Rain.Current.ToString("F2")
                       + " cloud=" + snapshot.Cloud.Current.ToString("F2")
+                      + " fog=" + snapshot.Fog.Current.ToString("F2")
                       + " trend=" + snapshot.Temperature.Trend
+                      + " locatedStorms=" + snapshot.LocatedLightningStorms
+                      + "/" + snapshot.LocatedTornadoes
                     : "snapshot invalid");
         }
 
@@ -71,6 +89,17 @@ namespace DisasterPlus.Game
                 b.Line(2, "cloud", snapshot.Cloud.Current.ToString("F2")
                     + " -> " + snapshot.Cloud.Target.ToString("F2")
                     + "  " + snapshot.Cloud.Trend);
+                b.Line(2, "fog", snapshot.Fog.Current.ToString("F2")
+                    + " -> " + snapshot.Fog.Target.ToString("F2")
+                    + "  " + snapshot.Fog.Trend);
+
+                // ハザードマップが「空」なのか「本当にリスクが低い」のかを
+                // テスターが切り分けられるようにする。0/0 なら、どこにカーソルを
+                // 置いてもグリッドは 0 で、それが正常な状態
+                // （WeatherSnapshot.LocatedLightningStorms の doc 参照）。
+                b.Line(2, "located storms (lightning/tornado)", snapshot.DisasterInfoAvailable
+                    ? snapshot.LocatedLightningStorms + " / " + snapshot.LocatedTornadoes
+                    : "unavailable (DisasterManager not present)");
                 // これは「設定された確率」(m_randomDisastersProbability、0.0-1.0 の分数。
                 // *100 の妥当性はバニラの PopsTelemetryEventFormatting.DisasterProbability と
                 // 同じ変換であることを IL 実測済み、ForecastPanel 側のコメント参照)であって、
@@ -107,6 +136,13 @@ namespace DisasterPlus.Game
                 + ModSettings.ForecastButtonY.value + "  (" + placement + ")");
 
             b.Line(1, "showing hazard view", InfoModeSwitch.IsShowingHazard ? "yes" : "no");
+
+            // ハザードの半分は DLC 依存（I2）。無い環境では「マップに表示」も
+            // カーソル位置の数値もパネルに出していないので、それが意図どおりか
+            // ダンプから分かるようにする。
+            b.Line(1, "hazard rows", ModCompat.NaturalDisastersOwned
+                ? "shown"
+                : "hidden (Natural Disasters DLC not owned)");
         }
     }
 }

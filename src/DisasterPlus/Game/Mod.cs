@@ -83,6 +83,17 @@ namespace DisasterPlus.Game
                 ModSettings.ForecastButtonY.value = -1;
             });
 
+            // 予報パネルの気象・傾向の行は DLC 無しでも正しく動くので、機能そのものは
+            // 隠さない。ただしハザードの 2 行（落雷・竜巻の「マップに表示」とカーソル
+            // 位置の数値）は DLC が無いと prefab も気象レーダーも存在せず、永久に
+            // 空のビューと 0 になる。パネル側では行ごと出さないようにしてあるが
+            // （ForecastPanel._hazardRowsBuilt）、設定画面にも理由を書いておかないと
+            // 「機能の一部が黙って無い」ように見える。FireWhirlNeedsDlc と同じ扱い。
+            if (!ModCompat.NaturalDisastersOwned)
+            {
+                helper.AddGroup(Strings.ForecastHazardNeedsDlc);
+            }
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);

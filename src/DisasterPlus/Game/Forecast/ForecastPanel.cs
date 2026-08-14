@@ -8,6 +8,17 @@ namespace DisasterPlus.Game
     /// <summary>
     /// 天気予報パネル。main スレッド専用。
     ///
+    /// **バニラのハザードマップが何なのか（全体レビューで前提が覆った）:**
+    /// 設計書 §1.3 は当初これを「地形・建物・設備から決まる静的なリスク」と書いていたが、
+    /// これは誤りだった。IL 実測で ThunderStormAI/TornadoAI の UpdateHazardMap は
+    /// どちらも Located(4096) と Emerging|Active(12) の 2 段ゲートで始まり、地形も建物も
+    /// 一切参照せず、通過した場合だけ m_targetPosition の周りに円盤を塗るだけと確定した。
+    /// つまりこのマップは「**測位済みで進行中の嵐が、これからどこを襲うか**」であり、
+    /// 雷雨・竜巻でその Located を立てられるのは気象レーダーだけである。
+    /// 該当する嵐が無ければ全セル 0 になるので、そのときは数値を出さない
+    /// （RefreshCursorHazard の doc 参照）。この「ゲートの説明」こそが、
+    /// ユーザーが「予報の概念が実感しづらい」と言った本当の理由に当たる。
+    ///
     /// 設計書 §4 のレイアウトに従うが、**§4.2 の訂正を反映する**: ハザード値は
     /// m_hazardAmount という単一の共有グリッドにしか無く、常に「今表示中のサブモード
     /// 1 種類ぶん」しか保持していない（HazardMapReader のクラス doc 参照）。
@@ -59,6 +70,7 @@ namespace DisasterPlus.Game
         private static UILabel _temperatureLabel;
         private static UILabel _rainLabel;
         private static UILabel _cloudLabel;
+        private static UILabel _fogLabel;
         private static UILabel _windLabel;
         private static UILabel _probabilityLabel;
         private static UILabel _ndrNoteLabel;
@@ -66,6 +78,20 @@ namespace DisasterPlus.Game
         private static UILabel _tornadoLabel;
         private static UILabel _cursorHeaderLabel;
         private static UILabel _cursorValueLabel;
+
+        /// <summary>
+        /// ハザード関連の行（落雷・竜巻の見出し／「マップに表示」ボタン／カーソル位置の
+        /// 数値）を構築したか。Natural Disasters DLC が無い環境では構築せず、
+        /// 代わりに理由を 1 行出す（<see cref="Strings.ForecastHazardNeedsDlc"/>）。
+        ///
+        /// なぜ要るか（全体レビュー指摘 I2）: DLC が無いと雷雨・竜巻の DisasterInfo
+        /// prefab も気象レーダーも存在しないので、「マップに表示」は永久に空のビューへ
+        /// 切り替わるだけになり、カーソルの数値も永久に 0 になる。しかも Assumptions の
+        /// 検査は全て通ってしまう——AI の**型**は DLC の有無に関わらず Assembly-CSharp に
+        /// 同梱されているため、起動時のログにも何のヒントも出ない。
+        /// 気象・傾向の行は DLC 無しでも正しく動くのでそのまま残す。
+        /// </summary>
+        private static bool _hazardRowsBuilt;
 
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
 
@@ -118,6 +144,7 @@ namespace DisasterPlus.Game
             _temperatureLabel = null;
             _rainLabel = null;
             _cloudLabel = null;
+            _fogLabel = null;
             _windLabel = null;
             _probabilityLabel = null;
             _ndrNoteLabel = null;
@@ -125,6 +152,7 @@ namespace DisasterPlus.Game
             _tornadoLabel = null;
             _cursorHeaderLabel = null;
             _cursorValueLabel = null;
+            _hazardRowsBuilt = false;
             // fake-null 経由でも次回 Camera.main を引き直せるが、都市をまたいで
             // 古い参照を抱え続けない、という本プロジェクトの原則を明示的に守る。
             _mainCameraCache = null;
@@ -209,6 +237,10 @@ namespace DisasterPlus.Game
             y += 22f;
             _cloudLabel = AddLabel(panel, "Cloud", 12f, y, PanelWidth - 24f, 20f);
             y += 22f;
+            // I5: Fog は以前から毎 tick 読んでスナップショットに載せていたが、
+            // どこにも出していなかった。読むなら出す。
+            _fogLabel = AddLabel(panel, "Fog", 12f, y, PanelWidth - 24f, 20f);
+            y += 22f;
             _windLabel = AddLabel(panel, "Wind", 12f, y, PanelWidth - 24f, 20f);
             y += 28f;
 
@@ -227,6 +259,21 @@ namespace DisasterPlus.Game
 
             y += 6f;
 
+            // ハザードの半分は DLC 依存。無い環境では「マップに表示」も
+            // カーソル位置の数値も原理的に意味を持たないので、行ごと出さずに
+            // 理由を書く（FireWhirlNeedsDlc と同じ扱い）。_hazardRowsBuilt の doc 参照。
+            _hazardRowsBuilt = ModCompat.NaturalDisastersOwned;
+            if (!_hazardRowsBuilt)
+            {
+                var dlcNote = AddLabel(panel, "HazardNeedsDlc", 12f, y, PanelWidth - 24f, 36f);
+                dlcNote.wordWrap = true;
+                dlcNote.text = Strings.ForecastHazardNeedsDlc;
+                y += 40f;
+
+                panel.height = y;
+                return;
+            }
+
             _lightningLabel = AddLabel(panel, "Lightning", 12f, y, 170f, 24f);
             var lightningButton = AddShowOnMapButton(panel, "LightningShow", y,
                 InfoManager.SubInfoMode.LightningHazard);
@@ -241,8 +288,12 @@ namespace DisasterPlus.Game
 
             _cursorHeaderLabel = AddLabel(panel, "CursorHeader", 12f, y, PanelWidth - 24f, 20f);
             y += 22f;
-            _cursorValueLabel = AddLabel(panel, "CursorValue", 12f, y, PanelWidth - 24f, 20f);
-            y += 28f;
+            // 「嵐が検知されていない」の説明文は 1 行に収まらないので折り返す。
+            // 数値だけを出していた頃の 20f のままだと、この機能でいちばん読ませたい
+            // 文章が途中で切れる。
+            _cursorValueLabel = AddLabel(panel, "CursorValue", 12f, y, PanelWidth - 24f, 54f);
+            _cursorValueLabel.wordWrap = true;
+            y += 60f;
 
             panel.height = y;
         }
@@ -280,20 +331,31 @@ namespace DisasterPlus.Game
             var snapshot = ForecastHub.Latest;
 
             _titleLabel.text = Strings.ForecastTitle;
-            _lightningLabel.text = Strings.ForecastLightning;
-            _tornadoLabel.text = Strings.ForecastTornado;
-            _cursorHeaderLabel.text = Strings.ForecastAtCursor;
+            if (_hazardRowsBuilt)
+            {
+                _lightningLabel.text = Strings.ForecastLightning;
+                _tornadoLabel.text = Strings.ForecastTornado;
+                _cursorHeaderLabel.text = Strings.ForecastAtCursor;
+            }
 
             if (snapshot == null || !snapshot.Valid)
             {
-                _temperatureLabel.text = Strings.ForecastTemperature + ": " + Strings.ForecastUnavailable;
-                _rainLabel.text = Strings.ForecastRain + ": " + Strings.ForecastUnavailable;
-                _cloudLabel.text = Strings.ForecastCloud + ": " + Strings.ForecastUnavailable;
-                _windLabel.text = Strings.ForecastWind + ": " + Strings.ForecastUnavailable;
-                // 完全に読めなかった場合（WeatherManager 自体が居ない等）は素直に
-                // 「不明」。DisasterManager だけ居ない場合の抑制（下の分岐）とは別の話。
-                _probabilityLabel.text = Strings.ForecastProbability + ": " + Strings.ForecastUnavailable;
-                RefreshCursorHazard();
+                // レビュー指摘: 「まだ 1 回も読んでいない」と「読んだが WeatherManager が
+                // 居ない」を同じ文言にしてはいけない。ロード直後にポーズしたままだと
+                // 前者が普通に起きる（FeatureHost.SimulationTick は deltaMinutes<=0 の
+                // 間 OnSimulationTick を呼ばず、ロード後の最初の tick は必ず 0 になる）。
+                // 「読み取れません」と出すと、実際には何も壊れていないのに壊れて見える。
+                string message = snapshot == null
+                    ? Strings.ForecastWaiting
+                    : Strings.ForecastUnavailable;
+
+                _temperatureLabel.text = Strings.ForecastTemperature + ": " + message;
+                _rainLabel.text = Strings.ForecastRain + ": " + message;
+                _cloudLabel.text = Strings.ForecastCloud + ": " + message;
+                _fogLabel.text = Strings.ForecastFog + ": " + message;
+                _windLabel.text = Strings.ForecastWind + ": " + message;
+                _probabilityLabel.text = Strings.ForecastProbability + ": " + message;
+                RefreshCursorHazard(snapshot);
                 return;
             }
 
@@ -308,6 +370,9 @@ namespace DisasterPlus.Game
             _cloudLabel.text = Strings.ForecastCloud + ": "
                 + snapshot.Cloud.Current.ToString("F2")
                 + "  " + TrendWord(snapshot.Cloud.Trend);
+            _fogLabel.text = Strings.ForecastFog + ": "
+                + snapshot.Fog.Current.ToString("F2")
+                + "  " + TrendWord(snapshot.Fog.Trend);
             _windLabel.text = Strings.ForecastWind + ": " + WindDirection.LabelOf(snapshot.WindDegrees);
 
             // 市全体の値。落雷・竜巻どちらの見出しにも属さない(クラス doc 参照)。
@@ -343,7 +408,7 @@ namespace DisasterPlus.Game
                 _probabilityLabel.text = "";
             }
 
-            RefreshCursorHazard();
+            RefreshCursorHazard(snapshot);
         }
 
         /// <summary>
@@ -353,7 +418,7 @@ namespace DisasterPlus.Game
         ///
         /// レビュー指摘: 以前はハザードビューが出ていない場合も ForecastUnavailable
         /// （「気象データを読み取れません」）を使い回していたが、これは誤り。
-        /// 気象データ自体は生きており(4 行上の温度・雨・雲・風は表示できている)、
+        /// 気象データ自体は生きており(温度・雨・雲・霧・風は表示できている)、
         /// 出せないのはハザード数値だけで、原因も「ハザードビューが出ていない」と
         /// 特定できている(§4.2)。しかもパネルを読んでいる間はマウスがほぼ確実に
         /// パネル自身の上にあり(UIView.IsInsideUI()==true)、地形上のカーソル判定は
@@ -362,12 +427,74 @@ namespace DisasterPlus.Game
         /// 無ければ原因を特定したヒント(ForecastSwitchHazardView)を即座に出す。
         /// カーソル位置が取れない(UI 上・地形の外)のに何らかのハザードビューは
         /// 出ている、という場合だけ ForecastUnavailable(=カーソル位置が不明)を使う。
+        ///
+        /// **全体レビューの最重要指摘（本メソッドの意味が変わった）:**
+        /// バニラのハザードマップは静的なリスク面ではなく、「レーダーで測位済み
+        /// （Located）かつ進行中（Emerging|Active）の嵐」の予測被害範囲である
+        /// （IL の根拠は WeatherSnapshot.LocatedLightningStorms の doc）。
+        /// 該当する嵐が 1 つも無いと、UpdateTexture が毎回グリッドを全ゼロで
+        /// 埋め直したあと誰も書き込まないので、都市の**全域が 0** になる。
+        /// 以前のこのメソッドはそれをそのまま「落雷: 0」と表示していた。
+        /// SampleAt は ok=true を返す——サブモードは一致していてグリッドも実在し、
+        /// 中身が全部ゼロなだけだからである。数値としては本物だが、プレイヤーが
+        /// 読み取る意味（「この街に落雷リスクは無い」）は嘘になる。正しくは
+        /// 「今どの嵐も検知されていない」であり、これは
+        /// **誤ったラベルではなく誤った前提から到達した「確信を持って誤った数値」**
+        /// だった。したがって表示中の種別の測位済み件数が 0 のときは、数値を
+        /// 一切出さずに空である理由（＝気象レーダーが要る）を書く。
         /// </summary>
-        private static void RefreshCursorHazard()
+        /// <param name="snapshot">
+        /// 測位済み件数の出所。null または Valid=false、あるいは
+        /// DisasterInfoAvailable=false のときは件数が**不明**なので、
+        /// 「嵐は検知されていません」と言い切ってはいけない（それ自体が、
+        /// 読めていない事実を隠した断定になる）。汎用の不明扱いに落とす。
+        /// </param>
+        private static void RefreshCursorHazard(WeatherSnapshot snapshot)
         {
+            // DLC が無い環境ではハザードの行そのものを構築していない（I2）。
+            if (!_hazardRowsBuilt) return;
+
             if (!InfoModeSwitch.IsShowingHazard)
             {
                 _cursorValueLabel.text = Strings.ForecastSwitchHazardView;
+                return;
+            }
+
+            // 表示中のサブモードを先に確定させる。カーソル座標より先にこれを見るのは、
+            // 「測位済みの嵐がゼロ」の判定にカーソル位置が要らないため。
+            // パネルを読んでいる間はマウスがパネル上にあってカーソル判定が失敗するので、
+            // 座標を先に要求すると、いちばん伝えたい「レーダーが要る」の説明に
+            // 永久に到達できなくなる。
+            bool showingLightning =
+                InfoModeSwitch.IsShowingHazardFor(InfoManager.SubInfoMode.LightningHazard);
+            bool showingTornado =
+                InfoModeSwitch.IsShowingHazardFor(InfoManager.SubInfoMode.TornadoHazard);
+
+            if (!showingLightning && !showingTornado)
+            {
+                // IsShowingHazard は true だが、表示中のサブモードが落雷・竜巻の
+                // どちらでもない(洪水・隕石・地盤沈下・地震・森林火災のハザード等)。
+                // この機能が扱う 2 種の外なので、原因を「切り替えてください」と
+                // 断定するのは不正確。汎用の不明扱いに留める。
+                _cursorValueLabel.text = Strings.ForecastUnavailable;
+                return;
+            }
+
+            // 件数が読めていなければ何も断定しない（引数の doc 参照）。
+            if (snapshot == null || !snapshot.Valid || !snapshot.DisasterInfoAvailable)
+            {
+                _cursorValueLabel.text = Strings.ForecastUnavailable;
+                return;
+            }
+
+            int located = showingLightning
+                ? snapshot.LocatedLightningStorms
+                : snapshot.LocatedTornadoes;
+
+            if (located <= 0)
+            {
+                // グリッドは全ゼロ。数値を出さず、空である理由を出す。
+                _cursorValueLabel.text = Strings.ForecastNoStormDetected;
                 return;
             }
 
@@ -379,29 +506,20 @@ namespace DisasterPlus.Game
             }
 
             var worldPos = new Vector3(hit.X, hit.Y, hit.Z);
+            var subMode = showingLightning
+                ? InfoManager.SubInfoMode.LightningHazard
+                : InfoManager.SubInfoMode.TornadoHazard;
 
             bool ok;
-            byte value = HazardMapReader.SampleAt(worldPos, InfoManager.SubInfoMode.LightningHazard, out ok);
-            if (ok)
+            byte value = HazardMapReader.SampleAt(worldPos, subMode, out ok);
+            if (!ok)
             {
-                _cursorValueLabel.text = Strings.ForecastLightning + ": " + value
-                    + "  [" + HazardLevel.BarOf(value) + "]";
+                _cursorValueLabel.text = Strings.ForecastUnavailable;
                 return;
             }
 
-            value = HazardMapReader.SampleAt(worldPos, InfoManager.SubInfoMode.TornadoHazard, out ok);
-            if (ok)
-            {
-                _cursorValueLabel.text = Strings.ForecastTornado + ": " + value
-                    + "  [" + HazardLevel.BarOf(value) + "]";
-                return;
-            }
-
-            // IsShowingHazard は true だが、表示中のサブモードが落雷・竜巻の
-            // どちらでもない(洪水・隕石・地盤沈下・地震・森林火災のハザード等)。
-            // この機能が扱う 2 種の外なので、原因を「切り替えてください」と
-            // 断定するのは不正確。汎用の不明扱いに留める。
-            _cursorValueLabel.text = Strings.ForecastUnavailable;
+            _cursorValueLabel.text = (showingLightning ? Strings.ForecastLightning : Strings.ForecastTornado)
+                + ": " + value + "  [" + HazardLevel.BarOf(value) + "]";
         }
 
         /// <summary>
