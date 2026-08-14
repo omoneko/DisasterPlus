@@ -472,3 +472,19 @@ IL 実測で確定した実際の姿は「**気象レーダーで測位済み（
 1. **`VanillaRandomizer` が本物と一致していること**は起動ログの `ASSUMPTIONS` で確認する
    （Task 5 で追加する検証項目。ここが FAIL なら、建物ごとの余裕度の表示は
    全て信用してはいけない）
+2. **プレハブ 4 値の実測（Task 3 の主目的。以後の全ての持続時間の設計がこの上に乗る）**
+   都市をロードし、`Ctrl+F11` でダンプを取る。`Earthquake` セクションに
+   `m_crackLength` / `m_crackWidth` / `m_emergingDuration` / `m_activeDuration` の
+   4 行が出ること。**この 4 個の数値を報告すること**（DLL にも UnityPy にも
+   無く、実機でしか取れない）
+3. `sim clock` の行が出ること。**日夜サイクルを OFF にすると `dayNight=off` に変わり、
+   `hour` が 12.0 に固定される**こと（これはバグではなくゲームの仕様。§F-1）
+4. 災害パネルから地震を 1 個起こす。`active quakes` に 1 行出て、
+   `phase` が Emerging → Active → Clearing と進むこと。
+   **`(not scheduled)` と出たら不具合**（SelfTrigger が立っていない地震を掴んでいる）
+5. 起動ログの `ASSUMPTIONS` の母数が **16**（スライダー検証が対象外なら 15）になり、
+   地震ぶんの 4 項目が出ること
+6. **2 つ目の都市をロードしても正常に動く**（プレハブキャッシュが持ち越されないこと）
+7. 設定画面の「デバッグ → 詳細ログチャンネル」に「地震」が出て、ON にすると
+   `DIAG earthquake: quakes=... hour=... dayNight=...` が出ること
+   （死んだチェックボックスになっていないことの確認）

@@ -39,6 +39,9 @@ namespace DisasterPlus.Game
         public static SavedBool ForecastEnabled;
         public static SavedInt ForecastButtonX;
         public static SavedInt ForecastButtonY;
+        public static SavedBool EarthquakeEnabled;
+        public static SavedInt EarthquakeButtonX;
+        public static SavedInt EarthquakeButtonY;
 
         public static void Ensure()
         {
@@ -74,6 +77,12 @@ namespace DisasterPlus.Game
             // 空き位置を探し、決まった座標をここへ書き戻す。以後はその座標を再利用する。
             ForecastButtonX  = new SavedInt("forecastButtonX", FileName, -1, true);
             ForecastButtonY  = new SavedInt("forecastButtonY", FileName, -1, true);
+
+            EarthquakeEnabled = new SavedBool("earthquakeEnabled", FileName, true, true);
+            // -1 = 未決定。ForecastButtonX/Y と全く同じ扱い
+            // （EarthquakePanelButton が空き位置を決めて書き戻す。Task 4）。
+            EarthquakeButtonX = new SavedInt("earthquakeButtonX", FileName, -1, true);
+            EarthquakeButtonY = new SavedInt("earthquakeButtonY", FileName, -1, true);
 
             _ready = true;
         }

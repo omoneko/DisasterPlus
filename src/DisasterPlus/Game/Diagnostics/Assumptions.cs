@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 11 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 15 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -40,12 +40,15 @@ namespace DisasterPlus.Game
         /// WeatherManager の current/target フィールド群・
         /// DisasterManager.m_hazardAmount が private Byte[] のままか・
         /// m_disasters の m_buffer/m_size・ハザードグリッドの形状）＋
+        /// 地震 4 件（EarthquakeAI プレハブの 4 調整値・DisasterData の
+        /// m_intensity/m_activationFrame/m_startFrame/m_angle・
+        /// EarthquakeCoverage と CheckLocalResource・sim スレッドの時計）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 12;
+        private const int TotalCheckCount = 16;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -109,7 +112,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 4 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 15 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -265,6 +268,89 @@ namespace DisasterPlus.Game
 
             // --- ①天気予報タブ（Task 5）ここまで ---
 
+            // --- ②地震（Task 3）ここから ---
+
+            // このプロジェクトで唯一「実行時にしか値が取れない」前提。
+            // m_crackLength / m_crackWidth / m_emergingDuration / m_activeDuration の
+            // 実数値は DLL に無く（プレハブのシリアライズ値、IL 事実文書 §A-0）、
+            // UnityPy による sharedassets の読み出しも失敗している。②の以後の
+            // 持続時間の設計は全てこの 4 値の上に乗るので、読めないなら読めないと
+            // 名指しする以外に防波堤が無い。
+            //
+            // DLC 非所持環境ではこれが FAIL するのが正常。TornadoAI の項目が既に
+            // 同じ性質を持っており、それが確立した扱い。母数からは外さない
+            // （ReportSliderNotApplicable 方式にしない）——地震機能そのものが
+            // DLC 依存なので、「使えない」と名指しするのが正しい。
+            Check("EarthquakeAI disaster prefab exposes its four tuning fields",
+                  "no earthquake durations or fault geometry can be read; every duration in this "
+                  + "feature is designed on top of these four numbers. This also FAILs when the "
+                  + "Natural Disasters DLC is not owned, which is expected.",
+                  delegate
+                  {
+                      var t = typeof(EarthquakeAI);
+                      if (!HasField(t, "m_crackLength") || !HasField(t, "m_crackWidth")
+                          || !HasField(t, "m_emergingDuration") || !HasField(t, "m_activeDuration"))
+                      {
+                          return false;
+                      }
+                      // 副作用の無い純粋な走査を使う。EarthquakeReader の内部キャッシュは
+                      // sim スレッドが回しており、main スレッドのここから巻き戻してはいけない
+                      // （FireWhirlSpawner.HasTornadoPrefab と同じ理由）。
+                      return EarthquakeReader.ScanPrefabFacts().Resolved;
+                  });
+
+            Check("DisasterData exposes m_intensity / m_activationFrame / m_startFrame / m_angle",
+                  "neither the shaking strength nor the per-building margin can be shown",
+                  delegate
+                  {
+                      var t = typeof(DisasterData);
+                      return HasField(t, "m_intensity") && HasField(t, "m_activationFrame")
+                          && HasField(t, "m_startFrame") && HasField(t, "m_angle");
+                  });
+
+            // 列挙メンバは文字列で見る。コード内の直接参照はコンパイル時に整数へ
+            // 畳み込まれるので、名前の変更を検出できない（SubInfoMode の検証と同じ理由）。
+            Check("ImmaterialResourceManager.Resource.EarthquakeCoverage exists and "
+                  + "CheckLocalResource is resolvable",
+                  "seismograph coverage cannot be read, so the mod cannot explain why the hazard map is empty",
+                  delegate
+                  {
+                      if (!Enum.IsDefined(typeof(ImmaterialResourceManager.Resource), "EarthquakeCoverage"))
+                      {
+                          return false;
+                      }
+                      return typeof(ImmaterialResourceManager).GetMethod("CheckLocalResource",
+                          BindingFlags.Public | BindingFlags.Instance,
+                          null,
+                          new Type[]
+                          {
+                              typeof(ImmaterialResourceManager.Resource),
+                              typeof(UnityEngine.Vector3),
+                              typeof(int).MakeByRefType()
+                          },
+                          null) != null;
+                  });
+
+            // sim スレッドの時計。ここが解決できないと、残るのは main スレッドが書く
+            // m_currentDayTimeHour だけになる——それはスレッド境界を跨ぐ上に、
+            // m_referenceFrameIndex（描画補間側）由来の別の量である（§F-1）。
+            //
+            // なお m_enableDayNight が false であること自体は前提の破れではない
+            // （プレイヤーが選べる正当な設定で、hour が 12.0 に固定されるだけ）。
+            // ここで FAIL にすると偽 FAIL になるので、その事実は診断ダンプの
+            // "sim clock" 行とパネルで名乗る。
+            Check("SimulationManager exposes m_dayTimeFrame / DAYTIME_FRAME_TO_HOUR / m_enableDayNight",
+                  "the sim-thread clock cannot be read; the mod would have to fall back to "
+                  + "m_currentDayTimeHour, which is written by the main thread",
+                  delegate
+                  {
+                      var t = typeof(SimulationManager);
+                      return HasField(t, "m_dayTimeFrame") && HasField(t, "m_enableDayNight")
+                          && HasStaticField(t, "DAYTIME_FRAME_TO_HOUR");
+                  });
+
+            // --- ②地震（Task 3）ここまで ---
+
             Report();
         }
 
@@ -281,6 +367,17 @@ namespace DisasterPlus.Game
         {
             return declaringType.GetField(fieldName,
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) != null;
+        }
+
+        /// <summary>
+        /// static フィールド版。<see cref="HasField"/> は Instance しか見ないので、
+        /// SimulationManager.DAYTIME_FRAME_TO_HOUR のような static readonly を
+        /// そちらに渡すと常に false になる（＝偽 FAIL）。
+        /// </summary>
+        private static bool HasStaticField(Type declaringType, string fieldName)
+        {
+            return declaringType.GetField(fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static) != null;
         }
 
         /// <summary>
@@ -359,7 +456,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 4 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 15 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

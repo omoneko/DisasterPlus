@@ -112,5 +112,16 @@ namespace DisasterPlus.Game
         public static string TrendFalling = "down";
         public static string TrendSteady = "steady";
         public static string LogChannelForecast = "Forecast";
+
+        // --- ②地震（Task 3） ---
+        // 既存の EarthquakeDamageOwner / EarthquakeOwnerOther / EarthquakeOwnerSelf は
+        // ③の NDR 互換ドロップダウン用で別物。名前を衝突させないこと。
+        public static string GroupEarthquake = "Earthquake";
+        public static string EarthquakeEnabled = "Enable the earthquake panel";
+        public static string EarthquakeResetButton =
+            "Reset the earthquake button position (takes effect next time you load a city)";
+        public static string EarthquakeNeedsDlc =
+            "Earthquakes require the Natural Disasters DLC.";
+        public static string LogChannelEarthquake = "Earthquake";
     }
 }

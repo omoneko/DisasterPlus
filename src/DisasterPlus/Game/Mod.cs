@@ -94,6 +94,22 @@ namespace DisasterPlus.Game
                 helper.AddGroup(Strings.ForecastHazardNeedsDlc);
             }
 
+            var earthquake = helper.AddGroup(Strings.GroupEarthquake);
+            earthquake.AddCheckbox(Strings.EarthquakeEnabled, ModSettings.EarthquakeEnabled.value,
+                v => ModSettings.EarthquakeEnabled.value = v);
+            earthquake.AddButton(Strings.EarthquakeResetButton, delegate
+            {
+                ModSettings.EarthquakeButtonX.value = -1;
+                ModSettings.EarthquakeButtonY.value = -1;
+            });
+
+            // ②は機能そのものが DLC 依存（EarthquakeAI のプレハブが存在しない）。
+            // ForecastHazardNeedsDlc / FireWhirlNeedsDlc と同じ形で理由を書く。
+            if (!ModCompat.NaturalDisastersOwned)
+            {
+                helper.AddGroup(Strings.EarthquakeNeedsDlc);
+            }
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
@@ -160,6 +176,15 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Forecast)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Forecast));
+
+            // Forecast と同じく、Earthquake チャンネル付きの Log.Diag 呼び出しが実在する
+            // （EarthquakeFeature.OnSimulationTick）。死んだ設定ではない。
+            channels.AddCheckbox(Strings.LogChannelEarthquake,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Earthquake)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Earthquake));
         }
     }
 }
