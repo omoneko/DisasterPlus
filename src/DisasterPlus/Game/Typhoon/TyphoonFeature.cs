@@ -149,8 +149,19 @@ namespace DisasterPlus.Game
             //   （TyphoonCloud のクラス doc）。台風が終わったときの後始末も
             //   TyphoonCloud.Update が自分で行う——TyphoonController.Forget の
             //   後始末列にこの型を足さないこと。
-            if (ModSettings.TyphoonCloudEnabled.value) TyphoonCloud.Update(TyphoonHub.Latest);
-            else TyphoonCloud.Destroy();
+            //   ★ TyphoonEnabled も見ること。機能そのものを切ると OnSimulationTick が
+            //     早期 return して TyphoonHub.Latest が更新されなくなるので、最後に
+            //     publish された「Active な」スナップショットが残り続ける ——
+            //     見ないと**止まった雲が画面に貼り付いたまま**になる
+            //     （TyphoonPanelButton / TyphoonPanel が同じガードを持っている）。
+            if (ModSettings.TyphoonEnabled.value && ModSettings.TyphoonCloudEnabled.value)
+            {
+                TyphoonCloud.Update(TyphoonHub.Latest);
+            }
+            else
+            {
+                TyphoonCloud.Destroy();
+            }
         }
 
         public void OnLevelUnloading()
