@@ -67,6 +67,18 @@ namespace DisasterPlus.Game
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
+
+        /// <summary>
+        /// Natural Disasters DLC を持たない環境では FAIL するのが正常な検証の名前。
+        /// <see cref="Check(string,string,Func{bool},bool)"/> が登録する。
+        ///
+        /// **名前を別表として二重に書かない。** 書くと検証名を直したときに黙って
+        /// 対応が切れ、正常な FAIL がまた警告として出るようになる。
+        /// <see cref="Reset"/> では消さない（ゲームのビルドに対する事実であって
+        /// 都市ごとの状態ではない）。
+        /// </summary>
+        private static readonly List<string> _expectedWithoutDlc = new List<string>();
+
         private static bool _ran;
 
         /// <summary>
@@ -161,9 +173,12 @@ namespace DisasterPlus.Game
                           null) != null;
                   });
 
+            // DLC 非所持環境では FAIL するのが正常（プレハブごと存在しない）。
             Check("TornadoAI disaster prefab is available",
-                  "fire whirls cannot be created",
-                  delegate { return FireWhirlSpawner.HasTornadoPrefab(); });
+                  "fire whirls cannot be created. This also FAILs when the Natural Disasters "
+                  + "DLC is not owned, which is expected.",
+                  delegate { return FireWhirlSpawner.HasTornadoPrefab(); },
+                  true);
 
             // --- ①天気予報タブ（Task 5）ここから ---
 
@@ -221,12 +236,17 @@ namespace DisasterPlus.Game
                   "trend cannot be computed (the core of the forecast feature)",
                   delegate
                   {
+                      // 全て Single であることを実際のゲームアセンブリで確認済み。
                       var t = typeof(WeatherManager);
-                      return HasField(t, "m_currentRain") && HasField(t, "m_targetRain")
-                          && HasField(t, "m_currentCloud") && HasField(t, "m_targetCloud")
-                          && HasField(t, "m_currentFog") && HasField(t, "m_targetFog")
-                          && HasField(t, "m_currentTemperature") && HasField(t, "m_targetTemperature")
-                          && HasField(t, "m_windDirection");
+                      return HasField(t, "m_currentRain", typeof(float))
+                          && HasField(t, "m_targetRain", typeof(float))
+                          && HasField(t, "m_currentCloud", typeof(float))
+                          && HasField(t, "m_targetCloud", typeof(float))
+                          && HasField(t, "m_currentFog", typeof(float))
+                          && HasField(t, "m_targetFog", typeof(float))
+                          && HasField(t, "m_currentTemperature", typeof(float))
+                          && HasField(t, "m_targetTemperature", typeof(float))
+                          && HasField(t, "m_windDirection", typeof(float));
                   });
 
             // 測位済み災害の走査に必要なもの（WeatherReader.CountLocatedStorms）。
@@ -240,7 +260,10 @@ namespace DisasterPlus.Game
                       var f = typeof(DisasterManager).GetField("m_disasters",
                           BindingFlags.Public | BindingFlags.Instance);
                       if (f == null) return false;
-                      return HasField(f.FieldType, "m_buffer") && HasField(f.FieldType, "m_size");
+                      // FastList<DisasterData> であることまで見る。名前だけでは、
+                      // 中身が別の型の FastList に差し替わっても通ってしまう。
+                      return HasField(f.FieldType, "m_buffer", typeof(DisasterData[]))
+                          && HasField(f.FieldType, "m_size", typeof(int));
                   });
 
             // グリッド形状。HazardMapReader の GridSize / WorldUnitsPerCell は
@@ -296,31 +319,52 @@ namespace DisasterPlus.Game
             // 同じ性質を持っており、それが確立した扱い。母数からは外さない
             // （ReportSliderNotApplicable 方式にしない）——地震機能そのものが
             // DLC 依存なので、「使えない」と名指しするのが正しい。
-            Check("EarthquakeAI disaster prefab exposes its four tuning fields",
+            Check("EarthquakeAI disaster prefab exposes its four tuning fields and "
+                  + "m_activeDuration is non-zero",
                   "no earthquake durations or fault geometry can be read; every duration in this "
                   + "feature is designed on top of these four numbers. This also FAILs when the "
                   + "Natural Disasters DLC is not owned, which is expected.",
                   delegate
                   {
                       var t = typeof(EarthquakeAI);
-                      if (!HasField(t, "m_crackLength") || !HasField(t, "m_crackWidth")
-                          || !HasField(t, "m_emergingDuration") || !HasField(t, "m_activeDuration"))
+                      if (!HasField(t, "m_crackLength", typeof(float))
+                          || !HasField(t, "m_crackWidth", typeof(float))
+                          || !HasField(t, "m_emergingDuration", typeof(uint))
+                          || !HasField(t, "m_activeDuration", typeof(uint)))
                       {
                           return false;
                       }
                       // 副作用の無い純粋な走査を使う。EarthquakeReader の内部キャッシュは
                       // sim スレッドが回しており、main スレッドのここから巻き戻してはいけない
                       // （FireWhirlSpawner.HasTornadoPrefab と同じ理由）。
-                      return EarthquakeReader.ScanPrefabFacts().Resolved;
-                  });
+                      //
+                      // ★★ **Resolved だけを見ない**（全体レビュー C1 の監査で見つかった
+                      //    3 件目）。Resolved は「オブジェクトが見つかり 4 値を読み終えた」
+                      //    だけで立ち、**中身を 1 バイトも見ていない**。②で実際に振る舞いを
+                      //    決めているのは 4 箇所の `Resolved || ActiveDuration == 0u` という
+                      //    ゲート（CameraShakeBooster / EarthquakeFeature /
+                      //    EarthquakePanel / EarthquakeSensorRows）である。
+                      //    m_activeDuration が 0 だと波形もカメラ補正も地震計も黙って
+                      //    止まるのに、この検証だけ PASS を出していた。
+                      //
+                      //    m_crackLength / m_crackWidth は**ゲートに含めない**。
+                      //    こちらは 0 のとき表示側が「unknown」と名乗る経路を既に持って
+                      //    いる（EarthquakeFeature の "fault (L/W)" 行）ので、
+                      //    黙って壊れる値ではない。
+                      var quake = EarthquakeReader.ScanPrefabFacts();
+                      return quake.Resolved && quake.ActiveDuration > 0u;
+                  },
+                  true);
 
             Check("DisasterData exposes m_intensity / m_activationFrame / m_startFrame / m_angle",
                   "neither the shaking strength nor the per-building margin can be shown",
                   delegate
                   {
                       var t = typeof(DisasterData);
-                      return HasField(t, "m_intensity") && HasField(t, "m_activationFrame")
-                          && HasField(t, "m_startFrame") && HasField(t, "m_angle");
+                      return HasField(t, "m_intensity", typeof(byte))
+                          && HasField(t, "m_activationFrame", typeof(uint))
+                          && HasField(t, "m_startFrame", typeof(uint))
+                          && HasField(t, "m_angle", typeof(float));
                   });
 
             // 列挙メンバは文字列で見る。コード内の直接参照はコンパイル時に整数へ
@@ -360,8 +404,9 @@ namespace DisasterPlus.Game
                   delegate
                   {
                       var t = typeof(SimulationManager);
-                      return HasField(t, "m_dayTimeFrame") && HasField(t, "m_enableDayNight")
-                          && HasStaticField(t, "DAYTIME_FRAME_TO_HOUR");
+                      return HasField(t, "m_dayTimeFrame", typeof(uint))
+                          && HasField(t, "m_enableDayNight", typeof(bool))
+                          && HasStaticField(t, "DAYTIME_FRAME_TO_HOUR", typeof(float));
                   });
 
             // --- ②地震（Task 3）ここまで ---
@@ -516,7 +561,8 @@ namespace DisasterPlus.Game
             Check("TsunamiAI disaster prefab is available",
                   "the tsunami chain cannot run (this also FAILs when the Natural Disasters DLC "
                   + "is not owned, which is expected)",
-                  delegate { return TsunamiChain.HasTsunamiPrefab(); });
+                  delegate { return TsunamiChain.HasTsunamiPrefab(); },
+                  true);
 
             // 津波連鎖の入口と出口。HasWater が解決できなければ「震源が水中か」を
             // 判断できず、m_waveIndex が読めなければ「波が実際に立ったか」を判断できない
@@ -616,7 +662,7 @@ namespace DisasterPlus.Game
             // 母数からは外さない——台風機能そのものが DLC 依存なので、
             // 「使えない」と名指しするのが正しい。
             Check("ThunderStormAI disaster prefab exposes m_radius / m_emergingDuration / "
-                  + "m_activeDuration",
+                  + "m_activeDuration, and m_radius / m_activeDuration are non-zero",
                   "no typhoon can be started at all: its radius, its lifetime and its travel "
                   + "speed are all derived from these three numbers, and the mod refuses to "
                   + "guess them. This also FAILs when the Natural Disasters DLC is not owned, "
@@ -624,16 +670,30 @@ namespace DisasterPlus.Game
                   delegate
                   {
                       var t = typeof(ThunderStormAI);
-                      if (!HasField(t, "m_radius") || !HasField(t, "m_emergingDuration")
-                          || !HasField(t, "m_activeDuration"))
+                      if (!HasField(t, "m_radius", typeof(float))
+                          || !HasField(t, "m_emergingDuration", typeof(uint))
+                          || !HasField(t, "m_activeDuration", typeof(uint)))
                       {
                           return false;
                       }
                       // 副作用の無い純粋な走査を使う。TyphoonReader の内部キャッシュは
                       // sim スレッドが回しており、main スレッドのここから巻き戻しては
                       // いけない（EarthquakeAI の項目と同じ理由）。
-                      return TyphoonReader.ScanPrefabFacts().StormResolved;
-                  });
+                      //
+                      // ★★ **StormResolved ではなく Usable を見る**（全体レビュー C1）。
+                      //    StormResolved は「プレハブという*オブジェクト*が見つかり、
+                      //    3 つのフィールドを読み終えた」だけで立つ ——
+                      //    **中身は 1 バイトも見ていない。** 台風を起こしてよいかを
+                      //    実際に決めているのは TyphoonPrefabFacts.Usable
+                      //    （＝ StormResolved && StormRadius > 0 && ActiveDuration > 0）で、
+                      //    TyphoonController.Start はそちらで断っている。
+                      //    ここが Resolved のままだと、m_radius か m_activeDuration が
+                      //    0 でデシリアライズされた環境で**ボタンを押しても何も起きないのに、
+                      //    ダンプも設定画面もこの検証だけ PASS と名乗る**。
+                      //    「読めた」を「使える」の代わりに使わない。
+                      return TyphoonReader.ScanPrefabFacts().Usable;
+                  },
+                  true);
 
             // ★ 設計書の記述をここでも訂正して固定する。**VortexAI に m_maxSpeed は
             //    存在しない。** §B-1 の IL_00AF が読んでいるのは VehicleAI.m_info、
@@ -646,7 +706,8 @@ namespace DisasterPlus.Game
             //    そのことを impact に書いておかないと、正常に台風が動く環境の
             //    この FAIL が「台風が壊れている」と読まれる。
             Check("TornadoAI.m_vortexInfo resolves to a VortexAI with m_destructionRadiusMin / "
-                  + "m_destructionRadiusMax and a VehicleInfo with m_maxSpeed",
+                  + "m_destructionRadiusMax and a VehicleInfo with m_maxSpeed, and "
+                  + "m_maxSpeed / m_destructionRadiusMax are non-zero",
                   "the optional accompanying tornadoes cannot be sized or steered; the typhoon "
                   + "itself is unaffected. This also FAILs when the Natural Disasters DLC is "
                   + "not owned, which is expected.",
@@ -660,15 +721,25 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      if (!HasField(typeof(VortexAI), "m_destructionRadiusMin")
-                          || !HasField(typeof(VortexAI), "m_destructionRadiusMax")
-                          || !HasField(typeof(VehicleInfo), "m_maxSpeed"))
+                      if (!HasField(typeof(VortexAI), "m_destructionRadiusMin", typeof(float))
+                          || !HasField(typeof(VortexAI), "m_destructionRadiusMax", typeof(float))
+                          || !HasField(typeof(VehicleInfo), "m_maxSpeed", typeof(float)))
                       {
                           return false;
                       }
 
-                      return TyphoonReader.ScanPrefabFacts().VortexResolved;
-                  });
+                      // ★★ **VortexResolved だけでは足りない**（全体レビュー C1、嵐と同じ形）。
+                      //    随伴竜巻を実際に止めているのは TyphoonTornado.Step の
+                      //    `!prefab.VortexResolved || !(prefab.VortexMaxSpeed > 0f)` で、
+                      //    軌道半径の見積りは m_destructionRadiusMax の上に乗る。
+                      //    値が 0 でも VortexResolved は立つので、ここを Resolved の
+                      //    ままにすると「竜巻が 1 個も出ないのに検証は PASS」になる。
+                      var vortex = TyphoonReader.ScanPrefabFacts();
+                      return vortex.VortexResolved
+                             && vortex.VortexMaxSpeed > 0f
+                             && vortex.DestructionRadiusMax > 0f;
+                  },
+                  true);
 
             // --- ④台風（Task 2）ここまで ---
 
@@ -694,8 +765,10 @@ namespace DisasterPlus.Game
                   delegate
                   {
                       var d = typeof(DisasterData);
-                      if (!HasField(d, "m_targetPosition") || !HasField(d, "m_angle")
-                          || !HasField(d, "m_intensity") || !HasField(d, "m_activationFrame"))
+                      if (!HasField(d, "m_targetPosition", typeof(UnityEngine.Vector3))
+                          || !HasField(d, "m_angle", typeof(float))
+                          || !HasField(d, "m_intensity", typeof(byte))
+                          || !HasField(d, "m_activationFrame", typeof(uint)))
                       {
                           return false;
                       }
@@ -741,12 +814,12 @@ namespace DisasterPlus.Game
                   delegate
                   {
                       var w = typeof(WeatherManager);
-                      return HasField(w, "m_targetRain")
-                             && HasField(w, "m_targetCloud")
-                             && HasField(w, "m_targetFog")
-                             && HasField(w, "m_targetDirection")
-                             && HasField(w, "m_forceWeatherOn")
-                             && HasField(w, "m_enableWeather");
+                      return HasField(w, "m_targetRain", typeof(float))
+                             && HasField(w, "m_targetCloud", typeof(float))
+                             && HasField(w, "m_targetFog", typeof(float))
+                             && HasField(w, "m_targetDirection", typeof(float))
+                             && HasField(w, "m_forceWeatherOn", typeof(float))
+                             && HasField(w, "m_enableWeather", typeof(bool));
                   });
 
             // --- ④台風（Task 4）ここまで ---
@@ -795,8 +868,19 @@ namespace DisasterPlus.Game
             // ★ DestroyTrees だけが解決できない場合はこの検査を FAIL にしない。
             //   風害本体（倒壊と AddWind）は動くので、FAIL にすると狼少年になる。
             //   倒木を諦めた事実は TyphoonWind が FeatureHost.NoteDegraded で名乗る。
-            Check("BuildingAI.CollapseBuilding is resolvable and DisasterHelpers.AddWind / "
-                  + "DestroyTrees are reachable",
+            //
+            // ★★ **ただし「見ていないものを名前で名乗らない」**（全体レビュー）。
+            //    この検査は以前 "AddWind / DestroyTrees are reachable" と名乗りながら
+            //    DestroyTrees を 1 度も引いていなかった —— PASS が、一度も調べて
+            //    いない相手について断定していたことになる。合否には入れないが
+            //    **実際に引き、結果を名前に書く**。名前は Check に渡す前に組み立てる
+            //    （AssumptionResult は Name しか表示しないので、ここが唯一の出口）。
+            Check("BuildingAI.CollapseBuilding is resolvable and DisasterHelpers.AddWind is "
+                  + "reachable (DisasterHelpers.DestroyTrees: "
+                  + (DestroyTreesIsReachable()
+                        ? "reachable"
+                        : "MISSING - the typhoon fells no trees; the rest of the wind sweep runs")
+                  + ")",
                   "wind damage cannot be applied. The typhoon still moves, drives the weather "
                   + "and drops lightning; the mod disables the wind sweep rather than reaching "
                   + "for DisasterHelpers.DestroyBuildings, which Natural Disasters Renewal "
@@ -862,7 +946,12 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      if (!HasField(typeof(WaterSimulation), "m_waterSources")) return false;
+                      // FastList<WaterSource> であることまで見る（実測で確認済み）。
+                      if (!HasField(typeof(WaterSimulation), "m_waterSources",
+                                    typeof(FastList<WaterSource>)))
+                      {
+                          return false;
+                      }
 
                       if (typeof(WaterSimulation).GetMethod("LockWaterSource",
                               BindingFlags.Public | BindingFlags.Instance, null,
@@ -878,8 +967,11 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      return HasField(typeof(WaterSource), "m_type")
-                             && HasField(typeof(WaterSource), "m_target");
+                      // ★ 型まで見る（全体レビュー）。ここのコメントは以前から
+                      //    「public UInt16」と断定していたのに、検査は名前しか見て
+                      //    いなかった。TyphoonFlood は ushort として読み書きする。
+                      return HasField(typeof(WaterSource), "m_type", typeof(ushort))
+                             && HasField(typeof(WaterSource), "m_target", typeof(ushort));
                   });
 
             // --- ④台風（Task 8）ここまで ---
@@ -942,34 +1034,101 @@ namespace DisasterPlus.Game
             // 問題ない。**DayNightDynamicCloudsProperties の実在はここに入れない** ——
             // 無いのは正当な環境（DLC・グラフィック設定）で、④の自前の雲には
             // 影響しないため（FAIL にすると狼少年になる）。
-            Check("A transparent shader resolves via Shader.Find and Graphics.DrawMesh is "
-                  + "reachable",
+            // ★★ **どのシェーダで通ったかを名前に書く**（全体レビュー）。
+            //    以前はこの検査が `|| Shader.Find("Standard") != null` で終わっていた。
+            //    Standard は Unity 組み込みなので実質いつでも解決し、**この検査は
+            //    原理的に FAIL しない**——「粒子系のアルファブレンドが 1 つも無い」
+            //    という、この検査が名指しするはずだった事態が起きても PASS が出る。
+            //    合否の式は TyphoonCloud.FindShader と同じままにし（そちらが実際に
+            //    使う順序であり、Standard は MakeStandardTransparent で正しく透過に
+            //    してから使う正当な最終手段である）、**勝ったシェーダ名を出す**ことで
+            //    「Standard まで落ちている」を読めるようにする。
+            string cloudShader = FirstResolvableCloudShader();
+            Check("Graphics.DrawMesh(Mesh, Matrix4x4, Material, int, Camera, int, "
+                  + "MaterialPropertyBlock, bool, bool) is reachable and a transparent shader "
+                  + "resolves via Shader.Find (winner: "
+                  + (cloudShader ?? "NONE - the cloud is not drawn") + ")",
                   "the typhoon's own cloud cannot be drawn. Every other part of the typhoon is "
                   + "unaffected; the mod draws nothing rather than borrowing a Cities material, "
                   + "which renders invisible or black in a hand-rolled DrawMesh",
                   delegate
                   {
+                      // ★ 4 引数版ではなく**実際に呼んでいる 9 引数版**を見る。
+                      //   4 引数版は castShadows: true / receiveShadows: true を転送するので、
+                      //   ④は影を落とさない 9 引数版へ移した（TyphoonCloud の doc）。
+                      //   検査する相手は、実際に呼ぶオーバーロードでなければ意味が無い。
                       if (typeof(UnityEngine.Graphics).GetMethod("DrawMesh",
                               BindingFlags.Public | BindingFlags.Static, null,
                               new Type[]
                               {
                                   typeof(UnityEngine.Mesh), typeof(UnityEngine.Matrix4x4),
-                                  typeof(UnityEngine.Material), typeof(int)
+                                  typeof(UnityEngine.Material), typeof(int),
+                                  typeof(UnityEngine.Camera), typeof(int),
+                                  typeof(UnityEngine.MaterialPropertyBlock),
+                                  typeof(bool), typeof(bool)
                               },
                               null) == null)
                       {
                           return false;
                       }
 
-                      return UnityEngine.Shader.Find("Particles/Alpha Blended") != null
-                             || UnityEngine.Shader.Find("Legacy Shaders/Particles/Alpha Blended") != null
-                             || UnityEngine.Shader.Find("Particles/Additive") != null
-                             || UnityEngine.Shader.Find("Standard") != null;
+                      return cloudShader != null;
                   });
 
             // --- ④台風（Task 9）ここまで ---
 
             Report();
+        }
+
+        /// <summary>
+        /// ④の雲が使えるシェーダの名前。1 つも無ければ null。
+        /// **順序は <c>TyphoonCloud.FindShader</c> と同じでなければならない**
+        /// （違う順序で調べると、検査が報告する名前と実際に使うシェーダがずれる）。
+        /// <c>Shader.Find</c> は main スレッド専用だが、<see cref="Run"/> 自体が
+        /// main スレッド専用なので問題ない。
+        /// </summary>
+        private static string FirstResolvableCloudShader()
+        {
+            string[] names =
+            {
+                "Particles/Alpha Blended",
+                "Legacy Shaders/Particles/Alpha Blended",
+                "Particles/Additive",
+                "Standard",
+            };
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                // UnityEngine.Object の == 多重定義で fake-null も弾く（?? は素通しする）。
+                if (UnityEngine.Shader.Find(names[i]) != null) return names[i];
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// <c>DisasterHelpers.DestroyTrees</c> が引数の型まで込みで解決できるか。
+        /// **合否には使わない**（倒木だけが使えない環境で風害まで FAIL にすると
+        /// 狼少年になる）。検証の名前に事実を書くためだけに引く。
+        /// 並びは Task 7 Step 1 で IL 実測したものと同じ。
+        /// </summary>
+        private static bool DestroyTreesIsReachable()
+        {
+            try
+            {
+                return typeof(DisasterHelpers).GetMethod("DestroyTrees",
+                    BindingFlags.Public | BindingFlags.Static, null,
+                    new Type[]
+                    {
+                        typeof(int), typeof(InstanceManager.Group), typeof(UnityEngine.Vector3),
+                        typeof(float), typeof(float), typeof(float), typeof(float),
+                        typeof(float), typeof(float)
+                    },
+                    null) != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool HasUpdateHazardMap(Type aiType)
@@ -981,6 +1140,19 @@ namespace DisasterPlus.Game
                 null) != null;
         }
 
+        /// <summary>
+        /// 名前だけで見る版。**新しい検証では使わないこと**（全体レビュー）。
+        ///
+        /// 名前の一致は「同じ意味のフィールドがまだそこに在る」ことを保証しない。
+        /// 型が <c>UInt16</c> から <c>UInt32</c> へ変わっても、<c>float</c> が
+        /// <c>double</c> になっても、この関数は true を返し続ける ——
+        /// そして本 MOD の読み書きは**コンパイル済みの型で**行われるので、
+        /// 実際には型ロード時例外か、黙って別の値を読む結果になる。
+        /// 型まで分かっているものは必ず <see cref="HasField(Type,string,Type)"/> を使う。
+        ///
+        /// 残してあるのは、型を名指しできない相手（<c>FastList&lt;T&gt;</c> の内部
+        /// フィールドなど、ジェネリック実引数を跨いで照合したい場合）のためだけである。
+        /// </summary>
         private static bool HasField(Type declaringType, string fieldName)
         {
             return declaringType.GetField(fieldName,
@@ -988,14 +1160,32 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
+        /// 型まで込みで見る版。**こちらが既定。**
+        ///
+        /// 期待する型は全て本タスクで実際のゲームアセンブリへリフレクションして確定させた
+        /// （<c>WeatherManager</c> の天候値は全て <c>Single</c>、
+        /// <c>DisasterData.m_intensity</c> は <c>Byte</c>、
+        /// <c>m_activationFrame</c> / <c>m_startFrame</c> は <c>UInt32</c>、
+        /// <c>WaterSource.m_type</c> / <c>m_target</c> は <c>UInt16</c>、
+        /// <c>ThunderStormAI</c> / <c>EarthquakeAI</c> の duration は <c>UInt32</c>）。
+        /// </summary>
+        private static bool HasField(Type declaringType, string fieldName, Type fieldType)
+        {
+            var f = declaringType.GetField(fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            return f != null && f.FieldType == fieldType;
+        }
+
+        /// <summary>
         /// static フィールド版。<see cref="HasField"/> は Instance しか見ないので、
         /// SimulationManager.DAYTIME_FRAME_TO_HOUR のような static readonly を
         /// そちらに渡すと常に false になる（＝偽 FAIL）。
         /// </summary>
-        private static bool HasStaticField(Type declaringType, string fieldName)
+        private static bool HasStaticField(Type declaringType, string fieldName, Type fieldType)
         {
-            return declaringType.GetField(fieldName,
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static) != null;
+            var f = declaringType.GetField(fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            return f != null && f.FieldType == fieldType;
         }
 
         /// <summary>
@@ -1059,6 +1249,35 @@ namespace DisasterPlus.Game
 
         private static void Check(string name, string impact, Func<bool> predicate)
         {
+            Check(name, impact, predicate, false);
+        }
+
+        /// <param name="expectedWithoutDlc">
+        /// Natural Disasters DLC を持っていない環境では**この検証が FAIL するのが正常**か。
+        ///
+        /// true を渡した検証は、DLC 非所持の環境で <see cref="LogResult"/> が
+        /// <c>Log.Warn</c> ではなく <c>Log.Info</c> で出し、設定画面の警告群からも
+        /// 外れる（<see cref="UnexpectedFailures"/>）。**結果自体は FAIL のまま**で、
+        /// 診断ダンプには従来どおり FAIL として出る —— 「DLC が無いから使えない」を
+        /// PASS と言い換えることはしない。
+        ///
+        /// これが要るのは、DLC を持たない環境では 5 件が**毎回のレベルロードで**
+        /// FAIL するからである。1 件につき Log.Warn が 2 行出るので、正常な
+        /// バニラ環境のログが毎回 10 行の警告で埋まり、設定画面には
+        /// 「一部の機能が使えません」の群が固定表示されて消えなくなる。
+        /// 狼少年にしないための扱いで、他の FAIL は今までどおり Warn で目立たせる。
+        /// </param>
+        private static void Check(string name, string impact, Func<bool> predicate,
+                                  bool expectedWithoutDlc)
+        {
+            if (expectedWithoutDlc)
+            {
+                lock (_gate)
+                {
+                    if (!_expectedWithoutDlc.Contains(name)) _expectedWithoutDlc.Add(name);
+                }
+            }
+
             bool passed;
             string detail = impact;
             try
@@ -1103,12 +1322,52 @@ namespace DisasterPlus.Game
             if (a.Passed)
             {
                 Log.Info("  PASS  " + a.Name);
+                return;
             }
-            else
+
+            // ★ DLC 非所持環境で「正常な FAIL」が毎回 2 行の警告になるのを止める
+            //   （全体レビュー）。行は必ず出す —— 黙らせるのではなく、
+            //   重み付けだけを変える。
+            if (IsExpectedFailure(a.Name))
             {
-                Log.Warn("  FAIL  " + a.Name);
-                Log.Warn("        -> " + a.Impact);
+                Log.Info("  FAIL  " + a.Name
+                         + "  (expected: the Natural Disasters DLC is not owned)");
+                return;
             }
+
+            Log.Warn("  FAIL  " + a.Name);
+            Log.Warn("        -> " + a.Impact);
+        }
+
+        /// <summary>
+        /// この FAIL が「この環境では正常」か。DLC 依存の検証で、かつ DLC を
+        /// 持っていないときだけ true。
+        /// </summary>
+        private static bool IsExpectedFailure(string name)
+        {
+            if (ModCompat.NaturalDisastersOwned) return false;
+            lock (_gate) { return _expectedWithoutDlc.Contains(name); }
+        }
+
+        /// <summary>
+        /// 設定画面に「一部の機能が使えません」として出すべき FAIL だけを返す。
+        /// **main スレッド専用**（<c>ModCompat.NaturalDisastersOwned</c> を読む）。
+        ///
+        /// DLC 非所持環境で正常に FAIL する 5 件を外すためだけに在る。外さないと、
+        /// バニラのままの環境では警告の群が**永久に出続ける** —— そして本当の
+        /// 前提破れが起きたとき、その 1 件は既に見慣れた群に紛れて読まれない。
+        /// </summary>
+        public static IList<AssumptionResult> UnexpectedFailures()
+        {
+            var all = LastResults;
+            var failures = new List<AssumptionResult>();
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (all[i].Passed) continue;
+                if (IsExpectedFailure(all[i].Name)) continue;
+                failures.Add(all[i]);
+            }
+            return failures;
         }
 
         private static void Report()

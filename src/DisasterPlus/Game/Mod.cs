@@ -28,16 +28,17 @@ namespace DisasterPlus.Game
             // これが成立するのは Assumptions.Reset()（レベルアンロード時）が結果を
             // 消さないから。ここは必ずアンロードより後に走るので、Reset() でクリアすると
             // LastResults は常に空になり、この警告は原理的に出せなくなる。
-            var failures = Assumptions.LastResults;
-            bool anyFailed = false;
-            for (int i = 0; i < failures.Count; i++) { if (!failures[i].Passed) anyFailed = true; }
+            // ★ **DLC 非所持環境で正常に FAIL する 5 件は出さない**（全体レビュー）。
+            //   出すと、バニラのままの環境ではこの群が永久に表示され続け、
+            //   本当の前提破れが起きたときにその 1 件が見慣れた群に紛れて読まれない。
+            //   何が外れているかは Assumptions.UnexpectedFailures の doc にある。
+            var failures = Assumptions.UnexpectedFailures();
 
-            if (anyFailed)
+            if (failures.Count > 0)
             {
                 var warn = helper.AddGroup(Strings.AssumptionsFailedTitle);
                 for (int i = 0; i < failures.Count; i++)
                 {
-                    if (failures[i].Passed) continue;
                     warn.AddGroup("- " + failures[i].Impact);
                 }
                 warn.AddGroup(Strings.AssumptionsFailedHint);
