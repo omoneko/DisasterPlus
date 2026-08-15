@@ -6,51 +6,32 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ④の論理オブジェクト本体。バニラの雷雨災害スロットを 1 つ取り、
-    /// その <c>m_targetPosition</c> を**毎 sim tick 書き換えて動かす**（IL 事実文書 §E-1）。
-    /// <b>sim スレッド専用。</b>
+    /// ④の論理オブジェクト本体 —— **台風のモデル**（経路・強度・位相・上陸予測）と、
+    /// その寿命の管理。<b>sim スレッド専用。</b>
+    ///
+    /// バニラの災害バッファに触るのは <see cref="TyphoonSlot"/> の仕事で、
+    /// **このファイルには <c>DisasterManager</c> / <c>DisasterAI</c> への呼び出しが
+    /// 1 つも無い**（<see cref="DisasterData"/> の配列を <see cref="TyphoonSlot"/> から
+    /// 受け取って渡し直すだけ）。分けた理由はあちらのクラス doc。
     ///
     /// ── なぜ④が自分で動かすのか ──────────────────────────────
     ///
     /// <c>DisasterManager.SimulationStepImpl</c> は
     /// <c>idx = m_currentFrameIndex &amp; 255</c> で 1 呼び出しにつき災害 1 個しか進めないので、
-    /// **災害 i の <c>SimulationStep</c> は 256 sim フレームに 1 回しか回らない**（§E-2）。
-    /// 滑らかに動かすには④が <c>OnAfterSimulationTick</c> から毎 tick 座標を書くしかない。
+    /// **災害 i の <c>SimulationStep</c> は 256 sim フレームに 1 回しか回らない**
+    /// （IL 事実文書 §E-2）。滑らかに動かすには④が <c>OnAfterSimulationTick</c> から
+    /// 毎 tick 座標を書くしかない。
     ///
-    /// ── <c>m_targetPosition</c> を書いてよい根拠（本タスクで再実測した） ──────────
+    /// ── <c>m_targetPosition</c> を書いてよい根拠（T3 で再実測した） ──────────
     ///
     /// 全アセンブリで <c>stfld DisasterData::m_targetPosition</c> を走査した結果、
     /// 書き手は 19 メソッドあるが、**既に存在する災害のそれを書くものは 1 つも無い**。
     /// 全て「<c>CreateDisaster</c> の直後に、今作ったスロットへ初期位置を入れる」か、
     /// セーブの <c>Deserialize</c> か、プレイヤーが移動ツールで掴んだとき
     /// （<c>DefaultTool+&lt;EndMoving&gt;</c>）である。<c>ThunderStormAI</c> 側は
-    /// <c>SimulationStep</c> でも <c>ActivateDisaster</c> でも一切書かず、
-    /// <c>StartDisaster</c> が <c>m_targetPosition.y</c>（Vector3 の y フィールド）に
-    /// 地形高を入れるだけである。**つまり Active 中にバニラと殴り合わない。**
-    /// 位置に追随するのは落雷の散布中心・ハザード円盤・災害マーカー・
-    /// <c>FindDisaster(Vector3)</c>（§E-1）。追随しないのは <c>m_activationFrame</c> と
-    /// <c>m_angle</c> である（誰も更新しないので④が書いてよい）。
-    ///
-    /// ── 罠 1: <c>SelfTrigger</c>（③が実際に出荷した） ───────────────────
-    ///
-    /// <c>ThunderStormAI.StartDisaster</c> は <c>IL_000E</c> で <c>m_flags &amp; 64</c> を見て、
-    /// 立っていなければ**即 return する**（§A-1、本タスクで IL 再確認）。そのとき
-    /// <c>m_activationFrame</c> は 0 のまま・<c>Significant(256)</c> も付かないので、
-    /// <c>IsStillEmerging</c> が永久 true になり、周囲の建物は <c>DetectDisaster</c> を
-    /// 呼ばず、**ハザードマップにも通知にも一切出ない**。例外は 1 つも出ない。
-    /// ③がこれを出荷し、②のレビューで初めて見つかった。
-    ///
-    /// **だからフラグを立てるだけでは足りない。** <see cref="Start"/> は
-    /// <c>StartNow</c> の直後に <c>m_activationFrame != 0</c> を観測する。
-    /// これが罠 1 の「構造で潰す」部分である —— 将来 <c>m_flags</c> の代入が
-    /// リファクタで消えても、実行時に必ず気付く。②が読み手側に
-    /// <c>ActivationScheduled</c> を用意したのと同じ規律を、書き手側にも置く。
-    ///
-    /// ── 罠 2: <c>CreateDisaster</c> の戻り値 ─────────────────────────
-    ///
-    /// 災害は上限 256。<c>CreateDisaster</c> は失敗時に **false を返し
-    /// <c>disasterIndex = 0</c> を出す**（例外は出ない。地震 §E-1）。見ないで書くと
-    /// **他人の災害スロットを書き潰す**。<see cref="Start"/> は必ず戻り値を見る。
+    /// <c>SimulationStep</c> でも <c>ActivateDisaster</c> でも一切書かない。
+    /// **つまり Active 中にバニラと殴り合わない。** 位置に追随するのは落雷の散布中心・
+    /// ハザード円盤・災害マーカー・<c>FindDisaster(Vector3)</c>（§E-1）。
     ///
     /// ── 同時に 1 個だけ ────────────────────────────────────
     ///
@@ -61,18 +42,9 @@ namespace DisasterPlus.Game
     ///
     /// ── 真の中心とクランプした写し ──────────────────────────────
     ///
-    /// **④は「本当の中心」を自分で持ち、<c>m_targetPosition</c> にはクランプした
-    /// 写しを書く。** <c>DisasterAI.ClampDisasterTarget</c> は本タスクで IL を読んだ
-    /// ところ**マップ矩形ではなく「解放済みタイル」の内側**へ丸める
-    /// （<c>GameAreaManager.IsUnlocked</c> / <c>GetAreaBounds</c> を 8 方向ぶん見る）。
-    /// これを④の状態にすると、台風は購入済みエリアの縁に貼り付いたまま
-    /// **永久に終わらなくなる**。終了判定は必ずクランプ前の中心で行う。
-    ///
-    /// ── <c>Singleton&lt;T&gt;.exists</c> を先に見る ─────────────────────
-    ///
-    /// <c>Singleton&lt;T&gt;.instance</c> は <c>sInstance</c> が null のとき
-    /// <c>FindObjectOfType</c> と <c>new GameObject</c> を走らせる **main スレッド専用
-    /// API** で、sim スレッドから踏むと落ちる（<see cref="TsunamiChain"/> の同じ注記）。
+    /// **④は「本当の中心」を自分で持ち、災害には <see cref="TyphoonSlot.WriteTarget"/> が
+    /// クランプした写しを書く。** 終了判定は必ずクランプ前の中心で行う（理由は
+    /// あちらの doc）。
     /// </summary>
     public static class TyphoonController
     {
@@ -100,8 +72,6 @@ namespace DisasterPlus.Game
         private const uint LandfallRescanFrames = 256u;
 
         private static bool _active;
-        private static ushort _id;
-        private static uint _activationFrame;
 
         private static uint _seed;
         private static float _speed;
@@ -138,7 +108,13 @@ namespace DisasterPlus.Game
 
         public static bool Active { get { return _active; } }
 
-        public static ushort DisasterId { get { return _id; } }
+        public static ushort DisasterId { get { return TyphoonSlot.Id; } }
+
+        /// <summary>
+        /// <c>StartDisaster</c> が予定した活性化フレーム。
+        /// **落雷の予算がバニラの取り分を見積もる起点**でもある（T6）。
+        /// </summary>
+        public static uint ActivationFrame { get { return TyphoonSlot.ActivationFrame; } }
 
         /// <summary>
         /// 真の中心（クランプ前）。Y は地形高のサンプルで、マップ外では地形グリッドが
@@ -222,7 +198,12 @@ namespace DisasterPlus.Game
             if (!_active) return;
 
             DisasterData[] buffer;
-            if (!TryGetOwnedSlot(out buffer)) return;
+            string lostReason;
+            if (!TyphoonSlot.TryGetBuffer(out buffer, out lostReason))
+            {
+                LoseSlot(lostReason);
+                return;
+            }
 
             Advance(buffer, frame, deltaMinutes);
         }
@@ -230,6 +211,8 @@ namespace DisasterPlus.Game
         /// <summary>
         /// 台風を起こす。<c>DisasterTool.&lt;CreateDisaster&gt;c__Iterator0.MoveNext</c> の
         /// 手順そのまま（§E-3）で、②の <c>TsunamiChain.Raise</c> と同型である。
+        /// スロットの取得と開始は <see cref="TyphoonSlot"/> が持ち、ここは
+        /// **起こしてよいかの判断と、④のモデルの初期化**だけを行う。
         /// </summary>
         private static void Start(TyphoonSnapshot snapshot, uint frame)
         {
@@ -262,36 +245,15 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            var info = FindStormInfo();
-            if (info == null)
+            string refusal;
+            if (!TyphoonSlot.Create(out refusal))
             {
-                _lastRefusal = "no ThunderStormAI prefab (Natural Disasters DLC?)";
+                _lastRefusal = refusal;
                 return;
             }
-
-            if (!Singleton<DisasterManager>.exists)
-            {
-                _lastRefusal = "DisasterManager is not available";
-                return;
-            }
-
-            var manager = Singleton<DisasterManager>.instance;
-
-            ushort id;
-            // ★ 罠 2: 戻り値を必ず見る。false のとき id = 0 になり、そのまま書き込むと
-            //    **他人の災害スロットを書き潰す**（上限 256）。
-            if (!manager.CreateDisaster(out id, info))
-            {
-                _lastRefusal = "CreateDisaster returned false (disaster buffer full?)";
-                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyFull", _lastRefusal);
-                return;
-            }
-
-            var buffer = manager.m_disasters.m_buffer;
-            var ai = info.m_disasterAI;
 
             // 種は災害 ID。同じセーブなら同じ経路になる（設計書 §4.1）。
-            _seed = id;
+            _seed = TyphoonSlot.Id;
             _speed = speed;
             _peakIntensity = ClampIntensity(ModSettings.TyphoonIntensity.value);
             _totalFrames = prefab.ActiveDuration;
@@ -313,137 +275,27 @@ namespace DisasterPlus.Game
             _galeRadius = TyphoonProfile.GaleRadiusOf(_intensity, _prefabRadius);
 
             var pos = new Vector3(_centre.X, 0f, _centre.Z);
-            ai.ClampDisasterTarget(ref pos);                        // public
-            pos.y = SampleHeight(pos);                              // StartDisaster と同じ扱い（§A-1）
-            _centreHeight = pos.y;
-
-            buffer[id].m_targetPosition = pos;
-            buffer[id].m_angle = _heading;
-            buffer[id].m_intensity = _intensity;
-            // ★ 罠 1: これが無いと StartDisaster は IL_000E で即 return する（クラス doc）。
-            buffer[id].m_flags |= DisasterData.Flags.SelfTrigger;
-
-            // StartDisaster は protected。CreateDisaster 直後の m_flags は Created(1) だけ
-            // なので StartNow の「& 60 が 0 なら」の門は必ず通る（§E-3）。
-            ai.StartNow(id, ref buffer[id]);
-
-            // ★ SelfTrigger が本当に効いたかを、その場で確かめる。StartDisaster が
-            //    通っていれば m_activationFrame = m_startFrame + m_emergingDuration が
-            //    入っている（§A-1 IL_003F）。
-            if (buffer[id].m_activationFrame == 0u)
+            if (!TyphoonSlot.Begin(ref pos, _heading, _intensity, out refusal))
             {
-                _lastRefusal = "StartDisaster did not schedule an activation frame; "
-                             + "the SelfTrigger flag did not take effect";
-                Log.Error("typhoon: " + _lastRefusal, null);
-                AbandonUnstartableSlot(manager, id);
+                _lastRefusal = refusal;
                 Forget();
                 return;
             }
 
-            _activationFrame = buffer[id].m_activationFrame;
-            _id = id;
+            _centreHeight = pos.y;
             _active = true;
             _lastRefusal = null;
 
-            Log.Info("typhoon started: disaster #" + id
+            Log.Info("typhoon started: disaster #" + TyphoonSlot.Id
                      + " intensity=" + _intensity
                      + " speed=" + _speed.ToString("F3") + " m/frame"
                      + " duration=" + _totalFrames + " frames");
         }
 
         /// <summary>
-        /// <c>SelfTrigger</c> の見張りが鳴ったときだけ通る後始末。**通常は到達しない。**
-        ///
-        /// <c>DeactivateNow</c> では畳めない。本タスクで IL を読んだところ
-        /// <c>DisasterAI.DeactivateNow</c> は <c>m_flags &amp; Active(8)</c> が無ければ
-        /// 何もせず、この時点の旗は <c>Created|Emerging</c> だからである。しかも
-        /// <c>ThunderStormAI.IsStillEmerging</c> は <c>m_activationFrame == 0</c> のとき
-        /// **恒久的に true を返す**（IL_0015 の <c>brfalse</c>）ので、この災害は
-        /// Emerging のまま**永久に Finished にならず、スロットも解放されない**。
-        ///
-        /// ②の <see cref="TsunamiChain"/> は <c>ReleaseDisaster</c> を「使えるが使わない」と
-        /// 判断した。あちらは位相が <c>m_startFrame</c> 基準で自然に進み、最悪でも
-        /// 39 ゲーム内時間で自己解放されると IL で確認できていたからである。
-        /// **ここはその条件が成り立たない**（進まないことが IL で確定している）ので、
-        /// 判断を分ける。放置すると災害スロット 256 を 1 個、都市の寿命ぶん食い潰し、
-        /// 災害一覧にも永久に残る。
+        /// **黙って手放さない。** 理由を 1 行出して <see cref="Forget"/> する。
+        /// <see cref="Stop"/> ではない —— **もう④のものではないので触ってはいけない。**
         /// </summary>
-        private static void AbandonUnstartableSlot(DisasterManager manager, ushort id)
-        {
-            try
-            {
-                manager.ReleaseDisaster(id);
-            }
-            catch (System.Exception e)
-            {
-                if (!_errorLogged)
-                {
-                    _errorLogged = true;
-                    Log.Error("typhoon could not release the stuck disaster slot", e);
-                }
-            }
-        }
-
-        /// <summary>
-        /// 掴んでいるスロットがまだ④のものか。**災害 ID は解放後に再利用される。**
-        /// 別の災害に化けたまま <c>m_targetPosition</c> を書き続けると、
-        /// **無関係な災害を④が引きずり回す**（③の <c>FireWhirlPinner</c> が距離で
-        /// 偽陽性を弾いているのと同じ事故）。
-        ///
-        /// 1 つでも外れたら書き込みをやめて <see cref="Forget"/> する ——
-        /// <see cref="Stop"/> ではない。**もう④のものではないので触ってはいけない。**
-        /// </summary>
-        private static bool TryGetOwnedSlot(out DisasterData[] buffer)
-        {
-            buffer = null;
-
-            if (!Singleton<DisasterManager>.exists)
-            {
-                LoseSlot("DisasterManager is not available");
-                return false;
-            }
-
-            var candidate = Singleton<DisasterManager>.instance.m_disasters.m_buffer;
-            if (candidate == null || _id == 0 || _id >= candidate.Length)
-            {
-                LoseSlot("the disaster index is out of range");
-                return false;
-            }
-
-            if ((candidate[_id].m_flags & DisasterData.Flags.Created) == 0)
-            {
-                LoseSlot("the disaster slot was released");
-                return false;
-            }
-
-            // 再利用されたスロットを見分ける最も安いキー。開始時に控えた値と一致するか。
-            if (candidate[_id].m_activationFrame != _activationFrame)
-            {
-                LoseSlot("the disaster slot was reused by something else");
-                return false;
-            }
-
-            // get_Info は境界検査をしない 4 命令なので、要素ごとに try/catch する。
-            try
-            {
-                var info = candidate[_id].Info;
-                if (info == null || !(info.m_disasterAI is ThunderStormAI))
-                {
-                    LoseSlot("the disaster slot is no longer a thunderstorm");
-                    return false;
-                }
-            }
-            catch
-            {
-                LoseSlot("the disaster slot could not be identified");
-                return false;
-            }
-
-            buffer = candidate;
-            return true;
-        }
-
-        /// <summary>**黙って手放さない。** 理由を 1 行出して <see cref="Forget"/> する。</summary>
         private static void LoseSlot(string reason)
         {
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyLost",
@@ -474,14 +326,8 @@ namespace DisasterPlus.Game
             _phase = TyphoonTrack.PhaseAt(_elapsedFrames, _totalFrames);
 
             var pos = new Vector3(_centre.X, 0f, _centre.Z);
-            var ai = buffer[_id].Info.m_disasterAI;
-            ai.ClampDisasterTarget(ref pos);
-            pos.y = SampleHeight(pos);
+            TyphoonSlot.WriteTarget(buffer, ref pos, _heading, _intensity);
             _centreHeight = pos.y;
-
-            buffer[_id].m_targetPosition = pos;
-            buffer[_id].m_angle = _heading;
-            buffer[_id].m_intensity = _intensity;
 
             UpdateLandfall(frame);
 
@@ -494,14 +340,14 @@ namespace DisasterPlus.Game
             // 「到着する前に台風が終わる」という、例外の出ない壊れ方をする。
             if (_wasInsideMap && !inside)
             {
-                Log.Info("typhoon #" + _id + " left the map");
+                Log.Info("typhoon #" + TyphoonSlot.Id + " left the map");
                 Stop();
                 return;
             }
 
             if (_phase == TyphoonPhase.Gone)
             {
-                Log.Info("typhoon #" + _id + " used up its lifetime ("
+                Log.Info("typhoon #" + TyphoonSlot.Id + " used up its lifetime ("
                          + _totalFrames + " frames)");
                 Stop();
             }
@@ -584,55 +430,14 @@ namespace DisasterPlus.Game
             return Singleton<TerrainManager>.instance.HasWater(new Vector2(centre.X, centre.Z));
         }
 
-        private static float SampleHeight(Vector3 pos)
-        {
-            if (!Singleton<TerrainManager>.exists) return 0f;
-            return Singleton<TerrainManager>.instance.SampleDetailHeight(pos);
-        }
-
         /// <summary>
         /// 終わり方は 3 つ（マップを抜けた／持続時間を使い切った／プレイヤーが止めた）だが、
         /// **後始末は必ずこの 1 本を通す。**
-        ///
-        /// **災害スロットは④が解放しない。** <c>DisasterAI.IsStillClearing</c>（base）は
-        /// 災害グループの <c>m_refCount &gt; 1</c>、すなわち④の落雷で燃えた建物が残っている
-        /// 間 Clearing を続ける（§A-1）。**嵐は火が消えるまで終わらない**のが正しい挙動で、
-        /// その後 <c>DisasterManager.SimulationStepImpl</c> が <c>ReleaseDisaster</c> を呼ぶ。
-        /// ②の <see cref="TsunamiChain"/> が <c>ReleaseDisaster</c> を「使えるが使わない」と
-        /// 判断したのと同じ理由（<c>OnDisasterStarted</c> を受け取った他 MOD から見て、
-        /// 終了通知の無い災害を作らない）。
         /// </summary>
         private static void Stop()
         {
-            // 1. バニラの終了経路に乗せる。DeactivateNow は public で、本タスクで IL を
-            //    読んだところ **m_flags に Active(8) が立っていなければ何もしない**。
-            //    立っていれば ThunderStormAI.DeactivateDisaster が走り、SelfTrigger 付き
-            //    なので m_targetRain = 0 / m_targetCloud = 0 が書かれる（§A-1）。
-            //    ★ Emerging 中に止めた場合はここが空振りする。だから④が触った天候は
-            //      ④自身が戻さなければならない（下の 2. と TyphoonWeather.Release）。
-            try
-            {
-                if (_active && _id != 0 && Singleton<DisasterManager>.exists)
-                {
-                    var buffer = Singleton<DisasterManager>.instance.m_disasters.m_buffer;
-                    if (buffer != null && _id < buffer.Length)
-                    {
-                        var info = buffer[_id].Info;
-                        if (info != null && info.m_disasterAI is ThunderStormAI)
-                        {
-                            info.m_disasterAI.DeactivateNow(_id, ref buffer[_id]);
-                        }
-                    }
-                }
-            }
-            catch (System.Exception e)
-            {
-                if (!_errorLogged)
-                {
-                    _errorLogged = true;
-                    Log.Error("typhoon deactivation failed", e);
-                }
-            }
+            // 1. バニラの終了経路に乗せる（スロットは解放しない。あちらの doc）。
+            TyphoonSlot.Deactivate();
             // ★ ここで return しない。バニラの終了経路が投げても、
             //    ④が握っている天候は下の Forget() が必ず戻す。
 
@@ -659,13 +464,13 @@ namespace DisasterPlus.Game
         private static void Forget()
         {
             // ★ バニラの DeactivateDisaster に任せない。DisasterAI.DeactivateNow は
-            //    m_flags & Active(8) が無ければ何もしないので（本タスクで IL 実測）、
+            //    m_flags & Active(8) が無ければ何もしないので（T3 で IL 実測）、
             //    Emerging 中に止めた台風では m_targetRain = 0 が走らない。
             TyphoonWeather.Release();
 
+            TyphoonSlot.Forget();
+
             _active = false;
-            _id = 0;
-            _activationFrame = 0u;
             _seed = 0u;
             _speed = 0f;
             _peakIntensity = 0;
@@ -700,23 +505,6 @@ namespace DisasterPlus.Game
             if (value < MinIntensity) value = MinIntensity;
             if (value > MaxIntensity) value = MaxIntensity;
             return (byte)value;
-        }
-
-        /// <summary>
-        /// <c>ThunderStormAI</c> を持つ災害プレハブ。**キャッシュしない**
-        /// （<c>TsunamiChain.FindTsunamiInfo</c> と同じ判断。走査は
-        /// 台風を起こす瞬間にしか走らない）。
-        /// </summary>
-        private static DisasterInfo FindStormInfo()
-        {
-            try
-            {
-                return DisasterManager.FindDisasterInfo<ThunderStormAI>();
-            }
-            catch
-            {
-                return null;
-            }
         }
     }
 }
