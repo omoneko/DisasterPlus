@@ -633,21 +633,36 @@ namespace DisasterPlus.Game
                     Log.Error("typhoon deactivation failed", e);
                 }
             }
+            // ★ ここで return しない。バニラの終了経路が投げても、
+            //    ④が握っている天候は下の Forget() が必ず戻す。
 
-            // 2. ④が触った全部を戻す。T4 以降がこの行の下に自分の復元を足していく。
-            //    （T4: TyphoonWeather.Release / T8: TyphoonFlood.RestoreAll /
-            //      T9: TyphoonCloud.ReleaseVanillaBoost / T10: TyphoonTornado.StopAll）
-
-            // 3. 自分の状態を捨てる。
+            // 2. 握っていたものを全部手放す（<see cref="Forget"/> が復元も持つ）。
             Forget();
         }
 
         /// <summary>
-        /// ④の状態だけを捨てる。**災害スロットには触らない。**
+        /// ④が握っていたものを全部手放す。**災害スロットには触らない**
+        /// （<see cref="Stop"/> だけがバニラの終了経路を呼ぶ）。
         /// <see cref="LastRefusal"/> は残す（呼び出し側が理由を上書きする）。
+        ///
+        /// ★ **④が触った他の系の復元はここに書くこと。<see cref="Stop"/> ではない。**
+        /// 台風を手放す経路は <see cref="Stop"/> だけではない ——
+        /// <see cref="LoseSlot"/>（災害スロットが再利用された）と
+        /// <see cref="Reset"/>（レベルアンロード）も通る。復元を <see cref="Stop"/> 側に
+        /// 置くと、スロットを奪われた瞬間に**天候を握ったまま台風だけが消える**。
+        /// T8 以降もここに足すこと（T8: <c>TyphoonFlood.RestoreAll</c> /
+        /// T9: <c>TyphoonCloud.ReleaseVanillaBoost</c> / T10: <c>TyphoonTornado.StopAll</c>）。
+        ///
+        /// 復元はどれも冪等でなければならない（<see cref="Stop"/> → <see cref="Forget"/> と
+        /// <c>TyphoonFeature.OnLevelUnloading</c> の両方から重ねて呼ばれる）。
         /// </summary>
         private static void Forget()
         {
+            // ★ バニラの DeactivateDisaster に任せない。DisasterAI.DeactivateNow は
+            //    m_flags & Active(8) が無ければ何もしないので（本タスクで IL 実測）、
+            //    Emerging 中に止めた台風では m_targetRain = 0 が走らない。
+            TyphoonWeather.Release();
+
             _active = false;
             _id = 0;
             _activationFrame = 0u;

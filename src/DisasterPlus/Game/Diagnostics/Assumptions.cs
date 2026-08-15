@@ -50,14 +50,15 @@ namespace DisasterPlus.Game
         /// 地震 第 2 層 3 件（TsunamiAI プレハブの実在・
         /// TerrainManager.HasWater と DisasterData.m_waveIndex・
         /// BuildingAI.CollapseBuilding と BuildingInfo.m_size / m_generatedInfo）＋
-        /// 台風 3 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値・
-        /// DisasterData の移動 4 フィールドと DisasterAI の公開ラッパー 3 メソッド）＋
+        /// 台風 4 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値・
+        /// DisasterData の移動 4 フィールドと DisasterAI の公開ラッパー 3 メソッド・
+        /// WeatherManager の target 系 6 フィールド）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 26;
+        private const int TotalCheckCount = 27;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -718,6 +719,32 @@ namespace DisasterPlus.Game
                   });
 
             // --- ④台風（Task 3）ここまで ---
+
+            // --- ④台風（Task 4: 天候の駆動）ここから ---
+
+            // ④が天候を握る 6 フィールド（§A-4）。どれが欠けても**例外は出ず**、
+            // 台風が晴天の下を進むだけになる。
+            //
+            // m_forceWeatherOn だけは性質が違う。これが無いと、天候を切っている
+            // プレイヤーの環境で m_targetRain / Cloud / Fog が毎ステップ 0 へ潰される
+            // （IL_053D の枝）。「一部の環境でだけ静かに何も起きない」という、
+            // いちばん報告されにくい壊れ方をするので、名指しで検証する。
+            Check("WeatherManager exposes m_targetRain / m_targetCloud / m_targetFog / "
+                  + "m_targetDirection / m_forceWeatherOn / m_enableWeather",
+                  "the typhoon cannot drive the weather; it would move across the map under "
+                  + "a clear sky",
+                  delegate
+                  {
+                      var w = typeof(WeatherManager);
+                      return HasField(w, "m_targetRain")
+                             && HasField(w, "m_targetCloud")
+                             && HasField(w, "m_targetFog")
+                             && HasField(w, "m_targetDirection")
+                             && HasField(w, "m_forceWeatherOn")
+                             && HasField(w, "m_enableWeather");
+                  });
+
+            // --- ④台風（Task 4）ここまで ---
 
             Report();
         }

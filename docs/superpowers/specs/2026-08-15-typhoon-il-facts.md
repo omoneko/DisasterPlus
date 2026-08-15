@@ -254,10 +254,33 @@ if (m_currentRain > 0.8f && m_lightningQueue.m_size == 0) {
 → `StartNow` → `ActivateNow` で新規に雷雨災害を作る**。
 `SelfTrigger` は立てないので、その嵐自身は天候も落雷も生成しない（`& 64` ゲート）— **落雷をグループに束ねるだけの器**。
 
-> **④の設計に効く帰結。** 台風が `m_currentRain` を 0.8 超に保つと、**ゲームが勝手に雷雨災害を作り続ける**。
-> 災害スロットを食い、④が「自分の嵐の数」を数える処理を狂わせる。
+> **④の設計に効く帰結。** 台風が `m_currentRain` を 0.8 超に保つと、環境落雷が走り続ける。
 > 逆に、④が落雷キューを空にしない限り環境落雷は発生しない（`m_size == 0` 条件）。
 > **④が自前で落雷を撒くなら、環境落雷は自動的に抑制される。**
+
+**追記（④ Task 4 で 1 引数版の IL を全部読んだ結果。上の「勝手に雷雨災害を作り続ける」を訂正する）— CONFIRMED**
+
+```
+IL_000F-004D  落着点 = (Randomizer.Int32(-8640, 8640), y, 同) ★ マップ一様の乱数点
+IL_00B1       info = DisasterManager.FindDisasterInfo<ThunderStormAI>()
+IL_00BD       info == null なら以降を全部飛ばす（グループ無しで落雷だけ積む）
+IL_00CA-0125  災害バッファを 0..m_size で走査し、
+              (m_flags & 8 /*Active*/) != 0 かつ get_Info == info のものを探す
+IL_012A       ★ 見つかったら brtrue で CreateDisaster ごと飛ばす（＝再利用する）
+IL_0131-013C  見つからなかったときだけ CreateDisaster（**戻り値を見ている**）
+IL_0154-01B1  m_intensity = 10 → m_targetPosition = 上の乱数点 → StartNow → ActivateNow
+IL_01B9-01DE  id != 0 なら InstanceManager.GetGroup(InstanceID{Disaster=id})
+IL_01E5       4 引数版へ委譲
+```
+
+したがって:
+
+- **既に Active な雷雨災害があれば、ゲームは新しい災害を作らない。** ④の台風が Active の間に
+  雨量が 0.8 を超えても**災害スロットは増えない**（落雷 1 発が④の嵐のグループに足されるだけ）。
+- 新規の雷雨災害が生まれうるのは、雨量が 0.8 超なのに Active な雷雨災害が 1 つも無い窓
+  ——④の台風がまだ **Emerging** の間と、④が終わったあと `m_currentRain` が
+  `0.0002/step` で 0.8 を下り切るまでの間——だけである。
+- 環境落雷の落着点は**台風の中心ではない**（マップ一様）。④の落雷と分布が違う。
 
 ### A-4. `WeatherManager` に何が書けるか — CONFIRMED
 
@@ -330,6 +353,18 @@ IL_07C7  昼夜位相 t = |m_dayTimeFrame/DAYTIME_FRAMES - 0.5| * 2 から
 | 旋回速度 | `m_directionSpeed` は `+0.001/step` ずつしか上がらず、上限は残角×0.001。**台風の急旋回は表現できない**（`m_windDirection` を直接書けば可能。書き手は本メソッドと `Data.Deserialize` だけ） |
 | 風速 | **フィールドが存在しない（ABSENT）**。§A-5 |
 | スレッド | `SimulationStepImpl` は sim スレッド。`Update`（`m_windZone` の回転）と `EndRenderingImpl` はメイン |
+
+**追記（④ Task 4 での実測）— CONFIRMED**
+
+- `m_windDirection` の角度規約: `WeatherManager.EndRenderingImpl` IL_0000–0050 が
+  `rad = m_windDirection * 0.01745329` から `_WindDirection = (sin rad, 0, cos rad, GetWindSpeedFactor())`
+  を作る。すなわち **0 度 = +Z、90 度 = +X の方位角**。数学系の方位 φ（`(cos φ, sin φ)` を (X, Z) とする）
+  からの変換は `θ[deg] = 90 − φ[deg]`。
+- `m_target*` 系の書き手を全アセンブリで走査した結果（上の表に無かったもの）:
+  **`ForestFireAI.SimulationStep` は Active（`m_flags & 8`）の間 `m_targetRain = 0f` を書く**（IL_001F）。
+  嵐・竜巻と同じく 256 sim フレームに 1 回なので、毎 tick 書く MOD とは実害無く共存する。
+  書き手の全体は `ForestFireAI` / `ThunderStormAI` / `TornadoAI` / `WeatherManager`（`Awake` /
+  `SimulationStepImpl` / `Data.Deserialize`）/ `DeveloperUI.OnGUI` の 6 型のみ。
 
 ### A-5. 風速 — **書けるフィールドは存在しない（ABSENT）**
 

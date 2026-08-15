@@ -37,6 +37,7 @@ namespace DisasterPlus.Game
             TyphoonHub.Clear();
             TyphoonReader.Reset();
             TyphoonController.Reset();
+            TyphoonWeather.Reset();
         }
 
         /// <summary>
@@ -77,10 +78,10 @@ namespace DisasterPlus.Game
             if (deltaMinutes <= 0f) return;
 
             TyphoonController.Tick(snapshot, frameIndex, deltaMinutes);
+            if (TyphoonController.Active) TyphoonWeather.Drive(snapshot, deltaMinutes);
 
-            // （T4: TyphoonWeather.Drive / T6: TyphoonLightning.Tick /
-            //   T7: TyphoonWind.Apply / T8: TyphoonFlood.Tick /
-            //   T10: TyphoonTornado.Tick がここに入る）
+            // （T6: TyphoonLightning.Tick / T7: TyphoonWind.Apply /
+            //   T8: TyphoonFlood.Tick / T10: TyphoonTornado.Tick がここに入る）
         }
 
         /// <summary>main スレッド。T5 でパネルとボタンが入る。</summary>
@@ -94,6 +95,9 @@ namespace DisasterPlus.Game
             TyphoonReader.Reset();
             // 予約も進行中の台風も都市をまたいで残らない。
             TyphoonController.Reset();
+            // ★ 天候の上書きは必ずここでも戻す。都市を出た瞬間に台風が消えても、
+            //    m_targetRain を握ったままにしない。
+            TyphoonWeather.Reset();
         }
 
         /// <summary>
@@ -132,6 +136,13 @@ namespace DisasterPlus.Game
                 {
                     b.Line(2, "refusal", snapshot.Refusal);
                 }
+                // 台風が居ないのに天候を握っていたら、それは④が戻し損ねている。
+                // 正常時は 1 行も出ない（＝この行が出たら不具合）。
+                if (snapshot.WeatherDriving)
+                {
+                    b.Line(2, "weather driving",
+                        "ON WITH NO TYPHOON (the weather override was not released)");
+                }
                 return;
             }
 
@@ -162,6 +173,48 @@ namespace DisasterPlus.Game
             if (!string.IsNullOrEmpty(snapshot.Refusal))
             {
                 b.Line(2, "last refusal", snapshot.Refusal);
+            }
+
+            WriteWeatherDriving(b, snapshot);
+        }
+
+        /// <summary>
+        /// ④が書いている天候の**目標値**。上の <c>weather (measured)</c> は
+        /// <c>m_current*</c>（バニラの実測値）で、こちらは <c>m_target*</c>（本 MOD の量）。
+        /// **2 つを取り違えないこと。**
+        ///
+        /// 天候を切っている環境では note を出す。**黙って動かない状態を作らない。**
+        /// </summary>
+        private static void WriteWeatherDriving(DiagnosticBuilder b, TyphoonSnapshot snapshot)
+        {
+            if (!snapshot.WeatherDriving)
+            {
+                b.Line(2, "weather driving", "off");
+                return;
+            }
+
+            b.Line(2, "weather driving",
+                "on   target rain=" + snapshot.DrivenRain.ToString("F2")
+                + " cloud=" + snapshot.DrivenCloud.ToString("F2")
+                + " fog=0.00"
+                + " dir=" + snapshot.DrivenDirectionDegrees.ToString("F1") + " deg");
+
+            if (!snapshot.WeatherEnabled)
+            {
+                b.Line(3, "note",
+                    "the player has weather disabled; m_forceWeatherOn=2 is written every "
+                    + "tick to keep the storm visible");
+            }
+
+            // 雨量 0.8 超はゲーム自身の環境落雷を呼ぶ。**意図した代償**なので隠さない
+            // （TyphoonWeather のクラス doc 6.）。
+            if (snapshot.DrivenRain > 0.8f)
+            {
+                b.Line(3, "note",
+                    "target rain is above 0.8: once m_currentRain passes it the game queues "
+                    + "its own lightning. While this typhoon is Active the game reuses this "
+                    + "very disaster instead of creating another one (measured); a separate "
+                    + "vanilla thunderstorm can only appear before it activates or after it ends");
             }
         }
 

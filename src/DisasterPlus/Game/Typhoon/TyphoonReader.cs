@@ -104,7 +104,11 @@ namespace DisasterPlus.Game
                                            TyphoonController.OverLand,
                                            TyphoonController.LandfallKnown,
                                            TyphoonController.MinutesToLandfall,
-                                           TyphoonController.LastRefusal);
+                                           TyphoonController.LastRefusal,
+                                           TyphoonWeather.Driving,
+                                           TyphoonWeather.LastRain,
+                                           TyphoonWeather.LastCloud,
+                                           TyphoonWeather.LastDirectionDegrees);
             }
             catch (System.Exception e)
             {

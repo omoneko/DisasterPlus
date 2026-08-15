@@ -181,6 +181,25 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly string Refusal;
 
+        // ── T4: ④が書いている天候の**目標値** ──────────────────────────
+        //
+        // ★ 上の Rain / Cloud（WeatherManager の m_currentRain / m_currentCloud）とは
+        //   別物である。あちらはバニラの実測値で [measured] を名乗ってよい唯一の 2 値、
+        //   こちらは④が毎 tick 書き込んでいる目標値で、本 MOD の量である。
+        //   **表示側でこの 2 組を取り違えないこと。**
+
+        /// <summary>④が天候を駆動しているか。</summary>
+        public readonly bool WeatherDriving;
+
+        /// <summary>④が書いた <c>m_targetRain</c>。</summary>
+        public readonly float DrivenRain;
+
+        /// <summary>④が書いた <c>m_targetCloud</c>。</summary>
+        public readonly float DrivenCloud;
+
+        /// <summary>④が書いた <c>m_targetDirection</c>（度、0 = +Z / 90 = +X）。</summary>
+        public readonly float DrivenDirectionDegrees;
+
         public TyphoonSnapshot(bool valid, TyphoonPrefabFacts prefab, uint currentFrame,
                                float rain, float cloud, float fog, float windDirectionDegrees,
                                bool weatherEnabled, bool weatherReadable,
@@ -188,8 +207,14 @@ namespace DisasterPlus.Game
                                byte intensity, float stormRadius, float galeRadius,
                                TyphoonPhase phase, uint elapsedFrames, uint totalFrames,
                                bool overLand, bool landfallKnown, float minutesToLandfall,
-                               string refusal)
+                               string refusal,
+                               bool weatherDriving, float drivenRain, float drivenCloud,
+                               float drivenDirectionDegrees)
         {
+            WeatherDriving = weatherDriving;
+            DrivenRain = drivenRain;
+            DrivenCloud = drivenCloud;
+            DrivenDirectionDegrees = drivenDirectionDegrees;
             Valid = valid;
             Prefab = prefab;
             CurrentFrame = currentFrame;
@@ -221,7 +246,8 @@ namespace DisasterPlus.Game
                                        0f, 0f, 0f, 0f, false, false,
                                        false, 0, new Vec3(0f, 0f, 0f), 0f,
                                        0, 0f, 0f, TyphoonPhase.Idle, 0u, 0u,
-                                       false, false, 0f, null);
+                                       false, false, 0f, null,
+                                       false, 0f, 0f, 0f);
         }
     }
 }
