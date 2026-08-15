@@ -156,6 +156,9 @@ namespace DisasterPlus.Game
             var typhoon = helper.AddGroup(Strings.GroupTyphoon);
             typhoon.AddCheckbox(Strings.TyphoonEnabled, ModSettings.TyphoonEnabled.value,
                 v => ModSettings.TyphoonEnabled.value = v);
+            typhoon.AddSlider(Strings.TyphoonIntensity, 10f, 255f, 5f,
+                ModSettings.TyphoonIntensity.value,
+                v => ModSettings.TyphoonIntensity.value = (int)v);
             // 探索のやり直しは次回のレベルロードで自然に起きる（TyphoonPanelButton.Install
             // は保存済み座標が -1 のときだけ FreeSlotFinder を再度呼ぶ）。ここでは保存値を
             // 戻すだけで十分（①②のボタン位置リセットと同じ形）。
@@ -164,6 +167,9 @@ namespace DisasterPlus.Game
                 ModSettings.TyphoonButtonX.value = -1;
                 ModSettings.TyphoonButtonY.value = -1;
             });
+
+            // 強度がバニラの領域を超えることを名乗る（EarthquakeShakeBoostNote と同じ形）。
+            helper.AddGroup(Strings.TyphoonIntensityNote);
 
             // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
             // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。

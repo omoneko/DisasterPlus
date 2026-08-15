@@ -161,3 +161,5 @@ TyphoonEnabled = Enable the typhoon panel
 TyphoonResetButton = Reset the typhoon button position (takes effect next time you load a city)
 TyphoonNeedsDlc = Typhoons require the Natural Disasters DLC.
 LogChannelTyphoon = Typhoon
+TyphoonIntensity = Typhoon intensity (10-255)
+TyphoonIntensityNote = The game's own storms use 55. Above 100 is beyond anything vanilla generates.

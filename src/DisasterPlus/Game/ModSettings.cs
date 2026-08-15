@@ -50,6 +50,7 @@ namespace DisasterPlus.Game
         public static SavedBool TyphoonEnabled;
         public static SavedInt TyphoonButtonX;
         public static SavedInt TyphoonButtonY;
+        public static SavedInt TyphoonIntensity;
 
         public static void Ensure()
         {
@@ -127,6 +128,12 @@ namespace DisasterPlus.Game
             // （TyphoonPanelButton が空き位置を決めて書き戻す。T5）。
             TyphoonButtonX = new SavedInt("typhoonButtonX", FileName, -1, true);
             TyphoonButtonY = new SavedInt("typhoonButtonY", FileName, -1, true);
+            // 台風の強度。①が 255 まで解放済み（IntensityUnlock）。範囲 10〜255 は
+            // スライダー側で縛るが、.cgs の値は公開契約なので範囲外が入っていても
+            // 読み捨てず、使う側（TyphoonController.ClampIntensity）でクランプする。
+            // ゲーム自身の嵐は 55。既定 120 はそれよりはっきり強いが、
+            // 上限 255 ほど極端でもない値として選んだ。
+            TyphoonIntensity = new SavedInt("typhoonIntensity", FileName, 120, true);
 
             _ready = true;
         }

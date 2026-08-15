@@ -1,3 +1,6 @@
+using DisasterPlus.Core.Common;
+using DisasterPlus.Core.Typhoon;
+
 namespace DisasterPlus.Game
 {
     /// <summary>
@@ -133,9 +136,59 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly bool WeatherReadable;
 
+        // ── T3: 台風そのものの状態 ──────────────────────────────────
+        //
+        // **これは前 tick の状態である。** TyphoonReader.Read() は
+        // TyphoonFeature.OnSimulationTick の先頭（＝ TyphoonController.Tick の前）で
+        // 走るので、ここに載るのは 1 tick 前の値になる。パネルの表示としては
+        // 差が出ないが、**sim 側のコードがこのスナップショットを「今の状態」として
+        // 使ってはいけない**（sim 側は TyphoonController の static を直接読むこと）。
+
+        /// <summary>④の台風が動いているか。</summary>
+        public readonly bool Active;
+
+        /// <summary>④が掴んでいる災害スロットの添字。<see cref="Active"/> のときだけ意味を持つ。</summary>
+        public readonly ushort TyphoonId;
+
+        /// <summary>**クランプ前の**真の中心（マップ外にもなる）。</summary>
+        public readonly Vec3 Centre;
+
+        /// <summary>進行方位（rad、[0, 2π)）。</summary>
+        public readonly float HeadingRadians;
+
+        /// <summary>今の強度（0〜255）。設定した最大値ではなく、包絡線と上陸減衰の後の値。</summary>
+        public readonly byte Intensity;
+
+        public readonly float StormRadius;
+        public readonly float GaleRadius;
+        public readonly TyphoonPhase Phase;
+        public readonly uint ElapsedFrames;
+        public readonly uint TotalFrames;
+        public readonly bool OverLand;
+
+        /// <summary>
+        /// 上陸予測が立っているか。**false は「0 分後」ではなく「このまま海上を
+        /// 通過する」である。** 0 と混ぜないこと（①②が繰り返し確立した規律）。
+        /// </summary>
+        public readonly bool LandfallKnown;
+
+        /// <summary>上陸までのゲーム内分。<see cref="LandfallKnown"/> のときだけ意味を持つ。</summary>
+        public readonly float MinutesToLandfall;
+
+        /// <summary>
+        /// 台風を起こせなかった／手放した理由（英語、診断用。無ければ null）。
+        /// **「起こせなかった」を「何も起きていない」と見分ける手段がここにしか無い。**
+        /// </summary>
+        public readonly string Refusal;
+
         public TyphoonSnapshot(bool valid, TyphoonPrefabFacts prefab, uint currentFrame,
                                float rain, float cloud, float fog, float windDirectionDegrees,
-                               bool weatherEnabled, bool weatherReadable)
+                               bool weatherEnabled, bool weatherReadable,
+                               bool active, ushort typhoonId, Vec3 centre, float headingRadians,
+                               byte intensity, float stormRadius, float galeRadius,
+                               TyphoonPhase phase, uint elapsedFrames, uint totalFrames,
+                               bool overLand, bool landfallKnown, float minutesToLandfall,
+                               string refusal)
         {
             Valid = valid;
             Prefab = prefab;
@@ -146,12 +199,29 @@ namespace DisasterPlus.Game
             WindDirectionDegrees = windDirectionDegrees;
             WeatherEnabled = weatherEnabled;
             WeatherReadable = weatherReadable;
+            Active = active;
+            TyphoonId = typhoonId;
+            Centre = centre;
+            HeadingRadians = headingRadians;
+            Intensity = intensity;
+            StormRadius = stormRadius;
+            GaleRadius = galeRadius;
+            Phase = phase;
+            ElapsedFrames = elapsedFrames;
+            TotalFrames = totalFrames;
+            OverLand = overLand;
+            LandfallKnown = landfallKnown;
+            MinutesToLandfall = minutesToLandfall;
+            Refusal = refusal;
         }
 
         public static TyphoonSnapshot Invalid()
         {
             return new TyphoonSnapshot(false, new TyphoonPrefabFacts(), 0u,
-                                       0f, 0f, 0f, 0f, false, false);
+                                       0f, 0f, 0f, 0f, false, false,
+                                       false, 0, new Vec3(0f, 0f, 0f), 0f,
+                                       0, 0f, 0f, TyphoonPhase.Idle, 0u, 0u,
+                                       false, false, 0f, null);
         }
     }
 }

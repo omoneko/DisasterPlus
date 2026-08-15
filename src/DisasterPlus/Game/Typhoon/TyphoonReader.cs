@@ -84,9 +84,27 @@ namespace DisasterPlus.Game
                 bool weatherReadable = ReadWeather(out rain, out cloud, out fog,
                                                    out windDirection, out weatherEnabled);
 
+                // ★ TyphoonController は sim スレッドの static で、この Read() と
+                //    同じスレッドから読んでいる（TyphoonFeature.OnSimulationTick）。
+                //    載るのは **TyphoonController.Tick が走る前**＝前 tick の状態である
+                //    （TyphoonSnapshot の T3 節の注記）。
                 return new TyphoonSnapshot(true, prefab, frame,
                                            rain, cloud, fog, windDirection,
-                                           weatherEnabled, weatherReadable);
+                                           weatherEnabled, weatherReadable,
+                                           TyphoonController.Active,
+                                           TyphoonController.DisasterId,
+                                           TyphoonController.Centre,
+                                           TyphoonController.HeadingRadians,
+                                           TyphoonController.Intensity,
+                                           TyphoonController.StormRadius,
+                                           TyphoonController.GaleRadius,
+                                           TyphoonController.Phase,
+                                           TyphoonController.ElapsedFrames,
+                                           TyphoonController.TotalFrames,
+                                           TyphoonController.OverLand,
+                                           TyphoonController.LandfallKnown,
+                                           TyphoonController.MinutesToLandfall,
+                                           TyphoonController.LastRefusal);
             }
             catch (System.Exception e)
             {

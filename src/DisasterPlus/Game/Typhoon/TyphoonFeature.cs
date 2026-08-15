@@ -36,6 +36,7 @@ namespace DisasterPlus.Game
         {
             TyphoonHub.Clear();
             TyphoonReader.Reset();
+            TyphoonController.Reset();
         }
 
         /// <summary>
@@ -75,9 +76,11 @@ namespace DisasterPlus.Game
             //    このコメントを消すと「ポーズ中に台風が動き、建物が倒れ、川が溢れる」が起きる。
             if (deltaMinutes <= 0f) return;
 
-            // （T3: TyphoonController.Tick / T4: TyphoonWeather.Drive /
-            //   T6: TyphoonLightning.Tick / T7: TyphoonWind.Apply /
-            //   T8: TyphoonFlood.Tick / T10: TyphoonTornado.Tick がここに入る）
+            TyphoonController.Tick(snapshot, frameIndex, deltaMinutes);
+
+            // （T4: TyphoonWeather.Drive / T6: TyphoonLightning.Tick /
+            //   T7: TyphoonWind.Apply / T8: TyphoonFlood.Tick /
+            //   T10: TyphoonTornado.Tick がここに入る）
         }
 
         /// <summary>main スレッド。T5 でパネルとボタンが入る。</summary>
@@ -89,6 +92,8 @@ namespace DisasterPlus.Game
         {
             TyphoonHub.Clear();
             TyphoonReader.Reset();
+            // 予約も進行中の台風も都市をまたいで残らない。
+            TyphoonController.Reset();
         }
 
         /// <summary>
@@ -109,6 +114,72 @@ namespace DisasterPlus.Game
             WriteStormPrefab(b, snapshot.Prefab);
             WriteVortexPrefab(b, snapshot.Prefab);
             WriteWeather(b, snapshot);
+            WriteTyphoon(b, snapshot);
+        }
+
+        /// <summary>
+        /// 台風そのもの。
+        ///
+        /// **<c>refusal</c> は必ず出す。** 「起こせなかった」を「何も起きていない」と
+        /// 見分ける手段がここにしか無い（計画 §3 Step 5）。
+        /// </summary>
+        private static void WriteTyphoon(DiagnosticBuilder b, TyphoonSnapshot snapshot)
+        {
+            if (!snapshot.Active)
+            {
+                b.Line(1, "typhoon", "idle");
+                if (!string.IsNullOrEmpty(snapshot.Refusal))
+                {
+                    b.Line(2, "refusal", snapshot.Refusal);
+                }
+                return;
+            }
+
+            b.Line(1, "typhoon", "active  #" + snapshot.TyphoonId
+                                 + "  phase=" + snapshot.Phase
+                                 + "  intensity=" + snapshot.Intensity);
+
+            b.Line(2, "centre", "(" + snapshot.Centre.X.ToString("F0")
+                                + ", " + snapshot.Centre.Y.ToString("F0")
+                                + ", " + snapshot.Centre.Z.ToString("F0")
+                                + ")  heading=" + DegreesOf(snapshot.HeadingRadians).ToString("F1")
+                                + " deg");
+
+            b.Line(2, "elapsed", ElapsedText(snapshot.ElapsedFrames, snapshot.TotalFrames));
+
+            b.Line(2, "radius", "storm " + snapshot.StormRadius.ToString("F0")
+                                + " m / gale " + snapshot.GaleRadius.ToString("F0") + " m");
+
+            // 「読めなかった」と「0 分後」を混ぜない。
+            b.Line(2, "landfall", snapshot.OverLand
+                ? "already over land"
+                : (snapshot.LandfallKnown
+                    ? "in " + snapshot.MinutesToLandfall.ToString("F1") + " in-game minutes"
+                    : "not within the forecast window (it may pass over water only)"));
+
+            b.Line(2, "over land", snapshot.OverLand ? "yes" : "no");
+
+            if (!string.IsNullOrEmpty(snapshot.Refusal))
+            {
+                b.Line(2, "last refusal", snapshot.Refusal);
+            }
+        }
+
+        private static float DegreesOf(float radians)
+        {
+            return radians * 57.29578f;
+        }
+
+        private static string ElapsedText(uint elapsed, uint total)
+        {
+            float framesPerMinute = FeatureHost.FramesPerMinute;
+            if (framesPerMinute <= 0f) return elapsed + " / " + total + " frames";
+
+            float elapsedHours = elapsed / framesPerMinute / 60f;
+            float totalHours = total / framesPerMinute / 60f;
+            return elapsed + " / " + total + " frames (= "
+                   + elapsedHours.ToString("F2") + " / " + totalHours.ToString("F2")
+                   + " in-game hours)";
         }
 
         /// <summary>

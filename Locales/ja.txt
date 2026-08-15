@@ -160,3 +160,5 @@ TyphoonEnabled = 台風パネルを有効にする
 TyphoonResetButton = 台風ボタンの位置をリセットする（次に都市を読み込んだときに反映されます）
 TyphoonNeedsDlc = 台風機能には Natural Disasters DLC が必要です。
 LogChannelTyphoon = 台風
+TyphoonIntensity = 台風の強度 (10〜255)
+TyphoonIntensityNote = ゲーム自身の嵐は 55 です。100 を超える値はバニラが生成しない領域になります。

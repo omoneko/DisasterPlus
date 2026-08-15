@@ -540,5 +540,10 @@ namespace DisasterPlus.Game
         public static string TyphoonNeedsDlc =
             "Typhoons require the Natural Disasters DLC.";
         public static string LogChannelTyphoon = "Typhoon";
+
+        // --- ④台風（Task 3: 論理オブジェクトと経路追従） ---
+        public static string TyphoonIntensity = "Typhoon intensity (10-255)";
+        public static string TyphoonIntensityNote =
+            "The game's own storms use 55. Above 100 is beyond anything vanilla generates.";
     }
 }

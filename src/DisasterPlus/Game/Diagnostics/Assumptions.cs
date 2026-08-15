@@ -50,13 +50,14 @@ namespace DisasterPlus.Game
         /// 地震 第 2 層 3 件（TsunamiAI プレハブの実在・
         /// TerrainManager.HasWater と DisasterData.m_waveIndex・
         /// BuildingAI.CollapseBuilding と BuildingInfo.m_size / m_generatedInfo）＋
-        /// 台風 2 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値）＋
+        /// 台風 3 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値・
+        /// DisasterData の移動 4 フィールドと DisasterAI の公開ラッパー 3 メソッド）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 25;
+        private const int TotalCheckCount = 26;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -664,6 +665,59 @@ namespace DisasterPlus.Game
                   });
 
             // --- ④台風（Task 2）ここまで ---
+
+            // --- ④台風（Task 3: 論理オブジェクトと経路追従）ここから ---
+
+            // ④の移動機構そのもの。DisasterData.m_targetPosition を毎 sim tick 書き換えて
+            // 災害を動かす（IL 事実文書 §E-1。本タスクで全アセンブリの
+            // stfld DisasterData::m_targetPosition を走査し直し、既存の災害のそれを
+            // 書くバニラのコードが 1 つも無いことを再確認した）。
+            //
+            // m_activationFrame は罠 1 の見張りに使う——SelfTrigger が効いていなければ
+            // StartDisaster が即 return し、この値が 0 のままになる（§A-1 IL_003F）。
+            // ここが読めなければ見張りごと成立しないので、同じ項目で照合する。
+            //
+            // メソッドは引数の型まで指定して見る（②の BuildingAI.CollapseBuilding の
+            // 検査と同じ形）。名前だけの一致では、シグネチャが変わったときに
+            // 偽 PASS を出す。
+            Check("DisasterData exposes m_targetPosition / m_angle / m_intensity / "
+                  + "m_activationFrame, and DisasterAI.StartNow / DeactivateNow / "
+                  + "ClampDisasterTarget are resolvable",
+                  "the typhoon cannot be created, moved or stopped; the feature does nothing "
+                  + "at all",
+                  delegate
+                  {
+                      var d = typeof(DisasterData);
+                      if (!HasField(d, "m_targetPosition") || !HasField(d, "m_angle")
+                          || !HasField(d, "m_intensity") || !HasField(d, "m_activationFrame"))
+                      {
+                          return false;
+                      }
+
+                      var byRef = new Type[]
+                      {
+                          typeof(ushort), typeof(DisasterData).MakeByRefType()
+                      };
+                      if (typeof(DisasterAI).GetMethod("StartNow",
+                              BindingFlags.Public | BindingFlags.Instance, null, byRef,
+                              null) == null)
+                      {
+                          return false;
+                      }
+                      if (typeof(DisasterAI).GetMethod("DeactivateNow",
+                              BindingFlags.Public | BindingFlags.Instance, null, byRef,
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      return typeof(DisasterAI).GetMethod("ClampDisasterTarget",
+                          BindingFlags.Public | BindingFlags.Instance, null,
+                          new Type[] { typeof(UnityEngine.Vector3).MakeByRefType() },
+                          null) != null;
+                  });
+
+            // --- ④台風（Task 3）ここまで ---
 
             Report();
         }
