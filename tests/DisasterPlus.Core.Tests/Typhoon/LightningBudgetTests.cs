@@ -77,6 +77,42 @@ namespace DisasterPlus.Core.Tests.Typhoon
         }
 
         [Fact]
+        public void AboveAKnownIntensityTheHostStormTakesTheWholeBudget()
+        {
+            // 全体レビュー I4。**この境界は設定できる強度の範囲の中にある**
+            // （スライダーは 10〜255）ので、プレイヤーは黙って T6 の壁雲散布を
+            // 失いうる。定数が式からずれないよう、両側を式から作って固定する。
+            const uint act = 1000u, dur = 80000u;
+
+            // ランプの頂点を踏むフレーム（c が 100 で頭打ちになる十分後ろ）。
+            uint peak = act + dur / 2u;
+
+            int justBelow = LightningBudget.VanillaMaxStrikes(
+                LightningBudget.VanillaRampCount(
+                    peak, act, dur, (byte)(LightningBudget.IntensityWithNoShareAtPeak - 1)));
+            int atThreshold = LightningBudget.VanillaMaxStrikes(
+                LightningBudget.VanillaRampCount(
+                    peak, act, dur, (byte)LightningBudget.IntensityWithNoShareAtPeak));
+
+            Assert.False(LightningBudget.YieldsCompletely(justBelow));
+            Assert.True(LightningBudget.YieldsCompletely(atThreshold));
+
+            // 「取り分 0」は取り分 0 であって、負でもエラーでもない。
+            Assert.Equal(0, LightningBudget.Allowance(0, atThreshold));
+            Assert.True(LightningBudget.Allowance(0, justBelow) >= 1);
+        }
+
+        [Fact]
+        public void YieldingCompletelyIgnoresTheModsOwnStock()
+        {
+            // 在庫で一時的に 0 になっている状態（次の tick で戻る）と、
+            // 宿主の取り分だけで 0 になっている状態（強度を下げるまで戻らない）を
+            // 混ぜないための性質。表示側はこの区別に乗っている。
+            Assert.Equal(0, LightningBudget.Allowance(18, 0));
+            Assert.False(LightningBudget.YieldsCompletely(0));
+        }
+
+        [Fact]
         public void TheEarliestFrameMatchesTheGamesFloor()
         {
             // §A-3: startFrame = Max(startFrame, currentFrameIndex + 15)

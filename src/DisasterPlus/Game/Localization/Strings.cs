@@ -134,6 +134,20 @@ namespace DisasterPlus.Game
         public static string SourceVanilla = "[measured]";
         public static string SourceModel = "[Disaster + model]";
 
+        /// <summary>
+        /// 翻訳文の中で「ここに実測値の印が入る」を表すトークン。
+        /// 表示の直前に <see cref="SourceVanilla"/> へ差し替える
+        /// （<c>TyphoonRows.SetModelNote</c> が唯一の差し替え箇所）。
+        ///
+        /// ★ <b><c>public static string</c> にしてはいけない。</b>
+        ///   <c>LocaleLoader</c> は <c>GetFields(Public | Static)</c> の string を
+        ///   全部「翻訳できるキー」として扱い、<c>en.txt</c> の生成にも同じ列挙を使う。
+        ///   ここを public にすると、トークン自体が翻訳対象として出力され、
+        ///   翻訳者が訳した瞬間に差し替えが効かなくなる（const なら
+        ///   <c>SetValue</c> が例外になる、というもっと悪い壊れ方もする）。
+        /// </summary>
+        internal const string MeasuredToken = "{measured}";
+
         public static string EarthquakeLayer1Header = "What the game actually computes";
         public static string EarthquakeLayer2Header =
             "Added by Disaster + (not vanilla behaviour)";
@@ -558,10 +572,30 @@ namespace DisasterPlus.Game
         // 名乗らなかったのと同じ理由で、単位を名乗ると実在の意味があると誤解させる。
         public static string TyphoonTitle = "Typhoon";
         public static string TyphoonModelHeader = "Computed by Disaster +";
+
+        // ★★ **この文に印の文字列そのものを書かないこと**（全体レビュー I5）。
+        //    以前 TyphoonModelNote は英語の "[measured]" を本文に埋め込んでおり、
+        //    ja.txt はその日本語訳でも "[measured]" のままだった。ところが
+        //    ja.txt の SourceVanilla は「[実測]」なので、**日本語のプレイヤーは
+        //    画面に一度も出ない文字列を探すことになっていた**（英語では偶然一致
+        //    していたので誰も気付かない形の壊れ方である）。
+        //    設計書 §7.1 は「行ごとの印を付けない」代わりに「見出しが意味を担う」と
+        //    決めているので、この 1 文が壊れると④の表示規約そのものが伝わらない。
+        //
+        //    印は 1 箇所（TyphoonRows.SetMeasured / SetModelNote）でしか作らない。
+        //    翻訳文には**印そのものではなく <see cref="MeasuredToken"/> を置き**、
+        //    表示の直前に Strings.SourceVanilla へ差し替える ——
+        //    **構造として 2 度とずれない。**
+        //
+        //    string.Format を使わないのは本 MOD の規律だが、それは位置指定
+        //    （{0} の数がずれると実行時に落ちる）を避けるためである。名前付きの
+        //    トークンを String.Replace で差し替えるのは落ちない ——
+        //    翻訳がトークンを落としても、その文だけが印に触れなくなるだけで、
+        //    それは build.ps1 の locale 検査が捕まえる。
         public static string TyphoonModelNote =
             "The numbers on this panel come from Disaster +'s own model. The game does not "
             + "compute a typhoon, wind damage, a positioned cloud or a flood of its own. "
-            + "Only the rows marked [measured] are values read straight from the game.";
+            + "Only the rows marked {measured} are values read straight from the game.";
         public static string TyphoonStart = "Raise a typhoon";
         public static string TyphoonStop = "Stop the typhoon";
         public static string TyphoonInactive = "No typhoon right now.";
@@ -621,6 +655,17 @@ namespace DisasterPlus.Game
         public static string TyphoonLightningNote =
             "The game can only hold 20 lightning strikes at once. Disaster + keeps its own "
             + "share below that so the host storm's strikes are not thrown away.";
+
+        // ★ 全体レビュー I4。強度 170 以上では宿主の嵐の取り分だけで 20 発の枠を
+        //   使い切るため、④は落雷を 1 発も積まなくなる（LightningBudget の
+        //   IntensityWithNoShareAtPeak に導出がある）。**その強度はスライダーの
+        //   範囲の中にある**ので、プレイヤーは T6 の目的そのもの（壁雲への偏り）を
+        //   黙って失いうる。診断ダンプだけでなく**パネルにも**出す。
+        public static string TyphoonLightningYielded =
+            "At this intensity the host thunderstorm is expected to use the whole 20-strike "
+            + "queue, so Disaster + adds none of its own. The lightning you see is the host "
+            + "storm's, spread evenly over its disc instead of around the eye wall. Lower the "
+            + "typhoon intensity to get the eye-wall placement back.";
 
         // --- ④台風（Task 7: 風害） ---
         //

@@ -191,7 +191,9 @@ namespace DisasterPlus.Game
             //     ここで一度だけ全部の出所を言う**（クラス doc / 設計書 §7-1）。
             TyphoonRows.AddSectionHeader(panel, "ModelHeader", ref y, Strings.TyphoonModelHeader);
             var note = TyphoonRows.AddRow(panel, "ModelNote", ref y, 56f);
-            TyphoonRows.SetPlain(note, Strings.TyphoonModelNote);
+            // ★ 印（[measured] / [実測]）を挟むのは TyphoonRows の仕事である。
+            //   ここで文を組み立てない（全体レビュー I5。あちらの SetModelNote の doc）。
+            TyphoonRows.SetModelNote(note);
 
             AddActionButtons(panel, ref y);
 

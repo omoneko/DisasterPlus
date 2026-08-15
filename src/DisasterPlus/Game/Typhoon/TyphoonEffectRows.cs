@@ -1,4 +1,5 @@
 using ColossalFramework.UI;
+using DisasterPlus.Core.Typhoon;
 
 namespace DisasterPlus.Game
 {
@@ -30,6 +31,9 @@ namespace DisasterPlus.Game
     {
         private static UILabel _lightningLabel;
         private static UILabel _lightningNoteLabel;
+
+        /// <summary>宿主の嵐に枠を全部譲っている間だけ出す行（全体レビュー I4）。</summary>
+        private static UILabel _lightningYieldedLabel;
         private static UILabel _windLabel;
         private static UILabel _windNoteLabel;
         private static UILabel _windShelterNoteLabel;
@@ -51,6 +55,11 @@ namespace DisasterPlus.Game
             // 何のことか、この 1 行が無いと分からない。
             _lightningNoteLabel = TyphoonRows.AddRow(p, "LightningNote", ref y, 40f);
             TyphoonRows.SetPlain(_lightningNoteLabel, Strings.TyphoonLightningNote);
+
+            // ★ 「④の落雷が 1 発も出ていない」を出す行。**中身は Refresh が
+            //    出し入れする** —— 常設にすると、譲っていない普通の強度でも
+            //    「譲っています」と読める。高さは 4 行に折り返すぶんを確保する。
+            _lightningYieldedLabel = TyphoonRows.AddRow(p, "LightningYielded", ref y, 72f);
 
             _windLabel = TyphoonRows.AddRow(p, "Wind", ref y);
 
@@ -95,6 +104,7 @@ namespace DisasterPlus.Game
             {
                 // 台風が居ないときに 0 を並べない（「撒いていない」と「0 発だった」は違う）。
                 TyphoonRows.SetPlain(_lightningLabel, "");
+                TyphoonRows.SetPlain(_lightningYieldedLabel, "");
                 TyphoonRows.SetPlain(_windLabel, "");
                 TyphoonRows.SetPlain(_floodLabel, "");
                 TyphoonRows.SetPlain(_floodReasonLabel, "");
@@ -110,6 +120,15 @@ namespace DisasterPlus.Game
                 Strings.TyphoonLightningRow + ": "
                 + s.LightningInFlight + " / " + s.LightningTotal + " / "
                 + s.LightningVanillaReserve + " / " + s.LightningRejected);
+
+            // ★ 「宿主に全部譲っていて④は 1 発も撃っていない」を名指しする
+            //    （全体レビュー I4）。判定は在庫（一時的に 0）ではなく**宿主の
+            //    取り分だけ**を見る —— 前者は次の tick で戻るが、後者は強度を
+            //    下げるまで戻らない。区別は LightningBudget.YieldsCompletely の doc。
+            TyphoonRows.SetPlain(_lightningYieldedLabel,
+                LightningBudget.YieldsCompletely(s.LightningVanillaReserve)
+                    ? Strings.TyphoonLightningYielded
+                    : "");
 
             RefreshWind(s);
             RefreshFlood(s);
@@ -243,6 +262,7 @@ namespace DisasterPlus.Game
         {
             _lightningLabel = null;
             _lightningNoteLabel = null;
+            _lightningYieldedLabel = null;
             _windLabel = null;
             _windNoteLabel = null;
             _windShelterNoteLabel = null;

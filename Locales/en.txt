@@ -165,7 +165,7 @@ TyphoonIntensity = Typhoon intensity (10-255)
 TyphoonIntensityNote = The game's own storms use 55. Above 100 is beyond anything vanilla generates.
 TyphoonTitle = Typhoon
 TyphoonModelHeader = Computed by Disaster +
-TyphoonModelNote = The numbers on this panel come from Disaster +'s own model. The game does not compute a typhoon, wind damage, a positioned cloud or a flood of its own. Only the rows marked [measured] are values read straight from the game.
+TyphoonModelNote = The numbers on this panel come from Disaster +'s own model. The game does not compute a typhoon, wind damage, a positioned cloud or a flood of its own. Only the rows marked {measured} are values read straight from the game.
 TyphoonStart = Raise a typhoon
 TyphoonStop = Stop the typhoon
 TyphoonInactive = No typhoon right now.
@@ -193,6 +193,7 @@ TyphoonWindDirectionNote = The wind direction follows the storm only slowly. The
 TyphoonEffectsHeader = What the typhoon brings
 TyphoonLightningRow = Lightning (in flight / total / left to the host storm / dropped)
 TyphoonLightningNote = The game can only hold 20 lightning strikes at once. Disaster + keeps its own share below that so the host storm's strikes are not thrown away.
+TyphoonLightningYielded = At this intensity the host thunderstorm is expected to use the whole 20-strike queue, so Disaster + adds none of its own. The lightning you see is the host storm's, spread evenly over its disc instead of around the eye wall. Lower the typhoon intensity to get the eye-wall placement back.
 TyphoonWindRow = Wind damage (collapsed this pass / total / examined / refused by the game)
 TyphoonWindEnabled = Wind damage (buildings vanilla would never collapse)
 TyphoonWindStrength = Wind damage strength (0 = off)

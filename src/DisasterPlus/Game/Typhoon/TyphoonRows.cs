@@ -158,11 +158,34 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// バニラの実測値の行に書く。**接頭辞は呼び出し側に選ばせない。**
-        /// ここが <c>Strings.SourceVanilla</c> を参照する唯一の場所である。
+        /// <see cref="SetModelNote"/> と並んで、ここが <c>Strings.SourceVanilla</c> を
+        /// 参照する 2 箇所のうちの 1 つである（どちらもこのファイルの中）。
         /// </summary>
         internal static void SetMeasured(UILabel label, string body)
         {
             SetPlain(label, Strings.SourceVanilla + " " + body);
+        }
+
+        /// <summary>
+        /// パネル見出しの説明文を組み立てて入れる。
+        ///
+        /// ★★ **印は必ずここで挟む**（全体レビュー I5）。以前この文は翻訳文の中に
+        /// 印の文字列を直接持っており、日本語の文だけが英語の <c>[measured]</c> を
+        /// 案内していた —— 画面には <c>[実測]</c> しか出ないので、
+        /// **プレイヤーは存在しない印を探すことになる。**
+        /// 翻訳文には印そのものではなく <c>Strings.MeasuredToken</c> を書き、
+        /// ここで <c>Strings.SourceVanilla</c> へ差し替える。翻訳がどう変わっても
+        /// 両者はずれない。トークンが無い翻訳文はそのまま出る（落ちない） ——
+        /// その取りこぼしは <c>build.ps1</c> の locale 検査が捕まえる。
+        ///
+        /// 呼び出し側（<c>TyphoonPanel</c>）に <c>Strings.SourceVanilla</c> を
+        /// 触らせないのは <see cref="SetMeasured"/> と同じ理由である
+        /// （印の出所を 1 ファイルに閉じる。クラス doc の grep 3）。
+        /// </summary>
+        internal static void SetModelNote(UILabel label)
+        {
+            SetPlain(label,
+                Strings.TyphoonModelNote.Replace(Strings.MeasuredToken, Strings.SourceVanilla));
         }
     }
 }

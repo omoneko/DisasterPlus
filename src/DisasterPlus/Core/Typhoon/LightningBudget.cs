@@ -143,8 +143,10 @@ namespace DisasterPlus.Core.Typhoon
         ///
         /// <c>QueueCapacity - MinFreeSlots - vanillaReserve - inFlight</c>（負なら 0）。
         /// **0 を返すのは正常な状態である** —— 強度が高いほど宿主の取り分が増え、
-        /// 強度 170 あたりから④の取り分は 0 になる。そのときキューを非空に保っているのは
-        /// 宿主の落雷なので、環境落雷は依然として抑制されている（クラス doc）。
+        /// <see cref="IntensityWithNoShareAtPeak"/> 以上では④の取り分が 0 になる。
+        /// そのときキューを非空に保っているのは宿主の落雷なので、環境落雷は依然として
+        /// 抑制されている（クラス doc）。ただし**④の壁雲への散布は止まる**ので、
+        /// その状態は <see cref="YieldsCompletely"/> で名指しして表示に出す。
         /// </summary>
         public static int Allowance(int inFlight, int vanillaReserve)
         {
@@ -153,6 +155,42 @@ namespace DisasterPlus.Core.Typhoon
 
             int allowance = QueueCapacity - MinFreeSlots - vanillaReserve - inFlight;
             return allowance < 0 ? 0 : allowance;
+        }
+
+        /// <summary>
+        /// この強度から上では、**キューが空でも④の取り分が 0 になる**（ランプの頂点で）。
+        ///
+        /// 導出（全部この型の中の式である。テストが 170 と 169 の両側を固定している）:
+        /// <code>
+        /// ランプの頂点     c = (100 * intensity + 50) / 100 = intensity
+        /// 宿主の取り分     reserve = VanillaMaxStrikes(c) = 1 + c / 10
+        /// ④の取り分       Allowance(0, reserve) = 20 - 2 - reserve = 17 - c / 10
+        /// 0 になる条件     c / 10 >= 17  →  c >= 170
+        /// </code>
+        ///
+        /// **これは設定できる強度の範囲の中にある**（スライダーは 10〜255）。
+        /// つまりプレイヤーが強度を 170 以上にすると、④は落雷を 1 発も積まなくなり、
+        /// <b>壁雲へ寄せる散布（T6 の目的そのもの）が消えて、宿主の嵐の一様な円盤だけに
+        /// なる</b>。**これは異常ではないが、黙って起きてよい変化でもない** ——
+        /// パネルと診断がその場で名乗る（<c>Strings.TyphoonLightningYielded</c>）。
+        ///
+        /// 予備枠そのものは緩めない。緩めると宿主の嵐と他 MOD の落雷が捨てられる側に
+        /// 倒れる（クラス doc の「20 発に当てないこと」）。
+        /// </summary>
+        public const int IntensityWithNoShareAtPeak = 170;
+
+        /// <summary>
+        /// 宿主の取り分だけで予算を使い切っているか（＝キューが空でも④は積めない）。
+        ///
+        /// <see cref="Allowance"/> が 0 を返す理由は 2 つある: ④自身の在庫が埋めている
+        /// （一時的・正常）か、宿主の取り分が大きすぎる（強度が高い間ずっと続く）か。
+        /// **表示側はこの 2 つを区別しなければならない** —— 前者は次の tick で戻るが、
+        /// 後者は強度を下げるまで戻らないからである。<paramref name="vanillaReserve"/>
+        /// だけを見ることでその区別が付く。
+        /// </summary>
+        public static bool YieldsCompletely(int vanillaReserve)
+        {
+            return Allowance(0, vanillaReserve) <= 0;
         }
 
         /// <summary>

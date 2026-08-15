@@ -575,6 +575,21 @@ namespace DisasterPlus.Game
                   + " — THE 20-STRIKE CAP WAS HIT; the host storm's own strikes are being "
                   + "thrown away too");
 
+            // ★ 「宿主に全部譲っていて④は 1 発も撃っていない」を名指しする
+            //   （全体レビュー I4）。強度 170 以上ではこれが恒常状態になり、
+            //   T6 の壁雲への偏りが消えて宿主の一様な円盤だけになる。
+            //   在庫（一時的に 0）ではなく**宿主の取り分だけ**を見る。
+            if (DisasterPlus.Core.Typhoon.LightningBudget.YieldsCompletely(
+                    snapshot.LightningVanillaReserve))
+            {
+                b.Line(3, "share",
+                    "0 — the host storm's reserve alone uses the whole queue at this intensity "
+                    + "(>= " + DisasterPlus.Core.Typhoon.LightningBudget.IntensityWithNoShareAtPeak
+                    + " at the ramp peak). Disaster + queues nothing, so the eye-wall placement "
+                    + "is gone and only the host storm's uniform disc remains. This is the "
+                    + "designed yield, not a failure");
+            }
+
             // 環境落雷（雨 > 0.8 かつキューが空）を抑えているかどうか。
             b.Line(3, "environmental lightning", snapshot.LightningInFlight > 0
                 ? "suppressed (the queue is not empty)"
