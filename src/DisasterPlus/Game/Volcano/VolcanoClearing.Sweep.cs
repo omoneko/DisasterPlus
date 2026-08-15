@@ -28,6 +28,12 @@ namespace DisasterPlus.Game
     /// （<c>ordinal</c> を 1 つ戻す）—— 途中まで進んだセルを終わったことにすると、
     /// そのセルに残った建物の足元だけ地形が固定されたまま隆起する。
     /// やり直しても二重に壊すことは無い（<c>Demolishing</c> はマスクが弾く）。
+    ///
+    /// > ★★ <b>やり直すのは「このセルで 1 つでも壊せたとき」だけである。</b>
+    /// > 壊せたものはマスクから外れるので、やり直しは必ず有限回で終わる。
+    /// > 無条件にやり直すと、**バニラが断る建物が 1 セルに予算ぶん並んでいるだけで
+    /// > 準備が永久に足踏みし、位相が <c>Clearing</c> のまま二度と進まない**
+    /// > （断られた建物は <c>Created</c> のままなので、次の走査も同じ数を数える）。
     /// </summary>
     public static partial class VolcanoClearing
     {
@@ -133,6 +139,7 @@ namespace DisasterPlus.Game
                 ushort id = grid[index];
                 int guard = 0;
                 bool budgetHit = false;
+                int destroyedHere = 0;
 
                 while (id != 0 && id < buildings.Length)
                 {
@@ -154,7 +161,7 @@ namespace DisasterPlus.Game
                         }
 
                         scanned++;
-                        if (Demolish(buildings, id)) destroyed++;
+                        if (Demolish(buildings, id)) { destroyed++; destroyedHere++; }
                         else refused++;
                     }
 
@@ -164,10 +171,17 @@ namespace DisasterPlus.Game
 
                 if (budgetHit)
                 {
-                    // このセルは途中である。**終わったことにしない** ——
-                    // 次回はこのセルの先頭からやり直す。
                     capped = true;
-                    ordinal--;
+
+                    // ★★ **やり直すのは、このセルで 1 棟でも壊せたときだけ**である。
+                    //    壊せた建物は Demolishing が立ってマスクから外れるので、
+                    //    やり直しは必ず有限回で終わる。**1 棟も壊せなかったセルで
+                    //    やり直すと、そこで永久に足踏みする** —— バニラが断る建物が
+                    //    1 セルに予算ぶん並んでいるだけで、準備が二度と前へ進まなくなる
+                    //    （断られた建物は Created のままなので、次回も同じ数だけ数える）。
+                    //    断られたものはこの先も断られる。その足元だけ地形が残るのは
+                    //    既知の帰結で、refused に積んで診断とパネルに出している。
+                    if (destroyedHere > 0) ordinal--;
                     break;
                 }
             }
@@ -283,6 +297,7 @@ namespace DisasterPlus.Game
                 ushort id = grid[index];
                 int guard = 0;
                 bool budgetHit = false;
+                int destroyedHere = 0;
 
                 while (id != 0 && id < segments.Length)
                 {
@@ -302,7 +317,7 @@ namespace DisasterPlus.Game
                         }
 
                         scanned++;
-                        if (Demolish(segments, id)) destroyed++;
+                        if (Demolish(segments, id)) { destroyed++; destroyedHere++; }
                         else refused++;
                     }
 
@@ -312,9 +327,13 @@ namespace DisasterPlus.Game
 
                 if (budgetHit)
                 {
-                    // このセルは途中である。次回はこのセルの先頭からやり直す。
                     capped = true;
-                    ordinal--;
+
+                    // ★★ 建物側と同じ理由で、**1 本でも解放できたときだけやり直す**。
+                    //    解放された道路は配列から消えるのでやり直しは有限回で終わる。
+                    //    断られる道路（SupportCableAI と、所有建物が倒壊を断った
+                    //    Untouchable）はこの先も断られるので、そこで足踏みしない。
+                    if (destroyedHere > 0) ordinal--;
                     break;
                 }
             }
