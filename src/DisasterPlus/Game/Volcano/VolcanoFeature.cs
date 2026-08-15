@@ -342,6 +342,69 @@ namespace DisasterPlus.Game
             {
                 b.Line(2, "eruption failure", VolcanoEruption.LastFailure);
             }
+
+            WriteLava(b, snapshot);
+        }
+
+        /// <summary>
+        /// 溶岩（T8）。**本数 0（設定で無効）のときは行ごと出さない** ——
+        /// 「0 本流れた」と「切ってある」を混ぜない。
+        ///
+        /// ★ <c>slope sign</c> はこの機能でいちばん重要な 1 行である。
+        ///   勾配の符号を取り違えると溶岩が山を登るが、例外は 1 つも出ない（§8.1）。
+        ///   IL では確定させてあるので、ここが <c>NOT VERIFIED</c> のまま進まないなら
+        ///   ゲームの更新で挙動が変わっている。
+        ///
+        /// ★ 樹木・道路の 2 行は**できないことの説明**である。
+        ///   どちらも⑤の手抜きではなくゲーム側の制約なので、診断でもそう名乗る。
+        /// </summary>
+        private static void WriteLava(DiagnosticBuilder b, VolcanoSnapshot snapshot)
+        {
+            if (snapshot.LavaFlowCount <= 0)
+            {
+                if (snapshot.Phase == VolcanoPhase.Flowing
+                    || snapshot.Phase == VolcanoPhase.Cooling)
+                {
+                    b.Line(1, "lava", "off (the number of flows is set to 0)");
+                }
+                return;
+            }
+
+            b.Line(1, "lava", snapshot.LavaAliveCount + "/" + snapshot.LavaFlowCount
+                              + " flows alive, longest "
+                              + snapshot.LavaLongestMetres.ToString("F0") + " m, cooling "
+                              + (snapshot.LavaCoolUnit * 100f).ToString("F0") + "% left");
+
+            b.Line(2, "slope sign", VolcanoLava.SlopeSignVerified
+                ? "verified at runtime (the first steps of a flow lost altitude)"
+                : "NOT VERIFIED YET (a flow has not finished its observation window)");
+
+            b.Line(2, "ignited", "buildings " + snapshot.LavaBuildingsIgnited
+                                 + " (refused " + VolcanoLava.BuildingsRefused
+                                 + "), trees " + snapshot.LavaTreesIgnited);
+
+            b.Line(2, "trees", snapshot.LavaTreesAvailable
+                ? "burnable (Natural Disasters DLC is owned)"
+                : "not burnable without the Natural Disasters DLC - the game itself refuses, "
+                  + "so Disaster + leaves them standing (this is normal)");
+
+            b.Line(2, "roads", "never burn - the game has no API for it at all; only the roads "
+                               + "inside the footprint are removed, during the clearing phase");
+
+            b.Line(2, "trail points", snapshot.LavaTrailPoints == null
+                ? "0" : snapshot.LavaTrailPoints.Length.ToString());
+
+            if (VolcanoLava.OutsidePurchasedArea)
+            {
+                b.Line(2, "outside the purchased area",
+                    "the lava left the tiles you own; terrain sampling drops from 4 m detail to "
+                    + "16 m interpolation there (this is normal, not a bug)");
+            }
+
+            if (!string.IsNullOrEmpty(VolcanoLava.LastFailure))
+            {
+                b.Line(2, "lava failure", VolcanoLava.LastFailure);
+            }
         }
 
         /// <summary>

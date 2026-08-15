@@ -234,6 +234,45 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly Vec3 SummitWorld;
 
+        // ── T8（溶岩）が足した 9 つ ───────────────────────────────
+
+        /// <summary>火口から出した流れの本数（設定の値。0 なら完全に無効）。</summary>
+        public readonly int LavaFlowCount;
+
+        /// <summary>まだ動いている流れの本数。</summary>
+        public readonly int LavaAliveCount;
+
+        /// <summary>いちばん長く流れた距離（m）。</summary>
+        public readonly float LavaLongestMetres;
+
+        /// <summary>これまでに火を付けた建物の数。</summary>
+        public readonly int LavaBuildingsIgnited;
+
+        /// <summary>これまでに火を付けた木の数（ND 非所持なら常に 0）。</summary>
+        public readonly int LavaTreesIgnited;
+
+        /// <summary>木に火を付けられる環境か（＝ ND DLC を持っているか。§B-7c）。</summary>
+        public readonly bool LavaTreesAvailable;
+
+        /// <summary>
+        /// 全流路の軌跡点を連結した**不変配列**。T9 の描画が読む唯一の口である。
+        ///
+        /// ★ <b>計画は <c>LavaHeads</c>（1 本の <c>Vec2[]</c>）と書いていたが、
+        /// 点列と本数の 2 つに分けてある。</b> 1 本の配列では **N 本の別々の折れ線を
+        /// 表せない** —— 別の流れの先端どうしを繋いだリボンは、流れの間を
+        /// 飛び回る帯になる。<see cref="LavaTrailCounts"/> が境目を持つ。
+        /// </summary>
+        public readonly Vec2[] LavaTrailPoints;
+
+        /// <summary>各流路の点数（**不変配列**）。合計が <see cref="LavaTrailPoints"/> の長さ。</summary>
+        public readonly int[] LavaTrailCounts;
+
+        /// <summary>
+        /// 冷え具合 <c>[0,1]</c>。1 が「まだ熱い」、0 が「冷え切った」。
+        /// T9 の描画がこれで色を落とす（止まった溶岩が永久に光っていないこと）。
+        /// </summary>
+        public readonly float LavaCoolUnit;
+
         public VolcanoSnapshot(bool valid, VolcanoTerrainFacts terrain,
                                uint currentFrame, bool gameMode,
                                VolcanoPhase phase, VolcanoFootprint footprint,
@@ -246,7 +285,11 @@ namespace DisasterPlus.Game
                                bool upliftComplete, bool craterCarved,
                                int upliftTileCount, int upliftTileCursor,
                                bool eruptionActive, float eruptionIntensityUnit,
-                               Vec3 summitWorld)
+                               Vec3 summitWorld,
+                               int lavaFlowCount, int lavaAliveCount, float lavaLongestMetres,
+                               int lavaBuildingsIgnited, int lavaTreesIgnited,
+                               bool lavaTreesAvailable, Vec2[] lavaTrailPoints,
+                               int[] lavaTrailCounts, float lavaCoolUnit)
         {
             Valid = valid;
             Terrain = terrain;
@@ -273,6 +316,15 @@ namespace DisasterPlus.Game
             EruptionActive = eruptionActive;
             EruptionIntensityUnit = eruptionIntensityUnit;
             SummitWorld = summitWorld;
+            LavaFlowCount = lavaFlowCount;
+            LavaAliveCount = lavaAliveCount;
+            LavaLongestMetres = lavaLongestMetres;
+            LavaBuildingsIgnited = lavaBuildingsIgnited;
+            LavaTreesIgnited = lavaTreesIgnited;
+            LavaTreesAvailable = lavaTreesAvailable;
+            LavaTrailPoints = lavaTrailPoints;
+            LavaTrailCounts = lavaTrailCounts;
+            LavaCoolUnit = lavaCoolUnit;
         }
 
         /// <summary>
@@ -289,7 +341,9 @@ namespace DisasterPlus.Game
                                        VolcanoPhase.Idle, VolcanoFootprint.None, 0f, null, false,
                                        0f, false, 0, 0, 0, false, true,
                                        0f, 0f, false, false, 0, 0,
-                                       false, 0f, new Vec3(0f, 0f, 0f));
+                                       false, 0f, new Vec3(0f, 0f, 0f),
+                                       0, 0, 0f, 0, 0, false,
+                                       new Vec2[0], new int[0], 0f);
         }
     }
 }

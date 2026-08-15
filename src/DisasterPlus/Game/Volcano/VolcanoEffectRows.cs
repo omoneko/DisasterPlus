@@ -50,6 +50,10 @@ namespace DisasterPlus.Game
         private static UILabel _craterLabel;
         private static UILabel _eruptionLabel;
         private static UILabel _eruptionNoteLabel;
+        private static UILabel _lavaLabel;
+        private static UILabel _lavaIgnitedLabel;
+        private static UILabel _lavaTreesNoteLabel;
+        private static UILabel _lavaRoadsNoteLabel;
         private static UILabel _roadPathLabel;
 
         private static float _blockTop;
@@ -88,6 +92,14 @@ namespace DisasterPlus.Game
             // ★ 「ゲームに溶岩も噴火も無い」を名乗る注記。4 行ぶん折り返す。
             _eruptionNoteLabel =
                 VolcanoRows.AddRow(p, "EffectEruptionNote", ref y, LongNoteHeight);
+
+            // ── 溶岩（T8）────────────────────────────────────
+            _lavaLabel = VolcanoRows.AddRow(p, "EffectLava", ref y);
+            _lavaIgnitedLabel = VolcanoRows.AddRow(p, "EffectLavaIgnited", ref y);
+            // ★ ND 非所持で木が燃えないことの説明。**不具合ではない**（§B-7c）。
+            _lavaTreesNoteLabel = VolcanoRows.AddRow(p, "EffectLavaTrees", ref y, NoteHeight);
+            // ★ 道路が燃えないことの説明。ゲームに API が無い（§B-7d）。
+            _lavaRoadsNoteLabel = VolcanoRows.AddRow(p, "EffectLavaRoads", ref y, NoteHeight);
 
             // ★ **道路を取り除けない環境の断り**。これだけは位相に関係なく出す
             //    （設計書 §1.2）。黙って火山を作らないのがいちばん悪い。
@@ -154,6 +166,7 @@ namespace DisasterPlus.Game
 
                 y = RefreshUplift(y, s);
                 y = RefreshEruption(y, s);
+                y = RefreshLava(y, s);
             }
             else
             {
@@ -167,6 +180,10 @@ namespace DisasterPlus.Game
                 y = ReflowRow(y, _craterLabel, "");
                 y = ReflowRow(y, _eruptionLabel, "");
                 y = Reflow(y, _eruptionNoteLabel, "", LongNoteHeight, LongNoteHeight + 4f);
+                y = ReflowRow(y, _lavaLabel, "");
+                y = ReflowRow(y, _lavaIgnitedLabel, "");
+                y = ReflowNote(y, _lavaTreesNoteLabel, "");
+                y = ReflowNote(y, _lavaRoadsNoteLabel, "");
             }
 
             y = Reflow(y, _roadPathLabel,
@@ -229,9 +246,9 @@ namespace DisasterPlus.Game
         /// </summary>
         private static float RefreshEruption(float y, VolcanoSnapshot s)
         {
-            bool erupting = s.Phase == VolcanoPhase.Erupting
-                            || s.Phase == VolcanoPhase.Flowing
-                            || s.Phase == VolcanoPhase.Cooling;
+            // ★ T8 で位相を絞った。噴火の段のあいだだけ出す —— 溶岩が流れている間は
+            //   その下の 4 行（<see cref="RefreshLava"/>）がその場所を使う。
+            bool erupting = s.Phase == VolcanoPhase.Erupting;
 
             if (!erupting)
             {
@@ -248,6 +265,43 @@ namespace DisasterPlus.Game
 
             y = Reflow(y, _eruptionNoteLabel, Strings.VolcanoEruptionBorrowedNote,
                        LongNoteHeight, LongNoteHeight + 4f);
+            return y;
+        }
+
+        /// <summary>
+        /// 溶岩の 4 行（T8）。**溶岩の段に入るまでは出さない。**
+        ///
+        /// ★ 木の説明は <b>ND DLC を持っていないときだけ</b>出す（§B-7c）。
+        ///   持っている環境で常に出すと、起きてもいない制約を毎回読ませることになる。
+        /// ★ 道路の説明は溶岩の段のあいだ常に出す —— 「溶岩の下の道路が燃えない」は
+        ///   必ず目に入る事実で、ゲームに API が無いことを説明できるのはここだけである。
+        /// </summary>
+        private static float RefreshLava(float y, VolcanoSnapshot s)
+        {
+            bool flowing = s.Phase == VolcanoPhase.Flowing || s.Phase == VolcanoPhase.Cooling;
+
+            if (!flowing || s.LavaFlowCount <= 0)
+            {
+                y = ReflowRow(y, _lavaLabel, "");
+                y = ReflowRow(y, _lavaIgnitedLabel, "");
+                y = ReflowNote(y, _lavaTreesNoteLabel, "");
+                y = ReflowNote(y, _lavaRoadsNoteLabel, "");
+                return y;
+            }
+
+            y = ReflowRow(y, _lavaLabel,
+                Strings.VolcanoLavaRow + ": " + s.LavaAliveCount + " / " + s.LavaFlowCount
+                + "    " + Strings.VolcanoLavaLongest + ": "
+                + s.LavaLongestMetres.ToString("F0") + " " + Strings.VolcanoMetres);
+
+            y = ReflowRow(y, _lavaIgnitedLabel,
+                Strings.VolcanoLavaIgnited + ": " + s.LavaBuildingsIgnited + " / "
+                + s.LavaTreesIgnited);
+
+            y = ReflowNote(y, _lavaTreesNoteLabel,
+                s.LavaTreesAvailable ? "" : Strings.VolcanoTreesNeedDlc);
+
+            y = ReflowNote(y, _lavaRoadsNoteLabel, Strings.VolcanoLavaRoadsNote);
             return y;
         }
 
@@ -341,6 +395,10 @@ namespace DisasterPlus.Game
             SetLabelVisible(_craterLabel, visible);
             SetLabelVisible(_eruptionLabel, visible);
             SetLabelVisible(_eruptionNoteLabel, visible);
+            SetLabelVisible(_lavaLabel, visible);
+            SetLabelVisible(_lavaIgnitedLabel, visible);
+            SetLabelVisible(_lavaTreesNoteLabel, visible);
+            SetLabelVisible(_lavaRoadsNoteLabel, visible);
             SetLabelVisible(_roadPathLabel, visible);
         }
 
@@ -366,6 +424,10 @@ namespace DisasterPlus.Game
             _craterLabel = null;
             _eruptionLabel = null;
             _eruptionNoteLabel = null;
+            _lavaLabel = null;
+            _lavaIgnitedLabel = null;
+            _lavaTreesNoteLabel = null;
+            _lavaRoadsNoteLabel = null;
             _roadPathLabel = null;
             _blockTop = 0f;
             _blockBottom = 0f;

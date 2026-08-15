@@ -275,3 +275,10 @@ VolcanoCraterCarved = Summit crater carved.
 VolcanoEruptionRow = Eruption
 VolcanoEruptionFx = Draw the eruption plume
 VolcanoEruptionBorrowedNote = The game has no lava, magma or eruption effect of any kind, so Disaster + draws its own. The flames on top are the game's own fire effect, borrowed and placed at the crater. The eruption is silent: the borrowed effect only makes a sound on a code path Disaster + does not use.
+VolcanoLavaRow = Lava
+VolcanoLavaFlowsSetting = Number of lava flows (0 = off)
+VolcanoLavaFireSetting = Lava sets fire to what it touches
+VolcanoLavaLongest = Longest flow
+VolcanoLavaIgnited = Set on fire
+VolcanoTreesNeedDlc = Trees do not catch fire without the Natural Disasters DLC. The game refuses to burn them, so Disaster + leaves them standing rather than pretending. The ground still scorches and buildings still catch fire.
+VolcanoLavaRoadsNote = Roads do not burn - the game has no API for it at all. Only the roads inside the volcano's own footprint are removed, and that happens during the clearing phase.

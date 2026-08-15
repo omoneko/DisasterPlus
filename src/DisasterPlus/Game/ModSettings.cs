@@ -98,6 +98,17 @@ namespace DisasterPlus.Game
         /// </summary>
         public static SavedBool VolcanoEruptionFx;
 
+        /// <summary>
+        /// 火口から出す溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
+        /// 上限は <c>VolcanoLava.MaxFlows</c> が使う側でクランプする。
+        /// </summary>
+        public static SavedInt VolcanoLavaFlows;
+
+        /// <summary>
+        /// 溶岩の通り道に火を付けるか（T8）。**切っても溶岩は流れる**（見た目だけになる）。
+        /// </summary>
+        public static SavedBool VolcanoLavaFire;
+
         /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
         public const int VolcanoShapeShield = 0;
         public const int VolcanoShapeStrato = 1;
@@ -249,6 +260,11 @@ namespace DisasterPlus.Game
 
             // 噴煙を描くか。切っても隆起は止まらない（描画は main スレッドだけの機能）。
             VolcanoEruptionFx = new SavedBool("volcanoEruptionFx", FileName, true, true);
+
+            // 火口から出す流れの本数。0 で完全に無効（溶岩も着火も出ない）。
+            VolcanoLavaFlows = new SavedInt("volcanoLavaFlows", FileName, 4, true);
+            // 溶岩の通り道に火を付けるか。切っても溶岩は流れる（見た目だけになる）。
+            VolcanoLavaFire = new SavedBool("volcanoLavaFire", FileName, true, true);
 
             _ready = true;
         }

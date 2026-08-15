@@ -38,7 +38,7 @@ namespace DisasterPlus.Game
     public static partial class Assumptions
     {
         /// <summary>このファイルが持つ検証の数。</summary>
-        private const int VolcanoCheckCount = 5;
+        private const int VolcanoCheckCount = 6;
 
         private static void RunVolcano()
         {
@@ -168,6 +168,74 @@ namespace DisasterPlus.Game
                   delegate { return borrow.Usable; });
 
             // --- ⑤火山（Task 7: 噴火の借り物エフェクト）ここまで ---
+
+            // --- ⑤火山（Task 8: 溶岩の着火経路）ここから ---
+
+            // 6. 着火と水の 3 つ。**溶岩そのものはこれが無くても流れて描かれる**ので、
+            //   impact にそこまで書く。
+            //
+            //   ★ **TreeManager.BurnTree はこの検査に含めない。** ND 非所持で
+            //     常に false になるのは正常であり（§B-7c の SupportsExpansion ゲート）、
+            //     FAIL にすると狼少年になる。所持／非所持は診断の 1 行で名乗る。
+            //
+            //   ★ 述語は VolcanoLava が実際に呼ぶ 3 つのメソッドの解決である。
+            //     引数の型まで指定するのは、SampleDetailHeight のように
+            //     同名オーバーロードがあるものを取り違えないためである（②が確立した形）。
+            Check("DisasterHelpers.BurnGround, BuildingAI.BurnBuilding and "
+                  + "TerrainManager.HasWater are resolvable",
+                  "the lava still flows and is still drawn, but it neither scorches the ground "
+                  + "nor sets buildings on fire, and it does not stop at water",
+                  delegate { return LavaIgnitionResolvable(); });
+
+            // --- ⑤火山（Task 8: 溶岩の着火経路）ここまで ---
+        }
+
+        /// <summary>
+        /// <see cref="VolcanoLava"/> が呼ぶ 3 つのメソッドが解決できるか。
+        /// **これは⑤の門ではない**（無くても溶岩は流れる）ので、
+        /// <c>VolcanoTerrainFacts.Usable</c> のような 1 本の式にはまとめていない ——
+        /// まとめると「溶岩が焦がさないだけ」の環境で山まで止めることになる。
+        /// </summary>
+        private static bool LavaIgnitionResolvable()
+        {
+            try
+            {
+                bool burnGround = typeof(DisasterHelpers).GetMethod(
+                    "BurnGround",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    null,
+                    new System.Type[]
+                    {
+                        typeof(UnityEngine.Vector2), typeof(float), typeof(float)
+                    },
+                    null) != null;
+
+                bool burnBuilding = typeof(BuildingAI).GetMethod(
+                    "BurnBuilding",
+                    System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.Instance,
+                    null,
+                    new System.Type[]
+                    {
+                        typeof(ushort), typeof(Building).MakeByRefType(),
+                        typeof(InstanceManager.Group), typeof(bool)
+                    },
+                    null) != null;
+
+                bool hasWater = typeof(TerrainManager).GetMethod(
+                    "HasWater",
+                    System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.Instance,
+                    null,
+                    new System.Type[] { typeof(UnityEngine.Vector2) },
+                    null) != null;
+
+                return burnGround && burnBuilding && hasWater;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

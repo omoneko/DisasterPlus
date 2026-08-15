@@ -951,5 +951,27 @@ namespace DisasterPlus.Game
             + "its own. The flames on top are the game's own fire effect, borrowed and placed "
             + "at the crater. The eruption is silent: the borrowed effect only makes a sound "
             + "on a code path Disaster + does not use.";
+
+        // --- ⑤火山（Task 8: 溶岩の前進と着火） ---
+        //
+        // ★ ここも [measured] は付かない。流れた距離も着火数も**⑤が自分で数えた
+        //   実績**であって、ゲームが計算した値ではない（設計書 §7.4）。
+        public static string VolcanoLavaRow = "Lava";
+        public static string VolcanoLavaFlowsSetting = "Number of lava flows (0 = off)";
+        public static string VolcanoLavaFireSetting = "Lava sets fire to what it touches";
+        public static string VolcanoLavaLongest = "Longest flow";
+        public static string VolcanoLavaIgnited = "Set on fire";
+
+        // ★ **短くしないこと。** 「木が燃えない」を「不具合」と読まれないための
+        //   唯一の説明であり、ND DLC 非所持が正常であることを名乗る場所である（§B-7c）。
+        public static string VolcanoTreesNeedDlc =
+            "Trees do not catch fire without the Natural Disasters DLC. The game refuses to "
+            + "burn them, so Disaster + leaves them standing rather than pretending. The "
+            + "ground still scorches and buildings still catch fire.";
+
+        // ★ 道路が燃えないのは⑤の手抜きではなく、ゲームに API が無いためである（§B-7d）。
+        public static string VolcanoLavaRoadsNote =
+            "Roads do not burn - the game has no API for it at all. Only the roads inside the "
+            + "volcano's own footprint are removed, and that happens during the clearing phase.";
     }
 }

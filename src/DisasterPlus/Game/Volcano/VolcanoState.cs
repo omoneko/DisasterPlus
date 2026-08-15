@@ -166,6 +166,9 @@ namespace DisasterPlus.Game
             //   VolcanoEruption.Render がスナップショットを見て自分で畳む
             //   （レベルアンロードでは VolcanoFeature が Destroy を呼ぶ）。
             VolcanoEruption.Reset();
+            // ★ 溶岩の軌跡も返す（8 本 × 128 点で 8 KB）。**焦げた地面と燃えた建物は
+            //   戻らない** —— 捨てるのは「これからの予定」だけである。
+            VolcanoLava.Reset();
         }
 
         /// <summary>
@@ -259,14 +262,41 @@ namespace DisasterPlus.Game
 
                 if (!VolcanoEruption.Finished) return;
 
-                // ★ **T8 が入るまでは、ここで終わりにする。** 位相を Flowing に置いて
-                //   止めると <c>InProgress()</c> が真のままになり、**プレイヤーは
-                //   2 つ目の火山を永久に置けなくなる**（T6 が Done で止めたのと同じ理由）。
-                //   T8 はこの遷移先を Flowing に差し替える。
-                _phase = VolcanoPhase.Done;
+                // ★ T8 がここを <c>Done</c> から <c>Flowing</c> に差し替えた。
+                //   位相が進行中のまま止まらないことは、溶岩の側の 2 つの有限性が
+                //   担保する —— 1 本の流れは <c>LavaPath.MaxSteps</c> で必ず止まり、
+                //   全部止まったあとは <c>CoolMinutes</c> で必ず冷え切る。
+                _phase = VolcanoPhase.Flowing;
                 Log.Info("volcano eruption finished after "
-                         + VolcanoEruption.BurstsSoFar + " bursts; "
-                         + "the lava starts when T8 lands");
+                         + VolcanoEruption.BurstsSoFar + " bursts; the lava starts now");
+                return;
+            }
+
+            if (_phase == VolcanoPhase.Flowing)
+            {
+                // T8。**地形は変えない**（RawHeights を書くのは T6 だけ）。
+                VolcanoLava.Tick(_footprint, frame, deltaMinutes);
+
+                // 本数 0（設定で無効）のときは 1 度も流れずにここを抜ける。
+                if (!VolcanoLava.AllStopped && !VolcanoLava.Finished) return;
+
+                _phase = VolcanoPhase.Cooling;
+                Log.Info("volcano lava stopped: " + VolcanoLava.FlowCount + " flows, longest "
+                         + VolcanoLava.LongestMetres.ToString("F0") + " m, ignited "
+                         + VolcanoLava.BuildingsIgnited + " buildings and "
+                         + VolcanoLava.TreesIgnited + " trees");
+                return;
+            }
+
+            if (_phase == VolcanoPhase.Cooling)
+            {
+                // 冷えるのを待つだけ。**新しい流れは出さない。**
+                VolcanoLava.Tick(_footprint, frame, deltaMinutes);
+
+                if (!VolcanoLava.Finished) return;
+
+                _phase = VolcanoPhase.Done;
+                Log.Info("volcano finished; the terrain stays as it is (this is irreversible)");
                 return;
             }
 
@@ -396,6 +426,9 @@ namespace DisasterPlus.Game
             //   VolcanoEruption.Render がスナップショットを見て自分で畳む
             //   （レベルアンロードでは VolcanoFeature が Destroy を呼ぶ）。
             VolcanoEruption.Reset();
+            // ★ 溶岩の軌跡も返す（8 本 × 128 点で 8 KB）。**焦げた地面と燃えた建物は
+            //   戻らない** —— 捨てるのは「これからの予定」だけである。
+            VolcanoLava.Reset();
             _lastRefusal = "stopped by the player; the terrain that already changed stays changed";
         }
 

@@ -281,6 +281,17 @@ namespace DisasterPlus.Game
             volcano.AddCheckbox(Strings.VolcanoEruptionFx, ModSettings.VolcanoEruptionFx.value,
                 v => ModSettings.VolcanoEruptionFx.value = v);
 
+            // ★ 溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
+            //    上限は VolcanoLava.MaxFlows と同じ 8 —— 1 tick あたりの仕事量が
+            //    「本数 × 2 歩」で決まるので、ここが費用の上限そのものである。
+            volcano.AddSlider(Strings.VolcanoLavaFlowsSetting, 0f, VolcanoLava.MaxFlows, 1f,
+                ModSettings.VolcanoLavaFlows.value,
+                v => ModSettings.VolcanoLavaFlows.value = (int)v);
+
+            // ★ 着火を切っても溶岩は流れる（見た目だけになる）。
+            volcano.AddCheckbox(Strings.VolcanoLavaFireSetting, ModSettings.VolcanoLavaFire.value,
+                v => ModSettings.VolcanoLavaFire.value = v);
+
             // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
             volcano.AddButton(Strings.VolcanoResetButton, delegate
             {

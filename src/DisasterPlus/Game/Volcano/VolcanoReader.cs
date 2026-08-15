@@ -94,7 +94,20 @@ namespace DisasterPlus.Game
                                            VolcanoUplift.TileCursor,
                                            VolcanoEruption.Active,
                                            VolcanoEruption.IntensityUnit,
-                                           VolcanoEruption.SummitWorld);
+                                           VolcanoEruption.SummitWorld,
+                                           VolcanoLava.FlowCount,
+                                           VolcanoLava.AliveCount,
+                                           VolcanoLava.LongestMetres,
+                                           VolcanoLava.BuildingsIgnited,
+                                           VolcanoLava.TreesIgnited,
+                                           VolcanoLava.TreesAvailable,
+                                           // ★ publish 後に書き換えられない配列である
+                                           //   （VolcanoLava は前進のたびに丸ごと差し替える）。
+                                           //   コピーを取らないのはそのためで、
+                                           //   main スレッドが参照を持ったままでも安全。
+                                           VolcanoLava.TrailPoints,
+                                           VolcanoLava.TrailPointCounts,
+                                           VolcanoLava.CoolUnit);
             }
             catch (Exception e)
             {
