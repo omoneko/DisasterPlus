@@ -109,6 +109,12 @@ namespace DisasterPlus.Game
         /// </summary>
         public static SavedBool VolcanoLavaFire;
 
+        /// <summary>
+        /// 溶岩の面を描くか（T9）。**切っても溶岩は流れ、地面を焦がし、建物に火を付ける**
+        /// —— 描画は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
+        /// </summary>
+        public static SavedBool VolcanoLavaRender;
+
         /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
         public const int VolcanoShapeShield = 0;
         public const int VolcanoShapeStrato = 1;
@@ -265,6 +271,8 @@ namespace DisasterPlus.Game
             VolcanoLavaFlows = new SavedInt("volcanoLavaFlows", FileName, 4, true);
             // 溶岩の通り道に火を付けるか。切っても溶岩は流れる（見た目だけになる）。
             VolcanoLavaFire = new SavedBool("volcanoLavaFire", FileName, true, true);
+            // 溶岩の面を描くか。切っても溶岩は流れる（描画は main スレッドだけの機能）。
+            VolcanoLavaRender = new SavedBool("volcanoLavaRender", FileName, true, true);
 
             _ready = true;
         }

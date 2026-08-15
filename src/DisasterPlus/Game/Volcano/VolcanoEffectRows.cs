@@ -54,6 +54,8 @@ namespace DisasterPlus.Game
         private static UILabel _lavaIgnitedLabel;
         private static UILabel _lavaTreesNoteLabel;
         private static UILabel _lavaRoadsNoteLabel;
+        private static UILabel _lavaSurfaceLabel;
+        private static UILabel _lavaNoMaterialLabel;
         private static UILabel _roadPathLabel;
 
         private static float _blockTop;
@@ -100,6 +102,12 @@ namespace DisasterPlus.Game
             _lavaTreesNoteLabel = VolcanoRows.AddRow(p, "EffectLavaTrees", ref y, NoteHeight);
             // ★ 道路が燃えないことの説明。ゲームに API が無い（§B-7d）。
             _lavaRoadsNoteLabel = VolcanoRows.AddRow(p, "EffectLavaRoads", ref y, NoteHeight);
+
+            // ── 溶岩の描画（T9）──────────────────────────────
+            // ★ このファイルで溶岩の描画側を参照するのはこの 2 行だけである
+            //   （T9 の独立性。あちらのクラス doc の grep）。
+            _lavaSurfaceLabel = VolcanoRows.AddRow(p, "EffectLavaSurface", ref y);
+            _lavaNoMaterialLabel = VolcanoRows.AddRow(p, "EffectLavaNoMaterial", ref y, NoteHeight);
 
             // ★ **道路を取り除けない環境の断り**。これだけは位相に関係なく出す
             //    （設計書 §1.2）。黙って火山を作らないのがいちばん悪い。
@@ -184,6 +192,8 @@ namespace DisasterPlus.Game
                 y = ReflowRow(y, _lavaIgnitedLabel, "");
                 y = ReflowNote(y, _lavaTreesNoteLabel, "");
                 y = ReflowNote(y, _lavaRoadsNoteLabel, "");
+                y = ReflowRow(y, _lavaSurfaceLabel, "");
+                y = ReflowNote(y, _lavaNoMaterialLabel, "");
             }
 
             y = Reflow(y, _roadPathLabel,
@@ -286,6 +296,8 @@ namespace DisasterPlus.Game
                 y = ReflowRow(y, _lavaIgnitedLabel, "");
                 y = ReflowNote(y, _lavaTreesNoteLabel, "");
                 y = ReflowNote(y, _lavaRoadsNoteLabel, "");
+                y = ReflowRow(y, _lavaSurfaceLabel, "");
+                y = ReflowNote(y, _lavaNoMaterialLabel, "");
                 return y;
             }
 
@@ -302,6 +314,19 @@ namespace DisasterPlus.Game
                 s.LavaTreesAvailable ? "" : Strings.VolcanoTreesNeedDlc);
 
             y = ReflowNote(y, _lavaRoadsNoteLabel, Strings.VolcanoLavaRoadsNote);
+
+            // ★ 溶岩の描画（T9）。**設定で切っているときは行ごと出さない** ——
+            //   「描いていない」と「切ってある」を混ぜない。
+            bool renderOn = ModSettings.VolcanoLavaRender.value;
+            y = ReflowRow(y, _lavaSurfaceLabel, renderOn
+                ? Strings.VolcanoLavaRenderRow + ": " + VolcanoLavaFx.PointsDrawn
+                : "");
+
+            // マテリアルを作れなかったときだけ説明する。**流れも焦げも着火も
+            //   変わらない**ことを同時に言う（Strings.VolcanoLavaNoMaterial）。
+            y = ReflowNote(y, _lavaNoMaterialLabel,
+                renderOn && !VolcanoLavaFx.MaterialResolved
+                    ? Strings.VolcanoLavaNoMaterial : "");
             return y;
         }
 
@@ -399,6 +424,8 @@ namespace DisasterPlus.Game
             SetLabelVisible(_lavaIgnitedLabel, visible);
             SetLabelVisible(_lavaTreesNoteLabel, visible);
             SetLabelVisible(_lavaRoadsNoteLabel, visible);
+            SetLabelVisible(_lavaSurfaceLabel, visible);
+            SetLabelVisible(_lavaNoMaterialLabel, visible);
             SetLabelVisible(_roadPathLabel, visible);
         }
 
@@ -428,6 +455,8 @@ namespace DisasterPlus.Game
             _lavaIgnitedLabel = null;
             _lavaTreesNoteLabel = null;
             _lavaRoadsNoteLabel = null;
+            _lavaSurfaceLabel = null;
+            _lavaNoMaterialLabel = null;
             _roadPathLabel = null;
             _blockTop = 0f;
             _blockBottom = 0f;

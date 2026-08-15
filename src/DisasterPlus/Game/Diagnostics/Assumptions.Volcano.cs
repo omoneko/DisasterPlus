@@ -38,7 +38,7 @@ namespace DisasterPlus.Game
     public static partial class Assumptions
     {
         /// <summary>このファイルが持つ検証の数。</summary>
-        private const int VolcanoCheckCount = 6;
+        private const int VolcanoCheckCount = 7;
 
         private static void RunVolcano()
         {
@@ -188,6 +188,44 @@ namespace DisasterPlus.Game
                   delegate { return LavaIgnitionResolvable(); });
 
             // --- ⑤火山（Task 8: 溶岩の着火経路）ここまで ---
+
+            // --- ⑤火山（Task 9: 溶岩の描画のシェーダ）ここから ---
+
+            // 7. 溶岩の面のシェーダ。
+            //
+            //   ★★ **述語に Shader.Find("Standard") を混ぜない。** Standard は
+            //     Unity の組み込みで実質必ず非 null なので、
+            //     「… || Shader.Find("Standard") != null」という検査は**構造上 1 度も
+            //     失敗できない**（④のレビューがまさにこれを見つけている）。
+            //     ここが見るのは **粒子系（加算 / アルファブレンド）が取れたか**で、
+            //     取れなければ Standard を透過モードにして描く（＝見えるが光らない）。
+            //
+            //   ★ 名前に「実際に何で解決したか」を出すのは、失敗したときにその情報が
+            //     ここにしか出ないからである（T2 の RawHeights の件数と同じ扱い）。
+            //
+            //   Shader.Find は main スレッド専用で、Run() も main である。
+            //   Check の外で例外を抑えるのは上の 6 件と同じ理由。
+            VolcanoLavaShaderFacts lavaShader;
+            try
+            {
+                lavaShader = VolcanoLavaFx.ScanShaderFacts();
+            }
+            catch
+            {
+                lavaShader = new VolcanoLavaShaderFacts();
+            }
+
+            Check("Shader.Find resolves an additive or alpha-blended particle shader for the "
+                  + "lava surface (resolved: "
+                  + (string.IsNullOrEmpty(lavaShader.ResolvedShaderName)
+                        ? "nothing" : lavaShader.ResolvedShaderName) + ")",
+                  "the lava surface falls back to the Standard shader forced into transparent "
+                  + "mode, so it draws but does not glow; if nothing resolves at all it is not "
+                  + "drawn. The lava still flows, still scorches the ground and still sets "
+                  + "buildings on fire either way",
+                  delegate { return lavaShader.ParticleShaderResolved; });
+
+            // --- ⑤火山（Task 9: 溶岩の描画のシェーダ）ここまで ---
         }
 
         /// <summary>

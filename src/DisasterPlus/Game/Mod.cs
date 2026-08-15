@@ -292,6 +292,12 @@ namespace DisasterPlus.Game
             volcano.AddCheckbox(Strings.VolcanoLavaFireSetting, ModSettings.VolcanoLavaFire.value,
                 v => ModSettings.VolcanoLavaFire.value = v);
 
+            // ★ 溶岩の面を描くか（T9）。**切っても溶岩は流れ、地面を焦がし、
+            //    建物に火を付ける** —— T9 は他のどのタスクからも依存されていない。
+            volcano.AddCheckbox(Strings.VolcanoLavaRenderSetting,
+                ModSettings.VolcanoLavaRender.value,
+                v => ModSettings.VolcanoLavaRender.value = v);
+
             // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
             volcano.AddButton(Strings.VolcanoResetButton, delegate
             {

@@ -1285,6 +1285,162 @@ Disasm-Method -Method $global:A.GetType('InstanceManager').GetMethod('SetGroup',
 
 ---
 
+## H. 噴火・溶岩・描画（⑤ T7-T9 で追加実測）
+
+### H-17. 借りたエフェクトは音を鳴らさない — **CONFIRMED（計画 §7.1 の根拠を訂正する）**
+
+計画 T7 §7.1 は「`m_fireEffect` は `FireEffect` 合成型で `SoundEffect` を子に持つので、
+`RenderEffect` を通せば**音も一緒に出る**」と書いている。**IL はそれを否定した。**
+
+```
+FireEffect.RenderEffect(InstanceID, SpawnArea, Vector3, float, float, float, float, CameraInfo)
+  IL_003A  ldfld FireEffect::m_particleEffect   -> ParticleEffect::EmitParticles
+  IL_0088  ldfld FireEffect::m_lightEffect      -> RenderManager::get_lightSystem
+                                                  -> LightSystem::DrawLight
+  ★ m_soundEffect への参照は 1 つも無い（全 IL 読了）
+
+FireEffect の宣言メソッドは 6 本:
+  RenderEffect / **PlayEffect(InstanceID, SpawnArea, Vector3, float, float,
+                              AudioManager.ListenerInfo, AudioManager.AudioGroup)** /
+  CreateEffect / DestroyEffect / RequireRender / RequirePlay
+```
+
+→ **音は `PlayEffect` の側にある。** `AudioManager.CurrentListenerInfo`（public プロパティ、
+型 `AudioManager+ListenerInfo`）と `AudioManager.EffectGroup` / `DefaultGroup` / `AmbientGroup`
+（いずれも public プロパティ）は到達できるので、鳴らすこと自体は可能である。
+
+**⑤は鳴らさない。** 計画の決定（音の経路を新設しない）は変えていないが、**理由が違う** ——
+「`RenderEffect` で出るから足さない」のではなく、「`PlayEffect` は毎フレーム呼ぶ想定の API ではなく、
+`ListenerInfo` / `AudioGroup` の扱いに本 MOD の前例が無いから」である。
+**噴火は無音であり、それを診断とパネルとチェックリストで名乗る。**
+
+### H-18. `RenderEffect` の引数と `CameraInfo` の到達経路 — CONFIRMED
+
+```
+public virtual Void EffectInfo.RenderEffect(InstanceID, EffectInfo+SpawnArea,
+        Vector3 velocity, Single acceleration, Single magnitude,
+        Single timeOffset, Single timeDelta, RenderManager+CameraInfo)
+    基底の実装は IL_0000 ret（＝何もしない）。実体はサブクラス側。
+
+public EffectInfo+SpawnArea..ctor(Vector3 position, Vector3 direction, Single radius)   ★ public
+
+public RenderManager+CameraInfo RenderManager.CurrentCameraInfo { get; }
+    IL_0001  ldfld RenderManager::m_cameraInfo ; ret      （public / instance / 非 static）
+
+public BuildingProperties BuildingManager.m_properties     （public フィールド）
+public EffectInfo BuildingProperties.m_fireEffect          （public フィールド）
+```
+
+`magnitude` の意味（呼ばれ方から確定）:
+
+```
+FireEffect.RenderEffect     : EmitParticles(id, area, velocity, timeDelta*0.01,
+                                            RoundToInt(magnitude*100), ...)
+ParticleEffect.RenderEffect : EmitParticles(id, area, velocity, magnitude*timeDelta*0.01,
+                                            100, ...)
+```
+→ **`float` 引数が「時間ぶんの噴出量」、`int` 引数が「強さの百分率」**である。
+バニラの建物火災は `magnitude = m_fireIntensity / 255`（§B-5）＝ **0.0–1.0**。⑤も同じ帯を使う。
+
+`ParticleEffect.RenderEffect` は先頭で `CameraInfo::CheckRenderDistance` と `CameraInfo::Intersect`
+を呼ぶので、**`CameraInfo` に null を渡すと NRE になる。**
+
+### H-19. `SampleDetailHeight` の勾配は「上り方向」で、単位は無次元 — **CONFIRMED**
+
+計画 §8.1 と設計書 付録が「未確定」と名指ししていた項目である。**読んだ。**
+
+```
+TerrainManager.SampleDetailHeight(float x, float z, out slopeX, out slopeZ)
+  h00 = GetDetailHeight(x0,   z0  )   (loc 9)
+  h10 = GetDetailHeight(x0+1, z0  )   (loc 10)
+  h01 = GetDetailHeight(x0,   z0+1)   (loc 11)
+  h11 = GetDetailHeight(x0+1, z0+1)   (loc 12)
+  IL_0071  *slopeX = (h10 + h11 - h00 - h01) * 0.5    // 平均 (h(x+1) - h(x))
+  IL_0084  *slopeZ = (h01 + h11 - h00 - h10) * 0.5    // 平均 (h(z+1) - h(z))
+  戻り値は SmoothSample ではなく Lerp 3 回の双線形補間（raw のまま）
+
+TerrainManager.SampleDetailHeight(Vector3, out slopeX, out slopeZ)
+  IL_0033  戻り値  *= 0.015625      // 1/64        -> メートル
+  IL_003B  *slopeX *= 0.00390625    // (1/64)/4 m  -> **無次元（m/m）**
+  IL_0045  *slopeZ *= 0.00390625
+```
+
+→ **`(slopeX, slopeZ)` は勾配（上り方向）である。下り方向は `(-slopeX, -slopeZ)`。**
+単位は無次元なので、`0.002` はそのまま「0.2 % の傾き」を意味する。
+**それでも実行時の観測はやめない**（⑤は最初の 8 歩で標高が上がったら流れを止めて名乗る）。
+
+### H-20. `TerrainManager.HasWater(Vector2)` は sim スレッド専用 — CONFIRMED
+
+```
+public Boolean TerrainManager.HasWater(Vector2 position)
+  IL_00B7  m_waterSimulation.BeginRead()      ★ try/finally で EndRead
+  セル座標: FloorToInt((v + 8640) * 16) >> 8 を [0,1080] にクランプ、添字 z*1081 + x
+  水面   = m_blockHeights[i] + WaterSimulation.Cell::m_height（m_height == 0 のセルは無視）
+  地形   = m_rawHeights2 の双線形補間
+  IL_027B  return (水面 - 地形) >= 8          // raw 8 = 0.125 m
+```
+→ ②の `TsunamiChain.IsUnderWater` と同じ扱い（**main スレッドから呼ばない**）。
+`m_blockHeights` 経由なので §A-2 の追随遅れをそのまま受ける。
+
+### H-21. 樹木グリッドの寸法とワールド座標の対応 — CONFIRMED
+
+```
+TreeManager.TREEGRID_RESOLUTION = 540（const）   TREEGRID_CELL_SIZE = 32（const）
+TreeManager.m_treeGrid : uint32[]                m_trees : Array32<TreeInstance>（262144）
+TreeInstance : m_nextGridTree(uint32) / m_posX,m_posZ(int16) / m_posY(uint16) /
+               m_flags(uint16) / m_infoIndex(uint16)
+TreeInstance.Flags: None Created(1) Deleted(2) Hidden Single FixedHeight FireDamage(64) Burning(128)
+
+TreeInstance.set_Position（ToolController.m_mode != 4、＝ゲームモード）:
+  IL_0096  m_posX = Clamp(RoundToInt(world.x * 3.792593), -32767, 32767)
+TreeManager.InitializeTree（同モード）:
+  IL_005F  cell = Clamp((m_posX + 32768) * 540 / 65536, 0, 539)
+  IL_00A1  index = cellZ * 540 + cellX
+```
+→ **ワールド → セルは `world / 32 + 270`**（建物グリッドの `/64 + 135` とは別の値）。
+アセットエディタ（`m_mode == 4`）だけ `m_posX` の縮尺が 16 倍になり、`InitializeTree` も先に 16 で割る。
+
+`TreeManager.BurnTree(uint, InstanceManager.Group, int)` は **`group` に null を渡してよい**
+（`IL_0039 ldarg.2 brfalse` で災害集計を飛ばし、`InstanceManager.SetGroup` は null 安全。§G-16 (e)）。
+
+### H-22. このビルドに実在する粒子シェーダ名 — CONFIRMED（アセット走査）
+
+`Cities_Data` 以下の 378 ファイルを ASCII で全走査した:
+
+```
+'Particles/Additive'                      globalgamemanagers / resources.assets   ★ 在る
+'Particles/Alpha Blended'                 globalgamemanagers / resources.assets   ★ 在る
+'Legacy Shaders/Particles/Additive'       0 件
+'Legacy Shaders/Particles/Alpha Blended'  0 件
+```
+
+→ **`Shader.Find("Particles/Additive")` がこのビルドで解決する名前である。**
+`globalgamemanagers` に載っているのは「常に含めるシェーダ」の一覧なので、実行時に確実に読める。
+`Legacy Shaders/...` は**このビルドには無い**（③④の多段フォールバックの 2 段目は、
+将来のビルドに対する保険として残す価値はあるが、現状は 1 段目で決まる）。
+
+> **`Shader.Find("Standard")` を「解決した」の検査に混ぜないこと。**
+> Unity の組み込みで実質必ず非 null なので、`… || Shader.Find("Standard") != null` という
+> 検査は**構造上 1 度も失敗できない**（④のレビューが同じ欠陥を見つけている）。
+
+**再現手順:**
+
+```powershell
+. docs\tools\ilload.ps1 ; . docs\tools\ildasm.ps1
+$bf = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,Static'
+$d  = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,DeclaredOnly'
+Disasm-Method -Method ($global:A.GetType('FireEffect').GetMethods($d) | ? {$_.Name -eq 'RenderEffect'})
+Disasm-Method -Method $global:A.GetType('TerrainManager').GetMethod('SampleDetailHeight', $bf, $null,
+    @([float],[float],[float].MakeByRefType(),[float].MakeByRefType()), $null)
+Disasm-Method -Method $global:A.GetType('TerrainManager').GetMethod('HasWater', $bf, $null,
+    @([UnityEngine.Vector2]), $null)
+Disasm-Method -Method $global:A.GetType('TreeManager').GetMethod('BurnTree', $bf)
+# シェーダ名は Cities_Data 以下を ASCII でバイト検索する（IL ではない）
+```
+
+
+---
+
 ## 設計への含意
 
 依頼文:

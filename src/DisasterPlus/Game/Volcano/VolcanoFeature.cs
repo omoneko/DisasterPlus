@@ -120,6 +120,11 @@ namespace DisasterPlus.Game
             //   設定で切った瞬間に自分で畳む（切ったまま噴煙が残らないこと）。
             if (ModSettings.VolcanoEruptionFx.value) VolcanoEruption.Render();
             else VolcanoEruption.Destroy();
+
+            // ★ 溶岩の描画も main スレッドだけの機能。sim 側からは 1 度も呼ばれない
+            //   （T9 の独立性の実体。VolcanoLavaFx のクラス doc の grep）。
+            if (ModSettings.VolcanoLavaRender.value) VolcanoLavaFx.Update(VolcanoHub.Latest);
+            else VolcanoLavaFx.Destroy();
         }
 
         public void OnLevelUnloading()
@@ -139,6 +144,9 @@ namespace DisasterPlus.Game
             //   （Material は Component ではないので GameObject の道連れにならない）。
             //   ここを飛ばすと都市を出入りするたびに 1 個ずつ残る。
             VolcanoEruption.Destroy();
+            // ★ 溶岩の Mesh / Material / Texture2D も自分で Object.Destroy する
+            //   （どれも Component ではないので GameObject の道連れにならない）。
+            VolcanoLavaFx.Destroy();
 
             VolcanoHub.Clear();
             // ★ 地形の実測（RawHeights の長さ）を都市をまたいで持ち越さない。
@@ -405,6 +413,20 @@ namespace DisasterPlus.Game
             {
                 b.Line(2, "lava failure", VolcanoLava.LastFailure);
             }
+
+            // ★ 溶岩の描画（T9）。**この 1 行が T9 の唯一の診断出力**である
+            //   （この型を参照するファイルは 4 つだけ。あちらのクラス doc の grep）。
+            //   どのシェーダで解決したかを必ず名乗る —— 将来のゲーム更新で
+            //   黙って不可視になったときの、唯一の手がかりだからである。
+            b.Line(1, "lava surface", VolcanoLavaFx.Drawing
+                ? VolcanoLavaFx.DrawCalls + " draw call/frame, "
+                  + VolcanoLavaFx.PointsDrawn + " points"
+                : (ModSettings.VolcanoLavaRender.value ? "not drawing" : "off (setting)"));
+            b.Line(2, "material", string.IsNullOrEmpty(VolcanoLavaFx.ShaderName)
+                ? "NONE (no shader resolved; the lava is invisible but still flows and burns)"
+                : VolcanoLavaFx.ShaderName
+                  + (VolcanoLavaFx.ParticleShaderResolved
+                        ? "" : "  (fallback: no particle shader in this build)"));
         }
 
         /// <summary>

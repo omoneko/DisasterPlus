@@ -973,5 +973,17 @@ namespace DisasterPlus.Game
         public static string VolcanoLavaRoadsNote =
             "Roads do not burn - the game has no API for it at all. Only the roads inside the "
             + "volcano's own footprint are removed, and that happens during the clearing phase.";
+
+        // --- ⑤火山（Task 9: 溶岩の描画） ---
+        //
+        // ★ T9 は他のどのタスクからも依存されない。**この 3 キーと設定 1 個と
+        //   VolcanoFeature の 4 行を消せば、T9 を丸ごと落としても T1〜T8 は動く。**
+        public static string VolcanoLavaRenderSetting = "Draw the lava surface";
+        public static string VolcanoLavaRenderRow = "Lava surface";
+
+        // ★ 見えないことを黙らない。**流れも焦げも着火も変わらない**ことを同時に言う。
+        public static string VolcanoLavaNoMaterial =
+            "Disaster + could not build a material for the lava in this environment, so the "
+            + "lava is invisible. It still flows, scorches the ground and sets buildings on fire.";
     }
 }
