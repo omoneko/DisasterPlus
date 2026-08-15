@@ -1,0 +1,172 @@
+using DisasterPlus.Core.Common;
+using DisasterPlus.Core.Typhoon;
+using Xunit;
+
+namespace DisasterPlus.Core.Tests.Typhoon
+{
+    public class TyphoonTrackTests
+    {
+        [Fact]
+        public void BearingIsInsideOneTurnAndDependsOnTheSeed()
+        {
+            int distinct = 0;
+            float first = TyphoonTrack.BearingOf(1u);
+            for (uint s = 1; s < 200; s++)
+            {
+                float b = TyphoonTrack.BearingOf(s);
+                Assert.InRange(b, 0f, 6.2831855f);
+                if (b != first) distinct++;
+            }
+            Assert.True(distinct >= 190, "too few distinct bearings: " + distinct);
+        }
+
+        [Fact]
+        public void SameSeedAlwaysGivesTheSameTrack()
+        {
+            // ここが崩れると「同じセーブで再現できる」（設計書 §4.1）が嘘になる。
+            float speed = TyphoonTrack.SpeedFor(20000u);
+            for (uint s = 1; s < 50; s++)
+            {
+                Vec2 a = TyphoonTrack.CentreAt(s, 5000u, speed);
+                Vec2 b = TyphoonTrack.CentreAt(s, 5000u, speed);
+                Assert.Equal(a.X, b.X, 4);
+                Assert.Equal(a.Z, b.Z, 4);
+            }
+        }
+
+        [Fact]
+        public void TheStormStartsOutsideTheMap()
+        {
+            // マップの中でいきなり湧くと「接近」の位相が意味を失う。
+            for (uint s = 1; s < 100; s++)
+            {
+                Assert.False(TyphoonTrack.IsInsideMap(TyphoonTrack.EntryOf(s)),
+                    "entry point for seed " + s + " is already inside the map");
+            }
+        }
+
+        [Fact]
+        public void TheTrackActuallyReachesTheMap()
+        {
+            // 出発点も向きも種から引くので、「掠めもせずに通り過ぎる」経路が
+            // 出せてしまう。それは「台風が来たのに何も起きない」になる。
+            float speed = TyphoonTrack.SpeedFor(20000u);
+            for (uint s = 1; s < 100; s++)
+            {
+                bool entered = false;
+                for (uint t = 0; t <= 20000u && !entered; t += 100u)
+                {
+                    if (TyphoonTrack.IsInsideMap(TyphoonTrack.CentreAt(s, t, speed))) entered = true;
+                }
+                Assert.True(entered, "track for seed " + s + " never enters the map");
+            }
+        }
+
+        [Fact]
+        public void ZeroCurvatureIsTheLimitOfSmallCurvature()
+        {
+            // κ の 0 分岐は「小さいけれど 0 ではない」値でだけ壊れる。
+            // 目視では絶対に見つからないので、ここで固定する。
+            const float speed = 1.3f;
+            float theta = 0.7f;
+            var entry = new Vec2(-12000f, 0f);
+
+            Vec2 straight = TyphoonTrack.ArcPosition(entry, theta, 0f, 3000f, speed);
+            Vec2 nearlyStraight = TyphoonTrack.ArcPosition(entry, theta, 1e-9f, 3000f, speed);
+
+            Assert.Equal(straight.X, nearlyStraight.X, 1);
+            Assert.Equal(straight.Z, nearlyStraight.Z, 1);
+        }
+
+        [Fact]
+        public void SpeedMatchesTheDistanceTravelledPerFrame()
+        {
+            float speed = TyphoonTrack.SpeedFor(20000u);
+            for (uint s = 1; s < 30; s++)
+            {
+                Vec2 a = TyphoonTrack.CentreAt(s, 4000u, speed);
+                Vec2 b = TyphoonTrack.CentreAt(s, 4001u, speed);
+                float d = (float)System.Math.Sqrt(a.DistanceSquaredTo(b));
+                Assert.Equal(speed, d, 2);
+            }
+        }
+
+        [Fact]
+        public void SpeedIsDerivedFromTheMeasuredActiveDuration()
+        {
+            // 長い嵐ほどゆっくり動く。経路長は同じなので、持続時間の逆数になる。
+            Assert.True(TyphoonTrack.SpeedFor(40000u) < TyphoonTrack.SpeedFor(10000u));
+            Assert.InRange(TyphoonTrack.SpeedFor(10u),
+                           TyphoonTrack.MinSpeedMetresPerFrame,
+                           TyphoonTrack.MaxSpeedMetresPerFrame);
+            Assert.InRange(TyphoonTrack.SpeedFor(100000000u),
+                           TyphoonTrack.MinSpeedMetresPerFrame,
+                           TyphoonTrack.MaxSpeedMetresPerFrame);
+        }
+
+        [Fact]
+        public void UnknownDurationGivesZeroSpeedNotAGuess()
+        {
+            // ★ 設計書 §6 の「読めなければ推測せず何もしない」を構造で保証している
+            //    唯一の場所。ここを「安全な既定値」に書き換えると、プレハブが
+            //    読めない環境で台風が推測値の速度で動き出す。
+            Assert.Equal(0f, TyphoonTrack.SpeedFor(0u), 5);
+        }
+
+        [Fact]
+        public void IntensityRisesPlateausAndFallsLikeTheVanillaLightningRamp()
+        {
+            const byte peak = 200;
+            const uint dur = 20000u;
+
+            byte start = TyphoonTrack.IntensityAt(peak, 0u, dur, 0f);
+            byte middle = TyphoonTrack.IntensityAt(peak, dur / 2u, dur, 0f);
+            byte end = TyphoonTrack.IntensityAt(peak, dur, dur, 0f);
+
+            Assert.True(start < middle, "the storm must ramp up");
+            Assert.Equal(peak, middle);
+            Assert.True(end < middle, "the storm must ramp down");
+        }
+
+        [Fact]
+        public void LandfallWeakensTheStormAndTheSeaGivesItBackSlowly()
+        {
+            float overLand = TyphoonTrack.DecayAfter(0f, true, 10f);
+            Assert.True(overLand > 0f, "the storm must weaken over land");
+
+            float recovered = TyphoonTrack.DecayAfter(overLand, false, 10f);
+            Assert.True(recovered < overLand, "the sea must give strength back");
+            Assert.True(recovered > 0f, "recovery must be slower than decay");
+
+            // 完全に戻り切ることはある。負にはならない。
+            Assert.Equal(0f, TyphoonTrack.DecayAfter(0f, false, 1000f), 4);
+            // 際限なく積み上がらない。
+            Assert.InRange(TyphoonTrack.DecayAfter(0f, true, 100000f), 0f, TyphoonTrack.MaxDecay);
+        }
+
+        [Fact]
+        public void DecayLowersTheIntensityAndNeverWrapsAround()
+        {
+            const byte peak = 100;
+            const uint dur = 20000u;
+            byte weak = TyphoonTrack.IntensityAt(peak, dur / 2u, dur, 90f);
+            Assert.True(weak < peak);
+            // byte の巻き戻り（255 になる）が最も痛い壊れ方。
+            Assert.Equal(0, TyphoonTrack.IntensityAt(peak, dur / 2u, dur, 5000f));
+        }
+
+        [Fact]
+        public void PhaseWalksForwardsOnlyAndEndsAtGone()
+        {
+            const uint dur = 20000u;
+            Assert.Equal(TyphoonPhase.Approaching, TyphoonTrack.PhaseAt(0u, dur));
+            Assert.Equal(TyphoonPhase.Peak, TyphoonTrack.PhaseAt(dur / 2u, dur));
+            Assert.Equal(TyphoonPhase.Passing, TyphoonTrack.PhaseAt(dur * 4u / 5u, dur));
+            Assert.Equal(TyphoonPhase.Gone, TyphoonTrack.PhaseAt(dur, dur));
+            Assert.Equal(TyphoonPhase.Gone, TyphoonTrack.PhaseAt(dur * 10u, dur));
+
+            // 持続時間が読めていないときに位相を名乗らない。
+            Assert.Equal(TyphoonPhase.Idle, TyphoonTrack.PhaseAt(0u, 0u));
+        }
+    }
+}
