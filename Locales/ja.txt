@@ -189,3 +189,6 @@ TyphoonNoLandfall = 現在の経路では上陸しません
 TyphoonRainRow = 雨量
 TyphoonCloudRow = 雲量
 TyphoonWindDirectionNote = 風向は台風にゆっくりとしか追随しません。ゲームが旋回速度を制限しているためで、Disaster + はそこを直接上書きしません。
+TyphoonEffectsHeader = 台風がもたらすもの
+TyphoonLightningRow = 落雷（飛行中 / 累計 / 宿主の嵐に残している数 / 捨てられた数）
+TyphoonLightningNote = ゲームは落雷を同時に 20 発しか保持できません。宿主の嵐が撃つぶんが捨てられないよう、Disaster + は自分の取り分をそれ未満に抑えています。

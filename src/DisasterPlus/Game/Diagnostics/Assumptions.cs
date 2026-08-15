@@ -58,7 +58,7 @@ namespace DisasterPlus.Game
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 27;
+        private const int TotalCheckCount = 28;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -745,6 +745,33 @@ namespace DisasterPlus.Game
                   });
 
             // --- ④台風（Task 4）ここまで ---
+
+            // --- ④台風（Task 6: 落雷）ここから ---
+
+            // 落雷は**実体**で、BurnBuilding / BurnTree / CollapseSegment を起こす
+            // （IL 事実文書 §A-3）。このメソッドが解決できなければ台風は雷を 1 発も
+            // 運ばないが、**例外は出ず、嵐は動き天候も駆動され続ける** ——
+            // 「雷の少ない台風」に見えるだけで、原因を指すものが他に無い。
+            //
+            // 引数の型まで指定して見る（1 引数版 QueueLightningStrike(uint) が別に
+            // 存在するので、名前だけの一致では偽 PASS になる）。
+            Check("WeatherManager.QueueLightningStrike(uint, Vector3, Quaternion, "
+                  + "InstanceManager.Group) is resolvable",
+                  "the typhoon carries no lightning; the storm still moves and drives the "
+                  + "weather",
+                  delegate
+                  {
+                      return typeof(WeatherManager).GetMethod("QueueLightningStrike",
+                          BindingFlags.Public | BindingFlags.Instance, null,
+                          new Type[]
+                          {
+                              typeof(uint), typeof(UnityEngine.Vector3),
+                              typeof(UnityEngine.Quaternion), typeof(InstanceManager.Group)
+                          },
+                          null) != null;
+                  });
+
+            // --- ④台風（Task 6）ここまで ---
 
             Report();
         }

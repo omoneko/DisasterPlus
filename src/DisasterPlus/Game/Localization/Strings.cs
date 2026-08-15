@@ -606,5 +606,20 @@ namespace DisasterPlus.Game
         public static string TyphoonWindDirectionNote =
             "The wind direction follows the storm only slowly. The game limits how fast it "
             + "can turn, and Disaster + does not overwrite it directly.";
+
+        // --- ④台風（Task 6: 落雷） ---
+        //
+        // ★ 落雷の行も**印を付けない**（④の表示規約）。数字はどれもゲームが計算した
+        //   ものではなく、④が自分で数えている台帳と、バニラの式から見積もった上限である。
+        //
+        // TyphoonLightningRow は**4 つの数を並べる順序をラベルで名乗る**形にしてある。
+        // この MOD は書式文字列（string.Format）を 1 箇所も使っていない ——
+        // 翻訳の {0} がずれると実行時に落ちるので、位置は語で説明する。
+        public static string TyphoonEffectsHeader = "What the typhoon brings";
+        public static string TyphoonLightningRow =
+            "Lightning (in flight / total / left to the host storm / dropped)";
+        public static string TyphoonLightningNote =
+            "The game can only hold 20 lightning strikes at once. Disaster + keeps its own "
+            + "share below that so the host storm's strikes are not thrown away.";
     }
 }

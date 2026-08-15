@@ -468,6 +468,11 @@ namespace DisasterPlus.Game
             //    Emerging 中に止めた台風では m_targetRain = 0 が走らない。
             TyphoonWeather.Release();
 
+            // ★ 落雷の在庫を次の台風へ持ち越さない。持ち越すと、次の台風は実際には
+            //    空いているキューを「埋まっている」と見て 1 発も撃たなくなる ——
+            //    そしてキューが空のままになるので、抑え込んでいたはずの環境落雷が戻る。
+            TyphoonLightning.Reset();
+
             TyphoonSlot.Forget();
 
             _active = false;

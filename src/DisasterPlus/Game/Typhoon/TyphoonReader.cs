@@ -108,7 +108,11 @@ namespace DisasterPlus.Game
                                            TyphoonWeather.Driving,
                                            TyphoonWeather.LastRain,
                                            TyphoonWeather.LastCloud,
-                                           TyphoonWeather.LastDirectionDegrees);
+                                           TyphoonWeather.LastDirectionDegrees,
+                                           TyphoonLightning.InFlight,
+                                           TyphoonLightning.TotalQueued,
+                                           TyphoonLightning.TotalRejected,
+                                           TyphoonLightning.LastVanillaReserve);
             }
             catch (System.Exception e)
             {

@@ -190,3 +190,6 @@ TyphoonNoLandfall = stays over water on its current track
 TyphoonRainRow = Rain
 TyphoonCloudRow = Cloud
 TyphoonWindDirectionNote = The wind direction follows the storm only slowly. The game limits how fast it can turn, and Disaster + does not overwrite it directly.
+TyphoonEffectsHeader = What the typhoon brings
+TyphoonLightningRow = Lightning (in flight / total / left to the host storm / dropped)
+TyphoonLightningNote = The game can only hold 20 lightning strikes at once. Disaster + keeps its own share below that so the host storm's strikes are not thrown away.

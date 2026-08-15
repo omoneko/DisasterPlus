@@ -78,10 +78,14 @@ namespace DisasterPlus.Game
             if (deltaMinutes <= 0f) return;
 
             TyphoonController.Tick(snapshot, frameIndex, deltaMinutes);
-            if (TyphoonController.Active) TyphoonWeather.Drive(snapshot, deltaMinutes);
+            if (TyphoonController.Active)
+            {
+                TyphoonWeather.Drive(snapshot, deltaMinutes);
+                TyphoonLightning.Tick(snapshot, frameIndex);
+            }
 
-            // （T6: TyphoonLightning.Tick / T7: TyphoonWind.Apply /
-            //   T8: TyphoonFlood.Tick / T10: TyphoonTornado.Tick がここに入る）
+            // （T7: TyphoonWind.Apply / T8: TyphoonFlood.Tick /
+            //   T10: TyphoonTornado.Tick がここに入る）
         }
 
         /// <summary>
@@ -109,6 +113,9 @@ namespace DisasterPlus.Game
             // ★ 天候の上書きは必ずここでも戻す。都市を出た瞬間に台風が消えても、
             //    m_targetRain を握ったままにしない。
             TyphoonWeather.Reset();
+            // ★ 落雷の在庫も持ち越さない。持ち越すと次の都市の台風が、実際には
+            //    空いているキューを「埋まっている」と見て撃たなくなる。
+            TyphoonLightning.Reset();
         }
 
         /// <summary>
@@ -221,6 +228,7 @@ namespace DisasterPlus.Game
             }
 
             WriteWeatherDriving(b, snapshot);
+            WriteLightning(b, snapshot);
         }
 
         /// <summary>
@@ -261,6 +269,35 @@ namespace DisasterPlus.Game
                     + "very disaster instead of creating another one (measured); a separate "
                     + "vanilla thunderstorm can only appear before it activates or after it ends");
             }
+        }
+
+        /// <summary>
+        /// 落雷（T6）。**撃った数が 0 のときも必ず全部出す**（③の「延焼が動いているか
+        /// 診断から一切見えなかった」失敗を繰り返さない）。画面上は
+        /// 「上限に当たって捨てられている」「宿主に全部譲っている」「そもそも撒いていない」が
+        /// どれも同じ顔（雷が少ない）になるので、切り分けはここでしかできない。
+        /// </summary>
+        private static void WriteLightning(DiagnosticBuilder b, TyphoonSnapshot snapshot)
+        {
+            b.Line(2, "lightning",
+                "in flight " + snapshot.LightningInFlight
+                + " / total " + snapshot.LightningTotal
+                + " / vanilla reserve " + snapshot.LightningVanillaReserve
+                + " / cap " + DisasterPlus.Core.Typhoon.LightningBudget.QueueCapacity);
+
+            // ★ 0 以外は不具合の合図。上限に当たると、宿主の嵐や他 MOD の落雷まで
+            //   同じように捨てられる（IL 事実文書 §A-3）。
+            b.Line(3, "dropped by the game", snapshot.LightningRejected == 0
+                ? "0 (the queue cap was never hit)"
+                : snapshot.LightningRejected
+                  + " — THE 20-STRIKE CAP WAS HIT; the host storm's own strikes are being "
+                  + "thrown away too");
+
+            // 環境落雷（雨 > 0.8 かつキューが空）を抑えているかどうか。
+            b.Line(3, "environmental lightning", snapshot.LightningInFlight > 0
+                ? "suppressed (the queue is not empty)"
+                : "possible (the queue may be empty this tick; the game reuses this very "
+                  + "disaster rather than creating another one)");
         }
 
         private static float DegreesOf(float radians)

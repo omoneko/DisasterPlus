@@ -101,6 +101,7 @@ namespace DisasterPlus.Game
         {
             // 参照を捨てるだけ。実体はパネルの GameObject と一緒に消える。
             TyphoonStatusRows.Destroy();
+            TyphoonEffectRows.Destroy();
 
             if (_panel != null)
             {
@@ -195,6 +196,9 @@ namespace DisasterPlus.Game
             AddActionButtons(panel, ref y);
 
             TyphoonStatusRows.Build(panel, ref y);
+            // ★ 各要素（落雷・風害・氾濫・雲・竜巻）の行は台風そのものの状態より下。
+            //   T7〜T10 は TyphoonEffectRows の中に足すこと（ここの並びは変えない）。
+            TyphoonEffectRows.Build(panel, ref y);
 
             panel.height = y + 8f;
             ClampToView(panel);
@@ -291,7 +295,10 @@ namespace DisasterPlus.Game
             // DLC が無い環境では説明の 1 行しか構築していない（_bodyBuilt の doc）。
             if (!_bodyBuilt) return;
 
-            TyphoonStatusRows.Refresh(TyphoonHub.Latest);
+            // ★ スナップショットは 1 フレームに 1 回だけ取る（ロックを 2 回取らない）。
+            var snapshot = TyphoonHub.Latest;
+            TyphoonStatusRows.Refresh(snapshot);
+            TyphoonEffectRows.Refresh(snapshot);
         }
     }
 }

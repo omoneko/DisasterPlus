@@ -200,6 +200,30 @@ namespace DisasterPlus.Game
         /// <summary>④が書いた <c>m_targetDirection</c>（度、0 = +Z / 90 = +X）。</summary>
         public readonly float DrivenDirectionDegrees;
 
+        // ── T6: 落雷 ────────────────────────────────────────
+        //
+        // 4 つとも**④が数えた／見積もった量**であって、ゲームが公開している値ではない
+        // （<c>m_lightningQueue</c> は private で読めない。IL 事実文書 §A-3）。
+        // したがって表示側で <c>[measured]</c> を付けてはいけない。
+
+        /// <summary>④がキューに載せている数（予定 + 45 フレームで落ちる）。</summary>
+        public readonly int LightningInFlight;
+
+        /// <summary>この台風で④が積んだ累計。台風ごとに 0 から数え直す。</summary>
+        public readonly int LightningTotal;
+
+        /// <summary>
+        /// この台風でゲームに捨てられた累計。**0 以外なら上限 20 に当たっている**
+        /// ＝宿主の嵐や他 MOD の落雷まで消えている。
+        /// </summary>
+        public readonly int LightningRejected;
+
+        /// <summary>
+        /// 宿主のバニラ雷雨のために空けている枠（<c>LightningBudget.VanillaMaxStrikes</c>
+        /// の見積り）。強度が高いほど大きくなり、④の取り分は減る。
+        /// </summary>
+        public readonly int LightningVanillaReserve;
+
         public TyphoonSnapshot(bool valid, TyphoonPrefabFacts prefab, uint currentFrame,
                                float rain, float cloud, float fog, float windDirectionDegrees,
                                bool weatherEnabled, bool weatherReadable,
@@ -209,8 +233,14 @@ namespace DisasterPlus.Game
                                bool overLand, bool landfallKnown, float minutesToLandfall,
                                string refusal,
                                bool weatherDriving, float drivenRain, float drivenCloud,
-                               float drivenDirectionDegrees)
+                               float drivenDirectionDegrees,
+                               int lightningInFlight, int lightningTotal,
+                               int lightningRejected, int lightningVanillaReserve)
         {
+            LightningInFlight = lightningInFlight;
+            LightningTotal = lightningTotal;
+            LightningRejected = lightningRejected;
+            LightningVanillaReserve = lightningVanillaReserve;
             WeatherDriving = weatherDriving;
             DrivenRain = drivenRain;
             DrivenCloud = drivenCloud;
@@ -247,7 +277,8 @@ namespace DisasterPlus.Game
                                        false, 0, new Vec3(0f, 0f, 0f), 0f,
                                        0, 0f, 0f, TyphoonPhase.Idle, 0u, 0u,
                                        false, false, 0f, null,
-                                       false, 0f, 0f, 0f);
+                                       false, 0f, 0f, 0f,
+                                       0, 0, 0, 0);
         }
     }
 }
