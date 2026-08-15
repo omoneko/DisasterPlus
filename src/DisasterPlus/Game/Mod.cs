@@ -169,6 +169,14 @@ namespace DisasterPlus.Game
             typhoon.AddSlider(Strings.TyphoonWindStrength, 0f, 10f, 1f,
                 ModSettings.TyphoonWindStrength.value,
                 v => ModSettings.TyphoonWindStrength.value = (int)v);
+            // ★ 河川氾濫も既定 ON。**セーブに焼き付く状態を触る唯一の機能**なので、
+            //    復元が 3 箇所から掛かることを TyphoonFloodNote が名乗る。
+            typhoon.AddCheckbox(Strings.TyphoonFloodEnabled,
+                ModSettings.TyphoonFloodEnabled.value,
+                v => ModSettings.TyphoonFloodEnabled.value = v);
+            typhoon.AddSlider(Strings.TyphoonFloodStrength, 0f, 10f, 1f,
+                ModSettings.TyphoonFloodStrength.value,
+                v => ModSettings.TyphoonFloodStrength.value = (int)v);
             typhoon.AddButton(Strings.TyphoonResetButton, delegate
             {
                 ModSettings.TyphoonButtonX.value = -1;
@@ -179,6 +187,9 @@ namespace DisasterPlus.Game
             helper.AddGroup(Strings.TyphoonIntensityNote);
             // ★ 「バニラに風害は存在しない」「数値は風速ではない」を設定画面でも名乗る。
             helper.AddGroup(Strings.TyphoonWindNote);
+            // ★ 「水位は必ず戻す」を設定画面でも名乗る。氾濫の唯一の怖さは
+            //    「MOD を外したら川が溢れたままだった」である。
+            helper.AddGroup(Strings.TyphoonFloodNote);
 
             // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
             // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。

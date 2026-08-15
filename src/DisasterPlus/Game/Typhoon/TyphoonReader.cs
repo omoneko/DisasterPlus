@@ -119,7 +119,11 @@ namespace DisasterPlus.Game
                                            TyphoonWind.LastScanned,
                                            TyphoonWind.LastRefused,
                                            TyphoonWind.LastCapped,
-                                           TyphoonWind.LastUnknownHeight);
+                                           TyphoonWind.LastUnknownHeight,
+                                           TyphoonFlood.State,
+                                           TyphoonFlood.NaturalSourceCount,
+                                           TyphoonFlood.TouchedCount,
+                                           TyphoonFlood.LastPeakRiseMetres);
             }
             catch (System.Exception e)
             {

@@ -257,6 +257,29 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly int WindLastUnknownHeight;
 
+        // ── T8: 河川氾濫 ─────────────────────────────────────
+        //
+        // ここも④の量である。バニラに洪水災害は無く（§D-1）、
+        // 「川がどれだけ増水したか」を公開しているゲーム側の値も無い。
+
+        /// <summary>
+        /// 氾濫の状態。**<see cref="TyphoonFloodState.NoSources"/> は不具合ではない**
+        /// （設計書 §7.4）。表示側はその理由を出すこと。
+        /// </summary>
+        public readonly TyphoonFloodState FloodState;
+
+        /// <summary>
+        /// マップ全体の <c>TYPE_NATURAL</c> 水源の数。**マップ依存で未知**（§D-4）。
+        /// 0 は「このマップには川を流している自然水源が無い」であって異常ではない。
+        /// </summary>
+        public readonly int FloodNaturalSources;
+
+        /// <summary>今④が水位を持ち上げている水源の数。</summary>
+        public readonly int FloodTouched;
+
+        /// <summary>直近の走査で中心に適用した上げ幅（m）。</summary>
+        public readonly float FloodPeakRiseMetres;
+
         public TyphoonSnapshot(bool valid, TyphoonPrefabFacts prefab, uint currentFrame,
                                float rain, float cloud, float fog, float windDirectionDegrees,
                                bool weatherEnabled, bool weatherReadable,
@@ -271,8 +294,14 @@ namespace DisasterPlus.Game
                                int lightningRejected, int lightningVanillaReserve,
                                int windPasses, int windLastCollapsed, int windTotalCollapsed,
                                int windLastScanned, int windLastRefused, bool windLastCapped,
-                               int windLastUnknownHeight)
+                               int windLastUnknownHeight,
+                               TyphoonFloodState floodState, int floodNaturalSources,
+                               int floodTouched, float floodPeakRiseMetres)
         {
+            FloodState = floodState;
+            FloodNaturalSources = floodNaturalSources;
+            FloodTouched = floodTouched;
+            FloodPeakRiseMetres = floodPeakRiseMetres;
             WindPasses = windPasses;
             WindLastCollapsed = windLastCollapsed;
             WindTotalCollapsed = windTotalCollapsed;
@@ -322,7 +351,8 @@ namespace DisasterPlus.Game
                                        false, false, 0f, null,
                                        false, 0f, 0f, 0f,
                                        0, 0, 0, 0,
-                                       0, 0, 0, 0, 0, false, 0);
+                                       0, 0, 0, 0, 0, false, 0,
+                                       TyphoonFloodState.Idle, 0, 0, 0f);
         }
     }
 }

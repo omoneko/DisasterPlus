@@ -54,13 +54,14 @@ namespace DisasterPlus.Game
         /// DisasterData の移動 4 フィールドと DisasterAI の公開ラッパー 3 メソッド・
         /// WeatherManager の target 系 6 フィールド・
         /// QueueLightningStrike の 4 引数版・
-        /// BuildingAI.CollapseBuilding と DisasterHelpers.AddWind / DestroyTrees）＋
+        /// BuildingAI.CollapseBuilding と DisasterHelpers.AddWind / DestroyTrees・
+        /// WaterSimulation の到達経路と WaterSource の m_type / m_target）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 29;
+        private const int TotalCheckCount = 30;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -827,6 +828,59 @@ namespace DisasterPlus.Game
                   });
 
             // --- ④台風（Task 7）ここまで ---
+
+            // --- ④台風（Task 8: 河川氾濫）ここから ---
+
+            // 氾濫の到達経路。**解決できなければ TyphoonFlood は 1 バイトも書かない。**
+            //
+            // Task 8 Step 1 で IL 実測して確定させたこと:
+            //   TerrainManager.WaterSimulation  … public インスタンスプロパティ
+            //                                     （裏は private m_waterSimulation）
+            //   WaterSimulation.m_waterSources  … public FastList<WaterSource>
+            //   LockWaterSource(ushort)         … public、m_buffer[source - 1] を返す
+            //                                     （**1 基点**）。Monitor を取ったまま返る
+            //   UnlockWaterSource(ushort, WaterSource) … public、書き戻して Monitor.Exit
+            //   WaterSource                     … public struct、m_type / m_target は
+            //                                     public UInt16、TYPE_NATURAL = 1
+            //
+            // ★ 代替経路へ逃げないことを impact に書く。CreateWaterWave は内陸で
+            //   **何も起こさない**（津波の波はマップ外周リングでしか評価されない。§D-3(a)）。
+            Check("WaterSimulation is reachable and exposes m_waterSources / LockWaterSource / "
+                  + "UnlockWaterSource, and WaterSource exposes m_type / m_target",
+                  "river flooding cannot run. The mod does nothing rather than reaching for "
+                  + "CreateWaterWave, which does nothing at all inland (the tsunami wave is "
+                  + "only evaluated on the map border ring)",
+                  delegate
+                  {
+                      var wsProperty = typeof(TerrainManager).GetProperty("WaterSimulation",
+                          BindingFlags.Public | BindingFlags.Instance);
+                      if (wsProperty == null
+                          || wsProperty.PropertyType != typeof(WaterSimulation))
+                      {
+                          return false;
+                      }
+
+                      if (!HasField(typeof(WaterSimulation), "m_waterSources")) return false;
+
+                      if (typeof(WaterSimulation).GetMethod("LockWaterSource",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[] { typeof(ushort) }, null) == null)
+                      {
+                          return false;
+                      }
+                      if (typeof(WaterSimulation).GetMethod("UnlockWaterSource",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[] { typeof(ushort), typeof(WaterSource) },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      return HasField(typeof(WaterSource), "m_type")
+                             && HasField(typeof(WaterSource), "m_target");
+                  });
+
+            // --- ④台風（Task 8）ここまで ---
 
             Report();
         }

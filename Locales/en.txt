@@ -199,3 +199,9 @@ TyphoonWindStrength = Wind damage strength (0 = off)
 TyphoonWindNote = The game has no wind damage of any kind, and no field that makes the wind stronger. This is a model Disaster + invented. The numbers are not wind speeds.
 TyphoonWindShelterNote = Shelters, vaults and dams do not collapse in a typhoon. That is the game refusing, and it is the right answer.
 TyphoonWindCapped = sweep truncated this pass; the outer edge has not been rolled yet
+TyphoonFloodRow = River flooding
+TyphoonFloodEnabled = River flooding (raises the map's own water sources)
+TyphoonFloodStrength = River flooding strength (0 = off)
+TyphoonFloodNoSources = This map has no natural water sources near the storm, so no river can rise. Nothing is wrong - the game has no flood disaster of its own, and Disaster + only raises water sources the map already has.
+TyphoonFloodRaised = raised
+TyphoonFloodNote = The water level is restored when the typhoon ends, when you leave the city and before every save. A river must never stay flooded after you remove the mod.

@@ -92,7 +92,21 @@ namespace DisasterPlus.Game
                 }
             }
 
-            // （T8: TyphoonFlood.Tick / T10: TyphoonTornado.Tick がここに入る）
+            // ★ 河川氾濫は台風が居なくても呼ぶ。**持ち上げた水位を戻すのが
+            //    この経路の仕事でもある**（TyphoonController.Forget が既に
+            //    RestoreAll を呼んでいるが、取りこぼしをここで拾う）。
+            //    設定を OFF にした瞬間に呼ばれなくなると川が溢れたままになるので、
+            //    OFF のときも「台帳が空でなければ戻す」ところまでは通す。
+            if (ModSettings.TyphoonFloodEnabled.value)
+            {
+                TyphoonFlood.Tick(snapshot, frameIndex, deltaMinutes);
+            }
+            else
+            {
+                TyphoonFlood.RestoreAll();
+            }
+
+            // （T10: TyphoonTornado.Tick がここに入る）
         }
 
         /// <summary>
@@ -126,6 +140,11 @@ namespace DisasterPlus.Game
             // ★ 風害の走査位置とカウンタも都市をまたがない。持ち越すと次の都市で
             //    前の都市の序数から走り出す（＝中心の周りが 1 度も判定されない）。
             TyphoonWind.Reset();
+            // ★★ 河川の水位を必ず戻す（罠 4 の復元経路 2 本目）。
+            //    ここを忘れると、次に開いた都市で**前の都市のハンドル**を復元しに行き、
+            //    無関係な川の水位を書き換える。TyphoonFlood.Reset は内部で
+            //    RestoreAll を呼んでから台帳を捨てる。
+            TyphoonFlood.Reset();
         }
 
         /// <summary>
@@ -240,6 +259,48 @@ namespace DisasterPlus.Game
             WriteWeatherDriving(b, snapshot);
             WriteLightning(b, snapshot);
             WriteWind(b, snapshot);
+            WriteFlood(b, snapshot);
+        }
+
+        /// <summary>
+        /// 河川氾濫（T8）。
+        ///
+        /// **<c>natural sources</c> の個数は必ず出す。** マップ依存で未知（§D-4 /
+        /// 設計書 §6）なので、実機で初めて分かる数である。**0 は不具合ではない。**
+        /// </summary>
+        private static void WriteFlood(DiagnosticBuilder b, TyphoonSnapshot snapshot)
+        {
+            if (!ModSettings.TyphoonFloodEnabled.value)
+            {
+                b.Line(2, "river flooding", "off (setting)");
+                return;
+            }
+
+            int strength = ModSettings.TyphoonFloodStrength.value;
+            if (strength <= 0)
+            {
+                b.Line(2, "river flooding", "off (strength slider is 0)");
+                return;
+            }
+
+            b.Line(2, "river flooding",
+                snapshot.FloodState
+                + "  raised " + snapshot.FloodTouched
+                + " / peak +" + snapshot.FloodPeakRiseMetres.ToString("F2") + " m"
+                + " / strength " + strength);
+
+            // ★ マップ依存で未知の数。実機の報告に必ず要る。
+            b.Line(3, "natural sources", snapshot.FloodNaturalSources
+                + (snapshot.FloodNaturalSources == 0
+                    ? " (this map has none; no river can rise and NOTHING IS WRONG - the game "
+                      + "has no flood disaster of its own and Disaster + only raises water "
+                      + "sources the map already has)"
+                    : " (TYPE_NATURAL water sources on the whole map)"));
+
+            if (snapshot.FloodState == TyphoonFloodState.Failed)
+            {
+                b.Line(3, "failure", TyphoonFlood.LastFailure ?? "unknown");
+            }
         }
 
         /// <summary>

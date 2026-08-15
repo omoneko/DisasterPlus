@@ -642,5 +642,23 @@ namespace DisasterPlus.Game
             + "refusing, and it is the right answer.";
         public static string TyphoonWindCapped =
             "sweep truncated this pass; the outer edge has not been rolled yet";
+
+        // --- ④台風（Task 8: 河川氾濫） ---
+        //
+        // ★ TyphoonFloodNoSources は「なぜ何も起きないか」を出す行である
+        //   （設計書 §7.4。①の「なぜハザードマップが空か」と同じ扱い）。
+        //   **不具合ではないと明示する。**
+        public static string TyphoonFloodRow = "River flooding";
+        public static string TyphoonFloodEnabled =
+            "River flooding (raises the map's own water sources)";
+        public static string TyphoonFloodStrength = "River flooding strength (0 = off)";
+        public static string TyphoonFloodNoSources =
+            "This map has no natural water sources near the storm, so no river can rise. "
+            + "Nothing is wrong - the game has no flood disaster of its own, and Disaster + "
+            + "only raises water sources the map already has.";
+        public static string TyphoonFloodRaised = "raised";
+        public static string TyphoonFloodNote =
+            "The water level is restored when the typhoon ends, when you leave the city and "
+            + "before every save. A river must never stay flooded after you remove the mod.";
     }
 }

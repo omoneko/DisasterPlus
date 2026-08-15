@@ -489,6 +489,13 @@ namespace DisasterPlus.Game
             //    前の台風の中心を基準にした序数から走り出す。
             TyphoonWind.Reset();
 
+            // ★★ 河川の水位を必ず戻す（罠 4 の復元経路 1 本目）。**Stop ではなく
+            //    ここに置く** —— 台風を手放す経路は Stop だけではなく、LoseSlot
+            //    （災害スロットを奪われた）と Reset（アンロード）も通る。Stop 側に
+            //    置くと、スロットを奪われた瞬間に**川を溢れさせたまま台風だけが消える**。
+            //    RestoreAll は冪等なので重ねて呼んでよい。
+            TyphoonFlood.RestoreAll();
+
             TyphoonSlot.Forget();
 
             _active = false;

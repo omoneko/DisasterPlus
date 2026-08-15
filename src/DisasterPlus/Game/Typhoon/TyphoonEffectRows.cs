@@ -33,6 +33,9 @@ namespace DisasterPlus.Game
         private static UILabel _windLabel;
         private static UILabel _windNoteLabel;
         private static UILabel _windShelterNoteLabel;
+        private static UILabel _floodLabel;
+        private static UILabel _floodReasonLabel;
+        private static UILabel _floodNoteLabel;
 
         /// <summary>パネル構築時に 1 回。</summary>
         internal static void Build(UIPanel p, ref float y)
@@ -56,6 +59,17 @@ namespace DisasterPlus.Game
             // 「壊れていない」と「壊せない」を取り違えさせない（§F-2）。
             _windShelterNoteLabel = TyphoonRows.AddRow(p, "WindShelterNote", ref y, 40f);
             TyphoonRows.SetPlain(_windShelterNoteLabel, Strings.TyphoonWindShelterNote);
+
+            _floodLabel = TyphoonRows.AddRow(p, "Flood", ref y);
+
+            // 「なぜ氾濫しなかったか」の行。**中身は状態によって出し入れする**
+            // （設計書 §7.4）。高さは説明文が 3 行に折り返すぶんを確保する。
+            _floodReasonLabel = TyphoonRows.AddRow(p, "FloodReason", ref y, 56f);
+
+            // 復元が 3 箇所から掛かることを**常設**で名乗る。氾濫の唯一の怖さは
+            // 「MOD を外したら川が溢れたままだった」なので、そこを先に打ち消す。
+            _floodNoteLabel = TyphoonRows.AddRow(p, "FloodNote", ref y, 40f);
+            TyphoonRows.SetPlain(_floodNoteLabel, Strings.TyphoonFloodNote);
         }
 
         /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
@@ -66,6 +80,8 @@ namespace DisasterPlus.Game
                 // 台風が居ないときに 0 を並べない（「撒いていない」と「0 発だった」は違う）。
                 TyphoonRows.SetPlain(_lightningLabel, "");
                 TyphoonRows.SetPlain(_windLabel, "");
+                TyphoonRows.SetPlain(_floodLabel, "");
+                TyphoonRows.SetPlain(_floodReasonLabel, "");
                 return;
             }
 
@@ -77,6 +93,54 @@ namespace DisasterPlus.Game
                 + s.LightningVanillaReserve + " / " + s.LightningRejected);
 
             RefreshWind(s);
+            RefreshFlood(s);
+        }
+
+        /// <summary>
+        /// 河川氾濫の行（設計書 §7.4 の 5 状態）。
+        ///
+        /// **<c>NoSources</c> のとき理由を出すのがこの機能の要件である。**
+        /// 対象マップに自然水源が無ければ正常に何も起きないので、
+        /// 空欄のままにすると「壊れている」と読まれる。
+        /// </summary>
+        private static void RefreshFlood(TyphoonSnapshot s)
+        {
+            if (!ModSettings.TyphoonFloodEnabled.value
+                || ModSettings.TyphoonFloodStrength.value <= 0)
+            {
+                TyphoonRows.SetPlain(_floodLabel, Strings.TyphoonFloodRow + ": off");
+                TyphoonRows.SetPlain(_floodReasonLabel, "");
+                return;
+            }
+
+            switch (s.FloodState)
+            {
+                case TyphoonFloodState.NoSources:
+                    TyphoonRows.SetPlain(_floodLabel, Strings.TyphoonFloodRow + ": -");
+                    // ★ 「なぜ起きないか」を出す。不具合ではない（設計書 §7.4）。
+                    TyphoonRows.SetPlain(_floodReasonLabel, Strings.TyphoonFloodNoSources);
+                    return;
+
+                case TyphoonFloodState.Raised:
+                    TyphoonRows.SetPlain(_floodLabel,
+                        Strings.TyphoonFloodRow + ": " + Strings.TyphoonFloodRaised + " "
+                        + s.FloodTouched + " / " + s.FloodNaturalSources
+                        + "   +" + s.FloodPeakRiseMetres.ToString("F1") + " m");
+                    TyphoonRows.SetPlain(_floodReasonLabel, "");
+                    return;
+
+                case TyphoonFloodState.Restored:
+                    TyphoonRows.SetPlain(_floodLabel, Strings.TyphoonFloodRow + ": -");
+                    TyphoonRows.SetPlain(_floodReasonLabel, "");
+                    return;
+
+                default:
+                    // Idle（まだ強風域に入っていない）と Failed（理由は診断へ）は
+                    // どちらも行を出さない。
+                    TyphoonRows.SetPlain(_floodLabel, "");
+                    TyphoonRows.SetPlain(_floodReasonLabel, "");
+                    return;
+            }
         }
 
         /// <summary>
@@ -118,6 +182,9 @@ namespace DisasterPlus.Game
             _windLabel = null;
             _windNoteLabel = null;
             _windShelterNoteLabel = null;
+            _floodLabel = null;
+            _floodReasonLabel = null;
+            _floodNoteLabel = null;
         }
     }
 }
