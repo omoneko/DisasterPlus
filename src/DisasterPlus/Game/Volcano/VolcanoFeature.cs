@@ -115,6 +115,11 @@ namespace DisasterPlus.Game
         {
             VolcanoPanelButton.Tick();
             VolcanoPanel.Tick();
+
+            // ★ 噴火の描画は main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
+            //   設定で切った瞬間に自分で畳む（切ったまま噴煙が残らないこと）。
+            if (ModSettings.VolcanoEruptionFx.value) VolcanoEruption.Render();
+            else VolcanoEruption.Destroy();
         }
 
         public void OnLevelUnloading()
@@ -129,6 +134,11 @@ namespace DisasterPlus.Game
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
             VolcanoPanelButton.Remove();
             VolcanoPanel.Destroy();
+
+            // ★ 噴煙の GameObject と Material は自分で Object.Destroy する
+            //   （Material は Component ではないので GameObject の道連れにならない）。
+            //   ここを飛ばすと都市を出入りするたびに 1 個ずつ残る。
+            VolcanoEruption.Destroy();
 
             VolcanoHub.Clear();
             // ★ 地形の実測（RawHeights の長さ）を都市をまたいで持ち越さない。
@@ -288,6 +298,49 @@ namespace DisasterPlus.Game
             if (!string.IsNullOrEmpty(VolcanoUplift.LastFailure))
             {
                 b.Line(2, "uplift failure", VolcanoUplift.LastFailure);
+            }
+
+            WriteEruption(b, snapshot);
+        }
+
+        /// <summary>
+        /// 噴火（T7）。**借り物のエフェクトが使えないのは不具合ではない** ——
+        /// ⑤自前の噴出物だけで噴火は成立する。だから
+        /// <c>not available in this environment</c> にはその旨を添える。
+        ///
+        /// ★ <c>own particles</c> と <c>borrowed fire effect</c> を別の行にするのは、
+        ///   実機で「何も見えない」を切り分ける材料がここにしか無いからである ——
+        ///   前者が <c>not drawing</c> ならシェーダかマテリアルの問題（火災旋風 §4.9 / §4.8）、
+        ///   後者だけが欠けているならこの環境で借りられないだけである。
+        /// </summary>
+        private static void WriteEruption(DiagnosticBuilder b, VolcanoSnapshot snapshot)
+        {
+            if (!snapshot.EruptionActive && VolcanoEruption.BurstsSoFar == 0) return;
+
+            b.Line(1, "eruption", (snapshot.EruptionActive ? "active" : "finished")
+                                  + " (intensity "
+                                  + snapshot.EruptionIntensityUnit.ToString("F2")
+                                  + ", " + VolcanoEruption.BurstsSoFar + " bursts)");
+            b.Line(2, "own particles", VolcanoEruption.Drawing ? "drawing" : "not drawing");
+            b.Line(2, "borrowed fire effect", VolcanoEruption.BorrowedEffectAvailable
+                ? "applied (the game's own building fire effect, no DLC needed)"
+                : "not available in this environment (this is normal; the eruption still "
+                  + "shows Disaster +'s own plume)");
+
+            if (!VolcanoEruption.BorrowedEffectAvailable)
+            {
+                b.Line(3, "camera info", VolcanoEruption.CameraInfoAvailable
+                    ? "resolved" : "NOT resolved");
+            }
+
+            // ★ 音は出ない。**IL 実測**（FireEffect.RenderEffect は m_soundEffect に
+            //   1 度も触れず、音は PlayEffect の経路にある）。仕様であることを名乗る。
+            b.Line(2, "sound", "none - the borrowed effect's sound lives on PlayEffect, "
+                               + "not RenderEffect; Disaster + does not open an audio path");
+
+            if (!string.IsNullOrEmpty(VolcanoEruption.LastFailure))
+            {
+                b.Line(2, "eruption failure", VolcanoEruption.LastFailure);
             }
         }
 

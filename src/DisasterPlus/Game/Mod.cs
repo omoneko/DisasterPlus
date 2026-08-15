@@ -276,6 +276,11 @@ namespace DisasterPlus.Game
                 ModSettings.VolcanoUpliftMinutes.value,
                 v => ModSettings.VolcanoUpliftMinutes.value = (int)v);
 
+            // ★ 噴煙を描くか（T7）。**描画は main スレッドだけの機能**なので、
+            //    切っても隆起は同じように進む（実機チェックリストの項目でもある）。
+            volcano.AddCheckbox(Strings.VolcanoEruptionFx, ModSettings.VolcanoEruptionFx.value,
+                v => ModSettings.VolcanoEruptionFx.value = v);
+
             // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
             volcano.AddButton(Strings.VolcanoResetButton, delegate
             {

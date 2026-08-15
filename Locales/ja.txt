@@ -271,3 +271,6 @@ VolcanoUpliftMinutes = 隆起にかける時間（ゲーム内分）
 VolcanoCatchUpRow = 「建てられる地面」が追いつくまで
 VolcanoFrames = シミュレーションフレーム
 VolcanoCraterCarved = 山頂の火口を彫りました。
+VolcanoEruptionRow = 噴火
+VolcanoEruptionFx = 噴煙を描く
+VolcanoEruptionBorrowedNote = ゲームには溶岩・マグマ・噴火のエフェクトが一切存在しないため、Disaster + が自前で描いています。その上に重なる炎だけはゲーム自身の火のエフェクトを借りて火口に置いたものです。音は出ません —— 借りたエフェクトが音を鳴らすのは Disaster + が使わない経路のためです。

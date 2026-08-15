@@ -91,7 +91,10 @@ namespace DisasterPlus.Game
                                            VolcanoUplift.Complete,
                                            VolcanoUplift.CraterCarved,
                                            VolcanoUplift.TileCount,
-                                           VolcanoUplift.TileCursor);
+                                           VolcanoUplift.TileCursor,
+                                           VolcanoEruption.Active,
+                                           VolcanoEruption.IntensityUnit,
+                                           VolcanoEruption.SummitWorld);
             }
             catch (Exception e)
             {

@@ -38,7 +38,7 @@ namespace DisasterPlus.Game
     public static partial class Assumptions
     {
         /// <summary>このファイルが持つ検証の数。</summary>
-        private const int VolcanoCheckCount = 4;
+        private const int VolcanoCheckCount = 5;
 
         private static void RunVolcano()
         {
@@ -135,6 +135,39 @@ namespace DisasterPlus.Game
                   delegate { return destruction.Usable; });
 
             // --- ⑤火山（Task 5: 準備の破壊経路）ここまで ---
+
+            // --- ⑤火山（Task 7: 噴火の借り物エフェクト）ここから ---
+
+            // 5. 借り物の炎。**この検査が FAIL でも噴火は出る**（⑤自前の
+            //   ParticleSystem が主経路で、③で出荷済みの形をそのまま写している）。
+            //   impact 文にそう書くのは、狼少年にしないためである
+            //   （④が DestroyTrees で同じ判断をしている）。
+            //
+            //   ★ 述語は VolcanoEruption.RenderBorrowed が実際に門にしている式
+            //     （VolcanoBorrowFacts.Usable）そのものである。「フィールドが解決した」を
+            //     述語にすると、CameraInfo が取れない環境で PASS が出る。
+            //
+            //   ScanBorrowFacts は副作用の無い走査で、main スレッド専用
+            //   （Run() も main）。Check の外で例外を抑えるのは上の 4 件と同じ理由。
+            VolcanoBorrowFacts borrow;
+            try
+            {
+                borrow = VolcanoEruption.ScanBorrowFacts();
+            }
+            catch
+            {
+                borrow = new VolcanoBorrowFacts();
+            }
+
+            Check("EffectInfo.RenderEffect and EffectInfo+SpawnArea(Vector3,Vector3,float) are "
+                  + "usable, and BuildingManager exposes m_properties.m_fireEffect "
+                  + "(fireEffect: " + (borrow.FireEffectResolved ? "ok" : "missing")
+                  + ", cameraInfo: " + (borrow.CameraInfoResolved ? "ok" : "missing") + ")",
+                  "the eruption falls back to Disaster +'s own particles only. Nothing else is "
+                  + "affected, and the volcano still erupts",
+                  delegate { return borrow.Usable; });
+
+            // --- ⑤火山（Task 7: 噴火の借り物エフェクト）ここまで ---
         }
     }
 }

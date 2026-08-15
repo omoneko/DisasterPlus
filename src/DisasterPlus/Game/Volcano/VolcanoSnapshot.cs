@@ -1,3 +1,5 @@
+using DisasterPlus.Core.Common;
+
 namespace DisasterPlus.Game
 {
     /// <summary>
@@ -211,6 +213,27 @@ namespace DisasterPlus.Game
         /// <summary>次に <c>UpdateArea</c> するタイルの番号。</summary>
         public readonly int UpliftTileCursor;
 
+        // ── T7（噴火）が足した 3 つ ────────────────────────────────
+        //
+        // ★ この 3 つは**描画のためだけ**に在る。ゲームの状態を 1 つも表さないので、
+        //   sim 側（VolcanoState / VolcanoClearing / VolcanoUplift）はこれを読まない。
+
+        /// <summary>噴火が進行中か。main の <c>VolcanoEruption.Render</c> の唯一の門。</summary>
+        public readonly bool EruptionActive;
+
+        /// <summary>
+        /// 噴出の強さ <c>[0,1]</c>。**本 MOD が決めた量**であって、ゲームが
+        /// 計算した値ではない（設計書 §7.4）。実在の物理単位は名乗らない。
+        /// </summary>
+        public readonly float EruptionIntensityUnit;
+
+        /// <summary>
+        /// 噴出口のワールド座標（<c>Y</c> は <c>SampleDetailHeight</c> ＋ 少しの浮き）。
+        /// sim が読んだ値を main がそのまま使う ——
+        /// **main スレッドから地形を引き直さない**（経路を 1 本にする）。
+        /// </summary>
+        public readonly Vec3 SummitWorld;
+
         public VolcanoSnapshot(bool valid, VolcanoTerrainFacts terrain,
                                uint currentFrame, bool gameMode,
                                VolcanoPhase phase, VolcanoFootprint footprint,
@@ -221,7 +244,9 @@ namespace DisasterPlus.Game
                                bool roadPathAvailable,
                                float summitMetres, float activeRadiusMetres,
                                bool upliftComplete, bool craterCarved,
-                               int upliftTileCount, int upliftTileCursor)
+                               int upliftTileCount, int upliftTileCursor,
+                               bool eruptionActive, float eruptionIntensityUnit,
+                               Vec3 summitWorld)
         {
             Valid = valid;
             Terrain = terrain;
@@ -245,6 +270,9 @@ namespace DisasterPlus.Game
             CraterCarved = craterCarved;
             UpliftTileCount = upliftTileCount;
             UpliftTileCursor = upliftTileCursor;
+            EruptionActive = eruptionActive;
+            EruptionIntensityUnit = eruptionIntensityUnit;
+            SummitWorld = summitWorld;
         }
 
         /// <summary>
@@ -260,7 +288,8 @@ namespace DisasterPlus.Game
             return new VolcanoSnapshot(false, new VolcanoTerrainFacts(), 0u, true,
                                        VolcanoPhase.Idle, VolcanoFootprint.None, 0f, null, false,
                                        0f, false, 0, 0, 0, false, true,
-                                       0f, 0f, false, false, 0, 0);
+                                       0f, 0f, false, false, 0, 0,
+                                       false, 0f, new Vec3(0f, 0f, 0f));
         }
     }
 }

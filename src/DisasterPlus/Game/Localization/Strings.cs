@@ -932,5 +932,24 @@ namespace DisasterPlus.Game
         public static string VolcanoFrames = "simulation frames";
 
         public static string VolcanoCraterCarved = "Summit crater carved.";
+
+        // --- ⑤火山（Task 7: 噴火） ---
+        //
+        // ★ ここも [measured] は付かない。噴出の強さは⑤が決めた 0〜10 の段階であって、
+        //   ゲームが計算した値でも実在の物理量でもない（設計書 §7.4 /
+        //   計画「出してよい断定の範囲」の 5）。
+        public static string VolcanoEruptionRow = "Eruption";
+
+        /// <summary>設定のチェックボックス（表示行の <c>VolcanoEruptionRow</c> と別物）。</summary>
+        public static string VolcanoEruptionFx = "Draw the eruption plume";
+
+        // ★ **短くしないこと。** ゲームには溶岩も噴火も存在しない（§B-5 で
+        //   文字列ヒープにヒット 0）ことを名乗る唯一の場所である。
+        //   炎だけがゲーム自身のもので、それも DLC 不要である。
+        public static string VolcanoEruptionBorrowedNote =
+            "The game has no lava, magma or eruption effect of any kind, so Disaster + draws "
+            + "its own. The flames on top are the game's own fire effect, borrowed and placed "
+            + "at the crater. The eruption is silent: the borrowed effect only makes a sound "
+            + "on a code path Disaster + does not use.";
     }
 }

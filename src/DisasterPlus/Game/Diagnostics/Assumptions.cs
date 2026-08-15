@@ -27,7 +27,7 @@ namespace DisasterPlus.Game
     /// Assumptions.Forecast.cs    ①天気予報  7 件
     /// Assumptions.Earthquake.cs  ②地震     11 件
     /// Assumptions.Typhoon.cs     ④台風      9 件
-    /// Assumptions.Volcano.cs     ⑤火山      3 件
+    /// Assumptions.Volcano.cs     ⑤火山      （件数はあちらの VolcanoCheckCount が名乗る）
     /// </code>
     ///
     /// **可視性は 1 つも変えていない。** <c>Check</c> も <c>_gate</c> も

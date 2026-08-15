@@ -161,6 +161,11 @@ namespace DisasterPlus.Game
             VolcanoClearing.Reset();
             // ★ 隆起の退避配列も返す（半径 3 km で 279 KB）。**地形は戻らない。**
             VolcanoUplift.Reset();
+            // ★ 噴火の予定も畳む。**描画側（main）の後始末はここではしない** ——
+            //   Unity オブジェクトの破棄は main スレッドの仕事で、
+            //   VolcanoEruption.Render がスナップショットを見て自分で畳む
+            //   （レベルアンロードでは VolcanoFeature が Destroy を呼ぶ）。
+            VolcanoEruption.Reset();
         }
 
         /// <summary>
@@ -247,6 +252,24 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            if (_phase == VolcanoPhase.Erupting)
+            {
+                // T7。**噴出の予定を決めるだけ**で、地形も建物も 1 つも変えない。
+                VolcanoEruption.Tick(_footprint, frame, deltaMinutes);
+
+                if (!VolcanoEruption.Finished) return;
+
+                // ★ **T8 が入るまでは、ここで終わりにする。** 位相を Flowing に置いて
+                //   止めると <c>InProgress()</c> が真のままになり、**プレイヤーは
+                //   2 つ目の火山を永久に置けなくなる**（T6 が Done で止めたのと同じ理由）。
+                //   T8 はこの遷移先を Flowing に差し替える。
+                _phase = VolcanoPhase.Done;
+                Log.Info("volcano eruption finished after "
+                         + VolcanoEruption.BurstsSoFar + " bursts; "
+                         + "the lava starts when T8 lands");
+                return;
+            }
+
             if (_phase != VolcanoPhase.Uplifting) return;
 
             // ★★ **順序がこの 2 行そのものである**（設計書 §1.2 / 罠 1）。
@@ -257,17 +280,15 @@ namespace DisasterPlus.Game
 
             if (!VolcanoUplift.Complete) return;
 
-            // ★ **T7 が入るまでは、ここで終わりにする。** 位相を Erupting に置いて
-            //   止めると <c>InProgress()</c> が真のままになり、**プレイヤーは 2 つ目の
-            //   火山を永久に置けなくなる**。Done は「⑤が今できることは全部終わった」
-            //   という事実でもあり、地形はそのまま残る（不可逆）。
-            //   T7 はこの遷移先を Erupting に差し替える。
-            _phase = VolcanoPhase.Done;
+            // ★ T7 がここを <c>Done</c> から <c>Erupting</c> に差し替えた。位相が
+            //   進行中のまま止まらないことは <c>VolcanoEruption.Finished</c> が担保する
+            //   （噴火は必ず有限のゲーム内時間で終わり、例外が出た場合も終わる）。
+            _phase = VolcanoPhase.Erupting;
             _lastRefusal = null;
             Log.Info("volcano uplift complete: summit +"
                      + VolcanoUplift.SummitMetres.ToString("F0")
                      + " m, crater " + (VolcanoUplift.CraterCarved ? "carved" : "NOT carved")
-                     + "; the eruption starts when T7 lands");
+                     + "; the eruption starts now");
         }
 
         /// <summary>
@@ -370,6 +391,11 @@ namespace DisasterPlus.Game
             VolcanoClearing.Reset();
             // ★ 隆起の退避配列も返す（半径 3 km で 279 KB）。**地形は戻らない。**
             VolcanoUplift.Reset();
+            // ★ 噴火の予定も畳む。**描画側（main）の後始末はここではしない** ——
+            //   Unity オブジェクトの破棄は main スレッドの仕事で、
+            //   VolcanoEruption.Render がスナップショットを見て自分で畳む
+            //   （レベルアンロードでは VolcanoFeature が Destroy を呼ぶ）。
+            VolcanoEruption.Reset();
             _lastRefusal = "stopped by the player; the terrain that already changed stays changed";
         }
 

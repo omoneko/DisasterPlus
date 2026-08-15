@@ -92,6 +92,12 @@ namespace DisasterPlus.Game
         /// </summary>
         public static SavedInt VolcanoUpliftMinutes;
 
+        /// <summary>
+        /// 噴煙を描くか（T7）。**切っても隆起も溶岩もそのまま動く** ——
+        /// 噴火の描画は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
+        /// </summary>
+        public static SavedBool VolcanoEruptionFx;
+
         /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
         public const int VolcanoShapeShield = 0;
         public const int VolcanoShapeStrato = 1;
@@ -240,6 +246,9 @@ namespace DisasterPlus.Game
             // 隆起にかけるゲーム内分。UpliftSchedule.TotalTicksFor が
             // 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰める。
             VolcanoUpliftMinutes = new SavedInt("volcanoUpliftMinutes", FileName, 30, true);
+
+            // 噴煙を描くか。切っても隆起は止まらない（描画は main スレッドだけの機能）。
+            VolcanoEruptionFx = new SavedBool("volcanoEruptionFx", FileName, true, true);
 
             _ready = true;
         }

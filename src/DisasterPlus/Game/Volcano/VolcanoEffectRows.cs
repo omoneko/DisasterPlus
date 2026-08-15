@@ -37,6 +37,9 @@ namespace DisasterPlus.Game
         /// <summary>追随の遅れの行の高さ（数字 ＋ 説明文で 4 行ぶん）。</summary>
         private const float CatchUpHeight = 72f;
 
+        /// <summary>長い注記の行の高さ（道路の断りと噴火の注記。4〜5 行ぶん）。</summary>
+        private const float LongNoteHeight = 72f;
+
         private static UILabel _clearingLabel;
         private static UILabel _clearingCountsLabel;
         private static UILabel _clearingRefusedNoteLabel;
@@ -45,6 +48,8 @@ namespace DisasterPlus.Game
         private static UILabel _upliftRadiusLabel;
         private static UILabel _catchUpLabel;
         private static UILabel _craterLabel;
+        private static UILabel _eruptionLabel;
+        private static UILabel _eruptionNoteLabel;
         private static UILabel _roadPathLabel;
 
         private static float _blockTop;
@@ -78,9 +83,15 @@ namespace DisasterPlus.Game
             _catchUpLabel = VolcanoRows.AddRow(p, "EffectCatchUp", ref y, CatchUpHeight);
             _craterLabel = VolcanoRows.AddRow(p, "EffectCrater", ref y);
 
+            // ── 噴火（T7）────────────────────────────────────
+            _eruptionLabel = VolcanoRows.AddRow(p, "EffectEruption", ref y);
+            // ★ 「ゲームに溶岩も噴火も無い」を名乗る注記。4 行ぶん折り返す。
+            _eruptionNoteLabel =
+                VolcanoRows.AddRow(p, "EffectEruptionNote", ref y, LongNoteHeight);
+
             // ★ **道路を取り除けない環境の断り**。これだけは位相に関係なく出す
             //    （設計書 §1.2）。黙って火山を作らないのがいちばん悪い。
-            _roadPathLabel = VolcanoRows.AddRow(p, "EffectRoadPath", ref y, 72f);
+            _roadPathLabel = VolcanoRows.AddRow(p, "EffectRoadPath", ref y, LongNoteHeight);
 
             _blockBottom = _blockTop;
 
@@ -142,6 +153,7 @@ namespace DisasterPlus.Game
                     s.ClearingCapped ? Strings.VolcanoSurveyCapped : "");
 
                 y = RefreshUplift(y, s);
+                y = RefreshEruption(y, s);
             }
             else
             {
@@ -153,10 +165,13 @@ namespace DisasterPlus.Game
                 y = ReflowRow(y, _upliftRadiusLabel, "");
                 y = Reflow(y, _catchUpLabel, "", CatchUpHeight, CatchUpHeight + 4f);
                 y = ReflowRow(y, _craterLabel, "");
+                y = ReflowRow(y, _eruptionLabel, "");
+                y = Reflow(y, _eruptionNoteLabel, "", LongNoteHeight, LongNoteHeight + 4f);
             }
 
             y = Reflow(y, _roadPathLabel,
-                roadPathBroken ? Strings.VolcanoRoadPathUnavailable : "", 72f, 76f);
+                roadPathBroken ? Strings.VolcanoRoadPathUnavailable : "",
+                LongNoteHeight, LongNoteHeight + 4f);
 
             _blockBottom = y;
         }
@@ -198,6 +213,41 @@ namespace DisasterPlus.Game
 
             y = Reflow(y, _catchUpLabel, CatchUpText(s), CatchUpHeight, CatchUpHeight + 4f);
             y = ReflowRow(y, _craterLabel, s.CraterCarved ? Strings.VolcanoCraterCarved : "");
+            return y;
+        }
+
+        /// <summary>
+        /// 噴火の 2 行（T7）。**噴火の段に入るまでは出さない**（隆起の 4 行と同じ扱い）。
+        ///
+        /// ★ 強さは <b>0〜10 の段階</b>で出す。⑤は温度も噴出量も持っておらず、
+        ///   実在の物理単位を名乗ってはいけない（設計書 §7.4 /
+        ///   計画「出してよい断定の範囲」の 5）。印（<c>[measured]</c>）も付かない ——
+        ///   これは⑤が決めた量であって、ゲームが計算した値ではない。
+        ///
+        /// ★ 注記は**噴火の段のあいだだけ**出す。常に出すと、山を作っている間ずっと
+        ///   「ゲームに溶岩は無い」と言い続けることになる。
+        /// </summary>
+        private static float RefreshEruption(float y, VolcanoSnapshot s)
+        {
+            bool erupting = s.Phase == VolcanoPhase.Erupting
+                            || s.Phase == VolcanoPhase.Flowing
+                            || s.Phase == VolcanoPhase.Cooling;
+
+            if (!erupting)
+            {
+                y = ReflowRow(y, _eruptionLabel, "");
+                y = Reflow(y, _eruptionNoteLabel, "", LongNoteHeight, LongNoteHeight + 4f);
+                return y;
+            }
+
+            // 0〜10 の段階。0.0 でも「1 段」と言わないよう、素直に四捨五入する。
+            float stage = s.EruptionIntensityUnit * 10f;
+
+            y = ReflowRow(y, _eruptionLabel,
+                Strings.VolcanoEruptionRow + ": " + stage.ToString("F1") + " / 10");
+
+            y = Reflow(y, _eruptionNoteLabel, Strings.VolcanoEruptionBorrowedNote,
+                       LongNoteHeight, LongNoteHeight + 4f);
             return y;
         }
 
@@ -269,6 +319,15 @@ namespace DisasterPlus.Game
             return y + step;
         }
 
+        /// <summary>
+        /// 一式まとめて出し入れする。
+        ///
+        /// ★ <b>この一式の行を 1 つも取りこぼさないこと。</b> T6 まで隆起の 4 行が
+        ///   この列に入っておらず、位相が畳まれたフレームで**古い隆起の行が
+        ///   そのまま残る**形になっていた（<see cref="Refresh"/> は <c>false</c> の枝で
+        ///   すぐ return するので、空文字を入れる経路を通らない）。T7 で
+        ///   噴火の 2 行を足すにあたって、隆起の 4 行もここへ入れてある。
+        /// </summary>
         private static void SetVisible(bool visible)
         {
             _showing = visible;
@@ -276,6 +335,12 @@ namespace DisasterPlus.Game
             SetLabelVisible(_clearingCountsLabel, visible);
             SetLabelVisible(_clearingRefusedNoteLabel, visible);
             SetLabelVisible(_clearingCappedLabel, visible);
+            SetLabelVisible(_upliftLabel, visible);
+            SetLabelVisible(_upliftRadiusLabel, visible);
+            SetLabelVisible(_catchUpLabel, visible);
+            SetLabelVisible(_craterLabel, visible);
+            SetLabelVisible(_eruptionLabel, visible);
+            SetLabelVisible(_eruptionNoteLabel, visible);
             SetLabelVisible(_roadPathLabel, visible);
         }
 
@@ -295,6 +360,12 @@ namespace DisasterPlus.Game
             _clearingCountsLabel = null;
             _clearingRefusedNoteLabel = null;
             _clearingCappedLabel = null;
+            _upliftLabel = null;
+            _upliftRadiusLabel = null;
+            _catchUpLabel = null;
+            _craterLabel = null;
+            _eruptionLabel = null;
+            _eruptionNoteLabel = null;
             _roadPathLabel = null;
             _blockTop = 0f;
             _blockBottom = 0f;

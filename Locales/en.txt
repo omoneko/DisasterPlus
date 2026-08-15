@@ -272,3 +272,6 @@ VolcanoUpliftMinutes = Time the uplift takes (in-game minutes)
 VolcanoCatchUpRow = Buildable ground catches up in
 VolcanoFrames = simulation frames
 VolcanoCraterCarved = Summit crater carved.
+VolcanoEruptionRow = Eruption
+VolcanoEruptionFx = Draw the eruption plume
+VolcanoEruptionBorrowedNote = The game has no lava, magma or eruption effect of any kind, so Disaster + draws its own. The flames on top are the game's own fire effect, borrowed and placed at the crater. The eruption is silent: the borrowed effect only makes a sound on a code path Disaster + does not use.
