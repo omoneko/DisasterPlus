@@ -85,7 +85,13 @@ namespace DisasterPlus.Game
                                            VolcanoClearing.TotalSegmentsDestroyed,
                                            VolcanoClearing.LastBuildingsRefused,
                                            VolcanoClearing.LastCapped,
-                                           VolcanoClearing.RoadPathAvailable);
+                                           VolcanoClearing.RoadPathAvailable,
+                                           VolcanoUplift.SummitMetres,
+                                           VolcanoUplift.ActiveRadiusMetres,
+                                           VolcanoUplift.Complete,
+                                           VolcanoUplift.CraterCarved,
+                                           VolcanoUplift.TileCount,
+                                           VolcanoUplift.TileCursor);
             }
             catch (Exception e)
             {

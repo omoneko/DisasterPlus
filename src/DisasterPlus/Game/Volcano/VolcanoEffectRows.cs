@@ -34,10 +34,17 @@ namespace DisasterPlus.Game
         /// <summary>説明文の行の高さ（3 行ぶん折り返す想定）。</summary>
         private const float NoteHeight = 52f;
 
+        /// <summary>追随の遅れの行の高さ（数字 ＋ 説明文で 4 行ぶん）。</summary>
+        private const float CatchUpHeight = 72f;
+
         private static UILabel _clearingLabel;
         private static UILabel _clearingCountsLabel;
         private static UILabel _clearingRefusedNoteLabel;
         private static UILabel _clearingCappedLabel;
+        private static UILabel _upliftLabel;
+        private static UILabel _upliftRadiusLabel;
+        private static UILabel _catchUpLabel;
+        private static UILabel _craterLabel;
         private static UILabel _roadPathLabel;
 
         private static float _blockTop;
@@ -64,6 +71,13 @@ namespace DisasterPlus.Game
                 VolcanoRows.AddRow(p, "EffectClearingRefused", ref y, NoteHeight);
             _clearingCappedLabel = VolcanoRows.AddRow(p, "EffectClearingCapped", ref y, NoteHeight);
 
+            // ── 隆起（T6）────────────────────────────────────
+            _upliftLabel = VolcanoRows.AddRow(p, "EffectUplift", ref y);
+            _upliftRadiusLabel = VolcanoRows.AddRow(p, "EffectUpliftRadius", ref y);
+            // 追随の遅れの行は数字と説明を両方持つので、注記より 1 行ぶん高くする。
+            _catchUpLabel = VolcanoRows.AddRow(p, "EffectCatchUp", ref y, CatchUpHeight);
+            _craterLabel = VolcanoRows.AddRow(p, "EffectCrater", ref y);
+
             // ★ **道路を取り除けない環境の断り**。これだけは位相に関係なく出す
             //    （設計書 §1.2）。黙って火山を作らないのがいちばん悪い。
             _roadPathLabel = VolcanoRows.AddRow(p, "EffectRoadPath", ref y, 72f);
@@ -88,7 +102,12 @@ namespace DisasterPlus.Game
 
             // 道路の経路が無い環境の断りは、位相に関係なく出す。
             bool roadPathBroken = !s.RoadPathAvailable;
-            bool clearing = InProgress(s.Phase);
+
+            // ★ 隆起が終わった火山の実績は**終わってからも出したままにする**。
+            //   位相が Done に落ちた瞬間に全部消えると、「山ができた」の結果
+            //   （山頂の高さ・火口・壊した数）を読む機会が 1 度も無い。
+            //   新しい火山を始めるか都市を出ると Reset で 0 に戻る。
+            bool clearing = InProgress(s.Phase) || s.UpliftComplete;
 
             _showing = roadPathBroken || clearing;
             if (!_showing)
@@ -121,6 +140,8 @@ namespace DisasterPlus.Game
 
                 y = ReflowNote(y, _clearingCappedLabel,
                     s.ClearingCapped ? Strings.VolcanoSurveyCapped : "");
+
+                y = RefreshUplift(y, s);
             }
             else
             {
@@ -128,12 +149,80 @@ namespace DisasterPlus.Game
                 y = ReflowRow(y, _clearingCountsLabel, "");
                 y = ReflowNote(y, _clearingRefusedNoteLabel, "");
                 y = ReflowNote(y, _clearingCappedLabel, "");
+                y = ReflowRow(y, _upliftLabel, "");
+                y = ReflowRow(y, _upliftRadiusLabel, "");
+                y = Reflow(y, _catchUpLabel, "", CatchUpHeight, CatchUpHeight + 4f);
+                y = ReflowRow(y, _craterLabel, "");
             }
 
             y = Reflow(y, _roadPathLabel,
                 roadPathBroken ? Strings.VolcanoRoadPathUnavailable : "", 72f, 76f);
 
             _blockBottom = y;
+        }
+
+        /// <summary>
+        /// 隆起の 4 行（T6）。**準備の段のうちは出さない** —— 進捗 0 % の行は
+        /// 「進んでいない」ではなく「まだその段に入っていない」だからである。
+        ///
+        /// ★★ <b>有効半径には必ず「準備が届いた範囲」と添える</b>
+        /// （<c>Strings.VolcanoActiveRadiusRow</c> がその文言を持っている）。
+        /// これが罠 1 の可視化であり、実機で「準備が止まると隆起も止まる」ことを
+        /// 目で確かめられる唯一の行である。
+        /// </summary>
+        private static float RefreshUplift(float y, VolcanoSnapshot s)
+        {
+            bool uplifting = s.Phase != VolcanoPhase.Clearing;
+            if (!uplifting)
+            {
+                y = ReflowRow(y, _upliftLabel, "");
+                y = ReflowRow(y, _upliftRadiusLabel, "");
+                y = Reflow(y, _catchUpLabel, "", CatchUpHeight, CatchUpHeight + 4f);
+                y = ReflowRow(y, _craterLabel, "");
+                return y;
+            }
+
+            y = ReflowRow(y, _upliftLabel,
+                Strings.VolcanoUpliftRow + ": " + Strings.VolcanoUpliftProgress + " "
+                + (s.ProgressUnit * 100f).ToString("F0") + "%"
+                + "    " + Strings.VolcanoSummitRow + ": +"
+                + s.SummitMetres.ToString("F0") + " " + Strings.VolcanoMetres
+                + " / " + s.Footprint.HeightMetres.ToString("F0") + " "
+                + Strings.VolcanoMetres);
+
+            y = ReflowRow(y, _upliftRadiusLabel,
+                Strings.VolcanoActiveRadiusRow + ": "
+                + s.ActiveRadiusMetres.ToString("F0") + " " + Strings.VolcanoMetres
+                + "    " + Strings.VolcanoTilesRow + ": "
+                + s.UpliftTileCursor + " / " + s.UpliftTileCount);
+
+            y = Reflow(y, _catchUpLabel, CatchUpText(s), CatchUpHeight, CatchUpHeight + 4f);
+            y = ReflowRow(y, _craterLabel, s.CraterCarved ? Strings.VolcanoCraterCarved : "");
+            return y;
+        }
+
+        /// <summary>
+        /// 「建てられる地面」と水位の遅れ（設計書 §7.3、§A-2 / §A-4）。**不具合ではない。**
+        ///
+        /// ★ 換算は <c>FeatureHost.FramesPerMinute</c> から出す。**定数を直書きしない**
+        ///   （③でこれを直書きして 4 倍ずれた前科がある）。読めないときは
+        ///   **フレーム数だけを出す** —— 出せない値を 0 として出さない。
+        /// </summary>
+        private static string CatchUpText(VolcanoSnapshot s)
+        {
+            int frames = s.Footprint.BlockHeightCatchUpFrames;
+            if (frames <= 0) return "";
+
+            string text = Strings.VolcanoCatchUpRow + ": " + frames + " " + Strings.VolcanoFrames;
+
+            float framesPerMinute = FeatureHost.FramesPerMinute;
+            if (framesPerMinute > 0f)
+            {
+                text += " (" + (frames / framesPerMinute).ToString("F0") + " "
+                        + Strings.VolcanoMinutes + ")";
+            }
+
+            return text + "  " + Strings.VolcanoBuildabilityNote;
         }
 
         /// <summary>

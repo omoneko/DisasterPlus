@@ -269,6 +269,13 @@ namespace DisasterPlus.Game
                 ModSettings.VolcanoClearingLeadMetres.value,
                 v => ModSettings.VolcanoClearingLeadMetres.value = (int)v);
 
+            // ★ 隆起にかけるゲーム内分（T6）。長すぎる値を入れても
+            //    UpliftSchedule.TotalTicksFor が「山頂が毎 tick 1/64 m 以上動く」上限で
+            //    切り詰めるので、**無言で隆起が止まることは無い**（罠 2）。
+            volcano.AddSlider(Strings.VolcanoUpliftMinutes, 5f, 240f, 5f,
+                ModSettings.VolcanoUpliftMinutes.value,
+                v => ModSettings.VolcanoUpliftMinutes.value = (int)v);
+
             // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
             volcano.AddButton(Strings.VolcanoResetButton, delegate
             {

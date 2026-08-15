@@ -127,11 +127,11 @@ namespace DisasterPlus.Game
         public static VolcanoFootprint Footprint { get { return _footprint; } }
 
         /// <summary>
-        /// 隆起の進捗 [0,1]。**T6 が動かすまで常に 0 である。**
+        /// 隆起の進捗 [0,1]。T6 以降は <see cref="VolcanoUplift.ProgressUnit"/> そのもの。
         /// <b>0 のうちは行にしないこと</b> —— 「進捗 0%」は「進んでいない」ではなく
-        /// 「⑤がまだ進捗という概念を持っていない」だからである。
+        /// 「まだ隆起という段に入っていない」だからである。
         /// </summary>
-        public static float ProgressUnit { get { return 0f; } }
+        public static float ProgressUnit { get { return VolcanoUplift.ProgressUnit; } }
 
         /// <summary>
         /// 直近に断った理由（**英語・診断用**）。断っていなければ null。
@@ -159,6 +159,8 @@ namespace DisasterPlus.Game
             // 準備の実績も持ち越さない。**進行中の火山は保存しない**ので、
             // 都市を出入りすると準備は 0 からになる（地形はそのままの形で残る）。
             VolcanoClearing.Reset();
+            // ★ 隆起の退避配列も返す（半径 3 km で 279 KB）。**地形は戻らない。**
+            VolcanoUplift.Reset();
         }
 
         /// <summary>
@@ -210,7 +212,7 @@ namespace DisasterPlus.Game
                     break;
             }
 
-            StepPhase(deltaMinutes);
+            StepPhase(frame, deltaMinutes);
         }
 
         /// <summary>
@@ -224,25 +226,48 @@ namespace DisasterPlus.Game
         /// <c>UpliftSchedule.ActiveRadiusMetres(R, VolcanoClearing.ClearedRadiusMetres)</c> で、
         /// 準備が届いていなければ 0 が返る。
         /// </summary>
-        private static void StepPhase(float deltaMinutes)
+        private static void StepPhase(uint frame, float deltaMinutes)
         {
-            if (_phase != VolcanoPhase.Clearing) return;
             if (!_footprint.Valid) return;
 
-            // 隆起はまだ 1 度も動いていないので進捗は 0。前線は
-            // ModSettings.VolcanoClearingLeadMetres のぶんだけ先へ出る。
-            VolcanoClearing.Tick(_footprint, 0f, deltaMinutes);
+            if (_phase == VolcanoPhase.Clearing)
+            {
+                // 隆起はまだ 1 度も動いていないので進捗は 0。前線は
+                // ModSettings.VolcanoClearingLeadMetres のぶんだけ先へ出る。
+                VolcanoClearing.Tick(_footprint, 0f, deltaMinutes);
 
-            if (!VolcanoClearing.FrontReached) return;
+                if (!VolcanoClearing.FrontReached) return;
 
-            // ★ 最初の前線まで届いた。ここから先は隆起が進捗を持ち、準備はその前を
-            //   走る（ring lockstep）。**T6 が入るまで隆起は動かない**ので、
-            //   ⑤はこの位相に入ったまま止まる —— T4 が Clearing で止めていたのと同じ扱いで、
-            //   途中で止まっていることが位相と診断から見える形にしてある。
-            _phase = VolcanoPhase.Uplifting;
-            Log.Info("volcano clearing reached its first front ("
-                     + VolcanoClearing.ClearedRadiusMetres.ToString("F0")
-                     + " m); the uplift starts when T6 lands");
+                // 最初の前線まで届いた。ここから先は隆起が進捗を持ち、
+                // 準備はその前を走る（ring lockstep）。
+                _phase = VolcanoPhase.Uplifting;
+                Log.Info("volcano clearing reached its first front ("
+                         + VolcanoClearing.ClearedRadiusMetres.ToString("F0")
+                         + " m); the uplift starts now");
+                return;
+            }
+
+            if (_phase != VolcanoPhase.Uplifting) return;
+
+            // ★★ **順序がこの 2 行そのものである**（設計書 §1.2 / 罠 1）。
+            //    準備を先に、隆起の進捗を渡して前へ走らせ、そのあとで隆起が
+            //    「準備が届いた半径」の内側だけを上げる。入れ替えてはいけない。
+            VolcanoClearing.Tick(_footprint, VolcanoUplift.ProgressUnit, deltaMinutes);
+            VolcanoUplift.Tick(_footprint, frame, deltaMinutes);
+
+            if (!VolcanoUplift.Complete) return;
+
+            // ★ **T7 が入るまでは、ここで終わりにする。** 位相を Erupting に置いて
+            //   止めると <c>InProgress()</c> が真のままになり、**プレイヤーは 2 つ目の
+            //   火山を永久に置けなくなる**。Done は「⑤が今できることは全部終わった」
+            //   という事実でもあり、地形はそのまま残る（不可逆）。
+            //   T7 はこの遷移先を Erupting に差し替える。
+            _phase = VolcanoPhase.Done;
+            _lastRefusal = null;
+            Log.Info("volcano uplift complete: summit +"
+                     + VolcanoUplift.SummitMetres.ToString("F0")
+                     + " m, crater " + (VolcanoUplift.CraterCarved ? "carved" : "NOT carved")
+                     + "; the eruption starts when T7 lands");
         }
 
         /// <summary>
@@ -343,6 +368,8 @@ namespace DisasterPlus.Game
             // ★ 準備の実績も畳む。**既に壊した建物と道路は戻らない**（不可逆）。
             //   畳まないと、次に開いたパネルが前の火山の破壊数を名乗る。
             VolcanoClearing.Reset();
+            // ★ 隆起の退避配列も返す（半径 3 km で 279 KB）。**地形は戻らない。**
+            VolcanoUplift.Reset();
             _lastRefusal = "stopped by the player; the terrain that already changed stays changed";
         }
 

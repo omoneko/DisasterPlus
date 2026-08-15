@@ -909,5 +909,28 @@ namespace DisasterPlus.Game
 
         public static string VolcanoClearingLead =
             "How far the clearing runs ahead of the uplift (m)";
+
+        // --- ⑤火山（Task 6: 隆起） ---
+        //
+        // ★ ここも [measured] は付かない。進捗も山頂も有効半径も**⑤が決めた数字**で
+        //   あって、ゲームが計算した値ではない（設計書 §7.4）。
+        //
+        // ★ **有効半径には「準備が届いた範囲」と添える**（VolcanoActiveRadiusRow）。
+        //   これが罠 1 の可視化であり、実機で「準備が止まると隆起も止まる」ことを
+        //   目で確かめられる唯一の行である。**短くしないこと。**
+        public static string VolcanoUpliftRow = "Uplift";
+        public static string VolcanoUpliftProgress = "Progress";
+        public static string VolcanoSummitRow = "Summit";
+        public static string VolcanoActiveRadiusRow =
+            "Active radius (as far as the clearing has reached)";
+        public static string VolcanoTilesRow = "Terrain tiles updated";
+        public static string VolcanoUpliftMinutes = "Time the uplift takes (in-game minutes)";
+
+        // ★ 設計書 §7.3 の見積り。**不具合ではない**ことは VolcanoBuildabilityNote が
+        //   既に言っているので、ここは数字の見出しだけを持つ。
+        public static string VolcanoCatchUpRow = "Buildable ground catches up in";
+        public static string VolcanoFrames = "simulation frames";
+
+        public static string VolcanoCraterCarved = "Summit crater carved.";
     }
 }

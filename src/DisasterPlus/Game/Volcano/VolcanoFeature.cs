@@ -239,6 +239,56 @@ namespace DisasterPlus.Game
             {
                 b.Line(2, "clearing failure", VolcanoClearing.LastFailure);
             }
+
+            WriteUplift(b, snapshot);
+        }
+
+        /// <summary>
+        /// 隆起（T6）の実績。
+        ///
+        /// ★ <c>cells written</c> と <c>active radius</c> の 2 つが、罠 1 と罠 2 を
+        /// 実機で切り分ける唯一の材料である ——
+        /// <c>cells written</c> が 0 なら 1 tick の増分が丸めで消えているか、
+        /// もう目標に届いている。<c>active radius</c> が伸びないなら準備が止まっている。
+        ///
+        /// ★ <c>refused buildings</c> をここにも出すのは、§A-3 のフィードバックループの
+        /// 規模がそれそのものだからである（<c>m_flattenTerrain == false</c> の建物が
+        /// 動くたびに追加の <c>UpdateArea</c> が 1 回増える）。
+        /// </summary>
+        private static void WriteUplift(DiagnosticBuilder b, VolcanoSnapshot snapshot)
+        {
+            b.Line(1, "uplift", "tick " + VolcanoUplift.Ticks + "/" + VolcanoUplift.TotalTicks
+                                + "  progress " + (snapshot.ProgressUnit * 100f).ToString("F0")
+                                + "%  summit +" + snapshot.SummitMetres.ToString("F1") + " m"
+                                + (snapshot.UpliftComplete ? " (complete)" : ""));
+            b.Line(2, "active radius", snapshot.ActiveRadiusMetres.ToString("F0")
+                                       + " m (as far as the clearing has reached)");
+            b.Line(2, "cells written", VolcanoUplift.CellsWrittenLastTick
+                                       + " last tick; tile " + snapshot.UpliftTileCursor
+                                       + "/" + snapshot.UpliftTileCount);
+            b.Line(2, "summit crater", snapshot.CraterCarved ? "carved" : "not carved yet");
+
+            // 「建てられる地面」と水位の遅れ。**これは不具合ではない**（設計書 §7.3）。
+            // 換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。
+            int frames = snapshot.Footprint.BlockHeightCatchUpFrames;
+            float framesPerMinute = FeatureHost.FramesPerMinute;
+            string catchUp = frames + " frames";
+            if (framesPerMinute > 0f)
+            {
+                catchUp += " (about " + (frames / framesPerMinute / 60f).ToString("F1")
+                           + " in-game hours)";
+            }
+            b.Line(2, "block heights catch-up", catchUp + " - this is not a bug");
+
+            b.Line(2, "refused buildings still pinning",
+                snapshot.BuildingsRefused
+                + " (each one keeps its cell at the original height and adds a terrain "
+                + "update of its own)");
+
+            if (!string.IsNullOrEmpty(VolcanoUplift.LastFailure))
+            {
+                b.Line(2, "uplift failure", VolcanoUplift.LastFailure);
+            }
         }
 
         /// <summary>

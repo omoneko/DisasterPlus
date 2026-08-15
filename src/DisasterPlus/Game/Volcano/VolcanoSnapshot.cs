@@ -183,6 +183,34 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly bool RoadPathAvailable;
 
+        // ── T6（隆起）が足した 6 つ ────────────────────────────────
+        //
+        // ★ 隆起の進捗そのものは新しいフィールドを作らず <see cref="ProgressUnit"/> を
+        //   使う（T2 から在って T5 まで常に 0 だった）。進捗を 2 つ持つと、
+        //   いつか片方だけ更新される。
+
+        /// <summary>今の山頂の盛り上がり（m）。**元の地形高さからの相対量**である。</summary>
+        public readonly float SummitMetres;
+
+        /// <summary>
+        /// 今この tick に上げてよい半径（m）＝**準備が届いた範囲**。
+        /// パネルはそう添えて出す —— 罠 1（準備より先に上げる）を実機で目で
+        /// 確かめられる唯一の行である。
+        /// </summary>
+        public readonly float ActiveRadiusMetres;
+
+        /// <summary>隆起が終わったか。</summary>
+        public readonly bool UpliftComplete;
+
+        /// <summary>山頂の火口を彫ったか（⑤全体で 1 回だけ起きる）。</summary>
+        public readonly bool CraterCarved;
+
+        /// <summary>影響矩形を覆うタイル数。</summary>
+        public readonly int UpliftTileCount;
+
+        /// <summary>次に <c>UpdateArea</c> するタイルの番号。</summary>
+        public readonly int UpliftTileCursor;
+
         public VolcanoSnapshot(bool valid, VolcanoTerrainFacts terrain,
                                uint currentFrame, bool gameMode,
                                VolcanoPhase phase, VolcanoFootprint footprint,
@@ -190,7 +218,10 @@ namespace DisasterPlus.Game
                                float clearedRadiusMetres, bool clearingComplete,
                                int buildingsDestroyed, int segmentsDestroyed,
                                int buildingsRefused, bool clearingCapped,
-                               bool roadPathAvailable)
+                               bool roadPathAvailable,
+                               float summitMetres, float activeRadiusMetres,
+                               bool upliftComplete, bool craterCarved,
+                               int upliftTileCount, int upliftTileCursor)
         {
             Valid = valid;
             Terrain = terrain;
@@ -208,6 +239,12 @@ namespace DisasterPlus.Game
             BuildingsRefused = buildingsRefused;
             ClearingCapped = clearingCapped;
             RoadPathAvailable = roadPathAvailable;
+            SummitMetres = summitMetres;
+            ActiveRadiusMetres = activeRadiusMetres;
+            UpliftComplete = upliftComplete;
+            CraterCarved = craterCarved;
+            UpliftTileCount = upliftTileCount;
+            UpliftTileCursor = upliftTileCursor;
         }
 
         /// <summary>
@@ -222,7 +259,8 @@ namespace DisasterPlus.Game
         {
             return new VolcanoSnapshot(false, new VolcanoTerrainFacts(), 0u, true,
                                        VolcanoPhase.Idle, VolcanoFootprint.None, 0f, null, false,
-                                       0f, false, 0, 0, 0, false, true);
+                                       0f, false, 0, 0, 0, false, true,
+                                       0f, 0f, false, false, 0, 0);
         }
     }
 }

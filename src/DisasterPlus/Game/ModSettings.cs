@@ -85,6 +85,13 @@ namespace DisasterPlus.Game
         /// </summary>
         public static SavedInt VolcanoClearingLeadMetres;
 
+        /// <summary>
+        /// 隆起にかけるゲーム内分。<c>UpliftSchedule.TotalTicksFor</c> が
+        /// 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰めるので、長すぎる値を
+        /// 入れても無言で止まることは無い。
+        /// </summary>
+        public static SavedInt VolcanoUpliftMinutes;
+
         /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
         public const int VolcanoShapeShield = 0;
         public const int VolcanoShapeStrato = 1;
@@ -229,6 +236,10 @@ namespace DisasterPlus.Game
             // 準備の前線が隆起の前線より何メートル先を走るか。0 にすると
             // 「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
             VolcanoClearingLeadMetres = new SavedInt("volcanoClearLead", FileName, 96, true);
+
+            // 隆起にかけるゲーム内分。UpliftSchedule.TotalTicksFor が
+            // 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰める。
+            VolcanoUpliftMinutes = new SavedInt("volcanoUpliftMinutes", FileName, 30, true);
 
             _ready = true;
         }
