@@ -170,6 +170,8 @@ namespace DisasterPlus.Game
         private static Material _material;
         private static float _configuredUnit = -1f;
         private static VolcanoBorrowFacts _borrowFacts;
+        private static string _shaderName;
+        private static bool _particleShaderResolved;
         private static bool _shaderWarned;
         private static bool _borrowWarned;
         private static bool _renderErrorLogged;
@@ -197,6 +199,19 @@ namespace DisasterPlus.Game
 
         /// <summary>⑤自前の噴出物を今描いているか。</summary>
         public static bool Drawing { get { return _plume != null && _particles != null; } }
+
+        /// <summary>
+        /// 噴煙のマテリアルが実際に解決したシェーダの名前（**null なら 1 つも取れなかった**）。
+        /// 診断に出す —— 将来のゲーム更新で黙って不可視になったときの唯一の手がかり。
+        /// </summary>
+        public static string ShaderName { get { return _shaderName; } }
+
+        /// <summary>
+        /// 粒子系のシェーダ（加算 / アルファブレンド）が取れたか。**<c>Standard</c> は
+        /// ここに数えない**（全体レビュー M10）——<c>Standard</c> は Unity の組み込みで
+        /// 実質必ず非 null なので、混ぜた瞬間にこの旗は**構造上 1 度も false になれない**。
+        /// </summary>
+        public static bool ParticleShaderResolved { get { return _particleShaderResolved; } }
 
         /// <summary>直近の失敗（**英語・診断用**）。無ければ null。</summary>
         public static string LastFailure { get { return _lastFailure; } }
@@ -546,12 +561,21 @@ namespace DisasterPlus.Game
         /// ★ 判定は必ず <c>!= null</c> で行う（<c>UnityEngine.Object</c> の多重定義）。
         ///   <c>??</c> は fake-null を素通しするので、破棄済みの <c>Shader</c> を
         ///   掴んだときにフォールバックが働かない（④の <c>TyphoonCloud</c> の同じ注記）。
+        ///
+        /// ★★ <b><c>Standard</c> は「取れた」の外側に置く</b>（全体レビュー M10）。
+        ///   <see cref="FindShader"/> の末尾が <c>Shader.Find("Standard")</c> だった頃、
+        ///   下の <c>s == null</c> は**構造上 1 度も真になれず**、<c>Log.Warn</c> も
+        ///   <see cref="LastFailure"/> も到達しない死んだ枝だった
+        ///   （<see cref="VolcanoLavaFx"/> のクラス doc が同じ罠を避けている）。
+        ///   しかも <c>Standard</c> を素で使うと**不透明な板**になるので、
+        ///   あちらと同じく透過モードへ落とす。
         /// </summary>
         private static Material BuildMaterial()
         {
-            Shader s = FindShader();
+            Shader s = FindShader(out _particleShaderResolved);
             if (s == null)
             {
+                _shaderName = null;
                 if (!_shaderWarned)
                 {
                     _shaderWarned = true;
@@ -562,13 +586,27 @@ namespace DisasterPlus.Game
                 return null;
             }
 
+            _shaderName = s.name;
+
             var m = new Material(s);
             m.name = "DisasterPlus_VolcanoPlume";
+
+            // ★ 粒子系が 1 つも取れなかったときの受け皿。透過にしないと
+            //   噴煙が**不透明な四角い板の群れ**になる。
+            if (s.name == "Standard") MakeStandardTransparent(m);
+
             return m;
         }
 
-        private static Shader FindShader()
+        /// <summary>
+        /// 使えるシェーダを 1 つ。<paramref name="particleResolved"/> は
+        /// **粒子系（加算 / アルファブレンド）が取れたか**で、<c>Standard</c> では false。
+        /// このビルドで実際に解決するのは <c>Particles/Additive</c> である（§H-22）。
+        /// </summary>
+        private static Shader FindShader(out bool particleResolved)
         {
+            particleResolved = true;
+
             Shader s = Shader.Find("Particles/Additive");
             if (s != null) return s;
 
@@ -578,8 +616,30 @@ namespace DisasterPlus.Game
             s = Shader.Find("Particles/Alpha Blended");
             if (s != null) return s;
 
+            s = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
+            if (s != null) return s;
+
+            // ★ ここから下は「粒子系が 1 つも無かった」場合の受け皿である。
+            particleResolved = false;
+
             s = Shader.Find("Standard");
             return s != null ? s : null;
+        }
+
+        /// <summary>
+        /// <c>Standard</c> を透過モードにする（<see cref="VolcanoLavaFx"/> と同じ 7 行）。
+        /// **共有していない**のは、あちらが T9 の独立性のために参照元を 4 ファイルに
+        /// 限っているためである（あちらのクラス doc の grep）。
+        /// </summary>
+        private static void MakeStandardTransparent(Material m)
+        {
+            m.SetFloat("_Mode", 3f);
+            m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            m.SetInt("_ZWrite", 0);
+            m.DisableKeyword("_ALPHATEST_ON");
+            m.DisableKeyword("_ALPHABLEND_ON");
+            m.EnableKeyword("_ALPHAPREMULTIPLY_ON");
         }
 
         /// <summary>

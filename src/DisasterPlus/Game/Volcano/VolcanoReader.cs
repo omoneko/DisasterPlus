@@ -25,10 +25,11 @@ namespace DisasterPlus.Game
     /// （<c>LongPeriodDamage.Sweep</c> / <c>TyphoonWind.Sweep</c> の同じ注記）。
     ///
     /// > **⑤は災害まわりの型に一切触らない。** 設計書 §2 が「災害スロットに
-    /// > 載せない」と決めており、事実文書 §D-11 が「ND 無しではバニラの災害プレハブが
-    /// > 1 つも無く、災害の検出 API は <c>m_DisasterWrapper</c> が null で NRE になる」と
+    /// > 載せない」と決めており、事実文書 §D-11 がその理由（ND 無しではバニラの
+    /// > プレハブが 1 つも無く、検出の経路は内部のラッパが null で NRE になる）を
     /// > 確定させている（罠 6）。担保は grep なので、**その API 名を doc にも書かない**
-    /// > （<see cref="VolcanoFeature"/> のクラス doc）。
+    /// > —— 名前が要るときは §D-11 を指すこと（<see cref="VolcanoFeature"/> の
+    /// > クラス doc がそう決めており、ここは一度それを破っていた。全体レビュー M15）。
     /// </summary>
     public static class VolcanoReader
     {
@@ -85,7 +86,7 @@ namespace DisasterPlus.Game
                                            VolcanoClearing.TotalSegmentsDestroyed,
                                            VolcanoClearing.LastBuildingsRefused,
                                            VolcanoClearing.LastCapped,
-                                           VolcanoClearing.RoadPathAvailable,
+                                           VolcanoClearing.ClearingPathAvailable,
                                            VolcanoUplift.SummitMetres,
                                            VolcanoUplift.ActiveRadiusMetres,
                                            VolcanoUplift.Complete,

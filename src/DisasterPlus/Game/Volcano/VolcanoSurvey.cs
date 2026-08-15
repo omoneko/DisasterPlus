@@ -2,7 +2,6 @@ using ColossalFramework;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Earthquake;
 using DisasterPlus.Core.Volcano;
-using UnityEngine;
 
 namespace DisasterPlus.Game
 {
@@ -125,14 +124,17 @@ namespace DisasterPlus.Game
     /// NetManager.Awake             : m_segments = new Array16&lt;NetSegment&gt;(36864)
     /// </code>
     ///
-    /// **セルに入れる位置（両端ノードの中点）と、ここで距離を測る位置
-    /// （<c>m_middlePosition</c>）は同じではない。** 曲がった道路ではベジェの中点が
-    /// ノードの中点から離れるので、<b>矩形を <see cref="SegmentGridMargin"/> セルだけ
-    /// 広げてから走査する</b>。広げないと、範囲の縁にある曲線道路を取りこぼす。
-    /// 距離の代表点に <c>m_middlePosition</c> を選んだのは、それが「その道路が
-    /// 実際にどこにあるか」だからである。
+    /// **セルに入れる位置（両端ノードの中点）と、道路が実際に伸びている範囲は
+    /// 同じではない。** だから矩形を <c>VolcanoScan.SegmentGridMargin</c> セルだけ
+    /// 広げてから走査し、距離は**両端ノード → 中点 → 両端ノードの折れ線**で測る。
     ///
-    /// **どちらの中点も、長い 1 本の道路の一部だけが範囲に掛かる場合を正しく表せない。**
+    /// ★★ <b>マスクも余白も当たり判定も、このファイルは 1 つも持っていない。</b>
+    /// 全部 <see cref="VolcanoScan"/> にあり、**準備段（<see cref="VolcanoClearing"/>）が
+    /// 同じものを使う**。全体レビュー I2 は、ここが独自にマスクを持っていたせいで
+    /// <c>Untouchable</c> と <c>Collapsed</c> を数え落とし、**不可逆の操作の直前に
+    /// 壊れる数を実際より少なく見せていた**ことを見つけている。
+    ///
+    /// **それでも長い 1 本の道路の一部だけが範囲に掛かる場合は正しく表せない。**
     /// だからこれは概数であり、<see cref="VolcanoConfirmRows"/> はそう名乗る（設計書 §7.2）。
     /// </summary>
     public static class VolcanoSurvey
@@ -158,27 +160,10 @@ namespace DisasterPlus.Game
         /// <summary>道路の連結リストを辿る回数の上限（<c>Array16&lt;NetSegment&gt;(36864)</c>）。</summary>
         private const int SegmentChainGuard = 36864;
 
-        /// <summary>道路の矩形を広げるセル数（クラス doc の「同じではない」）。</summary>
-        private const int SegmentGridMargin = 2;
-
-        /// <summary>
-        /// 候補にするフラグ条件。②④の <c>CandidateMask</c> と同じ形。
-        /// <c>Collapsed</c> と <c>Untouchable</c> を弾くのは、それらが準備段でも
-        /// 壊れない（あるいは既に瓦礫である）ためで、数に入れると
-        /// 「壊れる見込み」を実際より多く見せることになる。
-        /// </summary>
-        private const Building.Flags BuildingCandidateMask =
-            Building.Flags.Created | Building.Flags.Deleted
-            | Building.Flags.Untouchable | Building.Flags.Demolishing
-            | Building.Flags.Collapsed;
-
-        /// <summary>
-        /// 道路側の同じもの。<c>NetSegment.Flags</c> に <c>Demolishing</c> は無い
-        /// （IL 実測。クラス doc の一覧）。
-        /// </summary>
-        private const NetSegment.Flags SegmentCandidateMask =
-            NetSegment.Flags.Created | NetSegment.Flags.Deleted
-            | NetSegment.Flags.Untouchable | NetSegment.Flags.Collapsed;
+        // ★★ **マスクも余白も当たり判定もここには置かない**（クラス doc）。
+        //    <see cref="VolcanoScan"/> の 1 組を、準備段（VolcanoClearing）と共有する。
+        //    ②④の CandidateMask を写して Collapsed / Untouchable を弾いていた頃、
+        //    調査は「壊れる数」を実際より少なく見せていた（全体レビュー I2）。
 
         private static string _lastFailure;
 
@@ -221,8 +206,16 @@ namespace DisasterPlus.Game
 
                 // 地形高さ。**ゲームの配列から読んだだけの値**なので、
                 // 確認の行はここだけ [measured] を名乗ってよい（設計書 §7.4）。
+                //
+                // ★ 読めなければ**断る**（全体レビュー M14）。0 に倒すと「海面だった」と
+                //   区別が付かないまま、天井の判定も山の高さもその 0 を土台に計算され、
+                //   しかもその値に [measured] が付く。
                 float ground = TerrainHeightSampler.Instance.SampleHeight(point.X, point.Z);
-                if (float.IsNaN(ground)) ground = 0f;
+                if (float.IsNaN(ground))
+                {
+                    _lastFailure = "the ground height at the picked point could not be read";
+                    return false;
+                }
 
                 float height = VolcanoShape.HeightFor(form, requestedHeight, ground);
                 bool limited = VolcanoShape.HeightWasLimitedByCeiling(form, requestedHeight, ground);
@@ -323,10 +316,12 @@ namespace DisasterPlus.Game
                     //    形を崩すと T5 が同じファイルの隣に破壊を書くときに崩れたまま写る。
                     ushort next = buildings[id].m_nextGridBuilding;
 
-                    if ((buildings[id].m_flags & BuildingCandidateMask) == Building.Flags.Created)
+                    // ★ 述語は準備段とまったく同じもの（VolcanoScan）。
+                    if (VolcanoScan.IsCandidate(buildings[id].m_flags)
+                        && VolcanoScan.BuildingInside(buildings[id].m_position, origin,
+                                                      radiusSquared))
                     {
-                        var p = buildings[id].m_position;
-                        if (origin.DistanceSquaredTo(new Vec2(p.x, p.z)) <= radiusSquared) found++;
+                        found++;
                     }
 
                     id = next;
@@ -359,11 +354,14 @@ namespace DisasterPlus.Game
             //    合わないまま z*270+x で引くと、まったく別の場所の道路を数える。
             if (grid.Length != GridSide * GridSide) return -1;
 
-            int minX, maxX, minZ, maxZ, centreX, centreZ;
-            RectFor(centre, radius, SegmentGridMargin, out minX, out maxX, out minZ, out maxZ,
-                    out centreX, out centreZ);
+            // ★ ノードのバッファは折れ線判定に使う。読めなければ null のままで、
+            //   VolcanoScan が中点 1 点の判定に落ちる（準備段もまったく同じ）。
+            NetNode[] nodes = VolcanoScan.NodeBuffer(nm);
 
-            float radiusSquared = radius * radius;
+            int minX, maxX, minZ, maxZ, centreX, centreZ;
+            RectFor(centre, radius, VolcanoScan.SegmentGridMargin,
+                    out minX, out maxX, out minZ, out maxZ, out centreX, out centreZ);
+
             var origin = new Vec2(centre.X, centre.Z);
 
             int ordinalCount = OutwardCellOrder.OrdinalCount(
@@ -398,10 +396,11 @@ namespace DisasterPlus.Game
                 {
                     ushort next = segments[id].m_nextGridSegment;
 
-                    if ((segments[id].m_flags & SegmentCandidateMask) == NetSegment.Flags.Created)
+                    // ★ 述語は準備段とまったく同じもの（VolcanoScan）。
+                    if (VolcanoScan.IsCandidate(segments[id].m_flags)
+                        && VolcanoScan.SegmentInside(segments, nodes, id, origin, radius))
                     {
-                        Vector3 p = segments[id].m_middlePosition;
-                        if (origin.DistanceSquaredTo(new Vec2(p.x, p.z)) <= radiusSquared) found++;
+                        found++;
                     }
 
                     id = next;

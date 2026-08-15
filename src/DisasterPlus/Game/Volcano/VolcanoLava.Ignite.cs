@@ -46,6 +46,17 @@ namespace DisasterPlus.Game
         private const int MaxBuildingCellsPerStep = 25;
 
         /// <summary>
+        /// 1 歩で <c>BurnBuilding</c> を呼ぶ回数の上限。**全体レビュー M17。**
+        ///
+        /// 上限が<b>セル数だけ</b>だった頃、密集地の 1 セルにぶら下がる数百棟に対して
+        /// 1 歩で数百回の呼び出しが出ていた（セルの上限 25 は「歩が見る範囲」を
+        /// 縛るだけで、仕事量を縛っていない）。溶岩は 1 歩 12 m しか進まないのに
+        /// 着火半径は最大 60 m なので、**同じ建物を 1 本の流れが 5 回前後、
+        /// 8 本で最大 40 回叩く**。ここで縛るのは呼び出しそのものである。
+        /// </summary>
+        private const int MaxBuildingsPerStep = 48;
+
+        /// <summary>
         /// 樹木グリッドの 1 辺のセル数。<c>TreeManager.Awake</c> / <c>InitializeTree</c> の
         /// IL 実測（<c>TREEGRID_RESOLUTION = 540</c>、添字は <c>z*540 + x</c>）。
         /// </summary>
@@ -75,6 +86,12 @@ namespace DisasterPlus.Game
 
         /// <summary>1 歩で見る樹木グリッドのセル数の上限（半径 60 m なら実際は高々 5×5）。</summary>
         private const int MaxTreeCellsPerStep = 49;
+
+        /// <summary>
+        /// 1 歩で <c>BurnTree</c> を呼ぶ回数の上限（建物側と同じ理由。全体レビュー M17）。
+        /// 樹木は 1 セル 32 m でグリッドが密なので、建物より多めに取る。
+        /// </summary>
+        private const int MaxTreesPerStep = 96;
 
         /// <summary>
         /// <c>BurnTree</c> に渡す強さ。**<c>conv.u1</c> で切り捨てられる（クランプされない）**
@@ -261,6 +278,7 @@ namespace DisasterPlus.Game
 
             float radiusSquared = radius * radius;
             int cells = 0;
+            int burned = 0;
 
             for (int z = minZ; z <= maxZ; z++)
             {
@@ -288,6 +306,9 @@ namespace DisasterPlus.Game
 
                             if (dx * dx + dz * dz <= radiusSquared)
                             {
+                                // ★ 呼び出しそのものを縛る（全体レビュー M17）。
+                                if (++burned > MaxBuildingsPerStep) return;
+
                                 if (Burn(buildings, id)) _buildingsIgnited++;
                                 else _buildingsRefused++;
                             }
@@ -315,8 +336,11 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// 溶岩に触れた木へ火を付ける。**ND DLC が無いと必ず false になる**ので、
-        /// 呼ぶ前に <c>_treesAvailable</c> で分岐している（§B-7c の
-        /// <c>SupportsExpansion(NaturalDisasters)</c> ゲート）。
+        /// 呼ぶ前に <c>_treesAvailable</c> で分岐している（§B-7c の DLC ゲート。
+        /// ★ 全体レビュー M11 の追跡性の訂正: 事実文書は
+        /// <c>SupportsExpansion</c> と書いているが、本 MOD がここで実際に評価するのは
+        /// <c>ModCompat.NaturalDisastersOwned</c> ＝ <c>SteamHelper.IsDLCOwned</c> である。
+        /// レベルがロードされている間、この 2 つは同じ答えを返す）。
         ///
         /// 一度燃えた木は二度と燃えない（<c>m_flags &amp; 64 FireDamage</c> を
         /// <c>BurnTree</c> 自身が見る）。**空振りを異常として数えない。**
@@ -352,6 +376,7 @@ namespace DisasterPlus.Game
             float radiusSquared = radius * radius;
             int intensity = ClampTreeIntensity(TreeFireIntensity);
             int cells = 0;
+            int burned = 0;
 
             for (int z = minZ; z <= maxZ; z++)
             {
@@ -379,6 +404,9 @@ namespace DisasterPlus.Game
 
                             if (dx * dx + dz * dz <= radiusSquared)
                             {
+                                // ★ 呼び出しそのものを縛る（全体レビュー M17）。
+                                if (++burned > MaxTreesPerStep) return;
+
                                 if (tm.BurnTree(id, null, intensity)) _treesIgnited++;
                             }
                         }

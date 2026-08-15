@@ -180,10 +180,13 @@ namespace DisasterPlus.Game
         public readonly bool ClearingCapped;
 
         /// <summary>
-        /// 道路を取り除く経路がこのゲームのビルドで成立するか。
+        /// 準備（道路と建物を取り除くこと）の経路がこのゲームのビルドで成立するか。
         /// **false なら⑤は火山を 1 つも作らない**（設計書 §1.2）。
+        ///
+        /// ★ 道路だけでなく建物側（<c>CollapseBuilding</c>）も含む
+        /// （全体レビュー M9。<c>VolcanoClearing.ClearingPathAvailable</c> の doc）。
         /// </summary>
-        public readonly bool RoadPathAvailable;
+        public readonly bool ClearingPathAvailable;
 
         // ── T6（隆起）が足した 6 つ ────────────────────────────────
         //
@@ -280,7 +283,7 @@ namespace DisasterPlus.Game
                                float clearedRadiusMetres, bool clearingComplete,
                                int buildingsDestroyed, int segmentsDestroyed,
                                int buildingsRefused, bool clearingCapped,
-                               bool roadPathAvailable,
+                               bool clearingPathAvailable,
                                float summitMetres, float activeRadiusMetres,
                                bool upliftComplete, bool craterCarved,
                                int upliftTileCount, int upliftTileCursor,
@@ -306,7 +309,7 @@ namespace DisasterPlus.Game
             SegmentsDestroyed = segmentsDestroyed;
             BuildingsRefused = buildingsRefused;
             ClearingCapped = clearingCapped;
-            RoadPathAvailable = roadPathAvailable;
+            ClearingPathAvailable = clearingPathAvailable;
             SummitMetres = summitMetres;
             ActiveRadiusMetres = activeRadiusMetres;
             UpliftComplete = upliftComplete;
@@ -330,8 +333,8 @@ namespace DisasterPlus.Game
         /// <summary>
         /// 読み取りに失敗したときの 1 個。**0 を並べた「それらしい」値を作らない。**
         ///
-        /// ★ <see cref="RoadPathAvailable"/> だけ <b>true</b> を入れる。ここが false だと
-        /// パネルは「道路を取り除けないので火山は作りません」という**確定的な断り**を
+        /// ★ <see cref="ClearingPathAvailable"/> だけ <b>true</b> を入れる。ここが false だと
+        /// パネルは「取り除けないので火山は作りません」という**確定的な断り**を
         /// 出すが、この 1 個が言えるのは「今回の読み取りが失敗した」だけである。
         /// 読めなかったことを、測って分かった結論として名乗らない。
         /// </summary>

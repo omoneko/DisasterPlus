@@ -21,6 +21,7 @@ namespace DisasterPlus.Game
 
         private static bool _dlcEvaluated;
         private static bool _naturalDisastersOwned;
+        private static bool _naturalDisastersOwnedKnown;
 
         public static bool NdrPresent
         {
@@ -51,6 +52,27 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>
+        /// 上の値が**実際に測った答え**か（false なら判定に失敗して「持っている」に
+        /// 倒しただけ）。
+        ///
+        /// ★★ 全体レビュー M11。判定が例外で倒れた環境では
+        /// <see cref="NaturalDisastersOwned"/> は true を返すが、それは推定であって
+        /// 事実ではない。**診断がそれを「所持」と名乗ると、木が燃えない理由を
+        /// 探す人に嘘の手がかりを渡す**（<c>TreeManager.BurnTree</c> は DLC が無ければ
+        /// 黙って false を返す）。値そのものは倒したままにする ——
+        /// false に倒すと、判定に失敗しただけの環境で①②③④の機能が丸ごと隠れる。
+        /// **分岐は今までどおり、名乗りだけを正直にする。**
+        /// </summary>
+        public static bool NaturalDisastersOwnedKnown
+        {
+            get
+            {
+                if (!_dlcEvaluated) EvaluateDlc();
+                return _naturalDisastersOwnedKnown;
+            }
+        }
+
         private static void EvaluateDlc()
         {
             _dlcEvaluated = true;
@@ -58,17 +80,21 @@ namespace DisasterPlus.Game
             try
             {
                 _naturalDisastersOwned = SteamHelper.IsDLCOwned(SteamHelper.DLC.NaturalDisastersDLC);
+                _naturalDisastersOwnedKnown = true;
             }
             catch (System.Exception e)
             {
                 // 判定できないときは「持っている」に倒す。
                 // 機能を永久に隠す偽陰性より、実行時に諦める偽陽性の方が害が小さい
                 // （DisasterInfo が見つからなければ Task 10 が警告を出して黙って止まる）。
+                // ★ ただし**倒したことは覚えておく**（NaturalDisastersOwnedKnown）。
                 Log.Error("DLC check failed; assuming owned", e);
                 _naturalDisastersOwned = true;
+                _naturalDisastersOwnedKnown = false;
             }
 
-            Log.Info("Natural Disasters DLC owned: " + _naturalDisastersOwned);
+            Log.Info("Natural Disasters DLC owned: " + _naturalDisastersOwned
+                     + (_naturalDisastersOwnedKnown ? "" : " (ASSUMED; the check failed)"));
         }
 
         private static void Evaluate()

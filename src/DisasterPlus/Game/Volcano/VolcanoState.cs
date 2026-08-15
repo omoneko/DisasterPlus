@@ -112,6 +112,16 @@ namespace DisasterPlus.Game
     ///
     /// **黙って何もしないをやらない。** 断ったときは必ず <see cref="LastRefusal"/> に
     /// 英語 1 文を残す（④の <c>TyphoonSnapshot.Refusal</c> と同じ扱い）。
+    ///
+    /// ── ポーズ中も依頼には答える（全体レビュー I1）──────────────────
+    ///
+    /// 依頼の受け取り（<see cref="HandleRequest"/>）は
+    /// <c>VolcanoFeature.OnSimulationTick</c> の**ポーズガードより上**にあり、
+    /// 位相の前進（<see cref="Tick"/>）だけがガードの下にある。
+    /// <c>Survey</c> / <c>Cancel</c> / <c>Stop</c> は何も壊さないのでポーズ中も答え、
+    /// <c>Start</c> だけは断って理由を残す。**山を作る前にポーズするのは最も自然な
+    /// 操作**であり、そこで確認が永久に出てこないのは
+    /// このクラス doc が禁じている「黙って何もしない」そのものだった。
     /// </summary>
     public static class VolcanoState
     {
@@ -172,32 +182,40 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から呼ぶこと**（ポーズ中に山が育ち、建物が消える）。
+        /// 積まれている依頼を 1 件だけ拾って答える。**sim スレッド。**
+        ///
+        /// ★★ <b>これは <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
+        /// <u>上</u>から呼ぶ</b>（全体レビュー I1）。ガードの下に置いていた頃、
+        /// **ポーズ中に地面をクリックしたプレイヤーには何も起きなかった** ——
+        /// 状態の行は「影響範囲を調べています…」のまま永久に止まり、確認は一度も
+        /// 出ず、ログにも診断にも何も残らなかった。**山を作る前にポーズするのは
+        /// 最も自然な操作**であり、そこが「黙って何もしない」になっていた
+        /// （クラス doc がまさに禁じている形）。
+        ///
+        /// <paramref name="running"/> が false（ポーズ中）でも通すのは
+        /// <c>Survey</c> / <c>Cancel</c> / <c>Stop</c> の 3 つで、**どれも
+        /// 建物も道路も地形も 1 つも変えない**（調べる・捨てる・やめる）。
+        /// <c>Start</c> だけは通さない —— あれは不可逆の破壊の開始そのものなので、
+        /// ポーズ中に位相を進めない。**ただし黙って捨てず、理由を残す**
+        /// （パネルは確認の行に「ポーズ中は着手できません」を出し、
+        /// [作る] を押せなくする。<see cref="VolcanoConfirmRows"/>）。
         ///
         /// <see cref="VolcanoHub.TakeRequest"/> は<b>1 tick にちょうど 1 回</b>
         /// しか呼ばない（2 回呼ぶと 2 回目が必ず None になり、呼び出し順に依存した
-        /// 取りこぼしを作る。あちらの doc）。
-        ///
-        /// <paramref name="snapshot"/> は**この tick の頭で publish した状態**なので、
-        /// ここでは位相を読まず、地形が書けるか（<see cref="VolcanoTerrainFacts.Usable"/>）
-        /// だけを見る。<paramref name="frame"/> / <paramref name="deltaMinutes"/> は
-        /// T5〜T8 が使う（このタスクでは進める状態がまだ無い）。
+        /// 取りこぼしを作る。あちらの doc）。**その 1 回はここである。**
         /// </summary>
-        public static void Tick(VolcanoSnapshot snapshot, uint frame, float deltaMinutes)
+        public static void HandleRequest(VolcanoSnapshot snapshot, bool running)
         {
             VolcanoRequestData request = VolcanoHub.TakeRequest();
+            if (request.Kind == VolcanoRequest.None) return;
 
             // ★ 述語は⑤の門そのもの（VolcanoTerrainFacts.Usable）。
             //   「フィールドが解決した」で通すと、値が使えない環境で着手できてしまう。
             bool terrainUsable = snapshot != null && snapshot.Valid && snapshot.Terrain.Usable;
             if (!terrainUsable)
             {
-                if (request.Kind != VolcanoRequest.None)
-                {
-                    Refuse("the terrain write path is not usable in this build of the game; "
-                           + "no volcano can be placed");
-                }
+                Refuse("the terrain write path is not usable in this build of the game; "
+                       + "no volcano can be placed");
                 return;
             }
 
@@ -208,6 +226,16 @@ namespace DisasterPlus.Game
                     break;
 
                 case VolcanoRequest.Start:
+                    if (!running)
+                    {
+                        // **捨てない。名乗る。** 押した人が次に見るのは確認の行なので、
+                        // そこに出る文言と同じことをここでも残しておく。
+                        Refuse("no in-game time passed on this tick (the game is paused); "
+                               + "Disaster + does not start destroying the city while the "
+                               + "simulation is stopped. Press the button again with the "
+                               + "game running");
+                        break;
+                    }
                     HandleStart();
                     break;
 
@@ -219,6 +247,20 @@ namespace DisasterPlus.Game
                     HandleStop();
                     break;
             }
+        }
+
+        /// <summary>
+        /// 位相を前へ進める。**必ず <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
+        /// 下から呼ぶこと**（ポーズ中に山が育ち、建物が消える）。
+        ///
+        /// 依頼の受け取りはここには無い（<see cref="HandleRequest"/> がガードの上で
+        /// 済ませている）。
+        /// </summary>
+        public static void Tick(VolcanoSnapshot snapshot, uint frame, float deltaMinutes)
+        {
+            // ★ 述語は⑤の門そのもの（VolcanoTerrainFacts.Usable）。
+            bool terrainUsable = snapshot != null && snapshot.Valid && snapshot.Terrain.Usable;
+            if (!terrainUsable) return;
 
             StepPhase(frame, deltaMinutes);
         }
@@ -368,16 +410,21 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ **道路を取り除く経路が無い環境では、1 本も壊さずにここで断る**
+            // ★★ **準備の破壊経路が無い環境では、1 つも壊さずにここで断る**
             //    （設計書 §1.2 / T5 Step 1）。「道路だけ諦めて隆起する」は選ばない ——
             //    それは §1.2 が発見した失敗（山の中の平らな溝）を、分かったうえで
             //    出荷することになる。**判定は着手の直前に、破壊より先に置く。**
-            if (!VolcanoClearing.RoadPathAvailable)
+            //
+            //    ★ 述語は <c>VolcanoClearing.Sweep</c> が実際に門にしている式と同じ
+            //      （全体レビュー M9）。道路側だけを見ていた頃は、建物側が解決できない
+            //      環境で **火山が確定して <c>Clearing</c> のまま永久に止まった。**
+            if (!VolcanoClearing.ClearingPathAvailable)
             {
                 _settingsChanged = false;
                 _phase = VolcanoPhase.Refused;
-                _lastRefusal = "no usable road destruction path; raising the ground would leave "
-                               + "flat trenches where the roads are";
+                _lastRefusal = "no usable destruction path for the roads and buildings inside "
+                               + "the footprint; raising the ground would leave flat trenches "
+                               + "and bowls where they stand";
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Volcano, "VolcState",
                          _lastRefusal);
                 return;
@@ -409,10 +456,21 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// 進行中の火山を止める。**既に変わった地形は戻らない**（設計書 §7.1 / §E-13）。
-        /// T4 の時点では止める処理そのものがまだ無いので、位相を畳むだけである。
+        /// 止まるのは「これからの破壊と隆起」だけである。
+        ///
+        /// ★ 依頼を積むのは <see cref="VolcanoEffectRows"/> の [止める] ボタン 1 箇所だけで、
+        ///   そのボタンは進行中の位相のときしか出ない（全体レビュー I5）。
+        ///   それでも位相を見るのは、押した直後の 1 tick に位相が変わりうるからである。
         /// </summary>
         private static void HandleStop()
         {
+            if (!InProgress())
+            {
+                Refuse("no volcano is in progress (phase=" + _phase
+                       + "); the stop request was ignored");
+                return;
+            }
+
             _phase = VolcanoPhase.Idle;
             _footprint = VolcanoFootprint.None;
             _settingsChanged = false;

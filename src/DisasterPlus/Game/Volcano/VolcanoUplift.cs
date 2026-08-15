@@ -84,7 +84,16 @@ namespace DisasterPlus.Game
     /// ⑤が足しても <c>m_modifyingLevel</c> が 1 増えて 1 減るだけで、内側の <c>End</c> は
     /// <c>if (loc1 != 0) return</c>（IL_0017）で握り潰される。害は無いが意味も無く、
     /// 「バッチしているつもり」という誤解だけが残る。
-    /// **レビューの grep**: <c>BeginUpdateArea|EndUpdateArea</c> が <c>src/DisasterPlus/</c> に 0 件。
+    /// **レビューの grep**（★ 実際に走らせて件数を合わせてある。全体レビュー M12 ——
+    /// 素で走らせると**この規則の文そのもの**が 4 件引っかかり、
+    /// 「0 件」という手順が最初から成立していなかった。コメント行を落とすこと）:
+    ///
+    /// <code>
+    /// grep -rn --include=*.cs -E "BeginUpdateArea|EndUpdateArea" src/DisasterPlus/ \
+    ///   | grep -vE ':[0-9]+: *//' | wc -l          # -> 0
+    /// </code>
+    ///
+    /// <c>grep -v '///'</c> では足りない —— <c>//</c> 1 本のコメントも落とす必要がある。
     ///
     /// **main スレッドから <c>UpdateArea</c> を呼ぶのが本当に危ないほう**である。
     /// <c>m_modifyingLevel == 0</c> なので毎回フラッシュし、sim スレッドが溜めている

@@ -14,6 +14,20 @@ namespace DisasterPlus.Game
     /// 走査の形（セル 64・オフセット 135・<c>[0,269]</c>・<c>z*270+x</c>・
     /// <c>OutwardCellOrder</c>・次の ID を行動前に控える）は
     /// <c>VolcanoSurvey</c> / <c>TyphoonWind</c> / <c>LongPeriodDamage</c> と同じである。
+    ///
+    /// ★★ <b>「何が範囲に入っているか」はこのファイルが決めていない。</b>
+    /// マスクも余白も当たり判定も <see cref="VolcanoScan"/> にあり、
+    /// **調査（<see cref="VolcanoSurvey"/>）が同じものを使う** ——
+    /// 数える側と壊す側の述語が二度とずれないための構造である（全体レビュー I2 / I4）。
+    ///
+    /// ── 1 回の走査で壊す数の上限（全体レビュー M16）─────────────────
+    ///
+    /// 上限の判定は<b>連結リストを辿る途中にも置く</b>。セルの先頭でしか見ないと、
+    /// 1 つのセルに数百棟ぶら下がっている密集地で予算を大きく踏み越える。
+    /// 途中で打ち切ったセルは<b>次回の走査で先頭からやり直す</b>
+    /// （<c>ordinal</c> を 1 つ戻す）—— 途中まで進んだセルを終わったことにすると、
+    /// そのセルに残った建物の足元だけ地形が固定されたまま隆起する。
+    /// やり直しても二重に壊すことは無い（<c>Demolishing</c> はマスクが弾く）。
     /// </summary>
     public static partial class VolcanoClearing
     {
@@ -29,18 +43,36 @@ namespace DisasterPlus.Game
                                           out float reachedRadius)
         {
             capped = false;
-            reachedRadius = _frontRadius;
+
+            // ★★ **届いた半径の初期値は 0 である**（全体レビュー M7）。
+            //    以前はここで _frontRadius を入れていたので、下の「読めなかった」
+            //    3 つの return が**前線まで走査し終えたと名乗り**、T6 に
+            //    1 棟も壊れていない街の上を隆起させる許可を出していた。
+            //    実際に走れたと分かってから _frontRadius に上げる。
+            reachedRadius = 0f;
 
             // ★ Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
             //    new GameObject を走らせる main スレッド専用 API なので exists で先に見る。
-            if (!Singleton<BuildingManager>.exists) return 0;
+            if (!Singleton<BuildingManager>.exists)
+            {
+                _lastFailure = "BuildingManager is not available; nothing was cleared";
+                return 0;
+            }
 
             var bm = Singleton<BuildingManager>.instance;
-            if (bm == null) return 0;
+            if (bm == null)
+            {
+                _lastFailure = "BuildingManager is not available; nothing was cleared";
+                return 0;
+            }
 
             var buildings = bm.m_buildings != null ? bm.m_buildings.m_buffer : null;
             var grid = bm.m_buildingGrid;
-            if (buildings == null || grid == null) return 0;
+            if (buildings == null || grid == null)
+            {
+                _lastFailure = "the building buffer or grid is not readable; nothing was cleared";
+                return 0;
+            }
 
             // ★ 実測した長さと合わなければ走らない（推測で走らない。設計書 §6）。
             //   このとき**届いた半径は 0 にする** —— 前線に届いたことにすると、
@@ -50,9 +82,14 @@ namespace DisasterPlus.Game
             {
                 _lastFailure = "the building grid is not 270x270 in this build; "
                                + "nothing was cleared";
-                reachedRadius = 0f;
                 return 0;
             }
+
+            // ★ この 1 周が言える半径の上限（全体レビュー M8）。カーソルの途中から
+            //   再開したパスは、[0, cursor) を**そのときの（より小さい）前線**で
+            //   走査し終えている。今の前線でその内側まで走査したことにすると、
+            //   前回より外へ出た分の建物が残ったまま隆起が追い越す。
+            float passFront = PassFront(_buildingCursor, ref _buildingPassFront);
 
             int minX, maxX, minZ, maxZ, centreX, centreZ;
             RectFor(footprint.Centre, _frontRadius, 0, out minX, out maxX, out minZ, out maxZ,
@@ -71,7 +108,7 @@ namespace DisasterPlus.Game
 
             while (ordinal < ordinalCount)
             {
-                if (cells >= MaxCellsPerPass || scanned >= MaxBuildingsPerPass)
+                if (cells >= MaxCellsPerPass)
                 {
                     capped = true;
                     break;
@@ -95,6 +132,7 @@ namespace DisasterPlus.Game
 
                 ushort id = grid[index];
                 int guard = 0;
+                bool budgetHit = false;
 
                 while (id != 0 && id < buildings.Length)
                 {
@@ -103,19 +141,34 @@ namespace DisasterPlus.Game
                     //    （NetManager.ReleaseNodeImplementation → ReleaseBuilding）。
                     ushort next = buildings[id].m_nextGridBuilding;
 
-                    if ((buildings[id].m_flags & BuildingCandidateMask) == Building.Flags.Created)
+                    // ★ 述語は調査とまったく同じもの（VolcanoScan）。
+                    if (VolcanoScan.IsCandidate(buildings[id].m_flags)
+                        && VolcanoScan.BuildingInside(buildings[id].m_position, origin,
+                                                      radiusSquared))
                     {
-                        var p = buildings[id].m_position;
-                        if (origin.DistanceSquaredTo(new Vec2(p.x, p.z)) <= radiusSquared)
+                        // ★ 予算は**壊す直前**に見る（クラス doc の M16）。
+                        if (scanned >= MaxBuildingsPerPass)
                         {
-                            scanned++;
-                            if (Demolish(buildings, id)) destroyed++;
-                            else refused++;
+                            budgetHit = true;
+                            break;
                         }
+
+                        scanned++;
+                        if (Demolish(buildings, id)) destroyed++;
+                        else refused++;
                     }
 
                     id = next;
                     if (++guard >= BuildingChainGuard) break;
+                }
+
+                if (budgetHit)
+                {
+                    // このセルは途中である。**終わったことにしない** ——
+                    // 次回はこのセルの先頭からやり直す。
+                    capped = true;
+                    ordinal--;
+                    break;
                 }
             }
 
@@ -124,7 +177,12 @@ namespace DisasterPlus.Game
             _lastBuildingsRefused = refused;
             _totalBuildingsDestroyed += destroyed;
 
-            if (capped) reachedRadius = ReachedRadius(lastRing);
+            reachedRadius = capped ? ReachedRadius(lastRing) : _frontRadius;
+            if (reachedRadius > passFront) reachedRadius = passFront;
+
+            // 一周し切ったらカーソルは 0 に戻っている。次のパスは今の前線で
+            // 全域を走査するので、上限も今の前線に戻る。
+            if (_buildingCursor == 0) _buildingPassFront = 0f;
             return scanned;
         }
 
@@ -132,42 +190,62 @@ namespace DisasterPlus.Game
         /// 道路の走査。<c>demolish: true</c> で <c>PlayerNetAI</c> の解放経路へ入る
         /// （クラス doc の Step 1 の 1）。**dry-run に相当する引数がそもそも無い。**
         ///
-        /// 矩形は <see cref="SegmentGridMargin"/> セルだけ広げる —— セルを決める位置
-        /// （両端ノードの中点）と距離を測る位置（<c>m_middlePosition</c>）が違うので、
-        /// 広げないと範囲の縁にある曲線道路を取りこぼす（§F-15）。
+        /// 矩形は <c>VolcanoScan.SegmentGridMargin</c> セルだけ広げ、距離は
+        /// **両端ノード → 中点 → 両端ノードの折れ線**で測る（<see cref="VolcanoScan"/>）。
+        /// 中点 1 点で測っていた頃は、中心へ向かって伸びる幹線道路が取り除かれずに残り、
+        /// **完成した山の中に平らな溝が残っていた**（全体レビュー I4）。
         /// </summary>
         private static int ClearSegments(VolcanoFootprint footprint, out bool capped,
                                          out float reachedRadius)
         {
             capped = false;
-            reachedRadius = _frontRadius;
 
-            if (!Singleton<NetManager>.exists) return 0;
+            // ★★ 建物側と同じ理由で初期値は 0（全体レビュー M7）。
+            reachedRadius = 0f;
+
+            if (!Singleton<NetManager>.exists)
+            {
+                _lastFailure = "NetManager is not available; no road was removed";
+                return 0;
+            }
 
             var nm = Singleton<NetManager>.instance;
-            if (nm == null) return 0;
+            if (nm == null)
+            {
+                _lastFailure = "NetManager is not available; no road was removed";
+                return 0;
+            }
 
             var segments = nm.m_segments != null ? nm.m_segments.m_buffer : null;
             var grid = nm.m_segmentGrid;
-            if (segments == null || grid == null) return 0;
+            if (segments == null || grid == null)
+            {
+                _lastFailure = "the road buffer or grid is not readable; no road was removed";
+                return 0;
+            }
 
             // ★ 実測した長さと合わなければ走らない（推測で走らない。設計書 §6）。
             //    合わないまま z*270+x で引くと、まったく別の場所の道路を壊す。
             //    **届いた半径は 0**（上の建物側と同じ理由）。ここへ来る前に
-            //    RoadPathAvailable が false になって着手そのものを断っているので、
+            //    ClearingPathAvailable が false になって着手そのものを断っているので、
             //    実際にはまず到達しない二重の保険である。
             if (grid.Length != GridSide * GridSide)
             {
                 _lastFailure = "the road grid is not 270x270 in this build; no road was removed";
-                reachedRadius = 0f;
                 return 0;
             }
 
+            // ★ ノードのバッファ（折れ線判定）。読めなければ null のままで、
+            //   VolcanoScan が中点 1 点の判定に落ちる（調査もまったく同じ）。
+            NetNode[] nodes = VolcanoScan.NodeBuffer(nm);
+
+            // ★ 建物側と同じ「このパスが言える半径の上限」（全体レビュー M8）。
+            float passFront = PassFront(_segmentCursor, ref _segmentPassFront);
+
             int minX, maxX, minZ, maxZ, centreX, centreZ;
-            RectFor(footprint.Centre, _frontRadius, SegmentGridMargin,
+            RectFor(footprint.Centre, _frontRadius, VolcanoScan.SegmentGridMargin,
                     out minX, out maxX, out minZ, out maxZ, out centreX, out centreZ);
 
-            float radiusSquared = _frontRadius * _frontRadius;
             var origin = new Vec2(footprint.Centre.X, footprint.Centre.Z);
 
             int ordinalCount = OutwardCellOrder.OrdinalCount(
@@ -180,7 +258,7 @@ namespace DisasterPlus.Game
 
             while (ordinal < ordinalCount)
             {
-                if (cells >= MaxCellsPerPass || scanned >= MaxSegmentsPerPass)
+                if (cells >= MaxCellsPerPass)
                 {
                     capped = true;
                     break;
@@ -204,6 +282,7 @@ namespace DisasterPlus.Game
 
                 ushort id = grid[index];
                 int guard = 0;
+                bool budgetHit = false;
 
                 while (id != 0 && id < segments.Length)
                 {
@@ -211,19 +290,32 @@ namespace DisasterPlus.Game
                     //    その場で繋ぎ替えるので、控えないと残りが黙って飛ぶ。
                     ushort next = segments[id].m_nextGridSegment;
 
-                    if ((segments[id].m_flags & SegmentCandidateMask) == NetSegment.Flags.Created)
+                    // ★ 述語は調査とまったく同じもの（VolcanoScan）。
+                    if (VolcanoScan.IsCandidate(segments[id].m_flags)
+                        && VolcanoScan.SegmentInside(segments, nodes, id, origin, _frontRadius))
                     {
-                        var p = segments[id].m_middlePosition;
-                        if (origin.DistanceSquaredTo(new Vec2(p.x, p.z)) <= radiusSquared)
+                        // ★ 予算は**壊す直前**に見る（クラス doc の M16）。
+                        if (scanned >= MaxSegmentsPerPass)
                         {
-                            scanned++;
-                            if (Demolish(segments, id)) destroyed++;
-                            else refused++;
+                            budgetHit = true;
+                            break;
                         }
+
+                        scanned++;
+                        if (Demolish(segments, id)) destroyed++;
+                        else refused++;
                     }
 
                     id = next;
                     if (++guard >= SegmentChainGuard) break;
+                }
+
+                if (budgetHit)
+                {
+                    // このセルは途中である。次回はこのセルの先頭からやり直す。
+                    capped = true;
+                    ordinal--;
+                    break;
                 }
             }
 
@@ -232,8 +324,33 @@ namespace DisasterPlus.Game
             _lastSegmentsRefused = refused;
             _totalSegmentsDestroyed += destroyed;
 
-            if (capped) reachedRadius = ReachedRadius(lastRing);
+            reachedRadius = capped ? ReachedRadius(lastRing) : _frontRadius;
+            if (reachedRadius > passFront) reachedRadius = passFront;
+
+            if (_segmentCursor == 0) _segmentPassFront = 0f;
             return scanned;
+        }
+
+        /// <summary>
+        /// この 1 周が「走査し終えた」と言ってよい半径の上限（m）。**全体レビュー M8。**
+        ///
+        /// カーソルが 0 でない ＝ 前のパスが上限で打ち切られ、内側のリングは
+        /// <b>そのときの前線</b>で走査済みである。前線はその後も伸びるので、
+        /// 今の前線で「一周した」と言うと、内側のリングにある
+        /// 「前回の前線より外・今の前線より内」の建物と道路が**走査されないまま
+        /// 済んだことになる**。したがって上限は関わった前線の最小値である。
+        ///
+        /// 一周し切ってカーソルが 0 に戻ると呼び出し側が控えを捨てるので、
+        /// 次のパスは今の前線をそのまま名乗れる（自己修復する）。
+        /// </summary>
+        private static float PassFront(int cursor, ref float carried)
+        {
+            float front = _frontRadius;
+
+            if (cursor > 0 && carried > 0f && carried < front) front = carried;
+
+            carried = front;
+            return front;
         }
 
         /// <summary>

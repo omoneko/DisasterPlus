@@ -833,9 +833,29 @@ namespace DisasterPlus.Game
 
         // ★ §7.2 の「概数であることも明示する」。実数をそのまま出すとプレイヤーは
         //   「ぴったりその数だけ壊れる」と読む（ClearanceEstimate のクラス doc）。
+        //
+        // ★★ 全体レビュー I3。**丸めた数は [measured] の行から降りて、この注記に来た。**
+        //   印の意味は「ゲームの配列から読んだだけの値」であり、丸めは本 MOD の計算である。
+        //   上の 2 行は数えた実数、こちらが「およそ」を名乗る。
+        public static string VolcanoEstimateApprox = "About this many will be removed";
         public static string VolcanoEstimateNote =
-            "These are the counts measured at the moment of the survey, rounded. The city "
-            + "keeps changing while the ground is cleared, so the real number will differ.";
+            "The two rows above are what the survey counted at that moment. The city keeps "
+            + "changing while the ground is cleared, so the real number will differ.";
+
+        // ★★ 全体レビュー I6。**進行中の火山はセーブに残らない**（設計書 §1.3）。
+        //   途中で保存して読み直すと、火口も噴火も溶岩も無い切り株の山が、完成させる
+        //   ことも消すこともできない形で残る。同じ場所に置き直すと**その上に積み上がる**
+        //   （VolcanoUplift は「今の地形」を元の高さとして控え直す）。
+        public static string VolcanoSaveWarning =
+            "Do not save while a volcano is still being built. Disaster + does not store an "
+            + "unfinished volcano: after loading, the mountain stays exactly as far as it got "
+            + "- no crater, no eruption, no lava - and there is no way to finish or remove it. "
+            + "Placing a new volcano on the same spot piles a second mountain on top of it.";
+
+        // ★★ 全体レビュー I1。ポーズ中は着手できない。**黙って何もしないをやらない。**
+        public static string VolcanoPausedNote =
+            "The game is paused. Disaster + does not start destroying the city while the "
+            + "simulation is stopped. Unpause, then press the button.";
 
         // ★ 走査が 1 tick ぶんの上限で打ち切られたとき。**上の概数は下限になる。**
         //   これを黙っていると、概数どころか「実際より少ない数」を確定値のように見せる。
@@ -873,6 +893,12 @@ namespace DisasterPlus.Game
         /// <summary>ゲーム内の分。**実在の物理単位ではない**ので m/s の類とは扱いが違う。</summary>
         public static string VolcanoMinutes = "in-game minutes";
 
+        /// <summary>
+        /// ゲーム内の時間。**「建てられる地面」の遅れはこちらで出す**（全体レビュー M13）——
+        /// 分で出すと 400 を超える数になり、不可逆の決定の瞬間にプレイヤーが 60 で割る。
+        /// </summary>
+        public static string VolcanoHours = "in-game hours";
+
         public static string VolcanoShapeSetting = "Volcano shape";
         public static string VolcanoRadiusSetting = "Volcano radius (m)";
         public static string VolcanoHeightSetting = "Volcano final height (m)";
@@ -901,14 +927,28 @@ namespace DisasterPlus.Game
             + "is the game refusing rather than Disaster + failing.";
 
         // ★ 設計書 §1.2 そのもの。**「道路だけ諦めて隆起する」を選ばない**理由を書く。
-        public static string VolcanoRoadPathUnavailable =
-            "Disaster + could not find a way to remove roads in this build of the game, so it "
-            + "will not build a volcano at all. Raising the ground without removing the roads "
-            + "first does not work - the game pins the terrain back to each road's height on "
-            + "every update, and the mountain would come out full of flat trenches.";
+        //
+        // ★ 全体レビュー M9 で、判定が「道路の経路」から「準備の経路（道路と建物）」に
+        //   広がった。**文言も一緒に広げること** —— 建物側が解決できない環境で
+        //   「道路を取り除く方法が見つからなかった」と出すのは嘘である。
+        public static string VolcanoClearingPathUnavailable =
+            "Disaster + could not find a usable way to remove the roads and buildings inside "
+            + "the footprint in this build of the game, so it will not build a volcano at all. "
+            + "Raising the ground without removing them first does not work - the game pins "
+            + "the terrain back to the height of every road and building on every update, and "
+            + "the mountain would come out full of flat trenches and bowls.";
 
         public static string VolcanoClearingLead =
             "How far the clearing runs ahead of the uplift (m)";
+
+        // ★★ 全体レビュー I5。進行中の火山を止める唯一の口（VolcanoEffectRows）。
+        //   **止まるのは「これからの破壊と隆起」だけ**で、既に変わったものは戻らない。
+        //   それを言わずに [止める] だけ出すと「元に戻せる」と読まれる。
+        public static string VolcanoStopButton = "Stop this volcano";
+        public static string VolcanoStopNote =
+            "Stopping only cancels what has not happened yet. The terrain that already rose, "
+            + "the roads and buildings that are already gone and the ground that is already "
+            + "scorched all stay as they are.";
 
         // --- ⑤火山（Task 6: 隆起） ---
         //

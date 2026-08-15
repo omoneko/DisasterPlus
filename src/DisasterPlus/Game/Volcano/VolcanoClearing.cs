@@ -64,7 +64,14 @@ namespace DisasterPlus.Game
     /// > <c>CommonBuildingAI</c> の系だけで、それ以外の AI に書くと誰も消さない永久の
     /// > 幽霊火災になり、**バニラの建物配列に入るのでセーブに焼き付き、MOD を外しても残る**。
     /// > 本プロジェクトは一度これを出荷している。
-    /// > レビューの grep: <c>m_fireIntensity</c> が <c>src/DisasterPlus/Game/Volcano/</c> に 0 件。
+    /// > レビューの grep（★ 実際に走らせて件数を合わせてある。全体レビュー M12 ——
+    /// > 素で走らせると**この規則の文そのもの**が引っかかり、
+    /// > 「0 件」という手順が最初から成立していなかった）:
+    /// > <code>
+    /// > grep -rn --include=*.cs "m_fireIntensity" src/DisasterPlus/Game/Volcano/ \
+    /// >   | grep -vE ':[0-9]+: *//' | wc -l        # -> 0
+    /// > </code>
+    /// > <c>grep -v '///'</c> では足りない（<c>//</c> 1 本のコメントも落とす）。
     ///
     /// > **<c>DisasterHelpers</c> の破壊ヘルパを絶対に呼ばない**（§E-14）。Natural Disasters
     /// > Renewal はそれらを Prefix で完全置換する。<c>BuildingAI.CollapseBuilding</c> と
@@ -106,7 +113,7 @@ namespace DisasterPlus.Game
     ///      空の <c>Group</c> を new して渡すより、null のほうが実測どおりである
     ///
     /// > **1 と 2 が成立しなかった場合、⑤は隆起を始めない**（計画 T5 Step 1）。
-    /// > <see cref="RoadPathAvailable"/> が false になり、<c>VolcanoState.HandleStart</c> は
+    /// > <see cref="ClearingPathAvailable"/> が false になり、<c>VolcanoState.HandleStart</c> は
     /// > 1 本も壊さずに <c>Refused</c> へ落ちて、パネルが
     /// > <c>Strings.VolcanoRoadPathUnavailable</c> を出す。
     /// > **「道路だけ諦めて隆起する」を選んではいけない** —— それは設計書 §1.2 が
@@ -139,14 +146,33 @@ namespace DisasterPlus.Game
         /// <summary>走査の間隔（フレーム相当のゲーム内時間）。</summary>
         private const int IntervalFrames = 64;
 
-        /// <summary>1 回の走査で見るグリッドセルの上限（建物側・道路側それぞれ）。</summary>
-        private const int MaxCellsPerPass = 32768;
+        /// <summary>
+        /// 1 回の走査で見るグリッドセルの上限（建物側・道路側それぞれ）。
+        ///
+        /// ★ **32768 は死んだ定数だった**（全体レビュー M16）。走査するリングの
+        /// 通し番号は形態の最大（R=3000 m）でも 99² = 9801 が上限なので、
+        /// 32768 には**構造上 1 度も届かない**。実際に効く値へ下げてある ——
+        /// 最大の火山でも 3 回に分けて走ることになり、1 tick でグリッドを
+        /// 歩く量そのものに上限が付く。届かなかった分は次回のカーソルから続き、
+        /// <see cref="ClearedRadiusMetres"/> は届いた分しか進まない。
+        /// </summary>
+        private const int MaxCellsPerPass = 4096;
 
-        /// <summary>1 回の走査で壊しにいく建物の上限。</summary>
-        private const int MaxBuildingsPerPass = 2048;
+        /// <summary>
+        /// 1 回の走査で壊しにいく建物の上限。
+        ///
+        /// ★ **2048 から下げた**（全体レビュー M16）。<c>demolish: true</c> の 1 回は
+        /// フラグを立てるだけではない —— 建物の解放、下請け建物への再帰、
+        /// 道路側ではノードの解放と経路の無効化と <c>UpdateArea</c> を引き連れる。
+        /// 建物 2048 ＋ 道路 2048 ＝ **1 sim tick に 4096 回**は、
+        /// 「1 tick あたりの仕事量に上限を置く」と名乗れる数ではない。
+        /// 走査は 64 フレームおきなので、128 でも 1 ゲーム内分あたり
+        /// およそ 90 棟が消える速さである。
+        /// </summary>
+        private const int MaxBuildingsPerPass = 128;
 
-        /// <summary>1 回の走査で壊しにいく道路セグメントの上限。</summary>
-        private const int MaxSegmentsPerPass = 2048;
+        /// <summary>1 回の走査で壊しにいく道路セグメントの上限（建物側と同じ理由）。</summary>
+        private const int MaxSegmentsPerPass = 128;
 
         /// <summary>建物・道路グリッドの 1 辺のセル数（1 セル 64 m）。</summary>
         private const int GridSide = 270;
@@ -163,37 +189,18 @@ namespace DisasterPlus.Game
         /// <summary>道路の連結リストを辿る回数の上限（<c>Array16&lt;NetSegment&gt;(36864)</c>）。</summary>
         private const int SegmentChainGuard = 36864;
 
-        /// <summary>
-        /// 道路の矩形を広げるセル数。セルを決める位置（両端ノードの中点）と、距離を測る
-        /// 位置（<c>m_middlePosition</c>）は同じではない（§F-15）。
-        /// <c>VolcanoSurvey.SegmentGridMargin</c> と同じ値でなければ、
-        /// **数えた本数と壊す本数がずれる。**
-        /// </summary>
-        private const int SegmentGridMargin = 2;
+        // ★★ **マスクも余白も当たり判定もここには置かない**（全体レビュー I2 / I4）。
+        //    <see cref="VolcanoScan"/> の 1 組を調査（VolcanoSurvey）と共有する。
+        //    以前は同じ規則を 2 つのファイルに写し、「同じ値でなければずれる」と
+        //    **注意書きで**担保していた。注意書きは、実際にマスクがずれたことを
+        //    防げなかった —— 調査だけが Untouchable と Collapsed を弾いており、
+        //    不可逆の操作の直前に壊れる数を実際より少なく見せていた。
 
         /// <summary>
         /// 先行距離の下限（m）。raw セル 1 つ分。**0 を許すと ring lockstep が
         /// 自分自身を待って永久に止まる**（<see cref="LeadMetres"/>）。
         /// </summary>
         private const float MinLeadMetres = 16f;
-
-        /// <summary>
-        /// 建物の候補条件。<c>Collapsed</c> を**含める**のが⑤に固有の判断で、
-        /// 理由はクラス doc の「候補マスクが②④と違う」節にある。
-        /// <c>Untouchable</c> も含める —— <c>Building.TerrainUpdated</c> は
-        /// <c>Untouchable</c> を見ない（マスク 524291）ので、それも地形を固定する。
-        /// </summary>
-        private const Building.Flags BuildingCandidateMask =
-            Building.Flags.Created | Building.Flags.Deleted | Building.Flags.Demolishing;
-
-        /// <summary>
-        /// 道路の候補条件。<c>NetSegment.Flags</c> に <c>Demolishing</c> は無い（§F-15）。
-        /// <c>Collapsed</c> も <c>Untouchable</c> も**含める** —— どちらも
-        /// <c>NetSegment.TerrainUpdated</c> のマスク（<c>m_flags &amp; 3</c>）を通り抜けて
-        /// 地形を固定し続ける。
-        /// </summary>
-        private const NetSegment.Flags SegmentCandidateMask =
-            NetSegment.Flags.Created | NetSegment.Flags.Deleted;
 
         private static VolcanoDestructionFacts _facts;
         private static bool _factsScanned;
@@ -208,6 +215,12 @@ namespace DisasterPlus.Game
 
         private static int _buildingCursor;
         private static int _segmentCursor;
+
+        // ★ カーソルが途中のまま持ち越された走査が、「一周した」と言ってよい半径の
+        //   上限（全体レビュー M8。<c>VolcanoClearing.Sweep.cs</c> の <c>PassFront</c>）。
+        //   0 は「控えていない」。
+        private static float _buildingPassFront;
+        private static float _segmentPassFront;
 
         private static bool _errorLogged;
 
@@ -252,12 +265,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 道路を取り除く経路がこの環境で成立するか。**false なら⑤は火山を 1 つも作らない**
+        /// 準備の破壊経路がこの環境で成立するか。**false なら⑤は火山を 1 つも作らない**
         /// （クラス doc の Step 1）。<see cref="Tick"/> を 1 度も呼んでいなくても答えられる。
+        ///
+        /// ★★ <b>述語は <see cref="Sweep"/> が実際に門にしている式と同じでなければならない</b>
+        /// （全体レビュー M9）。ここが <c>RoadPathUsable</c>（道路だけ）だった頃、
+        /// <c>CollapseBuilding</c> が解決できず道路側だけ解決できた環境では
+        /// **火山が確定して <c>Clearing</c> に入り、そこで永久に止まった** ——
+        /// <c>Sweep</c> は <c>Facts().Usable</c> で毎回引き返すので走査回数が 1 回も
+        /// 増えず、<c>FrontReached</c> が真にならず、位相は <c>Refused</c> にすらならない。
         /// </summary>
-        public static bool RoadPathAvailable
+        public static bool ClearingPathAvailable
         {
-            get { return Facts().RoadPathUsable && SegmentGridUsable(); }
+            get { return Facts().Usable && SegmentGridUsable(); }
         }
 
         /// <summary>これまでに走った走査の回数（この火山での累計）。</summary>
@@ -314,6 +334,8 @@ namespace DisasterPlus.Game
             _shapeRadius = 0f;
             _buildingCursor = 0;
             _segmentCursor = 0;
+            _buildingPassFront = 0f;
+            _segmentPassFront = 0f;
             _passes = 0;
             _lastScanned = 0;
             _lastBuildingsDestroyed = 0;

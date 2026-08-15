@@ -97,6 +97,15 @@ namespace DisasterPlus.Game
                         : "snapshot invalid");
             }
 
+            // ★★ **依頼の受け取りはポーズガードより上**（全体レビュー I1）。
+            //    調べる・取りやめる・止めるは建物も道路も地形も 1 つも変えないので、
+            //    ポーズ中でも答える。**答えないと「黙って何もしない」になる** ——
+            //    山を作る前にポーズしてから地面をクリックしたプレイヤーには、
+            //    確認が永久に出てこなかった。
+            //    着手（Start）だけはここでは通らず、断って理由を残す
+            //    （VolcanoState.HandleRequest）。**1 tick に 1 回だけ呼ぶこと。**
+            VolcanoState.HandleRequest(snapshot, deltaMinutes > 0f);
+
             // ★ ここから下は状態を進める。⑤が進めるのは**取り消せない地形**である。
             //    ポーズ中（deltaMinutes == 0）は絶対に通さない。
             //    T4〜T9 が足す処理は必ずこの行より下に置くこと。
@@ -234,12 +243,12 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteClearing(DiagnosticBuilder b, VolcanoSnapshot snapshot)
         {
-            if (!snapshot.RoadPathAvailable)
+            if (!snapshot.ClearingPathAvailable)
             {
-                b.Line(1, "clearing", "NO ROAD DESTRUCTION PATH");
+                b.Line(1, "clearing", "NO USABLE DESTRUCTION PATH (roads and/or buildings)");
                 b.Line(2, "consequence",
                     "no volcano is built at all: raising the ground without removing the roads "
-                    + "first leaves flat trenches where the roads are");
+                    + "and buildings first leaves flat trenches and bowls where they stood");
                 return;
             }
 
@@ -330,6 +339,16 @@ namespace DisasterPlus.Game
                                   + snapshot.EruptionIntensityUnit.ToString("F2")
                                   + ", " + VolcanoEruption.BurstsSoFar + " bursts)");
             b.Line(2, "own particles", VolcanoEruption.Drawing ? "drawing" : "not drawing");
+
+            // ★ どのシェーダで解決したかを必ず名乗る（溶岩の描画と同じ扱い）。
+            //   将来のゲーム更新で黙って不可視になったときの唯一の手がかりであり、
+            //   Standard へ落ちた（＝光らない）ことも、ここでしか分からない。
+            b.Line(3, "plume material", string.IsNullOrEmpty(VolcanoEruption.ShaderName)
+                ? "NONE (no shader resolved; the plume is not drawn)"
+                : VolcanoEruption.ShaderName
+                  + (VolcanoEruption.ParticleShaderResolved
+                        ? "" : "  (fallback: no particle shader in this build; "
+                               + "forced to transparent so it does not draw opaque quads)"));
             b.Line(2, "borrowed fire effect", VolcanoEruption.BorrowedEffectAvailable
                 ? "applied (the game's own building fire effect, no DLC needed)"
                 : "not available in this environment (this is normal; the eruption still "
@@ -387,9 +406,12 @@ namespace DisasterPlus.Game
                 ? "verified at runtime (the first steps of a flow lost altitude)"
                 : "NOT VERIFIED YET (a flow has not finished its observation window)");
 
+            // ★ refused は**呼び出しの回数**であって建物の数ではない（VolcanoLava の doc）。
+            //   同じ建物を何度も叩くので、燃えた数より遥かに大きくなるのが正常である。
             b.Line(2, "ignited", "buildings " + snapshot.LavaBuildingsIgnited
-                                 + " (refused " + VolcanoLava.BuildingsRefused
-                                 + "), trees " + snapshot.LavaTreesIgnited);
+                                 + " (refused calls " + VolcanoLava.BuildingsRefused
+                                 + "; mostly re-hits on buildings that are already burning)"
+                                 + ", trees " + snapshot.LavaTreesIgnited);
 
             b.Line(2, "trees", snapshot.LavaTreesAvailable
                 ? "burnable (Natural Disasters DLC is owned)"
@@ -568,9 +590,20 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteDlc(DiagnosticBuilder b, VolcanoTerrainFacts terrain)
         {
-            b.Line(1, "Natural Disasters DLC", terrain.NaturalDisastersOwned
+            if (!terrain.NaturalDisastersOwned)
+            {
+                b.Line(1, "Natural Disasters DLC",
+                    "not owned (trees will not burn; everything else works)");
+                return;
+            }
+
+            // ★ 「測って所持」と「判定に失敗したので所持に倒した」を混ぜない
+            //   （全体レビュー M11）。後者で「owned」と出すと、木が燃えない理由を
+            //   探す人に嘘の手がかりを渡す。
+            b.Line(1, "Natural Disasters DLC", ModCompat.NaturalDisastersOwnedKnown
                 ? "owned"
-                : "not owned (trees will not burn; everything else works)");
+                : "ASSUMED owned - the DLC check itself failed. If the trees do not burn, "
+                  + "this is why: the game refuses BurnTree without the DLC and says nothing");
         }
     }
 }

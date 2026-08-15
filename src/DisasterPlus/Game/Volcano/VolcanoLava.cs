@@ -249,8 +249,18 @@ namespace DisasterPlus.Game
         public static int BuildingsIgnited { get { return _buildingsIgnited; } }
 
         /// <summary>
-        /// バニラが着火を断った建物の数。**0 でないのは異常ではない** ——
+        /// バニラが着火を断った**呼び出しの回数**。**0 でないのは異常ではない** ——
         /// <c>CommonBuildingAI.BurnBuilding</c> は水没中の建物と瓦礫を断る（§B-7a）。
+        ///
+        /// ★★ <b>これは「断られた建物の数」ではない</b>（全体レビュー M17）。
+        /// 溶岩は 1 歩 12 m しか進まないのに着火半径は最大 60 m なので、
+        /// **同じ建物が 1 本の流れに 5 回前後、8 本で最大 40 回叩かれる。**
+        /// 2 回目以降は既に燃えているので断られる ——
+        /// したがってこの数は<b>ほとんどが「もう燃えている建物への再着火」</b>であり、
+        /// <see cref="BuildingsIgnited"/> より遥かに大きくなるのが正常である。
+        /// **重複を数えないようにするには「どの建物に火を付けたか」を覚える必要があり、
+        /// そのための配列を⑤は持たない**（<c>m_fireIntensity</c> を読みに行くのは
+        /// 罠 5 の grep を壊すのでやらない）。数の意味のほうを正確に名乗る。
         /// </summary>
         public static int BuildingsRefused { get { return _buildingsRefused; } }
 

@@ -14,11 +14,16 @@ namespace DisasterPlus.Game
     ///      セーブに焼き付く（IL 事実文書 §E-13）。利用者は「不可逆でよい」と
     ///      判断したが、**それはプレイヤーに黙っていてよいという意味ではない。**
     ///   2. **壊される道路と建物の概数を先に見せ、概数であることも明示する**（§7.2）。
-    ///      丸めるのは <see cref="ClearanceEstimate.RoundedEstimate"/>。
-    ///      実数をそのまま出すとプレイヤーは「ぴったりその数だけ壊れる」と読む。
+    ///      ★ <b>丸めた数を [measured] の行に出さない</b>（全体レビュー I3）。
+    ///      印の意味は「ゲームの配列から読んだだけの値」であり、
+    ///      <see cref="ClearanceEstimate.RoundedEstimate"/> は本 MOD の計算である。
+    ///      印の付いた 2 行は**数えた実数**を出し、丸めた概数は印の付かない注記に置く。
     ///   3. **建設可能判定と水位が数ゲーム内時間遅れることを説明する**（§7.3）。
     ///      <c>m_blockHeights</c> はゲームモードで上へ 2 m / 64 sim フレームしか動かず、
     ///      水シミュはその配列そのものを見ている（§A-2 / §A-4）。**不具合ではない。**
+    ///   4. **進行中の火山はセーブに残らない**（設計書 §1.3・全体レビュー I6）。
+    ///      途中で保存して読み直すと、火口も噴火も溶岩も無い切り株の山が
+    ///      **完成させることも消すこともできない形で残る。**
     ///
     /// ── 確認は⑤自身のパネルの中に置く（バニラのモーダルを使わない）──────────
     ///
@@ -63,8 +68,10 @@ namespace DisasterPlus.Game
         private static UILabel _heightLimitedLabel;
         private static UILabel _settingsChangedLabel;
         private static UILabel _irreversibleLabel;
+        private static UILabel _saveWarningLabel;
         private static UILabel _clearingLabel;
         private static UILabel _buildabilityLabel;
+        private static UILabel _pausedLabel;
         private static UIButton _yesButton;
         private static UIButton _noButton;
 
@@ -103,15 +110,21 @@ namespace DisasterPlus.Game
             _segmentsLabel = VolcanoRows.AddMeasuredRow(p, "ConfirmSegments", ref y);
 
             _segmentsUnknownLabel = VolcanoRows.AddRow(p, "ConfirmSegmentsUnknown", ref y, NoteHeight);
-            _estimateNoteLabel = VolcanoRows.AddRow(p, "ConfirmEstimateNote", ref y, NoteHeight);
+            // ★ 概数の注記は「およそ N 棟 / M 本」＋説明文の 2 つを持つので 1 行ぶん高い
+            //   （全体レビュー I3 で、丸めた数がこちらへ移った）。
+            _estimateNoteLabel = VolcanoRows.AddRow(p, "ConfirmEstimateNote", ref y, 72f);
             _cappedLabel = VolcanoRows.AddRow(p, "ConfirmCapped", ref y, NoteHeight);
             _heightLimitedLabel = VolcanoRows.AddRow(p, "ConfirmHeightLimited", ref y, NoteHeight);
             _settingsChangedLabel = VolcanoRows.AddRow(p, "ConfirmSettingsChanged", ref y, NoteHeight);
 
-            // ★★ 3 つの警告。**どれも条件付きにしないこと**（クラス doc の 1〜3）。
+            // ★★ 4 つの警告。**どれも条件付きにしないこと**（クラス doc の 1〜4）。
             _irreversibleLabel = VolcanoRows.AddRow(p, "ConfirmIrreversible", ref y, NoteHeight);
+            _saveWarningLabel = VolcanoRows.AddRow(p, "ConfirmSaveWarning", ref y, 72f);
             _clearingLabel = VolcanoRows.AddRow(p, "ConfirmClearing", ref y, 72f);
             _buildabilityLabel = VolcanoRows.AddRow(p, "ConfirmBuildability", ref y, NoteHeight);
+
+            // ★ ポーズ中の説明（全体レビュー I1）。**当てはまらないときは場所も取らない。**
+            _pausedLabel = VolcanoRows.AddRow(p, "ConfirmPaused", ref y, NoteHeight);
 
             _yesButton = AddActionButton(p, "ConfirmYes", Strings.VolcanoConfirmYes,
                 VolcanoRows.RowLeft, y, VolcanoRequest.Start);
@@ -179,9 +192,11 @@ namespace DisasterPlus.Game
                 + " " + Strings.VolcanoMetres);
 
             // ★ 0 のときも行を出す。「0 棟」は「調べていない」とは違う（①②の規律）。
+            // ★★ **丸めない**（全体レビュー I3）。この行は [measured] を名乗る ＝
+            //    「ゲームの配列から読んだだけの値」である。丸めるのは本 MOD の計算で、
+            //    それは印の付かない下の注記（EstimateNoteText）に置く。
             VolcanoRows.SetMeasured(_buildingsLabel,
-                Strings.VolcanoBuildingsRow + ": "
-                + ClearanceEstimate.RoundedEstimate(f.BuildingCount));
+                Strings.VolcanoBuildingsRow + ": " + f.BuildingCount);
             y = Place(y, _buildingsLabel, VolcanoRows.RowHeight, VolcanoRows.RowStep);
 
             // ★ 道路は**「0 本」と「数えられなかった」を混ぜない。**
@@ -195,29 +210,79 @@ namespace DisasterPlus.Game
             else
             {
                 VolcanoRows.SetMeasured(_segmentsLabel,
-                    Strings.VolcanoSegmentsRow + ": "
-                    + ClearanceEstimate.RoundedEstimate(f.SegmentCount));
+                    Strings.VolcanoSegmentsRow + ": " + f.SegmentCount);
                 y = Place(y, _segmentsLabel, VolcanoRows.RowHeight, VolcanoRows.RowStep);
                 y = ReflowNote(y, _segmentsUnknownLabel, "");
             }
 
-            y = ReflowNote(y, _estimateNoteLabel, Strings.VolcanoEstimateNote);
+            y = Reflow(y, _estimateNoteLabel, EstimateNoteText(f), 72f, 76f);
             y = ReflowNote(y, _cappedLabel, f.Capped ? Strings.VolcanoSurveyCapped : "");
             y = ReflowNote(y, _heightLimitedLabel,
                 f.HeightLimitedByCeiling ? Strings.VolcanoHeightLimited : "");
             y = ReflowNote(y, _settingsChangedLabel,
                 s.SettingsChanged ? Strings.VolcanoSettingsChanged : "");
 
-            // ★★ 3 つの警告。**どれも条件付きにしないこと**（クラス doc の 1〜3）。
+            // ★★ 4 つの警告。**どれも条件付きにしないこと**（クラス doc の 1〜4）。
             y = ReflowNote(y, _irreversibleLabel, Strings.VolcanoIrreversibleWarning);
+            y = Reflow(y, _saveWarningLabel, Strings.VolcanoSaveWarning, 72f, 76f);
             y = Reflow(y, _clearingLabel, Strings.VolcanoClearingWarning, 72f, 76f);
             y = ReflowNote(y, _buildabilityLabel, BuildabilityText(f));
+
+            // ★ ポーズ中は着手できない（全体レビュー I1）。**説明を出し、
+            //   [作る] を押せなくする** —— 押しても何も起きないボタンは二度押される。
+            bool paused = SimulationIsPaused();
+            y = ReflowNote(y, _pausedLabel, paused ? Strings.VolcanoPausedNote : "");
+            if (_yesButton != null) _yesButton.isEnabled = !paused;
 
             MoveButton(_yesButton, VolcanoRows.RowLeft, y);
             MoveButton(_noButton, VolcanoRows.RowLeft + ActionButtonWidth + 12f, y);
             y += ActionButtonHeight + 10f;
 
             _blockBottom = y;
+        }
+
+        /// <summary>
+        /// シミュレーションが止まっているか。**main スレッドから読んでよい**
+        /// （<c>SimulationPaused</c> は bool の読み取りで、バッファに触らない。
+        /// <see cref="VolcanoLavaFx"/> が同じ判断をしている）。
+        /// 読めなければ「止まっていない」に倒す —— 読めないことを理由に
+        /// [作る] を押せなくすると、確認そのものが行き止まりになる。
+        /// </summary>
+        private static bool SimulationIsPaused()
+        {
+            try
+            {
+                if (!ColossalFramework.Singleton<SimulationManager>.exists) return false;
+                return ColossalFramework.Singleton<SimulationManager>.instance.SimulationPaused;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 概数の注記（設計書 §7.2）。**ここが「丸めた数」の置き場である**
+        /// （全体レビュー I3）—— <see cref="VolcanoRows.SetMeasured"/> の行は
+        /// ゲームの配列から読んだ実数を出し、本 MOD が丸めた概数は印の付かない
+        /// この行に出す。
+        ///
+        /// 道路が数えられなかったとき（<c>SegmentCount &lt; 0</c>）は建物だけを出す ——
+        /// 読めなかった値に「およそ」を付けて出さない。
+        /// </summary>
+        private static string EstimateNoteText(VolcanoFootprint f)
+        {
+            string approx = Strings.VolcanoEstimateApprox + ": "
+                            + Strings.VolcanoBuildingsRow + " ~"
+                            + ClearanceEstimate.RoundedEstimate(f.BuildingCount);
+
+            if (f.SegmentCount >= 0)
+            {
+                approx += "    " + Strings.VolcanoSegmentsRow + " ~"
+                          + ClearanceEstimate.RoundedEstimate(f.SegmentCount);
+            }
+
+            return approx + "\n" + Strings.VolcanoEstimateNote;
         }
 
         /// <summary>折り返さない 1 行。**空なら隠して場所も取らない**（<see cref="Reflow"/>）。</summary>
@@ -277,6 +342,11 @@ namespace DisasterPlus.Game
         /// ★ 換算は <c>FeatureHost.FramesPerMinute</c> から出す。**定数を直書きしない**
         ///   （③でこれを直書きして 4 倍ずれた前科がある）。読めないときは
         ///   **数字を出さず注記だけにする** —— 出せない値を 0 として出さない。
+        ///
+        /// ★★ **単位はゲーム内時間（hours）である**（全体レビュー M13）。
+        ///   分で出していた頃は「422 in-game minutes」のような数になり、
+        ///   **不可逆の決定をする瞬間にプレイヤーが 60 で割る**ことになっていた。
+        ///   設計書 §7.3 も診断ダンプも時間で言っている。
         /// </summary>
         private static string BuildabilityText(VolcanoFootprint f)
         {
@@ -285,8 +355,8 @@ namespace DisasterPlus.Game
             float framesPerMinute = FeatureHost.FramesPerMinute;
             if (f.BlockHeightCatchUpFrames <= 0 || !(framesPerMinute > 0f)) return note;
 
-            float minutes = f.BlockHeightCatchUpFrames / framesPerMinute;
-            return note + "  (" + minutes.ToString("F0") + " " + Strings.VolcanoMinutes + ")";
+            float hours = f.BlockHeightCatchUpFrames / framesPerMinute / 60f;
+            return note + "  (" + hours.ToString("F1") + " " + Strings.VolcanoHours + ")";
         }
 
         /// <summary>
@@ -322,8 +392,10 @@ namespace DisasterPlus.Game
             SetLabelVisible(_heightLimitedLabel, visible);
             SetLabelVisible(_settingsChangedLabel, visible);
             SetLabelVisible(_irreversibleLabel, visible);
+            SetLabelVisible(_saveWarningLabel, visible);
             SetLabelVisible(_clearingLabel, visible);
             SetLabelVisible(_buildabilityLabel, visible);
+            SetLabelVisible(_pausedLabel, visible);
             SetButtonVisible(_yesButton, visible);
             SetButtonVisible(_noButton, visible);
         }
@@ -379,8 +451,10 @@ namespace DisasterPlus.Game
             _heightLimitedLabel = null;
             _settingsChangedLabel = null;
             _irreversibleLabel = null;
+            _saveWarningLabel = null;
             _clearingLabel = null;
             _buildabilityLabel = null;
+            _pausedLabel = null;
             _yesButton = null;
             _noButton = null;
             _blockTop = 0f;
