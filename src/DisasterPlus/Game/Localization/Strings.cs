@@ -134,6 +134,20 @@ namespace DisasterPlus.Game
         public static string SourceVanilla = "[measured]";
         public static string SourceModel = "[Disaster + model]";
 
+        /// <summary>
+        /// 翻訳文の中で「ここに実測値の印が入る」を表すトークン。
+        /// 表示の直前に <see cref="SourceVanilla"/> へ差し替える
+        /// （<c>TyphoonRows.SetModelNote</c> が唯一の差し替え箇所）。
+        ///
+        /// ★ <b><c>public static string</c> にしてはいけない。</b>
+        ///   <c>LocaleLoader</c> は <c>GetFields(Public | Static)</c> の string を
+        ///   全部「翻訳できるキー」として扱い、<c>en.txt</c> の生成にも同じ列挙を使う。
+        ///   ここを public にすると、トークン自体が翻訳対象として出力され、
+        ///   翻訳者が訳した瞬間に差し替えが効かなくなる（const なら
+        ///   <c>SetValue</c> が例外になる、というもっと悪い壊れ方もする）。
+        /// </summary>
+        internal const string MeasuredToken = "{measured}";
+
         public static string EarthquakeLayer1Header = "What the game actually computes";
         public static string EarthquakeLayer2Header =
             "Added by Disaster + (not vanilla behaviour)";
@@ -523,5 +537,205 @@ namespace DisasterPlus.Game
         public static string EarthquakeNoDayNight =
             "The day/night cycle is off, so the in-game hour is pinned at 12:00 and the "
             + "time-of-day factor never changes.";
+
+        // --- ④台風（Task 2: 骨格・プレハブ実測・前提検証） ---
+        //
+        // このタスクの時点では**パネルもボタンも無い**（T5 で入る）。ここで足すのは
+        // 設定画面の 4 つと、ログチャンネルの名前だけである。
+        //
+        // ④の表示規約: **④が出す数値は原則すべて本 MOD のもの**なので、行ごとの
+        // 出所の印は付けない（設計書 §1.2 / §7）。例外は WeatherManager から読んだ
+        // 雨量・雲量だけで、そこにだけ SourceVanilla が付く。したがって
+        // **Strings.SourceModel を④の表示コードから参照してはいけない。**
+        public static string GroupTyphoon = "Typhoon";
+        public static string TyphoonEnabled = "Enable the typhoon panel";
+        public static string TyphoonResetButton =
+            "Reset the typhoon button position (takes effect next time you load a city)";
+        public static string TyphoonNeedsDlc =
+            "Typhoons require the Natural Disasters DLC.";
+        public static string LogChannelTyphoon = "Typhoon";
+
+        // --- ④台風（Task 3: 論理オブジェクトと経路追従） ---
+        public static string TyphoonIntensity = "Typhoon intensity (10-255)";
+        public static string TyphoonIntensityNote =
+            "The game's own storms use 55. Above 100 is beyond anything vanilla generates.";
+
+        // --- ④台風（Task 5: パネル・ボタン・表示規約） ---
+        //
+        // ★ ここから下の行ラベルは全て**印の付かない行**に入る。出所は
+        //   TyphoonModelHeader / TyphoonModelNote が見出しで一度だけ名乗る
+        //   （設計書 §7-1）。唯一 [measured] が付くのは TyphoonRainRow /
+        //   TyphoonCloudRow の 2 行で、接頭辞は TyphoonRows.SetMeasured が付ける。
+        //
+        // **m/s を出す文字列を足さないこと**（設計書 §7-3）。④の「風速相当」は
+        // ゲームの倒壊確率に掛ける係数であって実在の風速ではない。②が気象庁震度階級を
+        // 名乗らなかったのと同じ理由で、単位を名乗ると実在の意味があると誤解させる。
+        public static string TyphoonTitle = "Typhoon";
+        public static string TyphoonModelHeader = "Computed by Disaster +";
+
+        // ★★ **この文に印の文字列そのものを書かないこと**（全体レビュー I5）。
+        //    以前 TyphoonModelNote は英語の "[measured]" を本文に埋め込んでおり、
+        //    ja.txt はその日本語訳でも "[measured]" のままだった。ところが
+        //    ja.txt の SourceVanilla は「[実測]」なので、**日本語のプレイヤーは
+        //    画面に一度も出ない文字列を探すことになっていた**（英語では偶然一致
+        //    していたので誰も気付かない形の壊れ方である）。
+        //    設計書 §7.1 は「行ごとの印を付けない」代わりに「見出しが意味を担う」と
+        //    決めているので、この 1 文が壊れると④の表示規約そのものが伝わらない。
+        //
+        //    印は 1 箇所（TyphoonRows.SetMeasured / SetModelNote）でしか作らない。
+        //    翻訳文には**印そのものではなく <see cref="MeasuredToken"/> を置き**、
+        //    表示の直前に Strings.SourceVanilla へ差し替える ——
+        //    **構造として 2 度とずれない。**
+        //
+        //    string.Format を使わないのは本 MOD の規律だが、それは位置指定
+        //    （{0} の数がずれると実行時に落ちる）を避けるためである。名前付きの
+        //    トークンを String.Replace で差し替えるのは落ちない ——
+        //    翻訳がトークンを落としても、その文だけが印に触れなくなるだけで、
+        //    それは build.ps1 の locale 検査が捕まえる。
+        public static string TyphoonModelNote =
+            "The numbers on this panel come from Disaster +'s own model. The game does not "
+            + "compute a typhoon, wind damage, a positioned cloud or a flood of its own. "
+            + "Only the rows marked {measured} are values read straight from the game.";
+        public static string TyphoonStart = "Raise a typhoon";
+        public static string TyphoonStop = "Stop the typhoon";
+        public static string TyphoonInactive = "No typhoon right now.";
+        public static string TyphoonWaiting = "Waiting for the first simulation update.";
+        public static string TyphoonUnavailable = "Typhoon data unavailable";
+        public static string TyphoonPrefabUnreadable =
+            "The game's thunderstorm prefab could not be read, so no typhoon can be started. "
+            + "Disaster + will not guess its radius or its lifetime.";
+        public static string TyphoonCentre = "Centre";
+        public static string TyphoonHeading = "Heading";
+        public static string TyphoonCoreStrength = "Core strength";
+        public static string TyphoonStormRadius = "Storm radius";
+        public static string TyphoonGaleRadius = "Gale radius";
+        public static string TyphoonPhaseLabel = "Phase";
+        public static string TyphoonPhaseApproaching = "approaching";
+        public static string TyphoonPhasePeak = "at its peak";
+        public static string TyphoonPhasePassing = "passing";
+        public static string TyphoonPhaseGone = "gone";
+        public static string TyphoonLandfall = "Landfall in";
+
+        // ゲーム内分の単位。②の EarthquakeMinutes と同じ語だが、④のパネルから
+        // ②のキーを引くと、片方の翻訳を直したときにもう片方が黙って変わる。
+        public static string TyphoonMinutes = "min";
+
+        // **「上陸まで 0 分」と書かないための語。** 中心が既に陸の上にあるとき、
+        // 残り時間 0 は「もう起きた」であって「これから起きる」ではない。
+        // ①②が繰り返し確立した「0 と、0 ではない状態を混ぜない」の④版。
+        public static string TyphoonLandfallNow = "already over land";
+
+        // ★ 設計書 §7-2。「あと何分で上陸」を出してよいのは、④が経路を決定論的に
+        //   持っているからである。①の天気予報パネルは乱数で発生を判定しているので
+        //   同じことを出せない。**その違いをパネルに書く**のがこの 1 行の役目で、
+        //   これが無いと「ゲームが予測している」と読まれる。
+        public static string TyphoonLandfallNote =
+            "This is not a probability. Disaster + owns the track, so the arrival time is a "
+            + "fixed value - unlike the forecast panel, where the game rolls dice.";
+
+        // 「0 分」と混ぜないための文言。海上を通り抜ける経路では、上陸しないのが正常。
+        public static string TyphoonNoLandfall = "stays over water on its current track";
+        public static string TyphoonRainRow = "Rain";
+        public static string TyphoonCloudRow = "Cloud";
+        public static string TyphoonWindDirectionNote =
+            "The wind direction follows the storm only slowly. The game limits how fast it "
+            + "can turn, and Disaster + does not overwrite it directly.";
+
+        // --- ④台風（Task 6: 落雷） ---
+        //
+        // ★ 落雷の行も**印を付けない**（④の表示規約）。数字はどれもゲームが計算した
+        //   ものではなく、④が自分で数えている台帳と、バニラの式から見積もった上限である。
+        //
+        // TyphoonLightningRow は**4 つの数を並べる順序をラベルで名乗る**形にしてある。
+        // この MOD は書式文字列（string.Format）を 1 箇所も使っていない ——
+        // 翻訳の {0} がずれると実行時に落ちるので、位置は語で説明する。
+        public static string TyphoonEffectsHeader = "What the typhoon brings";
+        public static string TyphoonLightningRow =
+            "Lightning (in flight / total / left to the host storm / dropped)";
+        public static string TyphoonLightningNote =
+            "The game can only hold 20 lightning strikes at once. Disaster + keeps its own "
+            + "share below that so the host storm's strikes are not thrown away.";
+
+        // ★ 全体レビュー I4。強度 170 以上では宿主の嵐の取り分だけで 20 発の枠を
+        //   使い切るため、④は落雷を 1 発も積まなくなる（LightningBudget の
+        //   IntensityWithNoShareAtPeak に導出がある）。**その強度はスライダーの
+        //   範囲の中にある**ので、プレイヤーは T6 の目的そのもの（壁雲への偏り）を
+        //   黙って失いうる。診断ダンプだけでなく**パネルにも**出す。
+        public static string TyphoonLightningYielded =
+            "At this intensity the host thunderstorm is expected to use the whole 20-strike "
+            + "queue, so Disaster + adds none of its own. The lightning you see is the host "
+            + "storm's, spread evenly over its disc instead of around the eye wall. Lower the "
+            + "typhoon intensity to get the eye-wall placement back.";
+
+        // --- ④台風（Task 7: 風害） ---
+        //
+        // ★ ここも印を付けない（④の表示規約）。**特に「風速」を名乗らないこと** ——
+        //   ④の風速相当は倒壊確率に掛ける係数であって m/s ではない（設計書 §7.3）。
+        //   TyphoonWindNote がその事実を一度だけ名乗る。
+        // TyphoonLightningRow と同じ形で、**並べる順序をラベルが語で名乗る**
+        // （書式文字列を使わない。翻訳の {0} がずれると実行時に落ちる）。
+        public static string TyphoonWindRow =
+            "Wind damage (collapsed this pass / total / examined / refused by the game)";
+        public static string TyphoonWindEnabled =
+            "Wind damage (buildings vanilla would never collapse)";
+        public static string TyphoonWindStrength = "Wind damage strength (0 = off)";
+        public static string TyphoonWindNote =
+            "The game has no wind damage of any kind, and no field that makes the wind "
+            + "stronger. This is a model Disaster + invented. The numbers are not wind speeds.";
+        public static string TyphoonWindShelterNote =
+            "Shelters, vaults and dams do not collapse in a typhoon. That is the game "
+            + "refusing, and it is the right answer.";
+        public static string TyphoonWindCapped =
+            "sweep truncated this pass; the outer edge has not been rolled yet";
+
+        // --- ④台風（Task 8: 河川氾濫） ---
+        //
+        // ★ TyphoonFloodNoSources は「なぜ何も起きないか」を出す行である
+        //   （設計書 §7.4。①の「なぜハザードマップが空か」と同じ扱い）。
+        //   **不具合ではないと明示する。**
+        public static string TyphoonFloodRow = "River flooding";
+        public static string TyphoonFloodEnabled =
+            "River flooding (raises the map's own water sources)";
+        public static string TyphoonFloodStrength = "River flooding strength (0 = off)";
+        public static string TyphoonFloodNoSources =
+            "This map has no natural water sources near the storm, so no river can rise. "
+            + "Nothing is wrong - the game has no flood disaster of its own, and Disaster + "
+            + "only raises water sources the map already has.";
+        public static string TyphoonFloodRaised = "raised";
+        public static string TyphoonFloodNote =
+            "The water level is restored when the typhoon ends, when you leave the city and "
+            + "before every save. A river must never stay flooded after you remove the mod.";
+
+        // --- ④台風（Task 10: 随伴竜巻） ---
+        //
+        // ★ TyphoonTornadoNdrNote は**この要素だけが持つ代償**を名乗る行である。
+        //   バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので、
+        //   Natural Disasters Renewal はそれを竜巻と嗅ぎ分けて完全に置き換える
+        //   （IL 事実文書 §F-1）。④自身の風害は同じ影響を受けない
+        //   （DisasterHelpers を 1 度も通さないため）。**その区別まで書く** ——
+        //   同じ都市で両方が動いたとき、片方だけが他 MOD の設定に従う理由が
+        //   これ以外のどこにも出ない。
+        //   設定画面（NDR 検出時）とパネルの両方に出す。
+        public static string TyphoonTornadoRow = "Accompanying tornadoes";
+        public static string TyphoonTornadoEnabled =
+            "Spawn tornadoes that orbit the typhoon";
+        public static string TyphoonTornadoCount = "Number of tornadoes";
+        public static string TyphoonTornadoNdrNote =
+            "Natural Disasters Renewal replaces vanilla tornado destruction, so these "
+            + "tornadoes follow its settings. The typhoon's own wind damage does not - it "
+            + "never goes through DisasterHelpers.";
+
+        // --- ④台風（Task 9: 巨大な回転雲） ---
+        //
+        // ★ TyphoonCloudUnavailable は「なぜ空全体が変わらないか」を出す行である。
+        //   DayNightDynamicCloudsProperties は DLC・グラフィック設定によっては
+        //   存在しない（IL 事実文書 §C-2、PARTIAL）。**不具合ではない**ので、
+        //   ④自身の雲は変わらず描かれることまで書く。
+        public static string TyphoonCloudEnabled = "Draw the typhoon's cloud spiral";
+        public static string TyphoonVanillaCloudBoost =
+            "Also thicken and speed up the game's own sky clouds";
+        public static string TyphoonCloudUnavailable =
+            "The game's sky cloud settings are not present in this environment, so only "
+            + "Disaster +'s own cloud is drawn.";
     }
 }

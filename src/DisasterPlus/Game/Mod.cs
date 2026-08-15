@@ -28,16 +28,17 @@ namespace DisasterPlus.Game
             // これが成立するのは Assumptions.Reset()（レベルアンロード時）が結果を
             // 消さないから。ここは必ずアンロードより後に走るので、Reset() でクリアすると
             // LastResults は常に空になり、この警告は原理的に出せなくなる。
-            var failures = Assumptions.LastResults;
-            bool anyFailed = false;
-            for (int i = 0; i < failures.Count; i++) { if (!failures[i].Passed) anyFailed = true; }
+            // ★ **DLC 非所持環境で正常に FAIL する 5 件は出さない**（全体レビュー）。
+            //   出すと、バニラのままの環境ではこの群が永久に表示され続け、
+            //   本当の前提破れが起きたときにその 1 件が見慣れた群に紛れて読まれない。
+            //   何が外れているかは Assumptions.UnexpectedFailures の doc にある。
+            var failures = Assumptions.UnexpectedFailures();
 
-            if (anyFailed)
+            if (failures.Count > 0)
             {
                 var warn = helper.AddGroup(Strings.AssumptionsFailedTitle);
                 for (int i = 0; i < failures.Count; i++)
                 {
-                    if (failures[i].Passed) continue;
                     warn.AddGroup("- " + failures[i].Impact);
                 }
                 warn.AddGroup(Strings.AssumptionsFailedHint);
@@ -153,6 +154,79 @@ namespace DisasterPlus.Game
                 helper.AddGroup(Strings.EarthquakeNeedsDlc);
             }
 
+            var typhoon = helper.AddGroup(Strings.GroupTyphoon);
+            typhoon.AddCheckbox(Strings.TyphoonEnabled, ModSettings.TyphoonEnabled.value,
+                v => ModSettings.TyphoonEnabled.value = v);
+            typhoon.AddSlider(Strings.TyphoonIntensity, 10f, 255f, 5f,
+                ModSettings.TyphoonIntensity.value,
+                v => ModSettings.TyphoonIntensity.value = (int)v);
+            // 探索のやり直しは次回のレベルロードで自然に起きる（TyphoonPanelButton.Install
+            // は保存済み座標が -1 のときだけ FreeSlotFinder を再度呼ぶ）。ここでは保存値を
+            // 戻すだけで十分（①②のボタン位置リセットと同じ形）。
+            // ★ 風害は既定 ON（②の第 2 層と判断が違う理由は TyphoonWind のクラス doc）。
+            //    強さ 0 で完全に無効になる。
+            typhoon.AddCheckbox(Strings.TyphoonWindEnabled, ModSettings.TyphoonWindDamage.value,
+                v => ModSettings.TyphoonWindDamage.value = v);
+            typhoon.AddSlider(Strings.TyphoonWindStrength, 0f, 10f, 1f,
+                ModSettings.TyphoonWindStrength.value,
+                v => ModSettings.TyphoonWindStrength.value = (int)v);
+            // ★ 河川氾濫も既定 ON。**セーブに焼き付く状態を触る唯一の機能**なので、
+            //    復元が 3 箇所から掛かることを TyphoonFloodNote が名乗る。
+            typhoon.AddCheckbox(Strings.TyphoonFloodEnabled,
+                ModSettings.TyphoonFloodEnabled.value,
+                v => ModSettings.TyphoonFloodEnabled.value = v);
+            typhoon.AddSlider(Strings.TyphoonFloodStrength, 0f, 10f, 1f,
+                ModSettings.TyphoonFloodStrength.value,
+                v => ModSettings.TyphoonFloodStrength.value = (int)v);
+            // ★ 随伴竜巻は**既定 OFF**（設計書 §2）。バニラの竜巻をそのまま借りるので
+            //    見た目も破壊も無料でバニラ品質だが、その破壊は DisasterHelpers を
+            //    通るため NDR がいる環境ではあちらの設定に従う（下の注記）。
+            typhoon.AddCheckbox(Strings.TyphoonTornadoEnabled,
+                ModSettings.TyphoonTornadoes.value,
+                v => ModSettings.TyphoonTornadoes.value = v);
+            typhoon.AddSlider(Strings.TyphoonTornadoCount, 0f,
+                DisasterPlus.Game.TyphoonTornado.MaxTornadoes, 1f,
+                ModSettings.TyphoonTornadoCount.value,
+                v => ModSettings.TyphoonTornadoCount.value = (int)v);
+            // ★ 雲は既定 ON。**見た目だけの機能**で、切っても他の 5 要素はそのまま動く
+            //    （TyphoonCloud のクラス doc の独立性）。
+            typhoon.AddCheckbox(Strings.TyphoonCloudEnabled,
+                ModSettings.TyphoonCloudEnabled.value,
+                v => ModSettings.TyphoonCloudEnabled.value = v);
+            typhoon.AddCheckbox(Strings.TyphoonVanillaCloudBoost,
+                ModSettings.TyphoonVanillaCloudBoost.value,
+                v => ModSettings.TyphoonVanillaCloudBoost.value = v);
+            typhoon.AddButton(Strings.TyphoonResetButton, delegate
+            {
+                ModSettings.TyphoonButtonX.value = -1;
+                ModSettings.TyphoonButtonY.value = -1;
+            });
+
+            // 強度がバニラの領域を超えることを名乗る（EarthquakeShakeBoostNote と同じ形）。
+            helper.AddGroup(Strings.TyphoonIntensityNote);
+            // ★ 「バニラに風害は存在しない」「数値は風速ではない」を設定画面でも名乗る。
+            helper.AddGroup(Strings.TyphoonWindNote);
+            // ★ 「水位は必ず戻す」を設定画面でも名乗る。氾濫の唯一の怖さは
+            //    「MOD を外したら川が溢れたままだった」である。
+            helper.AddGroup(Strings.TyphoonFloodNote);
+
+            // ★★ NDR がいる環境でだけ出す。**この 1 行が、随伴竜巻の代償を
+            //    プレイヤーに見せる主経路である**（設計書 §2 / IL 事実文書 §F-1）。
+            //    バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので NDR に
+            //    置き換えられるが、④自身の風害は通していないので影響を受けない。
+            //    その区別まで書く（IntensityUnlockHandledByOther と同じ形）。
+            if (ModCompat.NdrPresent)
+            {
+                helper.AddGroup(Strings.TyphoonTornadoNdrNote);
+            }
+
+            // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
+            // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。
+            if (!ModCompat.NaturalDisastersOwned)
+            {
+                helper.AddGroup(Strings.TyphoonNeedsDlc);
+            }
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
@@ -228,6 +302,15 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Earthquake)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Earthquake));
+
+            // Forecast / Earthquake と同じく、Typhoon チャンネル付きの Log.Diag 呼び出しが
+            // 実在する（TyphoonFeature.OnSimulationTick）。死んだ設定ではない。
+            channels.AddCheckbox(Strings.LogChannelTyphoon,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Typhoon)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Typhoon));
         }
     }
 }

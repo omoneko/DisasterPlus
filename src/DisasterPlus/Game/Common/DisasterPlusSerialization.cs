@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using ColossalFramework;
 using DisasterPlus.Core.Common;
 using ICities;
 
@@ -47,6 +48,19 @@ namespace DisasterPlus.Game
 
         public void OnSaveData()
         {
+            // ★ 水源の m_target は WaterSimulation.Data.Serialize でセーブに焼き付く
+            //   （④の IL 事実文書 §D-4）。MOD を外したセーブで川が溢れたままに
+            //   ならないよう、**保存の前に必ず戻す**。火災旋風の保存処理より前に置く
+            //   ——「早期 return しても戻し損ねない」を構造で保証するため
+            //   （下の if (_data == null) より上にある理由）。
+            RestoreFloodedRiversForSave();
+
+            // ★ 天候の上書きも同じ理由でセーブに焼き付く（WeatherManager+Data.Serialize は
+            //   m_targetRain / m_targetCloud / m_forceWeatherOn を書く。全体レビュー I2 で
+            //   IL 実測）。水源と同じく**保存の前に降ろし、AddAction で戻す**。
+            //   早期 return より上に置くのも同じ理由である。
+            LowerTyphoonWeatherForSave();
+
             if (_data == null) return;
 
             var views = FireWhirlRegistry.Snapshot();
@@ -74,6 +88,80 @@ namespace DisasterPlus.Game
             }
 
             Log.Info("saved " + views.Count + " fire whirls");
+        }
+
+        /// <summary>
+        /// ④が持ち上げている河川の水位を、**バニラが水源配列を書く前に**元へ戻す。
+        ///
+        /// **再適用は <c>SimulationManager.AddAction</c> で遅らせる。** ここで
+        /// （あるいは <c>finally</c> で）すぐ戻し直すと、バニラが配列を書く前に
+        /// 持ち上げ直すことになり漏れが再発する ——
+        /// **MOD の <c>OnSaveData</c> はバニラの配列書き込みより先に走る**というのは、
+        /// 本プロジェクトが一時フラグの漏れで一度出荷して確定させた事実である。
+        ///
+        /// <c>SimulationManager.AddAction(System.Action)</c> は public instance で
+        /// <c>AsyncAction</c> を返す（④ Task 8 で IL 実測）。渡したデリゲートは
+        /// **sim スレッド**で走るので、<c>TyphoonFlood</c> のスレッド契約を破らない。
+        ///
+        /// ここで例外を出して**セーブそのものを失敗させない**。水位が戻ったままに
+        /// なるだけで、セーブは正しく（溢れていない状態で）書かれる。
+        /// </summary>
+        private static void RestoreFloodedRiversForSave()
+        {
+            try
+            {
+                var raised = TyphoonFlood.SnapshotAndRestoreForSave();
+                if (raised == null || raised.Count == 0) return;
+
+                // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
+                // new GameObject を走らせるので、exists で先に確認する。
+                if (!Singleton<SimulationManager>.exists) return;
+
+                Singleton<SimulationManager>.instance.AddAction(delegate
+                {
+                    TyphoonFlood.ReapplyAfterSave(raised);
+                });
+            }
+            catch (System.Exception e)
+            {
+                Log.Error("could not lower the typhoon's raised water sources before saving; "
+                          + "the save may contain a flooded river", e);
+            }
+        }
+
+        /// <summary>
+        /// ④が握っている天候の上書きを、**バニラが <c>WeatherManager+Data</c> を書く前に**
+        /// 降ろし、セーブが終わってから <c>AddAction</c> で戻す。
+        ///
+        /// 形は <see cref="RestoreFloodedRiversForSave"/> と同じで、理由も同じである
+        /// （MOD の <c>OnSaveData</c> はバニラの書き込みより先に走る。すぐ戻し直すと
+        /// 漏れが再発する）。**戻しを次の sim tick の <c>TyphoonWeather.Drive</c> に
+        /// 任せない** —— ポーズ中に保存されるとポーズガードがそれを止めるので、
+        /// ポーズを解くまで雨だけが消えたままになる。
+        ///
+        /// ここで例外を出して**セーブそのものを失敗させない**。
+        /// </summary>
+        private static void LowerTyphoonWeatherForSave()
+        {
+            try
+            {
+                bool wasDriving = TyphoonWeather.SuspendForSave();
+                if (!wasDriving) return;
+
+                // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
+                // new GameObject を走らせるので、exists で先に確認する。
+                if (!Singleton<SimulationManager>.exists) return;
+
+                Singleton<SimulationManager>.instance.AddAction(delegate
+                {
+                    TyphoonWeather.ReapplyAfterSave(true);
+                });
+            }
+            catch (System.Exception e)
+            {
+                Log.Error("could not lower the typhoon's weather override before saving; "
+                          + "the save may restore with the storm's rain still forced on", e);
+            }
         }
 
         public void OnLoadData()

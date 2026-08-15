@@ -1,0 +1,520 @@
+using System;
+using System.Reflection;
+
+namespace DisasterPlus.Game
+{
+    /// <summary>
+    /// <see cref="Assumptions"/> のうち④台風 の前提。
+    ///
+    /// **このファイルには検証しか置かない。** <c>Check</c> / <c>SetResult</c> /
+    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> は本体側の private のままで、
+    /// partial なので可視性を 1 つも上げずに使える（分割の要件そのもの）。
+    ///
+    /// 件数は <see cref="TyphoonCheckCount"/> がこのファイルの中で宣言する。
+    /// **検証を足したらここも増やすこと** —— 本体の <c>TotalCheckCount</c> は
+    /// これらの和である。
+    /// </summary>
+    public static partial class Assumptions
+    {
+        /// <summary>このファイルが持つ検証の数。</summary>
+        private const int TyphoonCheckCount = 9;
+
+        private static void RunTyphoon()
+        {
+            // --- ④台風（Task 2: 骨格・プレハブ実測）ここから ---
+
+            // ②の EarthquakeAI の項目と同じ性質の検証で、**実行時にしか値が取れない**。
+            // m_radius / m_emergingDuration / m_activeDuration の実数値は DLL に無く
+            // （プレハブのシリアライズ値、IL 事実文書 §A-0、PARTIAL）、④の
+            // 暴風域半径も持続時間も**進行速度**も全部この 3 値の上に乗る
+            // （TyphoonTrack.SpeedFor は m_activeDuration が 0 なら 0 を返し、
+            //  呼び出し側は台風を 1 個も起こさない）。読めないなら読めないと
+            // 名指しする以外に防波堤が無い。
+            //
+            // DLC 非所持環境ではこれが FAIL するのが正常。TornadoAI / TsunamiAI の
+            // 項目が既に同じ性質を持っており、それが確立した扱いである。
+            // 母数からは外さない——台風機能そのものが DLC 依存なので、
+            // 「使えない」と名指しするのが正しい。
+            Check("ThunderStormAI disaster prefab exposes m_radius / m_emergingDuration / "
+                  + "m_activeDuration, and m_radius / m_activeDuration are non-zero",
+                  "no typhoon can be started at all: its radius, its lifetime and its travel "
+                  + "speed are all derived from these three numbers, and the mod refuses to "
+                  + "guess them. This also FAILs when the Natural Disasters DLC is not owned, "
+                  + "which is expected.",
+                  delegate
+                  {
+                      var t = typeof(ThunderStormAI);
+                      if (!HasField(t, "m_radius", typeof(float))
+                          || !HasField(t, "m_emergingDuration", typeof(uint))
+                          || !HasField(t, "m_activeDuration", typeof(uint)))
+                      {
+                          return false;
+                      }
+                      // 副作用の無い純粋な走査を使う。TyphoonReader の内部キャッシュは
+                      // sim スレッドが回しており、main スレッドのここから巻き戻しては
+                      // いけない（EarthquakeAI の項目と同じ理由）。
+                      //
+                      // ★★ **StormResolved ではなく Usable を見る**（全体レビュー C1）。
+                      //    StormResolved は「プレハブという*オブジェクト*が見つかり、
+                      //    3 つのフィールドを読み終えた」だけで立つ ——
+                      //    **中身は 1 バイトも見ていない。** 台風を起こしてよいかを
+                      //    実際に決めているのは TyphoonPrefabFacts.Usable
+                      //    （＝ StormResolved && StormRadius > 0 && ActiveDuration > 0）で、
+                      //    TyphoonController.Start はそちらで断っている。
+                      //    ここが Resolved のままだと、m_radius か m_activeDuration が
+                      //    0 でデシリアライズされた環境で**ボタンを押しても何も起きないのに、
+                      //    ダンプも設定画面もこの検証だけ PASS と名乗る**。
+                      //    「読めた」を「使える」の代わりに使わない。
+                      return TyphoonReader.ScanPrefabFacts().Usable;
+                  },
+                  true);
+
+            // ★ 設計書の記述をここでも訂正して固定する。**VortexAI に m_maxSpeed は
+            //    存在しない。** §B-1 の IL_00AF が読んでいるのは VehicleAI.m_info、
+            //    すなわち VehicleInfo.m_maxSpeed である。到達経路は
+            //    TornadoAI.m_vortexInfo（VehicleInfo）.m_maxSpeed なので、
+            //    m_vortexInfo の**型まで**照合する——ここが VehicleInfo でなくなったら、
+            //    次の担当者は VortexAI 側に無いフィールドを探して推測で別のものを掴む。
+            //
+            //    影響は台風本体には及ばない（随伴竜巻＝ T10 だけが使えない）。
+            //    そのことを impact に書いておかないと、正常に台風が動く環境の
+            //    この FAIL が「台風が壊れている」と読まれる。
+            Check("TornadoAI.m_vortexInfo resolves to a VortexAI with m_destructionRadiusMin / "
+                  + "m_destructionRadiusMax and a VehicleInfo with m_maxSpeed, and "
+                  + "m_maxSpeed / m_destructionRadiusMax are non-zero",
+                  "the optional accompanying tornadoes cannot be sized or steered; the typhoon "
+                  + "itself is unaffected. This also FAILs when the Natural Disasters DLC is "
+                  + "not owned, which is expected.",
+                  delegate
+                  {
+                      var vortexInfoField = typeof(TornadoAI).GetField("m_vortexInfo",
+                          BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                      if (vortexInfoField == null
+                          || vortexInfoField.FieldType != typeof(VehicleInfo))
+                      {
+                          return false;
+                      }
+
+                      if (!HasField(typeof(VortexAI), "m_destructionRadiusMin", typeof(float))
+                          || !HasField(typeof(VortexAI), "m_destructionRadiusMax", typeof(float))
+                          || !HasField(typeof(VehicleInfo), "m_maxSpeed", typeof(float)))
+                      {
+                          return false;
+                      }
+
+                      // ★★ **VortexResolved だけでは足りない**（全体レビュー C1、嵐と同じ形）。
+                      //    随伴竜巻を実際に止めているのは TyphoonTornado.Step の
+                      //    `!prefab.VortexResolved || !(prefab.VortexMaxSpeed > 0f)` で、
+                      //    軌道半径の見積りは m_destructionRadiusMax の上に乗る。
+                      //    値が 0 でも VortexResolved は立つので、ここを Resolved の
+                      //    ままにすると「竜巻が 1 個も出ないのに検証は PASS」になる。
+                      var vortex = TyphoonReader.ScanPrefabFacts();
+                      return vortex.VortexResolved
+                             && vortex.VortexMaxSpeed > 0f
+                             && vortex.DestructionRadiusMax > 0f;
+                  },
+                  true);
+
+            // --- ④台風（Task 2）ここまで ---
+
+            // --- ④台風（Task 3: 論理オブジェクトと経路追従）ここから ---
+
+            // ④の移動機構そのもの。DisasterData.m_targetPosition を毎 sim tick 書き換えて
+            // 災害を動かす（IL 事実文書 §E-1。本タスクで全アセンブリの
+            // stfld DisasterData::m_targetPosition を走査し直し、既存の災害のそれを
+            // 書くバニラのコードが 1 つも無いことを再確認した）。
+            //
+            // m_activationFrame は罠 1 の見張りに使う——SelfTrigger が効いていなければ
+            // StartDisaster が即 return し、この値が 0 のままになる（§A-1 IL_003F）。
+            // ここが読めなければ見張りごと成立しないので、同じ項目で照合する。
+            //
+            // メソッドは引数の型まで指定して見る（②の BuildingAI.CollapseBuilding の
+            // 検査と同じ形）。名前だけの一致では、シグネチャが変わったときに
+            // 偽 PASS を出す。
+            Check("DisasterData exposes m_targetPosition / m_angle / m_intensity / "
+                  + "m_activationFrame, and DisasterAI.StartNow / DeactivateNow / "
+                  + "ClampDisasterTarget are resolvable",
+                  "the typhoon cannot be created, moved or stopped; the feature does nothing "
+                  + "at all",
+                  delegate
+                  {
+                      var d = typeof(DisasterData);
+                      if (!HasField(d, "m_targetPosition", typeof(UnityEngine.Vector3))
+                          || !HasField(d, "m_angle", typeof(float))
+                          || !HasField(d, "m_intensity", typeof(byte))
+                          || !HasField(d, "m_activationFrame", typeof(uint)))
+                      {
+                          return false;
+                      }
+
+                      var byRef = new Type[]
+                      {
+                          typeof(ushort), typeof(DisasterData).MakeByRefType()
+                      };
+                      if (typeof(DisasterAI).GetMethod("StartNow",
+                              BindingFlags.Public | BindingFlags.Instance, null, byRef,
+                              null) == null)
+                      {
+                          return false;
+                      }
+                      if (typeof(DisasterAI).GetMethod("DeactivateNow",
+                              BindingFlags.Public | BindingFlags.Instance, null, byRef,
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      return typeof(DisasterAI).GetMethod("ClampDisasterTarget",
+                          BindingFlags.Public | BindingFlags.Instance, null,
+                          new Type[] { typeof(UnityEngine.Vector3).MakeByRefType() },
+                          null) != null;
+                  });
+
+            // --- ④台風（Task 3）ここまで ---
+
+            // --- ④台風（Task 4: 天候の駆動）ここから ---
+
+            // ④が天候を握る 6 フィールド（§A-4）。どれが欠けても**例外は出ず**、
+            // 台風が晴天の下を進むだけになる。
+            //
+            // m_forceWeatherOn だけは性質が違う。これが無いと、天候を切っている
+            // プレイヤーの環境で m_targetRain / Cloud / Fog が毎ステップ 0 へ潰される
+            // （IL_053D の枝）。「一部の環境でだけ静かに何も起きない」という、
+            // いちばん報告されにくい壊れ方をするので、名指しで検証する。
+            Check("WeatherManager exposes m_targetRain / m_targetCloud / m_targetFog / "
+                  + "m_targetDirection / m_forceWeatherOn / m_enableWeather",
+                  "the typhoon cannot drive the weather; it would move across the map under "
+                  + "a clear sky",
+                  delegate
+                  {
+                      var w = typeof(WeatherManager);
+                      return HasField(w, "m_targetRain", typeof(float))
+                             && HasField(w, "m_targetCloud", typeof(float))
+                             && HasField(w, "m_targetFog", typeof(float))
+                             && HasField(w, "m_targetDirection", typeof(float))
+                             && HasField(w, "m_forceWeatherOn", typeof(float))
+                             && HasField(w, "m_enableWeather", typeof(bool));
+                  });
+
+            // --- ④台風（Task 4）ここまで ---
+
+            // --- ④台風（Task 6: 落雷）ここから ---
+
+            // 落雷は**実体**で、BurnBuilding / BurnTree / CollapseSegment を起こす
+            // （IL 事実文書 §A-3）。このメソッドが解決できなければ台風は雷を 1 発も
+            // 運ばないが、**例外は出ず、嵐は動き天候も駆動され続ける** ——
+            // 「雷の少ない台風」に見えるだけで、原因を指すものが他に無い。
+            //
+            // 引数の型まで指定して見る（1 引数版 QueueLightningStrike(uint) が別に
+            // 存在するので、名前だけの一致では偽 PASS になる）。
+            Check("WeatherManager.QueueLightningStrike(uint, Vector3, Quaternion, "
+                  + "InstanceManager.Group) is resolvable",
+                  "the typhoon carries no lightning; the storm still moves and drives the "
+                  + "weather",
+                  delegate
+                  {
+                      return typeof(WeatherManager).GetMethod("QueueLightningStrike",
+                          BindingFlags.Public | BindingFlags.Instance, null,
+                          new Type[]
+                          {
+                              typeof(uint), typeof(UnityEngine.Vector3),
+                              typeof(UnityEngine.Quaternion), typeof(InstanceManager.Group)
+                          },
+                          null) != null;
+                  });
+
+            // --- ④台風（Task 6）ここまで ---
+
+            // --- ④台風（Task 7: 風害）ここから ---
+
+            // 風害の 3 経路。**どれが欠けても例外は出ない** ——
+            // 台風が通っても建物が 1 棟も倒れないだけになる。
+            //
+            // CollapseBuilding は②が既に検証している 6 引数版と同じ形で見る。
+            // AddWind / DestroyTrees の並びは Task 7 Step 1 で IL 実測し、
+            // §B-1 が DestroyStuff の転送から導いていた並びと一致することを確認した:
+            //
+            //   public static void AddWind(Vector3, float, Vector3, float, float,
+            //                              InstanceManager.Group)
+            //   public static void DestroyTrees(int, InstanceManager.Group, Vector3,
+            //                                   float, float, float, float, float, float)
+            //
+            // ★ DestroyTrees だけが解決できない場合はこの検査を FAIL にしない。
+            //   風害本体（倒壊と AddWind）は動くので、FAIL にすると狼少年になる。
+            //   倒木を諦めた事実は TyphoonWind が FeatureHost.NoteDegraded で名乗る。
+            //
+            // ★★ **ただし「見ていないものを名前で名乗らない」**（全体レビュー）。
+            //    この検査は以前 "AddWind / DestroyTrees are reachable" と名乗りながら
+            //    DestroyTrees を 1 度も引いていなかった —— PASS が、一度も調べて
+            //    いない相手について断定していたことになる。合否には入れないが
+            //    **実際に引き、結果を名前に書く**。名前は Check に渡す前に組み立てる
+            //    （AssumptionResult は Name しか表示しないので、ここが唯一の出口）。
+            Check("BuildingAI.CollapseBuilding is resolvable and DisasterHelpers.AddWind is "
+                  + "reachable (DisasterHelpers.DestroyTrees: "
+                  + (DestroyTreesIsReachable()
+                        ? "reachable"
+                        : "MISSING - the typhoon fells no trees; the rest of the wind sweep runs")
+                  + ")",
+                  "wind damage cannot be applied. The typhoon still moves, drives the weather "
+                  + "and drops lightning; the mod disables the wind sweep rather than reaching "
+                  + "for DisasterHelpers.DestroyBuildings, which Natural Disasters Renewal "
+                  + "replaces wholesale",
+                  delegate
+                  {
+                      if (typeof(BuildingAI).GetMethod("CollapseBuilding",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[]
+                              {
+                                  typeof(ushort), typeof(Building).MakeByRefType(),
+                                  typeof(InstanceManager.Group), typeof(bool), typeof(bool),
+                                  typeof(int)
+                              },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      // AddWind が無ければ演出だけでなく「風害の経路が丸ごと違う」
+                      // 合図なので、こちらは FAIL に含める。
+                      return typeof(DisasterHelpers).GetMethod("AddWind",
+                          BindingFlags.Public | BindingFlags.Static, null,
+                          new Type[]
+                          {
+                              typeof(UnityEngine.Vector3), typeof(float),
+                              typeof(UnityEngine.Vector3), typeof(float), typeof(float),
+                              typeof(InstanceManager.Group)
+                          },
+                          null) != null;
+                  });
+
+            // --- ④台風（Task 7）ここまで ---
+
+            // --- ④台風（Task 8: 河川氾濫）ここから ---
+
+            // 氾濫の到達経路。**解決できなければ TyphoonFlood は 1 バイトも書かない。**
+            //
+            // Task 8 Step 1 で IL 実測して確定させたこと:
+            //   TerrainManager.WaterSimulation  … public インスタンスプロパティ
+            //                                     （裏は private m_waterSimulation）
+            //   WaterSimulation.m_waterSources  … public FastList<WaterSource>
+            //   LockWaterSource(ushort)         … public、m_buffer[source - 1] を返す
+            //                                     （**1 基点**）。Monitor を取ったまま返る
+            //   UnlockWaterSource(ushort, WaterSource) … public、書き戻して Monitor.Exit
+            //   WaterSource                     … public struct、m_type / m_target は
+            //                                     public UInt16、TYPE_NATURAL = 1
+            //
+            // ★ 代替経路へ逃げないことを impact に書く。CreateWaterWave は内陸で
+            //   **何も起こさない**（津波の波はマップ外周リングでしか評価されない。§D-3(a)）。
+            Check("WaterSimulation is reachable and exposes m_waterSources / LockWaterSource / "
+                  + "UnlockWaterSource, and WaterSource exposes m_type / m_target",
+                  "river flooding cannot run. The mod does nothing rather than reaching for "
+                  + "CreateWaterWave, which does nothing at all inland (the tsunami wave is "
+                  + "only evaluated on the map border ring)",
+                  delegate
+                  {
+                      var wsProperty = typeof(TerrainManager).GetProperty("WaterSimulation",
+                          BindingFlags.Public | BindingFlags.Instance);
+                      if (wsProperty == null
+                          || wsProperty.PropertyType != typeof(WaterSimulation))
+                      {
+                          return false;
+                      }
+
+                      // FastList<WaterSource> であることまで見る（実測で確認済み）。
+                      if (!HasField(typeof(WaterSimulation), "m_waterSources",
+                                    typeof(FastList<WaterSource>)))
+                      {
+                          return false;
+                      }
+
+                      if (typeof(WaterSimulation).GetMethod("LockWaterSource",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[] { typeof(ushort) }, null) == null)
+                      {
+                          return false;
+                      }
+                      if (typeof(WaterSimulation).GetMethod("UnlockWaterSource",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[] { typeof(ushort), typeof(WaterSource) },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      // ★ 型まで見る（全体レビュー）。ここのコメントは以前から
+                      //    「public UInt16」と断定していたのに、検査は名前しか見て
+                      //    いなかった。TyphoonFlood は ushort として読み書きする。
+                      return HasField(typeof(WaterSource), "m_type", typeof(ushort))
+                             && HasField(typeof(WaterSource), "m_target", typeof(ushort));
+                  });
+
+            // --- ④台風（Task 8）ここまで ---
+
+            // --- ④台風（Task 10: 随伴竜巻）ここから ---
+
+            // 随伴竜巻の**操舵**の経路。竜巻は「災害」ではなく VortexAI の車両が動くので
+            // （§E-1）、m_targetPosition を書いても車両は追随しない。車両を見つけて
+            // Vehicle.SetTargetPos の**両スロット**に書くのが唯一の手段である
+            // （スロット 0 だけでは次のステップでスロット 1 に上書きされる。
+            //  ③が IL 実測で確定させた事実）。
+            //
+            // ★ 解決できないときに「竜巻だけ出して操舵を諦める」ことはしない。
+            //   操舵できない竜巻は台風と無関係に都市を横断するので、
+            //   プレイヤーから見ると④が野良の竜巻を落としたのと区別が付かない。
+            //   TyphoonTornado はそのとき 1 個も作らない。
+            //
+            // 引数の型まで指定して見る（②の CollapseBuilding の検査と同じ形）。
+            // 名前だけの一致では、シグネチャが変わったときに偽 PASS を出す。
+            Check("Vehicle.SetTargetPos(int, Vector4) and "
+                  + "InstanceManager.GetAllGroupInstances(InstanceID, FastList<InstanceID>) "
+                  + "are resolvable",
+                  "the accompanying tornadoes cannot be steered around the typhoon. They "
+                  + "would still spawn and drift on vanilla's own path, so the feature "
+                  + "refuses to create them at all rather than dropping loose tornadoes on "
+                  + "the city. Everything else about the typhoon is unaffected",
+                  delegate
+                  {
+                      if (typeof(Vehicle).GetMethod("SetTargetPos",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[] { typeof(int), typeof(UnityEngine.Vector4) },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      return typeof(InstanceManager).GetMethod("GetAllGroupInstances",
+                          BindingFlags.Public | BindingFlags.Static, null,
+                          new Type[] { typeof(InstanceID), typeof(FastList<InstanceID>) },
+                          null) != null;
+                  });
+
+            // --- ④台風（Task 10）ここまで ---
+
+            // --- ④台風（Task 9: 巨大な回転雲）ここから ---
+
+            // ④の雲は**全部自前**である。バニラに流用できる雲は 1 つも無く
+            // （DisasterInfo.m_effect はフィールドごと存在しない。§C-1）、バニラの雲は
+            // ワールド座標を持たないスカイドームなので合成もできない（§C-2）。
+            // したがって雲の生死は「自前のマテリアルが作れるか」だけに掛かっている。
+            //
+            // ★ ここが FAIL のとき、④は**何も描かない**。CS のマテリアルを借りる
+            //   逃げ道は取らない —— CS のシェーダはエンジンが供給する per-instance
+            //   データを要求するので、自前の DrawMesh に載せると不可視か真っ黒になる
+            //   （VortexAI.RenderExtraStuff がその実例。§C-1 / 火災旋風 §4.9）。
+            //   将来のゲーム更新でシェーダ名が変わったとき、黙って雲が消えるのではなく
+            //   ここが名指しする。
+            //
+            // Shader.Find は main スレッド専用だが、Run() 自体が main スレッド専用なので
+            // 問題ない。**DayNightDynamicCloudsProperties の実在はここに入れない** ——
+            // 無いのは正当な環境（DLC・グラフィック設定）で、④の自前の雲には
+            // 影響しないため（FAIL にすると狼少年になる）。
+            // ★★ **どのシェーダで通ったかを名前に書く**（全体レビュー）。
+            //    以前はこの検査が `|| Shader.Find("Standard") != null` で終わっていた。
+            //    Standard は Unity 組み込みなので実質いつでも解決し、**この検査は
+            //    原理的に FAIL しない**——「粒子系のアルファブレンドが 1 つも無い」
+            //    という、この検査が名指しするはずだった事態が起きても PASS が出る。
+            //    合否の式は TyphoonCloud.FindShader と同じままにし（そちらが実際に
+            //    使う順序であり、Standard は MakeStandardTransparent で正しく透過に
+            //    してから使う正当な最終手段である）、**勝ったシェーダ名を出す**ことで
+            //    「Standard まで落ちている」を読めるようにする。
+            string cloudShader = FirstResolvableCloudShader();
+            Check("Graphics.DrawMesh(Mesh, Matrix4x4, Material, int, Camera, int, "
+                  + "MaterialPropertyBlock, bool, bool) is reachable and a transparent shader "
+                  + "resolves via Shader.Find (winner: "
+                  + (cloudShader ?? "NONE - the cloud is not drawn") + ")",
+                  "the typhoon's own cloud cannot be drawn. Every other part of the typhoon is "
+                  + "unaffected; the mod draws nothing rather than borrowing a Cities material, "
+                  + "which renders invisible or black in a hand-rolled DrawMesh",
+                  delegate
+                  {
+                      // ★ 4 引数版ではなく**実際に呼んでいる 9 引数版**を見る。
+                      //   4 引数版は castShadows: true / receiveShadows: true を転送するので、
+                      //   ④は影を落とさない 9 引数版へ移した（TyphoonCloud の doc）。
+                      //   検査する相手は、実際に呼ぶオーバーロードでなければ意味が無い。
+                      if (typeof(UnityEngine.Graphics).GetMethod("DrawMesh",
+                              BindingFlags.Public | BindingFlags.Static, null,
+                              new Type[]
+                              {
+                                  typeof(UnityEngine.Mesh), typeof(UnityEngine.Matrix4x4),
+                                  typeof(UnityEngine.Material), typeof(int),
+                                  typeof(UnityEngine.Camera), typeof(int),
+                                  typeof(UnityEngine.MaterialPropertyBlock),
+                                  typeof(bool), typeof(bool)
+                              },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      return cloudShader != null;
+                  });
+
+            // --- ④台風（Task 9）ここまで ---
+        }
+
+        /// <summary>
+        /// ④の雲が使えるシェーダの名前。1 つも無ければ null。
+        /// **順序は <c>TyphoonCloud.FindShader</c> と同じでなければならない**
+        /// （違う順序で調べると、検査が報告する名前と実際に使うシェーダがずれる）。
+        /// <c>Shader.Find</c> は main スレッド専用だが、<see cref="Run"/> 自体が
+        /// main スレッド専用なので問題ない。
+        /// </summary>
+        private static string FirstResolvableCloudShader()
+        {
+            // ★ **自分で try/catch する。** ここは検証の*名前*を組み立てるために
+            //   Check() の外側（＝あの try/catch の外）で呼ばれる。Assumptions.Run() は
+            //   DisasterPlusLoading.OnLevelLoaded から素で呼ばれているので、
+            //   ここから例外を投げるとレベルロードが壊れる
+            //   （DestroyTreesIsReachable が同じ理由で同じ形をしている）。
+            try
+            {
+                string[] names =
+                {
+                    "Particles/Alpha Blended",
+                    "Legacy Shaders/Particles/Alpha Blended",
+                    "Particles/Additive",
+                    "Standard",
+                };
+
+                for (int i = 0; i < names.Length; i++)
+                {
+                    // UnityEngine.Object の == 多重定義で fake-null も弾く（?? は素通しする）。
+                    if (UnityEngine.Shader.Find(names[i]) != null) return names[i];
+                }
+                return null;
+            }
+            catch
+            {
+                // 名前は「解決しなかった」側に倒す。検証も FAIL になるので、
+                // 黙って PASS を出すことにはならない。
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// <c>DisasterHelpers.DestroyTrees</c> が引数の型まで込みで解決できるか。
+        /// **合否には使わない**（倒木だけが使えない環境で風害まで FAIL にすると
+        /// 狼少年になる）。検証の名前に事実を書くためだけに引く。
+        /// 並びは Task 7 Step 1 で IL 実測したものと同じ。
+        /// </summary>
+        private static bool DestroyTreesIsReachable()
+        {
+            try
+            {
+                return typeof(DisasterHelpers).GetMethod("DestroyTrees",
+                    BindingFlags.Public | BindingFlags.Static, null,
+                    new Type[]
+                    {
+                        typeof(int), typeof(InstanceManager.Group), typeof(UnityEngine.Vector3),
+                        typeof(float), typeof(float), typeof(float), typeof(float),
+                        typeof(float), typeof(float)
+                    },
+                    null) != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+}

@@ -47,6 +47,18 @@ namespace DisasterPlus.Game
         public static SavedInt EarthquakeTsunamiDelayMinutes;
         public static SavedBool EarthquakeLongPeriod;
         public static SavedInt EarthquakeLongPeriodStrength;
+        public static SavedBool TyphoonEnabled;
+        public static SavedInt TyphoonButtonX;
+        public static SavedInt TyphoonButtonY;
+        public static SavedInt TyphoonIntensity;
+        public static SavedBool TyphoonWindDamage;
+        public static SavedInt TyphoonWindStrength;
+        public static SavedBool TyphoonFloodEnabled;
+        public static SavedInt TyphoonFloodStrength;
+        public static SavedBool TyphoonTornadoes;
+        public static SavedInt TyphoonTornadoCount;
+        public static SavedBool TyphoonCloudEnabled;
+        public static SavedBool TyphoonVanillaCloudBoost;
 
         public static void Ensure()
         {
@@ -115,6 +127,55 @@ namespace DisasterPlus.Game
             // 厳密に 0 を返す）。範囲はスライダー側で縛るが、.cgs の値は公開契約なので
             // 範囲外が入っていても読み捨てず、使う側でクランプする。
             EarthquakeLongPeriodStrength = new SavedInt("eqLongPeriodStrength", FileName, 3, true);
+
+            // ④台風。パネルの表示そのものは④が発生させない限り何も起きないので、
+            // 有効化は既定 ON でよい（②の EarthquakeEnabled と同じ扱い）。
+            // 台風を実際に起こすのはプレイヤーの明示的な操作だけである（T3）。
+            TyphoonEnabled = new SavedBool("typhoonEnabled", FileName, true, true);
+            // -1 = 未決定。ForecastButtonX/Y・EarthquakeButtonX/Y と全く同じ扱い
+            // （TyphoonPanelButton が空き位置を決めて書き戻す。T5）。
+            TyphoonButtonX = new SavedInt("typhoonButtonX", FileName, -1, true);
+            TyphoonButtonY = new SavedInt("typhoonButtonY", FileName, -1, true);
+            // 台風の強度。①が 255 まで解放済み（IntensityUnlock）。範囲 10〜255 は
+            // スライダー側で縛るが、.cgs の値は公開契約なので範囲外が入っていても
+            // 読み捨てず、使う側（TyphoonController.ClampIntensity）でクランプする。
+            // ゲーム自身の嵐は 55。既定 120 はそれよりはっきり強いが、
+            // 上限 255 ほど極端でもない値として選んだ。
+            TyphoonIntensity = new SavedInt("typhoonIntensity", FileName, 120, true);
+
+            // ★ 風害は既定 ON。②の第 2 層（津波連鎖・長周期）と判断が違う理由は
+            //    TyphoonWind のクラス doc —— 台風はプレイヤーが明示的に起こすので、
+            //    起きたことの原因が取り違えられない。設計書 §4.3 も既定 ON を指定。
+            TyphoonWindDamage = new SavedBool("typhoonWind", FileName, true, true);
+            // 0〜10。0 で完全に無効（WindDamageModel.CollapseChance が厳密に 0 を返す）。
+            // 範囲はスライダーが縛るが、.cgs の値は公開契約なので使う側でクランプする。
+            TyphoonWindStrength = new SavedInt("typhoonWindStrength", FileName, 3, true);
+
+            // ★ 既定 ON（風害と同じ理由）。ただしこれは**セーブに焼き付く状態を触る
+            //    唯一の機能**なので、復元経路は 3 箇所（終了時・アンロード時・保存時）
+            //    から呼ばれる（TyphoonFlood のクラス doc）。
+            TyphoonFloodEnabled = new SavedBool("typhoonFlood", FileName, true, true);
+            TyphoonFloodStrength = new SavedInt("typhoonFloodStrength", FileName, 3, true);
+
+            // ★ 随伴竜巻は**既定 OFF**（設計書 §2 が明示）。風害・氾濫と判断が違うのは、
+            //    これが唯一「④の外の MOD に破壊を渡す」要素だからである ——
+            //    バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので、
+            //    Natural Disasters Renewal がいる環境ではあちらの竜巻設定に従う
+            //    （IL 事実文書 §F-1、TyphoonTornado のクラス doc）。
+            //    見た目が無料でバニラ品質という利点と引き換えなので、
+            //    プレイヤーに明示的に選ばせる。
+            TyphoonTornadoes = new SavedBool("typhoonTornado", FileName, false, true);
+            // 0〜3。範囲はスライダーが縛るが、.cgs の値は公開契約なので範囲外が
+            // 入っていても読み捨てず、使う側（TyphoonTornado.Step）でクランプする。
+            TyphoonTornadoCount = new SavedInt("typhoonTornadoCount", FileName, 1, true);
+
+            // ★ 雲は既定 ON。**見た目だけの機能で、ゲームの状態を 1 バイトも変えない**
+            //    （main スレッドで Graphics.DrawMesh を出すだけ）。切っても他の 5 要素は
+            //    そのまま動く（TyphoonCloud のクラス doc の独立性）。
+            TyphoonCloudEnabled = new SavedBool("typhoonCloud", FileName, true, true);
+            // バニラのスカイドームの雲を濃く・速くする。**存在しない環境がありうる**
+            // （DLC・グラフィック設定。IL 事実文書 §C-2、PARTIAL）。無ければ黙って諦める。
+            TyphoonVanillaCloudBoost = new SavedBool("typhoonCloudBoost", FileName, true, true);
 
             _ready = true;
         }

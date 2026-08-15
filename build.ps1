@@ -30,6 +30,14 @@ Write-Host "Deployed DisasterPlus.dll -> $modDir"
 Copy-Item $apiDll $modDir -Force
 Write-Host "Deployed CitiesHarmony.API.dll"
 
+# ★ Locales をコピーする**前に**検査する。ja.txt は「[measured] が付いた行だけ」と
+#   案内しながら、自分の SourceVanilla は [実測] だった（英語では偶然一致するので
+#   英語側を読んでも気付けない形）。キーの数だけ数えても捕まらないので、
+#   キー集合の一致に加えて印の契約まで見る。壊れたまま配置しないよう、
+#   ここで throw して以降のコピーを止める。
+& powershell -NoProfile -ExecutionPolicy Bypass -File "tools\CheckLocales.ps1"
+if ($LASTEXITCODE -ne 0) { throw "Locale check failed" }
+
 # LocaleLoader は実行時に Locales\<lang>.txt を読む。
 if (Test-Path "Locales") {
     $dst = Join-Path $modDir "Locales"
