@@ -48,7 +48,20 @@ namespace DisasterPlus.Game
         /// </summary>
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
-            if (!ModSettings.TyphoonEnabled.value) return;
+            if (!ModSettings.TyphoonEnabled.value)
+            {
+                // ★★ 機能を切っても、**触ったものは返す。** プレイヤーが台風の最中に
+                //    この設定を切ると、以降この tick は 1 行も走らなくなるので、
+                //    持ち上げた川の水位を戻す機会が（都市を出るか保存するまで）
+                //    無くなる。RestoreAll は台帳が空なら 1 命令で返るので、
+                //    毎 tick 通っても構わない（ログも確保も走らない）。
+                //
+                //    ここはポーズガードより上だが、**復元はゲームの状態を進めない**
+                //    ので IPausedTickFeature の契約は破らない（むしろポーズ中に
+                //    切られたときに戻せるほうが正しい）。
+                TyphoonFlood.RestoreAll();
+                return;
+            }
 
             // ここまでが「読んで publish するだけ」。ポーズ中もここは通る。
             var snapshot = TyphoonReader.Read();
