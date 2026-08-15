@@ -224,6 +224,39 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly int LightningVanillaReserve;
 
+        // ── T7: 風害 ────────────────────────────────────────
+        //
+        // 5 つとも**④が数えた量**である。バニラには風による破壊機構が 1 つも無く
+        // （§A-5 / §B5）、ここに対応するゲーム側の集計は存在しない。
+        // したがって表示側で <c>[measured]</c> を付けてはいけない。
+
+        /// <summary>これまでに走った風害の走査回数（セッション累計）。</summary>
+        public readonly int WindPasses;
+
+        /// <summary>直近 1 回の走査で倒壊した棟数。</summary>
+        public readonly int WindLastCollapsed;
+
+        /// <summary>セッション累計の倒壊棟数。</summary>
+        public readonly int WindTotalCollapsed;
+
+        /// <summary>直近 1 回で調べた棟数（候補マスクを通り、強風域内にあったもの）。</summary>
+        public readonly int WindLastScanned;
+
+        /// <summary>
+        /// 直近 1 回で**バニラが設計上断った**棟数。
+        /// **0 でないのは正常** —— 防災施設は台風で壊れない（§F-2）。
+        /// </summary>
+        public readonly int WindLastRefused;
+
+        /// <summary>直近 1 回が上限で打ち切られたか（外縁はまだ判定されていない）。</summary>
+        public readonly bool WindLastCapped;
+
+        /// <summary>
+        /// 直近 1 回で高さが読めなかった棟数。**②と違い対象からは外れていない**
+        /// （高さボーナスを辞退しただけ。<c>WindDamageModel</c> の doc）。
+        /// </summary>
+        public readonly int WindLastUnknownHeight;
+
         public TyphoonSnapshot(bool valid, TyphoonPrefabFacts prefab, uint currentFrame,
                                float rain, float cloud, float fog, float windDirectionDegrees,
                                bool weatherEnabled, bool weatherReadable,
@@ -235,8 +268,18 @@ namespace DisasterPlus.Game
                                bool weatherDriving, float drivenRain, float drivenCloud,
                                float drivenDirectionDegrees,
                                int lightningInFlight, int lightningTotal,
-                               int lightningRejected, int lightningVanillaReserve)
+                               int lightningRejected, int lightningVanillaReserve,
+                               int windPasses, int windLastCollapsed, int windTotalCollapsed,
+                               int windLastScanned, int windLastRefused, bool windLastCapped,
+                               int windLastUnknownHeight)
         {
+            WindPasses = windPasses;
+            WindLastCollapsed = windLastCollapsed;
+            WindTotalCollapsed = windTotalCollapsed;
+            WindLastScanned = windLastScanned;
+            WindLastRefused = windLastRefused;
+            WindLastCapped = windLastCapped;
+            WindLastUnknownHeight = windLastUnknownHeight;
             LightningInFlight = lightningInFlight;
             LightningTotal = lightningTotal;
             LightningRejected = lightningRejected;
@@ -278,7 +321,8 @@ namespace DisasterPlus.Game
                                        0, 0f, 0f, TyphoonPhase.Idle, 0u, 0u,
                                        false, false, 0f, null,
                                        false, 0f, 0f, 0f,
-                                       0, 0, 0, 0);
+                                       0, 0, 0, 0,
+                                       0, 0, 0, 0, 0, false, 0);
         }
     }
 }

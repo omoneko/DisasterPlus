@@ -162,6 +162,13 @@ namespace DisasterPlus.Game
             // 探索のやり直しは次回のレベルロードで自然に起きる（TyphoonPanelButton.Install
             // は保存済み座標が -1 のときだけ FreeSlotFinder を再度呼ぶ）。ここでは保存値を
             // 戻すだけで十分（①②のボタン位置リセットと同じ形）。
+            // ★ 風害は既定 ON（②の第 2 層と判断が違う理由は TyphoonWind のクラス doc）。
+            //    強さ 0 で完全に無効になる。
+            typhoon.AddCheckbox(Strings.TyphoonWindEnabled, ModSettings.TyphoonWindDamage.value,
+                v => ModSettings.TyphoonWindDamage.value = v);
+            typhoon.AddSlider(Strings.TyphoonWindStrength, 0f, 10f, 1f,
+                ModSettings.TyphoonWindStrength.value,
+                v => ModSettings.TyphoonWindStrength.value = (int)v);
             typhoon.AddButton(Strings.TyphoonResetButton, delegate
             {
                 ModSettings.TyphoonButtonX.value = -1;
@@ -170,6 +177,8 @@ namespace DisasterPlus.Game
 
             // 強度がバニラの領域を超えることを名乗る（EarthquakeShakeBoostNote と同じ形）。
             helper.AddGroup(Strings.TyphoonIntensityNote);
+            // ★ 「バニラに風害は存在しない」「数値は風速ではない」を設定画面でも名乗る。
+            helper.AddGroup(Strings.TyphoonWindNote);
 
             // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
             // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。

@@ -30,6 +30,9 @@ namespace DisasterPlus.Game
     {
         private static UILabel _lightningLabel;
         private static UILabel _lightningNoteLabel;
+        private static UILabel _windLabel;
+        private static UILabel _windNoteLabel;
+        private static UILabel _windShelterNoteLabel;
 
         /// <summary>パネル構築時に 1 回。</summary>
         internal static void Build(UIPanel p, ref float y)
@@ -42,6 +45,17 @@ namespace DisasterPlus.Game
             // 何のことか、この 1 行が無いと分からない。
             _lightningNoteLabel = TyphoonRows.AddRow(p, "LightningNote", ref y, 40f);
             TyphoonRows.SetPlain(_lightningNoteLabel, Strings.TyphoonLightningNote);
+
+            _windLabel = TyphoonRows.AddRow(p, "Wind", ref y);
+
+            // **常設**にする。「バニラには風害が存在しない」ことと「数値は風速ではない」
+            // ことは、風害が動いていない瞬間にこそ読まれるべき説明である。
+            _windNoteLabel = TyphoonRows.AddRow(p, "WindNote", ref y, 40f);
+            TyphoonRows.SetPlain(_windNoteLabel, Strings.TyphoonWindNote);
+
+            // 「壊れていない」と「壊せない」を取り違えさせない（§F-2）。
+            _windShelterNoteLabel = TyphoonRows.AddRow(p, "WindShelterNote", ref y, 40f);
+            TyphoonRows.SetPlain(_windShelterNoteLabel, Strings.TyphoonWindShelterNote);
         }
 
         /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
@@ -51,6 +65,7 @@ namespace DisasterPlus.Game
             {
                 // 台風が居ないときに 0 を並べない（「撒いていない」と「0 発だった」は違う）。
                 TyphoonRows.SetPlain(_lightningLabel, "");
+                TyphoonRows.SetPlain(_windLabel, "");
                 return;
             }
 
@@ -60,6 +75,36 @@ namespace DisasterPlus.Game
                 Strings.TyphoonLightningRow + ": "
                 + s.LightningInFlight + " / " + s.LightningTotal + " / "
                 + s.LightningVanillaReserve + " / " + s.LightningRejected);
+
+            RefreshWind(s);
+        }
+
+        /// <summary>
+        /// 風害の行。**倒壊 0 のときも数を出す** —— 「効いていない」と「近くに建物が
+        /// 無い」を画面上で区別できるようにするため（<c>scanned</c> がその手がかり）。
+        ///
+        /// 設定で切っているときは数字を並べず、切っていることを言う
+        /// （0 を並べると「動いているのに 1 棟も倒れない」と読める）。
+        /// </summary>
+        private static void RefreshWind(TyphoonSnapshot s)
+        {
+            if (!ModSettings.TyphoonWindDamage.value
+                || ModSettings.TyphoonWindStrength.value <= 0)
+            {
+                TyphoonRows.SetPlain(_windLabel, Strings.TyphoonWindRow + ": off");
+                return;
+            }
+
+            // 並びは Strings.TyphoonWindRow が語で名乗っている順:
+            // 直近の走査の倒壊 / 累計 / 調べた棟数 / ゲームに断られた棟数。
+            string text = Strings.TyphoonWindRow + ": "
+                + s.WindLastCollapsed + " / " + s.WindTotalCollapsed + " / "
+                + s.WindLastScanned + " / " + s.WindLastRefused;
+
+            // 外縁がまだ判定されていないことを黙って隠さない（巨大都市で起きる）。
+            if (s.WindLastCapped) text += "   " + Strings.TyphoonWindCapped;
+
+            TyphoonRows.SetPlain(_windLabel, text);
         }
 
         /// <summary>
@@ -70,6 +115,9 @@ namespace DisasterPlus.Game
         {
             _lightningLabel = null;
             _lightningNoteLabel = null;
+            _windLabel = null;
+            _windNoteLabel = null;
+            _windShelterNoteLabel = null;
         }
     }
 }

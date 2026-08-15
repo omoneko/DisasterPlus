@@ -130,6 +130,18 @@ namespace DisasterPlus.Game
 
         public static float GaleRadius { get { return _galeRadius; } }
 
+        /// <summary>
+        /// この台風が使っている <c>ThunderStormAI.m_radius</c>（プレハブ実測値）。
+        /// **0 は「読めていない」である**（設計書 §6。<c>TyphoonPrefabFacts.Usable</c> が
+        /// false のとき台風はそもそも起きないので、Active 中は必ず正）。
+        ///
+        /// <see cref="StormRadius"/> / <see cref="GaleRadius"/> は今の強度での**結果**で、
+        /// こちらは <c>TyphoonProfile.WindAt</c> / <c>StormRadiusOf</c> に渡す**入力**である。
+        /// T7 の風害が距離ごとの風速相当を求めるのに要る ——
+        /// 結果から割り戻すと強度 0 のとき 0 除算になる。
+        /// </summary>
+        public static float PrefabRadius { get { return _prefabRadius; } }
+
         public static TyphoonPhase Phase { get { return _phase; } }
 
         public static uint ElapsedFrames { get { return _elapsedFrames; } }
@@ -472,6 +484,10 @@ namespace DisasterPlus.Game
             //    空いているキューを「埋まっている」と見て 1 発も撃たなくなる ——
             //    そしてキューが空のままになるので、抑え込んでいたはずの環境落雷が戻る。
             TyphoonLightning.Reset();
+
+            // ★ 風害の走査位置も次の台風へ持ち越さない。持ち越すと、次の台風は
+            //    前の台風の中心を基準にした序数から走り出す。
+            TyphoonWind.Reset();
 
             TyphoonSlot.Forget();
 

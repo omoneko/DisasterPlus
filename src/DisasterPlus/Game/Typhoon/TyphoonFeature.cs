@@ -82,10 +82,17 @@ namespace DisasterPlus.Game
             {
                 TyphoonWeather.Drive(snapshot, deltaMinutes);
                 TyphoonLightning.Tick(snapshot, frameIndex);
+
+                // ★ 風害は設定で切れる（既定 ON。強さ 0 でも完全に無効）。
+                //   切ったときに Apply を呼ばないのは②の第 2 層と同じ形で、
+                //   走査そのものを起こさないためである。
+                if (ModSettings.TyphoonWindDamage.value)
+                {
+                    TyphoonWind.Apply(snapshot, deltaMinutes);
+                }
             }
 
-            // （T7: TyphoonWind.Apply / T8: TyphoonFlood.Tick /
-            //   T10: TyphoonTornado.Tick がここに入る）
+            // （T8: TyphoonFlood.Tick / T10: TyphoonTornado.Tick がここに入る）
         }
 
         /// <summary>
@@ -116,6 +123,9 @@ namespace DisasterPlus.Game
             // ★ 落雷の在庫も持ち越さない。持ち越すと次の都市の台風が、実際には
             //    空いているキューを「埋まっている」と見て撃たなくなる。
             TyphoonLightning.Reset();
+            // ★ 風害の走査位置とカウンタも都市をまたがない。持ち越すと次の都市で
+            //    前の都市の序数から走り出す（＝中心の周りが 1 度も判定されない）。
+            TyphoonWind.Reset();
         }
 
         /// <summary>
@@ -229,6 +239,57 @@ namespace DisasterPlus.Game
 
             WriteWeatherDriving(b, snapshot);
             WriteLightning(b, snapshot);
+            WriteWind(b, snapshot);
+        }
+
+        /// <summary>
+        /// 風害（T7）。**倒壊 0 のときも全部出す。** 画面上は「設定で切っている」
+        /// 「近くに建物が無い」「上限で外縁まで届いていない」「全部ゲームに断られた」が
+        /// どれも同じ顔（何も倒れない）になるので、切り分けはここでしかできない。
+        /// </summary>
+        private static void WriteWind(DiagnosticBuilder b, TyphoonSnapshot snapshot)
+        {
+            if (!ModSettings.TyphoonWindDamage.value)
+            {
+                b.Line(2, "wind damage", "off (setting)");
+                return;
+            }
+
+            int strength = ModSettings.TyphoonWindStrength.value;
+            if (strength <= 0)
+            {
+                b.Line(2, "wind damage", "off (strength slider is 0)");
+                return;
+            }
+
+            b.Line(2, "wind damage",
+                "pass " + snapshot.WindPasses
+                + " / collapsed " + snapshot.WindLastCollapsed
+                + " (total " + snapshot.WindTotalCollapsed + ")"
+                + " / examined " + snapshot.WindLastScanned
+                + " / refused " + snapshot.WindLastRefused
+                + " / strength " + strength);
+
+            // 「壊れていない」と「壊せない」を取り違えさせない（§F-2）。
+            b.Line(3, "refused", snapshot.WindLastRefused == 0
+                ? "0"
+                : snapshot.WindLastRefused
+                  + " (shelters / vaults / dams / decoration / tsunami buoys refuse "
+                  + "demolish:false; that is the game answering correctly, not a failure)");
+
+            // 高さは係数であって足切りではない（②の長周期と判断が違う）。
+            b.Line(3, "unknown height", snapshot.WindLastUnknownHeight == 0
+                ? "0"
+                : snapshot.WindLastUnknownHeight
+                  + " (these buildings stayed eligible at the base chance; the height bonus "
+                  + "was declined, not guessed)");
+
+            if (snapshot.WindLastCapped)
+            {
+                b.Line(3, "capped",
+                    "the sweep was truncated this pass; the outer edge has not been rolled yet "
+                    + "and resumes next pass");
+            }
         }
 
         /// <summary>

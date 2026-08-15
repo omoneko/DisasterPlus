@@ -193,3 +193,9 @@ TyphoonWindDirectionNote = The wind direction follows the storm only slowly. The
 TyphoonEffectsHeader = What the typhoon brings
 TyphoonLightningRow = Lightning (in flight / total / left to the host storm / dropped)
 TyphoonLightningNote = The game can only hold 20 lightning strikes at once. Disaster + keeps its own share below that so the host storm's strikes are not thrown away.
+TyphoonWindRow = Wind damage (collapsed this pass / total / examined / refused by the game)
+TyphoonWindEnabled = Wind damage (buildings vanilla would never collapse)
+TyphoonWindStrength = Wind damage strength (0 = off)
+TyphoonWindNote = The game has no wind damage of any kind, and no field that makes the wind stronger. This is a model Disaster + invented. The numbers are not wind speeds.
+TyphoonWindShelterNote = Shelters, vaults and dams do not collapse in a typhoon. That is the game refusing, and it is the right answer.
+TyphoonWindCapped = sweep truncated this pass; the outer edge has not been rolled yet

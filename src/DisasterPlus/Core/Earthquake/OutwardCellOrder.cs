@@ -36,6 +36,10 @@ namespace DisasterPlus.Core.Earthquake
     /// （震央がマップの端にある場合）だが、走査の間隔は 256 フレームなので
     /// 実測が要るほどの量ではない。数えてしまうと、上限がはみ出しの分だけ
     /// 目減りして「実際に見た建物が上限より少ない」という読めない診断になる。
+    ///
+    /// **④台風の風害走査もこの順序を使う**（<c>Game/Typhoon/TyphoonWind</c>）。名前空間が
+    /// Earthquake のままなのは意図的で、型を動かすと②のテストとレビュー済みの doc 参照が
+    /// 全部動く。順序そのものは災害に依存しない。
     /// </summary>
     public static class OutwardCellOrder
     {

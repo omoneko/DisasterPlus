@@ -112,7 +112,14 @@ namespace DisasterPlus.Game
                                            TyphoonLightning.InFlight,
                                            TyphoonLightning.TotalQueued,
                                            TyphoonLightning.TotalRejected,
-                                           TyphoonLightning.LastVanillaReserve);
+                                           TyphoonLightning.LastVanillaReserve,
+                                           TyphoonWind.Passes,
+                                           TyphoonWind.LastCollapsed,
+                                           TyphoonWind.TotalCollapsed,
+                                           TyphoonWind.LastScanned,
+                                           TyphoonWind.LastRefused,
+                                           TyphoonWind.LastCapped,
+                                           TyphoonWind.LastUnknownHeight);
             }
             catch (System.Exception e)
             {

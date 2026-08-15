@@ -52,13 +52,15 @@ namespace DisasterPlus.Game
         /// BuildingAI.CollapseBuilding と BuildingInfo.m_size / m_generatedInfo）＋
         /// 台風 4 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値・
         /// DisasterData の移動 4 フィールドと DisasterAI の公開ラッパー 3 メソッド・
-        /// WeatherManager の target 系 6 フィールド）＋
+        /// WeatherManager の target 系 6 フィールド・
+        /// QueueLightningStrike の 4 引数版・
+        /// BuildingAI.CollapseBuilding と DisasterHelpers.AddWind / DestroyTrees）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 28;
+        private const int TotalCheckCount = 29;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -772,6 +774,59 @@ namespace DisasterPlus.Game
                   });
 
             // --- ④台風（Task 6）ここまで ---
+
+            // --- ④台風（Task 7: 風害）ここから ---
+
+            // 風害の 3 経路。**どれが欠けても例外は出ない** ——
+            // 台風が通っても建物が 1 棟も倒れないだけになる。
+            //
+            // CollapseBuilding は②が既に検証している 6 引数版と同じ形で見る。
+            // AddWind / DestroyTrees の並びは Task 7 Step 1 で IL 実測し、
+            // §B-1 が DestroyStuff の転送から導いていた並びと一致することを確認した:
+            //
+            //   public static void AddWind(Vector3, float, Vector3, float, float,
+            //                              InstanceManager.Group)
+            //   public static void DestroyTrees(int, InstanceManager.Group, Vector3,
+            //                                   float, float, float, float, float, float)
+            //
+            // ★ DestroyTrees だけが解決できない場合はこの検査を FAIL にしない。
+            //   風害本体（倒壊と AddWind）は動くので、FAIL にすると狼少年になる。
+            //   倒木を諦めた事実は TyphoonWind が FeatureHost.NoteDegraded で名乗る。
+            Check("BuildingAI.CollapseBuilding is resolvable and DisasterHelpers.AddWind / "
+                  + "DestroyTrees are reachable",
+                  "wind damage cannot be applied. The typhoon still moves, drives the weather "
+                  + "and drops lightning; the mod disables the wind sweep rather than reaching "
+                  + "for DisasterHelpers.DestroyBuildings, which Natural Disasters Renewal "
+                  + "replaces wholesale",
+                  delegate
+                  {
+                      if (typeof(BuildingAI).GetMethod("CollapseBuilding",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[]
+                              {
+                                  typeof(ushort), typeof(Building).MakeByRefType(),
+                                  typeof(InstanceManager.Group), typeof(bool), typeof(bool),
+                                  typeof(int)
+                              },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      // AddWind が無ければ演出だけでなく「風害の経路が丸ごと違う」
+                      // 合図なので、こちらは FAIL に含める。
+                      return typeof(DisasterHelpers).GetMethod("AddWind",
+                          BindingFlags.Public | BindingFlags.Static, null,
+                          new Type[]
+                          {
+                              typeof(UnityEngine.Vector3), typeof(float),
+                              typeof(UnityEngine.Vector3), typeof(float), typeof(float),
+                              typeof(InstanceManager.Group)
+                          },
+                          null) != null;
+                  });
+
+            // --- ④台風（Task 7）ここまで ---
 
             Report();
         }

@@ -621,5 +621,26 @@ namespace DisasterPlus.Game
         public static string TyphoonLightningNote =
             "The game can only hold 20 lightning strikes at once. Disaster + keeps its own "
             + "share below that so the host storm's strikes are not thrown away.";
+
+        // --- ④台風（Task 7: 風害） ---
+        //
+        // ★ ここも印を付けない（④の表示規約）。**特に「風速」を名乗らないこと** ——
+        //   ④の風速相当は倒壊確率に掛ける係数であって m/s ではない（設計書 §7.3）。
+        //   TyphoonWindNote がその事実を一度だけ名乗る。
+        // TyphoonLightningRow と同じ形で、**並べる順序をラベルが語で名乗る**
+        // （書式文字列を使わない。翻訳の {0} がずれると実行時に落ちる）。
+        public static string TyphoonWindRow =
+            "Wind damage (collapsed this pass / total / examined / refused by the game)";
+        public static string TyphoonWindEnabled =
+            "Wind damage (buildings vanilla would never collapse)";
+        public static string TyphoonWindStrength = "Wind damage strength (0 = off)";
+        public static string TyphoonWindNote =
+            "The game has no wind damage of any kind, and no field that makes the wind "
+            + "stronger. This is a model Disaster + invented. The numbers are not wind speeds.";
+        public static string TyphoonWindShelterNote =
+            "Shelters, vaults and dams do not collapse in a typhoon. That is the game "
+            + "refusing, and it is the right answer.";
+        public static string TyphoonWindCapped =
+            "sweep truncated this pass; the outer edge has not been rolled yet";
     }
 }

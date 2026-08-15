@@ -51,6 +51,8 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonButtonX;
         public static SavedInt TyphoonButtonY;
         public static SavedInt TyphoonIntensity;
+        public static SavedBool TyphoonWindDamage;
+        public static SavedInt TyphoonWindStrength;
 
         public static void Ensure()
         {
@@ -134,6 +136,14 @@ namespace DisasterPlus.Game
             // ゲーム自身の嵐は 55。既定 120 はそれよりはっきり強いが、
             // 上限 255 ほど極端でもない値として選んだ。
             TyphoonIntensity = new SavedInt("typhoonIntensity", FileName, 120, true);
+
+            // ★ 風害は既定 ON。②の第 2 層（津波連鎖・長周期）と判断が違う理由は
+            //    TyphoonWind のクラス doc —— 台風はプレイヤーが明示的に起こすので、
+            //    起きたことの原因が取り違えられない。設計書 §4.3 も既定 ON を指定。
+            TyphoonWindDamage = new SavedBool("typhoonWind", FileName, true, true);
+            // 0〜10。0 で完全に無効（WindDamageModel.CollapseChance が厳密に 0 を返す）。
+            // 範囲はスライダーが縛るが、.cgs の値は公開契約なので使う側でクランプする。
+            TyphoonWindStrength = new SavedInt("typhoonWindStrength", FileName, 3, true);
 
             _ready = true;
         }
