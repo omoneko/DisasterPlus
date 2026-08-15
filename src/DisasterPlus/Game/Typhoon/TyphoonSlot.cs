@@ -126,7 +126,18 @@ namespace DisasterPlus.Game
         {
             refusal = null;
 
-            if (_id == 0 || !Singleton<DisasterManager>.exists)
+            // ★ 2 つの別々の失敗を 1 つのメッセージにまとめない（全体レビュー I3）。
+            //   「まだスロットを取っていない」を "DisasterManager is not available" と
+            //   名乗ると、診断を読む人は存在しない Singleton の不在を追いかけることになる。
+            if (_id == 0)
+            {
+                refusal = "Begin was called without a disaster slot (Create did not run "
+                        + "or did not succeed)";
+                Forget();
+                return false;
+            }
+
+            if (!Singleton<DisasterManager>.exists)
             {
                 refusal = "DisasterManager is not available";
                 Forget();
@@ -138,6 +149,13 @@ namespace DisasterPlus.Game
             if (buffer == null || _id >= buffer.Length)
             {
                 refusal = "the disaster index is out of range";
+                // ★★ **取ったスロットを返してから降りる**（全体レビュー I3）。
+                //    ここへ来るのは Create が成功した後なので、④は災害スロットを
+                //    1 個確保済みである。返さずに Forget すると、そのスロットは
+                //    誰にも解放されないまま都市の寿命ぶん残り、災害一覧にも出続ける
+                //    （下の SelfTrigger の見張りが Abandon するのと同じ理由）。
+                //    ReleaseDisaster 自身が範囲外を弾く（例外は Abandon が握る）。
+                Abandon(manager, _id);
                 Forget();
                 return false;
             }

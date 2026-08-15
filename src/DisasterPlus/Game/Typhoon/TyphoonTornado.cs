@@ -140,6 +140,14 @@ namespace DisasterPlus.Game
         /// （ゲームのビルドに対する事実であって都市ごとの状態ではない）。</summary>
         private static bool _errorLogged;
 
+        /// <summary>
+        /// <c>SelfTrigger</c> の見張りが鳴ったことを 1 回だけ <c>Log.Error</c> で出したか。
+        /// <see cref="_errorLogged"/> と分けてあるのは、片方が立つともう片方の 1 回目が
+        /// 黙って消えるからである（<c>TyphoonLightning._rejectionLogged</c> と同じ判断）。
+        /// <see cref="Reset"/> で戻さない。
+        /// </summary>
+        private static bool _startFailureLogged;
+
         /// <summary>今④が掴んでいる竜巻の数。</summary>
         public static int Count { get { return _count; } }
 
@@ -330,6 +338,37 @@ namespace DisasterPlus.Game
 
         // ── 生成 ───────────────────────────────────────────────
 
+        /// <summary>1 個ぶんの生成がどう終わったか。<see cref="TopUp"/> の打ち切り判断に使う。</summary>
+        private enum CreateOutcome
+        {
+            /// <summary>竜巻が 1 個立ち上がった。</summary>
+            Started,
+
+            /// <summary><c>CreateDisaster</c> まで届かずに諦めた（プレハブ無しなど）。</summary>
+            RefusedBeforeCreate,
+
+            /// <summary><c>CreateDisaster</c> は呼んだが竜巻にならなかった。
+            /// **呼び出し側は災害バッファの参照を取り直すこと**（<see cref="Step"/> の注記）。</summary>
+            FailedAfterCreate,
+        }
+
+        /// <summary>
+        /// 足りないぶんを補充する。
+        ///
+        /// ★★ **1 tick のうち最初の失敗で打ち切る**（全体レビュー I3）。以前は
+        /// 失敗しても <c>_count</c> が増えないため、3 スロットぶんの生成が
+        /// **毎 sim tick・永久に**再試行されていた。実害は 3 つあった:
+        ///
+        ///   1. 災害バッファが満杯のとき、<c>CreateDisaster</c> の 256 スロット全走査が
+        ///      毎 tick 3 回走る（満杯は「そのうち直る」状態ではない）
+        ///   2. <c>SelfTrigger</c> の見張りが鳴る環境では、ラッチの無い
+        ///      <c>Log.Error</c> が毎 tick 3 行 —— 通常速度で毎秒 150 行の
+        ///      スタックトレースになり、ログが読めなくなる
+        ///   3. どちらも「失敗の理由は次の tick でも同じ」であり、連打しても直らない
+        ///
+        /// 失敗した tick は 1 回で降りる。次の tick で改めて 1 回試すので、
+        /// 一時的な失敗（バッファが一瞬満杯だった等）からは自然に回復する。
+        /// </summary>
         /// <returns><c>CreateDisaster</c> を 1 回でも呼んだなら true
         /// （呼び出し側は災害バッファの参照を取り直すこと）。</returns>
         private static bool TopUp(int desired, uint frame, float radius)
@@ -338,7 +377,11 @@ namespace DisasterPlus.Game
             for (int i = 0; i < _slots.Length && _count < desired; i++)
             {
                 if (_slots[i].DisasterId != 0) continue;
-                created |= TryCreate(i, frame, radius);
+
+                CreateOutcome outcome = TryCreate(i, frame, radius);
+                if (outcome == CreateOutcome.FailedAfterCreate) created = true;
+                if (outcome != CreateOutcome.Started) break;   // ★ この tick はここまで
+                created = true;
             }
             return created;
         }
@@ -350,20 +393,20 @@ namespace DisasterPlus.Game
         /// **災害バッファは <c>CreateDisaster</c> の後で自分で取り直す**（あちらが
         /// <c>FastList.Add</c> で配列を作り直すため。<see cref="Step"/> の注記）。
         /// </summary>
-        /// <returns><c>CreateDisaster</c> を呼んだなら true（成否によらず）。</returns>
-        private static bool TryCreate(int index, uint frame, float radius)
+        /// <returns>この 1 個がどう終わったか（<see cref="TopUp"/> が打ち切りに使う）。</returns>
+        private static CreateOutcome TryCreate(int index, uint frame, float radius)
         {
             var info = FindTornadoInfo();
             if (info == null || info.m_disasterAI == null)
             {
                 _lastFailure = "no TornadoAI prefab (Natural Disasters DLC?)";
-                return false;
+                return CreateOutcome.RefusedBeforeCreate;
             }
 
             if (!Singleton<DisasterManager>.exists)
             {
                 _lastFailure = "DisasterManager is not available";
-                return false;
+                return CreateOutcome.RefusedBeforeCreate;
             }
 
             ushort id;
@@ -374,7 +417,9 @@ namespace DisasterPlus.Game
             {
                 _lastFailure = "CreateDisaster returned false (disaster buffer full?)";
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorFull", _lastFailure);
-                return true;
+                // 呼んだ側は 256 スロットの全走査を 1 回させている。**この tick は
+                // もう試さない**（TopUp の doc）。
+                return CreateOutcome.RefusedBeforeCreate;
             }
 
             // ★ ここで初めて取る（メソッド doc）。CreateDisaster より前に取った参照は
@@ -383,7 +428,12 @@ namespace DisasterPlus.Game
             if (buffer == null || id == 0 || id >= buffer.Length)
             {
                 _lastFailure = "CreateDisaster returned an out-of-range index";
-                return true;
+                // ★★ **取ったスロットを必ず返す**（全体レビュー I3）。以前はここで
+                //    そのまま return しており、CreateDisaster が成功して確保した
+                //    スロットが誰にも解放されないまま残った ——
+                //    毎 tick 再試行していたので、256 の予算がそのぶんだけ削られ続けた。
+                Abandon(id);
+                return CreateOutcome.FailedAfterCreate;
             }
 
             // 位相は災害 ID から決定論的に引く（VanillaRandomizer は使わない ——
@@ -412,9 +462,25 @@ namespace DisasterPlus.Game
             {
                 _lastFailure = "StartDisaster did not schedule an activation frame; "
                              + "the SelfTrigger flag did not take effect";
-                Log.Error("typhoon tornado: " + _lastFailure, null);
+
+                // ★★ **ラッチする**（全体レビュー I3）。ここは毎 sim tick 通る経路で、
+                //    Log.Error はスロットルされない。TyphoonSlot に同じ 1 行が
+                //    あるが、あちらはプレイヤーが「台風を発生させる」を押した
+                //    ときの一発勝負なので費用が違う —— 形だけ写して、
+                //    ループが費用の前提を変えたことを見落としていた。
+                if (!_startFailureLogged)
+                {
+                    _startFailureLogged = true;
+                    Log.Error("typhoon tornado: " + _lastFailure, null);
+                }
+                else
+                {
+                    Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorSelfTrigger",
+                             "typhoon tornado: " + _lastFailure);
+                }
+
                 Abandon(id);
-                return true;
+                return CreateOutcome.FailedAfterCreate;
             }
 
             _slots[index] = new TyphoonTornadoSlot
@@ -432,7 +498,7 @@ namespace DisasterPlus.Game
             Log.Info("typhoon tornado started: disaster #" + id
                      + " intensity=" + intensity
                      + " (frame " + frame + ")");
-            return true;
+            return CreateOutcome.Started;
         }
 
         // ── 紐づけ ─────────────────────────────────────────────
@@ -671,6 +737,22 @@ namespace DisasterPlus.Game
             _count = 0;
         }
 
+        /// <summary>
+        /// 竜巻 1 個を畳む。
+        ///
+        /// ★★ **災害 ID の再利用を、車両 ID と同じ厳しさで弾く**（全体レビュー C2）。
+        /// 以前ここは <c>Created</c> と <c>Info != null</c> しか見ておらず、
+        /// <c>LostReason</c> が毎 tick 見ている 2 条件——<c>m_activationFrame</c> の一致と
+        /// <c>m_disasterAI is TornadoAI</c>——を飛ばしていた。通常は <see cref="Verify"/> が
+        /// 同じ tick で走るので窓は 1 tick だが、**設定の「台風」を切ると窓が無限になる**:
+        /// <c>TyphoonFeature.OnSimulationTick</c> は無効時に早期 return するので、
+        /// 台帳は <c>(DisasterId, ActivationFrame)</c> を抱えたまま 1 tick も検証されず、
+        /// その間に竜巻は自然終了してスロットがバニラや他 MOD に配り直される。
+        /// あとで都市を出るか設定を戻すと、ここが**他人の生きている災害**を
+        /// <c>DeactivateNow</c> するか <c>ReleaseDisaster</c> する。例外もログも出ない。
+        /// （その早期 return 自体も同じレビューで塞いだが、<b>この関数は自分で確かめる</b>
+        ///  ——呼び出し側の順序に安全性を預けない。）
+        /// </summary>
         private static void StopOne(DisasterData[] buffer, TyphoonTornadoSlot slot)
         {
             // ★ 車両 ID の再利用を先に弾く（<see cref="StillOurVortex"/> の注記）。
@@ -690,8 +772,19 @@ namespace DisasterPlus.Game
                 }
             }
 
-            if (buffer == null || slot.DisasterId >= buffer.Length) return;
-            if ((buffer[slot.DisasterId].m_flags & DisasterData.Flags.Created) == 0) return;
+            if (buffer == null) return;
+
+            // ★★ バニラの終了経路を呼ぶ前に、**まだ④の竜巻か**を毎回確かめる
+            //    （メソッド doc）。Verify と同じ関数を通すので、判定が 2 箇所に
+            //    分かれて片方だけ古くなることが無い。
+            string lost = LostReason(buffer, slot.DisasterId, slot.ActivationFrame);
+            if (lost != null)
+            {
+                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorStale",
+                         "typhoon dropped tornado #" + slot.DisasterId
+                         + " without touching it: " + lost);
+                return;
+            }
 
             var info = buffer[slot.DisasterId].Info;
             if (info == null || info.m_disasterAI == null) return;
