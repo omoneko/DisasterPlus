@@ -33,6 +33,8 @@
 | E13 | 可逆性 | **CONFIRMED（自前で持つしかない）** | `BackupHeights` / `UndoBuffer` は **`TerrainTool` / `DistrictTool` 専有**。MOD が使うと地形ツールを開いた瞬間に壊れる。自前保存の実費は**半径 1 km で 31 KB、2 km で 123 KB**（ushort × 影響セル） |
 | E14 | NDR との衝突 | **CONFIRMED（衝突しない）** | ⑤が使う `MakeCrater` / `TerrainModify` / `TerrainManager` / `BurnGround` / `BurnBuilding` は NDR のパッチ面（`DisasterHelpers.DestroyBuildings` / `DestroyNetSegments`）を**一切通らない** |
 
+| F15 | 道路セグメントのグリッド | **CONFIRMED（建物と同じ形）** | `NetManager.m_segmentGrid` は `ushort[72900]`（= 270²）。セル 64 m・オフセット +135・`[0,269]` クランプ・`index = z*270 + x` で、**建物グリッドと完全に同じ寸法**。鎖は `NetSegment.m_nextGridSegment`（`ushort`）。ただし**セルを決める位置は両端ノードの中点**であって `m_middlePosition` ではない（→ §F-15） |
+
 **今回いちばん危なかった思い込み（＝10 個目の候補）は A2。** 「地形を書けば地形が変わる」は、**道路と建物の下では成り立たない**。詳細は §A-2 と「設計への含意」。
 
 ---
@@ -1064,6 +1066,68 @@ NDR は「災害がいつ・どれだけ強く起きるか」を変えるが、�
 2. **地形を書き換える他 MOD**（`TerrainWrapper.SetHeights` を使うもの、および `Terraform`/`Extra Landscaping Tools` 系）。
    `TerrainWrapper.SetHeights` は `RawHeights` を直接書いて `UpdateArea` する公式 API。
    ⑤の退避配列は「隆起開始時点のスナップショット」なので、途中で他 MOD が同じ矩形を触ると復元で上書きされる。
+
+---
+
+## F. 道路セグメントのグリッド（⑤ T4 で追加実測）
+
+### F-15. `NetManager` のセグメントグリッド — CONFIRMED（全文読了）
+
+⑤の T4（影響範囲の調査）は「範囲内の道路が何本か」を数える。建物グリッドの
+`64 / 135 / [0,269]` に対応する 3 つの数値は、本プロジェクトのどの事実文書にも
+無かったので、ここで確定させた。**推測していない。**
+
+**確保（`NetManager.Awake`）:**
+
+```
+IL_0017: ldc.i4 36864     newobj Array16`1::.ctor   stfld NetManager::m_segments
+IL_0077: ldc.i4 72900     newarr UInt16             stfld NetManager::m_segmentGrid
+```
+
+→ `m_segmentGrid` は `ushort[72900]` = **270 × 270**。セグメントバッファは **36864**
+（連結リストを辿る保険の上限はこれ）。`m_nodeGrid` も同じ 72900 である。
+
+**セルへの登録（`NetManager.InitializeSegment`、IL_0046–IL_00B6）:**
+
+```
+pos = (m_nodes.m_buffer[m_startNode].m_position
+     + m_nodes.m_buffer[m_endNode].m_position) * 0.5f
+x   = Mathf.Clamp((int)(pos.x / 64f + 135f), 0, 269)
+z   = Mathf.Clamp((int)(pos.z / 64f + 135f), 0, 269)
+idx = z * 270 + x
+m_segments.m_buffer[id].m_nextGridSegment = m_segmentGrid[idx]
+m_segmentGrid[idx] = id
+```
+
+→ **建物グリッド（セル 64・オフセット 135・`[0,269]`・`z*270+x`）と完全に同じ形**である。
+`LongPeriodDamage` / `TyphoonWind` の走査をそのまま写してよい。
+
+**フィールド:**
+
+| フィールド | 型 | 用途 |
+|---|---|---|
+| `NetSegment.m_nextGridSegment` | `UInt16`（public instance） | 同一セルの次のセグメント。建物の `m_nextGridBuilding` に対応 |
+| `NetSegment.m_flags` | `NetSegment.Flags`（`Int32` 基底） | `Created=1` / `Deleted=2` / `Original=4` / `Collapsed=8` / `Untouchable=0x20`。**`Demolishing` は無い**（建物側にはある） |
+| `NetSegment.m_middlePosition` | `Vector3` | 位置を取る最も安いフィールド。`NetSegment.UpdateBounds`（IL_01DB）が**2 本のベジェの中点の平均**として書く |
+| `NetSegment.m_bounds` | `Bounds` | 同じく `UpdateBounds` が書く AABB |
+
+> ★★ **セルを決める位置（両端ノードの中点）と `m_middlePosition` は同じではない。**
+> 曲がった道路ではベジェの中点がノードの中点から離れる。したがって
+> 「矩形のセルを走査して `m_middlePosition` で距離を測る」を素直に書くと、
+> **範囲の縁にある曲線道路を取りこぼす**。⑤は矩形を ±2 セル（128 m）広げてから走査する
+> （`VolcanoSurvey.SegmentGridMargin`）。
+>
+> どちらの中点も、**長い 1 本の道路の一部だけが範囲に掛かる場合**を正しく表せない。
+> ⑤がこの数を「概数」としてしか出さない理由の 1 つがこれである（設計書 §7.2）。
+
+**再現手順:**
+
+```powershell
+. docs\tools\ilload.ps1 ; . docs\tools\ildasm.ps1
+$bf = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,Static'
+Disasm-Method -Method $global:A.GetType('NetManager').GetMethod('Awake', $bf)
+Disasm-Method -Method $global:A.GetType('NetManager').GetMethod('InitializeSegment', $bf)
+```
 
 ---
 

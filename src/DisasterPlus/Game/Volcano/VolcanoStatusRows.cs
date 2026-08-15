@@ -40,8 +40,9 @@ namespace DisasterPlus.Game
         /// <summary>パネル構築時に 1 回。行は常に作り、中身の有無で出し分ける。</summary>
         internal static void Build(UIPanel p, ref float y)
         {
-            // 「火山が居ない」「まだ読んでいない」「読めない」を全部ここに出す。
-            // **折り返す高さを取る** —— 折り返さない行に入れると理由が途中で切れる。
+            // 「火山が居ない」「まだ読んでいない」「読めない」「調べています」
+            // 「断られた理由」を全部ここに出す。**折り返す高さを取る** ——
+            // refusal は英語の 1 文なので、折り返さない行に入れると理由が途中で切れる。
             _stateLabel = VolcanoRows.AddRow(p, "State", ref y, 40f);
 
             _shapeLabel = VolcanoRows.AddRow(p, "Shape", ref y);
@@ -74,24 +75,68 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // T4 が位相機械を入れるまでは、火山は構造上 1 つも存在しない。
-            VolcanoRows.SetPlain(_stateLabel, Strings.VolcanoInactive);
+            VolcanoRows.SetPlain(_stateLabel, StateText(s));
+        }
+
+        /// <summary>
+        /// 状態の 1 行。**「何も起きていない」と「起こせなかった」を見分けられるようにする。**
+        ///
+        /// 優先順は「依頼を出した直後（次の sim tick を待っている）」＞「調査中」＞
+        /// 「確認待ち（行は下の確認の一式が出す）」＞「進行中」＞「理由つきで断られた」＞
+        /// 「ただ起きていない」。<see cref="VolcanoHub.PendingRequest"/> を見るのは
+        /// **押しても何も変わらないように見えて二度押しするのを防ぐため**で、
+        /// 依頼から反映までには設計上 1 tick の遅れがある（<see cref="VolcanoHub"/> の doc）。
+        /// </summary>
+        private static string StateText(VolcanoSnapshot s)
+        {
+            // 配置ツールが出ている間は、何をすればよいかを出す。**押した直後に
+            // 画面が何も変わらないと、プレイヤーはボタンが壊れていると読む。**
+            if (VolcanoPlacementTool.IsActive) return Strings.VolcanoPlaceHint;
+
+            VolcanoRequest pending = VolcanoHub.PendingRequest.Kind;
+            if (pending == VolcanoRequest.Survey) return Strings.VolcanoSurveying;
+            if (pending != VolcanoRequest.None) return Strings.VolcanoWaiting;
+
+            switch (s.Phase)
+            {
+                case VolcanoPhase.Surveying:
+                    return Strings.VolcanoSurveying;
+
+                case VolcanoPhase.AwaitingConfirmation:
+                    // 確認の一式がこの下に出ているので、状態の行は空にする
+                    // （同じことを 2 度言わない）。
+                    return "";
+
+                case VolcanoPhase.Idle:
+                case VolcanoPhase.Done:
+                case VolcanoPhase.Refused:
+                    return string.IsNullOrEmpty(s.Refusal)
+                        ? Strings.VolcanoInactive
+                        : Strings.VolcanoInactive + "  (" + s.Refusal + ")";
+
+                default:
+                    // ★ 進行中の位相。**T5〜T8 が各段を実装するまで翻訳キーを持たない**
+                    //   ので、列挙の名前（英語）をそのまま出す。何も出さないより、
+                    //   どこで止まっているかが分かるほうが良い
+                    //   （④の refusal を英語のまま出しているのと同じ判断）。
+                    return Strings.VolcanoPhaseRow + ": " + s.Phase;
+            }
         }
 
         /// <summary>
         /// 形態・半径・最終高の 1 行。**クランプ後の値を出す**（<c>.cgs</c> は
         /// 公開契約で手で編集されうるので、生の設定値をそのまま画面に出さない）。
         ///
-        /// このタスクの時点では形態・半径・最終高の設定がまだ無いので、
-        /// <see cref="VolcanoShape"/> の既定値を通す（T4 が設定を足して差し替える）。
         /// **天井（§C-10）による切り下げはここでは掛けない** —— それは
-        /// 設置地点の地形高さが決まって初めて分かる量で、T4 の確認の行が名乗る。
+        /// 設置地点の地形高さが決まって初めて分かる量で、確認の行
+        /// （<see cref="VolcanoConfirmRows"/>）が名乗る。
         /// </summary>
         private static void RefreshShapeRow()
         {
             VolcanoForm form = CurrentForm();
-            float radius = VolcanoShape.RadiusFor(form, VolcanoShape.DefaultRadiusOf(form));
-            float height = VolcanoShape.DefaultHeightOf(form);
+            float radius = VolcanoShape.RadiusFor(form, ModSettings.VolcanoRadius.value);
+            // 高さは形態の帯だけでクランプする（天井は地点が決まってから）。
+            float height = ClampHeightToForm(form, ModSettings.VolcanoHeight.value);
 
             VolcanoRows.SetPlain(_shapeLabel,
                 Strings.VolcanoFormRow + ": " + FormLabel(form)
@@ -102,12 +147,27 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// いま選ばれている形態。設定はまだ無いので既定（成層）。T4 が
-        /// <c>ModSettings.VolcanoShapeSetting</c> から引くように差し替える。
+        /// いま選ばれている形態。範囲外の値は <c>VolcanoShape.FormOf</c> が既定へ落とす
+        /// （<c>.cgs</c> は公開契約で、手で編集されうる）。
         /// </summary>
         private static VolcanoForm CurrentForm()
         {
-            return VolcanoForm.Strato;
+            return VolcanoShape.FormOf(ModSettings.VolcanoShapeSetting.value);
+        }
+
+        /// <summary>
+        /// 形態の帯だけでクランプした高さ。**<c>VolcanoShape.HeightFor</c> を使わない** ——
+        /// あちらは天井（§C-10）まで見るので、設置地点が決まっていないここで通すと
+        /// 「起点 0 m」を仮定した値になる。
+        /// </summary>
+        private static float ClampHeightToForm(VolcanoForm form, float requested)
+        {
+            float min = VolcanoShape.MinHeightOf(form);
+            float max = VolcanoShape.MaxHeightOf(form);
+            if (float.IsNaN(requested)) return VolcanoShape.DefaultHeightOf(form);
+            if (requested < min) return min;
+            if (requested > max) return max;
+            return requested;
         }
 
         /// <summary>

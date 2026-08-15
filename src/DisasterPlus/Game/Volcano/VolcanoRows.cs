@@ -137,9 +137,18 @@ namespace DisasterPlus.Game
         internal static UILabel AddSectionHeader(UIPanel p, string suffix, ref float y, string text)
         {
             var label = AddLabel(p, suffix, RowLeft, y, RowWidth, RowHeight);
-            SetPlain(label, "-- " + text + " --");
+            SetSectionHeader(label, text);
             y += 26f;
             return label;
+        }
+
+        /// <summary>
+        /// 節の見出しの飾り（<c>-- ... --</c>）を付けて入れる。
+        /// **飾りを呼び出し側に書かせない** —— 2 箇所に書くと必ずいつか片方だけ変わる。
+        /// </summary>
+        internal static void SetSectionHeader(UILabel label, string text)
+        {
+            SetPlain(label, "-- " + text + " --");
         }
 
         /// <summary>

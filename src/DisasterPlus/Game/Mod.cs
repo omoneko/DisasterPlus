@@ -236,12 +236,41 @@ namespace DisasterPlus.Game
             var volcano = helper.AddGroup(Strings.GroupVolcano);
             volcano.AddCheckbox(Strings.VolcanoEnabled, ModSettings.VolcanoEnabled.value,
                 v => ModSettings.VolcanoEnabled.value = v);
+
+            // ラベル配列は static readonly にしてはいけない。型初期化時の言語で凍結する。
+            // 毎回組み直すことで言語切替に追従する（このファイルの他の 2 箇所と同じ）。
+            string[] volcanoShapes =
+            {
+                Strings.VolcanoFormShield, Strings.VolcanoFormStrato, Strings.VolcanoFormDome
+            };
+            int currentShape = ModSettings.VolcanoShapeSetting.value;
+            if (currentShape < 0 || currentShape >= volcanoShapes.Length)
+            {
+                currentShape = ModSettings.VolcanoShapeStrato;
+            }
+            volcano.AddDropdown(Strings.VolcanoShapeSetting, volcanoShapes, currentShape,
+                v => ModSettings.VolcanoShapeSetting.value = v);
+
+            // ★ スライダーの範囲は 3 形態を合わせた外枠にしてある。**形態ごとの帯へ
+            //    絞るのは使う側（VolcanoShape.RadiusFor / HeightFor）の仕事**で、
+            //    .cgs は公開契約なので範囲外の値が入っていても読み捨てない。
+            volcano.AddSlider(Strings.VolcanoRadiusSetting, 250f, 3000f, 50f,
+                ModSettings.VolcanoRadius.value,
+                v => ModSettings.VolcanoRadius.value = (int)v);
+            volcano.AddSlider(Strings.VolcanoHeightSetting, 50f, 700f, 10f,
+                ModSettings.VolcanoHeight.value,
+                v => ModSettings.VolcanoHeight.value = (int)v);
+
             // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
             volcano.AddButton(Strings.VolcanoResetButton, delegate
             {
                 ModSettings.VolcanoButtonX.value = -1;
                 ModSettings.VolcanoButtonY.value = -1;
             });
+
+            // ★★ 設定画面でも不可逆であることを名乗る（設計書 §7.1）。
+            //    パネルの警告はパネルを開いた人しか読まない。
+            helper.AddGroup(Strings.VolcanoIrreversibleWarning);
 
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,

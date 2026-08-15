@@ -811,5 +811,70 @@ namespace DisasterPlus.Game
         public static string VolcanoPhaseRow = "Phase";
         public static string VolcanoGroundHeightRow = "Ground at the chosen spot";
         public static string VolcanoMetres = "m";
+
+        // --- ⑤火山（Task 4: 配置ツール・影響範囲の調査・不可逆の確認） ---
+        //
+        // ★★ 設計書 §7.1 / §7.2 / §7.3 の 3 つの断定は、全部この節の文字列である。
+        //   VolcanoIrreversibleWarning（§7.1）・VolcanoEstimateNote（§7.2）・
+        //   VolcanoBuildabilityNote（§7.3）。**短くしたくなっても、
+        //   どの断定を落とすことになるのかを先に読むこと。**
+        //
+        // ★ **単位を名乗る文字列はメートルとゲーム内分だけ。** ⑤は m/s も度も
+        //   カロリーも持っていない（設計書 §7.5）。
+        public static string VolcanoPlace = "Place a volcano";
+        public static string VolcanoPlaceHint =
+            "Click where the volcano should rise. Right-click to cancel.";
+        public static string VolcanoSurveying = "Surveying the area...";
+        public static string VolcanoConfirmHeader = "Build a volcano here?";
+        public static string VolcanoConfirmYes = "Build the volcano here";
+        public static string VolcanoConfirmNo = "Cancel";
+        public static string VolcanoBuildingsRow = "Buildings inside the footprint";
+        public static string VolcanoSegmentsRow = "Roads inside the footprint";
+
+        // ★ §7.2 の「概数であることも明示する」。実数をそのまま出すとプレイヤーは
+        //   「ぴったりその数だけ壊れる」と読む（ClearanceEstimate のクラス doc）。
+        public static string VolcanoEstimateNote =
+            "These are the counts measured at the moment of the survey, rounded. The city "
+            + "keeps changing while the ground is cleared, so the real number will differ.";
+
+        // ★ 走査が 1 tick ぶんの上限で打ち切られたとき。**上の概数は下限になる。**
+        //   これを黙っていると、概数どころか「実際より少ない数」を確定値のように見せる。
+        public static string VolcanoSurveyCapped =
+            "The survey stopped at its per-tick limit, so the counts above are a lower "
+            + "bound: the outer edge of the footprint was not reached.";
+
+        public static string VolcanoSegmentsUnknown =
+            "Disaster + could not count the roads inside the footprint in this build of the "
+            + "game. They are still going to be destroyed.";
+
+        // ★ §1.2 そのもの。**「壊さずに地面を上げる」が選べない理由**を書く ——
+        //   これが書いていないと、破壊は MOD の乱暴な選択に見える。
+        public static string VolcanoClearingWarning =
+            "The roads and buildings inside the footprint will be destroyed. Raising the "
+            + "ground without clearing them first does not work: the game pins the terrain "
+            + "back to the height of every road and building on every update, so the "
+            + "mountain would end up full of flat trenches and bowls.";
+
+        // ★ §7.3。**不具合ではないと明示する**（①の「なぜハザードマップが空か」と同じ扱い）。
+        public static string VolcanoBuildabilityNote =
+            "The buildable ground and the water level do not follow the visible terrain "
+            + "straight away. They catch up at 2 m per 64 simulation frames. This is not a bug.";
+
+        // ★ §C-10。天井に当たっても例外は出ず**無言で山頂が平らな台地になる**ので、
+        //   黙って低い山を作らずに先に言う。
+        public static string VolcanoHeightLimited =
+            "The terrain has a hard ceiling at 1024 m, so the volcano here is lower than the "
+            + "height you asked for.";
+
+        public static string VolcanoSettingsChanged =
+            "The shape, radius or height changed after the survey, so Disaster + is surveying "
+            + "again before it starts.";
+
+        /// <summary>ゲーム内の分。**実在の物理単位ではない**ので m/s の類とは扱いが違う。</summary>
+        public static string VolcanoMinutes = "in-game minutes";
+
+        public static string VolcanoShapeSetting = "Volcano shape";
+        public static string VolcanoRadiusSetting = "Volcano radius (m)";
+        public static string VolcanoHeightSetting = "Volcano final height (m)";
     }
 }

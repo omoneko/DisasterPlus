@@ -51,8 +51,19 @@ namespace DisasterPlus.Game
     {
         private const string PanelName = FreeSlotFinder.SelfPrefix + "VolcanoPanel";
 
+        /// <summary>「火山を設置する」ボタンの大きさ。</summary>
+        private const float PlaceButtonWidth = 240f;
+
+        private const float PlaceButtonHeight = 28f;
+
+        /// <summary>パネルの既定の左上。<see cref="ClampToView"/> が縦だけ寄せる。</summary>
+        private static readonly Vector3 BasePosition = new Vector3(620f, 60f);
+
         private static UIPanel _panel;
         private static UILabel _titleLabel;
+
+        /// <summary>最後に <see cref="ApplyHeight"/> が入れた高さ（<c>-1</c> = まだ入れていない）。</summary>
+        private static float _appliedHeight = -1f;
 
         /// <summary>
         /// 火山の行を構築したか。地形の書き込み経路が解決できない環境では
@@ -103,6 +114,7 @@ namespace DisasterPlus.Game
         {
             // 参照を捨てるだけ。実体はパネルの GameObject と一緒に消える。
             VolcanoStatusRows.Destroy();
+            VolcanoConfirmRows.Destroy();
 
             if (_panel != null)
             {
@@ -112,6 +124,7 @@ namespace DisasterPlus.Game
             _panel = null;
             _titleLabel = null;
             _bodyBuilt = false;
+            _appliedHeight = -1f;
         }
 
         private static void EnsureBuilt()
@@ -163,7 +176,7 @@ namespace DisasterPlus.Game
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
             // クラス doc の「パネルの位置」。重なる相手は②だけで、その上端 90 px は空く。
-            panel.relativePosition = new Vector3(620f, 60f);
+            panel.relativePosition = BasePosition;
             panel.isVisible = false;
 
             float y = 8f;
@@ -183,7 +196,7 @@ namespace DisasterPlus.Game
             {
                 var unavailable = VolcanoRows.AddRow(panel, "TerrainUnavailable", ref y, 56f);
                 VolcanoRows.SetPlain(unavailable, Strings.VolcanoTerrainUnavailable);
-                panel.height = y + 8f;
+                ApplyHeight(panel, y + 8f);
                 return;
             }
 
@@ -195,9 +208,56 @@ namespace DisasterPlus.Game
             //   ここで文を組み立てない（あちらの SetModelNote の doc）。
             VolcanoRows.SetModelNote(note);
 
+            AddPlaceButton(panel, ref y);
+
             VolcanoStatusRows.Build(panel, ref y);
 
-            panel.height = y + 8f;
+            // ★ 確認の一式は**いちばん下**に置く（あちらの BlockTop の doc）。
+            //   出していないときはパネルをその手前まで縮めるので、空白が残らない。
+            VolcanoConfirmRows.Build(panel, ref y);
+
+            ApplyHeight(panel, VolcanoConfirmRows.BlockTop + 8f);
+        }
+
+        /// <summary>
+        /// 「火山を設置する」。押すと配置ツールが起動し、地面をクリックすると
+        /// **調査の依頼だけ**が積まれる（<see cref="VolcanoPlacementTool"/> のクラス doc）。
+        /// **このボタンは何も壊さない。**
+        /// </summary>
+        private static void AddPlaceButton(UIPanel panel, ref float y)
+        {
+            var button = (UIButton)panel.AddUIComponent(typeof(UIButton));
+            button.name = FreeSlotFinder.SelfPrefix + "VolcanoPlaceButton";
+            button.text = Strings.VolcanoPlace;
+            button.tooltip = Strings.VolcanoPlaceHint;
+            button.width = PlaceButtonWidth;
+            button.height = PlaceButtonHeight;
+            button.relativePosition = new Vector3(VolcanoRows.RowLeft, y);
+            button.normalBgSprite = "ButtonMenu";
+            button.hoveredBgSprite = "ButtonMenuHovered";
+            button.pressedBgSprite = "ButtonMenuPressed";
+            button.eventClick += (c, e) => VolcanoPlacementTool.Activate();
+            y += PlaceButtonHeight + 10f;
+        }
+
+        /// <summary>
+        /// 高さを入れ直し、ビューに収まる位置へ寄せ直す。**必ず既定の左上へ戻してから
+        /// 寄せる** —— 前回の寄せの結果から寄せ直すと、開閉のたびに上へずれていく。
+        /// </summary>
+        private static void ApplyHeight(UIPanel panel, float height)
+        {
+            if (panel == null) return;
+
+            // ★ 比較には**自分が最後に入れた値**を使う。<c>panel.height</c> を読み返して
+            //   比べると、UI 側が丸めた場合に毎フレーム「違う」と判定され、
+            //   ClampToView が毎フレーム走る —— あそこには Log.Warn があるので、
+            //   内容がビューより高い環境で**毎フレーム 1 行**ログを吐くことになる
+            //   （Log.Warn はスロットルされない）。
+            if (_appliedHeight == height) return;
+            _appliedHeight = height;
+
+            panel.height = height;
+            panel.relativePosition = BasePosition;
             ClampToView(panel);
         }
 
@@ -261,7 +321,14 @@ namespace DisasterPlus.Game
             if (!_bodyBuilt) return;
 
             // ★ スナップショットは 1 フレームに 1 回だけ取る（ロックを 2 回取らない）。
-            VolcanoStatusRows.Refresh(VolcanoHub.Latest);
+            var snapshot = VolcanoHub.Latest;
+            VolcanoStatusRows.Refresh(snapshot);
+            VolcanoConfirmRows.Refresh(snapshot);
+
+            // 確認を出していないときは、確認の一式のぶんだけパネルを縮める。
+            ApplyHeight(_panel, (VolcanoConfirmRows.IsShowing
+                ? VolcanoConfirmRows.BlockBottom
+                : VolcanoConfirmRows.BlockTop) + 8f);
         }
     }
 }

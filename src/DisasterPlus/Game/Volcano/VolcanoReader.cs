@@ -69,7 +69,15 @@ namespace DisasterPlus.Game
                 if (!SimulationManager.exists) return VolcanoSnapshot.Invalid();
 
                 uint frame = SimulationManager.instance.m_currentFrameIndex;
-                return new VolcanoSnapshot(true, ResolveTerrainFacts(), frame, ReadGameMode());
+
+                // ★ 位相と調査結果は sim スレッドの VolcanoState から直接読む。
+                //   この Read はポーズガードより上で走るので、載るのは
+                //   **この tick で VolcanoState.Tick が走る前の状態**である
+                //   （VolcanoSnapshot.Phase の doc）。
+                return new VolcanoSnapshot(true, ResolveTerrainFacts(), frame, ReadGameMode(),
+                                           VolcanoState.Phase, VolcanoState.Footprint,
+                                           VolcanoState.ProgressUnit, VolcanoState.LastRefusal,
+                                           VolcanoState.SettingsChanged);
             }
             catch (Exception e)
             {

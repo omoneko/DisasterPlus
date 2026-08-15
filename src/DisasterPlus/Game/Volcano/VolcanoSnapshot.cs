@@ -123,19 +123,53 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly bool GameMode;
 
+        /// <summary>
+        /// この tick の頭での位相（T4 以降）。
+        ///
+        /// ★ <b>これは 1 tick 前の状態である。</b> <c>VolcanoFeature.OnSimulationTick</c> は
+        /// 「読んで publish する」をポーズガードより上で行い、位相を進める
+        /// <c>VolcanoState.Tick</c> はその下にある。ポーズ中でもパネルが凍らないよう
+        /// この順序にしてあるので、位相の反映は設計上 1 tick 遅れる
+        /// （④の <see cref="TyphoonSnapshot"/> も同じ扱い）。
+        /// </summary>
+        public readonly VolcanoPhase Phase;
+
+        /// <summary>直近の調査結果。<c>Valid == false</c> なら「まだ調べていない」。</summary>
+        public readonly VolcanoFootprint Footprint;
+
+        /// <summary>
+        /// 隆起の進捗 [0,1]。**T6 が動かすまで常に 0 である。**
+        /// <b>0 のうちは行にしないこと</b>（<see cref="VolcanoState.ProgressUnit"/> の doc）。
+        /// </summary>
+        public readonly float ProgressUnit;
+
+        /// <summary>直近に断った理由（**英語・診断用**）。断っていなければ null。</summary>
+        public readonly string Refusal;
+
+        /// <summary>確認の直前に設定が変わったので調べ直したか。</summary>
+        public readonly bool SettingsChanged;
+
         public VolcanoSnapshot(bool valid, VolcanoTerrainFacts terrain,
-                               uint currentFrame, bool gameMode)
+                               uint currentFrame, bool gameMode,
+                               VolcanoPhase phase, VolcanoFootprint footprint,
+                               float progressUnit, string refusal, bool settingsChanged)
         {
             Valid = valid;
             Terrain = terrain;
             CurrentFrame = currentFrame;
             GameMode = gameMode;
+            Phase = phase;
+            Footprint = footprint;
+            ProgressUnit = progressUnit;
+            Refusal = refusal;
+            SettingsChanged = settingsChanged;
         }
 
         /// <summary>読み取りに失敗したときの 1 個。**0 を並べた「それらしい」値を作らない。**</summary>
         public static VolcanoSnapshot Invalid()
         {
-            return new VolcanoSnapshot(false, new VolcanoTerrainFacts(), 0u, true);
+            return new VolcanoSnapshot(false, new VolcanoTerrainFacts(), 0u, true,
+                                       VolcanoPhase.Idle, VolcanoFootprint.None, 0f, null, false);
         }
     }
 }

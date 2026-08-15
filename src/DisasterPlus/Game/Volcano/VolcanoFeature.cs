@@ -42,6 +42,14 @@ namespace DisasterPlus.Game
         {
             VolcanoHub.Clear();
             VolcanoReader.Reset();
+            VolcanoState.Reset();
+
+            // ★★ **毎レベルロードで登録し直すこと。** ToolController.m_tools は
+            //    Awake で一度だけ構築され、ToolsModifierControl.SetTool<T> は静的辞書を
+            //    引くだけなので、登録しないと SetTool<T>() が**黙って空振りする**
+            //    （火災旋風 付録 A。VolcanoPlacementTool のクラス doc）。
+            //    ToolController は都市ごとに作り直されるので、前の都市の登録は使えない。
+            ToolRegistration.Register<VolcanoPlacementTool>();
         }
 
         /// <summary>
@@ -52,7 +60,21 @@ namespace DisasterPlus.Game
         /// </summary>
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
-            if (!ModSettings.VolcanoEnabled.value) return;
+            if (!ModSettings.VolcanoEnabled.value)
+            {
+                // ★ 機能を切ったら、積まれている依頼と位相を捨てる（計画 §4.1）。
+                //   捨てないと、切っている間に積まれた依頼が**入れ直した瞬間に発火**して、
+                //   プレイヤーが忘れた地点に確認が出る。
+                //   **既に変わった地形は戻らない。** 捨てるのは「これからの予定」だけである。
+                //   条件を付けているのは、切っている間ずっとロックを取り続けないため。
+                if (VolcanoState.Phase != VolcanoPhase.Idle
+                    || VolcanoHub.PendingRequest.Kind != VolcanoRequest.None)
+                {
+                    VolcanoHub.TakeRequest();
+                    VolcanoState.Reset();
+                }
+                return;
+            }
 
             // ここまでが「読んで publish するだけ」。ポーズ中もここは通る。
             var snapshot = VolcanoReader.Read();
@@ -81,7 +103,8 @@ namespace DisasterPlus.Game
             //    このコメントを消すと「ポーズ中に山が育ち、建物が消え、溶岩が流れる」が起きる。
             if (deltaMinutes <= 0f) return;
 
-            // （T4: VolcanoState.Tick がここに入る。T5〜T9 は VolcanoState の中から呼ばれる）
+            // T5〜T9 はこの中の位相分岐から呼ばれる。**ここに直接足さないこと。**
+            VolcanoState.Tick(snapshot, frameIndex, deltaMinutes);
         }
 
         /// <summary>
@@ -96,6 +119,12 @@ namespace DisasterPlus.Game
 
         public void OnLevelUnloading()
         {
+            // ★★ 配置ツールが選ばれたまま都市を出させない。次の都市でカーソルが
+            //    「火山を置く」のまま始まると、プレイヤーが意図せず地点を指しうる
+            //    （地形は取り消せない）。**アクティブでないときは何もしない**ので、
+            //    他 MOD が選んでいたツールを横から戻すことはない。
+            VolcanoPlacementTool.Deactivate();
+
             // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
             VolcanoPanelButton.Remove();
@@ -105,6 +134,9 @@ namespace DisasterPlus.Game
             // ★ 地形の実測（RawHeights の長さ）を都市をまたいで持ち越さない。
             //    持ち越すと 2 つ目の都市で前の都市の事実を名乗ることになる。
             VolcanoReader.Reset();
+            // ★ 位相と調査結果も持ち越さない。持ち越すと、次の都市で前の都市の
+            //    地点に確認が出る（そして押せてしまう）。
+            VolcanoState.Reset();
         }
 
         /// <summary>
@@ -130,9 +162,47 @@ namespace DisasterPlus.Game
             WriteMode(b, snapshot.GameMode);
             WriteDlc(b, snapshot.Terrain);
             WriteUiState(b);
+            WriteState(b, snapshot);
+        }
 
-            // T4 が位相機械を入れるまでは常に idle。
-            b.Line(1, "state", "idle");
+        /// <summary>
+        /// 位相と、直近の調査結果。
+        ///
+        /// **<c>refusal</c> は必ず出す。** 「断られた」を「何も起きていない」と
+        /// 見分ける手段がここにしか無い（④の <c>TyphoonSnapshot.Refusal</c> と同じ扱い）。
+        ///
+        /// **数えられなかった道路は <c>not counted</c> と出す。0 と混ぜない**
+        /// （<see cref="VolcanoFootprint.SegmentCount"/> の doc）。
+        /// </summary>
+        private static void WriteState(DiagnosticBuilder b, VolcanoSnapshot snapshot)
+        {
+            b.Line(1, "phase", snapshot.Phase.ToString());
+            b.Line(1, "placement tool", VolcanoPlacementTool.IsActive ? "active" : "idle");
+
+            if (!string.IsNullOrEmpty(snapshot.Refusal))
+            {
+                b.Line(1, "refusal", snapshot.Refusal);
+            }
+
+            VolcanoFootprint f = snapshot.Footprint;
+            if (!f.Valid)
+            {
+                b.Line(1, "survey", "none yet");
+                return;
+            }
+
+            b.Line(1, "survey", "(" + f.Centre.X.ToString("F0") + ","
+                                + f.Centre.Z.ToString("F0") + ")  ground "
+                                + f.GroundHeightMetres.ToString("F1") + " m");
+            b.Line(2, "shape", f.Form + "  r=" + f.RadiusMetres.ToString("F0")
+                               + " m  h=" + f.HeightMetres.ToString("F0") + " m"
+                               + (f.HeightLimitedByCeiling ? "  (LIMITED by the 1024 m ceiling)" : ""));
+            b.Line(2, "counts", "buildings " + f.BuildingCount + ", segments "
+                                + (f.SegmentCount < 0 ? "not counted" : f.SegmentCount.ToString())
+                                + (f.Capped ? "  (CAPPED: these are a lower bound)" : ""));
+            b.Line(2, "uplift tiles", f.TileCount.ToString());
+            b.Line(2, "block height catch-up", f.BlockHeightCatchUpFrames
+                                               + " sim frames (this is not a bug)");
         }
 
         /// <summary>
