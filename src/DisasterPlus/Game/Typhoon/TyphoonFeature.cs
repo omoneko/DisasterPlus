@@ -84,13 +84,24 @@ namespace DisasterPlus.Game
             //   T8: TyphoonFlood.Tick / T10: TyphoonTornado.Tick がここに入る）
         }
 
-        /// <summary>main スレッド。T5 でパネルとボタンが入る。</summary>
+        /// <summary>
+        /// main スレッド。**ここから sim 側の型（<see cref="TyphoonController"/> /
+        /// <see cref="TyphoonWeather"/>）を呼ばないこと。** 読むのは
+        /// <see cref="TyphoonHub.Latest"/> のスナップショットだけである。
+        /// </summary>
         public void OnMainThreadUpdate()
         {
+            TyphoonPanelButton.Tick();
+            TyphoonPanel.Tick();
         }
 
         public void OnLevelUnloading()
         {
+            // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
+            //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
+            TyphoonPanelButton.Remove();
+            TyphoonPanel.Destroy();
+
             TyphoonHub.Clear();
             TyphoonReader.Reset();
             // 予約も進行中の台風も都市をまたいで残らない。
@@ -113,12 +124,46 @@ namespace DisasterPlus.Game
                 ? "none yet"
                 : (snapshot.Valid ? "valid" : "INVALID"));
 
+            WriteUiState(b);
+
             if (snapshot == null || !snapshot.Valid) return;
 
             WriteStormPrefab(b, snapshot.Prefab);
             WriteVortexPrefab(b, snapshot.Prefab);
             WriteWeather(b, snapshot);
             WriteTyphoon(b, snapshot);
+        }
+
+        /// <summary>
+        /// UI の状態。②の <c>EarthquakeFeature.WriteUiState</c> と同じ 3 状態
+        /// （未設置／保存位置の再利用／新規探索の成否）。
+        ///
+        /// **ボタンが①②のボタンと重なっているかどうかは、ここでしか分からない。**
+        /// 重なったボタンは画面上で「1 個しか無い」ように見えるので、
+        /// <c>fresh free-slot search FAILED</c> が出ているかを診断で確かめる。
+        /// </summary>
+        private static void WriteUiState(DiagnosticBuilder b)
+        {
+            string placement;
+            if (!TyphoonPanelButton.Installed)
+            {
+                placement = "button not installed yet";
+            }
+            else if (TyphoonPanelButton.UsedSavedPosition)
+            {
+                placement = "saved position reused";
+            }
+            else
+            {
+                placement = TyphoonPanelButton.FoundFreeSlot
+                    ? "fresh free-slot search succeeded"
+                    : "fresh free-slot search FAILED (fell back to preferred position)";
+            }
+
+            b.Line(1, "button position", ModSettings.TyphoonButtonX.value + ","
+                                         + ModSettings.TyphoonButtonY.value
+                                         + "  (" + placement + ")");
+            b.Line(1, "panel body", TyphoonPanel.IsVisible ? "shown" : "hidden");
         }
 
         /// <summary>

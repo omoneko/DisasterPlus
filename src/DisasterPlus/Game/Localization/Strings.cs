@@ -545,5 +545,66 @@ namespace DisasterPlus.Game
         public static string TyphoonIntensity = "Typhoon intensity (10-255)";
         public static string TyphoonIntensityNote =
             "The game's own storms use 55. Above 100 is beyond anything vanilla generates.";
+
+        // --- ④台風（Task 5: パネル・ボタン・表示規約） ---
+        //
+        // ★ ここから下の行ラベルは全て**印の付かない行**に入る。出所は
+        //   TyphoonModelHeader / TyphoonModelNote が見出しで一度だけ名乗る
+        //   （設計書 §7-1）。唯一 [measured] が付くのは TyphoonRainRow /
+        //   TyphoonCloudRow の 2 行で、接頭辞は TyphoonRows.SetMeasured が付ける。
+        //
+        // **m/s を出す文字列を足さないこと**（設計書 §7-3）。④の「風速相当」は
+        // ゲームの倒壊確率に掛ける係数であって実在の風速ではない。②が気象庁震度階級を
+        // 名乗らなかったのと同じ理由で、単位を名乗ると実在の意味があると誤解させる。
+        public static string TyphoonTitle = "Typhoon";
+        public static string TyphoonModelHeader = "Computed by Disaster +";
+        public static string TyphoonModelNote =
+            "The numbers on this panel come from Disaster +'s own model. The game does not "
+            + "compute a typhoon, wind damage, a positioned cloud or a flood of its own. "
+            + "Only the rows marked [measured] are values read straight from the game.";
+        public static string TyphoonStart = "Raise a typhoon";
+        public static string TyphoonStop = "Stop the typhoon";
+        public static string TyphoonInactive = "No typhoon right now.";
+        public static string TyphoonWaiting = "Waiting for the first simulation update.";
+        public static string TyphoonUnavailable = "Typhoon data unavailable";
+        public static string TyphoonPrefabUnreadable =
+            "The game's thunderstorm prefab could not be read, so no typhoon can be started. "
+            + "Disaster + will not guess its radius or its lifetime.";
+        public static string TyphoonCentre = "Centre";
+        public static string TyphoonHeading = "Heading";
+        public static string TyphoonCoreStrength = "Core strength";
+        public static string TyphoonStormRadius = "Storm radius";
+        public static string TyphoonGaleRadius = "Gale radius";
+        public static string TyphoonPhaseLabel = "Phase";
+        public static string TyphoonPhaseApproaching = "approaching";
+        public static string TyphoonPhasePeak = "at its peak";
+        public static string TyphoonPhasePassing = "passing";
+        public static string TyphoonPhaseGone = "gone";
+        public static string TyphoonLandfall = "Landfall in";
+
+        // ゲーム内分の単位。②の EarthquakeMinutes と同じ語だが、④のパネルから
+        // ②のキーを引くと、片方の翻訳を直したときにもう片方が黙って変わる。
+        public static string TyphoonMinutes = "min";
+
+        // **「上陸まで 0 分」と書かないための語。** 中心が既に陸の上にあるとき、
+        // 残り時間 0 は「もう起きた」であって「これから起きる」ではない。
+        // ①②が繰り返し確立した「0 と、0 ではない状態を混ぜない」の④版。
+        public static string TyphoonLandfallNow = "already over land";
+
+        // ★ 設計書 §7-2。「あと何分で上陸」を出してよいのは、④が経路を決定論的に
+        //   持っているからである。①の天気予報パネルは乱数で発生を判定しているので
+        //   同じことを出せない。**その違いをパネルに書く**のがこの 1 行の役目で、
+        //   これが無いと「ゲームが予測している」と読まれる。
+        public static string TyphoonLandfallNote =
+            "This is not a probability. Disaster + owns the track, so the arrival time is a "
+            + "fixed value - unlike the forecast panel, where the game rolls dice.";
+
+        // 「0 分」と混ぜないための文言。海上を通り抜ける経路では、上陸しないのが正常。
+        public static string TyphoonNoLandfall = "stays over water on its current track";
+        public static string TyphoonRainRow = "Rain";
+        public static string TyphoonCloudRow = "Cloud";
+        public static string TyphoonWindDirectionNote =
+            "The wind direction follows the storm only slowly. The game limits how fast it "
+            + "can turn, and Disaster + does not overwrite it directly.";
     }
 }

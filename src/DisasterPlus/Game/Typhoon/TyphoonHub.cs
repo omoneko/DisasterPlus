@@ -59,6 +59,22 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
+        /// **main スレッドから（表示専用）。** まだ sim に拾われていない依頼。
+        ///
+        /// パネルが「依頼中」を出すためだけに在る。押してから実際に台風が現れるまでは
+        /// **設計上 1 tick かかる**（実行は次の sim tick の <see cref="TyphoonController"/>）
+        /// ので、この口が無いとボタンを押した直後のパネルは「台風は発生していません」の
+        /// ままになり、**プレイヤーはもう一度押す**。
+        ///
+        /// <see cref="TakeRequest"/> と違って**取り出さない**。ここで消費すると
+        /// パネルを開いているかどうかで sim の挙動が変わる。
+        /// </summary>
+        public static TyphoonRequest PendingRequest
+        {
+            get { lock (_gate) { return _request; } }
+        }
+
+        /// <summary>
         /// **sim スレッドから。** 積まれている依頼を取り出し、<see cref="TyphoonRequest.None"/>
         /// に戻す。**1 tick に 1 回だけ呼ぶこと**（2 回呼ぶと 2 回目が必ず None になり、
         /// 呼び出し順に依存した取りこぼしを作る）。
