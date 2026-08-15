@@ -208,3 +208,6 @@ TyphoonTornadoRow = 随伴する竜巻
 TyphoonTornadoEnabled = 台風の周りを回る竜巻を発生させる
 TyphoonTornadoCount = 竜巻の数
 TyphoonTornadoNdrNote = Natural Disasters Renewal はバニラの竜巻の破壊を置き換えるため、この竜巻はあちらの設定に従います。台風自身の風害はその影響を受けません（DisasterHelpers を通していないため）。
+TyphoonCloudEnabled = 台風の渦巻き雲を描く
+TyphoonVanillaCloudBoost = ゲーム自身の空の雲も濃く・速く流す
+TyphoonCloudUnavailable = この環境にはゲームの空の雲の設定が無いため、Disaster + 自身の雲だけを描いています。

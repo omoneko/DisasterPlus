@@ -57,6 +57,8 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonFloodStrength;
         public static SavedBool TyphoonTornadoes;
         public static SavedInt TyphoonTornadoCount;
+        public static SavedBool TyphoonCloudEnabled;
+        public static SavedBool TyphoonVanillaCloudBoost;
 
         public static void Ensure()
         {
@@ -166,6 +168,14 @@ namespace DisasterPlus.Game
             // 0〜3。範囲はスライダーが縛るが、.cgs の値は公開契約なので範囲外が
             // 入っていても読み捨てず、使う側（TyphoonTornado.Step）でクランプする。
             TyphoonTornadoCount = new SavedInt("typhoonTornadoCount", FileName, 1, true);
+
+            // ★ 雲は既定 ON。**見た目だけの機能で、ゲームの状態を 1 バイトも変えない**
+            //    （main スレッドで Graphics.DrawMesh を出すだけ）。切っても他の 5 要素は
+            //    そのまま動く（TyphoonCloud のクラス doc の独立性）。
+            TyphoonCloudEnabled = new SavedBool("typhoonCloud", FileName, true, true);
+            // バニラのスカイドームの雲を濃く・速くする。**存在しない環境がありうる**
+            // （DLC・グラフィック設定。IL 事実文書 §C-2、PARTIAL）。無ければ黙って諦める。
+            TyphoonVanillaCloudBoost = new SavedBool("typhoonCloudBoost", FileName, true, true);
 
             _ready = true;
         }

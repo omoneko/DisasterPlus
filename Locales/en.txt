@@ -209,3 +209,6 @@ TyphoonTornadoRow = Accompanying tornadoes
 TyphoonTornadoEnabled = Spawn tornadoes that orbit the typhoon
 TyphoonTornadoCount = Number of tornadoes
 TyphoonTornadoNdrNote = Natural Disasters Renewal replaces vanilla tornado destruction, so these tornadoes follow its settings. The typhoon's own wind damage does not - it never goes through DisasterHelpers.
+TyphoonCloudEnabled = Draw the typhoon's cloud spiral
+TyphoonVanillaCloudBoost = Also thicken and speed up the game's own sky clouds
+TyphoonCloudUnavailable = The game's sky cloud settings are not present in this environment, so only Disaster +'s own cloud is drawn.

@@ -187,6 +187,14 @@ namespace DisasterPlus.Game
                 DisasterPlus.Game.TyphoonTornado.MaxTornadoes, 1f,
                 ModSettings.TyphoonTornadoCount.value,
                 v => ModSettings.TyphoonTornadoCount.value = (int)v);
+            // ★ 雲は既定 ON。**見た目だけの機能**で、切っても他の 5 要素はそのまま動く
+            //    （TyphoonCloud のクラス doc の独立性）。
+            typhoon.AddCheckbox(Strings.TyphoonCloudEnabled,
+                ModSettings.TyphoonCloudEnabled.value,
+                v => ModSettings.TyphoonCloudEnabled.value = v);
+            typhoon.AddCheckbox(Strings.TyphoonVanillaCloudBoost,
+                ModSettings.TyphoonVanillaCloudBoost.value,
+                v => ModSettings.TyphoonVanillaCloudBoost.value = v);
             typhoon.AddButton(Strings.TyphoonResetButton, delegate
             {
                 ModSettings.TyphoonButtonX.value = -1;

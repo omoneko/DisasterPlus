@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 30 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 31 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -50,19 +50,20 @@ namespace DisasterPlus.Game
         /// 地震 第 2 層 3 件（TsunamiAI プレハブの実在・
         /// TerrainManager.HasWater と DisasterData.m_waveIndex・
         /// BuildingAI.CollapseBuilding と BuildingInfo.m_size / m_generatedInfo）＋
-        /// 台風 8 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値・
+        /// 台風 9 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値・
         /// DisasterData の移動 4 フィールドと DisasterAI の公開ラッパー 3 メソッド・
         /// WeatherManager の target 系 6 フィールド・
         /// QueueLightningStrike の 4 引数版・
         /// BuildingAI.CollapseBuilding と DisasterHelpers.AddWind / DestroyTrees・
         /// WaterSimulation の到達経路と WaterSource の m_type / m_target・
-        /// Vehicle.SetTargetPos と InstanceManager.GetAllGroupInstances）＋
+        /// Vehicle.SetTargetPos と InstanceManager.GetAllGroupInstances・
+        /// 雲の透過シェーダと Graphics.DrawMesh）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 31;
+        private const int TotalCheckCount = 32;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -126,7 +127,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 30 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 31 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -923,6 +924,51 @@ namespace DisasterPlus.Game
 
             // --- ④台風（Task 10）ここまで ---
 
+            // --- ④台風（Task 9: 巨大な回転雲）ここから ---
+
+            // ④の雲は**全部自前**である。バニラに流用できる雲は 1 つも無く
+            // （DisasterInfo.m_effect はフィールドごと存在しない。§C-1）、バニラの雲は
+            // ワールド座標を持たないスカイドームなので合成もできない（§C-2）。
+            // したがって雲の生死は「自前のマテリアルが作れるか」だけに掛かっている。
+            //
+            // ★ ここが FAIL のとき、④は**何も描かない**。CS のマテリアルを借りる
+            //   逃げ道は取らない —— CS のシェーダはエンジンが供給する per-instance
+            //   データを要求するので、自前の DrawMesh に載せると不可視か真っ黒になる
+            //   （VortexAI.RenderExtraStuff がその実例。§C-1 / 火災旋風 §4.9）。
+            //   将来のゲーム更新でシェーダ名が変わったとき、黙って雲が消えるのではなく
+            //   ここが名指しする。
+            //
+            // Shader.Find は main スレッド専用だが、Run() 自体が main スレッド専用なので
+            // 問題ない。**DayNightDynamicCloudsProperties の実在はここに入れない** ——
+            // 無いのは正当な環境（DLC・グラフィック設定）で、④の自前の雲には
+            // 影響しないため（FAIL にすると狼少年になる）。
+            Check("A transparent shader resolves via Shader.Find and Graphics.DrawMesh is "
+                  + "reachable",
+                  "the typhoon's own cloud cannot be drawn. Every other part of the typhoon is "
+                  + "unaffected; the mod draws nothing rather than borrowing a Cities material, "
+                  + "which renders invisible or black in a hand-rolled DrawMesh",
+                  delegate
+                  {
+                      if (typeof(UnityEngine.Graphics).GetMethod("DrawMesh",
+                              BindingFlags.Public | BindingFlags.Static, null,
+                              new Type[]
+                              {
+                                  typeof(UnityEngine.Mesh), typeof(UnityEngine.Matrix4x4),
+                                  typeof(UnityEngine.Material), typeof(int)
+                              },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      return UnityEngine.Shader.Find("Particles/Alpha Blended") != null
+                             || UnityEngine.Shader.Find("Legacy Shaders/Particles/Alpha Blended") != null
+                             || UnityEngine.Shader.Find("Particles/Additive") != null
+                             || UnityEngine.Shader.Find("Standard") != null;
+                  });
+
+            // --- ④台風（Task 9）ここまで ---
+
             Report();
         }
 
@@ -1028,7 +1074,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 30 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 31 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

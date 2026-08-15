@@ -679,5 +679,18 @@ namespace DisasterPlus.Game
             "Natural Disasters Renewal replaces vanilla tornado destruction, so these "
             + "tornadoes follow its settings. The typhoon's own wind damage does not - it "
             + "never goes through DisasterHelpers.";
+
+        // --- ④台風（Task 9: 巨大な回転雲） ---
+        //
+        // ★ TyphoonCloudUnavailable は「なぜ空全体が変わらないか」を出す行である。
+        //   DayNightDynamicCloudsProperties は DLC・グラフィック設定によっては
+        //   存在しない（IL 事実文書 §C-2、PARTIAL）。**不具合ではない**ので、
+        //   ④自身の雲は変わらず描かれることまで書く。
+        public static string TyphoonCloudEnabled = "Draw the typhoon's cloud spiral";
+        public static string TyphoonVanillaCloudBoost =
+            "Also thicken and speed up the game's own sky clouds";
+        public static string TyphoonCloudUnavailable =
+            "The game's sky cloud settings are not present in this environment, so only "
+            + "Disaster +'s own cloud is drawn.";
     }
 }

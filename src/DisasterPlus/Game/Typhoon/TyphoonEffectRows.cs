@@ -38,6 +38,7 @@ namespace DisasterPlus.Game
         private static UILabel _floodNoteLabel;
         private static UILabel _tornadoLabel;
         private static UILabel _tornadoNdrNoteLabel;
+        private static UILabel _cloudNoteLabel;
 
         /// <summary>パネル構築時に 1 回。</summary>
         internal static void Build(UIPanel p, ref float y)
@@ -80,6 +81,11 @@ namespace DisasterPlus.Game
             //    残ると、切っているのに影響を受けていると読める。
             //    高さは 3 行に折り返すぶんを確保する。
             _tornadoNdrNoteLabel = TyphoonRows.AddRow(p, "TornadoNdrNote", ref y, 56f);
+
+            // ★ 雲は行を持たない（画面を見れば出ているかどうか分かる）。**出ない理由**
+            //    だけを出す —— バニラ空の雲の設定がこの環境に無いのは正当な状態で
+            //    （§C-2、PARTIAL）、それを黙っていると「④の雲が壊れている」と読まれる。
+            _cloudNoteLabel = TyphoonRows.AddRow(p, "CloudNote", ref y, 40f);
         }
 
         /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
@@ -94,6 +100,7 @@ namespace DisasterPlus.Game
                 TyphoonRows.SetPlain(_floodReasonLabel, "");
                 TyphoonRows.SetPlain(_tornadoLabel, "");
                 TyphoonRows.SetPlain(_tornadoNdrNoteLabel, "");
+                TyphoonRows.SetPlain(_cloudNoteLabel, "");
                 return;
             }
 
@@ -107,6 +114,24 @@ namespace DisasterPlus.Game
             RefreshWind(s);
             RefreshFlood(s);
             RefreshTornado(s);
+            RefreshCloud();
+        }
+
+        /// <summary>
+        /// 雲の行（T9）。**出ているときは何も言わない** —— 空を見れば分かる。
+        /// バニラ空の雲の増強がこの環境で使えないときだけ、その理由を出す
+        /// （<c>DayNightDynamicCloudsProperties</c> は DLC・グラフィック設定によっては
+        /// 存在しない。§C-2、PARTIAL。**不具合ではない**）。
+        /// </summary>
+        private static void RefreshCloud()
+        {
+            bool unavailable = ModSettings.TyphoonCloudEnabled.value
+                               && ModSettings.TyphoonVanillaCloudBoost.value
+                               && TyphoonCloud.State == TyphoonCloudState.Drawing
+                               && !TyphoonCloud.VanillaBoostApplied;
+
+            TyphoonRows.SetPlain(_cloudNoteLabel,
+                unavailable ? Strings.TyphoonCloudUnavailable : "");
         }
 
         /// <summary>
@@ -226,6 +251,7 @@ namespace DisasterPlus.Game
             _floodNoteLabel = null;
             _tornadoLabel = null;
             _tornadoNdrNoteLabel = null;
+            _cloudNoteLabel = null;
         }
     }
 }

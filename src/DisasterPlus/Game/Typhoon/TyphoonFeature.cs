@@ -143,6 +143,14 @@ namespace DisasterPlus.Game
         {
             TyphoonPanelButton.Tick();
             TyphoonPanel.Tick();
+
+            // ★ 雲は main スレッドだけの機能で、**sim 側からは 1 度も呼ばれない。**
+            //   それが T9 を④の他の要素から独立させている実体である
+            //   （TyphoonCloud のクラス doc）。台風が終わったときの後始末も
+            //   TyphoonCloud.Update が自分で行う——TyphoonController.Forget の
+            //   後始末列にこの型を足さないこと。
+            if (ModSettings.TyphoonCloudEnabled.value) TyphoonCloud.Update(TyphoonHub.Latest);
+            else TyphoonCloud.Destroy();
         }
 
         public void OnLevelUnloading()
@@ -151,6 +159,10 @@ namespace DisasterPlus.Game
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
             TyphoonPanelButton.Remove();
             TyphoonPanel.Destroy();
+            // ★ Mesh も Material も Component ではないので、GameObject を消しても
+            //    道連れにならない。**自分で Object.Destroy する**（TyphoonCloud の
+            //    クラス doc）。バニラ空の雲の設定もここで元へ戻る。
+            TyphoonCloud.Destroy();
 
             TyphoonHub.Clear();
             TyphoonReader.Reset();
@@ -290,6 +302,58 @@ namespace DisasterPlus.Game
             WriteWind(b, snapshot);
             WriteFlood(b, snapshot);
             WriteTornadoes(b, snapshot);
+            WriteCloud(b);
+        }
+
+        /// <summary>
+        /// 巨大な回転雲（T9）。**バニラに流用できる雲は 1 つも無い**ので、
+        /// ここに出るのは全部④が自分で組んだものである（§C-1 / §C-2）。
+        ///
+        /// <c>vanilla sky boost</c> が <c>not available</c> なのは**不具合ではない** ——
+        /// <c>DayNightDynamicCloudsProperties</c> は DLC・グラフィック設定によっては
+        /// 存在しない（§C-2、PARTIAL）。④の自前の雲はそれに依存しない。
+        /// </summary>
+        private static void WriteCloud(DiagnosticBuilder b)
+        {
+            if (!ModSettings.TyphoonCloudEnabled.value)
+            {
+                b.Line(2, "cloud", "off (setting)");
+                return;
+            }
+
+            b.Line(2, "cloud", CloudStateText());
+
+            if (!ModSettings.TyphoonVanillaCloudBoost.value)
+            {
+                b.Line(3, "vanilla sky boost", "off (setting)");
+                return;
+            }
+
+            b.Line(3, "vanilla sky boost", TyphoonCloud.VanillaBoostApplied
+                ? "applied"
+                : "not available in this environment (this is normal on some DLC/graphics "
+                  + "settings; Disaster + draws its own cloud regardless)");
+        }
+
+        private static string CloudStateText()
+        {
+            switch (TyphoonCloud.State)
+            {
+                case TyphoonCloudState.Drawing:
+                    return "drawing (" + TyphoonCloud.LastDrawCalls + " draw call/frame, radius "
+                           + TyphoonCloud.LastRadiusMetres.ToString("F0") + " m)";
+
+                case TyphoonCloudState.ShaderMissing:
+                    return "NOT DRAWN: no usable shader resolved. Disaster + refuses to borrow "
+                           + "a Cities material - that renders invisible or black in a "
+                           + "hand-rolled DrawMesh";
+
+                case TyphoonCloudState.BuildFailed:
+                    return "NOT DRAWN: the mesh or material could not be built";
+
+                default:
+                    return "idle (no typhoon to draw)";
+            }
         }
 
         /// <summary>
