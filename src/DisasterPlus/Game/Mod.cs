@@ -236,11 +236,12 @@ namespace DisasterPlus.Game
             var volcano = helper.AddGroup(Strings.GroupVolcano);
             volcano.AddCheckbox(Strings.VolcanoEnabled, ModSettings.VolcanoEnabled.value,
                 v => ModSettings.VolcanoEnabled.value = v);
-            // ★ Strings.VolcanoResetButton は宣言だけしてここでは使わない。
-            //   ボタン自体が T3 で入るので、**存在しないボタンの位置をリセットする
-            //   設定**を先に置くと、押しても何も起きない死んだ設定になる。
-            //   キーだけ先に足してあるのは、ロケール 3 ファイルの追加を
-            //   T2 に寄せて 1 回で済ませるためである（計画 Step 1 の表）。
+            // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
+            volcano.AddButton(Strings.VolcanoResetButton, delegate
+            {
+                ModSettings.VolcanoButtonX.value = -1;
+                ModSettings.VolcanoButtonY.value = -1;
+            });
 
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,

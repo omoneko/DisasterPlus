@@ -60,6 +60,8 @@ namespace DisasterPlus.Game
         public static SavedBool TyphoonCloudEnabled;
         public static SavedBool TyphoonVanillaCloudBoost;
         public static SavedBool VolcanoEnabled;
+        public static SavedInt VolcanoButtonX;
+        public static SavedInt VolcanoButtonY;
 
         public static void Ensure()
         {
@@ -183,6 +185,10 @@ namespace DisasterPlus.Game
             //    発火しない（プレイヤーが地点を指し、不可逆であることを確認して
             //    初めて始まる）ので、既定 ON でも黙って地形が変わることはない。
             VolcanoEnabled = new SavedBool("volcanoEnabled", FileName, true, true);
+            // -1 = 未決定。ForecastButtonX/Y・EarthquakeButtonX/Y・TyphoonButtonX/Y と
+            // 全く同じ扱い（VolcanoPanelButton が空き位置を決めて書き戻す。T3）。
+            VolcanoButtonX = new SavedInt("volcanoButtonX", FileName, -1, true);
+            VolcanoButtonY = new SavedInt("volcanoButtonY", FileName, -1, true);
 
             _ready = true;
         }

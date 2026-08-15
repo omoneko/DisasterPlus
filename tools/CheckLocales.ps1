@@ -70,13 +70,18 @@ foreach ($file in Get-ChildItem -Path $localeDir -Filter *.txt) {
     }
 
     # --- marker contract -------------------------------------------------
-    # 1. The heading that explains the display convention must carry the token,
-    #    because the marker itself is substituted at runtime from SourceVanilla.
-    if ($loc.Map.Contains('TyphoonModelNote')) {
-        $note = [string]$loc.Map['TyphoonModelNote']
-        if ($note.IndexOf($token) -lt 0) {
-            $problems.Add("$name : TyphoonModelNote does not contain the $token token, so the " +
-                          "panel heading will never name the marker the rows actually carry")
+    # 1. Every heading that explains a panel's display convention must carry the
+    #    token, because the marker itself is substituted at runtime from
+    #    SourceVanilla. One entry per panel that names the marker in prose.
+    #    Add the new key here when a feature adds such a heading; leaving it out
+    #    is exactly how the original bug shipped.
+    foreach ($noteKey in @('TyphoonModelNote', 'VolcanoModelNote')) {
+        if ($loc.Map.Contains($noteKey)) {
+            $note = [string]$loc.Map[$noteKey]
+            if ($note.IndexOf($token) -lt 0) {
+                $problems.Add("$name : $noteKey does not contain the $token token, so the " +
+                              "panel heading will never name the marker the rows actually carry")
+            }
         }
     }
 

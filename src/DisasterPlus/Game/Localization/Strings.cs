@@ -760,5 +760,56 @@ namespace DisasterPlus.Game
             "Reset the volcano button position (takes effect next time you load a city)";
         public static string VolcanoUnavailable = "Volcano data unavailable";
         public static string LogChannelVolcano = "Volcano";
+
+        // --- ⑤火山（Task 3: パネル・ボタン・表示規約） ---
+        //
+        // ★ ここから下の行ラベルは全て**印の付かない行**に入る。出所は
+        //   VolcanoModelHeader / VolcanoModelNote が見出しで一度だけ名乗る
+        //   （設計書 §7.4）。⑤で [measured] が付いてよいのは
+        //   **設置地点の地形高さ・範囲内の建物数・範囲内の道路セグメント数**の
+        //   3 行だけで、接頭辞は VolcanoRows.SetMeasured が付ける。
+        //
+        // **実在の物理単位を名乗る文字列を足さないこと**（設計書 §7.5）。
+        // ⑤が出してよいのは距離 (m)・高さ (m)・ゲーム内時間・0〜10 の段階だけで、
+        // 溶岩の「温度」も「粘性」も⑤は持っていない。
+        public static string VolcanoTitle = "Volcano";
+        public static string VolcanoButtonLabel = "Volcano";
+        public static string VolcanoButtonTooltip = "Open the Disaster + volcano panel";
+        public static string VolcanoModelHeader = "Computed by Disaster +";
+
+        // ★★ **この文に印の文字列そのものを書かないこと**（④の全体レビュー I5 と
+        //    同じ罠）。ja.txt の SourceVanilla は「[実測]」なので、本文に英語の
+        //    "[measured]" を埋め込むと**日本語のプレイヤーは画面に一度も出ない
+        //    文字列を探すことになる**。翻訳文には MeasuredToken を置き、
+        //    表示の直前に VolcanoRows.SetModelNote が SourceVanilla へ差し替える。
+        //    tools\CheckLocales.ps1 がこのキーにトークンが在ることを検査する。
+        public static string VolcanoModelNote =
+            "The numbers on this panel come from Disaster +'s own model. The game does not "
+            + "compute a volcano, an uplift or a lava flow of its own. Only the rows marked "
+            + "{measured} are values read straight from the game.";
+
+        // ★ **常設の警告**（設計書 §7.1）。火山が無いときも出す。
+        //   「うるさいから」と条件付きにしないこと —— 利用者は「不可逆でよい」と
+        //   判断したが、それはプレイヤーに黙っていてよいという意味ではない。
+        public static string VolcanoIrreversibleWarning =
+            "Building a volcano changes the terrain permanently. Neither the game nor "
+            + "Disaster + can undo it, and it is written into your save.";
+
+        public static string VolcanoInactive = "No volcano right now.";
+        public static string VolcanoWaiting = "Waiting for the first simulation update.";
+        public static string VolcanoTerrainUnavailable =
+            "Disaster + cannot reach the terrain height array in this build of the game, so "
+            + "volcanoes are disabled. See the diagnostic dump for which call could not be "
+            + "resolved.";
+
+        public static string VolcanoFormRow = "Shape";
+        public static string VolcanoFormShield = "Shield volcano";
+        public static string VolcanoFormStrato = "Stratovolcano";
+        public static string VolcanoFormDome = "Lava dome";
+        public static string VolcanoRadiusRow = "Radius";
+        public static string VolcanoHeightRow = "Final height";
+        public static string VolcanoPhaseRow = "Phase";
+        public static string VolcanoGroundHeightRow = "Ground at the chosen spot";
+        public static string VolcanoMetres = "m";
     }
 }

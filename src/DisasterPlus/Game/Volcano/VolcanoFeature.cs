@@ -87,14 +87,20 @@ namespace DisasterPlus.Game
         /// <summary>
         /// main スレッド。**ここから sim 側の型を呼ばないこと。**
         /// 読むのは <see cref="VolcanoHub.Latest"/> のスナップショットだけである。
-        /// このタスクでは何もしない（T3 でパネルとボタンが入る）。
         /// </summary>
         public void OnMainThreadUpdate()
         {
+            VolcanoPanelButton.Tick();
+            VolcanoPanel.Tick();
         }
 
         public void OnLevelUnloading()
         {
+            // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
+            //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
+            VolcanoPanelButton.Remove();
+            VolcanoPanel.Destroy();
+
             VolcanoHub.Clear();
             // ★ 地形の実測（RawHeights の長さ）を都市をまたいで持ち越さない。
             //    持ち越すと 2 つ目の都市で前の都市の事実を名乗ることになる。
@@ -123,9 +129,41 @@ namespace DisasterPlus.Game
             WriteBudgets(b);
             WriteMode(b, snapshot.GameMode);
             WriteDlc(b, snapshot.Terrain);
+            WriteUiState(b);
 
             // T4 が位相機械を入れるまでは常に idle。
             b.Line(1, "state", "idle");
+        }
+
+        /// <summary>
+        /// UI の状態。②④と同じ 3 状態（未設置／保存位置の再利用／新規探索の成否）。
+        ///
+        /// **ボタンが①②④のボタンと重なっているかどうかは、ここでしか分からない。**
+        /// 重なったボタンは画面上で「1 個しか無い」ように見えるので、
+        /// <c>fresh free-slot search FAILED</c> が出ているかを診断で確かめる。
+        /// </summary>
+        private static void WriteUiState(DiagnosticBuilder b)
+        {
+            string placement;
+            if (!VolcanoPanelButton.Installed)
+            {
+                placement = "button not installed yet";
+            }
+            else if (VolcanoPanelButton.UsedSavedPosition)
+            {
+                placement = "saved position reused";
+            }
+            else
+            {
+                placement = VolcanoPanelButton.FoundFreeSlot
+                    ? "fresh free-slot search succeeded"
+                    : "fresh free-slot search FAILED (fell back to preferred position)";
+            }
+
+            b.Line(1, "button position", ModSettings.VolcanoButtonX.value + ","
+                                         + ModSettings.VolcanoButtonY.value
+                                         + "  (" + placement + ")");
+            b.Line(1, "panel body", VolcanoPanel.IsVisible ? "shown" : "hidden");
         }
 
         /// <summary>
