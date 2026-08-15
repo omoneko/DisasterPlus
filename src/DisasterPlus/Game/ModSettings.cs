@@ -59,6 +59,66 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonTornadoCount;
         public static SavedBool TyphoonCloudEnabled;
         public static SavedBool TyphoonVanillaCloudBoost;
+        public static SavedBool VolcanoEnabled;
+        public static SavedInt VolcanoButtonX;
+        public static SavedInt VolcanoButtonY;
+
+        /// <summary>
+        /// 火山の形態。**.cgs に書かれる公開契約なので番号を詰め直さない**
+        /// （<c>DisasterPlus.Core.Volcano.VolcanoForm</c> と同じ値）。
+        ///
+        /// ★ フィールド名が <c>VolcanoShapeSetting</c> なのは、Core の型名
+        ///   <c>VolcanoShape</c>（3 形態のプロファイルという内容そのもの）と
+        ///   衝突するからである。**保存キーの文字列 "volcanoShape" は変えない。**
+        /// </summary>
+        public static SavedInt VolcanoShapeSetting;
+
+        /// <summary>火山の半径（m）。範囲は形態ごとに違うので使う側でクランプする。</summary>
+        public static SavedInt VolcanoRadius;
+
+        /// <summary>火山の最終高（m）。同上。</summary>
+        public static SavedInt VolcanoHeight;
+
+        /// <summary>
+        /// 準備（破壊）の前線が隆起の前線より何メートル先を走るか（m）。
+        /// 0 にすると「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
+        /// </summary>
+        public static SavedInt VolcanoClearingLeadMetres;
+
+        /// <summary>
+        /// 隆起にかけるゲーム内分。<c>UpliftSchedule.TotalTicksFor</c> が
+        /// 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰めるので、長すぎる値を
+        /// 入れても無言で止まることは無い。
+        /// </summary>
+        public static SavedInt VolcanoUpliftMinutes;
+
+        /// <summary>
+        /// 噴煙を描くか（T7）。**切っても隆起も溶岩もそのまま動く** ——
+        /// 噴火の描画は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
+        /// </summary>
+        public static SavedBool VolcanoEruptionFx;
+
+        /// <summary>
+        /// 火口から出す溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
+        /// 上限は <c>VolcanoLava.MaxFlows</c> が使う側でクランプする。
+        /// </summary>
+        public static SavedInt VolcanoLavaFlows;
+
+        /// <summary>
+        /// 溶岩の通り道に火を付けるか（T8）。**切っても溶岩は流れる**（見た目だけになる）。
+        /// </summary>
+        public static SavedBool VolcanoLavaFire;
+
+        /// <summary>
+        /// 溶岩の面を描くか（T9）。**切っても溶岩は流れ、地面を焦がし、建物に火を付ける**
+        /// —— 描画は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
+        /// </summary>
+        public static SavedBool VolcanoLavaRender;
+
+        /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
+        public const int VolcanoShapeShield = 0;
+        public const int VolcanoShapeStrato = 1;
+        public const int VolcanoShapeDome = 2;
 
         public static void Ensure()
         {
@@ -176,6 +236,43 @@ namespace DisasterPlus.Game
             // バニラのスカイドームの雲を濃く・速くする。**存在しない環境がありうる**
             // （DLC・グラフィック設定。IL 事実文書 §C-2、PARTIAL）。無ければ黙って諦める。
             TyphoonVanillaCloudBoost = new SavedBool("typhoonCloudBoost", FileName, true, true);
+
+            // ★ ⑤火山は既定 ON。**DLC 非所持を理由に止めない** —— ⑤は Natural
+            //    Disasters を要らない（設計書 §1.4）。しかも⑤は自動では 1 度も
+            //    発火しない（プレイヤーが地点を指し、不可逆であることを確認して
+            //    初めて始まる）ので、既定 ON でも黙って地形が変わることはない。
+            VolcanoEnabled = new SavedBool("volcanoEnabled", FileName, true, true);
+            // -1 = 未決定。ForecastButtonX/Y・EarthquakeButtonX/Y・TyphoonButtonX/Y と
+            // 全く同じ扱い（VolcanoPanelButton が空き位置を決めて書き戻す。T3）。
+            VolcanoButtonX = new SavedInt("volcanoButtonX", FileName, -1, true);
+            VolcanoButtonY = new SavedInt("volcanoButtonY", FileName, -1, true);
+
+            // ★ 保存値は公開契約。0=盾状 / 1=成層 / 2=溶岩ドーム の番号を詰め直さない。
+            //    範囲外の値は VolcanoShape.FormOf が既定（成層）へ落とす。
+            VolcanoShapeSetting = new SavedInt("volcanoShape", FileName, VolcanoShapeStrato, true);
+            // 単位はメートル。範囲は形態ごとに違うので、スライダーの範囲ではなく
+            // VolcanoShape.RadiusFor / HeightFor が使う側でクランプする
+            // （.cgs は手で編集されうる）。
+            VolcanoRadius = new SavedInt("volcanoRadius", FileName, 1200, true);
+            VolcanoHeight = new SavedInt("volcanoHeight", FileName, 600, true);
+
+            // 準備の前線が隆起の前線より何メートル先を走るか。0 にすると
+            // 「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
+            VolcanoClearingLeadMetres = new SavedInt("volcanoClearLead", FileName, 96, true);
+
+            // 隆起にかけるゲーム内分。UpliftSchedule.TotalTicksFor が
+            // 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰める。
+            VolcanoUpliftMinutes = new SavedInt("volcanoUpliftMinutes", FileName, 30, true);
+
+            // 噴煙を描くか。切っても隆起は止まらない（描画は main スレッドだけの機能）。
+            VolcanoEruptionFx = new SavedBool("volcanoEruptionFx", FileName, true, true);
+
+            // 火口から出す流れの本数。0 で完全に無効（溶岩も着火も出ない）。
+            VolcanoLavaFlows = new SavedInt("volcanoLavaFlows", FileName, 4, true);
+            // 溶岩の通り道に火を付けるか。切っても溶岩は流れる（見た目だけになる）。
+            VolcanoLavaFire = new SavedBool("volcanoLavaFire", FileName, true, true);
+            // 溶岩の面を描くか。切っても溶岩は流れる（描画は main スレッドだけの機能）。
+            VolcanoLavaRender = new SavedBool("volcanoLavaRender", FileName, true, true);
 
             _ready = true;
         }

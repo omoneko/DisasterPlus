@@ -227,6 +227,88 @@ namespace DisasterPlus.Game
                 helper.AddGroup(Strings.TyphoonNeedsDlc);
             }
 
+            // ★★ ⑤火山には「Natural Disasters が必要です」の群を**置かない**。
+            //    ⑤は DLC を要らない（設計書 §1.4）—— 災害スロットに載らず、
+            //    RawHeights を自分で書き、MakeCrater / BurnGround にも DLC ゲートは
+            //    無い（IL 事実文書 §C-8 / §B-7b）。分岐するのは樹木の着火だけ
+            //    （TreeManager.BurnTree、§B-7c）で、それは T8 が
+            //    FeatureHost.NoteDegraded で名乗る。ここに DLC の注記を置くと嘘になる。
+            var volcano = helper.AddGroup(Strings.GroupVolcano);
+            volcano.AddCheckbox(Strings.VolcanoEnabled, ModSettings.VolcanoEnabled.value,
+                v => ModSettings.VolcanoEnabled.value = v);
+
+            // ラベル配列は static readonly にしてはいけない。型初期化時の言語で凍結する。
+            // 毎回組み直すことで言語切替に追従する（このファイルの他の 2 箇所と同じ）。
+            string[] volcanoShapes =
+            {
+                Strings.VolcanoFormShield, Strings.VolcanoFormStrato, Strings.VolcanoFormDome
+            };
+            int currentShape = ModSettings.VolcanoShapeSetting.value;
+            if (currentShape < 0 || currentShape >= volcanoShapes.Length)
+            {
+                currentShape = ModSettings.VolcanoShapeStrato;
+            }
+            volcano.AddDropdown(Strings.VolcanoShapeSetting, volcanoShapes, currentShape,
+                v => ModSettings.VolcanoShapeSetting.value = v);
+
+            // ★ スライダーの範囲は 3 形態を合わせた外枠にしてある。**形態ごとの帯へ
+            //    絞るのは使う側（VolcanoShape.RadiusFor / HeightFor）の仕事**で、
+            //    .cgs は公開契約なので範囲外の値が入っていても読み捨てない。
+            volcano.AddSlider(Strings.VolcanoRadiusSetting, 250f, 3000f, 50f,
+                ModSettings.VolcanoRadius.value,
+                v => ModSettings.VolcanoRadius.value = (int)v);
+            volcano.AddSlider(Strings.VolcanoHeightSetting, 50f, 700f, 10f,
+                ModSettings.VolcanoHeight.value,
+                v => ModSettings.VolcanoHeight.value = (int)v);
+
+            // ★ 準備が隆起より先行する距離（T5）。**下限は 0 ではなく 16 m** ——
+            //    0 だと「何も壊さない → 何も上がらない → 進捗が動かない」の輪から
+            //    出られなくなる（VolcanoClearing.LeadMetres）。使う側でも
+            //    同じ下限へクランプするので、.cgs を手で書き換えても止まらない。
+            volcano.AddSlider(Strings.VolcanoClearingLead, 16f, 400f, 16f,
+                ModSettings.VolcanoClearingLeadMetres.value,
+                v => ModSettings.VolcanoClearingLeadMetres.value = (int)v);
+
+            // ★ 隆起にかけるゲーム内分（T6）。長すぎる値を入れても
+            //    UpliftSchedule.TotalTicksFor が「山頂が毎 tick 1/64 m 以上動く」上限で
+            //    切り詰めるので、**無言で隆起が止まることは無い**（罠 2）。
+            volcano.AddSlider(Strings.VolcanoUpliftMinutes, 5f, 240f, 5f,
+                ModSettings.VolcanoUpliftMinutes.value,
+                v => ModSettings.VolcanoUpliftMinutes.value = (int)v);
+
+            // ★ 噴煙を描くか（T7）。**描画は main スレッドだけの機能**なので、
+            //    切っても隆起は同じように進む（実機チェックリストの項目でもある）。
+            volcano.AddCheckbox(Strings.VolcanoEruptionFx, ModSettings.VolcanoEruptionFx.value,
+                v => ModSettings.VolcanoEruptionFx.value = v);
+
+            // ★ 溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
+            //    上限は VolcanoLava.MaxFlows と同じ 8 —— 1 tick あたりの仕事量が
+            //    「本数 × 2 歩」で決まるので、ここが費用の上限そのものである。
+            volcano.AddSlider(Strings.VolcanoLavaFlowsSetting, 0f, VolcanoLava.MaxFlows, 1f,
+                ModSettings.VolcanoLavaFlows.value,
+                v => ModSettings.VolcanoLavaFlows.value = (int)v);
+
+            // ★ 着火を切っても溶岩は流れる（見た目だけになる）。
+            volcano.AddCheckbox(Strings.VolcanoLavaFireSetting, ModSettings.VolcanoLavaFire.value,
+                v => ModSettings.VolcanoLavaFire.value = v);
+
+            // ★ 溶岩の面を描くか（T9）。**切っても溶岩は流れ、地面を焦がし、
+            //    建物に火を付ける** —— T9 は他のどのタスクからも依存されていない。
+            volcano.AddCheckbox(Strings.VolcanoLavaRenderSetting,
+                ModSettings.VolcanoLavaRender.value,
+                v => ModSettings.VolcanoLavaRender.value = v);
+
+            // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
+            volcano.AddButton(Strings.VolcanoResetButton, delegate
+            {
+                ModSettings.VolcanoButtonX.value = -1;
+                ModSettings.VolcanoButtonY.value = -1;
+            });
+
+            // ★★ 設定画面でも不可逆であることを名乗る（設計書 §7.1）。
+            //    パネルの警告はパネルを開いた人しか読まない。
+            helper.AddGroup(Strings.VolcanoIrreversibleWarning);
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
@@ -311,6 +393,16 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Typhoon)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Typhoon));
+
+            // Volcano チャンネル（= 32）は⑤の Task 2 まで**定義済み・未使用**だった。
+            // VolcanoFeature.OnSimulationTick がこのチャンネル付きの Log.Diag を出すので、
+            // ここで初めて死んだ設定ではなくなる。
+            channels.AddCheckbox(Strings.LogChannelVolcano,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.Volcano, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Volcano)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Volcano));
         }
     }
 }

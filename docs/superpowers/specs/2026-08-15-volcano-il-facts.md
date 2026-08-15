@@ -33,6 +33,9 @@
 | E13 | 可逆性 | **CONFIRMED（自前で持つしかない）** | `BackupHeights` / `UndoBuffer` は **`TerrainTool` / `DistrictTool` 専有**。MOD が使うと地形ツールを開いた瞬間に壊れる。自前保存の実費は**半径 1 km で 31 KB、2 km で 123 KB**（ushort × 影響セル） |
 | E14 | NDR との衝突 | **CONFIRMED（衝突しない）** | ⑤が使う `MakeCrater` / `TerrainModify` / `TerrainManager` / `BurnGround` / `BurnBuilding` は NDR のパッチ面（`DisasterHelpers.DestroyBuildings` / `DestroyNetSegments`）を**一切通らない** |
 
+| F15 | 道路セグメントのグリッド | **CONFIRMED（建物と同じ形）** | `NetManager.m_segmentGrid` は `ushort[72900]`（= 270²）。セル 64 m・オフセット +135・`[0,269]` クランプ・`index = z*270 + x` で、**建物グリッドと完全に同じ寸法**。鎖は `NetSegment.m_nextGridSegment`（`ushort`）。ただし**セルを決める位置は両端ノードの中点**であって `m_middlePosition` ではない（→ §F-15） |
+| G16 | 準備段の破壊経路 | **CONFIRMED（成立する）** | `demolish:true` は `PlayerNetAI.CollapseSegment` へ集約され、**`NetManager.ReleaseSegment(id, keepNodes:false)` で本当に解放する**（孤児ノードも同時に解放される）。**`Collapsed` を立てただけの道路と建物は地形を固定し続ける**（`TerrainUpdated` は `Collapsed` を見ない）ので、⑤は `demolish:true` でなければならない。**`demolish:false` を断る 5 つの AI は `demolish:true` を通す**（→ §G-16） |
+
 **今回いちばん危なかった思い込み（＝10 個目の候補）は A2。** 「地形を書けば地形が変わる」は、**道路と建物の下では成り立たない**。詳細は §A-2 と「設計への含意」。
 
 ---
@@ -624,6 +627,16 @@ IL_00C0  ldc.i4 192                                            → m_flags |= 0x
 > ND を持たないプレイヤーには出せない。** `LoadingManager.instance.SupportsExpansion(Expansion.NaturalDisasters)` で
 > 分岐し、無い場合は `BurnGround` の焦げと（後述の）自作エフェクトだけにするか、
 > 木を `TreeManager.ReleaseTree` で消すかを設計で選ぶこと。診断（Phase 0.5）に 1 行出す。
+>
+> ★ **実装が実際に評価しているのは `SteamHelper.IsDLCOwned(NaturalDisastersDLC)` である**
+> （`ModCompat.NaturalDisastersOwned`。全体レビュー M11 の追跡性の訂正）。
+> ゲートの本体は上の `SupportsExpansion` だが、レベルがロードされている間、
+> この 2 つは同じ答えを返す（`LoadingManager.m_supportsExpansion[]` は所持状況から埋まる）。
+> ⑤が `IsDLCOwned` を使うのは、①〜④と同じ判定を**メインメニューの時点**でも
+> 使えるようにするためである（`OnSettingsUI` はレベルロード前に一度だけ走る）。
+> **判定そのものが例外で倒れた場合は「所持」に倒すが、倒したことを覚えて
+> 診断ではそう名乗る** —— 「所持」と出しておいて木が燃えないのは、
+> 原因を探す人に嘘の手がかりを渡すことになる。
 
 **(d) 道路 — 「燃やす」は ABSENT。「壊す」だけある。**
 
@@ -1064,6 +1077,392 @@ NDR は「災害がいつ・どれだけ強く起きるか」を変えるが、�
 2. **地形を書き換える他 MOD**（`TerrainWrapper.SetHeights` を使うもの、および `Terraform`/`Extra Landscaping Tools` 系）。
    `TerrainWrapper.SetHeights` は `RawHeights` を直接書いて `UpdateArea` する公式 API。
    ⑤の退避配列は「隆起開始時点のスナップショット」なので、途中で他 MOD が同じ矩形を触ると復元で上書きされる。
+
+---
+
+## F. 道路セグメントのグリッド（⑤ T4 で追加実測）
+
+### F-15. `NetManager` のセグメントグリッド — CONFIRMED（全文読了）
+
+⑤の T4（影響範囲の調査）は「範囲内の道路が何本か」を数える。建物グリッドの
+`64 / 135 / [0,269]` に対応する 3 つの数値は、本プロジェクトのどの事実文書にも
+無かったので、ここで確定させた。**推測していない。**
+
+**確保（`NetManager.Awake`）:**
+
+```
+IL_0017: ldc.i4 36864     newobj Array16`1::.ctor   stfld NetManager::m_segments
+IL_0077: ldc.i4 72900     newarr UInt16             stfld NetManager::m_segmentGrid
+```
+
+→ `m_segmentGrid` は `ushort[72900]` = **270 × 270**。セグメントバッファは **36864**
+（連結リストを辿る保険の上限はこれ）。`m_nodeGrid` も同じ 72900 である。
+
+**セルへの登録（`NetManager.InitializeSegment`、IL_0046–IL_00B6）:**
+
+```
+pos = (m_nodes.m_buffer[m_startNode].m_position
+     + m_nodes.m_buffer[m_endNode].m_position) * 0.5f
+x   = Mathf.Clamp((int)(pos.x / 64f + 135f), 0, 269)
+z   = Mathf.Clamp((int)(pos.z / 64f + 135f), 0, 269)
+idx = z * 270 + x
+m_segments.m_buffer[id].m_nextGridSegment = m_segmentGrid[idx]
+m_segmentGrid[idx] = id
+```
+
+→ **建物グリッド（セル 64・オフセット 135・`[0,269]`・`z*270+x`）と完全に同じ形**である。
+`LongPeriodDamage` / `TyphoonWind` の走査をそのまま写してよい。
+
+**フィールド:**
+
+| フィールド | 型 | 用途 |
+|---|---|---|
+| `NetSegment.m_nextGridSegment` | `UInt16`（public instance） | 同一セルの次のセグメント。建物の `m_nextGridBuilding` に対応 |
+| `NetSegment.m_flags` | `NetSegment.Flags`（`Int32` 基底） | `Created=1` / `Deleted=2` / `Original=4` / `Collapsed=8` / `Untouchable=0x20`。**`Demolishing` は無い**（建物側にはある） |
+| `NetSegment.m_middlePosition` | `Vector3` | 位置を取る最も安いフィールド。`NetSegment.UpdateBounds`（IL_01DB）が**2 本のベジェの中点の平均**として書く |
+| `NetSegment.m_bounds` | `Bounds` | 同じく `UpdateBounds` が書く AABB |
+
+> ★★ **セルを決める位置（両端ノードの中点）と `m_middlePosition` は同じではない。**
+> 曲がった道路ではベジェの中点がノードの中点から離れる。したがって
+> 「矩形のセルを走査して `m_middlePosition` で距離を測る」を素直に書くと、
+> **範囲の縁にある曲線道路を取りこぼす**。⑤は矩形を ±2 セル（128 m）広げてから走査する
+> （`VolcanoScan.SegmentGridMargin`）。
+>
+> ★★ **矩形を広げるだけでは足りない（2026-08-15 の全体レビュー I4 で判明）。**
+> 矩形を広げるのは「どのセルを見るか」の話でしかなく、**距離の判定は広がらない**。
+> `m_middlePosition` の 1 点で測ると、**中点が円の外にあり、しかも円の中心へ向かって
+> 伸びている幹線道路**が候補から落ちる。落ちた道路は `(m_flags & 3) == 1` のままなので
+> `NetSegment.TerrainUpdated` が `Heights.PrimaryLevel` を掛け続け（§A-2 / §G-16 (c)）、
+> **その道路の y に沿って山の中に平らな溝が残る**。
+> 隆起の途中の前線なら後続の走査が拾い直すが、**いちばん外側の帯は二度と走査されない**。
+>
+> ⑤は上の 3 フィールドから 3 点（`m_startNode`／`m_endNode` の `m_position` と
+> `m_middlePosition`）を取り、**その折れ線と円の距離**で判定する
+> （`Core/Volcano/FootprintReach`）。`m_bounds`（AABB）でも判定できるが、
+> 斜めの道路で角のぶんだけ広く当たる —— **数える側と壊す側が同じ述語を使う**以上、
+> 「壊さないのに数える」も「数えないのに壊す」も等しく避けたい。
+>
+> それでも**長い 1 本の道路の一部だけが範囲に掛かる場合**や、ベジェが折れ線より
+> 外へ膨らむ場合は正しく表せない。
+> ⑤がこの数を「概数」としてしか出さない理由の 1 つがこれである（設計書 §7.2）。
+
+**再現手順:**
+
+```powershell
+. docs\tools\ilload.ps1 ; . docs\tools\ildasm.ps1
+$bf = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,Static'
+Disasm-Method -Method $global:A.GetType('NetManager').GetMethod('Awake', $bf)
+Disasm-Method -Method $global:A.GetType('NetManager').GetMethod('InitializeSegment', $bf)
+```
+
+---
+
+## G. 準備段の破壊経路（⑤ T5 で追加実測）
+
+### G-16. `demolish: true` は何をするのか — CONFIRMED（全経路読了）
+
+設計書 付録と計画 T5 Step 1 が「未確定」と名指ししていた 2 項目
+（**道路の破壊経路**と、**`demolish:false` を断る AI が `demolish:true` を通すか**）を
+ここで確定させた。**推測していない。**
+
+**(a) 道路 — 実体は `PlayerNetAI.CollapseSegment` 1 本。本当に解放する。**
+
+```
+RoadBaseAI.CollapseSegment(id, ref seg, group, demolish)
+  IL_0000  demolish == true -> PlayerNetAI::CollapseSegment へ委譲
+
+PlayerNetAI.CollapseSegment(id, ref seg, group, demolish)
+  IL_0000  demolish == false -> NetAI::CollapseSegment（= ldc.i4.0 ; ret）
+  IL_000F  (m_flags & 32 Untouchable) なら
+           NetSegment::FindOwnerBuilding(id, 363f)
+           -> Building::m_parentBuilding を (m_flags & 16 Untouchable) の間だけ遡る
+              （鎖の保険は 49152。超えると "Invalid list detected!"）
+  IL_00C2  所有建物が Collapsed(0x400000) でないなら
+           ai.CollapseBuilding(owner, ref b, group, testOnly:true, demolish:false, 0)
+           -> false なら IL_00F8 で **セグメントごと断る**（return false）
+  IL_00FA  NetManager::ReleaseSegment(id, keepNodes:false)    ★ 本当に解放する
+  IL_010C  所有建物があれば
+           ai.CollapseBuilding(owner, ref b, group, testOnly:false, demolish:false, 0)
+           を本番で 1 回（戻り値は捨てる）
+  IL_0147  return true
+```
+
+`CollapseSegment` の override は 19 型。**`demolish: true` の扱いは 3 通りしかない**
+（全 19 型の先頭を逆アセンブルして確認）:
+
+| 扱い | 型 |
+|---|---|
+| `PlayerNetAI` へ委譲（直接または `RoadBaseAI` / `TrainTrackBaseAI` 経由） | `CableCarPathAI` / `MetroTrackBaseAI` / `MetroTrackTunnelAI` / `MonorailTrackAI` / `PedestrianBridgeAI` / `PedestrianPathAI` / `PedestrianWayAI` / `PowerLineAI` / `RoadBaseAI` / `RoadTunnelAI` / `RunwayAI` / `TaxiwayAI` / `TrainTrackBaseAI` / `TrainTrackTunnelAI` |
+| 同じ本体をインラインで持つ（`FindOwnerBuilding` → `ReleaseSegment`） | `DamAI` / `DecorationWallAI` |
+| **断る** | `SupportCableAI`（`demolish: true` を基底 `NetAI::CollapseSegment` へ渡す＝必ず false）／ `NetAI` そのもの |
+
+**`NetManager.ReleaseSegment(UInt16, Boolean)` は public / instance / 非 virtual。**
+
+**(b) 最後のセグメントが消えたときノードはどうなるか — 解放される。**
+
+```
+NetManager.ReleaseSegment(id, keepNodes)
+  -> PreReleaseSegmentImplementation / ReleaseSegmentImplementation
+     -> ReleaseSegmentNode(id, ref node, keepNodes)
+        IL_0019  NetNode::RemoveSegment(id)
+        IL_0020  keepNodes なら以下を飛ばす
+        IL_0038  (node.m_flags & 512 Untouchable) なら残す（建物が持つノード）
+        IL_005A  NetNode::CountSegments() == 0 なら
+                 NetManager::ReleaseNodeImplementation(node)      ★ 孤児ノードは残らない
+        それ以外  NetManager::UpdateNode(node, id, 1)
+        IL_007B  ref node = 0
+```
+
+`PlayerNetAI` は `keepNodes: false` を渡すので、**⑤の経路では孤児ノードが残らない**。
+`NetNode.Flags.Untouchable = 512`（`Enum.GetNames` 実測）。
+なお `NetManager::ReleaseNodeImplementation` は `BuildingManager.ReleaseBuilding` を
+呼びうる（全メソッド走査で確認）ので、**道路の解放が建物を巻き込むことがある** ——
+建物の走査側は「次の ID を行動前に控える」規律を必ず守ること。
+
+**(c) ★ `Collapsed` を立てただけでは地形固定が止まらない。**
+
+```
+NetSegment.TerrainUpdated : IL_0000  (m_flags & 3) != 1 なら ret
+                             -> Created(1) かつ Deleted(2) でないことだけを見る。
+                                Collapsed(8) は見ていない。
+Building.TerrainUpdated    : IL_0000  (m_flags & 524291) != 1 なら ret
+                             -> 524291 = Created(1) | Deleted(2) | Demolishing(0x80000)。
+                                Collapsed(0x400000) は見ていない。
+```
+
+> **これが「④の風害は `demolish:false`、⑤の準備は `demolish:true`」の IL 上の理由である。**
+> 倒壊フラグを立てただけの道路と建物は `ApplyQuad` を出し続け、
+> §A-2 のとおりセルを自分の高さへ固定し続ける。
+> **道路は解放されなければならず、建物は `Demolishing` が立たなければならない。**
+>
+> ちなみに `Building.Flags` の `0x80000` は `Demolishing` であって `Untouchable`（= 16）ではない。
+> §A-2 の括弧書き「`Created` かつ `Deleted`/`Untouchable` でない」は言い方が不正確で、
+> 正しくは `Created` かつ `Deleted` でも `Demolishing` でもない、である。
+
+**(d) `demolish:false` を断る 5 つの AI は `demolish:true` を通す。**
+
+④ §F-2 が読んだのは `demolish: false` のときの挙動だけだった。全文を読み直した結果:
+
+```
+ShelterAI / DoomsdayVaultAI / DamPowerHouseAI / TsunamiBuoyAI :
+  IL_0000  demolish(arg5) なら CommonBuildingAI::CollapseBuilding へそのまま委譲
+  IL_0017  でなければ return false
+
+DecorationBuildingAI :
+  IL_0000  demolish なら -> IL_0007 testOnly でなければ m_flags |= 524288 (Demolishing)
+                            IL_0020 return true
+  IL_0022  でなければ return false
+```
+
+→ **5 つとも `demolish: true` は受け付ける。** 「防災施設の足元だけ地形が元の高さで残る」
+は起きない。`DecorationBuildingAI` は `CommonBuildingAI` を通さず `Demolishing` を
+立てるだけだが、(c) のとおりそれで地形固定は止まる。
+
+`CommonBuildingAI.CollapseBuilding` 本体で `demolish` が効く箇所:
+
+```
+IL_0007  (m_flags & 0x400000 Collapsed) なら -> IL_0210 へ
+IL_0013  testOnly なら return true
+IL_0025  m_fireIntensity = 0                        ★ ⑤は自分では書かない（罠 5）
+IL_0031  m_flags = (m_flags & 0x7FFFFFFF) | Collapsed
+IL_0049  demolish なら m_flags |= 524288 (Demolishing)、problems をクリア
+IL_0132  group が null なら災害集計を飛ばす          ★ null 安全
+IL_0170  constructState != 0 なら InstanceManager::SetGroup(id, group)
+IL_02A3  親を持たない建物は m_subBuilding の鎖に同じ引数で再帰（上限 49152）
+IL_0210  （既に Collapsed のとき）demolish かつ Demolishing がまだなら
+         testOnly で true、でなければ Demolishing を立てて true
+IL_0284  フラグが 1 ビットも変わらなければ return false（＝冪等）
+```
+
+→ **既に `Collapsed` の瓦礫にも `demolish: true` は効き、`Demolishing` を立てて true を返す。**
+⑤が候補マスクから `Collapsed` を弾いてはいけない理由がこれである（②④は弾いていた）。
+
+`Demolishing` の建物を実際に配列から消すのは `CommonBuildingAI.SimulationStep` /
+`DecorationBuildingAI.SimulationStep`（`BuildingManager.ReleaseBuilding` の全呼び出し元を
+走査して確認）。**⑤は解放を自分では呼ばない。**
+
+**(e) `InstanceManager.Group` は `null` を渡してよい。**
+
+⑤は災害スロットに載らない（§D-11）ので束ねる先が無い。null 検査は 3 箇所とも在る:
+
+```
+CommonBuildingAI.CollapseBuilding : IL_0132  ldarg.3 ; brfalse -> 災害集計を飛ばす
+RoadBaseAI.CollapseSegment        : IL_004F  ldarg.3 ; brfalse -> 災害集計を飛ばす
+InstanceManager.SetGroup(id, g)   : IL_005E  g が null なら m_groups から Remove
+                                    IL_0096  未登録かつ g が null なら何もしない
+```
+
+→ **空の `Group` を new して `m_ownerInstance` を空のまま渡すより、`null` のほうが実測どおり。**
+
+**再現手順:**
+
+```powershell
+. docs\tools\ilload.ps1 ; . docs\tools\ildasm.ps1
+$bf = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,Static'
+$d  = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,DeclaredOnly'
+Disasm-Method -Method $global:A.GetType('PlayerNetAI').GetMethod('CollapseSegment', $bf)
+Disasm-Method -Method $global:A.GetType('NetManager').GetMethod('ReleaseSegmentNode', $bf)
+Disasm-Method -Method $global:A.GetType('ShelterAI').GetMethod('CollapseBuilding', $d)
+Disasm-Method -Method $global:A.GetType('CommonBuildingAI').GetMethod('CollapseBuilding', $d)
+Disasm-Method -Method $global:A.GetType('InstanceManager').GetMethod('SetGroup', $bf)
+# NetSegment / Building の TerrainUpdated は先頭 10 命令だけでよい
+```
+
+---
+
+## H. 噴火・溶岩・描画（⑤ T7-T9 で追加実測）
+
+### H-17. 借りたエフェクトは音を鳴らさない — **CONFIRMED（計画 §7.1 の根拠を訂正する）**
+
+計画 T7 §7.1 は「`m_fireEffect` は `FireEffect` 合成型で `SoundEffect` を子に持つので、
+`RenderEffect` を通せば**音も一緒に出る**」と書いている。**IL はそれを否定した。**
+
+```
+FireEffect.RenderEffect(InstanceID, SpawnArea, Vector3, float, float, float, float, CameraInfo)
+  IL_003A  ldfld FireEffect::m_particleEffect   -> ParticleEffect::EmitParticles
+  IL_0088  ldfld FireEffect::m_lightEffect      -> RenderManager::get_lightSystem
+                                                  -> LightSystem::DrawLight
+  ★ m_soundEffect への参照は 1 つも無い（全 IL 読了）
+
+FireEffect の宣言メソッドは 6 本:
+  RenderEffect / **PlayEffect(InstanceID, SpawnArea, Vector3, float, float,
+                              AudioManager.ListenerInfo, AudioManager.AudioGroup)** /
+  CreateEffect / DestroyEffect / RequireRender / RequirePlay
+```
+
+→ **音は `PlayEffect` の側にある。** `AudioManager.CurrentListenerInfo`（public プロパティ、
+型 `AudioManager+ListenerInfo`）と `AudioManager.EffectGroup` / `DefaultGroup` / `AmbientGroup`
+（いずれも public プロパティ）は到達できるので、鳴らすこと自体は可能である。
+
+**⑤は鳴らさない。** 計画の決定（音の経路を新設しない）は変えていないが、**理由が違う** ——
+「`RenderEffect` で出るから足さない」のではなく、「`PlayEffect` は毎フレーム呼ぶ想定の API ではなく、
+`ListenerInfo` / `AudioGroup` の扱いに本 MOD の前例が無いから」である。
+**噴火は無音であり、それを診断とパネルとチェックリストで名乗る。**
+
+### H-18. `RenderEffect` の引数と `CameraInfo` の到達経路 — CONFIRMED
+
+```
+public virtual Void EffectInfo.RenderEffect(InstanceID, EffectInfo+SpawnArea,
+        Vector3 velocity, Single acceleration, Single magnitude,
+        Single timeOffset, Single timeDelta, RenderManager+CameraInfo)
+    基底の実装は IL_0000 ret（＝何もしない）。実体はサブクラス側。
+
+public EffectInfo+SpawnArea..ctor(Vector3 position, Vector3 direction, Single radius)   ★ public
+
+public RenderManager+CameraInfo RenderManager.CurrentCameraInfo { get; }
+    IL_0001  ldfld RenderManager::m_cameraInfo ; ret      （public / instance / 非 static）
+
+public BuildingProperties BuildingManager.m_properties     （public フィールド）
+public EffectInfo BuildingProperties.m_fireEffect          （public フィールド）
+```
+
+`magnitude` の意味（呼ばれ方から確定）:
+
+```
+FireEffect.RenderEffect     : EmitParticles(id, area, velocity, timeDelta*0.01,
+                                            RoundToInt(magnitude*100), ...)
+ParticleEffect.RenderEffect : EmitParticles(id, area, velocity, magnitude*timeDelta*0.01,
+                                            100, ...)
+```
+→ **`float` 引数が「時間ぶんの噴出量」、`int` 引数が「強さの百分率」**である。
+バニラの建物火災は `magnitude = m_fireIntensity / 255`（§B-5）＝ **0.0–1.0**。⑤も同じ帯を使う。
+
+`ParticleEffect.RenderEffect` は先頭で `CameraInfo::CheckRenderDistance` と `CameraInfo::Intersect`
+を呼ぶので、**`CameraInfo` に null を渡すと NRE になる。**
+
+### H-19. `SampleDetailHeight` の勾配は「上り方向」で、単位は無次元 — **CONFIRMED**
+
+計画 §8.1 と設計書 付録が「未確定」と名指ししていた項目である。**読んだ。**
+
+```
+TerrainManager.SampleDetailHeight(float x, float z, out slopeX, out slopeZ)
+  h00 = GetDetailHeight(x0,   z0  )   (loc 9)
+  h10 = GetDetailHeight(x0+1, z0  )   (loc 10)
+  h01 = GetDetailHeight(x0,   z0+1)   (loc 11)
+  h11 = GetDetailHeight(x0+1, z0+1)   (loc 12)
+  IL_0071  *slopeX = (h10 + h11 - h00 - h01) * 0.5    // 平均 (h(x+1) - h(x))
+  IL_0084  *slopeZ = (h01 + h11 - h00 - h10) * 0.5    // 平均 (h(z+1) - h(z))
+  戻り値は SmoothSample ではなく Lerp 3 回の双線形補間（raw のまま）
+
+TerrainManager.SampleDetailHeight(Vector3, out slopeX, out slopeZ)
+  IL_0033  戻り値  *= 0.015625      // 1/64        -> メートル
+  IL_003B  *slopeX *= 0.00390625    // (1/64)/4 m  -> **無次元（m/m）**
+  IL_0045  *slopeZ *= 0.00390625
+```
+
+→ **`(slopeX, slopeZ)` は勾配（上り方向）である。下り方向は `(-slopeX, -slopeZ)`。**
+単位は無次元なので、`0.002` はそのまま「0.2 % の傾き」を意味する。
+**それでも実行時の観測はやめない**（⑤は最初の 8 歩で標高が上がったら流れを止めて名乗る）。
+
+### H-20. `TerrainManager.HasWater(Vector2)` は sim スレッド専用 — CONFIRMED
+
+```
+public Boolean TerrainManager.HasWater(Vector2 position)
+  IL_00B7  m_waterSimulation.BeginRead()      ★ try/finally で EndRead
+  セル座標: FloorToInt((v + 8640) * 16) >> 8 を [0,1080] にクランプ、添字 z*1081 + x
+  水面   = m_blockHeights[i] + WaterSimulation.Cell::m_height（m_height == 0 のセルは無視）
+  地形   = m_rawHeights2 の双線形補間
+  IL_027B  return (水面 - 地形) >= 8          // raw 8 = 0.125 m
+```
+→ ②の `TsunamiChain.IsUnderWater` と同じ扱い（**main スレッドから呼ばない**）。
+`m_blockHeights` 経由なので §A-2 の追随遅れをそのまま受ける。
+
+### H-21. 樹木グリッドの寸法とワールド座標の対応 — CONFIRMED
+
+```
+TreeManager.TREEGRID_RESOLUTION = 540（const）   TREEGRID_CELL_SIZE = 32（const）
+TreeManager.m_treeGrid : uint32[]                m_trees : Array32<TreeInstance>（262144）
+TreeInstance : m_nextGridTree(uint32) / m_posX,m_posZ(int16) / m_posY(uint16) /
+               m_flags(uint16) / m_infoIndex(uint16)
+TreeInstance.Flags: None Created(1) Deleted(2) Hidden Single FixedHeight FireDamage(64) Burning(128)
+
+TreeInstance.set_Position（ToolController.m_mode != 4、＝ゲームモード）:
+  IL_0096  m_posX = Clamp(RoundToInt(world.x * 3.792593), -32767, 32767)
+TreeManager.InitializeTree（同モード）:
+  IL_005F  cell = Clamp((m_posX + 32768) * 540 / 65536, 0, 539)
+  IL_00A1  index = cellZ * 540 + cellX
+```
+→ **ワールド → セルは `world / 32 + 270`**（建物グリッドの `/64 + 135` とは別の値）。
+アセットエディタ（`m_mode == 4`）だけ `m_posX` の縮尺が 16 倍になり、`InitializeTree` も先に 16 で割る。
+
+`TreeManager.BurnTree(uint, InstanceManager.Group, int)` は **`group` に null を渡してよい**
+（`IL_0039 ldarg.2 brfalse` で災害集計を飛ばし、`InstanceManager.SetGroup` は null 安全。§G-16 (e)）。
+
+### H-22. このビルドに実在する粒子シェーダ名 — CONFIRMED（アセット走査）
+
+`Cities_Data` 以下の 378 ファイルを ASCII で全走査した:
+
+```
+'Particles/Additive'                      globalgamemanagers / resources.assets   ★ 在る
+'Particles/Alpha Blended'                 globalgamemanagers / resources.assets   ★ 在る
+'Legacy Shaders/Particles/Additive'       0 件
+'Legacy Shaders/Particles/Alpha Blended'  0 件
+```
+
+→ **`Shader.Find("Particles/Additive")` がこのビルドで解決する名前である。**
+`globalgamemanagers` に載っているのは「常に含めるシェーダ」の一覧なので、実行時に確実に読める。
+`Legacy Shaders/...` は**このビルドには無い**（③④の多段フォールバックの 2 段目は、
+将来のビルドに対する保険として残す価値はあるが、現状は 1 段目で決まる）。
+
+> **`Shader.Find("Standard")` を「解決した」の検査に混ぜないこと。**
+> Unity の組み込みで実質必ず非 null なので、`… || Shader.Find("Standard") != null` という
+> 検査は**構造上 1 度も失敗できない**（④のレビューが同じ欠陥を見つけている）。
+
+**再現手順:**
+
+```powershell
+. docs\tools\ilload.ps1 ; . docs\tools\ildasm.ps1
+$bf = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,Static'
+$d  = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,DeclaredOnly'
+Disasm-Method -Method ($global:A.GetType('FireEffect').GetMethods($d) | ? {$_.Name -eq 'RenderEffect'})
+Disasm-Method -Method $global:A.GetType('TerrainManager').GetMethod('SampleDetailHeight', $bf, $null,
+    @([float],[float],[float].MakeByRefType(),[float].MakeByRefType()), $null)
+Disasm-Method -Method $global:A.GetType('TerrainManager').GetMethod('HasWater', $bf, $null,
+    @([UnityEngine.Vector2]), $null)
+Disasm-Method -Method $global:A.GetType('TreeManager').GetMethod('BurnTree', $bf)
+# シェーダ名は Cities_Data 以下を ASCII でバイト検索する（IL ではない）
+```
+
 
 ---
 

@@ -737,5 +737,293 @@ namespace DisasterPlus.Game
         public static string TyphoonCloudUnavailable =
             "The game's sky cloud settings are not present in this environment, so only "
             + "Disaster +'s own cloud is drawn.";
+
+        // --- ⑤火山（Task 2: 骨格・地形 API の解決・前提検証） ---
+        //
+        // このタスクの時点では**パネルもボタンも火山も無い**（T3 以降で入る）。
+        // ここで足すのは設定画面の 3 つと、ログチャンネルの名前、そして
+        // 「読み取れません」の 1 行だけである。
+        //
+        // ⑤の表示規約: **⑤が出す数値は原則すべて本 MOD のもの**なので、行ごとの
+        // 出所の印は付けない（設計書 §7.4）。例外は設置地点の地形高さと、
+        // 影響範囲の建物数・道路セグメント数の 3 行だけで、そこにだけ
+        // SourceVanilla が付く。したがって
+        // **Strings.SourceModel を⑤の表示コードから参照してはいけない。**
+        //
+        // ★ ⑤には TyphoonNeedsDlc に相当するキーが無い。**⑤は ND DLC を要らない**
+        //   （設計書 §1.4）。DLC が要るのは樹木の着火だけで、それは T8 が
+        //   FeatureHost.NoteDegraded で名乗る。ここに「DLC が必要です」を
+        //   置くと嘘になる。
+        public static string GroupVolcano = "Volcano";
+        public static string VolcanoEnabled = "Enable volcanoes";
+        public static string VolcanoResetButton =
+            "Reset the volcano button position (takes effect next time you load a city)";
+        public static string VolcanoUnavailable = "Volcano data unavailable";
+        public static string LogChannelVolcano = "Volcano";
+
+        // --- ⑤火山（Task 3: パネル・ボタン・表示規約） ---
+        //
+        // ★ ここから下の行ラベルは全て**印の付かない行**に入る。出所は
+        //   VolcanoModelHeader / VolcanoModelNote が見出しで一度だけ名乗る
+        //   （設計書 §7.4）。⑤で [measured] が付いてよいのは
+        //   **設置地点の地形高さ・範囲内の建物数・範囲内の道路セグメント数**の
+        //   3 行だけで、接頭辞は VolcanoRows.SetMeasured が付ける。
+        //
+        // **実在の物理単位を名乗る文字列を足さないこと**（設計書 §7.5）。
+        // ⑤が出してよいのは距離 (m)・高さ (m)・ゲーム内時間・0〜10 の段階だけで、
+        // 溶岩の「温度」も「粘性」も⑤は持っていない。
+        public static string VolcanoTitle = "Volcano";
+        public static string VolcanoButtonLabel = "Volcano";
+        public static string VolcanoButtonTooltip = "Open the Disaster + volcano panel";
+        public static string VolcanoModelHeader = "Computed by Disaster +";
+
+        // ★★ **この文に印の文字列そのものを書かないこと**（④の全体レビュー I5 と
+        //    同じ罠）。ja.txt の SourceVanilla は「[実測]」なので、本文に英語の
+        //    "[measured]" を埋め込むと**日本語のプレイヤーは画面に一度も出ない
+        //    文字列を探すことになる**。翻訳文には MeasuredToken を置き、
+        //    表示の直前に VolcanoRows.SetModelNote が SourceVanilla へ差し替える。
+        //    tools\CheckLocales.ps1 がこのキーにトークンが在ることを検査する。
+        public static string VolcanoModelNote =
+            "The numbers on this panel come from Disaster +'s own model. The game does not "
+            + "compute a volcano, an uplift or a lava flow of its own. Only the rows marked "
+            + "{measured} are values read straight from the game.";
+
+        // ★ **常設の警告**（設計書 §7.1）。火山が無いときも出す。
+        //   「うるさいから」と条件付きにしないこと —— 利用者は「不可逆でよい」と
+        //   判断したが、それはプレイヤーに黙っていてよいという意味ではない。
+        public static string VolcanoIrreversibleWarning =
+            "Building a volcano changes the terrain permanently. Neither the game nor "
+            + "Disaster + can undo it, and it is written into your save.";
+
+        public static string VolcanoInactive = "No volcano right now.";
+        public static string VolcanoWaiting = "Waiting for the first simulation update.";
+        public static string VolcanoTerrainUnavailable =
+            "Disaster + cannot reach the terrain height array in this build of the game, so "
+            + "volcanoes are disabled. See the diagnostic dump for which call could not be "
+            + "resolved.";
+
+        public static string VolcanoFormRow = "Shape";
+        public static string VolcanoFormShield = "Shield volcano";
+        public static string VolcanoFormStrato = "Stratovolcano";
+        public static string VolcanoFormDome = "Lava dome";
+        public static string VolcanoRadiusRow = "Radius";
+        public static string VolcanoHeightRow = "Final height";
+        public static string VolcanoPhaseRow = "Phase";
+        public static string VolcanoGroundHeightRow = "Ground at the chosen spot";
+        public static string VolcanoMetres = "m";
+
+        // --- ⑤火山（Task 4: 配置ツール・影響範囲の調査・不可逆の確認） ---
+        //
+        // ★★ 設計書 §7.1 / §7.2 / §7.3 の 3 つの断定は、全部この節の文字列である。
+        //   VolcanoIrreversibleWarning（§7.1）・VolcanoEstimateNote（§7.2）・
+        //   VolcanoBuildabilityNote（§7.3）。**短くしたくなっても、
+        //   どの断定を落とすことになるのかを先に読むこと。**
+        //
+        // ★ **単位を名乗る文字列はメートルとゲーム内分だけ。** ⑤は m/s も度も
+        //   カロリーも持っていない（設計書 §7.5）。
+        public static string VolcanoPlace = "Place a volcano";
+        public static string VolcanoPlaceHint =
+            "Click where the volcano should rise. Right-click to cancel.";
+        public static string VolcanoSurveying = "Surveying the area...";
+        public static string VolcanoConfirmHeader = "Build a volcano here?";
+        public static string VolcanoConfirmYes = "Build the volcano here";
+        public static string VolcanoConfirmNo = "Cancel";
+        public static string VolcanoBuildingsRow = "Buildings inside the footprint";
+        public static string VolcanoSegmentsRow = "Roads inside the footprint";
+
+        // ★ §7.2 の「概数であることも明示する」。実数をそのまま出すとプレイヤーは
+        //   「ぴったりその数だけ壊れる」と読む（ClearanceEstimate のクラス doc）。
+        //
+        // ★★ 全体レビュー I3。**丸めた数は [measured] の行から降りて、この注記に来た。**
+        //   印の意味は「ゲームの配列から読んだだけの値」であり、丸めは本 MOD の計算である。
+        //   上の 2 行は数えた実数、こちらが「およそ」を名乗る。
+        public static string VolcanoEstimateApprox = "About this many will be removed";
+        public static string VolcanoEstimateNote =
+            "The two rows above are what the survey counted at that moment. The city keeps "
+            + "changing while the ground is cleared, so the real number will differ.";
+
+        // ★★ 全体レビュー I6。**進行中の火山はセーブに残らない**（設計書 §1.3）。
+        //   途中で保存して読み直すと、火口も噴火も溶岩も無い切り株の山が、完成させる
+        //   ことも消すこともできない形で残る。同じ場所に置き直すと**その上に積み上がる**
+        //   （VolcanoUplift は「今の地形」を元の高さとして控え直す）。
+        public static string VolcanoSaveWarning =
+            "Do not save while a volcano is still being built. Disaster + does not store an "
+            + "unfinished volcano: after loading, the mountain stays exactly as far as it got "
+            + "- no crater, no eruption, no lava - and there is no way to finish or remove it. "
+            + "Placing a new volcano on the same spot piles a second mountain on top of it.";
+
+        // ★★ 全体レビュー I1。ポーズ中は着手できない。**黙って何もしないをやらない。**
+        public static string VolcanoPausedNote =
+            "The game is paused. Disaster + does not start destroying the city while the "
+            + "simulation is stopped. Unpause, then press the button.";
+
+        // ★ 走査が 1 tick ぶんの上限で打ち切られたとき。**上の概数は下限になる。**
+        //   これを黙っていると、概数どころか「実際より少ない数」を確定値のように見せる。
+        public static string VolcanoSurveyCapped =
+            "The survey stopped at its per-tick limit, so the counts above are a lower "
+            + "bound: the outer edge of the footprint was not reached.";
+
+        public static string VolcanoSegmentsUnknown =
+            "Disaster + could not count the roads inside the footprint in this build of the "
+            + "game. They are still going to be destroyed.";
+
+        // ★ §1.2 そのもの。**「壊さずに地面を上げる」が選べない理由**を書く ——
+        //   これが書いていないと、破壊は MOD の乱暴な選択に見える。
+        public static string VolcanoClearingWarning =
+            "The roads and buildings inside the footprint will be destroyed. Raising the "
+            + "ground without clearing them first does not work: the game pins the terrain "
+            + "back to the height of every road and building on every update, so the "
+            + "mountain would end up full of flat trenches and bowls.";
+
+        // ★ §7.3。**不具合ではないと明示する**（①の「なぜハザードマップが空か」と同じ扱い）。
+        public static string VolcanoBuildabilityNote =
+            "The buildable ground and the water level do not follow the visible terrain "
+            + "straight away. They catch up at 2 m per 64 simulation frames. This is not a bug.";
+
+        // ★ §C-10。天井に当たっても例外は出ず**無言で山頂が平らな台地になる**ので、
+        //   黙って低い山を作らずに先に言う。
+        public static string VolcanoHeightLimited =
+            "The terrain has a hard ceiling at 1024 m, so the volcano here is lower than the "
+            + "height you asked for.";
+
+        public static string VolcanoSettingsChanged =
+            "The shape, radius or height changed after the survey, so Disaster + is surveying "
+            + "again before it starts.";
+
+        /// <summary>ゲーム内の分。**実在の物理単位ではない**ので m/s の類とは扱いが違う。</summary>
+        public static string VolcanoMinutes = "in-game minutes";
+
+        /// <summary>
+        /// ゲーム内の時間。**「建てられる地面」の遅れはこちらで出す**（全体レビュー M13）——
+        /// 分で出すと 400 を超える数になり、不可逆の決定の瞬間にプレイヤーが 60 で割る。
+        /// </summary>
+        public static string VolcanoHours = "in-game hours";
+
+        public static string VolcanoShapeSetting = "Volcano shape";
+        public static string VolcanoRadiusSetting = "Volcano radius (m)";
+        public static string VolcanoHeightSetting = "Volcano final height (m)";
+
+        // --- ⑤火山（Task 5: 準備 — 道路と建物の段階的破壊） ---
+        //
+        // ★ ここの行にも [measured] は付かない。走査した半径も壊した数も
+        //   **⑤が自分で数えた実績**であって、ゲームが計算した値ではない
+        //   （設計書 §7.4。確認の 3 行だけが例外で、それは T4 の節にある）。
+        public static string VolcanoClearingRow = "Clearing";
+        public static string VolcanoClearedRadius = "Radius swept";
+        public static string VolcanoBuildingsDestroyed = "Buildings destroyed";
+        public static string VolcanoSegmentsDestroyed = "Roads destroyed";
+
+        // ★ 計画の文言から**内容を変えてある**。計画は「シェルター・地下保管庫・ダムは
+        //   壊せません」と書いていたが、それは④が demolish:false のときの挙動しか
+        //   読んでいなかったためで、T5 Step 1 の IL 実測では
+        //   ShelterAI / DoomsdayVaultAI / DamPowerHouseAI / DecorationBuildingAI /
+        //   TsunamiBuoyAI の 5 つとも **demolish:true は受け付ける**
+        //   （VolcanoClearing のクラス doc の 4）。名指しすると嘘になるので、
+        //   「断られたものがあれば」という条件つきの一般形にしてある。
+        public static string VolcanoClearingRefusedRow = "Could not be removed";
+        public static string VolcanoClearingRefusedNote =
+            "Some of these the game itself refuses to remove. The ground under those stays at "
+            + "its original height while the rest of the mountain rises around them, and that "
+            + "is the game refusing rather than Disaster + failing.";
+
+        // ★ 設計書 §1.2 そのもの。**「道路だけ諦めて隆起する」を選ばない**理由を書く。
+        //
+        // ★ 全体レビュー M9 で、判定が「道路の経路」から「準備の経路（道路と建物）」に
+        //   広がった。**文言も一緒に広げること** —— 建物側が解決できない環境で
+        //   「道路を取り除く方法が見つからなかった」と出すのは嘘である。
+        public static string VolcanoClearingPathUnavailable =
+            "Disaster + could not find a usable way to remove the roads and buildings inside "
+            + "the footprint in this build of the game, so it will not build a volcano at all. "
+            + "Raising the ground without removing them first does not work - the game pins "
+            + "the terrain back to the height of every road and building on every update, and "
+            + "the mountain would come out full of flat trenches and bowls.";
+
+        public static string VolcanoClearingLead =
+            "How far the clearing runs ahead of the uplift (m)";
+
+        // ★★ 全体レビュー I5。進行中の火山を止める唯一の口（VolcanoEffectRows）。
+        //   **止まるのは「これからの破壊と隆起」だけ**で、既に変わったものは戻らない。
+        //   それを言わずに [止める] だけ出すと「元に戻せる」と読まれる。
+        public static string VolcanoStopButton = "Stop this volcano";
+        public static string VolcanoStopNote =
+            "Stopping only cancels what has not happened yet. The terrain that already rose, "
+            + "the roads and buildings that are already gone and the ground that is already "
+            + "scorched all stay as they are.";
+
+        // --- ⑤火山（Task 6: 隆起） ---
+        //
+        // ★ ここも [measured] は付かない。進捗も山頂も有効半径も**⑤が決めた数字**で
+        //   あって、ゲームが計算した値ではない（設計書 §7.4）。
+        //
+        // ★ **有効半径には「準備が届いた範囲」と添える**（VolcanoActiveRadiusRow）。
+        //   これが罠 1 の可視化であり、実機で「準備が止まると隆起も止まる」ことを
+        //   目で確かめられる唯一の行である。**短くしないこと。**
+        public static string VolcanoUpliftRow = "Uplift";
+        public static string VolcanoUpliftProgress = "Progress";
+        public static string VolcanoSummitRow = "Summit";
+        public static string VolcanoActiveRadiusRow =
+            "Active radius (as far as the clearing has reached)";
+        public static string VolcanoTilesRow = "Terrain tiles updated";
+        public static string VolcanoUpliftMinutes = "Time the uplift takes (in-game minutes)";
+
+        // ★ 設計書 §7.3 の見積り。**不具合ではない**ことは VolcanoBuildabilityNote が
+        //   既に言っているので、ここは数字の見出しだけを持つ。
+        public static string VolcanoCatchUpRow = "Buildable ground catches up in";
+        public static string VolcanoFrames = "simulation frames";
+
+        public static string VolcanoCraterCarved = "Summit crater carved.";
+
+        // --- ⑤火山（Task 7: 噴火） ---
+        //
+        // ★ ここも [measured] は付かない。噴出の強さは⑤が決めた 0〜10 の段階であって、
+        //   ゲームが計算した値でも実在の物理量でもない（設計書 §7.4 /
+        //   計画「出してよい断定の範囲」の 5）。
+        public static string VolcanoEruptionRow = "Eruption";
+
+        /// <summary>設定のチェックボックス（表示行の <c>VolcanoEruptionRow</c> と別物）。</summary>
+        public static string VolcanoEruptionFx = "Draw the eruption plume";
+
+        // ★ **短くしないこと。** ゲームには溶岩も噴火も存在しない（§B-5 で
+        //   文字列ヒープにヒット 0）ことを名乗る唯一の場所である。
+        //   炎だけがゲーム自身のもので、それも DLC 不要である。
+        public static string VolcanoEruptionBorrowedNote =
+            "The game has no lava, magma or eruption effect of any kind, so Disaster + draws "
+            + "its own. The flames on top are the game's own fire effect, borrowed and placed "
+            + "at the crater. The eruption is silent: the borrowed effect only makes a sound "
+            + "on a code path Disaster + does not use.";
+
+        // --- ⑤火山（Task 8: 溶岩の前進と着火） ---
+        //
+        // ★ ここも [measured] は付かない。流れた距離も着火数も**⑤が自分で数えた
+        //   実績**であって、ゲームが計算した値ではない（設計書 §7.4）。
+        public static string VolcanoLavaRow = "Lava";
+        public static string VolcanoLavaFlowsSetting = "Number of lava flows (0 = off)";
+        public static string VolcanoLavaFireSetting = "Lava sets fire to what it touches";
+        public static string VolcanoLavaLongest = "Longest flow";
+        public static string VolcanoLavaIgnited = "Set on fire";
+
+        // ★ **短くしないこと。** 「木が燃えない」を「不具合」と読まれないための
+        //   唯一の説明であり、ND DLC 非所持が正常であることを名乗る場所である（§B-7c）。
+        public static string VolcanoTreesNeedDlc =
+            "Trees do not catch fire without the Natural Disasters DLC. The game refuses to "
+            + "burn them, so Disaster + leaves them standing rather than pretending. The "
+            + "ground still scorches and buildings still catch fire.";
+
+        // ★ 道路が燃えないのは⑤の手抜きではなく、ゲームに API が無いためである（§B-7d）。
+        public static string VolcanoLavaRoadsNote =
+            "Roads do not burn - the game has no API for it at all. Only the roads inside the "
+            + "volcano's own footprint are removed, and that happens during the clearing phase.";
+
+        // --- ⑤火山（Task 9: 溶岩の描画） ---
+        //
+        // ★ T9 は他のどのタスクからも依存されない。**この 3 キーと設定 1 個と
+        //   VolcanoFeature の 4 行を消せば、T9 を丸ごと落としても T1〜T8 は動く。**
+        public static string VolcanoLavaRenderSetting = "Draw the lava surface";
+        public static string VolcanoLavaRenderRow = "Lava surface";
+
+        // ★ 見えないことを黙らない。**流れも焦げも着火も変わらない**ことを同時に言う。
+        public static string VolcanoLavaNoMaterial =
+            "Disaster + could not build a material for the lava in this environment, so the "
+            + "lava is invisible. It still flows, scorches the ground and sets buildings on fire.";
     }
 }
