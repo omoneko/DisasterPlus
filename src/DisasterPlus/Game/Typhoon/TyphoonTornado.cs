@@ -88,7 +88,7 @@ namespace DisasterPlus.Game
     /// （<c>VehicleManager.SimulationStepImpl</c> の <c>m_currentFrameIndex &amp; 15</c>。
     /// 本タスクで IL 実測）ので、1 tick に目標を動かしてよい量は <c>m_maxSpeed / 16</c>。
     /// </summary>
-    public static class TyphoonTornado
+    public static partial class TyphoonTornado
     {
         /// <summary>同時に持てる竜巻の数の上限。④が災害スロット 256 を食い潰す形を作らない。</summary>
         public const int MaxTornadoes = 3;
@@ -347,7 +347,7 @@ namespace DisasterPlus.Game
             /// <summary><c>CreateDisaster</c> まで届かずに諦めた（プレハブ無しなど）。</summary>
             RefusedBeforeCreate,
 
-            /// <summary><c>CreateDisaster</c> は呼んだが竜巻にならなかった。
+            /// <summary><c>CreateDisaster</c> を**呼んだ**が竜巻にならなかった（成否によらず）。
             /// **呼び出し側は災害バッファの参照を取り直すこと**（<see cref="Step"/> の注記）。</summary>
             FailedAfterCreate,
         }
@@ -417,9 +417,13 @@ namespace DisasterPlus.Game
             {
                 _lastFailure = "CreateDisaster returned false (disaster buffer full?)";
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorFull", _lastFailure);
-                // 呼んだ側は 256 スロットの全走査を 1 回させている。**この tick は
-                // もう試さない**（TopUp の doc）。
-                return CreateOutcome.RefusedBeforeCreate;
+                // ★ 呼んだ側は 256 スロットの全走査を 1 回させている。**この tick は
+                //   もう試さない**（TopUp の doc）。
+                // ★ 失敗でも FailedAfterCreate を返す —— CreateDisaster を**呼んだ**
+                //   以上、災害バッファの参照は取り直させる（あちらは空きが無いとき
+                //   FastList.Add へ落ち、配列を作り直しうる。Step の注記）。
+                //   「呼んだかどうか」で分けるのがこの列挙の意味である。
+                return CreateOutcome.FailedAfterCreate;
             }
 
             // ★ ここで初めて取る（メソッド doc）。CreateDisaster より前に取った参照は
@@ -501,194 +505,6 @@ namespace DisasterPlus.Game
             return CreateOutcome.Started;
         }
 
-        // ── 紐づけ ─────────────────────────────────────────────
-
-        /// <summary>
-        /// 渦車両を探す。**災害が Active になるまでは探さない**（<see cref="MaxAttachTicks"/>）。
-        /// </summary>
-        private static void Attach(DisasterData[] buffer)
-        {
-            for (int i = 0; i < _slots.Length; i++)
-            {
-                ushort id = _slots[i].DisasterId;
-                if (id == 0 || id >= buffer.Length || _slots[i].VehicleId != 0) continue;
-                if ((buffer[id].m_flags & DisasterData.Flags.Active) == 0) continue;
-                if (_slots[i].AttachTicks >= MaxAttachTicks) continue;
-
-                _slots[i].AttachTicks++;
-
-                ushort found = FindVortexVehicle(id, buffer[id].m_targetPosition,
-                                                 buffer[id].m_intensity);
-                if (found != 0)
-                {
-                    _slots[i].VehicleId = found;
-                    Log.Info("typhoon tornado " + id + " attached to vortex vehicle " + found);
-                    continue;
-                }
-
-                // **隠さない。** 諦めた竜巻は④の軌道に乗らず、バニラの竜巻として
-                // 自由に流れる（見た目も破壊も出る）。診断の attached < count が示す。
-                if (_slots[i].AttachTicks == MaxAttachTicks)
-                {
-                    Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorAttach",
-                             "typhoon tornado " + id + " never got a vortex vehicle; "
-                             + "it drifts on vanilla's own path");
-                }
-            }
-        }
-
-        /// <summary>
-        /// 災害グループに属する車両のうち、渦の <c>VehicleAI</c> を持つものを探す。
-        /// <c>TornadoAI.GetPosition</c> と同じ経路（<c>InstanceID.Disaster</c> →
-        /// <c>InstanceManager.GetAllGroupInstances</c>）。③の
-        /// <c>FireWhirlPinner.FindVortexVehicle</c> を写した形で、
-        /// **発生地点から離れすぎている候補は棄却する**（災害 ID 使い回し対策）。
-        /// </summary>
-        private static ushort FindVortexVehicle(ushort disasterId, Vector3 expectedCentre,
-                                                byte intensity)
-        {
-            var id = InstanceID.Empty;
-            id.Disaster = disasterId;
-
-            _tempInstances.Clear();
-            InstanceManager.GetAllGroupInstances(id, _tempInstances);
-            if (!Singleton<VehicleManager>.exists) return 0;
-
-            var buffer = Singleton<VehicleManager>.instance.m_vehicles.m_buffer;
-            if (buffer == null) return 0;
-
-            // TornadoAI.ActivateDisaster の生成距離（本タスクで IL 実測）。
-            float expected = intensity * 10f + 400f;
-            float limit = expected * AttachDistanceFactor;
-            float limitSq = limit * limit;
-
-            for (int i = 0; i < _tempInstances.m_size; i++)
-            {
-                ushort v = _tempInstances.m_buffer[i].Vehicle;
-                if (v == 0 || v >= buffer.Length) continue;
-
-                var info = buffer[v].Info;
-                if (info == null || !(info.m_vehicleAI is VortexAI)) continue;
-
-                Vector3 pos = buffer[v].GetLastFrameData().m_position;
-                float dx = pos.x - expectedCentre.x;
-                float dz = pos.z - expectedCentre.z;
-                if (dx * dx + dz * dz > limitSq)
-                {
-                    // 遠すぎる = 災害 ID 使い回しで無関係な渦を拾った可能性。
-                    // ここで掴むとバニラの竜巻を④が引きずり回すことになる。
-                    Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorReject",
-                             "vortex vehicle " + v + " for tornado " + disasterId
-                             + " is too far from the expected centre; rejecting");
-                    continue;
-                }
-
-                return v;
-            }
-            return 0;
-        }
-
-        // ── 操舵 ───────────────────────────────────────────────
-
-        /// <summary>
-        /// 台風の中心の周りを回らせる。位相の進みには**2 段の上限**がある。
-        /// まず 1 tick の角度の増分を「車両が追える距離 ÷ 軌道半径」で抑える
-        /// （抑えないと位相だけが先へ進み、竜巻は円ではなく弦を横切る）。次に、実際に
-        /// 書く目標点の移動量も <paramref name="maxStep"/> でクランプする ——
-        /// 台風の中心自体が動くので、位相を抑えるだけでは足りない。
-        /// </summary>
-        private static void Steer(DisasterData[] buffer, float deltaMinutes,
-                                  float radius, float maxStep)
-        {
-            float desiredStep = OrbitDegreesPerMinute * deltaMinutes * 0.017453292f;
-            float reachableStep = maxStep / radius;
-            float phaseStep = desiredStep < reachableStep ? desiredStep : reachableStep;
-
-            byte intensity = TornadoIntensity();
-            float angle = TyphoonController.HeadingRadians;
-
-            for (int i = 0; i < _slots.Length; i++)
-            {
-                ushort id = _slots[i].DisasterId;
-                if (id == 0 || id >= buffer.Length) continue;
-
-                // Verify がこの tick で確かめているが、get_Info は境界検査をしない
-                // 4 命令なので、参照は毎回自分で確かめてから使う。
-                var info = buffer[id].Info;
-                if (info == null || info.m_disasterAI == null) continue;
-
-                _slots[i].OrbitPhase += phaseStep;
-
-                var wanted = OrbitPoint(_slots[i].OrbitPhase, radius);
-                var target = ClampStep(_slots[i].Target, wanted, maxStep);
-
-                var ai = info.m_disasterAI;
-                ai.ClampDisasterTarget(ref target);
-                target.y = SampleHeight(target);
-
-                // Emerging 中も書く。ActivateDisaster は m_targetPosition を読んで
-                // 渦車両の生成位置を決めるので（§B-2）、書いておくと軌道上に生まれる。
-                buffer[id].m_targetPosition = target;
-                buffer[id].m_angle = angle;
-                buffer[id].m_intensity = intensity;
-                _slots[i].Target = target;
-
-                ushort v = _slots[i].VehicleId;
-                if (v == 0) continue;
-
-                // ★ **車両 ID も再利用される。** 渦が Unspawn されたあと同じ添字が
-                //   普通のバスに配られる。掴んだままだと④がその車両の目標地点を毎 tick
-                //   書き潰し、市内の車が 1 台だけ台風の周りを回り出す（例外は出ない）。
-                //   探し直しはさせない —— 渦が消えた＝竜巻自体が終わりかけなので
-                //   （TornadoAI.IsStillActive は渦が生きている間だけ true。§B-2）、
-                //   Verify がまもなくスロットを外す。
-                if (!StillOurVortex(v))
-                {
-                    _slots[i].VehicleId = 0;
-                    _slots[i].AttachTicks = MaxAttachTicks;
-                    continue;
-                }
-
-                // ★ 罠 3: **両スロットに書く**（クラス doc）。
-                WriteVehicleTarget(v, target);
-            }
-        }
-
-        /// <summary>
-        /// <paramref name="from"/> から <paramref name="to"/> へ、水平距離
-        /// <paramref name="maxStep"/> までしか動かさない。
-        /// </summary>
-        private static Vector3 ClampStep(Vector3 from, Vector3 to, float maxStep)
-        {
-            float dx = to.x - from.x;
-            float dz = to.z - from.z;
-            float d2 = dx * dx + dz * dz;
-            if (d2 <= maxStep * maxStep || d2 <= 0f) return to;
-
-            float scale = maxStep / Mathf.Sqrt(d2);
-            return new Vector3(from.x + dx * scale, to.y, from.z + dz * scale);
-        }
-
-        /// <summary>位相と半径から台風の中心まわりの点を出す。</summary>
-        private static Vector3 OrbitPoint(float phase, float radius)
-        {
-            Vec3 centre = TyphoonController.Centre;
-            return new Vector3(centre.X + Mathf.Cos(phase) * radius,
-                               0f,
-                               centre.Z + Mathf.Sin(phase) * radius);
-        }
-
-        /// <summary>
-        /// 台風の今の強度から竜巻の強度を出す。**<c>(byte)</c> へのキャストの前に
-        /// クランプすること**（範囲外を先にキャストすると最弱の台風が最強の竜巻を産む）。
-        /// </summary>
-        private static byte TornadoIntensity()
-        {
-            int value = (int)(TyphoonController.Intensity * IntensityFraction);
-            if (value < MinTornadoIntensity) value = MinTornadoIntensity;
-            if (value > MaxTornadoIntensity) value = MaxTornadoIntensity;
-            return (byte)value;
-        }
 
         // ── 後始末 ─────────────────────────────────────────────
 
@@ -752,10 +568,39 @@ namespace DisasterPlus.Game
         /// <c>DeactivateNow</c> するか <c>ReleaseDisaster</c> する。例外もログも出ない。
         /// （その早期 return 自体も同じレビューで塞いだが、<b>この関数は自分で確かめる</b>
         ///  ——呼び出し側の順序に安全性を預けない。）
+        ///
+        /// **確かめる前は車両にも触らない。** 掴んでいる車両はこの災害グループから
+        /// 探した渦なので、災害スロットが再利用されていればその車両ももう④のもの
+        /// ではない（<see cref="StillOurVortex"/> は「渦であること」しか見ないので、
+        /// 他人の竜巻を現在位置に釘付けにできてしまう）。
         /// </summary>
         private static void StopOne(DisasterData[] buffer, TyphoonTornadoSlot slot)
         {
-            // ★ 車両 ID の再利用を先に弾く（<see cref="StillOurVortex"/> の注記）。
+            // ★★ **所有権が最初。** 確かめる前は車両にも触らない。
+            //    掴んでいる VehicleId は「この災害グループから探した渦」なので、
+            //    災害スロットが再利用されていれば、その車両ももう④のものではない
+            //    （StillOurVortex は「渦であること」しか見ない ——
+            //     他人の竜巻を現在位置に釘付けにできてしまう）。
+            if (buffer == null)
+            {
+                // 災害バッファに届かない ＝ 確かめる手段が無い。**何も触らない。**
+                // 台帳は呼び出し側（StopAll / Reset）が捨てるので、次の都市へは残らない。
+                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorNoBuffer",
+                         "typhoon dropped tornado #" + slot.DisasterId
+                         + " without touching it: the disaster buffer is unavailable");
+                return;
+            }
+
+            string lost = LostReason(buffer, slot.DisasterId, slot.ActivationFrame);
+            if (lost != null)
+            {
+                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorStale",
+                         "typhoon dropped tornado #" + slot.DisasterId
+                         + " without touching it: " + lost);
+                return;
+            }
+
+            // ★ 車両 ID の再利用も弾く（<see cref="StillOurVortex"/> の注記）。
             //   ここを飛ばすと、終了処理が無関係な車両を現在位置に釘付けにする。
             if (slot.VehicleId != 0 && StillOurVortex(slot.VehicleId))
             {
@@ -770,20 +615,6 @@ namespace DisasterPlus.Game
                              + " ending; both target slots moved to current position");
                     return;
                 }
-            }
-
-            if (buffer == null) return;
-
-            // ★★ バニラの終了経路を呼ぶ前に、**まだ④の竜巻か**を毎回確かめる
-            //    （メソッド doc）。Verify と同じ関数を通すので、判定が 2 箇所に
-            //    分かれて片方だけ古くなることが無い。
-            string lost = LostReason(buffer, slot.DisasterId, slot.ActivationFrame);
-            if (lost != null)
-            {
-                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyTorStale",
-                         "typhoon dropped tornado #" + slot.DisasterId
-                         + " without touching it: " + lost);
-                return;
             }
 
             var info = buffer[slot.DisasterId].Info;
