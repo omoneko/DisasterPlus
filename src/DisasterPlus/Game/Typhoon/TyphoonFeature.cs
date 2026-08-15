@@ -119,7 +119,19 @@ namespace DisasterPlus.Game
                 TyphoonFlood.RestoreAll();
             }
 
-            // （T10: TyphoonTornado.Tick がここに入る）
+            // ★ 随伴竜巻は**既定 OFF**（設計書 §2）。切っている間・台風が居ない間は
+            //    StopAll を通す —— 台風の最中にこの設定を切ったプレイヤーが、
+            //    掴まれたままの竜巻を止める手段を失わないようにする
+            //    （TyphoonFlood.RestoreAll と同じ形。StopAll は台帳が空なら
+            //    1 命令で返るので毎 tick 通ってよい）。
+            if (TyphoonController.Active && ModSettings.TyphoonTornadoes.value)
+            {
+                TyphoonTornado.Tick(snapshot, frameIndex, deltaMinutes);
+            }
+            else
+            {
+                TyphoonTornado.StopAll();
+            }
         }
 
         /// <summary>
@@ -158,6 +170,10 @@ namespace DisasterPlus.Game
             //    無関係な川の水位を書き換える。TyphoonFlood.Reset は内部で
             //    RestoreAll を呼んでから台帳を捨てる。
             TyphoonFlood.Reset();
+            // ★ 随伴竜巻も都市をまたがない。持ち越すと、次の都市で**前の都市の
+            //    災害 ID** を操舵しに行き、無関係な災害を引きずり回す。
+            //    TyphoonTornado.Reset は内部で StopAll を呼んでから台帳を捨てる。
+            TyphoonTornado.Reset();
         }
 
         /// <summary>
@@ -273,6 +289,51 @@ namespace DisasterPlus.Game
             WriteLightning(b, snapshot);
             WriteWind(b, snapshot);
             WriteFlood(b, snapshot);
+            WriteTornadoes(b, snapshot);
+        }
+
+        /// <summary>
+        /// 随伴竜巻（T10）。**既定 OFF なので「出ていない」が正常である。**
+        ///
+        /// <c>attached</c> が <c>count</c> より小さい状態を隠さない ——
+        /// 渦車両が付かなかった竜巻は④の軌道に乗らず、バニラの竜巻として自由に流れる。
+        /// 画面上は「台風の周りを回っていない竜巻」に見えるだけで、原因を指すものが
+        /// 他に無い。
+        /// </summary>
+        private static void WriteTornadoes(DiagnosticBuilder b, TyphoonSnapshot snapshot)
+        {
+            if (!ModSettings.TyphoonTornadoes.value)
+            {
+                b.Line(2, "accompanying tornadoes", "off (setting; this is the default)");
+                return;
+            }
+
+            b.Line(2, "accompanying tornadoes",
+                snapshot.TornadoCount + " running / " + snapshot.TornadoAttached
+                + " steered / " + ModSettings.TyphoonTornadoCount.value + " requested");
+
+            if (snapshot.TornadoAttached < snapshot.TornadoCount)
+            {
+                b.Line(3, "not steered",
+                    (snapshot.TornadoCount - snapshot.TornadoAttached)
+                    + " tornado(es) have no vortex vehicle yet. Until one attaches they "
+                    + "drift on vanilla's own path instead of orbiting the typhoon");
+            }
+
+            if (!string.IsNullOrEmpty(TyphoonTornado.LastFailure))
+            {
+                b.Line(3, "last failure", TyphoonTornado.LastFailure);
+            }
+
+            // ★ NDR がいる環境で「風害と竜巻で壊れ方が違う」理由は、ここと設定画面と
+            //    パネルにしか出ない（IL 事実文書 §F-1）。
+            if (ModCompat.NdrPresent)
+            {
+                b.Line(3, "Natural Disasters Renewal",
+                    "present: vanilla tornado destruction is replaced wholesale, so these "
+                    + "tornadoes follow NDR's tornado settings. The typhoon's own wind damage "
+                    + "does not - it never goes through DisasterHelpers");
+            }
         }
 
         /// <summary>

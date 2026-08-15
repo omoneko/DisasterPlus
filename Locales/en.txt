@@ -205,3 +205,7 @@ TyphoonFloodStrength = River flooding strength (0 = off)
 TyphoonFloodNoSources = This map has no natural water sources near the storm, so no river can rise. Nothing is wrong - the game has no flood disaster of its own, and Disaster + only raises water sources the map already has.
 TyphoonFloodRaised = raised
 TyphoonFloodNote = The water level is restored when the typhoon ends, when you leave the city and before every save. A river must never stay flooded after you remove the mod.
+TyphoonTornadoRow = Accompanying tornadoes
+TyphoonTornadoEnabled = Spawn tornadoes that orbit the typhoon
+TyphoonTornadoCount = Number of tornadoes
+TyphoonTornadoNdrNote = Natural Disasters Renewal replaces vanilla tornado destruction, so these tornadoes follow its settings. The typhoon's own wind damage does not - it never goes through DisasterHelpers.

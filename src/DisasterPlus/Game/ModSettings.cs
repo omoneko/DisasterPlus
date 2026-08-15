@@ -55,6 +55,8 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonWindStrength;
         public static SavedBool TyphoonFloodEnabled;
         public static SavedInt TyphoonFloodStrength;
+        public static SavedBool TyphoonTornadoes;
+        public static SavedInt TyphoonTornadoCount;
 
         public static void Ensure()
         {
@@ -152,6 +154,18 @@ namespace DisasterPlus.Game
             //    から呼ばれる（TyphoonFlood のクラス doc）。
             TyphoonFloodEnabled = new SavedBool("typhoonFlood", FileName, true, true);
             TyphoonFloodStrength = new SavedInt("typhoonFloodStrength", FileName, 3, true);
+
+            // ★ 随伴竜巻は**既定 OFF**（設計書 §2 が明示）。風害・氾濫と判断が違うのは、
+            //    これが唯一「④の外の MOD に破壊を渡す」要素だからである ——
+            //    バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので、
+            //    Natural Disasters Renewal がいる環境ではあちらの竜巻設定に従う
+            //    （IL 事実文書 §F-1、TyphoonTornado のクラス doc）。
+            //    見た目が無料でバニラ品質という利点と引き換えなので、
+            //    プレイヤーに明示的に選ばせる。
+            TyphoonTornadoes = new SavedBool("typhoonTornado", FileName, false, true);
+            // 0〜3。範囲はスライダーが縛るが、.cgs の値は公開契約なので範囲外が
+            // 入っていても読み捨てず、使う側（TyphoonTornado.Step）でクランプする。
+            TyphoonTornadoCount = new SavedInt("typhoonTornadoCount", FileName, 1, true);
 
             _ready = true;
         }

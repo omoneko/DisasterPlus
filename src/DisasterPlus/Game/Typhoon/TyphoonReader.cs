@@ -123,7 +123,9 @@ namespace DisasterPlus.Game
                                            TyphoonFlood.State,
                                            TyphoonFlood.NaturalSourceCount,
                                            TyphoonFlood.TouchedCount,
-                                           TyphoonFlood.LastPeakRiseMetres);
+                                           TyphoonFlood.LastPeakRiseMetres,
+                                           TyphoonTornado.Count,
+                                           TyphoonTornado.Attached);
             }
             catch (System.Exception e)
             {

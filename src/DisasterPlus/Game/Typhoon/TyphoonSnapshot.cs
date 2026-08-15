@@ -280,6 +280,21 @@ namespace DisasterPlus.Game
         /// <summary>直近の走査で中心に適用した上げ幅（m）。</summary>
         public readonly float FloodPeakRiseMetres;
 
+        // ── T10: 随伴竜巻 ─────────────────────────────────────
+        //
+        // 2 つとも④が数えた量である。ゲーム側に「④の竜巻が何個あるか」を
+        // 公開している値は無い。
+
+        /// <summary>④が掴んでいる竜巻の数。</summary>
+        public readonly int TornadoCount;
+
+        /// <summary>
+        /// そのうち渦車両まで紐づいた数。**<see cref="TornadoCount"/> より小さい
+        /// 状態を隠さない** —— 付いていない竜巻は④の軌道に乗らず、
+        /// バニラの竜巻として自由に流れる。
+        /// </summary>
+        public readonly int TornadoAttached;
+
         public TyphoonSnapshot(bool valid, TyphoonPrefabFacts prefab, uint currentFrame,
                                float rain, float cloud, float fog, float windDirectionDegrees,
                                bool weatherEnabled, bool weatherReadable,
@@ -296,8 +311,11 @@ namespace DisasterPlus.Game
                                int windLastScanned, int windLastRefused, bool windLastCapped,
                                int windLastUnknownHeight,
                                TyphoonFloodState floodState, int floodNaturalSources,
-                               int floodTouched, float floodPeakRiseMetres)
+                               int floodTouched, float floodPeakRiseMetres,
+                               int tornadoCount, int tornadoAttached)
         {
+            TornadoCount = tornadoCount;
+            TornadoAttached = tornadoAttached;
             FloodState = floodState;
             FloodNaturalSources = floodNaturalSources;
             FloodTouched = floodTouched;
@@ -352,7 +370,8 @@ namespace DisasterPlus.Game
                                        false, 0f, 0f, 0f,
                                        0, 0, 0, 0,
                                        0, 0, 0, 0, 0, false, 0,
-                                       TyphoonFloodState.Idle, 0, 0, 0f);
+                                       TyphoonFloodState.Idle, 0, 0, 0f,
+                                       0, 0);
         }
     }
 }

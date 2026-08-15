@@ -660,5 +660,24 @@ namespace DisasterPlus.Game
         public static string TyphoonFloodNote =
             "The water level is restored when the typhoon ends, when you leave the city and "
             + "before every save. A river must never stay flooded after you remove the mod.";
+
+        // --- ④台風（Task 10: 随伴竜巻） ---
+        //
+        // ★ TyphoonTornadoNdrNote は**この要素だけが持つ代償**を名乗る行である。
+        //   バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので、
+        //   Natural Disasters Renewal はそれを竜巻と嗅ぎ分けて完全に置き換える
+        //   （IL 事実文書 §F-1）。④自身の風害は同じ影響を受けない
+        //   （DisasterHelpers を 1 度も通さないため）。**その区別まで書く** ——
+        //   同じ都市で両方が動いたとき、片方だけが他 MOD の設定に従う理由が
+        //   これ以外のどこにも出ない。
+        //   設定画面（NDR 検出時）とパネルの両方に出す。
+        public static string TyphoonTornadoRow = "Accompanying tornadoes";
+        public static string TyphoonTornadoEnabled =
+            "Spawn tornadoes that orbit the typhoon";
+        public static string TyphoonTornadoCount = "Number of tornadoes";
+        public static string TyphoonTornadoNdrNote =
+            "Natural Disasters Renewal replaces vanilla tornado destruction, so these "
+            + "tornadoes follow its settings. The typhoon's own wind damage does not - it "
+            + "never goes through DisasterHelpers.";
     }
 }

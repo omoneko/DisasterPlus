@@ -177,6 +177,16 @@ namespace DisasterPlus.Game
             typhoon.AddSlider(Strings.TyphoonFloodStrength, 0f, 10f, 1f,
                 ModSettings.TyphoonFloodStrength.value,
                 v => ModSettings.TyphoonFloodStrength.value = (int)v);
+            // ★ 随伴竜巻は**既定 OFF**（設計書 §2）。バニラの竜巻をそのまま借りるので
+            //    見た目も破壊も無料でバニラ品質だが、その破壊は DisasterHelpers を
+            //    通るため NDR がいる環境ではあちらの設定に従う（下の注記）。
+            typhoon.AddCheckbox(Strings.TyphoonTornadoEnabled,
+                ModSettings.TyphoonTornadoes.value,
+                v => ModSettings.TyphoonTornadoes.value = v);
+            typhoon.AddSlider(Strings.TyphoonTornadoCount, 0f,
+                DisasterPlus.Game.TyphoonTornado.MaxTornadoes, 1f,
+                ModSettings.TyphoonTornadoCount.value,
+                v => ModSettings.TyphoonTornadoCount.value = (int)v);
             typhoon.AddButton(Strings.TyphoonResetButton, delegate
             {
                 ModSettings.TyphoonButtonX.value = -1;
@@ -190,6 +200,16 @@ namespace DisasterPlus.Game
             // ★ 「水位は必ず戻す」を設定画面でも名乗る。氾濫の唯一の怖さは
             //    「MOD を外したら川が溢れたままだった」である。
             helper.AddGroup(Strings.TyphoonFloodNote);
+
+            // ★★ NDR がいる環境でだけ出す。**この 1 行が、随伴竜巻の代償を
+            //    プレイヤーに見せる主経路である**（設計書 §2 / IL 事実文書 §F-1）。
+            //    バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので NDR に
+            //    置き換えられるが、④自身の風害は通していないので影響を受けない。
+            //    その区別まで書く（IntensityUnlockHandledByOther と同じ形）。
+            if (ModCompat.NdrPresent)
+            {
+                helper.AddGroup(Strings.TyphoonTornadoNdrNote);
+            }
 
             // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
             // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。

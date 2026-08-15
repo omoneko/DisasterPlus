@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 24 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 30 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -50,18 +50,19 @@ namespace DisasterPlus.Game
         /// 地震 第 2 層 3 件（TsunamiAI プレハブの実在・
         /// TerrainManager.HasWater と DisasterData.m_waveIndex・
         /// BuildingAI.CollapseBuilding と BuildingInfo.m_size / m_generatedInfo）＋
-        /// 台風 4 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値・
+        /// 台風 8 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値・
         /// DisasterData の移動 4 フィールドと DisasterAI の公開ラッパー 3 メソッド・
         /// WeatherManager の target 系 6 フィールド・
         /// QueueLightningStrike の 4 引数版・
         /// BuildingAI.CollapseBuilding と DisasterHelpers.AddWind / DestroyTrees・
-        /// WaterSimulation の到達経路と WaterSource の m_type / m_target）＋
+        /// WaterSimulation の到達経路と WaterSource の m_type / m_target・
+        /// Vehicle.SetTargetPos と InstanceManager.GetAllGroupInstances）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 30;
+        private const int TotalCheckCount = 31;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -125,7 +126,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 24 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 30 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -882,6 +883,46 @@ namespace DisasterPlus.Game
 
             // --- ④台風（Task 8）ここまで ---
 
+            // --- ④台風（Task 10: 随伴竜巻）ここから ---
+
+            // 随伴竜巻の**操舵**の経路。竜巻は「災害」ではなく VortexAI の車両が動くので
+            // （§E-1）、m_targetPosition を書いても車両は追随しない。車両を見つけて
+            // Vehicle.SetTargetPos の**両スロット**に書くのが唯一の手段である
+            // （スロット 0 だけでは次のステップでスロット 1 に上書きされる。
+            //  ③が IL 実測で確定させた事実）。
+            //
+            // ★ 解決できないときに「竜巻だけ出して操舵を諦める」ことはしない。
+            //   操舵できない竜巻は台風と無関係に都市を横断するので、
+            //   プレイヤーから見ると④が野良の竜巻を落としたのと区別が付かない。
+            //   TyphoonTornado はそのとき 1 個も作らない。
+            //
+            // 引数の型まで指定して見る（②の CollapseBuilding の検査と同じ形）。
+            // 名前だけの一致では、シグネチャが変わったときに偽 PASS を出す。
+            Check("Vehicle.SetTargetPos(int, Vector4) and "
+                  + "InstanceManager.GetAllGroupInstances(InstanceID, FastList<InstanceID>) "
+                  + "are resolvable",
+                  "the accompanying tornadoes cannot be steered around the typhoon. They "
+                  + "would still spawn and drift on vanilla's own path, so the feature "
+                  + "refuses to create them at all rather than dropping loose tornadoes on "
+                  + "the city. Everything else about the typhoon is unaffected",
+                  delegate
+                  {
+                      if (typeof(Vehicle).GetMethod("SetTargetPos",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[] { typeof(int), typeof(UnityEngine.Vector4) },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      return typeof(InstanceManager).GetMethod("GetAllGroupInstances",
+                          BindingFlags.Public | BindingFlags.Static, null,
+                          new Type[] { typeof(InstanceID), typeof(FastList<InstanceID>) },
+                          null) != null;
+                  });
+
+            // --- ④台風（Task 10）ここまで ---
+
             Report();
         }
 
@@ -987,7 +1028,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 24 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 30 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

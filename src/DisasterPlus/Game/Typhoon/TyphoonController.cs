@@ -467,8 +467,12 @@ namespace DisasterPlus.Game
         /// <see cref="LoseSlot"/>（災害スロットが再利用された）と
         /// <see cref="Reset"/>（レベルアンロード）も通る。復元を <see cref="Stop"/> 側に
         /// 置くと、スロットを奪われた瞬間に**天候を握ったまま台風だけが消える**。
-        /// T8 以降もここに足すこと（T8: <c>TyphoonFlood.RestoreAll</c> /
-        /// T9: <c>TyphoonCloud.ReleaseVanillaBoost</c> / T10: <c>TyphoonTornado.StopAll</c>）。
+        ///
+        /// ★ **ここに <c>TyphoonCloud</c> を足さないこと。** 雲は main スレッドだけの
+        /// 機能で、sim 側からは 1 度も呼ばれない。それが T9 を他から独立させている
+        /// 実体である（<c>TyphoonCloud</c> のクラス doc）。雲の後始末は
+        /// <c>TyphoonFeature.OnMainThreadUpdate</c> が「Active でなくなったフレーム」に
+        /// 自分で行う。
         ///
         /// 復元はどれも冪等でなければならない（<see cref="Stop"/> → <see cref="Forget"/> と
         /// <c>TyphoonFeature.OnLevelUnloading</c> の両方から重ねて呼ばれる）。
@@ -495,6 +499,12 @@ namespace DisasterPlus.Game
             //    置くと、スロットを奪われた瞬間に**川を溢れさせたまま台風だけが消える**。
             //    RestoreAll は冪等なので重ねて呼んでよい。
             TyphoonFlood.RestoreAll();
+
+            // ★ 随伴竜巻もここで手放す。**Stop ではなくここ**（上の 3 つと同じ理由）。
+            //    StopAll は掴んでいる竜巻をバニラの終了経路へ乗せてから台帳を捨てる
+            //    冪等な操作なので、重ねて呼んでよい。ここを飛ばすと、台風が終わった
+            //    あとに竜巻だけが単独で都市に残る。
+            TyphoonTornado.StopAll();
 
             TyphoonSlot.Forget();
 

@@ -36,6 +36,8 @@ namespace DisasterPlus.Game
         private static UILabel _floodLabel;
         private static UILabel _floodReasonLabel;
         private static UILabel _floodNoteLabel;
+        private static UILabel _tornadoLabel;
+        private static UILabel _tornadoNdrNoteLabel;
 
         /// <summary>パネル構築時に 1 回。</summary>
         internal static void Build(UIPanel p, ref float y)
@@ -70,6 +72,14 @@ namespace DisasterPlus.Game
             // 「MOD を外したら川が溢れたままだった」なので、そこを先に打ち消す。
             _floodNoteLabel = TyphoonRows.AddRow(p, "FloodNote", ref y, 40f);
             TyphoonRows.SetPlain(_floodNoteLabel, Strings.TyphoonFloodNote);
+
+            _tornadoLabel = TyphoonRows.AddRow(p, "Tornado", ref y);
+
+            // ★ NDR がいる環境でだけ出す注記（設計書 §2 の代償）。**中身は
+            //    Refresh が出し入れする** —— 竜巻を切っているときにこの説明だけが
+            //    残ると、切っているのに影響を受けていると読める。
+            //    高さは 3 行に折り返すぶんを確保する。
+            _tornadoNdrNoteLabel = TyphoonRows.AddRow(p, "TornadoNdrNote", ref y, 56f);
         }
 
         /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
@@ -82,6 +92,8 @@ namespace DisasterPlus.Game
                 TyphoonRows.SetPlain(_windLabel, "");
                 TyphoonRows.SetPlain(_floodLabel, "");
                 TyphoonRows.SetPlain(_floodReasonLabel, "");
+                TyphoonRows.SetPlain(_tornadoLabel, "");
+                TyphoonRows.SetPlain(_tornadoNdrNoteLabel, "");
                 return;
             }
 
@@ -94,6 +106,33 @@ namespace DisasterPlus.Game
 
             RefreshWind(s);
             RefreshFlood(s);
+            RefreshTornado(s);
+        }
+
+        /// <summary>
+        /// 随伴竜巻の行（T10）。**既定 OFF なので「off」が普通の表示である。**
+        ///
+        /// NDR がいる環境では、**この要素だけが他 MOD の設定に従う**ことを
+        /// その場で名乗る（設計書 §2 / IL 事実文書 §F-1）。同じ都市で風害と竜巻の
+        /// 両方が動いているとき、片方だけ壊れ方が違う理由はここにしか出ない。
+        /// </summary>
+        private static void RefreshTornado(TyphoonSnapshot s)
+        {
+            if (!ModSettings.TyphoonTornadoes.value
+                || ModSettings.TyphoonTornadoCount.value <= 0)
+            {
+                TyphoonRows.SetPlain(_tornadoLabel, Strings.TyphoonTornadoRow + ": off");
+                TyphoonRows.SetPlain(_tornadoNdrNoteLabel, "");
+                return;
+            }
+
+            // 並びは「今出ている数 / ④が操舵できている数」。後者が小さいときは
+            // その竜巻がバニラの経路で流れている（診断に理由が出る）。
+            TyphoonRows.SetPlain(_tornadoLabel,
+                Strings.TyphoonTornadoRow + ": " + s.TornadoCount + " / " + s.TornadoAttached);
+
+            TyphoonRows.SetPlain(_tornadoNdrNoteLabel,
+                ModCompat.NdrPresent ? Strings.TyphoonTornadoNdrNote : "");
         }
 
         /// <summary>
@@ -185,6 +224,8 @@ namespace DisasterPlus.Game
             _floodLabel = null;
             _floodReasonLabel = null;
             _floodNoteLabel = null;
+            _tornadoLabel = null;
+            _tornadoNdrNoteLabel = null;
         }
     }
 }
