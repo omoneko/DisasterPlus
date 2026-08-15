@@ -461,20 +461,34 @@ namespace DisasterPlus.Game
         /// </summary>
         private static string FirstResolvableCloudShader()
         {
-            string[] names =
+            // ★ **自分で try/catch する。** ここは検証の*名前*を組み立てるために
+            //   Check() の外側（＝あの try/catch の外）で呼ばれる。Assumptions.Run() は
+            //   DisasterPlusLoading.OnLevelLoaded から素で呼ばれているので、
+            //   ここから例外を投げるとレベルロードが壊れる
+            //   （DestroyTreesIsReachable が同じ理由で同じ形をしている）。
+            try
             {
-                "Particles/Alpha Blended",
-                "Legacy Shaders/Particles/Alpha Blended",
-                "Particles/Additive",
-                "Standard",
-            };
+                string[] names =
+                {
+                    "Particles/Alpha Blended",
+                    "Legacy Shaders/Particles/Alpha Blended",
+                    "Particles/Additive",
+                    "Standard",
+                };
 
-            for (int i = 0; i < names.Length; i++)
-            {
-                // UnityEngine.Object の == 多重定義で fake-null も弾く（?? は素通しする）。
-                if (UnityEngine.Shader.Find(names[i]) != null) return names[i];
+                for (int i = 0; i < names.Length; i++)
+                {
+                    // UnityEngine.Object の == 多重定義で fake-null も弾く（?? は素通しする）。
+                    if (UnityEngine.Shader.Find(names[i]) != null) return names[i];
+                }
+                return null;
             }
-            return null;
+            catch
+            {
+                // 名前は「解決しなかった」側に倒す。検証も FAIL になるので、
+                // 黙って PASS を出すことにはならない。
+                return null;
+            }
         }
 
         /// <summary>
