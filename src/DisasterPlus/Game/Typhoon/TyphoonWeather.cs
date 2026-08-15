@@ -134,11 +134,15 @@ namespace DisasterPlus.Game
     /// ここに 0 を書くと「台風が去って雨が引いていく」ではなく
     /// 「台風が去った瞬間に雨が消える」になる。
     ///
-    /// **残る 1 つの穴（T8 の担当）。** <c>m_targetRain</c> はセーブに焼き付く
-    /// （<c>WeatherManager+Data</c>）。台風の最中にセーブして終了すると、
-    /// 次のロードで <c>m_targetRain</c> が高いまま復元される。時間はかかるが
-    /// バニラの再抽選で必ず戻るので固まりはしない。保存時に戻す経路は
-    /// <c>DisasterPlusSerialization</c> を触る T8 と同じ場所なので、そちらに任せる。
+    /// ── 8. セーブへの焼き付き（全体レビュー I2 で塞いだ）───────────────────
+    ///
+    /// ④が書く <c>m_targetRain</c> / <c>m_targetCloud</c> / <c>m_targetFog</c> /
+    /// <c>m_forceWeatherOn</c> / <c>m_targetDirection</c> は**全部セーブに焼き付く**
+    /// （<c>WeatherManager+Data.Serialize</c> を本レビューで IL 実測。並びは
+    /// <see cref="SuspendForSave"/> の doc）。台風の最中に保存して開き直すと、
+    /// ④が走っていないのに最大の雨が期待値 2 万 step 続く。
+    /// <see cref="SuspendForSave"/> と <see cref="ReapplyAfterSave"/> がその穴を塞ぐ。
+    /// **宿主の嵐そのものをセーブから外さない判断**も同じ doc にある。
     /// </summary>
     public static class TyphoonWeather
     {
@@ -336,6 +340,110 @@ namespace DisasterPlus.Game
             _lastCloud = 0f;
             _lastFog = 0f;
             _lastDirectionDegrees = 0f;
+        }
+
+        /// <summary>
+        /// **セーブの直前に呼ぶ**（<c>DisasterPlusSerialization.OnSaveData</c>）。
+        /// ④が握っている天候の上書きを、バニラが <c>WeatherManager+Data</c> を
+        /// 書く前に降ろす。<b>戻り値を <see cref="ReapplyAfterSave"/> へ渡すこと。</b>
+        ///
+        /// ── なぜ要るか（本タスクで IL 実測して確定させた）─────────────────
+        ///
+        /// <c>WeatherManager+Data.Serialize</c> は
+        /// <c>m_windDirection / m_targetDirection / m_directionSpeed /
+        /// m_currentTemperature / m_targetTemperature / m_temperatureSpeed /
+        /// m_currentRain / m_targetRain / m_currentFog / m_targetFog /
+        /// m_currentCloud / m_targetCloud / m_forceWeatherOn / m_groundWetness / …</c>
+        /// を順に書く（<c>Deserialize</c> が同じ並びで戻す）。つまり
+        /// **④が毎 tick 書いている 4 値はそのままセーブに焼き付く。**
+        ///
+        /// 焼き付いたセーブを開くと、④は走っていないのに <c>m_targetRain</c> が
+        /// 1.0 のまま復元される。バニラが振り直すのは
+        /// <c>m_currentRain == m_targetRain</c> になってから <c>Int32(20000) == 0</c> を
+        /// 引いたときだけ（§A-4）なので、期待値でおよそ 2 万 step ——
+        /// その間ずっと最大の雨が降り続け、雨量 0.8 超の判定でゲーム自身が
+        /// 雷雨を作り始める。<c>m_forceWeatherOn</c> も同じ経路で焼き付き、
+        /// **天候を切っているプレイヤーの環境で天候が復活する。**
+        ///
+        /// ── 宿主の嵐そのものは触らない（意識して決めた）─────────────────
+        ///
+        /// ④の宿主は <c>SelfTrigger</c> 付きの <c>ThunderStormAI</c> 災害で、
+        /// これも <c>DisasterManager</c> のバッファごとセーブに入る。台風の最中に
+        /// 保存したセーブを開くと、**動かない雷雨**がその場に残り、
+        /// <c>m_activeDuration</c> を使い切るまで続く。
+        ///
+        /// **これは直さない。** 直す手は「保存の前に <c>DeactivateNow</c> する」しか
+        /// 無く、それは<b>保存という操作がシミュレーションの状態を変える</b>ことを
+        /// 意味する（プレイヤーがセーブしただけで台風が消える）。残るのはバニラが
+        /// 自分で作れる正当な災害——強度の高い雷雨——であり、バニラのライフサイクルが
+        /// 期限どおり終わらせて <c>ReleaseDisaster</c> まで行う。天候だけを降ろすのは、
+        /// あちらが**災害に属さないグローバルな上書き**で、持ち主が居なくなっても
+        /// 誰も戻さないからである。この非対称は意図であり、設計書 §4.2 と
+        /// 実機チェックリストに書いてある。
+        ///
+        /// なお、その宿主の嵐がロード後もまだ Active なら、
+        /// <c>ThunderStormAI.SimulationStep</c> が 256 フレームに 1 回
+        /// <c>m_targetRain = 1</c> を書き直す（§A-1）。**それは正しい** ——
+        /// 雨は嵐が居るから降っているのであって、④の消し忘れではなくなる。
+        /// </summary>
+        /// <returns>実際に降ろしたか（④が駆動中だったか）。</returns>
+        public static bool SuspendForSave()
+        {
+            if (!_driving) return false;
+
+            try
+            {
+                if (!Singleton<WeatherManager>.exists) return false;
+
+                var w = Singleton<WeatherManager>.instance;
+                w.m_targetRain = 0f;
+                w.m_targetCloud = 0f;
+                // ★ ここでは m_forceWeatherOn も 0 にする（Release とは判断が違う）。
+                //   Release が触らないのは「台風が去った瞬間に雨が消える」のを
+                //   避けるためで、あれは**画面の見え方**の話である。セーブに
+                //   焼き付ける値の話ではない。
+                w.m_forceWeatherOn = 0f;
+                return true;
+            }
+            catch (System.Exception e)
+            {
+                if (!_errorLogged)
+                {
+                    _errorLogged = true;
+                    Log.Error("typhoon could not lower its weather override before saving", e);
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// <see cref="SuspendForSave"/> で降ろした上書きを戻す。
+        /// **<c>SimulationManager.AddAction</c> 経由で、セーブが終わってから呼ぶこと**
+        /// （<c>TyphoonFlood.ReapplyAfterSave</c> と同じ形。すぐ戻すと、バニラが
+        /// 配列を書く前に上書きし直すことになり漏れが再発する）。
+        ///
+        /// **次の tick の <see cref="Drive"/> に任せない。** ポーズ中に保存した場合、
+        /// <c>TyphoonFeature.OnSimulationTick</c> のポーズガードが <see cref="Drive"/> を
+        /// 止めるので、ポーズを解くまで雨が 0 のままになる ——
+        /// プレイヤーから見ると「セーブしたら台風の雨だけ消えた」になる。
+        /// </summary>
+        public static void ReapplyAfterSave(bool wasDriving)
+        {
+            // ④が保存中に台風を失っていたら書き直さない（_driving が落ちている）。
+            if (!wasDriving || !_driving) return;
+
+            try
+            {
+                Step();
+            }
+            catch (System.Exception e)
+            {
+                if (!_errorLogged)
+                {
+                    _errorLogged = true;
+                    Log.Error("typhoon could not restore its weather override after saving", e);
+                }
+            }
         }
 
         /// <summary>
