@@ -30,6 +30,7 @@ namespace DisasterPlus.Game
                 FeatureHost.Register(new ForecastFeature());
                 FeatureHost.Register(new EarthquakeFeature());
                 FeatureHost.Register(new TyphoonFeature());
+                FeatureHost.Register(new VolcanoFeature());
             }
 
             FeatureHost.LevelLoaded();

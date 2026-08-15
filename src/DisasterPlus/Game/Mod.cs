@@ -227,6 +227,21 @@ namespace DisasterPlus.Game
                 helper.AddGroup(Strings.TyphoonNeedsDlc);
             }
 
+            // ★★ ⑤火山には「Natural Disasters が必要です」の群を**置かない**。
+            //    ⑤は DLC を要らない（設計書 §1.4）—— 災害スロットに載らず、
+            //    RawHeights を自分で書き、MakeCrater / BurnGround にも DLC ゲートは
+            //    無い（IL 事実文書 §C-8 / §B-7b）。分岐するのは樹木の着火だけ
+            //    （TreeManager.BurnTree、§B-7c）で、それは T8 が
+            //    FeatureHost.NoteDegraded で名乗る。ここに DLC の注記を置くと嘘になる。
+            var volcano = helper.AddGroup(Strings.GroupVolcano);
+            volcano.AddCheckbox(Strings.VolcanoEnabled, ModSettings.VolcanoEnabled.value,
+                v => ModSettings.VolcanoEnabled.value = v);
+            // ★ Strings.VolcanoResetButton は宣言だけしてここでは使わない。
+            //   ボタン自体が T3 で入るので、**存在しないボタンの位置をリセットする
+            //   設定**を先に置くと、押しても何も起きない死んだ設定になる。
+            //   キーだけ先に足してあるのは、ロケール 3 ファイルの追加を
+            //   T2 に寄せて 1 回で済ませるためである（計画 Step 1 の表）。
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
@@ -311,6 +326,16 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Typhoon)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Typhoon));
+
+            // Volcano チャンネル（= 32）は⑤の Task 2 まで**定義済み・未使用**だった。
+            // VolcanoFeature.OnSimulationTick がこのチャンネル付きの Log.Diag を出すので、
+            // ここで初めて死んだ設定ではなくなる。
+            channels.AddCheckbox(Strings.LogChannelVolcano,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.Volcano, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Volcano)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Volcano));
         }
     }
 }

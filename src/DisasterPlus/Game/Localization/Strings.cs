@@ -737,5 +737,28 @@ namespace DisasterPlus.Game
         public static string TyphoonCloudUnavailable =
             "The game's sky cloud settings are not present in this environment, so only "
             + "Disaster +'s own cloud is drawn.";
+
+        // --- ⑤火山（Task 2: 骨格・地形 API の解決・前提検証） ---
+        //
+        // このタスクの時点では**パネルもボタンも火山も無い**（T3 以降で入る）。
+        // ここで足すのは設定画面の 3 つと、ログチャンネルの名前、そして
+        // 「読み取れません」の 1 行だけである。
+        //
+        // ⑤の表示規約: **⑤が出す数値は原則すべて本 MOD のもの**なので、行ごとの
+        // 出所の印は付けない（設計書 §7.4）。例外は設置地点の地形高さと、
+        // 影響範囲の建物数・道路セグメント数の 3 行だけで、そこにだけ
+        // SourceVanilla が付く。したがって
+        // **Strings.SourceModel を⑤の表示コードから参照してはいけない。**
+        //
+        // ★ ⑤には TyphoonNeedsDlc に相当するキーが無い。**⑤は ND DLC を要らない**
+        //   （設計書 §1.4）。DLC が要るのは樹木の着火だけで、それは T8 が
+        //   FeatureHost.NoteDegraded で名乗る。ここに「DLC が必要です」を
+        //   置くと嘘になる。
+        public static string GroupVolcano = "Volcano";
+        public static string VolcanoEnabled = "Enable volcanoes";
+        public static string VolcanoResetButton =
+            "Reset the volcano button position (takes effect next time you load a city)";
+        public static string VolcanoUnavailable = "Volcano data unavailable";
+        public static string LogChannelVolcano = "Volcano";
     }
 }

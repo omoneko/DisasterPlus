@@ -27,6 +27,7 @@ namespace DisasterPlus.Game
     /// Assumptions.Forecast.cs    ①天気予報  7 件
     /// Assumptions.Earthquake.cs  ②地震     11 件
     /// Assumptions.Typhoon.cs     ④台風      9 件
+    /// Assumptions.Volcano.cs     ⑤火山      3 件
     /// </code>
     ///
     /// **可視性は 1 つも変えていない。** <c>Check</c> も <c>_gate</c> も
@@ -64,7 +65,8 @@ namespace DisasterPlus.Game
         /// </summary>
         private const int TotalCheckCount = GeneralCheckCount + FireWhirlCheckCount
                                             + ForecastCheckCount + EarthquakeCheckCount
-                                            + TyphoonCheckCount + SliderCheckCount;
+                                            + TyphoonCheckCount + VolcanoCheckCount
+                                            + SliderCheckCount;
 
         /// <summary>このファイルが持つ検証の数（機能に属さない土台の前提）。</summary>
         private const int GeneralCheckCount = 1;
@@ -146,7 +148,10 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 31 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できるものだけを見る（<see cref="TotalCheckCount"/> から
+        /// <see cref="SliderCheckCount"/> を引いた件数）。**ここに実数を書かないこと** ——
+        /// 書くと機能を足すたびに片方だけが古くなる（この doc が 1 度そうなっている）。
+        /// 強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -166,6 +171,7 @@ namespace DisasterPlus.Game
             RunForecast();
             RunEarthquake();
             RunTyphoon();
+            RunVolcano();
 
             Report();
         }
@@ -312,7 +318,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 31 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の各件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

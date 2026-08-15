@@ -59,6 +59,7 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonTornadoCount;
         public static SavedBool TyphoonCloudEnabled;
         public static SavedBool TyphoonVanillaCloudBoost;
+        public static SavedBool VolcanoEnabled;
 
         public static void Ensure()
         {
@@ -176,6 +177,12 @@ namespace DisasterPlus.Game
             // バニラのスカイドームの雲を濃く・速くする。**存在しない環境がありうる**
             // （DLC・グラフィック設定。IL 事実文書 §C-2、PARTIAL）。無ければ黙って諦める。
             TyphoonVanillaCloudBoost = new SavedBool("typhoonCloudBoost", FileName, true, true);
+
+            // ★ ⑤火山は既定 ON。**DLC 非所持を理由に止めない** —— ⑤は Natural
+            //    Disasters を要らない（設計書 §1.4）。しかも⑤は自動では 1 度も
+            //    発火しない（プレイヤーが地点を指し、不可逆であることを確認して
+            //    初めて始まる）ので、既定 ON でも黙って地形が変わることはない。
+            VolcanoEnabled = new SavedBool("volcanoEnabled", FileName, true, true);
 
             _ready = true;
         }
