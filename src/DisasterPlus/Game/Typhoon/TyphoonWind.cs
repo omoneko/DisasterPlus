@@ -71,6 +71,28 @@ namespace DisasterPlus.Game
     /// 巻き戻すと中心が動くたびに 0 に戻り、**走査が 1 度も走らない**
     /// （②の第 2 層レビュー I3 がまさにこれ）。
     ///
+    /// ── 打ち切りの続きは、実際にはほぼ起きない（全体レビュー I1）──────────────
+    ///
+    /// <b>そしてその「持ち越し」は、動いている台風ではまず成立しない。</b>
+    /// <c>TyphoonTrack.SpeedFor</c> は進行速度を <c>[0.25, 6]</c> m/frame に
+    /// クランプし、走査の間隔は <see cref="IntervalFrames"/> ＝ 256 フレームぶんの
+    /// ゲーム内時間である。つまり眼は 1 走査のあいだに **64〜1536 m** 動く ——
+    /// グリッドのセルは 64 m なので、中心のセルはほぼ毎回変わり、
+    /// <see cref="_cursorOrdinal"/> は 0 に戻る。
+    ///
+    /// **したがって「上限で打ち切られた外縁が次の走査で続きから判定される」ことは
+    /// 起きない。** 次の走査はまた眼から始まり、内側のリングをもう一度舐める。
+    /// 診断ダンプはかつて「次の走査で続きから」と書いていたが、それは嘘だったので
+    /// 消した（パネルの文言はもともと続きに触れていない）。今の文言は
+    /// 「この走査では外縁まで届かなかった」だけを言う。
+    ///
+    /// 仕組みそのものは残してある。最低速度で斜めに進むと、稀に中心のセルが
+    /// 変わらない走査があり、そのときだけ本当に続きから走る。**上限は安全側に
+    /// 外す方向**（判定されない ＝ 倒れない）なので、これで害は無い。
+    /// リング半径で持ち越す形に変えることもできるが、それは「中心が動いても
+    /// 内側は再抽選しない」という別の挙動になるので、実機で挙動を見る前に
+    /// 入れ替えない。
+    ///
     /// ── 乱数にフレームを混ぜない ──────────────────────────────
     ///
     /// 選定は (台風 ID, 建物 ID) だけで決まる。混ぜると同じ建物が走査のたびに
@@ -212,8 +234,13 @@ namespace DisasterPlus.Game
         public static int LastAttempted { get { return _lastAttempted; } }
 
         /// <summary>
-        /// 直近 1 回で「バニラが設計上断る」と答えた棟数。
+        /// 直近 1 回で「バニラが設計上断る」と答えた棟数
+        /// （dry-run も本番も false ＝ 本当に壊れなかったもの）。
         /// **0 でないのは正常**（防災施設は台風で壊れない。§F-2）。
+        ///
+        /// ★ <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> はここに入らない。
+        ///   あれらは dry-run で false を返した直後に本物の倒壊を行うので
+        ///   （§F-2）、<see cref="LastCollapsed"/> にだけ積まれる。
         /// </summary>
         public static int LastRefused { get { return _lastRefused; } }
 
@@ -459,8 +486,17 @@ namespace DisasterPlus.Game
                             {
                                 selected++;
                                 bool accepted;
-                                if (Collapse(buildings, id, group, out accepted)) collapsed++;
-                                if (accepted) attempted++; else refused++;
+                                bool fell = Collapse(buildings, id, group, out accepted);
+
+                                // ★★ **倒れたものを「断られた」に数えない**（全体レビュー）。
+                                //    dry-run は診断専用で、PowerPoleAI / CableCarPylonAI は
+                                //    `if (testOnly) return false;` の直後に本物の倒壊を行う
+                                //    （§F-2）。以前はそれらを refused と collapsed の
+                                //    **両方**に積んでおり、診断の refused が
+                                //    「シェルター等が設計上断った数」を名乗れなくなっていた。
+                                if (fell) collapsed++;
+                                else if (accepted) attempted++;
+                                else refused++;
                             }
                         }
                     }
@@ -650,7 +686,10 @@ namespace DisasterPlus.Game
                 + " collapsed=" + collapsed
                 + " unknownHeight=" + unknownHeight
                 + (_treesUnavailable ? " trees=unavailable" : " trees=felled")
-                + (capped ? " (capped; resumes next pass)" : ""));
+                // ★ 「次回続きから」とは書かない（全体レビュー I1）。中心のセルが
+                //   変わると _cursorOrdinal は 0 に戻り、次の走査は眼から
+                //   やり直す —— 詳しくはクラス doc の「打ち切りの続き」節。
+                + (capped ? " (capped; the outer edge was not rolled this pass)" : ""));
         }
 
         private static float Distance(Vec2 centre, float x, float z)

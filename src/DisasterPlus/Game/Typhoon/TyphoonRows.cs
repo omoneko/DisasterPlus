@@ -24,23 +24,46 @@ namespace DisasterPlus.Game
     ///     バニラの実測値なので <c>Strings.SourceVanilla</c> を付ける
     ///     （<see cref="AddMeasuredRow"/> / <see cref="SetMeasured"/>）
     ///
-    /// ── 機械的に確認できる担保（grep 4 本）──────────────────────
+    /// ── 機械的に確認できる担保（grep 5 本）──────────────────────
     ///
-    ///   1. <c>AddUIComponent(typeof(UILabel))</c> が現れるのは <see cref="AddLabel"/> の
-    ///      1 箇所だけ。行を作れるのは <see cref="AddTitleRow"/> /
-    ///      <see cref="AddSectionHeader"/> / <see cref="AddRow(UIPanel,string,ref float)"/> /
-    ///      <see cref="AddRow(UIPanel,string,ref float,float)"/> /
-    ///      <see cref="AddMeasuredRow"/> の 5 系統だけ
-    ///   2. <c>UILabel.text</c> への代入が現れるのは <see cref="SetPlain"/> の 1 箇所だけ
-    ///   3. <c>Strings.SourceVanilla</c> が現れるのは <see cref="SetMeasured"/> の中だけ。
-    ///      **接頭辞は呼び出し側に選ばせない**
-    ///   4. <c>Strings.SourceModel</c> は <b>Game/Typhoon/ と Game/UI/TyphoonPanelButton.cs
-    ///      に 1 度も現れてはいけない</b>
+    /// ★ **コマンドと件数は実際に走らせて合わせてある**（全体レビュー）。
+    ///   以前ここに書いてあった手順は、素朴に grep すると doc コメント自身に当たり、
+    ///   書いてある件数と一致しなかった —— 規則の文が規則の反例になっていた
+    ///   （<c>Strings.SourceModel</c> が「1 度も現れてはいけない」と書いてある行に
+    ///   <c>Strings.SourceModel</c> と書いてあった）。**合わない手順は、レビューする人に
+    ///   ヒットを手で読み飛ばす癖を付けさせる**ので、コメント行を除く形で書き直した。
+    ///   以下はすべてリポジトリのルートから走らせる。
+    ///
+    /// <code>
+    /// # 対象は④の表示コード全部（Game/Typhoon/ と台風ボタン）。
+    /// #   T=  'src/DisasterPlus/Game/Typhoon src/DisasterPlus/Game/UI/TyphoonPanelButton.cs'
+    /// #   grep -v '///' で doc コメントを落とす（この doc 自身が引っかかるため）。
+    ///
+    /// # 1. UILabel を作るのは AddLabel の 1 箇所だけ                        -> 1
+    /// grep -rn --include=*.cs "AddUIComponent(typeof(UILabel))" $T | grep -v '///' | wc -l
+    ///
+    /// # 2. UILabel.text へ代入するのは SetPlain の 1 箇所だけ               -> 1
+    /// grep -rn --include=*.cs "label.text = " $T | grep -v '///' | wc -l
+    ///
+    /// # 3. Strings.SourceVanilla を参照するのはこのファイルの 2 箇所だけ    -> 2
+    /// #    （SetMeasured と SetModelNote。どちらも TyphoonRows.cs）
+    /// grep -rn --include=*.cs "Strings.SourceVanilla" $T | grep -v '///'
+    ///
+    /// # 4. Strings.SourceModel は 1 度も現れない                            -> 0
+    /// grep -rn --include=*.cs "Strings.SourceModel" $T | grep -v '///' | wc -l
+    ///
+    /// # 5. SetMeasured の呼び出しは雨量と雲量の 2 行だけ                    -> 2
+    /// grep -rn --include=*.cs "TyphoonRows.SetMeasured(" $T | grep -v '///' | wc -l
+    /// </code>
+    ///
+    /// 行を作れるのは <see cref="AddTitleRow"/> / <see cref="AddSectionHeader"/> /
+    /// <see cref="AddRow(UIPanel,string,ref float)"/> /
+    /// <see cref="AddRow(UIPanel,string,ref float,float)"/> /
+    /// <see cref="AddMeasuredRow"/> の 5 系統だけである。
     ///
     /// <see cref="SetMeasured"/> を呼んでよいのは<b>雨量と雲量の 2 行だけ</b>である。
-    /// それ以外の行が <c>[measured]</c> を名乗ったら、それは④が「バニラが計算した」と
-    /// 嘘をついている。レビューは <c>SetMeasured</c> の**呼び出し箇所を数える**
-    /// （定義 1 ＋ 雨量 ＋ 雲量 ＝ 3 件）。
+    /// それ以外の行が実測の印を名乗ったら、それは④が「バニラが計算した」と
+    /// 嘘をついている。
     ///
     /// **②の <see cref="EarthquakeRows"/> を流用しない理由。** あちらは
     /// <c>SetLayer1</c> / <c>SetLayer2</c> という④が使ってはいけない 2 つの接頭辞を

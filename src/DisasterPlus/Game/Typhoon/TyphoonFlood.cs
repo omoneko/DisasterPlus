@@ -199,9 +199,19 @@ namespace DisasterPlus.Game
         private static readonly Dictionary<ushort, TyphoonFloodedSource> _raised =
             new Dictionary<ushort, TyphoonFloodedSource>();
 
-        /// <summary>この走査で範囲内だったハンドル（範囲外に出たものを外すのに使う）。
-        /// **毎 tick 作らない**ので使い回す。</summary>
-        private static readonly List<ushort> _inRange = new List<ushort>();
+        /// <summary>
+        /// この走査で範囲内だったハンドル（範囲外に出たものを外すのに使う）。
+        /// **毎 tick 作らない**ので使い回す。
+        ///
+        /// ★ <c>List</c> ではなく <c>HashSet</c>（全体レビュー）。
+        ///   <see cref="DropOutOfRange"/> は台帳の全要素について「今回の範囲内か」を
+        ///   引くので、List だと <c>Contains</c> が線形走査になり
+        ///   **台帳 × 範囲内の掛け算**になる。台帳は大きな川のあるマップでは
+        ///   水源の数ぶんまで育ちうるので、256 フレームに 1 回とはいえ
+        ///   ここを O(n^2) のまま置かない。.NET 3.5 に HashSet&lt;T&gt; はある
+        ///   （System.Core）。
+        /// </summary>
+        private static readonly HashSet<ushort> _inRange = new HashSet<ushort>();
 
         /// <summary>台帳から外すハンドルの作業用。毎回 <c>Clear()</c> して使い回す。</summary>
         private static readonly List<ushort> _toDrop = new List<ushort>();
@@ -435,6 +445,7 @@ namespace DisasterPlus.Game
             _toDrop.Clear();
             foreach (var entry in _raised)
             {
+                // HashSet なので 1 件あたり定数時間（_inRange の doc）。
                 if (!_inRange.Contains(entry.Key)) _toDrop.Add(entry.Key);
             }
 

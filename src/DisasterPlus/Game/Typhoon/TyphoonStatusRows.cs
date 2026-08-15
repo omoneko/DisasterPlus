@@ -187,7 +187,10 @@ namespace DisasterPlus.Game
             if (s.OverLand) body = Strings.TyphoonLandfallNow;
             else if (s.LandfallKnown)
             {
-                body = s.MinutesToLandfall.ToString("F1") + " " + Strings.TyphoonMinutes;
+                // ★ F0。上陸フレームの推定は 256 フレーム（ゲーム内でおよそ 5.6 分）
+                //   刻みでしか打っていないので、0.1 分は持っていない精度である
+                //   （全体レビュー。TyphoonController.LandfallStepFrames の doc）。
+                body = s.MinutesToLandfall.ToString("F0") + " " + Strings.TyphoonMinutes;
             }
             else body = Strings.TyphoonNoLandfall;
 

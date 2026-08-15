@@ -76,12 +76,21 @@ namespace DisasterPlus.Game
     /// <c>TyphoonFeature.OnMainThreadUpdate</c> が毎フレーム <see cref="Update"/> を呼び、
     /// **スナップショットが <c>Active == false</c> になったフレームで自分で後始末する**。
     ///
+    /// ── これは「渦の記号」であって空を覆う雲ではない（全体レビューの記録）──────
+    ///
+    /// 実物の台風の雲は数十 km に広がるが、④が描くのは**半径およそ 900 m の
+    /// 平らな渦巻き 1 枚**である。眼の上に「渦がある」ことが読める記号として置いて
+    /// あり、空を埋める雲ではない。空全体を重くするのは
+    /// <see cref="ApplyVanillaBoost"/> の担当で、それも環境によっては効かない。
+    /// **画面写真を見て「思ったより小さい」と驚かないこと。** この判断は
+    /// 設計書 §4.5 と実機チェックリストにも書いてある（今回のレビューで拡大はしない）。
+    ///
     /// ── 毎フレームの費用 ─────────────────────────────────
     ///
-    /// <c>Graphics.DrawMesh</c> **1 回**（2304 頂点 / 4560 三角形）と
+    /// <c>Graphics.DrawMesh</c> **1 回**（2304 頂点 / 4560 三角形、影は落とさず受けない）と
     /// <c>Matrix4x4.TRS</c> 1 個、バニラ雲の増強が有効なときは float 3 本の書き込みだけ。
     /// **ヒープ確保は 0 バイト**（<c>Matrix4x4</c> / <c>Quaternion</c> / <c>Vector3</c> は
-    /// いずれも struct、メッシュとマテリアルは都市ごとに 1 回だけ作る）。
+    /// いずれも struct、メッシュ・マテリアル・テクスチャは都市ごとに 1 回だけ作る）。
     /// </summary>
     public static class TyphoonCloud
     {
@@ -115,9 +124,31 @@ namespace DisasterPlus.Game
         /// <c>Resources.FindObjectsOfTypeAll</c> は確保と全走査を伴うので毎フレームは回さない。</summary>
         private const int BoostRetryFrames = 300;
 
+        /// <summary>シェーダを探し直すまでに空けるフレーム数（<see cref="_shaderMissCount"/>）。
+        /// <see cref="BoostRetryFrames"/> と同じ間引きで、理由も同じである。</summary>
+        private const int ShaderRetryFrames = 300;
+
         // ★ 配列にしない（罠 2）。参照 1 個ずつで持ち、fake-null の自己修復を効かせる。
         private static Mesh _mesh;
         private static Material _material;
+
+        /// <summary>リボンの縁を落とすアルファ（<c>CloudBandAlpha</c>）。
+        /// <c>Mesh</c> / <c>Material</c> と同じく <c>Component</c> ではないので
+        /// <see cref="Destroy"/> が自分で <c>Object.Destroy</c> する。</summary>
+        private static Texture2D _texture;
+
+        /// <summary>
+        /// シェーダが 1 つも解決しなかったとき、次に <c>Shader.Find</c> を
+        /// 試すまでに空けるフレーム数の残り（全体レビュー）。
+        ///
+        /// <c>BuildMaterial</c> はマテリアルが作れない限り**毎フレーム**呼ばれるので、
+        /// 素直に書くと 4 回の <c>Shader.Find</c> がセッションのあいだ毎フレーム走る。
+        /// <c>Log.Warn</c> のほうは 1 回だけにラッチしてあったが、**探索自体には
+        /// 同じ間引きが掛かっていなかった** —— 同じファイルの
+        /// <see cref="ApplyVanillaBoost"/> が既に <see cref="BoostRetryFrames"/> で
+        /// やっていることを、こちらに写し忘れていた。
+        /// </summary>
+        private static int _shaderMissCount;
 
         private static TyphoonCloudState _state = TyphoonCloudState.Off;
         private static float _spinDegrees;
@@ -213,8 +244,16 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            _spinDegrees += SpinDegreesPerSecond * Time.deltaTime;
-            if (_spinDegrees >= 360f) _spinDegrees -= 360f;
+            // ★ ポーズ中は回さない（全体レビュー）。ここは main スレッドの
+            //   毎フレーム経路なので Time.deltaTime はポーズしても進み続ける ——
+            //   何も動いていない都市の上で雲だけが回っていた。
+            //   SimulationManager.SimulationPaused は bool のプロパティで、
+            //   main スレッドから読んでよい（②の CameraShakeBooster と同じ扱い）。
+            if (!SimulationIsPaused())
+            {
+                _spinDegrees += SpinDegreesPerSecond * Time.deltaTime;
+                if (_spinDegrees >= 360f) _spinDegrees -= 360f;
+            }
 
             Vec3 centre = snapshot.Centre;
             float altitude = centre.Y + MinClearanceMetres;
@@ -227,7 +266,19 @@ namespace DisasterPlus.Game
             var rotation = Quaternion.AngleAxis(_spinDegrees, Vector3.up);
             var matrix = Matrix4x4.TRS(position, rotation, new Vector3(scale, 1f, scale));
 
-            Graphics.DrawMesh(_mesh, matrix, _material, CloudLayer);
+            // ★ 影を落とさない・受けない（全体レビュー）。4 引数版は
+            //   castShadows: true / receiveShadows: true を転送するので、
+            //   **900 m 上空の半透明な渦（4560 三角形）が影のパスに入り**、
+            //   都市に渦巻きの影を落としうる。雲は演出であって遮蔽物ではない。
+            //   camera は null のまま（＝全カメラ）にする —— CS はゲーム内カメラの
+            //   ほかにマップ編集や写真モードでも世界を描くので、1 台に絞ると
+            //   そこだけ雲が消える。
+            Graphics.DrawMesh(_mesh, matrix, _material, CloudLayer,
+                              null,     // camera: 全カメラ
+                              0,        // submeshIndex
+                              null,     // MaterialPropertyBlock
+                              false,    // castShadows
+                              false);   // receiveShadows
 
             _state = TyphoonCloudState.Drawing;
             _lastDrawCalls = 1;
@@ -276,6 +327,14 @@ namespace DisasterPlus.Game
         /// </summary>
         private static Material BuildMaterial()
         {
+            // ★ 毎フレーム探しに行かない（_shaderMissCount の doc）。
+            if (_shaderMissCount > 0)
+            {
+                _shaderMissCount--;
+                _state = TyphoonCloudState.ShaderMissing;
+                return null;
+            }
+
             Shader s = FindShader();
             if (s == null)
             {
@@ -289,12 +348,21 @@ namespace DisasterPlus.Game
                              + "(Disaster + does not borrow a Cities material - that renders "
                              + "invisible or black in a hand-rolled DrawMesh)");
                 }
+                _shaderMissCount = ShaderRetryFrames;
                 _state = TyphoonCloudState.ShaderMissing;
                 return null;
             }
 
             var m = new Material(s);
             m.name = "DisasterPlus_TyphoonCloud";
+
+            // ★ リボンの縁を落とすテクスチャ。UV は SpiralMesh が出しているのに
+            //   _MainTex を 1 度も割り当てていなかった（全体レビュー）＝ UV は
+            //   死んだデータで、縁の硬いべた塗りが出ていた。
+            //   **色は入れない**（白 × ティント ＝ ティント）。作れなければ
+            //   割り当てないだけで、今までと同じ見え方に落ちる。
+            if (_texture == null) _texture = BuildTexture();
+            if (_texture != null && m.HasProperty("_MainTex")) m.SetTexture("_MainTex", _texture);
 
             // 嵐雲の色。粒子系シェーダのティントは _TintColor、Standard は _Color
             // （③が確定させた区別。FireWhirlFlameFx の doc）。**効かないほうを
@@ -328,6 +396,64 @@ namespace DisasterPlus.Game
 
             s = Shader.Find("Standard");
             return s != null ? s : null;
+        }
+
+        /// <summary>
+        /// リボンの縁を落とすアルファのテクスチャを 1 枚作る。都市ごとに 1 回だけ。
+        ///
+        /// **RGB は白**（色はマテリアルのティントが持つ。<c>CloudBandAlpha</c> の doc）。
+        /// <c>TextureFormat.Alpha8</c> にしないのは、粒子系シェーダが RGB も掛けるため
+        /// 環境によっては**真っ黒**になりうるからである。作れなければ null を返し、
+        /// 呼び出し側は <c>_MainTex</c> を割り当てない（＝これまでどおりの見え方）。
+        /// </summary>
+        private static Texture2D BuildTexture()
+        {
+            try
+            {
+                int size = DisasterPlus.Core.Typhoon.CloudBandAlpha.Size;
+                var alpha = new byte[size * size];
+                DisasterPlus.Core.Typhoon.CloudBandAlpha.Build(alpha);
+
+                var pixels = new Color32[alpha.Length];
+                for (int i = 0; i < alpha.Length; i++)
+                {
+                    pixels[i] = new Color32(255, 255, 255, alpha[i]);
+                }
+
+                var t = new Texture2D(size, size, TextureFormat.RGBA32, false);
+                t.name = "DisasterPlus_TyphoonCloudBand";
+                // u は腕に沿った 1 本ぶん、v はリボンを横切る 1 本ぶんしか無いので
+                // どちらも繰り返さない。縁の 0 を折り返さないためにも Clamp である。
+                t.wrapMode = TextureWrapMode.Clamp;
+                t.filterMode = FilterMode.Bilinear;
+                t.SetPixels32(pixels);
+                t.Apply(false, false);
+                return t;
+            }
+            catch
+            {
+                // ここで諦めても雲は出る（縁が硬くなるだけ）。毎フレームの経路では
+                // ないが、ログは出さない —— 失敗しても機能は落ちない。
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// シミュレーションが止まっているか。読めなければ「止まっていない」に倒す
+        /// （雲が回らないより、ポーズ中に回るほうが害が小さい……のではなく、
+        ///  読めない環境で雲が永久に静止するのを避けるため）。
+        /// </summary>
+        private static bool SimulationIsPaused()
+        {
+            try
+            {
+                if (!ColossalFramework.Singleton<SimulationManager>.exists) return false;
+                return ColossalFramework.Singleton<SimulationManager>.instance.SimulationPaused;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -450,8 +576,14 @@ namespace DisasterPlus.Game
             if (_material != null) Object.Destroy(_material);
             _material = null;
 
+            // ★ Texture2D も Component ではない（Mesh / Material と同じ。②が
+            //   WaveformView の Texture2D で踏んだのと同じ形のリーク）。
+            if (_texture != null) Object.Destroy(_texture);
+            _texture = null;
+
             _clouds = null;
             _boostMissCount = 0;
+            _shaderMissCount = 0;
             _state = TyphoonCloudState.Off;
             _spinDegrees = 0f;
             _lastDrawCalls = 0;

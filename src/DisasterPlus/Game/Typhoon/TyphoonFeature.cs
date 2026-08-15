@@ -306,10 +306,15 @@ namespace DisasterPlus.Game
                                 + " m / gale " + snapshot.GaleRadius.ToString("F0") + " m");
 
             // 「読めなかった」と「0 分後」を混ぜない。
+            // ★ 桁を主張しすぎない（全体レビュー）。上陸フレームの推定は
+            //   256 フレーム刻み（LandfallStepFrames ≒ ゲーム内 5.6 分）でしか
+            //   打っていないので、F1（0.1 分）は持っていない精度である。
             b.Line(2, "landfall", snapshot.OverLand
                 ? "already over land"
                 : (snapshot.LandfallKnown
-                    ? "in " + snapshot.MinutesToLandfall.ToString("F1") + " in-game minutes"
+                    ? "in about " + snapshot.MinutesToLandfall.ToString("F0")
+                      + " in-game minutes (sampled every "
+                      + TyphoonController.LandfallStepMinutesText() + ")"
                     : "not within the forecast window (it may pass over water only)"));
 
             b.Line(2, "over land", snapshot.OverLand ? "yes" : "no");
@@ -492,11 +497,16 @@ namespace DisasterPlus.Game
                 + " / strength " + strength);
 
             // 「壊れていない」と「壊せない」を取り違えさせない（§F-2）。
+            // ★ 送電柱・索道の支柱はここに入らない（全体レビュー）。あれらは
+            //   dry-run で false を返した直後に本物の倒壊を行うので、collapsed に
+            //   だけ積まれる。以前はこの行が refused を丸ごと防災施設に帰していた。
             b.Line(3, "refused", snapshot.WindLastRefused == 0
                 ? "0"
                 : snapshot.WindLastRefused
                   + " (shelters / vaults / dams / decoration / tsunami buoys refuse "
-                  + "demolish:false; that is the game answering correctly, not a failure)");
+                  + "demolish:false; that is the game answering correctly, not a failure. "
+                  + "Power poles and cable-car pylons are NOT counted here - they refuse the "
+                  + "dry run and then collapse anyway, so they land in 'collapsed')");
 
             // 高さは係数であって足切りではない（②の長周期と判断が違う）。
             b.Line(3, "unknown height", snapshot.WindLastUnknownHeight == 0
@@ -507,9 +517,15 @@ namespace DisasterPlus.Game
 
             if (snapshot.WindLastCapped)
             {
+                // ★ 「次の走査で続きから」とは書かない（全体レビュー I1）。
+                //   眼は 1 走査（256 フレーム）のあいだに 64〜1536 m 動き、
+                //   グリッドのセルは 64 m なので、中心のセルはほぼ毎回変わって
+                //   走査位置は 0 に戻る。**次の走査もまた眼から始まる。**
+                //   打ち切りは安全側（判定しない ＝ 倒さない）に外れる。
                 b.Line(3, "capped",
-                    "the sweep was truncated this pass; the outer edge has not been rolled yet "
-                    + "and resumes next pass");
+                    "the sweep was truncated this pass, so the outer edge was not rolled. It "
+                    + "does NOT resume where it stopped: the eye moves 64-1536 m per pass "
+                    + "against a 64 m grid, so the next pass restarts at the eye");
             }
         }
 

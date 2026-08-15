@@ -57,7 +57,16 @@ namespace DisasterPlus.Game
         /// <summary>上陸予測の先読みサンプル数の上限（計画 §3.6）。</summary>
         private const int LandfallSamples = 64;
 
-        /// <summary>上陸予測のサンプル間隔（フレーム）。</summary>
+        /// <summary>
+        /// 上陸予測のサンプル間隔（フレーム）。
+        ///
+        /// ★ **これが予測の粒度そのものである。** 256 フレーム ＝ ゲーム内でおよそ
+        ///   5.6 分なので、<see cref="MinutesToLandfall"/> の実際の分解能は
+        ///   「約 5.6 分」であって「0.1 分」ではない。値そのものは
+        ///   （経路が閉じた式なので）安定して単調に減るが、**持っていない精度を
+        ///   表示で主張しない** —— 表示は F0 に丸め、刻みを
+        ///   <see cref="LandfallStepMinutesText"/> で名乗る（全体レビュー）。
+        /// </summary>
         private const uint LandfallStepFrames = 256u;
 
         /// <summary>
@@ -154,8 +163,22 @@ namespace DisasterPlus.Game
         /// 海上を通過する（か、先読みの範囲に陸が無い）」である。** 0 と混ぜないこと。</summary>
         public static bool LandfallKnown { get { return _landfallKnown; } }
 
-        /// <summary>上陸までのゲーム内分。<see cref="LandfallKnown"/> が true のときだけ意味を持つ。</summary>
+        /// <summary>上陸までのゲーム内分。<see cref="LandfallKnown"/> が true のときだけ意味を持つ。
+        /// **分解能は <see cref="LandfallStepFrames"/> 刻み**（その doc）。</summary>
         public static float MinutesToLandfall { get; private set; }
+
+        /// <summary>
+        /// 上陸予測の刻み（ゲーム内分）を人が読める形で。表示側が
+        /// 「この数字はこれくらいの粒度でしか打っていない」と名乗るために使う。
+        /// <c>FramesPerMinute</c> が読めなければフレーム数のまま名乗る
+        /// （推測した分に換算しない）。
+        /// </summary>
+        public static string LandfallStepMinutesText()
+        {
+            float framesPerMinute = FeatureHost.FramesPerMinute;
+            if (framesPerMinute <= 0f) return LandfallStepFrames + " frames";
+            return (LandfallStepFrames / framesPerMinute).ToString("F1") + " in-game minutes";
+        }
 
         /// <summary>
         /// 直近で台風を起こせなかった／手放した理由（英語、診断用）。
