@@ -149,10 +149,48 @@ namespace DisasterPlus.Game
         /// <summary>確認の直前に設定が変わったので調べ直したか。</summary>
         public readonly bool SettingsChanged;
 
+        // ── T5（準備）が足した 7 つ ────────────────────────────────
+
+        /// <summary>
+        /// 準備の走査が届いた半径（m）。**T6 が隆起してよい半径そのもの**である
+        /// （<c>VolcanoClearing.ClearedRadiusMetres</c>）。**表示専用のコピーであり、
+        /// T6 はこれではなく sim 側の static を読むこと**（スナップショットは
+        /// 設計上 1 tick 遅れる）。
+        /// </summary>
+        public readonly float ClearedRadiusMetres;
+
+        /// <summary>準備が山の半径まで届いたか。</summary>
+        public readonly bool ClearingComplete;
+
+        /// <summary>この火山でこれまでに取り除いた建物数。</summary>
+        public readonly int BuildingsDestroyed;
+
+        /// <summary>この火山でこれまでに取り除いた道路セグメント数。</summary>
+        public readonly int SegmentsDestroyed;
+
+        /// <summary>
+        /// 直近の走査でバニラが取り除きを断った建物数。**0 でないのは異常ではない**が、
+        /// その足元だけは地形が元の高さに残る（<c>VolcanoClearing</c> のクラス doc）。
+        /// </summary>
+        public readonly int BuildingsRefused;
+
+        /// <summary>直近の走査が 1 回ぶんの上限で打ち切られたか。</summary>
+        public readonly bool ClearingCapped;
+
+        /// <summary>
+        /// 道路を取り除く経路がこのゲームのビルドで成立するか。
+        /// **false なら⑤は火山を 1 つも作らない**（設計書 §1.2）。
+        /// </summary>
+        public readonly bool RoadPathAvailable;
+
         public VolcanoSnapshot(bool valid, VolcanoTerrainFacts terrain,
                                uint currentFrame, bool gameMode,
                                VolcanoPhase phase, VolcanoFootprint footprint,
-                               float progressUnit, string refusal, bool settingsChanged)
+                               float progressUnit, string refusal, bool settingsChanged,
+                               float clearedRadiusMetres, bool clearingComplete,
+                               int buildingsDestroyed, int segmentsDestroyed,
+                               int buildingsRefused, bool clearingCapped,
+                               bool roadPathAvailable)
         {
             Valid = valid;
             Terrain = terrain;
@@ -163,13 +201,28 @@ namespace DisasterPlus.Game
             ProgressUnit = progressUnit;
             Refusal = refusal;
             SettingsChanged = settingsChanged;
+            ClearedRadiusMetres = clearedRadiusMetres;
+            ClearingComplete = clearingComplete;
+            BuildingsDestroyed = buildingsDestroyed;
+            SegmentsDestroyed = segmentsDestroyed;
+            BuildingsRefused = buildingsRefused;
+            ClearingCapped = clearingCapped;
+            RoadPathAvailable = roadPathAvailable;
         }
 
-        /// <summary>読み取りに失敗したときの 1 個。**0 を並べた「それらしい」値を作らない。**</summary>
+        /// <summary>
+        /// 読み取りに失敗したときの 1 個。**0 を並べた「それらしい」値を作らない。**
+        ///
+        /// ★ <see cref="RoadPathAvailable"/> だけ <b>true</b> を入れる。ここが false だと
+        /// パネルは「道路を取り除けないので火山は作りません」という**確定的な断り**を
+        /// 出すが、この 1 個が言えるのは「今回の読み取りが失敗した」だけである。
+        /// 読めなかったことを、測って分かった結論として名乗らない。
+        /// </summary>
         public static VolcanoSnapshot Invalid()
         {
             return new VolcanoSnapshot(false, new VolcanoTerrainFacts(), 0u, true,
-                                       VolcanoPhase.Idle, VolcanoFootprint.None, 0f, null, false);
+                                       VolcanoPhase.Idle, VolcanoFootprint.None, 0f, null, false,
+                                       0f, false, 0, 0, 0, false, true);
         }
     }
 }

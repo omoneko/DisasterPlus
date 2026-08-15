@@ -38,7 +38,7 @@ namespace DisasterPlus.Game
     public static partial class Assumptions
     {
         /// <summary>このファイルが持つ検証の数。</summary>
-        private const int VolcanoCheckCount = 3;
+        private const int VolcanoCheckCount = 4;
 
         private static void RunVolcano()
         {
@@ -101,6 +101,40 @@ namespace DisasterPlus.Game
                   delegate { return facts.SlopeSampleResolved; });
 
             // --- ⑤火山（Task 2: 地形 API）ここまで ---
+
+            // --- ⑤火山（Task 5: 準備の破壊経路）ここから ---
+
+            // 4. 破壊経路。**述語は VolcanoClearing が実際に門にしている式そのもの**
+            //   （VolcanoDestructionFacts.Usable）である。「フィールドが解決した」を
+            //   述語にすると、経路が使えない環境で PASS が出る（④のレビューと
+            //   ②の監査が同じ欠陥を見つけている）。
+            //
+            //   ★ この検査が FAIL なら⑤は火山を 1 つも作らない。**degraded ではない** ——
+            //     準備せずに地面を上げるのは劣化した動作ではなく、設計書 §1.2 が
+            //     発見した失敗そのものだからである。
+            //
+            //   ScanFacts はキャッシュを触らない純粋な走査なので main スレッドから
+            //   呼んでよい（あちらのクラス doc）。Check の外で例外を抑えるのは
+            //   上の 3 件と同じ理由（Run はレベルロードから素で呼ばれている）。
+            VolcanoDestructionFacts destruction;
+            try
+            {
+                destruction = VolcanoClearing.ScanFacts();
+            }
+            catch
+            {
+                destruction = new VolcanoDestructionFacts();
+            }
+
+            Check("BuildingAI.CollapseBuilding is resolvable and a road destruction path "
+                  + "(NetAI.CollapseSegment / NetManager.ReleaseSegment) is reachable",
+                  "the volcano refuses to start. Raising the ground without clearing it first "
+                  + "is not a degraded mode: the game pins the terrain back to the height of "
+                  + "every road and building on every update, so the mountain would come out "
+                  + "full of flat trenches and bowls",
+                  delegate { return destruction.Usable; });
+
+            // --- ⑤火山（Task 5: 準備の破壊経路）ここまで ---
         }
     }
 }

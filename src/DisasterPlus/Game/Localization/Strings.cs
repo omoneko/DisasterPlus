@@ -876,5 +876,38 @@ namespace DisasterPlus.Game
         public static string VolcanoShapeSetting = "Volcano shape";
         public static string VolcanoRadiusSetting = "Volcano radius (m)";
         public static string VolcanoHeightSetting = "Volcano final height (m)";
+
+        // --- ⑤火山（Task 5: 準備 — 道路と建物の段階的破壊） ---
+        //
+        // ★ ここの行にも [measured] は付かない。走査した半径も壊した数も
+        //   **⑤が自分で数えた実績**であって、ゲームが計算した値ではない
+        //   （設計書 §7.4。確認の 3 行だけが例外で、それは T4 の節にある）。
+        public static string VolcanoClearingRow = "Clearing";
+        public static string VolcanoClearedRadius = "Radius swept";
+        public static string VolcanoBuildingsDestroyed = "Buildings destroyed";
+        public static string VolcanoSegmentsDestroyed = "Roads destroyed";
+
+        // ★ 計画の文言から**内容を変えてある**。計画は「シェルター・地下保管庫・ダムは
+        //   壊せません」と書いていたが、それは④が demolish:false のときの挙動しか
+        //   読んでいなかったためで、T5 Step 1 の IL 実測では
+        //   ShelterAI / DoomsdayVaultAI / DamPowerHouseAI / DecorationBuildingAI /
+        //   TsunamiBuoyAI の 5 つとも **demolish:true は受け付ける**
+        //   （VolcanoClearing のクラス doc の 4）。名指しすると嘘になるので、
+        //   「断られたものがあれば」という条件つきの一般形にしてある。
+        public static string VolcanoClearingRefusedRow = "Could not be removed";
+        public static string VolcanoClearingRefusedNote =
+            "Some of these the game itself refuses to remove. The ground under those stays at "
+            + "its original height while the rest of the mountain rises around them, and that "
+            + "is the game refusing rather than Disaster + failing.";
+
+        // ★ 設計書 §1.2 そのもの。**「道路だけ諦めて隆起する」を選ばない**理由を書く。
+        public static string VolcanoRoadPathUnavailable =
+            "Disaster + could not find a way to remove roads in this build of the game, so it "
+            + "will not build a volcano at all. Raising the ground without removing the roads "
+            + "first does not work - the game pins the terrain back to each road's height on "
+            + "every update, and the mountain would come out full of flat trenches.";
+
+        public static string VolcanoClearingLead =
+            "How far the clearing runs ahead of the uplift (m)";
     }
 }

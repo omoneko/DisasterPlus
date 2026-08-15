@@ -156,6 +156,9 @@ namespace DisasterPlus.Game
             _footprint = VolcanoFootprint.None;
             _lastRefusal = null;
             _settingsChanged = false;
+            // 準備の実績も持ち越さない。**進行中の火山は保存しない**ので、
+            // 都市を出入りすると準備は 0 からになる（地形はそのままの形で残る）。
+            VolcanoClearing.Reset();
         }
 
         /// <summary>
@@ -207,8 +210,39 @@ namespace DisasterPlus.Game
                     break;
             }
 
-            // T5〜T8 が位相ごとの処理をここに足す。**実処理はこのファイルに書かず、
-            // VolcanoClearing / VolcanoUplift / VolcanoLava に置くこと**（800 行の規則）。
+            StepPhase(deltaMinutes);
+        }
+
+        /// <summary>
+        /// 位相ごとの前進。**実処理はこのファイルに書かない** ——
+        /// <see cref="VolcanoClearing"/> / <c>VolcanoUplift</c> / <c>VolcanoLava</c> に置く
+        /// （800 行の規則）。ここに書いてよいのは「どれをどの順で呼ぶか」だけである。
+        ///
+        /// ★★ <b>準備 → 隆起の順序は、ここでしか壊れない。</b> 順序を入れ替えると
+        /// 道路と建物が毎フラッシュ地形を押し戻して、山の中に平らな溝とすり鉢が残る
+        /// （設計書 §1.2 / §A-2）。型の側の担保は
+        /// <c>UpliftSchedule.ActiveRadiusMetres(R, VolcanoClearing.ClearedRadiusMetres)</c> で、
+        /// 準備が届いていなければ 0 が返る。
+        /// </summary>
+        private static void StepPhase(float deltaMinutes)
+        {
+            if (_phase != VolcanoPhase.Clearing) return;
+            if (!_footprint.Valid) return;
+
+            // 隆起はまだ 1 度も動いていないので進捗は 0。前線は
+            // ModSettings.VolcanoClearingLeadMetres のぶんだけ先へ出る。
+            VolcanoClearing.Tick(_footprint, 0f, deltaMinutes);
+
+            if (!VolcanoClearing.FrontReached) return;
+
+            // ★ 最初の前線まで届いた。ここから先は隆起が進捗を持ち、準備はその前を
+            //   走る（ring lockstep）。**T6 が入るまで隆起は動かない**ので、
+            //   ⑤はこの位相に入ったまま止まる —— T4 が Clearing で止めていたのと同じ扱いで、
+            //   途中で止まっていることが位相と診断から見える形にしてある。
+            _phase = VolcanoPhase.Uplifting;
+            Log.Info("volcano clearing reached its first front ("
+                     + VolcanoClearing.ClearedRadiusMetres.ToString("F0")
+                     + " m); the uplift starts when T6 lands");
         }
 
         /// <summary>
@@ -258,14 +292,27 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            // ★★ **道路を取り除く経路が無い環境では、1 本も壊さずにここで断る**
+            //    （設計書 §1.2 / T5 Step 1）。「道路だけ諦めて隆起する」は選ばない ——
+            //    それは §1.2 が発見した失敗（山の中の平らな溝）を、分かったうえで
+            //    出荷することになる。**判定は着手の直前に、破壊より先に置く。**
+            if (!VolcanoClearing.RoadPathAvailable)
+            {
+                _settingsChanged = false;
+                _phase = VolcanoPhase.Refused;
+                _lastRefusal = "no usable road destruction path; raising the ground would leave "
+                               + "flat trenches where the roads are";
+                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Volcano, "VolcState",
+                         _lastRefusal);
+                return;
+            }
+
             _settingsChanged = false;
             _lastRefusal = null;
             // ★ ここから先が「壊す」である。T5 の VolcanoClearing がこの位相を動かす。
-            //   **T4 の時点では、この位相に入ったまま何も起きないのが正しい**
-            //   （このタスクは「数えて、見せて、訊く」までで、壊すのは T5）。
             _phase = VolcanoPhase.Clearing;
             Log.Info("volcano confirmed at (" + _footprint.Centre.X.ToString("F0") + ","
-                     + _footprint.Centre.Z.ToString("F0") + "); clearing starts when T5 lands");
+                     + _footprint.Centre.Z.ToString("F0") + "); clearing starts now");
         }
 
         /// <summary>確認を閉じる。**何も起きずに <see cref="VolcanoPhase.Idle"/> へ戻る。**</summary>
@@ -293,6 +340,9 @@ namespace DisasterPlus.Game
             _phase = VolcanoPhase.Idle;
             _footprint = VolcanoFootprint.None;
             _settingsChanged = false;
+            // ★ 準備の実績も畳む。**既に壊した建物と道路は戻らない**（不可逆）。
+            //   畳まないと、次に開いたパネルが前の火山の破壊数を名乗る。
+            VolcanoClearing.Reset();
             _lastRefusal = "stopped by the player; the terrain that already changed stays changed";
         }
 

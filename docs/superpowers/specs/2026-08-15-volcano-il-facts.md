@@ -34,6 +34,7 @@
 | E14 | NDR との衝突 | **CONFIRMED（衝突しない）** | ⑤が使う `MakeCrater` / `TerrainModify` / `TerrainManager` / `BurnGround` / `BurnBuilding` は NDR のパッチ面（`DisasterHelpers.DestroyBuildings` / `DestroyNetSegments`）を**一切通らない** |
 
 | F15 | 道路セグメントのグリッド | **CONFIRMED（建物と同じ形）** | `NetManager.m_segmentGrid` は `ushort[72900]`（= 270²）。セル 64 m・オフセット +135・`[0,269]` クランプ・`index = z*270 + x` で、**建物グリッドと完全に同じ寸法**。鎖は `NetSegment.m_nextGridSegment`（`ushort`）。ただし**セルを決める位置は両端ノードの中点**であって `m_middlePosition` ではない（→ §F-15） |
+| G16 | 準備段の破壊経路 | **CONFIRMED（成立する）** | `demolish:true` は `PlayerNetAI.CollapseSegment` へ集約され、**`NetManager.ReleaseSegment(id, keepNodes:false)` で本当に解放する**（孤児ノードも同時に解放される）。**`Collapsed` を立てただけの道路と建物は地形を固定し続ける**（`TerrainUpdated` は `Collapsed` を見ない）ので、⑤は `demolish:true` でなければならない。**`demolish:false` を断る 5 つの AI は `demolish:true` を通す**（→ §G-16） |
 
 **今回いちばん危なかった思い込み（＝10 個目の候補）は A2。** 「地形を書けば地形が変わる」は、**道路と建物の下では成り立たない**。詳細は §A-2 と「設計への含意」。
 
@@ -1127,6 +1128,159 @@ m_segmentGrid[idx] = id
 $bf = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,Static'
 Disasm-Method -Method $global:A.GetType('NetManager').GetMethod('Awake', $bf)
 Disasm-Method -Method $global:A.GetType('NetManager').GetMethod('InitializeSegment', $bf)
+```
+
+---
+
+## G. 準備段の破壊経路（⑤ T5 で追加実測）
+
+### G-16. `demolish: true` は何をするのか — CONFIRMED（全経路読了）
+
+設計書 付録と計画 T5 Step 1 が「未確定」と名指ししていた 2 項目
+（**道路の破壊経路**と、**`demolish:false` を断る AI が `demolish:true` を通すか**）を
+ここで確定させた。**推測していない。**
+
+**(a) 道路 — 実体は `PlayerNetAI.CollapseSegment` 1 本。本当に解放する。**
+
+```
+RoadBaseAI.CollapseSegment(id, ref seg, group, demolish)
+  IL_0000  demolish == true -> PlayerNetAI::CollapseSegment へ委譲
+
+PlayerNetAI.CollapseSegment(id, ref seg, group, demolish)
+  IL_0000  demolish == false -> NetAI::CollapseSegment（= ldc.i4.0 ; ret）
+  IL_000F  (m_flags & 32 Untouchable) なら
+           NetSegment::FindOwnerBuilding(id, 363f)
+           -> Building::m_parentBuilding を (m_flags & 16 Untouchable) の間だけ遡る
+              （鎖の保険は 49152。超えると "Invalid list detected!"）
+  IL_00C2  所有建物が Collapsed(0x400000) でないなら
+           ai.CollapseBuilding(owner, ref b, group, testOnly:true, demolish:false, 0)
+           -> false なら IL_00F8 で **セグメントごと断る**（return false）
+  IL_00FA  NetManager::ReleaseSegment(id, keepNodes:false)    ★ 本当に解放する
+  IL_010C  所有建物があれば
+           ai.CollapseBuilding(owner, ref b, group, testOnly:false, demolish:false, 0)
+           を本番で 1 回（戻り値は捨てる）
+  IL_0147  return true
+```
+
+`CollapseSegment` の override は 19 型。**`demolish: true` の扱いは 3 通りしかない**
+（全 19 型の先頭を逆アセンブルして確認）:
+
+| 扱い | 型 |
+|---|---|
+| `PlayerNetAI` へ委譲（直接または `RoadBaseAI` / `TrainTrackBaseAI` 経由） | `CableCarPathAI` / `MetroTrackBaseAI` / `MetroTrackTunnelAI` / `MonorailTrackAI` / `PedestrianBridgeAI` / `PedestrianPathAI` / `PedestrianWayAI` / `PowerLineAI` / `RoadBaseAI` / `RoadTunnelAI` / `RunwayAI` / `TaxiwayAI` / `TrainTrackBaseAI` / `TrainTrackTunnelAI` |
+| 同じ本体をインラインで持つ（`FindOwnerBuilding` → `ReleaseSegment`） | `DamAI` / `DecorationWallAI` |
+| **断る** | `SupportCableAI`（`demolish: true` を基底 `NetAI::CollapseSegment` へ渡す＝必ず false）／ `NetAI` そのもの |
+
+**`NetManager.ReleaseSegment(UInt16, Boolean)` は public / instance / 非 virtual。**
+
+**(b) 最後のセグメントが消えたときノードはどうなるか — 解放される。**
+
+```
+NetManager.ReleaseSegment(id, keepNodes)
+  -> PreReleaseSegmentImplementation / ReleaseSegmentImplementation
+     -> ReleaseSegmentNode(id, ref node, keepNodes)
+        IL_0019  NetNode::RemoveSegment(id)
+        IL_0020  keepNodes なら以下を飛ばす
+        IL_0038  (node.m_flags & 512 Untouchable) なら残す（建物が持つノード）
+        IL_005A  NetNode::CountSegments() == 0 なら
+                 NetManager::ReleaseNodeImplementation(node)      ★ 孤児ノードは残らない
+        それ以外  NetManager::UpdateNode(node, id, 1)
+        IL_007B  ref node = 0
+```
+
+`PlayerNetAI` は `keepNodes: false` を渡すので、**⑤の経路では孤児ノードが残らない**。
+`NetNode.Flags.Untouchable = 512`（`Enum.GetNames` 実測）。
+なお `NetManager::ReleaseNodeImplementation` は `BuildingManager.ReleaseBuilding` を
+呼びうる（全メソッド走査で確認）ので、**道路の解放が建物を巻き込むことがある** ——
+建物の走査側は「次の ID を行動前に控える」規律を必ず守ること。
+
+**(c) ★ `Collapsed` を立てただけでは地形固定が止まらない。**
+
+```
+NetSegment.TerrainUpdated : IL_0000  (m_flags & 3) != 1 なら ret
+                             -> Created(1) かつ Deleted(2) でないことだけを見る。
+                                Collapsed(8) は見ていない。
+Building.TerrainUpdated    : IL_0000  (m_flags & 524291) != 1 なら ret
+                             -> 524291 = Created(1) | Deleted(2) | Demolishing(0x80000)。
+                                Collapsed(0x400000) は見ていない。
+```
+
+> **これが「④の風害は `demolish:false`、⑤の準備は `demolish:true`」の IL 上の理由である。**
+> 倒壊フラグを立てただけの道路と建物は `ApplyQuad` を出し続け、
+> §A-2 のとおりセルを自分の高さへ固定し続ける。
+> **道路は解放されなければならず、建物は `Demolishing` が立たなければならない。**
+>
+> ちなみに `Building.Flags` の `0x80000` は `Demolishing` であって `Untouchable`（= 16）ではない。
+> §A-2 の括弧書き「`Created` かつ `Deleted`/`Untouchable` でない」は言い方が不正確で、
+> 正しくは `Created` かつ `Deleted` でも `Demolishing` でもない、である。
+
+**(d) `demolish:false` を断る 5 つの AI は `demolish:true` を通す。**
+
+④ §F-2 が読んだのは `demolish: false` のときの挙動だけだった。全文を読み直した結果:
+
+```
+ShelterAI / DoomsdayVaultAI / DamPowerHouseAI / TsunamiBuoyAI :
+  IL_0000  demolish(arg5) なら CommonBuildingAI::CollapseBuilding へそのまま委譲
+  IL_0017  でなければ return false
+
+DecorationBuildingAI :
+  IL_0000  demolish なら -> IL_0007 testOnly でなければ m_flags |= 524288 (Demolishing)
+                            IL_0020 return true
+  IL_0022  でなければ return false
+```
+
+→ **5 つとも `demolish: true` は受け付ける。** 「防災施設の足元だけ地形が元の高さで残る」
+は起きない。`DecorationBuildingAI` は `CommonBuildingAI` を通さず `Demolishing` を
+立てるだけだが、(c) のとおりそれで地形固定は止まる。
+
+`CommonBuildingAI.CollapseBuilding` 本体で `demolish` が効く箇所:
+
+```
+IL_0007  (m_flags & 0x400000 Collapsed) なら -> IL_0210 へ
+IL_0013  testOnly なら return true
+IL_0025  m_fireIntensity = 0                        ★ ⑤は自分では書かない（罠 5）
+IL_0031  m_flags = (m_flags & 0x7FFFFFFF) | Collapsed
+IL_0049  demolish なら m_flags |= 524288 (Demolishing)、problems をクリア
+IL_0132  group が null なら災害集計を飛ばす          ★ null 安全
+IL_0170  constructState != 0 なら InstanceManager::SetGroup(id, group)
+IL_02A3  親を持たない建物は m_subBuilding の鎖に同じ引数で再帰（上限 49152）
+IL_0210  （既に Collapsed のとき）demolish かつ Demolishing がまだなら
+         testOnly で true、でなければ Demolishing を立てて true
+IL_0284  フラグが 1 ビットも変わらなければ return false（＝冪等）
+```
+
+→ **既に `Collapsed` の瓦礫にも `demolish: true` は効き、`Demolishing` を立てて true を返す。**
+⑤が候補マスクから `Collapsed` を弾いてはいけない理由がこれである（②④は弾いていた）。
+
+`Demolishing` の建物を実際に配列から消すのは `CommonBuildingAI.SimulationStep` /
+`DecorationBuildingAI.SimulationStep`（`BuildingManager.ReleaseBuilding` の全呼び出し元を
+走査して確認）。**⑤は解放を自分では呼ばない。**
+
+**(e) `InstanceManager.Group` は `null` を渡してよい。**
+
+⑤は災害スロットに載らない（§D-11）ので束ねる先が無い。null 検査は 3 箇所とも在る:
+
+```
+CommonBuildingAI.CollapseBuilding : IL_0132  ldarg.3 ; brfalse -> 災害集計を飛ばす
+RoadBaseAI.CollapseSegment        : IL_004F  ldarg.3 ; brfalse -> 災害集計を飛ばす
+InstanceManager.SetGroup(id, g)   : IL_005E  g が null なら m_groups から Remove
+                                    IL_0096  未登録かつ g が null なら何もしない
+```
+
+→ **空の `Group` を new して `m_ownerInstance` を空のまま渡すより、`null` のほうが実測どおり。**
+
+**再現手順:**
+
+```powershell
+. docs\tools\ilload.ps1 ; . docs\tools\ildasm.ps1
+$bf = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,Static'
+$d  = [System.Reflection.BindingFlags]'Public,NonPublic,Instance,DeclaredOnly'
+Disasm-Method -Method $global:A.GetType('PlayerNetAI').GetMethod('CollapseSegment', $bf)
+Disasm-Method -Method $global:A.GetType('NetManager').GetMethod('ReleaseSegmentNode', $bf)
+Disasm-Method -Method $global:A.GetType('ShelterAI').GetMethod('CollapseBuilding', $d)
+Disasm-Method -Method $global:A.GetType('CommonBuildingAI').GetMethod('CollapseBuilding', $d)
+Disasm-Method -Method $global:A.GetType('InstanceManager').GetMethod('SetGroup', $bf)
+# NetSegment / Building の TerrainUpdated は先頭 10 命令だけでよい
 ```
 
 ---

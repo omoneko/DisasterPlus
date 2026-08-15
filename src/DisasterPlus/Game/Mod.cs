@@ -261,6 +261,14 @@ namespace DisasterPlus.Game
                 ModSettings.VolcanoHeight.value,
                 v => ModSettings.VolcanoHeight.value = (int)v);
 
+            // ★ 準備が隆起より先行する距離（T5）。**下限は 0 ではなく 16 m** ——
+            //    0 だと「何も壊さない → 何も上がらない → 進捗が動かない」の輪から
+            //    出られなくなる（VolcanoClearing.LeadMetres）。使う側でも
+            //    同じ下限へクランプするので、.cgs を手で書き換えても止まらない。
+            volcano.AddSlider(Strings.VolcanoClearingLead, 16f, 400f, 16f,
+                ModSettings.VolcanoClearingLeadMetres.value,
+                v => ModSettings.VolcanoClearingLeadMetres.value = (int)v);
+
             // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
             volcano.AddButton(Strings.VolcanoResetButton, delegate
             {

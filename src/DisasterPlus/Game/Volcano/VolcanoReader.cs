@@ -74,10 +74,18 @@ namespace DisasterPlus.Game
                 //   この Read はポーズガードより上で走るので、載るのは
                 //   **この tick で VolcanoState.Tick が走る前の状態**である
                 //   （VolcanoSnapshot.Phase の doc）。
+                // 準備の実績も sim スレッドの static から直接読む（同じスレッド）。
                 return new VolcanoSnapshot(true, ResolveTerrainFacts(), frame, ReadGameMode(),
                                            VolcanoState.Phase, VolcanoState.Footprint,
                                            VolcanoState.ProgressUnit, VolcanoState.LastRefusal,
-                                           VolcanoState.SettingsChanged);
+                                           VolcanoState.SettingsChanged,
+                                           VolcanoClearing.ClearedRadiusMetres,
+                                           VolcanoClearing.Complete,
+                                           VolcanoClearing.TotalBuildingsDestroyed,
+                                           VolcanoClearing.TotalSegmentsDestroyed,
+                                           VolcanoClearing.LastBuildingsRefused,
+                                           VolcanoClearing.LastCapped,
+                                           VolcanoClearing.RoadPathAvailable);
             }
             catch (Exception e)
             {

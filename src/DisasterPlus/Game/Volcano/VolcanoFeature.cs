@@ -203,6 +203,42 @@ namespace DisasterPlus.Game
             b.Line(2, "uplift tiles", f.TileCount.ToString());
             b.Line(2, "block height catch-up", f.BlockHeightCatchUpFrames
                                                + " sim frames (this is not a bug)");
+
+            WriteClearing(b, snapshot);
+        }
+
+        /// <summary>
+        /// 準備（T5）の実績。**壊した数が 0 のときも出す** —— 「機能が死んでいる」と
+        /// 「範囲内に何も無い」を診断で区別できるようにするため（③で実際に起きた形）。
+        ///
+        /// <c>refused</c> は必ず出す。0 でないなら、その足元のセルは元の高さに固定された
+        /// まま隆起に取り残される（<see cref="VolcanoClearing"/> のクラス doc の 4）。
+        /// </summary>
+        private static void WriteClearing(DiagnosticBuilder b, VolcanoSnapshot snapshot)
+        {
+            if (!snapshot.RoadPathAvailable)
+            {
+                b.Line(1, "clearing", "NO ROAD DESTRUCTION PATH");
+                b.Line(2, "consequence",
+                    "no volcano is built at all: raising the ground without removing the roads "
+                    + "first leaves flat trenches where the roads are");
+                return;
+            }
+
+            b.Line(1, "clearing", "swept " + snapshot.ClearedRadiusMetres.ToString("F0")
+                                  + " m of " + snapshot.Footprint.RadiusMetres.ToString("F0")
+                                  + " m" + (snapshot.ClearingComplete ? " (complete)" : "")
+                                  + (snapshot.ClearingCapped
+                                        ? "  (CAPPED: the front was not reached this pass)"
+                                        : ""));
+            b.Line(2, "removed", "buildings " + snapshot.BuildingsDestroyed
+                                 + ", roads " + snapshot.SegmentsDestroyed
+                                 + ", refused " + snapshot.BuildingsRefused);
+
+            if (!string.IsNullOrEmpty(VolcanoClearing.LastFailure))
+            {
+                b.Line(2, "clearing failure", VolcanoClearing.LastFailure);
+            }
         }
 
         /// <summary>

@@ -79,6 +79,12 @@ namespace DisasterPlus.Game
         /// <summary>火山の最終高（m）。同上。</summary>
         public static SavedInt VolcanoHeight;
 
+        /// <summary>
+        /// 準備（破壊）の前線が隆起の前線より何メートル先を走るか（m）。
+        /// 0 にすると「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
+        /// </summary>
+        public static SavedInt VolcanoClearingLeadMetres;
+
         /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
         public const int VolcanoShapeShield = 0;
         public const int VolcanoShapeStrato = 1;
@@ -219,6 +225,10 @@ namespace DisasterPlus.Game
             // （.cgs は手で編集されうる）。
             VolcanoRadius = new SavedInt("volcanoRadius", FileName, 1200, true);
             VolcanoHeight = new SavedInt("volcanoHeight", FileName, 600, true);
+
+            // 準備の前線が隆起の前線より何メートル先を走るか。0 にすると
+            // 「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
+            VolcanoClearingLeadMetres = new SavedInt("volcanoClearLead", FileName, 96, true);
 
             _ready = true;
         }

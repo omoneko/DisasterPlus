@@ -115,6 +115,7 @@ namespace DisasterPlus.Game
             // 参照を捨てるだけ。実体はパネルの GameObject と一緒に消える。
             VolcanoStatusRows.Destroy();
             VolcanoConfirmRows.Destroy();
+            VolcanoEffectRows.Destroy();
 
             if (_panel != null)
             {
@@ -215,6 +216,13 @@ namespace DisasterPlus.Game
             // ★ 確認の一式は**いちばん下**に置く（あちらの BlockTop の doc）。
             //   出していないときはパネルをその手前まで縮めるので、空白が残らない。
             VolcanoConfirmRows.Build(panel, ref y);
+
+            // ★★ 進行中の各段の行は**確認の一式と同じ y から始める**。
+            //    「確認待ち」と「進行中」は同時に成立しない位相なので、同じ場所を
+            //    使ってよい（VolcanoEffectRows のクラス doc）。上下に並べると、
+            //    出していないほうのぶんだけパネルに空白が残る。
+            float effectTop = VolcanoConfirmRows.BlockTop;
+            VolcanoEffectRows.Build(panel, ref effectTop);
 
             ApplyHeight(panel, VolcanoConfirmRows.BlockTop + 8f);
         }
@@ -324,11 +332,16 @@ namespace DisasterPlus.Game
             var snapshot = VolcanoHub.Latest;
             VolcanoStatusRows.Refresh(snapshot);
             VolcanoConfirmRows.Refresh(snapshot);
+            VolcanoEffectRows.Refresh(snapshot);
 
-            // 確認を出していないときは、確認の一式のぶんだけパネルを縮める。
-            ApplyHeight(_panel, (VolcanoConfirmRows.IsShowing
-                ? VolcanoConfirmRows.BlockBottom
-                : VolcanoConfirmRows.BlockTop) + 8f);
+            // 確認も進行中の行も出していないときは、そのぶんだけパネルを縮める。
+            // **2 つは同じ y から始まる**ので、下端は出しているほうのものを使う
+            // （VolcanoEffectRows のクラス doc）。
+            float bottom = VolcanoConfirmRows.BlockTop;
+            if (VolcanoConfirmRows.IsShowing) bottom = VolcanoConfirmRows.BlockBottom;
+            else if (VolcanoEffectRows.IsShowing) bottom = VolcanoEffectRows.BlockBottom;
+
+            ApplyHeight(_panel, bottom + 8f);
         }
     }
 }
