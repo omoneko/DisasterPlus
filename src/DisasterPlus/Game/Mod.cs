@@ -153,6 +153,25 @@ namespace DisasterPlus.Game
                 helper.AddGroup(Strings.EarthquakeNeedsDlc);
             }
 
+            var typhoon = helper.AddGroup(Strings.GroupTyphoon);
+            typhoon.AddCheckbox(Strings.TyphoonEnabled, ModSettings.TyphoonEnabled.value,
+                v => ModSettings.TyphoonEnabled.value = v);
+            // 探索のやり直しは次回のレベルロードで自然に起きる（TyphoonPanelButton.Install
+            // は保存済み座標が -1 のときだけ FreeSlotFinder を再度呼ぶ）。ここでは保存値を
+            // 戻すだけで十分（①②のボタン位置リセットと同じ形）。
+            typhoon.AddButton(Strings.TyphoonResetButton, delegate
+            {
+                ModSettings.TyphoonButtonX.value = -1;
+                ModSettings.TyphoonButtonY.value = -1;
+            });
+
+            // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
+            // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。
+            if (!ModCompat.NaturalDisastersOwned)
+            {
+                helper.AddGroup(Strings.TyphoonNeedsDlc);
+            }
+
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
@@ -228,6 +247,15 @@ namespace DisasterPlus.Game
                 v => ModSettings.LogChannelMask.value =
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Earthquake)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Earthquake));
+
+            // Forecast / Earthquake と同じく、Typhoon チャンネル付きの Log.Diag 呼び出しが
+            // 実在する（TyphoonFeature.OnSimulationTick）。死んだ設定ではない。
+            channels.AddCheckbox(Strings.LogChannelTyphoon,
+                DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
+                    DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, ModSettings.LogChannelMask.value),
+                v => ModSettings.LogChannelMask.value =
+                     v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Typhoon)
+                       : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Typhoon));
         }
     }
 }

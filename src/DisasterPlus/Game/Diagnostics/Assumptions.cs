@@ -30,7 +30,7 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 22 件 ＋
+        /// 1 回のレベルロードで最終的に埋まる検証件数。Run() の 24 件 ＋
         /// ReportSliderOutcome() の 1 件。Report() が「何件中の集計か」を
         /// 名乗るために使う。Run() に検証を足したらここも増やすこと。
         ///
@@ -50,12 +50,13 @@ namespace DisasterPlus.Game
         /// 地震 第 2 層 3 件（TsunamiAI プレハブの実在・
         /// TerrainManager.HasWater と DisasterData.m_waveIndex・
         /// BuildingAI.CollapseBuilding と BuildingInfo.m_size / m_generatedInfo）＋
+        /// 台風 2 件（嵐プレハブの 3 調整値・竜巻プレハブの 3 調整値）＋
         /// スライダー検証 1 件。
         ///
         /// スライダー検証が「対象外」に確定した場合はこの母数から 1 件引く
         /// （<see cref="_sliderNotApplicable"/>）。
         /// </summary>
-        private const int TotalCheckCount = 23;
+        private const int TotalCheckCount = 25;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
@@ -119,7 +120,7 @@ namespace DisasterPlus.Game
         /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
         /// Harmony の適用状況と prefab の解決を見る必要があるため。
         ///
-        /// ここでは確定的に判定できる 22 件だけを見る。強度スライダーの到達可否は
+        /// ここでは確定的に判定できる 24 件だけを見る。強度スライダーの到達可否は
         /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
         /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
         /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
@@ -593,6 +594,77 @@ namespace DisasterPlus.Game
 
             // --- ②地震（Task 10）ここまで ---
 
+            // --- ④台風（Task 2: 骨格・プレハブ実測）ここから ---
+
+            // ②の EarthquakeAI の項目と同じ性質の検証で、**実行時にしか値が取れない**。
+            // m_radius / m_emergingDuration / m_activeDuration の実数値は DLL に無く
+            // （プレハブのシリアライズ値、IL 事実文書 §A-0、PARTIAL）、④の
+            // 暴風域半径も持続時間も**進行速度**も全部この 3 値の上に乗る
+            // （TyphoonTrack.SpeedFor は m_activeDuration が 0 なら 0 を返し、
+            //  呼び出し側は台風を 1 個も起こさない）。読めないなら読めないと
+            // 名指しする以外に防波堤が無い。
+            //
+            // DLC 非所持環境ではこれが FAIL するのが正常。TornadoAI / TsunamiAI の
+            // 項目が既に同じ性質を持っており、それが確立した扱いである。
+            // 母数からは外さない——台風機能そのものが DLC 依存なので、
+            // 「使えない」と名指しするのが正しい。
+            Check("ThunderStormAI disaster prefab exposes m_radius / m_emergingDuration / "
+                  + "m_activeDuration",
+                  "no typhoon can be started at all: its radius, its lifetime and its travel "
+                  + "speed are all derived from these three numbers, and the mod refuses to "
+                  + "guess them. This also FAILs when the Natural Disasters DLC is not owned, "
+                  + "which is expected.",
+                  delegate
+                  {
+                      var t = typeof(ThunderStormAI);
+                      if (!HasField(t, "m_radius") || !HasField(t, "m_emergingDuration")
+                          || !HasField(t, "m_activeDuration"))
+                      {
+                          return false;
+                      }
+                      // 副作用の無い純粋な走査を使う。TyphoonReader の内部キャッシュは
+                      // sim スレッドが回しており、main スレッドのここから巻き戻しては
+                      // いけない（EarthquakeAI の項目と同じ理由）。
+                      return TyphoonReader.ScanPrefabFacts().StormResolved;
+                  });
+
+            // ★ 設計書の記述をここでも訂正して固定する。**VortexAI に m_maxSpeed は
+            //    存在しない。** §B-1 の IL_00AF が読んでいるのは VehicleAI.m_info、
+            //    すなわち VehicleInfo.m_maxSpeed である。到達経路は
+            //    TornadoAI.m_vortexInfo（VehicleInfo）.m_maxSpeed なので、
+            //    m_vortexInfo の**型まで**照合する——ここが VehicleInfo でなくなったら、
+            //    次の担当者は VortexAI 側に無いフィールドを探して推測で別のものを掴む。
+            //
+            //    影響は台風本体には及ばない（随伴竜巻＝ T10 だけが使えない）。
+            //    そのことを impact に書いておかないと、正常に台風が動く環境の
+            //    この FAIL が「台風が壊れている」と読まれる。
+            Check("TornadoAI.m_vortexInfo resolves to a VortexAI with m_destructionRadiusMin / "
+                  + "m_destructionRadiusMax and a VehicleInfo with m_maxSpeed",
+                  "the optional accompanying tornadoes cannot be sized or steered; the typhoon "
+                  + "itself is unaffected. This also FAILs when the Natural Disasters DLC is "
+                  + "not owned, which is expected.",
+                  delegate
+                  {
+                      var vortexInfoField = typeof(TornadoAI).GetField("m_vortexInfo",
+                          BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                      if (vortexInfoField == null
+                          || vortexInfoField.FieldType != typeof(VehicleInfo))
+                      {
+                          return false;
+                      }
+
+                      if (!HasField(typeof(VortexAI), "m_destructionRadiusMin")
+                          || !HasField(typeof(VortexAI), "m_destructionRadiusMax")
+                          || !HasField(typeof(VehicleInfo), "m_maxSpeed"))
+                      {
+                          return false;
+                      }
+
+                      return TyphoonReader.ScanPrefabFacts().VortexResolved;
+                  });
+
+            // --- ④台風（Task 2）ここまで ---
+
             Report();
         }
 
@@ -698,7 +770,7 @@ namespace DisasterPlus.Game
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の 22 件と
+        /// <summary>同名の既存結果があれば置き換える。Run() の 24 件と
         /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
         /// 常に最新・単一の結果だけが残るようにする。
         ///

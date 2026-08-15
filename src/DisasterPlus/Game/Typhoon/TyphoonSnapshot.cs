@@ -1,0 +1,157 @@
+namespace DisasterPlus.Game
+{
+    /// <summary>
+    /// <c>ThunderStormAI</c> と <c>VortexAI</c> のプレハブに焼き込まれている 6 つの調整値。
+    ///
+    /// **この 6 個の実数値は DLL に存在しない**（IL 事実文書 §A-0 と §B-1。どちらも
+    /// PARTIAL 判定）。プレハブのシリアライズ値なので IL 逆アセンブルでは見えず、
+    /// **実行時に <c>DisasterManager.FindDisasterInfo&lt;T&gt;()</c> から読んで診断ダンプに
+    /// 出すのが唯一の入手経路**であり、それが Task 2 の主目的である。
+    /// ④の以後の持続時間・落雷本数・破壊半径・移動速度は全てこの上に乗る。
+    ///
+    /// **嵐と竜巻は独立に解決する。** 竜巻プレハブが読めなくても（随伴竜巻が
+    /// 使えないだけで）台風本体は動く。だからフラグを 2 本に分けてある。
+    ///
+    /// struct にしているのは、キャッシュしても Unity の fake-null 自己修復問題を
+    /// 持ち込まないため（float / uint しか持たないので <c>DisasterInfo</c> や
+    /// <c>VehicleInfo</c> の参照を抱え込まずに済む）。既定値は両方 false ＝
+    /// 「まだ／もう読めていない」。
+    /// </summary>
+    public struct TyphoonPrefabFacts
+    {
+        /// <summary>嵐側の 3 値を読めたか。false のとき下の 3 つは 0 で意味を持たない。</summary>
+        public readonly bool StormResolved;
+
+        /// <summary><c>ThunderStormAI.m_radius</c>。落雷散布半径とハザード円盤の基準（§A-1 / §A-2）。</summary>
+        public readonly float StormRadius;
+
+        /// <summary><c>ThunderStormAI.m_emergingDuration</c>（フレーム）。</summary>
+        public readonly uint EmergingDuration;
+
+        /// <summary>
+        /// <c>ThunderStormAI.m_activeDuration</c>（フレーム）。
+        /// **台風はこれより長生きできない**（<c>IsStillActive</c>、§A-1）。
+        /// 進行速度はこの値からしか出せない（<c>TyphoonTrack.SpeedFor</c>）。
+        /// </summary>
+        public readonly uint ActiveDuration;
+
+        /// <summary>竜巻側の 3 値を読めたか。**台風本体はこれが false でも動く。**</summary>
+        public readonly bool VortexResolved;
+
+        /// <summary><c>VortexAI.m_destructionRadiusMin</c>。</summary>
+        public readonly float DestructionRadiusMin;
+
+        /// <summary><c>VortexAI.m_destructionRadiusMax</c>。</summary>
+        public readonly float DestructionRadiusMax;
+
+        /// <summary>
+        /// **<c>VehicleInfo.m_maxSpeed</c>**（<c>TornadoAI.m_vortexInfo</c> 側）。
+        /// <c>VortexAI</c> に <c>m_maxSpeed</c> というフィールドは無い。
+        /// 詳細は <see cref="TyphoonReader"/> の doc。
+        /// </summary>
+        public readonly float VortexMaxSpeed;
+
+        public TyphoonPrefabFacts(bool stormResolved, float stormRadius,
+                                  uint emergingDuration, uint activeDuration,
+                                  bool vortexResolved, float destructionRadiusMin,
+                                  float destructionRadiusMax, float vortexMaxSpeed)
+        {
+            StormResolved = stormResolved;
+            StormRadius = stormRadius;
+            EmergingDuration = emergingDuration;
+            ActiveDuration = activeDuration;
+            VortexResolved = vortexResolved;
+            DestructionRadiusMin = destructionRadiusMin;
+            DestructionRadiusMax = destructionRadiusMax;
+            VortexMaxSpeed = vortexMaxSpeed;
+        }
+
+        /// <summary>
+        /// 台風を 1 個でも起こしてよいか。
+        ///
+        /// 半径が 0 だと暴風域も強風域も 0 になり（<c>TyphoonProfile.StormRadiusOf</c>）、
+        /// 持続時間が 0 だと速度が 0 になる（<c>TyphoonTrack.SpeedFor</c>）。
+        /// **どちらも「推測した値で代替しない」ことを構造で保証している場所**なので、
+        /// ここが false のとき呼び出し側は台風を起こさず、理由を診断に出す（設計書 §6）。
+        /// </summary>
+        public bool Usable
+        {
+            get { return StormResolved && StormRadius > 0f && ActiveDuration > 0u; }
+        }
+    }
+
+    /// <summary>
+    /// sim スレッドで作り main スレッドで読む不変スナップショット。
+    /// ①の <c>WeatherSnapshot</c>・②の <see cref="EarthquakeSnapshot"/> と同じ規律で、
+    /// **一度作ったら書き換えない**。
+    ///
+    /// **T3 以降がフィールドを足していく。追加は必ず ctor の末尾に付けること**
+    /// （既存の呼び出し側を全部直させないため）。
+    ///
+    /// ④の表示規約: ここに載る値のうち **<see cref="Rain"/> / <see cref="Cloud"/> /
+    /// <see cref="Fog"/> / <see cref="WindDirectionDegrees"/> だけがバニラの実測値**で、
+    /// それ以外は全て本 MOD が決めた量である（設計書 §1.2 / §7）。
+    /// </summary>
+    public class TyphoonSnapshot
+    {
+        /// <summary>読み取りに成功したか。false なら表示側は「読み取れません」と出す。</summary>
+        public readonly bool Valid;
+
+        public readonly TyphoonPrefabFacts Prefab;
+
+        /// <summary><c>SimulationManager.m_currentFrameIndex</c>。</summary>
+        public readonly uint CurrentFrame;
+
+        /// <summary>
+        /// <c>WeatherManager.m_currentRain</c>。**④で <c>[measured]</c> を名乗ってよい 2 値の 1 つ。**
+        /// <see cref="WeatherReadable"/> が false のときこの値は無意味（0 と混ぜない）。
+        /// </summary>
+        public readonly float Rain;
+
+        /// <summary><c>WeatherManager.m_currentCloud</c>。もう 1 つの <c>[measured]</c>。</summary>
+        public readonly float Cloud;
+
+        /// <summary><c>WeatherManager.m_currentFog</c>。診断専用（パネルには出さない）。</summary>
+        public readonly float Fog;
+
+        /// <summary><c>WeatherManager.m_windDirection</c>（度、-180〜180 に正規化済み）。</summary>
+        public readonly float WindDirectionDegrees;
+
+        /// <summary>
+        /// <c>WeatherManager.m_enableWeather</c>。
+        ///
+        /// **false は不具合ではなくプレイヤーの正当な設定**である。ただしその環境では
+        /// <c>m_forceWeatherOn</c> を毎 tick 書かない限り雨も雲も 0 へ潰される（§A-4）ので、
+        /// T4 の天候駆動はこの値を見て振る舞いを変える。表示側は隠さないこと。
+        /// </summary>
+        public readonly bool WeatherEnabled;
+
+        /// <summary>
+        /// 天候の 4 値を実際に読めたか。
+        /// **読めなかった 0 と、本当に 0 だった 0 を混ぜないための旗**
+        /// （①②が繰り返し確立した規律）。
+        /// </summary>
+        public readonly bool WeatherReadable;
+
+        public TyphoonSnapshot(bool valid, TyphoonPrefabFacts prefab, uint currentFrame,
+                               float rain, float cloud, float fog, float windDirectionDegrees,
+                               bool weatherEnabled, bool weatherReadable)
+        {
+            Valid = valid;
+            Prefab = prefab;
+            CurrentFrame = currentFrame;
+            Rain = rain;
+            Cloud = cloud;
+            Fog = fog;
+            WindDirectionDegrees = windDirectionDegrees;
+            WeatherEnabled = weatherEnabled;
+            WeatherReadable = weatherReadable;
+        }
+
+        public static TyphoonSnapshot Invalid()
+        {
+            return new TyphoonSnapshot(false, new TyphoonPrefabFacts(), 0u,
+                                       0f, 0f, 0f, 0f, false, false);
+        }
+    }
+}

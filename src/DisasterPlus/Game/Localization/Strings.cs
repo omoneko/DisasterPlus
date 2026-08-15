@@ -523,5 +523,22 @@ namespace DisasterPlus.Game
         public static string EarthquakeNoDayNight =
             "The day/night cycle is off, so the in-game hour is pinned at 12:00 and the "
             + "time-of-day factor never changes.";
+
+        // --- ④台風（Task 2: 骨格・プレハブ実測・前提検証） ---
+        //
+        // このタスクの時点では**パネルもボタンも無い**（T5 で入る）。ここで足すのは
+        // 設定画面の 4 つと、ログチャンネルの名前だけである。
+        //
+        // ④の表示規約: **④が出す数値は原則すべて本 MOD のもの**なので、行ごとの
+        // 出所の印は付けない（設計書 §1.2 / §7）。例外は WeatherManager から読んだ
+        // 雨量・雲量だけで、そこにだけ SourceVanilla が付く。したがって
+        // **Strings.SourceModel を④の表示コードから参照してはいけない。**
+        public static string GroupTyphoon = "Typhoon";
+        public static string TyphoonEnabled = "Enable the typhoon panel";
+        public static string TyphoonResetButton =
+            "Reset the typhoon button position (takes effect next time you load a city)";
+        public static string TyphoonNeedsDlc =
+            "Typhoons require the Natural Disasters DLC.";
+        public static string LogChannelTyphoon = "Typhoon";
     }
 }

@@ -47,6 +47,9 @@ namespace DisasterPlus.Game
         public static SavedInt EarthquakeTsunamiDelayMinutes;
         public static SavedBool EarthquakeLongPeriod;
         public static SavedInt EarthquakeLongPeriodStrength;
+        public static SavedBool TyphoonEnabled;
+        public static SavedInt TyphoonButtonX;
+        public static SavedInt TyphoonButtonY;
 
         public static void Ensure()
         {
@@ -115,6 +118,15 @@ namespace DisasterPlus.Game
             // 厳密に 0 を返す）。範囲はスライダー側で縛るが、.cgs の値は公開契約なので
             // 範囲外が入っていても読み捨てず、使う側でクランプする。
             EarthquakeLongPeriodStrength = new SavedInt("eqLongPeriodStrength", FileName, 3, true);
+
+            // ④台風。パネルの表示そのものは④が発生させない限り何も起きないので、
+            // 有効化は既定 ON でよい（②の EarthquakeEnabled と同じ扱い）。
+            // 台風を実際に起こすのはプレイヤーの明示的な操作だけである（T3）。
+            TyphoonEnabled = new SavedBool("typhoonEnabled", FileName, true, true);
+            // -1 = 未決定。ForecastButtonX/Y・EarthquakeButtonX/Y と全く同じ扱い
+            // （TyphoonPanelButton が空き位置を決めて書き戻す。T5）。
+            TyphoonButtonX = new SavedInt("typhoonButtonX", FileName, -1, true);
+            TyphoonButtonY = new SavedInt("typhoonButtonY", FileName, -1, true);
 
             _ready = true;
         }
