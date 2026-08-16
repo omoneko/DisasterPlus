@@ -221,6 +221,9 @@ namespace DisasterPlus.Game
         private static Vector2 _fallbackOrigin;
         private static bool _fallbackFoundFreeSlot;
 
+        /// <summary>退避したことを 1 回だけ警告する（Log.Warn にスロットルは無い）。</summary>
+        private static bool _fallbackAnnounced;
+
         /// <summary>
         /// 診断向け。id のボタンが今、画面に居るか。
         ///
@@ -314,6 +317,7 @@ namespace DisasterPlus.Game
             _attempts = 0;
             _fallbackOrigin = Vector2.zero;
             _fallbackFoundFreeSlot = false;
+            _fallbackAnnounced = false;
         }
 
         // ------------------------------------------------------------------
@@ -330,6 +334,12 @@ namespace DisasterPlus.Game
             {
                 // 行が無い間は浮遊バーの側を保つ（言語切替への追従もここで効く）。
                 if (!_searchStopped) CountFailedSearch();
+
+                // 退避先でも設定の切り替えに追従する。ここを飛ばすと、行が
+                // 見つからない環境でだけ「機能を切ったのにボタンが残る」——
+                // しかもボタンが残れば押せるので、切ったはずのパネルが開く。
+                if (_fallbackBar != null && !WantedMatchesInstalled()) RebuildFallbackBar();
+
                 RefreshText();
                 return;
             }
@@ -374,12 +384,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void SyncButtons(UIScrollablePanel row, UIButton sample)
         {
-            bool matches = true;
-            for (int i = 0; i < Entries.Count; i++)
-            {
-                if (Entries[i].Wanted() != (Entries[i].Button != null)) { matches = false; break; }
-            }
-            if (matches) return;
+            if (WantedMatchesInstalled()) return;
 
             // 作り直す間だけ手放す。**この直後に作り直す分のパネルは閉じない**
             // （関係の無い機能の設定を触っただけで開いていたパネルが閉じるのを避ける）。
@@ -524,6 +529,20 @@ namespace DisasterPlus.Game
         {
             e.Button = null;
             e.Handler = null;
+        }
+
+        /// <summary>
+        /// 設定が望んでいる集合と、いま実際に居る集合が一致しているか。
+        /// **要素ごとに <c>Button != null</c> を見る**（破棄済みの fake-null は
+        /// 要素側にしか出ないので、並びを見て判断しないこと）。
+        /// </summary>
+        private static bool WantedMatchesInstalled()
+        {
+            for (int i = 0; i < Entries.Count; i++)
+            {
+                if (Entries[i].Wanted() != (Entries[i].Button != null)) return false;
+            }
+            return true;
         }
 
         private static void OnClick(Entry e, UIMouseEventParameter p)
@@ -699,9 +718,28 @@ namespace DisasterPlus.Game
                 placed++;
             }
 
+            // ★ 1 回だけ。設定を切り替えるたびにバーを作り直すので（RebuildFallbackBar）、
+            //   ここで無条件に Warn を出すと、スロットルの無い警告が繰り返し出る。
+            if (_fallbackAnnounced) return;
+            _fallbackAnnounced = true;
             Log.Warn("the vanilla disasters panel was not found after " + _attempts
                      + " attempts; the Disaster + buttons were placed on a floating bar at ("
                      + origin.x + "," + origin.y + ") instead");
+        }
+
+        /// <summary>
+        /// 退避先のバーを作り直す。設定で機能を切った／入れたときに呼ばれる。
+        /// **バーごと作り直す**のは、行に置く場合と同じ理由 —— 足りない分だけ
+        /// 後ろに足すと、切り替えた順序で並び順が変わる。
+        /// </summary>
+        private static void RebuildFallbackBar()
+        {
+            for (int i = 0; i < Entries.Count; i++) Detach(Entries[i], true, !Entries[i].Wanted());
+
+            UnityEngine.Object.Destroy(_fallbackBar.gameObject);
+            _fallbackBar = null;
+
+            EnsureFallbackBar();
         }
 
         /// <summary>行が見つかったので浮遊バーを畳む。ボタンは同じ保守パスで行の側に作り直す。</summary>
