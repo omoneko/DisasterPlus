@@ -59,6 +59,13 @@ namespace DisasterPlus.Game
 
         public static string GroupForecast = "Weather forecast";
         public static string ForecastEnabled = "Enable the forecast panel";
+
+        // ★ 現在 UI からは出していない 4 件（*ResetButton）。ボタンはバニラの災害
+        //   パネルの中に置かれるようになり、位置はパネルの autolayout が決めるので
+        //   （DisasterPanelBar）、「位置をリセット」は何も制御しない死んだボタンになる。
+        //   **キーは消さない** —— Strings / Locales\en.txt / Locales\ja.txt の
+        //   キー集合は一致させ続ける必要があり、既訳を捨てる理由も無い
+        //   （LogChannelFireWhirl・EarthquakeBandWeak と同じ扱い）。
         public static string ForecastResetButton =
             "Reset the forecast button position (takes effect next time you load a city)";
         public static string ForecastTitle = "Weather forecast";
@@ -118,6 +125,7 @@ namespace DisasterPlus.Game
         // ③の NDR 互換ドロップダウン用で別物。名前を衝突させないこと。
         public static string GroupEarthquake = "Earthquake";
         public static string EarthquakeEnabled = "Enable the earthquake panel";
+        // ★ 現在 UI からは出していない（ForecastResetButton の doc）。
         public static string EarthquakeResetButton =
             "Reset the earthquake button position (takes effect next time you load a city)";
         public static string EarthquakeNeedsDlc =
@@ -549,6 +557,7 @@ namespace DisasterPlus.Game
         // **Strings.SourceModel を④の表示コードから参照してはいけない。**
         public static string GroupTyphoon = "Typhoon";
         public static string TyphoonEnabled = "Enable the typhoon panel";
+        // ★ 現在 UI からは出していない（ForecastResetButton の doc）。
         public static string TyphoonResetButton =
             "Reset the typhoon button position (takes effect next time you load a city)";
         public static string TyphoonNeedsDlc =
@@ -756,6 +765,7 @@ namespace DisasterPlus.Game
         //   置くと嘘になる。
         public static string GroupVolcano = "Volcano";
         public static string VolcanoEnabled = "Enable volcanoes";
+        // ★ 現在 UI からは出していない（ForecastResetButton の doc）。
         public static string VolcanoResetButton =
             "Reset the volcano button position (takes effect next time you load a city)";
         public static string VolcanoUnavailable = "Volcano data unavailable";

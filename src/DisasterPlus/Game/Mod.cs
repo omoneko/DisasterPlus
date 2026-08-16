@@ -75,14 +75,12 @@ namespace DisasterPlus.Game
             var forecast = helper.AddGroup(Strings.GroupForecast);
             forecast.AddCheckbox(Strings.ForecastEnabled, ModSettings.ForecastEnabled.value,
                 v => ModSettings.ForecastEnabled.value = v);
-            // 探索のやり直しは次回のレベルロードで自然に起きる（ForecastPanelButton.Install
-            // は保存済み座標が -1 のときだけ FreeSlotFinder を再度呼ぶ）。ここでは保存値を
-            // 戻すだけで十分（設計書 5.1 の「ボタン位置をリセット」）。
-            forecast.AddButton(Strings.ForecastResetButton, delegate
-            {
-                ModSettings.ForecastButtonX.value = -1;
-                ModSettings.ForecastButtonY.value = -1;
-            });
+            // ★ 「ボタン位置をリセット」は①②④⑤の 4 つとも撤去した。ボタンは
+            //    バニラの災害パネルの中に置かれるようになり、位置はパネルの
+            //    autolayout が決めるので（DisasterPanelBar）、押しても何も起きない
+            //    死んだボタンになる。保存キー（forecastButtonX/Y 等）は .cgs の
+            //    公開契約なので ModSettings 側に残してあるが、**別の意味で
+            //    再利用してはいけない**（ModSettings の当該コメント参照）。
 
             // 予報パネルの気象・傾向の行は DLC 無しでも正しく動くので、機能そのものは
             // 隠さない。ただしハザードの 2 行（落雷・竜巻の「マップに表示」とカーソル
@@ -129,12 +127,6 @@ namespace DisasterPlus.Game
                     v => ModSettings.EarthquakeLongPeriodStrength.value = (int)v);
             }
 
-            earthquake.AddButton(Strings.EarthquakeResetButton, delegate
-            {
-                ModSettings.EarthquakeButtonX.value = -1;
-                ModSettings.EarthquakeButtonY.value = -1;
-            });
-
             // 揺れの補正が「既定の強度では何も変えない」ことを名乗る。バニラを抑制せず
             // 足すだけで、強度 55（バニラ既定）では追加分が厳密に 0 になる（§A-7）。
             // 注記の出し方は IntensityUnlockHandledByOther と同じ（root への AddGroup）。
@@ -160,9 +152,6 @@ namespace DisasterPlus.Game
             typhoon.AddSlider(Strings.TyphoonIntensity, 10f, 255f, 5f,
                 ModSettings.TyphoonIntensity.value,
                 v => ModSettings.TyphoonIntensity.value = (int)v);
-            // 探索のやり直しは次回のレベルロードで自然に起きる（TyphoonPanelButton.Install
-            // は保存済み座標が -1 のときだけ FreeSlotFinder を再度呼ぶ）。ここでは保存値を
-            // 戻すだけで十分（①②のボタン位置リセットと同じ形）。
             // ★ 風害は既定 ON（②の第 2 層と判断が違う理由は TyphoonWind のクラス doc）。
             //    強さ 0 で完全に無効になる。
             typhoon.AddCheckbox(Strings.TyphoonWindEnabled, ModSettings.TyphoonWindDamage.value,
@@ -196,12 +185,6 @@ namespace DisasterPlus.Game
             typhoon.AddCheckbox(Strings.TyphoonVanillaCloudBoost,
                 ModSettings.TyphoonVanillaCloudBoost.value,
                 v => ModSettings.TyphoonVanillaCloudBoost.value = v);
-            typhoon.AddButton(Strings.TyphoonResetButton, delegate
-            {
-                ModSettings.TyphoonButtonX.value = -1;
-                ModSettings.TyphoonButtonY.value = -1;
-            });
-
             // 強度がバニラの領域を超えることを名乗る（EarthquakeShakeBoostNote と同じ形）。
             helper.AddGroup(Strings.TyphoonIntensityNote);
             // ★ 「バニラに風害は存在しない」「数値は風速ではない」を設定画面でも名乗る。
@@ -297,13 +280,6 @@ namespace DisasterPlus.Game
             volcano.AddCheckbox(Strings.VolcanoLavaRenderSetting,
                 ModSettings.VolcanoLavaRender.value,
                 v => ModSettings.VolcanoLavaRender.value = v);
-
-            // T3 でボタンが入ったので、位置リセットもここで生きた設定になる（④と同じ形）。
-            volcano.AddButton(Strings.VolcanoResetButton, delegate
-            {
-                ModSettings.VolcanoButtonX.value = -1;
-                ModSettings.VolcanoButtonY.value = -1;
-            });
 
             // ★★ 設定画面でも不可逆であることを名乗る（設計書 §7.1）。
             //    パネルの警告はパネルを開いた人しか読まない。
