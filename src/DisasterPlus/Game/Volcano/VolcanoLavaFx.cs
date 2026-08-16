@@ -42,9 +42,6 @@ namespace DisasterPlus.Game
             ParticleShaderResolved = particleShaderResolved;
             Detail = detail;
         }
-
-        /// <summary>マテリアルを作れるか（＝溶岩の面が出るか）。</summary>
-        public bool Usable { get { return !string.IsNullOrEmpty(ResolvedShaderName); } }
     }
 
     /// <summary>
@@ -66,9 +63,8 @@ namespace DisasterPlus.Game
     /// —— 借りるのは<b>シェーダだけ</b>で、<c>Material</c> インスタンスは借りない
     /// （2 つの違いはあちらのクラス doc）。
     ///
-    /// **どのシェーダで解決したかは診断に出す**（<see cref="ShaderName"/> /
-    /// <see cref="ShaderDetail"/>）—— 将来のゲーム更新で黙って不可視になったときに、
-    /// そう名乗れるようにするためである。
+    /// **どのシェーダで解決したかは診断に出す**（<see cref="ShaderDetail"/>）——
+    /// 将来のゲーム更新で黙って不可視になったときに、そう名乗れるようにするためである。
     ///
     /// > ★★ **かつてここには「このビルドで実際に解決する名前は <c>Particles/Additive</c>
     /// > である（§H-22）」と書いてあった。それは誤りだった**（本プロジェクトで 13 件目の
@@ -167,7 +163,6 @@ namespace DisasterPlus.Game
         private static bool _buildFailed;
 
         private static string _shaderName;
-        private static bool _particleShaderResolved;
         private static string _shaderDetail;
         private static bool _hasMainTex;
         private static int _shaderMissCount;
@@ -185,10 +180,12 @@ namespace DisasterPlus.Game
         /// <summary>マテリアルを作れているか。</summary>
         public static bool MaterialResolved { get { return _material != null; } }
 
-        /// <summary>実際に使っているシェーダの名前（診断用）。作れていなければ null。</summary>
-        public static string ShaderName { get { return _shaderName; } }
-
-        /// <summary>診断に出す 1 行（**英語**）。</summary>
+        /// <summary>
+        /// 診断に出す 1 行（**英語**）。**T9 の見た目についての唯一の診断出力**である。
+        /// <c>Assumptions</c> は同じ答えを <see cref="ScanShaderFacts"/> から引くので、
+        /// ここに「粒子系か」を別の口として生やさない
+        /// （同じ事実の口が 2 つあると、必ず片方が古くなる）。
+        /// </summary>
         public static string ShaderDetail
         {
             get
@@ -465,7 +462,6 @@ namespace DisasterPlus.Game
 
             ShaderPick pick = ShaderPool.Resolve(ShaderPreference.Additive);
             _shaderName = pick.Name;
-            _particleShaderResolved = pick.Particle;
             _shaderDetail = pick.Describe();
 
             if (!pick.Usable)
@@ -624,14 +620,11 @@ namespace DisasterPlus.Game
             _tintedCool = -1f;
             _drawCalls = 0;
             _shaderMissCount = 0;
-            // ★ _shaderName / _particleShaderResolved は診断が「何で解決したか」を
-            //   名乗るための事実なので、都市を出ても消さない。
-            //   _shaderWarned / _errorLogged も同じ理由で戻さない
-            //   （ゲームのビルドに対する事実であって都市ごとの状態ではない）。
+            // ★ _shaderName / _shaderDetail は診断が「何で解決したか」を名乗るための
+            //   事実なので、都市を出ても消さない。_shaderWarned / _errorLogged も
+            //   同じ理由で戻さない（ゲームのビルドに対する事実であって
+            //   都市ごとの状態ではない）。
         }
-
-        /// <summary>粒子系のシェーダで解決したか（診断と <c>Assumptions</c> 用）。</summary>
-        public static bool ParticleShaderResolved { get { return _particleShaderResolved; } }
 
         private static int Min(int a, int b)
         {

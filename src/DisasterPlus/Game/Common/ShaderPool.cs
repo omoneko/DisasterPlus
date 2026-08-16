@@ -114,8 +114,9 @@ namespace DisasterPlus.Game
     ///
     /// ── 費用（<c>Resources.FindObjectsOfTypeAll</c> は安くない）──────────────
     ///
-    /// 走査は配列の確保と全オブジェクトの走査を伴うので、**1 セッションに 1 回**しか
-    /// 走らせない。解決できたら結果を持ち回し、以後は走査しない。
+    /// 走査は配列の確保と全オブジェクトの走査を伴い、さらに <c>Object.name</c> は
+    /// ネイティブ側から文字列を作るので**マテリアル 1 個につき 1 個の文字列を確保する**。
+    /// だから **1 セッションに 1 回**しか走らせない。解決できたら結果を持ち回し、以後は走査しない。
     /// 1 つも解決できなかったときだけ <see cref="RetryFrames"/> 空けて再走査する
     /// （将来のビルドでロードのタイミングが変わった場合の保険。
     /// ④の <c>ApplyVanillaBoost</c> と同じ間引きで、こちらは走査が重いぶん長い）。
@@ -135,6 +136,10 @@ namespace DisasterPlus.Game
     /// この環境に実際どんなシェーダが在るのかは**まだ誰も知らない**。
     /// 次の実機テストが推測ではなく答えを持ち帰れるよう、走査した時点で
     /// 相異なるシェーダ名を <c>Log.Info</c> に 1 度だけ出す（件数の上限つき）。
+    ///
+    /// 最初の 1 回はレベルロード中に走る —— <c>Assumptions</c> の③④⑤の検証が
+    /// ここを呼ぶからである。**それは意図してそうしてある**: 災害が 1 度も
+    /// 起きなかったセッションでも、在庫がログに残る。
     /// </summary>
     public static class ShaderPool
     {
@@ -176,11 +181,6 @@ namespace DisasterPlus.Game
         private static bool _scanned;
         private static int _nextScanFrame;
         private static bool _errorLogged;
-
-        private static int _distinctShaderCount = -1;
-
-        /// <summary>走査で見つけた相異なるシェーダ名の数（**まだ走査していなければ -1**）。</summary>
-        public static int DistinctShaderCount { get { return _distinctShaderCount; } }
 
         /// <summary>
         /// 使えるシェーダを 1 つ返す。**main スレッド専用**（<c>Shader</c> /
@@ -247,7 +247,6 @@ namespace DisasterPlus.Game
             _nextScanFrame = Time.frameCount + RetryFrames;
 
             Catalog catalog = ScanCatalog();
-            _distinctShaderCount = catalog.DistinctCount;
 
             // ★ 在庫のログはセッションに 1 回だけ（次の実機テストへの答え）。
             if (!_scanned)
@@ -423,7 +422,12 @@ namespace DisasterPlus.Game
             bool additive = lower.Contains("additive");
             bool alphaBlended = lower.Contains("alpha blended") || lower.Contains("alphablended");
             bool isParticle = lower.Contains("particle");
-            bool transparent = lower.Contains("transparent") || lower.Contains("unlit");
+
+            // ★ "unlit" だけでは半透明の証拠にならない（"Unlit/Color" は不透明である）。
+            //   借りたシェーダには Standard の透過設定を掛けないので、ここで
+            //   不透明なものを拾うと**色の付いた不透明な板**になる。
+            //   "Unlit/Transparent" は下の "transparent" で拾える。
+            bool transparent = lower.Contains("transparent");
 
             bool wantAdditive = preference == ShaderPreference.Additive;
 

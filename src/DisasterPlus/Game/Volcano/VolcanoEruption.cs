@@ -206,20 +206,15 @@ namespace DisasterPlus.Game
         public static bool Drawing { get { return _plume != null && _particles != null; } }
 
         /// <summary>
-        /// 噴煙のマテリアルが実際に解決したシェーダの名前（**null なら 1 つも取れなかった**）。
-        /// 診断に出す —— 将来のゲーム更新で黙って不可視になったときの唯一の手がかり。
+        /// 噴煙のマテリアルの診断 1 行（**英語**）。**将来のゲーム更新で黙って
+        /// 不可視になったときの唯一の手がかり**なので、何で解決したか
+        /// （借用か・<c>Standard</c> へ落ちたか・1 つも取れなかったか）を必ず名乗る。
+        ///
+        /// ★ <c>Standard</c> は「粒子系が取れた」に数えない（全体レビュー M10）——
+        ///   混ぜた瞬間にその旗は**構造上 1 度も false になれない**
+        ///   （と思われていた。実機では <c>Shader.Find("Standard")</c> すら null を
+        ///   返したが、規律は同じである）。その判定は <see cref="ShaderPool"/> にある。
         /// </summary>
-        public static string ShaderName { get { return _pick.Name; } }
-
-        /// <summary>
-        /// 粒子系のシェーダ（加算 / アルファブレンド）が取れたか。**<c>Standard</c> は
-        /// ここに数えない**（全体レビュー M10）—— 混ぜた瞬間にこの旗は
-        /// **構造上 1 度も false になれない**（と思われていたが、実機では
-        /// <c>Shader.Find("Standard")</c> すら null を返した。それでも規律は同じである）。
-        /// </summary>
-        public static bool ParticleShaderResolved { get { return _pick.Particle; } }
-
-        /// <summary>診断に出す 1 行（**英語**）。</summary>
         public static string ShaderDetail
         {
             get

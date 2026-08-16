@@ -62,20 +62,12 @@ namespace DisasterPlus.Game
         /// 都市ごとの状態ではない。④⑤と同じ判断）。</summary>
         private static bool _shaderWarned;
 
-        /// <summary>炎のマテリアルを作れているか（診断用）。</summary>
-        public static bool MaterialResolved { get { return _flameMaterial != null; } }
-
-        /// <summary>実際に使っているシェーダの名前（診断用）。取れていなければ null。</summary>
-        public static string ShaderName { get { return _pick.Name; } }
-
         /// <summary>
-        /// 粒子系のシェーダで解決したか（診断と <c>Assumptions</c> 用）。
-        /// **<c>Standard</c> はここに数えない** —— 数えた瞬間にこの旗は構造上
-        /// false になれなくなる（⑤ <c>VolcanoLavaFx</c> のクラス doc）。
+        /// 診断に出す 1 行（**英語**）。**③の見た目についての唯一の診断出力**である。
+        /// <c>Assumptions</c> は同じ答えを <see cref="ShaderPool"/> から直接引くので、
+        /// ここに「粒子系か」を別の口として生やさない
+        /// （同じ事実の口が 2 つあると、必ず片方が古くなる）。
         /// </summary>
-        public static bool ParticleShaderResolved { get { return _pick.Particle; } }
-
-        /// <summary>診断に出す 1 行（**英語**）。</summary>
         public static string ShaderDetail
         {
             get
@@ -85,9 +77,6 @@ namespace DisasterPlus.Game
                     : "NONE (no shader resolved; the flames are not drawn)";
             }
         }
-
-        /// <summary>今エフェクトを出している渦の数（診断用）。</summary>
-        public static int ObjectCount { get { return _objects.Count; } }
 
         /// <summary>レジストリの内容に合わせてエフェクトを生成・更新・破棄する。</summary>
         public static void Sync()
