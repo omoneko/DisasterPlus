@@ -272,6 +272,11 @@ namespace DisasterPlus.Game
                 b.Line(2, s);
             }
 
+            // ★ 炎のシェーダ。**「渦は出ているのに何も見えない」の唯一の手がかり**である。
+            //   ④⑤は最初からこの行を持っていて、③だけが持っていなかった
+            //   （そして③だけが FAIL を報告する代わりに毎フレーム落ちていた）。
+            b.Line(1, "flame material", FireWhirlFlameFx.ShaderDetail);
+
             // 設計書 7.1 のオーバーレイ例の末尾。「大火災なのに旋風が出ない」の
             // 最有力の原因なので必ず出す。
             b.Line(1, "cooldown", FireWhirlRegistry.CoolingCount.ToString());

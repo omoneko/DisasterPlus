@@ -343,12 +343,7 @@ namespace DisasterPlus.Game
             // ★ どのシェーダで解決したかを必ず名乗る（溶岩の描画と同じ扱い）。
             //   将来のゲーム更新で黙って不可視になったときの唯一の手がかりであり、
             //   Standard へ落ちた（＝光らない）ことも、ここでしか分からない。
-            b.Line(3, "plume material", string.IsNullOrEmpty(VolcanoEruption.ShaderName)
-                ? "NONE (no shader resolved; the plume is not drawn)"
-                : VolcanoEruption.ShaderName
-                  + (VolcanoEruption.ParticleShaderResolved
-                        ? "" : "  (fallback: no particle shader in this build; "
-                               + "forced to transparent so it does not draw opaque quads)"));
+            b.Line(3, "plume material", VolcanoEruption.ShaderDetail);
             b.Line(2, "borrowed fire effect", VolcanoEruption.BorrowedEffectAvailable
                 ? "applied (the game's own building fire effect, no DLC needed)"
                 : "not available in this environment (this is normal; the eruption still "
@@ -444,11 +439,7 @@ namespace DisasterPlus.Game
                 ? VolcanoLavaFx.DrawCalls + " draw call/frame, "
                   + VolcanoLavaFx.PointsDrawn + " points"
                 : (ModSettings.VolcanoLavaRender.value ? "not drawing" : "off (setting)"));
-            b.Line(2, "material", string.IsNullOrEmpty(VolcanoLavaFx.ShaderName)
-                ? "NONE (no shader resolved; the lava is invisible but still flows and burns)"
-                : VolcanoLavaFx.ShaderName
-                  + (VolcanoLavaFx.ParticleShaderResolved
-                        ? "" : "  (fallback: no particle shader in this build)"));
+            b.Line(2, "material", VolcanoLavaFx.ShaderDetail);
         }
 
         /// <summary>

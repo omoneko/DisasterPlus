@@ -353,6 +353,10 @@ namespace DisasterPlus.Game
 
             b.Line(2, "cloud", CloudStateText());
 
+            // ★ どのシェーダで解決したかを必ず名乗る（③⑤と同じ扱い）。
+            //   Standard へ落ちた／借りてきたことは、ここでしか分からない。
+            b.Line(3, "cloud material", TyphoonCloud.ShaderDetail);
+
             if (!ModSettings.TyphoonVanillaCloudBoost.value)
             {
                 b.Line(3, "vanilla sky boost", "off (setting)");

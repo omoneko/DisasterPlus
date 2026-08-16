@@ -23,7 +23,7 @@ namespace DisasterPlus.Game
     /// <code>
     /// Assumptions.cs             土台（この file）— 集計・ログ・Check/SetResult・
     ///                            HasField 系・スライダー検証・機能に属さない前提 1 件
-    /// Assumptions.FireWhirl.cs   ③火災旋風  3 件
+    /// Assumptions.FireWhirl.cs   ③火災旋風  4 件
     /// Assumptions.Forecast.cs    ①天気予報  7 件
     /// Assumptions.Earthquake.cs  ②地震     11 件
     /// Assumptions.Typhoon.cs     ④台風      9 件
