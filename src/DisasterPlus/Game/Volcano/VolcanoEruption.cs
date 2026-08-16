@@ -98,7 +98,8 @@ namespace DisasterPlus.Game
     /// ── 罠: CS のマテリアルを借りない／静的キャッシュを配列にしない ───────────
     ///
     /// CS のマテリアルを借りると自前の <c>Renderer</c> では何も描かれないか真っ黒になる
-    /// （火災旋風 §4.9）。マテリアルは <c>Shader.Find</c> から自作する。
+    /// （火災旋風 §4.9）。借りるのは <c>ShaderPool</c> が取ってくる**シェーダだけ**で、
+    /// マテリアルは自作する（2 つの違いはあちらのクラス doc）。
     /// <c>static GameObject[]</c> / <c>Material[]</c> にすると Unity の <c>==</c> による
     /// fake-null の自己修復が効かず、**2 つ目の都市で無言で見えなくなる**
     /// （同 §4.8。③が実際に出荷した不具合）。ここは**参照 1 個ずつ**で持ち、
@@ -170,8 +171,12 @@ namespace DisasterPlus.Game
         private static Material _material;
         private static float _configuredUnit = -1f;
         private static VolcanoBorrowFacts _borrowFacts;
-        private static string _shaderName;
-        private static bool _particleShaderResolved;
+
+        /// <summary>直近に解決したシェーダの事実（**取れなければ <c>Usable</c> が false**）。
+        /// <see cref="Reset"/> でも <see cref="Destroy"/> でも戻さない ——
+        /// <see cref="_shaderWarned"/> と同じくゲームのビルドに対する事実である。</summary>
+        private static ShaderPick _pick;
+
         private static bool _shaderWarned;
         private static bool _borrowWarned;
         private static bool _renderErrorLogged;
@@ -204,14 +209,26 @@ namespace DisasterPlus.Game
         /// 噴煙のマテリアルが実際に解決したシェーダの名前（**null なら 1 つも取れなかった**）。
         /// 診断に出す —— 将来のゲーム更新で黙って不可視になったときの唯一の手がかり。
         /// </summary>
-        public static string ShaderName { get { return _shaderName; } }
+        public static string ShaderName { get { return _pick.Name; } }
 
         /// <summary>
         /// 粒子系のシェーダ（加算 / アルファブレンド）が取れたか。**<c>Standard</c> は
-        /// ここに数えない**（全体レビュー M10）——<c>Standard</c> は Unity の組み込みで
-        /// 実質必ず非 null なので、混ぜた瞬間にこの旗は**構造上 1 度も false になれない**。
+        /// ここに数えない**（全体レビュー M10）—— 混ぜた瞬間にこの旗は
+        /// **構造上 1 度も false になれない**（と思われていたが、実機では
+        /// <c>Shader.Find("Standard")</c> すら null を返した。それでも規律は同じである）。
         /// </summary>
-        public static bool ParticleShaderResolved { get { return _particleShaderResolved; } }
+        public static bool ParticleShaderResolved { get { return _pick.Particle; } }
+
+        /// <summary>診断に出す 1 行（**英語**）。</summary>
+        public static string ShaderDetail
+        {
+            get
+            {
+                return _pick.Usable
+                    ? _pick.Describe()
+                    : "NONE (no shader resolved; the plume is not drawn)";
+            }
+        }
 
         /// <summary>直近の失敗（**英語・診断用**）。無ければ null。</summary>
         public static string LastFailure { get { return _lastFailure; } }
@@ -555,27 +572,28 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **CS のマテリアルを借りない**（火災旋風 §4.9）。加算合成を狙い、
-        /// 無ければ順に落とす。
+        /// **CS のマテリアルは借りない**（火災旋風 §4.9）。借りるのは
+        /// <see cref="ShaderPool"/> が取ってくる<b>シェーダだけ</b>で、
+        /// <c>Material</c> は必ずここで作る（2 つの違いはあちらのクラス doc）。
+        /// 噴煙なので加算合成を狙う。
         ///
-        /// ★ 判定は必ず <c>!= null</c> で行う（<c>UnityEngine.Object</c> の多重定義）。
-        ///   <c>??</c> は fake-null を素通しするので、破棄済みの <c>Shader</c> を
-        ///   掴んだときにフォールバックが働かない（④の <c>TyphoonCloud</c> の同じ注記）。
-        ///
-        /// ★★ <b><c>Standard</c> は「取れた」の外側に置く</b>（全体レビュー M10）。
-        ///   <see cref="FindShader"/> の末尾が <c>Shader.Find("Standard")</c> だった頃、
-        ///   下の <c>s == null</c> は**構造上 1 度も真になれず**、<c>Log.Warn</c> も
-        ///   <see cref="LastFailure"/> も到達しない死んだ枝だった
+        /// ★★ <b><c>Standard</c> は「粒子系が取れた」の外側に置く</b>（全体レビュー M10）。
+        ///   かつてここの探索の末尾が <c>Shader.Find("Standard")</c> だった頃、
+        ///   下の <c>Usable == false</c> にあたる枝は**構造上 1 度も真になれず**、
+        ///   <c>Log.Warn</c> も <see cref="LastFailure"/> も到達しない死んだ枝だった
         ///   （<see cref="VolcanoLavaFx"/> のクラス doc が同じ罠を避けている）。
         ///   しかも <c>Standard</c> を素で使うと**不透明な板**になるので、
         ///   あちらと同じく透過モードへ落とす。
+        ///
+        /// ★ 探索の間引きは <see cref="ShaderPool"/> の側にある。ここは
+        ///   <c>_plume</c> が無いあいだ毎フレーム呼ばれうるが、あちらは解決済みなら
+        ///   キャッシュを返すだけで、走査は間引かれている。
         /// </summary>
         private static Material BuildMaterial()
         {
-            Shader s = FindShader(out _particleShaderResolved);
-            if (s == null)
+            _pick = ShaderPool.Resolve(ShaderPreference.Additive);
+            if (!_pick.Usable)
             {
-                _shaderName = null;
                 if (!_shaderWarned)
                 {
                     _shaderWarned = true;
@@ -586,60 +604,15 @@ namespace DisasterPlus.Game
                 return null;
             }
 
-            _shaderName = s.name;
-
-            var m = new Material(s);
+            var m = new Material(_pick.Shader);
             m.name = "DisasterPlus_VolcanoPlume";
 
-            // ★ 粒子系が 1 つも取れなかったときの受け皿。透過にしないと
-            //   噴煙が**不透明な四角い板の群れ**になる。
-            if (s.name == "Standard") MakeStandardTransparent(m);
+            // ★ Standard まで落ちたときの受け皿。透過にしないと噴煙が
+            //   **不透明な四角い板の群れ**になる。借りてきた別のシェーダには
+            //   掛けない（_Mode / _SrcBlend は Standard の契約である）。
+            if (_pick.StandardFallback) ShaderPool.MakeStandardTransparent(m);
 
             return m;
-        }
-
-        /// <summary>
-        /// 使えるシェーダを 1 つ。<paramref name="particleResolved"/> は
-        /// **粒子系（加算 / アルファブレンド）が取れたか**で、<c>Standard</c> では false。
-        /// このビルドで実際に解決するのは <c>Particles/Additive</c> である（§H-22）。
-        /// </summary>
-        private static Shader FindShader(out bool particleResolved)
-        {
-            particleResolved = true;
-
-            Shader s = Shader.Find("Particles/Additive");
-            if (s != null) return s;
-
-            s = Shader.Find("Legacy Shaders/Particles/Additive");
-            if (s != null) return s;
-
-            s = Shader.Find("Particles/Alpha Blended");
-            if (s != null) return s;
-
-            s = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
-            if (s != null) return s;
-
-            // ★ ここから下は「粒子系が 1 つも無かった」場合の受け皿である。
-            particleResolved = false;
-
-            s = Shader.Find("Standard");
-            return s != null ? s : null;
-        }
-
-        /// <summary>
-        /// <c>Standard</c> を透過モードにする（<see cref="VolcanoLavaFx"/> と同じ 7 行）。
-        /// **共有していない**のは、あちらが T9 の独立性のために参照元を 4 ファイルに
-        /// 限っているためである（あちらのクラス doc の grep）。
-        /// </summary>
-        private static void MakeStandardTransparent(Material m)
-        {
-            m.SetFloat("_Mode", 3f);
-            m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            m.SetInt("_ZWrite", 0);
-            m.DisableKeyword("_ALPHATEST_ON");
-            m.DisableKeyword("_ALPHABLEND_ON");
-            m.EnableKeyword("_ALPHAPREMULTIPLY_ON");
         }
 
         /// <summary>

@@ -6,9 +6,10 @@ namespace DisasterPlus.Game
     /// <summary>
     /// 渦に炎をまとわせる。main スレッドからのみ呼ぶこと（Unity オブジェクトを作る）。
     ///
-    /// CS のマテリアルは借りない。CS のシェーダはエンジンが供給する per-instance データを
-    /// 要求するので、素の Renderer に載せると何も描画されないか真っ黒になる。
-    /// シェーダは自前に解決して自分で <c>Material</c> を作る。
+    /// CS の<b>マテリアル</b>は借りない。CS のシェーダはエンジンが供給する per-instance
+    /// データを要求するので、素の Renderer に載せると何も描画されないか真っ黒になる。
+    /// <b>借りるのは <c>ShaderPool</c> が取ってくる<u>シェーダだけ</u></b>で、
+    /// <c>Material</c> は必ず自分で作る（2 つの違いは <see cref="ShaderPool"/> のクラス doc）。
     ///
     /// ★★ <b>シェーダが 1 つも解決しなければ「描かない」。</b>実機テストで
     ///   <c>Shader.Find</c> が**組み込みの <c>"Standard"</c> を含めて全て null を返した**。
@@ -18,11 +19,6 @@ namespace DisasterPlus.Game
     ///   それが毎フレームの経路だったため**同じ例外が 6,938 行**出た。
     ///   ④<c>TyphoonCloud</c> と⑤<c>VolcanoLavaFx</c> は最初から「解決しなければ描かない」
     ///   経路を持っていて綺麗に FAIL を報告できたので、③も同じ形に揃える。
-    ///
-    /// ★ <c>??</c> は使わない。<c>UnityEngine.Object</c> の <c>==</c> は多重定義されていて
-    ///   破棄済みオブジェクトが null と等価になるが、<c>??</c> は**素の参照 null しか見ない**
-    ///   ので fake-null を素通しする（④の <c>TyphoonCloud.FindShader</c> の同じ注記）。
-    ///   判定は必ず <c>!= null</c> で行う。
     ///
     /// DispatchEffect を使わないのは、magnitude が粒子密度でしかなく、大きさは
     /// EffectInfo.SpawnArea 半径でしか変えられないため。旋風は 40〜220m とスケールが
@@ -58,14 +54,8 @@ namespace DisasterPlus.Game
         /// <summary>解決しなかったときに次に探すまでの残りフレーム数。</summary>
         private static int _shaderMissCount;
 
-        /// <summary>実際に解決したシェーダの名前（**null なら 1 つも取れなかった**）。診断用。</summary>
-        private static string _shaderName;
-
-        /// <summary>
-        /// 粒子系（加算 / アルファブレンド）が取れたか。**<c>Standard</c> はここに数えない** ——
-        /// 数えた瞬間にこの旗は構造上 false になれなくなる（⑤ <c>VolcanoLavaFx</c> のクラス doc）。
-        /// </summary>
-        private static bool _particleShaderResolved;
+        /// <summary>直近に解決したシェーダの事実（**取れなければ <c>Usable</c> が false**）。</summary>
+        private static ShaderPick _pick;
 
         /// <summary>シェーダが解決しないことを <c>Log.Warn</c> で 1 度だけ鳴らしたか。
         /// **<see cref="Clear"/> で戻さない**（ゲームのビルドに対する事実であって
@@ -75,11 +65,26 @@ namespace DisasterPlus.Game
         /// <summary>炎のマテリアルを作れているか（診断用）。</summary>
         public static bool MaterialResolved { get { return _flameMaterial != null; } }
 
-        /// <summary>実際に使っているシェーダの名前（診断用）。作れていなければ null。</summary>
-        public static string ShaderName { get { return _shaderName; } }
+        /// <summary>実際に使っているシェーダの名前（診断用）。取れていなければ null。</summary>
+        public static string ShaderName { get { return _pick.Name; } }
 
-        /// <summary>粒子系のシェーダで解決したか（診断と <c>Assumptions</c> 用）。</summary>
-        public static bool ParticleShaderResolved { get { return _particleShaderResolved; } }
+        /// <summary>
+        /// 粒子系のシェーダで解決したか（診断と <c>Assumptions</c> 用）。
+        /// **<c>Standard</c> はここに数えない** —— 数えた瞬間にこの旗は構造上
+        /// false になれなくなる（⑤ <c>VolcanoLavaFx</c> のクラス doc）。
+        /// </summary>
+        public static bool ParticleShaderResolved { get { return _pick.Particle; } }
+
+        /// <summary>診断に出す 1 行（**英語**）。</summary>
+        public static string ShaderDetail
+        {
+            get
+            {
+                return _pick.Usable
+                    ? _pick.Describe()
+                    : "NONE (no shader resolved; the flames are not drawn)";
+            }
+        }
 
         /// <summary>今エフェクトを出している渦の数（診断用）。</summary>
         public static int ObjectCount { get { return _objects.Count; } }
@@ -156,12 +161,11 @@ namespace DisasterPlus.Game
                 return null;
             }
 
-            bool particle;
-            Shader s = FindShader(out particle);
-            _shaderName = s != null ? s.name : null;
-            _particleShaderResolved = particle;
+            // ★ Shader.Find が全滅する環境があるので、名前で引けなければ
+            //   読み込み済み Material から**シェーダだけ**を借りる（ShaderPool）。
+            _pick = ShaderPool.Resolve(ShaderPreference.Additive);
 
-            if (s == null)
+            if (!_pick.Usable)
             {
                 if (!_shaderWarned)
                 {
@@ -181,60 +185,16 @@ namespace DisasterPlus.Game
             // Material.color が触るのは _Color だが Particles/Additive のティントは _TintColor なので、
             // ここで色を入れても何も起きない。「効いているように読める死んだ行」を残すと、
             // 後から誰かが _TintColor に直してしまい、理由なく見た目が変わる。
-            var m = new Material(s);
+            var m = new Material(_pick.Shader);
             m.name = "DisasterPlus_FireWhirlFlame";
 
-            // ★ 粒子系が 1 つも取れなかったときの受け皿。透過にしないと炎が
-            //   **不透明な四角い板の群れ**になる（⑤ VolcanoEruption と同じ 7 行）。
-            if (s.name == "Standard") MakeStandardTransparent(m);
+            // ★ Standard まで落ちたときの受け皿。透過にしないと炎が
+            //   **不透明な四角い板の群れ**になる。借りてきた別のシェーダには
+            //   掛けない（_Mode / _SrcBlend は Standard の契約である）。
+            if (_pick.StandardFallback) ShaderPool.MakeStandardTransparent(m);
 
             _flameMaterial = m;
             return _flameMaterial;
-        }
-
-        /// <summary>
-        /// 使えるシェーダを 1 つ返す。炎なので加算合成を優先する。
-        /// <paramref name="particleResolved"/> は**粒子系が取れたか**で、
-        /// <c>Standard</c> では false。1 つも取れなければ null を返す。
-        /// </summary>
-        private static Shader FindShader(out bool particleResolved)
-        {
-            particleResolved = true;
-
-            // ★ 判定は必ず != null（?? は fake-null を素通しする。クラス doc）。
-            Shader s = Shader.Find("Particles/Additive");
-            if (s != null) return s;
-
-            s = Shader.Find("Legacy Shaders/Particles/Additive");
-            if (s != null) return s;
-
-            s = Shader.Find("Particles/Alpha Blended");
-            if (s != null) return s;
-
-            s = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
-            if (s != null) return s;
-
-            // ★ ここから下は「粒子系が 1 つも無かった」場合の受け皿である。
-            particleResolved = false;
-
-            s = Shader.Find("Standard");
-            return s != null ? s : null;
-        }
-
-        /// <summary>
-        /// <c>Standard</c> まで落ちたときだけ通る。既定の <c>Standard</c> は不透明なので、
-        /// これを飛ばすと炎が不透明な板になる。Unity 5.6 の StandardShaderGUI が
-        /// Transparent モードで入れるのと同じ設定（④⑤と同じ）。
-        /// </summary>
-        private static void MakeStandardTransparent(Material m)
-        {
-            m.SetFloat("_Mode", 3f);
-            m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            m.SetInt("_ZWrite", 0);
-            m.DisableKeyword("_ALPHATEST_ON");
-            m.DisableKeyword("_ALPHABLEND_ON");
-            m.EnableKeyword("_ALPHAPREMULTIPLY_ON");
         }
 
         private static GameObject Create(ushort disasterId, Material flame)
@@ -306,8 +266,9 @@ namespace DisasterPlus.Game
             _flameMaterial = null;
 
             _shaderMissCount = 0;
-            // ★ _shaderName / _particleShaderResolved / _shaderWarned は戻さない。
-            //   ゲームのビルドに対する事実であって都市ごとの状態ではない（④⑤と同じ）。
+            // ★ _pick / _shaderWarned は戻さない。ゲームのビルドに対する事実であって
+            //   都市ごとの状態ではない（④⑤と同じ）。_pick が抱えるのは Shader 参照
+            //   だけで、Material は上で破棄している。
         }
     }
 }

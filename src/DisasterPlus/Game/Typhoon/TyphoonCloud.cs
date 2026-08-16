@@ -47,8 +47,12 @@ namespace DisasterPlus.Game
     /// <c>ID_TyreMatrix</c> / <c>ID_TyrePosition</c> / <c>ID_LightState</c> / <c>ID_Color</c> を
     /// 詰めてから <c>DrawMesh</c> している。§C-1）。それを自前の <c>DrawMesh</c> に載せると
     /// **何も描画されないか真っ黒になる**。だから借りるとしてもメッシュだけで、
-    /// マテリアルは <c>Shader.Find</c> から自作する（火災旋風 §4.9、
-    /// ③の <c>FireWhirlFlameFx.FlameMaterial</c> と同じ形）。
+    /// マテリアルは自作する（火災旋風 §4.9、③の <c>FireWhirlFlameFx.FlameMaterial</c> と同じ形）。
+    ///
+    /// ★ そのシェーダは <see cref="ShaderPool"/> が取ってくる。<c>Shader.Find</c> が
+    ///   **組み込みの <c>"Standard"</c> にさえ null を返す環境**が実機で見つかったので、
+    ///   名前で引けないときは読み込み済み <c>Material</c> から<b>シェーダだけ</b>を借りる
+    ///   （<c>Material</c> インスタンスは借りない。2 つの違いはあちらのクラス doc）。
     ///
     /// **シェーダが 1 つも解決しなければ何も描かない**（<see cref="TyphoonCloudState.ShaderMissing"/>）。
     /// 将来のゲーム更新でそうなったときに黙って不可視にならないよう、
@@ -138,11 +142,12 @@ namespace DisasterPlus.Game
         private static Texture2D _texture;
 
         /// <summary>
-        /// シェーダが 1 つも解決しなかったとき、次に <c>Shader.Find</c> を
-        /// 試すまでに空けるフレーム数の残り（全体レビュー）。
+        /// シェーダが 1 つも解決しなかったとき、次に <see cref="ShaderPool"/> へ
+        /// 訊きに行くまでに空けるフレーム数の残り（全体レビュー）。
         ///
         /// <c>BuildMaterial</c> はマテリアルが作れない限り**毎フレーム**呼ばれるので、
-        /// 素直に書くと 4 回の <c>Shader.Find</c> がセッションのあいだ毎フレーム走る。
+        /// 素直に書くと解決の試行がセッションのあいだ毎フレーム走る
+        /// （<see cref="ShaderPool"/> の側にも走査の間引きがあるが、こちらはこちらで持つ）。
         /// <c>Log.Warn</c> のほうは 1 回だけにラッチしてあったが、**探索自体には
         /// 同じ間引きが掛かっていなかった** —— 同じファイルの
         /// <see cref="ApplyVanillaBoost"/> が既に <see cref="BoostRetryFrames"/> で
@@ -170,9 +175,33 @@ namespace DisasterPlus.Game
         /// 都市ごとの状態ではない）。</summary>
         private static bool _shaderWarned;
 
+        /// <summary>直近に解決したシェーダの事実（**取れなければ <c>Usable</c> が false**）。
+        /// <see cref="Destroy"/> で戻さない —— <see cref="_shaderWarned"/> と同じ理由で
+        /// ゲームのビルドに対する事実である。抱えるのは <c>Shader</c> 参照だけで、
+        /// <c>Material</c> は <see cref="Destroy"/> が破棄している。</summary>
+        private static ShaderPick _pick;
+
         private static bool _errorLogged;
 
         public static TyphoonCloudState State { get { return _state; } }
+
+        /// <summary>実際に使っているシェーダの名前（診断用）。取れていなければ null。</summary>
+        public static string ShaderName { get { return _pick.Name; } }
+
+        /// <summary>粒子系のシェーダで解決したか（診断と <c>Assumptions</c> 用）。
+        /// **<c>Standard</c> はここに数えない。**</summary>
+        public static bool ParticleShaderResolved { get { return _pick.Particle; } }
+
+        /// <summary>診断に出す 1 行（**英語**）。</summary>
+        public static string ShaderDetail
+        {
+            get
+            {
+                return _pick.Usable
+                    ? _pick.Describe()
+                    : "NONE (no shader resolved; the cloud is not drawn)";
+            }
+        }
 
         /// <summary>バニラ空の雲を今増強しているか。</summary>
         public static bool VanillaBoostApplied { get { return _boostApplied; } }
@@ -335,8 +364,10 @@ namespace DisasterPlus.Game
                 return null;
             }
 
-            Shader s = FindShader();
-            if (s == null)
+            // ★ Shader.Find が全滅する環境があるので、名前で引けなければ
+            //   読み込み済み Material から**シェーダだけ**を借りる（ShaderPool）。
+            _pick = ShaderPool.Resolve(ShaderPreference.AlphaBlended);
+            if (!_pick.Usable)
             {
                 // ★ Log.Warn はスロットルされない。ここは**毎フレームの経路**
                 //   （マテリアルが作れない限り毎フレーム再挑戦する）なので、
@@ -353,7 +384,7 @@ namespace DisasterPlus.Game
                 return null;
             }
 
-            var m = new Material(s);
+            var m = new Material(_pick.Shader);
             m.name = "DisasterPlus_TyphoonCloud";
 
             // ★ リボンの縁を落とすテクスチャ。UV は SpiralMesh が出しているのに
@@ -371,31 +402,12 @@ namespace DisasterPlus.Game
             if (m.HasProperty("_TintColor")) m.SetColor("_TintColor", tint);
             if (m.HasProperty("_Color")) m.SetColor("_Color", tint);
 
-            if (s.name == "Standard") MakeStandardTransparent(m);
+            // ★ Standard まで落ちたときだけ透過へ落とす。借りてきた別のシェーダには
+            //   掛けない（_Mode / _SrcBlend は Standard の契約である）。
+            if (_pick.StandardFallback) ShaderPool.MakeStandardTransparent(m);
 
             m.renderQueue = 3000;   // Transparent
             return m;
-        }
-
-        /// <summary>
-        /// 使えるシェーダを 1 つ返す。半透明で描きたいので粒子系のアルファブレンドを
-        /// 優先し、無ければ順に落とす。判定は必ず <c>!= null</c>（<c>UnityEngine.Object</c> の
-        /// 多重定義）で行う —— <c>??</c> は fake-null を素通しするので、破棄済みの
-        /// <c>Shader</c> を掴んだときにフォールバックが働かない。
-        /// </summary>
-        private static Shader FindShader()
-        {
-            Shader s = Shader.Find("Particles/Alpha Blended");
-            if (s != null) return s;
-
-            s = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
-            if (s != null) return s;
-
-            s = Shader.Find("Particles/Additive");
-            if (s != null) return s;
-
-            s = Shader.Find("Standard");
-            return s != null ? s : null;
         }
 
         /// <summary>
@@ -454,22 +466,6 @@ namespace DisasterPlus.Game
             {
                 return false;
             }
-        }
-
-        /// <summary>
-        /// <c>Standard</c> まで落ちたときだけ通る。既定の <c>Standard</c> は不透明なので、
-        /// これを飛ばすと**都市の上に不透明な灰色の円盤**が乗る。
-        /// Unity 5.6 の StandardShaderGUI が Transparent モードで入れるのと同じ設定。
-        /// </summary>
-        private static void MakeStandardTransparent(Material m)
-        {
-            m.SetFloat("_Mode", 3f);
-            m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            m.SetInt("_ZWrite", 0);
-            m.DisableKeyword("_ALPHATEST_ON");
-            m.DisableKeyword("_ALPHABLEND_ON");
-            m.EnableKeyword("_ALPHAPREMULTIPLY_ON");
         }
 
         // ── バニラ空の雲の増強（無ければ黙って諦める） ─────────────────
