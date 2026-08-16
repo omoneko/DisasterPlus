@@ -193,18 +193,24 @@ namespace DisasterPlus.Game
 
             // 7. 溶岩の面のシェーダ。
             //
-            //   ★★ **述語に Shader.Find("Standard") を混ぜない。** Standard は
-            //     Unity の組み込みで実質必ず非 null なので、
+            //   ★★ **述語に「Standard が取れた」を混ぜない。** Standard は
+            //     Unity の組み込みなので実質必ず非 null だと思われており、
             //     「… || Shader.Find("Standard") != null」という検査は**構造上 1 度も
-            //     失敗できない**（④のレビューがまさにこれを見つけている）。
+            //     失敗できない**形だった（④のレビューがまさにこれを見つけている。
+            //     実機では Shader.Find がその Standard にすら null を返したが、
+            //     構造上の欠陥は欠陥のままである）。
             //     ここが見るのは **粒子系（加算 / アルファブレンド）が取れたか**で、
             //     取れなければ Standard を透過モードにして描く（＝見えるが光らない）。
             //
             //   ★ 名前に「実際に何で解決したか」を出すのは、失敗したときにその情報が
             //     ここにしか出ないからである（T2 の RawHeights の件数と同じ扱い）。
+            //     **借りてきたのかどうかも出す** —— Shader.Find で引けた環境と
+            //     読み込み済み Material から借りた環境は、次に何を疑うかが違う。
             //
-            //   Shader.Find は main スレッド専用で、Run() も main である。
-            //   Check の外で例外を抑えるのは上の 6 件と同じ理由。
+            //   ★ 述語は VolcanoLavaFx が実際に門にしている式そのものである
+            //     （ScanShaderFacts は BuildMaterial と同じ ShaderPool を呼ぶ）。
+            //     ShaderPool は main スレッド専用で、Run() も main である。
+            //     Check の外で例外を抑えるのは上の 6 件と同じ理由。
             VolcanoLavaShaderFacts lavaShader;
             try
             {
@@ -212,13 +218,13 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                lavaShader = new VolcanoLavaShaderFacts();
+                lavaShader = new VolcanoLavaShaderFacts(null, false, "NONE (the scan threw)");
             }
 
-            Check("Shader.Find resolves an additive or alpha-blended particle shader for the "
-                  + "lava surface (resolved: "
+            Check("an additive or alpha-blended particle shader resolves for the lava surface, "
+                  + "by name or by borrowing the shader off a loaded material (resolved: "
                   + (string.IsNullOrEmpty(lavaShader.ResolvedShaderName)
-                        ? "nothing" : lavaShader.ResolvedShaderName) + ")",
+                        ? "nothing" : lavaShader.Detail) + ")",
                   "the lava surface falls back to the Standard shader forced into transparent "
                   + "mode, so it draws but does not glow; if nothing resolves at all it is not "
                   + "drawn. The lava still flows, still scorches the ground and still sets "

@@ -404,27 +404,37 @@ namespace DisasterPlus.Game
             //   将来のゲーム更新でシェーダ名が変わったとき、黙って雲が消えるのではなく
             //   ここが名指しする。
             //
-            // Shader.Find は main スレッド専用だが、Run() 自体が main スレッド専用なので
+            // ShaderPool は main スレッド専用だが、Run() 自体が main スレッド専用なので
             // 問題ない。**DayNightDynamicCloudsProperties の実在はここに入れない** ——
             // 無いのは正当な環境（DLC・グラフィック設定）で、④の自前の雲には
             // 影響しないため（FAIL にすると狼少年になる）。
-            // ★★ **どのシェーダで通ったかを名前に書く**（全体レビュー）。
+            //
+            // ★★ **述語に「Standard が取れた」を混ぜない**（全体レビュー）。
             //    以前はこの検査が `|| Shader.Find("Standard") != null` で終わっていた。
-            //    Standard は Unity 組み込みなので実質いつでも解決し、**この検査は
-            //    原理的に FAIL しない**——「粒子系のアルファブレンドが 1 つも無い」
-            //    という、この検査が名指しするはずだった事態が起きても PASS が出る。
-            //    合否の式は TyphoonCloud.FindShader と同じままにし（そちらが実際に
-            //    使う順序であり、Standard は MakeStandardTransparent で正しく透過に
-            //    してから使う正当な最終手段である）、**勝ったシェーダ名を出す**ことで
-            //    「Standard まで落ちている」を読めるようにする。
-            string cloudShader = FirstResolvableCloudShader();
+            //    Standard は Unity 組み込みなので実質いつでも解決すると思われており、
+            //    **この検査は原理的に FAIL しない**形だった（実機では Shader.Find が
+            //    その Standard にすら null を返したので結果的に FAIL したが、
+            //    構造上の欠陥は欠陥のままである）。
+            //    ここが見るのは⑤の溶岩と同じく **「粒子系が取れたか」** で、
+            //    取れなければ Standard を透過モードにして描く（＝見えるが光らない）。
+            //    「1 つも取れなかった」は名前のほうに出る。
+            //
+            // ★ **述語は④が実際に門にしている式でなければならない。**
+            //    だから自前に順序を書き写さず、TyphoonCloud と**同じ** ShaderPool を
+            //    同じ preference で呼ぶ（順序を写すと、検査が報告する名前と
+            //    実際に使うシェーダが黙ってずれる）。
+            ShaderPick cloudShader = ResolveCloudShader();
             Check("Graphics.DrawMesh(Mesh, Matrix4x4, Material, int, Camera, int, "
-                  + "MaterialPropertyBlock, bool, bool) is reachable and a transparent shader "
-                  + "resolves via Shader.Find (winner: "
-                  + (cloudShader ?? "NONE - the cloud is not drawn") + ")",
-                  "the typhoon's own cloud cannot be drawn. Every other part of the typhoon is "
-                  + "unaffected; the mod draws nothing rather than borrowing a Cities material, "
-                  + "which renders invisible or black in a hand-rolled DrawMesh",
+                  + "MaterialPropertyBlock, bool, bool) is reachable and an additive or "
+                  + "alpha-blended particle shader resolves for the cloud, by name or by "
+                  + "borrowing the shader off a loaded material (resolved: "
+                  + cloudShader.Describe() + ")",
+                  "the typhoon's own cloud falls back to the Standard shader forced into "
+                  + "transparent mode, so it draws but does not glow; if nothing resolves at "
+                  + "all it is not drawn. Every other part of the typhoon is unaffected. The "
+                  + "mod draws nothing rather than borrowing a Cities material instance, which "
+                  + "renders invisible or black in a hand-rolled DrawMesh - borrowing only the "
+                  + "shader off such a material is a different thing and is what it does",
                   delegate
                   {
                       // ★ 4 引数版ではなく**実際に呼んでいる 9 引数版**を見る。
@@ -446,20 +456,19 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      return cloudShader != null;
+                      return cloudShader.Particle;
                   });
 
             // --- ④台風（Task 9）ここまで ---
         }
 
         /// <summary>
-        /// ④の雲が使えるシェーダの名前。1 つも無ければ null。
-        /// **順序は <c>TyphoonCloud.FindShader</c> と同じでなければならない**
-        /// （違う順序で調べると、検査が報告する名前と実際に使うシェーダがずれる）。
-        /// <c>Shader.Find</c> は main スレッド専用だが、<see cref="Run"/> 自体が
-        /// main スレッド専用なので問題ない。
+        /// ④の雲が実際に使うシェーダ。**<c>TyphoonCloud.BuildMaterial</c> と
+        /// 同じ <c>ShaderPool</c> を同じ preference で呼ぶ** —— 順序をここへ写すと、
+        /// 検査が報告する名前と実際に使うシェーダが黙ってずれる。
+        /// main スレッド専用だが、<see cref="Run"/> 自体が main スレッド専用なので問題ない。
         /// </summary>
-        private static string FirstResolvableCloudShader()
+        private static ShaderPick ResolveCloudShader()
         {
             // ★ **自分で try/catch する。** ここは検証の*名前*を組み立てるために
             //   Check() の外側（＝あの try/catch の外）で呼ばれる。Assumptions.Run() は
@@ -468,26 +477,13 @@ namespace DisasterPlus.Game
             //   （DestroyTreesIsReachable が同じ理由で同じ形をしている）。
             try
             {
-                string[] names =
-                {
-                    "Particles/Alpha Blended",
-                    "Legacy Shaders/Particles/Alpha Blended",
-                    "Particles/Additive",
-                    "Standard",
-                };
-
-                for (int i = 0; i < names.Length; i++)
-                {
-                    // UnityEngine.Object の == 多重定義で fake-null も弾く（?? は素通しする）。
-                    if (UnityEngine.Shader.Find(names[i]) != null) return names[i];
-                }
-                return null;
+                return ShaderPool.Resolve(ShaderPreference.AlphaBlended);
             }
             catch
             {
-                // 名前は「解決しなかった」側に倒す。検証も FAIL になるので、
+                // 「解決しなかった」側に倒す。検証も FAIL になるので、
                 // 黙って PASS を出すことにはならない。
-                return null;
+                return new ShaderPick(null, false, false, false);
             }
         }
 
