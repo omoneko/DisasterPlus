@@ -155,7 +155,7 @@ namespace DisasterPlus.Game
         /// </summary>
         public void OnMainThreadUpdate()
         {
-            TyphoonPanelButton.Tick();
+            // ボタンは DisasterPanelBar が 5 個まとめて持つ（FeatureHost が呼ぶ）。
             TyphoonPanel.Tick();
 
             // ★ 雲は main スレッドだけの機能で、**sim 側からは 1 度も呼ばれない。**
@@ -167,7 +167,7 @@ namespace DisasterPlus.Game
             //     早期 return して TyphoonHub.Latest が更新されなくなるので、最後に
             //     publish された「Active な」スナップショットが残り続ける ——
             //     見ないと**止まった雲が画面に貼り付いたまま**になる
-            //     （TyphoonPanelButton / TyphoonPanel が同じガードを持っている）。
+            //     （TyphoonPanel が同じガードを持っている）。
             if (ModSettings.TyphoonEnabled.value && ModSettings.TyphoonCloudEnabled.value)
             {
                 TyphoonCloud.Update(TyphoonHub.Latest);
@@ -182,7 +182,7 @@ namespace DisasterPlus.Game
         {
             // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
-            TyphoonPanelButton.Remove();
+            //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
             TyphoonPanel.Destroy();
             // ★ Mesh も Material も Component ではないので、GameObject を消しても
             //    道連れにならない。**自分で Object.Destroy する**（TyphoonCloud の
@@ -237,34 +237,20 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// UI の状態。②の <c>EarthquakeFeature.WriteUiState</c> と同じ 3 状態
-        /// （未設置／保存位置の再利用／新規探索の成否）。
+        /// UI の状態。①②③⑤と同じ形（<see cref="DisasterPanelBar"/> に問い合わせるだけ）。
         ///
-        /// **ボタンが①②のボタンと重なっているかどうかは、ここでしか分からない。**
-        /// 重なったボタンは画面上で「1 個しか無い」ように見えるので、
-        /// <c>fresh free-slot search FAILED</c> が出ているかを診断で確かめる。
+        /// **「①②のボタンと重なっていないか」はもう診断項目ではない。** 5 個の位置は
+        /// 1 本の並びに対する 1 回のループが決めるので、重なる経路が存在しない
+        /// （DisasterPanelBar のクラス doc）。ここで見るのは
+        /// 「④のボタンが実際に居るか」と「どこに居るか（バニラのパネルの中か、
+        /// 退避先の浮遊バーか）」だけである。
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b)
         {
-            string placement;
-            if (!TyphoonPanelButton.Installed)
-            {
-                placement = "button not installed yet";
-            }
-            else if (TyphoonPanelButton.UsedSavedPosition)
-            {
-                placement = "saved position reused";
-            }
-            else
-            {
-                placement = TyphoonPanelButton.FoundFreeSlot
-                    ? "fresh free-slot search succeeded"
-                    : "fresh free-slot search FAILED (fell back to preferred position)";
-            }
-
-            b.Line(1, "button position", ModSettings.TyphoonButtonX.value + ","
-                                         + ModSettings.TyphoonButtonY.value
-                                         + "  (" + placement + ")");
+            // ボタンは④専用ではなく DisasterPanelBar が 5 個まとめて置く。座標は
+            // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
+            b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdTyphoon)
+                ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "panel body", TyphoonPanel.IsVisible ? "shown" : "hidden");
         }
 

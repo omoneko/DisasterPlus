@@ -39,8 +39,8 @@ namespace DisasterPlus.Game
     ///
     /// <code>
     /// # 対象は⑤の表示コード全部。
-    /// #   V='src/DisasterPlus/Game/Volcano src/DisasterPlus/Game/UI/VolcanoPanelButton.cs
-    /// #      src/DisasterPlus/Game/UI/VolcanoPlacementTool.cs'
+    /// #   V='src/DisasterPlus/Game/Volcano src/DisasterPlus/Game/UI/VolcanoPlacementTool.cs'
+    /// #   （ボタンは DisasterPanelBar が持つので⑤の表示コードではなくなった）
     /// #   grep -v '///' で doc コメントを落とす（この doc 自身が引っかかるため）。
     ///
     /// # 1. UILabel を作るのは AddLabel の 1 箇所だけ                        -> 1

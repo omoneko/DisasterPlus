@@ -41,7 +41,7 @@ namespace DisasterPlus.Game
 
             // ツール登録は毎レベルロード必要（ToolController.m_tools はレベル毎に再構築される）。
             ToolRegistration.Register<FireWhirlPlacementTool>();
-            FireWhirlPanelButton.Install();
+            // ボタンの設置は DisasterPanelBar が 5 個まとめて行う（FeatureHost が呼ぶ）。
         }
 
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
@@ -228,8 +228,7 @@ namespace DisasterPlus.Game
             FireWhirlFlameFx.Sync();
 
             // 災害パネルはレベルロード時点ではまだ構築されていないことがある。
-            // Tick は間引き（120 フレーム毎）と試行上限を持つので毎フレーム呼んでよい。
-            FireWhirlPanelButton.Tick();
+            // その再試行は DisasterPanelBar が 5 個ぶんまとめて持つ（FeatureHost が呼ぶ）。
         }
 
         public void OnLevelUnloading()
@@ -240,13 +239,17 @@ namespace DisasterPlus.Game
             FireWhirlRegistry.Clear();
             FireWhirlFlameFx.Clear();
             HarmonyBootstrap.Uninstall();
-            FireWhirlPanelButton.Remove();
+            // ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
             _endingStallLogged = false;
         }
 
         public void WriteDiagnostics(DiagnosticBuilder b)
         {
             b.Line(1, "enabled", ModSettings.FireWhirlEnabled.value ? "yes" : "no");
+            // ③のボタンも①②④⑤と同じ並びに居る（DisasterPanelBar）。以前は
+            // (8,8) 固定の 1 個だけ別扱いだったので、その例外が残っていないことを出す。
+            b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdFireWhirl)
+                ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "scan", _scanner.DiagnosticSummary());
 
             var views = FireWhirlRegistry.Snapshot();
