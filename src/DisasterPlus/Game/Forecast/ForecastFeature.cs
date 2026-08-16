@@ -60,14 +60,13 @@ namespace DisasterPlus.Game
         /// <summary>main スレッド。パネル・ボタンの設置と、表示中のみの内容更新はここから。</summary>
         public void OnMainThreadUpdate()
         {
-            ForecastPanelButton.Tick();
+            // ボタンは DisasterPanelBar が 5 個まとめて持つ（FeatureHost が呼ぶ）。
             ForecastPanel.Tick();
         }
 
         public void OnLevelUnloading()
         {
             ForecastHub.Clear();
-            ForecastPanelButton.Remove();
             ForecastPanel.Destroy();
         }
 
@@ -117,23 +116,10 @@ namespace DisasterPlus.Game
                     : (snapshot.DisasterCooldown > 0 ? "active (" + snapshot.DisasterCooldown + ")" : "none"));
             }
 
-            string placement;
-            if (!ForecastPanelButton.Installed)
-            {
-                placement = "button not installed yet";
-            }
-            else if (ForecastPanelButton.UsedSavedPosition)
-            {
-                placement = "saved position reused";
-            }
-            else
-            {
-                placement = ForecastPanelButton.FoundFreeSlot
-                    ? "fresh free-slot search succeeded"
-                    : "fresh free-slot search FAILED (fell back to preferred position)";
-            }
-            b.Line(1, "button position", ModSettings.ForecastButtonX.value + ","
-                + ModSettings.ForecastButtonY.value + "  (" + placement + ")");
+            // ボタンは①専用ではなく DisasterPanelBar が 5 個まとめて置く。座標は
+            // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
+            b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdForecast)
+                ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
 
             // sim スレッドから main の持ち物を読んでいるが、これは InfoModeSwitch の
             // クラス doc が IL 実測つきで明示的に許可している唯一の例外である

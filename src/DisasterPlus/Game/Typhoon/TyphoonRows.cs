@@ -35,8 +35,9 @@ namespace DisasterPlus.Game
     ///   以下はすべてリポジトリのルートから走らせる。
     ///
     /// <code>
-    /// # 対象は④の表示コード全部（Game/Typhoon/ と台風ボタン）。
-    /// #   T=  'src/DisasterPlus/Game/Typhoon src/DisasterPlus/Game/UI/TyphoonPanelButton.cs'
+    /// # 対象は④の表示コード全部（Game/Typhoon/。ボタンは DisasterPanelBar が持つので
+    /// # ④の表示コードではなくなった）。
+    /// #   T='src/DisasterPlus/Game/Typhoon'
     /// #   grep -v '///' で doc コメントを落とす（この doc 自身が引っかかるため）。
     ///
     /// # 1. UILabel を作るのは AddLabel の 1 箇所だけ                        -> 1

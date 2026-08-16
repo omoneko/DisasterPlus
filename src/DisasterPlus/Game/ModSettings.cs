@@ -37,6 +37,23 @@ namespace DisasterPlus.Game
         public static SavedInt OverlayHotkey;
         public static SavedInt LogChannelMask;
         public static SavedBool ForecastEnabled;
+
+        /// <summary>
+        /// ★★ **退役した保存キー（forecastButtonX/Y・earthquakeButtonX/Y・
+        ///     typhoonButtonX/Y・volcanoButtonX/Y の 8 本）。**
+        ///
+        /// ①〜⑤のボタンはバニラの災害パネルの中に置かれるようになり、位置は
+        /// パネル自身の autolayout が決める（<c>DisasterPanelBar</c>）。したがって
+        /// この 8 本を読む場所はもう 1 つも無い。
+        ///
+        /// **それでも宣言は残す。** .cgs のキーと値は公開契約であり、
+        /// - 宣言を消すとキーだけが .cgs に取り残され、後日この名前が
+        ///   *別の意味で* 復活したときに、古い座標が新しい設定として読まれる
+        /// - 番号や名前を詰め直さない、という本 MOD の規律と同じ理由
+        ///
+        /// **この 8 本を別の意味で再利用してはいけない。** 新しい設定には
+        /// 新しいキー名を付けること。
+        /// </summary>
         public static SavedInt ForecastButtonX;
         public static SavedInt ForecastButtonY;
         public static SavedBool EarthquakeEnabled;
@@ -150,14 +167,13 @@ namespace DisasterPlus.Game
                                                   DisasterPlus.Core.Diagnostics.LogChannel.DefaultMask, true);
 
             ForecastEnabled  = new SavedBool("forecastEnabled", FileName, true, true);
-            // -1 = 未決定。ForecastPanelButton が初回インストール時に FreeSlotFinder で
-            // 空き位置を探し、決まった座標をここへ書き戻す。以後はその座標を再利用する。
+            // ★ 退役キー。読む場所はもう無いが、キーは公開契約なので宣言を残す
+            //   （ForecastButtonX の doc。別の意味で再利用しないこと）。
             ForecastButtonX  = new SavedInt("forecastButtonX", FileName, -1, true);
             ForecastButtonY  = new SavedInt("forecastButtonY", FileName, -1, true);
 
             EarthquakeEnabled = new SavedBool("earthquakeEnabled", FileName, true, true);
-            // -1 = 未決定。ForecastButtonX/Y と全く同じ扱い
-            // （EarthquakePanelButton が空き位置を決めて書き戻す。Task 4）。
+            // ★ 退役キー。ForecastButtonX/Y と全く同じ扱い（同 doc）。
             EarthquakeButtonX = new SavedInt("earthquakeButtonX", FileName, -1, true);
             EarthquakeButtonY = new SavedInt("earthquakeButtonY", FileName, -1, true);
             // 既定 ON にできるのは、強度 55（バニラ既定）で追加分が厳密に 0 になり、
@@ -192,8 +208,7 @@ namespace DisasterPlus.Game
             // 有効化は既定 ON でよい（②の EarthquakeEnabled と同じ扱い）。
             // 台風を実際に起こすのはプレイヤーの明示的な操作だけである（T3）。
             TyphoonEnabled = new SavedBool("typhoonEnabled", FileName, true, true);
-            // -1 = 未決定。ForecastButtonX/Y・EarthquakeButtonX/Y と全く同じ扱い
-            // （TyphoonPanelButton が空き位置を決めて書き戻す。T5）。
+            // ★ 退役キー。ForecastButtonX/Y と全く同じ扱い（同 doc）。
             TyphoonButtonX = new SavedInt("typhoonButtonX", FileName, -1, true);
             TyphoonButtonY = new SavedInt("typhoonButtonY", FileName, -1, true);
             // 台風の強度。①が 255 まで解放済み（IntensityUnlock）。範囲 10〜255 は
@@ -242,8 +257,7 @@ namespace DisasterPlus.Game
             //    発火しない（プレイヤーが地点を指し、不可逆であることを確認して
             //    初めて始まる）ので、既定 ON でも黙って地形が変わることはない。
             VolcanoEnabled = new SavedBool("volcanoEnabled", FileName, true, true);
-            // -1 = 未決定。ForecastButtonX/Y・EarthquakeButtonX/Y・TyphoonButtonX/Y と
-            // 全く同じ扱い（VolcanoPanelButton が空き位置を決めて書き戻す。T3）。
+            // ★ 退役キー。ForecastButtonX/Y と全く同じ扱い（同 doc）。
             VolcanoButtonX = new SavedInt("volcanoButtonX", FileName, -1, true);
             VolcanoButtonY = new SavedInt("volcanoButtonY", FileName, -1, true);
 

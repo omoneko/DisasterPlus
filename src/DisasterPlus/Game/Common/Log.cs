@@ -10,7 +10,7 @@ namespace DisasterPlus.Game
     ///
     /// スレッド安全性: Diag は sim スレッド（FireWhirlFeature / FireWhirlDamage /
     /// FireWhirlSpawner / FireWhirlPinner）と main スレッド（IntensityUnlock /
-    /// FireWhirlPanelButton / FireWhirlPlacementTool）の両方から呼ばれる。
+    /// DisasterPanelBar / FireWhirlPlacementTool）の両方から呼ばれる。
     /// System.Collections.Generic.Dictionary は書き込みと読み取りの並行実行が安全ではなく、
     /// main スレッドの新規キー挿入がバケット再確保を起こしている最中に sim スレッドが
     /// TryGetValue すると、例外か壊れたバケット連鎖の無限ループ（＝スタックトレースの

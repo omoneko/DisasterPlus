@@ -122,7 +122,7 @@ namespace DisasterPlus.Game
         /// </summary>
         public void OnMainThreadUpdate()
         {
-            VolcanoPanelButton.Tick();
+            // ボタンは DisasterPanelBar が 5 個まとめて持つ（FeatureHost が呼ぶ）。
             VolcanoPanel.Tick();
 
             // ★ 噴火の描画は main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
@@ -146,7 +146,7 @@ namespace DisasterPlus.Game
 
             // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
-            VolcanoPanelButton.Remove();
+            //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
             VolcanoPanel.Destroy();
 
             // ★ 噴煙の GameObject と Material は自分で Object.Destroy する
@@ -443,33 +443,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// UI の状態。②④と同じ 3 状態（未設置／保存位置の再利用／新規探索の成否）。
-        ///
-        /// **ボタンが①②④のボタンと重なっているかどうかは、ここでしか分からない。**
-        /// 重なったボタンは画面上で「1 個しか無い」ように見えるので、
-        /// <c>fresh free-slot search FAILED</c> が出ているかを診断で確かめる。
+        /// UI の状態。①②③④と同じ形（<see cref="DisasterPanelBar"/> に問い合わせるだけ）。
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b)
         {
-            string placement;
-            if (!VolcanoPanelButton.Installed)
-            {
-                placement = "button not installed yet";
-            }
-            else if (VolcanoPanelButton.UsedSavedPosition)
-            {
-                placement = "saved position reused";
-            }
-            else
-            {
-                placement = VolcanoPanelButton.FoundFreeSlot
-                    ? "fresh free-slot search succeeded"
-                    : "fresh free-slot search FAILED (fell back to preferred position)";
-            }
-
-            b.Line(1, "button position", ModSettings.VolcanoButtonX.value + ","
-                                         + ModSettings.VolcanoButtonY.value
-                                         + "  (" + placement + ")");
+            // ボタンは⑤専用ではなく DisasterPanelBar が 5 個まとめて置く。座標は
+            // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
+            b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdVolcano)
+                ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "panel body", VolcanoPanel.IsVisible ? "shown" : "hidden");
         }
 

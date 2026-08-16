@@ -206,6 +206,10 @@ namespace DisasterPlus.Game
             // 災害パネルはロード直後にはまだ無いことがある。見つかるまで間隔をあけて再試行する。
             IntensityUnlock.Tick();
 
+            // ①〜⑤のボタンはこの 1 か所が持つ。機能ごとに Tick を呼ばせると、
+            // 位置を決める主体がまた 5 つに戻る（DisasterPanelBar のクラス doc）。
+            DisasterPanelBar.Tick();
+
             for (int i = 0; i < _features.Count; i++)
             {
                 try { _features[i].OnMainThreadUpdate(); }
@@ -234,6 +238,9 @@ namespace DisasterPlus.Game
 
             _hasLastFrame = false;
             IntensityUnlock.Reset();
+            // 機能の解体が済んでから撤去する。次の都市が必ず「1 個ずつ・重複なし」で
+            // 始まるようにするのはここ 1 か所の責任。
+            DisasterPanelBar.Remove();
             Log.Reset();
 
             lock (_errorGate)

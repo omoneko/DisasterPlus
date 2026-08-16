@@ -53,7 +53,7 @@ namespace DisasterPlus.Game
     /// API 実測（Task 5、docs/tools/ilload.ps1 で ColossalManaged.dll を確認）:
     /// UIPanel / UILabel / UIButton は UIComponent の width/height/relativePosition/
     /// isVisible/Show()/Hide() をそのまま継承する。UIView.AddUIComponent(Type) は
-    /// 非総称のみ実在するので、ここでもキャストして使う（ForecastPanelButton と同じ）。
+    /// 非総称のみ実在するので、ここでもキャストして使う（DisasterPanelBar の退避先と同じ）。
     /// backgroundSprite の実際の見え方（"MenuPanel2" が存在するか、意図通りに描画されるか）
     /// はアセットのリフレクションでは確認できない。実機でしか分からない
     /// （docs/playtest-checklist.md に追記した確認項目参照）。
@@ -140,8 +140,8 @@ namespace DisasterPlus.Game
             // レビュー指摘: 設定で無効化されたときにパネルが開いたままだと、
             // OnSimulationTick が publish を止めた古いスナップショットを永遠に
             // 出し続ける「凍りついたのに生きて見える」パネルになり、閉じる手段の
-            // ボタンも既に撤去済みで消せない。ボタン側（ForecastPanelButton.Tick）
-            // と同じガードをここにも置く。
+            // ボタンも既に撤去済みで消せない。ボタン側（DisasterPanelBar が
+            // ForecastEnabled を見て並びから外す）と同じガードをここにも置く。
             if (!ModSettings.ForecastEnabled.value)
             {
                 if (IsVisible) Hide();
