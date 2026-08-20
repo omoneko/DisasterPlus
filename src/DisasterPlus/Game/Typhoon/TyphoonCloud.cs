@@ -259,6 +259,14 @@ namespace DisasterPlus.Game
                 // ★ 台風が終わったフレームで**自分で**後始末する。sim 側の
                 //   TyphoonController は雲を 1 度も呼ばない（クラス doc）。
                 ReleaseVanillaBoost();
+
+                // ★★ **粒の側にも「台風は居ない」を伝える。** 伝えないと
+                //    TyphoonCloudFx の状態と RenderEffect の回数が最後の値で
+                //    止まったままになり、**診断が「まだ描いている」と読める**。
+                //    あちらは Active でないフレームで Idle に落ちて 0 を出す
+                //    （既に湧いた粒は寿命ぶん漂って消える。それが正しい見え方）。
+                TyphoonCloudFx.Update(snapshot, _spinDegrees);
+
                 _state = TyphoonCloudState.NotBuilt;
                 _lastDrawCalls = 0;
                 _lastRadius = 0f;

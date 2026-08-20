@@ -76,6 +76,12 @@ namespace DisasterPlus.Game
                 //    （雨がやまなくなる）。Reset / Release はどちらも冪等である。
                 TyphoonGust.Reset();
                 TyphoonWeather.Release();
+
+                // ★ 風害の走査位置とカウンタも畳む。走査そのものはもう呼ばれないが、
+                //   **診断が最後の走査の数字を抱えたままだと「切ったのにまだ
+                //   壊している」と読める**（局所被害と同じ理由）。Reset は冪等で、
+                //   台帳を持たないので毎 tick 通ってよい。
+                TyphoonWind.Reset();
                 return;
             }
 
@@ -282,13 +288,7 @@ namespace DisasterPlus.Game
                 {
                     b.Line(2, "refusal", snapshot.Refusal);
                 }
-                // 台風が居ないのに天候を握っていたら、それは④が戻し損ねている。
-                // 正常時は 1 行も出ない（＝この行が出たら不具合）。
-                if (snapshot.WeatherDriving)
-                {
-                    b.Line(2, "weather driving",
-                        "ON WITH NO TYPHOON (the weather override was not released)");
-                }
+                WriteShutdown(b, snapshot);
                 return;
             }
 
@@ -332,6 +332,55 @@ namespace DisasterPlus.Game
             WriteFlood(b, snapshot);
             WriteGusts(b, snapshot);
             WriteCloud(b);
+        }
+
+        /// <summary>
+        /// **台風が去ったあとに④が何も握っていないことの証明。**
+        ///
+        /// 持ち主の指摘「台風が去ったら暴風雨や竜巻被害がなくなるように」に対して、
+        /// 「本当に止まったか」を画面から確かめる手段がここである。
+        /// **正常なら 5 行とも <c>released</c> / <c>0</c> になる。**
+        /// 1 つでもそうでなければ、その行が名指しで不具合を指している。
+        ///
+        /// ★ <c>host thunderstorm</c> の行は**不具合ではない。** 宿主の
+        /// <c>ThunderStormAI</c> 災害はセーブから外さないと決めてある（設計書 §4.2）——
+        /// 外す手は保存の前に <c>DeactivateNow</c> する以外に無く、それは
+        /// 「セーブしただけで台風が消える」ことを意味するからである。
+        /// **台風の途中で保存して開き直すと、動かない雷雨がその場に残る。**
+        /// それは雨も風も被害も駆動していない抜け殻で、
+        /// <c>m_activeDuration</c> が尽きればバニラが自分で畳む。
+        /// この行が無いと、次にそれを見た人は④が後始末を忘れたと読む。
+        /// </summary>
+        private static void WriteShutdown(DiagnosticBuilder b, TyphoonSnapshot snapshot)
+        {
+            b.Line(2, "weather override", snapshot.WeatherDriving
+                ? "STILL APPLIED WITH NO TYPHOON (m_targetRain / m_targetCloud were not "
+                  + "released; this is a bug)"
+                : "released");
+
+            b.Line(2, "wind damage", snapshot.WindLastCollapsed == 0
+                ? "stopped (0 collapsed in the last sweep)"
+                : "STILL COLLAPSING BUILDINGS WITH NO TYPHOON ("
+                  + snapshot.WindLastCollapsed + " in the last sweep; this is a bug)");
+
+            b.Line(2, "tornado-strength damage", snapshot.GustActive == 0
+                    && snapshot.GustLastCollapsed == 0
+                ? "stopped (0 patches, 0 collapsed)"
+                : "STILL RUNNING WITH NO TYPHOON (" + snapshot.GustActive + " patches, "
+                  + snapshot.GustLastCollapsed + " collapsed; this is a bug)");
+
+            b.Line(2, "river flooding", snapshot.FloodTouched == 0
+                ? "restored (0 water sources held)"
+                : "STILL HOLDING " + snapshot.FloodTouched + " WATER SOURCE(S) WITH NO "
+                  + "TYPHOON (this is a bug; the map would stay flooded)");
+
+            b.Line(2, "host thunderstorm",
+                "left in the city on purpose. A typhoon rides on a vanilla ThunderStormAI "
+                + "disaster, and Disaster + deliberately does not remove it from saves - "
+                + "the only way to do that would be to deactivate it before writing, which "
+                + "would mean saving the game destroyed your typhoon. After a mid-storm "
+                + "reload you may see a stationary thunderstorm: it drives no rain, no wind "
+                + "and no damage, and vanilla ends it when m_activeDuration runs out");
         }
 
         /// <summary>

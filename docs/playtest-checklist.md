@@ -1818,6 +1818,61 @@ radius x1.18, collapse chance x1.30 …` が出る。
 その行は `output_log.txt` に**ちょうど 1 行だけ**であること（2 行以上なら不具合）。
 雨・風害・落雷・氾濫は雲が出なくても全部動く。
 
+### 7.10 台風が去ったら全部止まること（`T85`–`T92`）
+
+持ち主の指摘「台風が去ったら暴風雨や竜巻被害がなくなるように」に対する確認である。
+**ここは 1 項目でも赤なら報告すること。**
+
+**`T85`** ★★ **台風が終わったあと、ダンプの `typhoon: idle` の下の 5 行を読む。**
+`Ctrl+F11` のダンプに
+
+```
+typhoon: idle
+  weather override           released
+  wind damage                stopped (0 collapsed in the last sweep)
+  tornado-strength damage    stopped (0 patches, 0 collapsed)
+  river flooding             restored (0 water sources held)
+  host thunderstorm          left in the city on purpose. ...
+```
+
+が出ること。**大文字で `STILL …` と出ている行があればそれが不具合**であり、
+その行の文言をそのまま報告する。
+
+**`T86`** ★★ **`output_log.txt` に締めの 1 行が出ること。**
+`typhoon #NN released everything it was holding: weather override=restored,
+water sources restored=N, lightning queue cleared, wind sweep stopped (N collapsed
+in total), tornado-strength patches stopped (N collapsed in total).` が
+**台風 1 個につきちょうど 1 行**。出ていなければ、④はどこかで
+`TyphoonController.Forget` を通らずに台風を手放している。
+
+**`T87`** ★★ **雨がやむこと。** 台風が終わってしばらく（ゲーム内で数分）で
+雨量と雲量が下がり、晴れていくこと。**やまなければ `m_targetRain` を
+握ったままである**（`T85` の 1 行目が `STILL APPLIED` になっているはず）。
+
+**`T88`** ★★ **建物が倒れ続けないこと。** 台風が去ったあとに新しい倒壊が
+起きないこと。パネルの風害と局所被害の行が `0` で止まること。
+
+**`T89`** **川の水位が戻ること**（§7.7 と同じ確認。台風の後で必ず見る）。
+
+**`T90`** **雲が消えていくこと。** 新しい雲の粒が湧かなくなり、
+既に出ている粒が寿命（10 秒前後）で消えること。**その場に貼り付いたまま
+回り続けたら不具合**である。
+
+**`T91`** ★ **3 つの終わり方すべてで同じことを確認する。**
+(a) 寿命を使い切って終わる、(b) マップの外へ抜ける、
+(c) 台風の最中に「台風」の設定を OFF にする。
+**(c) でも雨がやみ、被害が止まること**（設定を切った瞬間に④が全部返す）。
+
+**`T92`** ★ **仕様であって不具合ではないもの: 台風の途中で保存して開き直すと、
+動かない雷雨がその場に残る。**
+これは設計上の判断である（設計書 §4.2）——
+外す手は「保存の前に災害を止める」以外に無く、それは
+**セーブしただけで台風が消える**ことを意味する。
+残った雷雨は雨も風も被害も駆動していない抜け殻で、
+バニラが `m_activeDuration` の期限で自分で畳む。
+ダンプの `host thunderstorm` の行が同じことを言っている。
+**これを見ても不具合報告にしないこと。**
+
 ---
 
 <a id="s8"></a>
