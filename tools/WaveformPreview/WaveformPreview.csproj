@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- 起伏をゲームを起動せずに描いて確かめるための開発用ツール。
+  <!-- 合成記象（P 波・S 波・コーダ）をゲームを起動せずに描いて確かめるための開発用ツール。
        MOD 本体（net35）には入らない。Core だけを直接コンパイルする。 -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -7,8 +7,8 @@
     <LangVersion>7.3</LangVersion>
     <Nullable>disable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <RootNamespace>DisasterPlus.Tools.VolcanoPreview</RootNamespace>
-    <AssemblyName>VolcanoPreview</AssemblyName>
+    <RootNamespace>DisasterPlus.Tools.WaveformPreview</RootNamespace>
+    <AssemblyName>WaveformPreview</AssemblyName>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>

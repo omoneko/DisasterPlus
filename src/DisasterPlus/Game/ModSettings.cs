@@ -64,6 +64,21 @@ namespace DisasterPlus.Game
         public static SavedInt EarthquakeTsunamiDelayMinutes;
         public static SavedBool EarthquakeLongPeriod;
         public static SavedInt EarthquakeLongPeriodStrength;
+
+        /// <summary>
+        /// **第 2 層。合成記象（P 波・S 波・コーダ）**。既定 OFF。
+        ///
+        /// ON にすると 2 つのことが同時に起きる:
+        ///   1. 波形グラフに <c>[Disaster + model]</c> の線が 1 本増える（バニラの線は残る）
+        ///   2. カメラの揺れが、バニラの 2 本の正弦波の代わりに合成記象の形になる
+        ///
+        /// ★ **既定 OFF を外さないこと。** <c>EarthquakeShakeBoost</c> が既定 ON に
+        ///   できるのは、強度 55（バニラ既定）で追加分が**厳密に 0** ＝ 挙動が
+        ///   バニラとビット単位で同一になるからで（<c>ShakeWaveform.IntensityFactor</c>）、
+        ///   こちらにはその逃げ道が無い —— 合成記象はどの強度でもバニラと違う形である。
+        ///   これは<c>EarthquakeLongPeriod</c> と同じ扱いになる。
+        /// </summary>
+        public static SavedBool EarthquakeSeismogram;
         public static SavedBool TyphoonEnabled;
         public static SavedInt TyphoonButtonX;
         public static SavedInt TyphoonButtonY;
@@ -224,6 +239,10 @@ namespace DisasterPlus.Game
             // 厳密に 0 を返す）。範囲はスライダー側で縛るが、.cgs の値は公開契約なので
             // 範囲外が入っていても読み捨てず、使う側でクランプする。
             EarthquakeLongPeriodStrength = new SavedInt("eqLongPeriodStrength", FileName, 3, true);
+
+            // ★ 第 2 層その 3。既定 OFF（ModSettings.EarthquakeSeismogram の doc）。
+            //    OFF のあいだ、記録も描画もカメラの揺れも**今日と 1 ビットも違わない**。
+            EarthquakeSeismogram = new SavedBool("eqSeismogram", FileName, false, true);
 
             // ④台風。パネルの表示そのものは④が発生させない限り何も起きないので、
             // 有効化は既定 ON でよい（②の EarthquakeEnabled と同じ扱い）。

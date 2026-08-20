@@ -83,7 +83,21 @@ namespace DisasterPlus.Game
 
         private static readonly Color32 Background = new Color32(16, 18, 24, 255);
         private static readonly Color32 AxisColor = new Color32(70, 76, 90, 255);
+
+        /// <summary>
+        /// **バニラの式の線**（第 1 層 <c>[measured]</c>）。白。
+        /// この色は行の接頭辞と対で意味を持つので、<see cref="ModelColor"/> と
+        /// 取り違えないこと —— 取り違えると、この MOD が発明した線が
+        /// 「ゲームが計算している値」の顔で描かれる。
+        /// </summary>
         private static readonly Color32 TraceColor = new Color32(255, 255, 255, 255);
+
+        /// <summary>
+        /// **合成記象の線**（第 2 層 <c>[Disaster + model]</c>）。橙。
+        /// パネルの凡例（<c>Strings.EarthquakeWaveformLegend</c>）が、どちらの色が
+        /// どちらの層かを毎回グラフの真下で名乗る。
+        /// </summary>
+        private static readonly Color32 ModelColor = new Color32(255, 158, 66, 255);
 
         private static UITextureSprite _sprite;
         private static Texture2D _texture;
@@ -108,6 +122,13 @@ namespace DisasterPlus.Game
         private static int _drawnCount;
         private static uint _drawnNewestFrame;
         private static bool _drawnAnything;
+
+        /// <summary>
+        /// 直近に描いた絵にモデルの線があったか。**指紋に含める。** 含めないと、
+        /// 設定を切り替えても件数と最新フレームが同じあいだは塗り直されず、
+        /// 消したはずの線がそのまま残る。
+        /// </summary>
+        private static bool _drawnModel;
 
         /// <summary>
         /// テクスチャによる描画が使えるか。<see cref="Build"/> が一度でも呼ばれるまでは false。
@@ -160,7 +181,7 @@ namespace DisasterPlus.Game
                 _sprite.isVisible = false;
 
                 Fill(Background);
-                DrawAxis();
+                DrawAxis(0, PlotHeight);
                 _texture.SetPixels32(_pixels);
                 _texture.Apply(false);
 
@@ -205,7 +226,8 @@ namespace DisasterPlus.Game
             if (_drawnAnything
                 && _drawnBuildingId == trace.BuildingId
                 && _drawnCount == trace.Count
-                && _drawnNewestFrame == trace.NewestFrame)
+                && _drawnNewestFrame == trace.NewestFrame
+                && _drawnModel == trace.HasModel)
             {
                 return;
             }
@@ -213,6 +235,7 @@ namespace DisasterPlus.Game
             _drawnBuildingId = trace.BuildingId;
             _drawnCount = trace.Count;
             _drawnNewestFrame = trace.NewestFrame;
+            _drawnModel = trace.HasModel;
             _drawnAnything = true;
 
             try
@@ -264,6 +287,7 @@ namespace DisasterPlus.Game
             _drawnBuildingId = 0;
             _drawnCount = 0;
             _drawnNewestFrame = 0u;
+            _drawnModel = false;
         }
 
         private static void Draw(SeismographTrace trace)
@@ -279,16 +303,59 @@ namespace DisasterPlus.Game
             // ここで自動縮尺にしても「大きさ」を偽ることにはならない。
             // 平ら（peak == 0）でも正の縮尺を渡す —— 0 を渡すと WaveformPlot が
             // 全列を「サンプル無し」にしてしまい、平らな波形が空の波形に化ける。
+            // ★ 縦の尺度は**2 本で共通**にする。線ごとに正規化すると、
+            //   「モデルのほうが大きい／小さい」という一番読みたい比較ができなくなる。
+            //   満目盛りは 2 本のうち大きいほうの最大振幅。
             float peak = trace.PeakAbsolute;
+            if (trace.HasModel && trace.ModelPeakAbsolute > peak) peak = trace.ModelPeakAbsolute;
             float scale = peak > 0f ? 1f / peak : 1f;
 
-            int[] columns = WaveformPlot.Columns(trace.Frames, trace.Values, trace.Count,
-                                                 from, newest, PlotWidth, PlotHeight - 1, scale);
-
             Fill(Background);
-            DrawAxis();
 
-            int middle = (PlotHeight - 1) / 2;
+            if (!trace.HasModel)
+            {
+                // 1 本だけのときは今日までと同じ絵（全面 1 段）。
+                DrawAxis(0, PlotHeight);
+                DrawTrace(WaveformPlot.Columns(trace.Frames, trace.Values, trace.Count,
+                                               from, newest, PlotWidth, PlotHeight - 1, scale),
+                          TraceColor, 0, PlotHeight);
+                _texture.SetPixels32(_pixels);
+                _texture.Apply(false);
+                return;
+            }
+
+            // ★★ **2 本を重ねずに上下 2 段に分ける。** 512 フレームを 320 px に
+            //    落とすと 1 px が 1.6 フレームで、バニラの主成分（周期 ≒10 フレーム）は
+            //    6 px の縞になる。その上にモデルを重ねると、どちらの線を見ているのか
+            //    区別できない絵になった（オフライン描画で確認した）。
+            //    上段が第 1 層（白・バニラの式）、下段が第 2 層（橙・合成記象）で、
+            //    **縦の尺度は共通**なので高さはそのまま見比べられる。
+            const int lane = PlotHeight / 2;
+
+            DrawAxis(0, lane);
+            DrawAxis(lane, lane);
+            DrawSeparator(lane);
+
+            DrawTrace(WaveformPlot.Columns(trace.Frames, trace.Values, trace.Count,
+                                           from, newest, PlotWidth, lane - 1, scale),
+                      TraceColor, 0, lane);
+
+            DrawTrace(WaveformPlot.Columns(trace.Frames, trace.ModelValues, trace.Count,
+                                           from, newest, PlotWidth, lane - 1, scale),
+                      ModelColor, lane, lane);
+
+            _texture.SetPixels32(_pixels);
+            _texture.Apply(false);
+        }
+
+        /// <summary>
+        /// 列ごとの行番号を中央から塗る。**<c>Empty</c>（-1）の列は飛ばす** ——
+        /// 0 を中央行として描くと、データの無い区間が「揺れていない区間」になる
+        /// （<c>WaveformPlot.Empty</c> の doc）。
+        /// </summary>
+        private static void DrawTrace(int[] columns, Color32 color, int laneTop, int laneHeight)
+        {
+            int middle = (laneHeight - 1) / 2;
             for (int x = 0; x < PlotWidth; x++)
             {
                 int row = columns[x];
@@ -296,11 +363,8 @@ namespace DisasterPlus.Game
 
                 int lo = row < middle ? row : middle;
                 int hi = row < middle ? middle : row;
-                for (int r = lo; r <= hi; r++) SetPixel(x, r, TraceColor);
+                for (int r = lo; r <= hi; r++) SetPixel(x, laneTop + r, color);
             }
-
-            _texture.SetPixels32(_pixels);
-            _texture.Apply(false);
         }
 
         private static void Fill(Color32 color)
@@ -308,10 +372,20 @@ namespace DisasterPlus.Game
             for (int i = 0; i < _pixels.Length; i++) _pixels[i] = color;
         }
 
-        private static void DrawAxis()
+        /// <summary>1 段ぶんの零線。<paramref name="laneTop"/> は段の上端の行番号。</summary>
+        private static void DrawAxis(int laneTop, int laneHeight)
         {
-            int middle = (PlotHeight - 1) / 2;
-            for (int x = 0; x < PlotWidth; x++) SetPixel(x, middle, AxisColor);
+            int middle = (laneHeight - 1) / 2;
+            for (int x = 0; x < PlotWidth; x++) SetPixel(x, laneTop + middle, AxisColor);
+        }
+
+        /// <summary>
+        /// 上段と下段の境目。**色だけに頼らないための 3 つ目の手掛かり**で、
+        /// これがあると「1 本の波が上下に飛んでいる」とは読めなくなる。
+        /// </summary>
+        private static void DrawSeparator(int row)
+        {
+            for (int x = 0; x < PlotWidth; x += 4) SetPixel(x, row, AxisColor);
         }
 
         /// <summary>

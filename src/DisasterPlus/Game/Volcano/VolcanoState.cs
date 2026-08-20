@@ -313,9 +313,9 @@ namespace DisasterPlus.Game
 
                 // ★ 溶岩は隆起の途中から出ているので、ここでも進め続ける ——
                 //   止めると噴火のあいだだけ流れが凍りつく。地形はもう動かないので
-                //   許容差は 0（VolcanoUplift.RiseMetresPerTick が完了後 0 を返す）。
+                //   許容差は 0（VolcanoUplift.RiseMetresPerFrame が完了後 0 を返す）。
                 VolcanoLava.Tick(_footprint, frame, deltaMinutes,
-                                 VolcanoUplift.RiseMetresPerTick);
+                                 VolcanoUplift.RiseMetresPerFrame);
 
                 if (!VolcanoEruption.Finished) return;
 
@@ -380,7 +380,7 @@ namespace DisasterPlus.Game
             if (VolcanoUplift.ProgressUnit >= LavaDuringUpliftFrom)
             {
                 VolcanoLava.Tick(_footprint, frame, deltaMinutes,
-                                 VolcanoUplift.RiseMetresPerTick);
+                                 VolcanoUplift.RiseMetresPerFrame);
             }
 
             if (!VolcanoUplift.Complete) return;

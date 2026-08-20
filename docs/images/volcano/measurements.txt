@@ -56,3 +56,26 @@ grid = 16 m (the game's own terrain grid)
      0.72   |   432.0  |  838   |  7194
      1.00   |   600.0  |  1199   |  15730
 
+## uplift pacing (strato, R = 1200 m, H = 600 m, 30 in-game minutes)
+  in-game duration is UNCHANGED: 30 in-game minutes = 1365 sim frames
+  (1 in-game minute = 45.51 sim frames; wall clock depends on the game speed and the fixed-update rate)
+
+                        | before | after
+  uplift interval frames|     16 |      4
+  ticks                 |     85 |    341
+  rise per tick (m)     |   7.06 |   1.76
+  VISIBLE step, summit  |  28.25 |   7.05   <- the complaint
+  VISIBLE step, flank   |  28.23 |   7.05
+  visible updates, summit|     22 |    263
+  visible updates, flank |      8 |     50
+  UpdateArea calls      |     94 |    341
+  flushed cells / frame | 442.96 | 850.16
+  biggest single flush  |   9801 |   9801   (cap 10000, side cap 128)
+
+  interval | ticks | rise/tick m | VISIBLE step m | flushed cells/frame
+      16 |     85 |   7.06 |  28.23 | 225.87
+       8 |    170 |   3.53 |  14.12 | 427.47
+       4 |    341 |   1.76 |   7.05 | 850.16
+       2 |    682 |   0.88 |   3.53 | 1693.59
+       1 |   1365 |   0.44 |   1.77 | 3395.06
+

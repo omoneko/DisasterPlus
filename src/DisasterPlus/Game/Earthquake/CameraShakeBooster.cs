@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using ColossalFramework;
+using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Earthquake;
 using UnityEngine;
 
@@ -48,6 +49,30 @@ namespace DisasterPlus.Game
     ///      このクラスは何も足さない。窓が分からないまま足すと、地震が終わった後も
     ///      揺れ続ける。**マグニチュードを決め打ちで書かないこと。**
     ///
+    /// ── 第 2 層: 合成記象へ差し替える（<c>ModSettings.EarthquakeSeismogram</c>）──
+    ///
+    /// 依頼②「揺れ方がリアルではない（同じ波形が連続している）」への回答。
+    /// **既定 OFF。** ON のとき、このクラスは
+    ///
+    /// <code>
+    /// 足す分 = 合成記象 × (intensity / 55) − バニラの項
+    /// </code>
+    ///
+    /// を書き込む。バニラの項は**このクラスがバニラと同じ式・同じ点・同じ窓で
+    /// 計算したもの**（上の 3 点）なので、合計はちょうど合成記象になる。
+    /// Harmony もリフレクションも要らない —— <c>m_cameraShake</c> は加算で
+    /// 消費されるフィールドなので、打ち消しも加算で書ける。
+    ///
+    /// **打ち消してよいことの根拠**（§A-7 の適用経路）: バニラは
+    /// <c>DisasterManager.EndRenderingImpl</c> で <c>(m_flags &amp; 3) == Created</c> の
+    /// 災害**すべて**について <c>RenderInstance</c> を呼ぶ。可視判定も距離打ち切りも
+    /// 無いので、こちらが同じ条件（位相 Emerging|Active、<c>e</c> の窓、
+    /// <c>m_disableCameraShake</c>）で評価すれば、バニラが足す量と 1 対 1 で対応する。
+    /// 残差は <c>Mathf.Sin</c>(float) と <c>System.Math.Sin</c>(double) の最下位ビットだけである。
+    ///
+    /// ★ **OFF のときの経路は 1 命令も変えていない。** 強度 55 で追加分が厳密に 0 に
+    ///   なる既定の道はそのまま残っている（それがこの機能を既定 ON にできる唯一の根拠）。
+    ///
     /// ── 残留しないことの根拠 ──────────────────────────────
     ///
     /// <c>CameraController.LateUpdate</c> の**最後の 1 行**が
@@ -70,6 +95,33 @@ namespace DisasterPlus.Game
         /// |sin + sin| = 2 × 0.3 = 0.6 なので、これはその 2 倍にあたる。
         /// </summary>
         private const float MaxAddedShake = 1.2f;
+
+        /// <summary>
+        /// 合成記象に差し替えたときに**カメラが受け取る合計**の上限。
+        /// バニラの理論最大 0.6 の 3 倍で、<c>ShakeWaveform.MaxIntensityFactor</c>
+        /// （＝強度倍率の上限 3.0）と揃えてある。**足す分ではなく合計を押さえる** ——
+        /// 足す分を押さえると打ち消しが崩れて、バニラの波が残って混ざる。
+        /// </summary>
+        private const float MaxTotalShake = 3f * ShakeWaveform.MaxDisplacement;
+
+        /// <summary>同時に覚えておく地震の数（§E-1 で複数同時に起こりうる）。</summary>
+        private const int MaxTrackedQuakes = 8;
+
+        /// <summary>
+        /// 合成記象の**観測距離を地震ごとに 1 回だけ控える**ための表。
+        ///
+        /// P 波と S 波の到達時刻は距離で決まるので、毎フレーム測り直すと
+        /// **カメラを動かしただけで到達時刻が動く**（揺れの途中で振幅が跳ねる）。
+        /// 揺れの窓に入って最初に評価したフレームの距離をその地震の観測距離として
+        /// 固定し、地震が消えたら枠を空ける。ID 0 は「空き」。
+        ///
+        /// ★ **鍵は ID だけではなく (ID, 発動フレーム) の組である。** 災害バッファの
+        ///   添字は解放後すぐ再利用されるので（§E-1）、ID だけを鍵にすると
+        ///   前の地震の観測距離を次の地震が引き継ぎうる。
+        /// </summary>
+        private static readonly ushort[] _trackedIds = new ushort[MaxTrackedQuakes];
+        private static readonly uint[] _trackedFrames = new uint[MaxTrackedQuakes];
+        private static readonly float[] _trackedDistances = new float[MaxTrackedQuakes];
 
         /// <summary>
         /// <c>CameraController</c> の参照。**静的キャッシュを素の参照比較で
@@ -102,6 +154,12 @@ namespace DisasterPlus.Game
             _controllerCache = null;
             _mainCameraCache = null;
             _lastAdded = 0f;
+            for (int i = 0; i < MaxTrackedQuakes; i++)
+            {
+                _trackedIds[i] = 0;
+                _trackedFrames[i] = 0u;
+                _trackedDistances[i] = 0f;
+            }
             // _errorLogged は戻さない。「投げる」はこの DLL が参照しているゲームの
             // ビルドに対する事実であって、都市ごとの状態ではない
             // （EarthquakeReader._readErrorLogged と同じ判断）。
@@ -176,7 +234,19 @@ namespace DisasterPlus.Game
         private static Vector3 Accumulate(IList<EarthquakeReading> quakes,
                                           uint activeDuration, SimulationManager sim, Camera cam)
         {
+            bool seismogram = ModSettings.EarthquakeSeismogram.value;
+
+            // ★ 設定の ON / OFF に関わらず毎フレーム掃除する。OFF のあいだ掃除を
+            //   止めると、次に ON にしたとき前の地震の枠が残ったままになる。
+            ForgetGoneQuakes(quakes);
+
             Vector3 added = Vector3.zero;
+
+            // 合成記象に差し替えるときだけ使う。target は「カメラが受け取るべき合計」、
+            // vanilla は「バニラが自分で足す量」で、その差だけを書き込む。
+            Vector3 target = Vector3.zero;
+            Vector3 vanilla = Vector3.zero;
+
             Transform camTransform = cam.transform;
 
             for (int i = 0; i < quakes.Count; i++)
@@ -192,8 +262,9 @@ namespace DisasterPlus.Game
                 if (!q.ActivationScheduled) continue;
 
                 float factor = ShakeWaveform.IntensityFactor(q.Intensity);
-                // 強度 55 ではここで打ち切られる。以後の三角関数も実行されない。
-                if (factor == 0f) continue;
+                // ★ 強度 55 ではここで打ち切られる（合成記象が OFF のときだけ）。
+                //   以後の三角関数も実行されない ＝ バニラとビット単位で同一。
+                if (!seismogram && factor == 0f) continue;
 
                 long e = (long)sim.m_referenceFrameIndex - q.ActivationFrame + ShakeWaveform.FrameOffset;
                 if (!ShakeWaveform.IsShaking(e, activeDuration)) continue;
@@ -204,15 +275,47 @@ namespace DisasterPlus.Game
                 Vector3 v = camTransform.InverseTransformPoint(
                     new Vector3(q.Epicentre.X, q.Epicentre.Y, q.Epicentre.Z));
                 v.z *= 0.25f;
-
-                float displacement = ShakeWaveform.DisplacementAt(v.magnitude, t) * factor;
-                if (displacement == 0f) continue;
+                float cameraDistance = v.magnitude;
 
                 // §A-7 IL_00AA / IL_00F2: 揺れは断層に直交する 1 方向。
                 float dirX = -Mathf.Sin(q.AngleRadians);
                 float dirZ = Mathf.Cos(q.AngleRadians);
-                added.x += displacement * dirZ;
-                added.z -= displacement * dirX;
+
+                if (!seismogram)
+                {
+                    float displacement = ShakeWaveform.DisplacementAt(cameraDistance, t) * factor;
+                    if (displacement == 0f) continue;
+
+                    added.x += displacement * dirZ;
+                    added.z -= displacement * dirX;
+                    continue;
+                }
+
+                // ── 第 2 層: 合成記象に差し替える ──────────────────────
+                // 観測距離は地震ごとに 1 回だけ控える（カメラを動かしても
+                // P/S の到達時刻を動かさないため。_trackedDistances の doc）。
+                float observed = ObservationDistance(q.DisasterId, q.ActivationFrame, cameraDistance);
+
+                var model = SeismogramModel.For(
+                    DeterministicRandom.Hash(q.DisasterId, q.ActivationFrame), activeDuration);
+
+                // 1 + factor ＝ intensity / 55（クランプ済み）。強度 55 でちょうど等倍。
+                float wanted = model.DisplacementAt(observed, t) * (1f + factor);
+                float replaced = ShakeWaveform.DisplacementAt(cameraDistance, t);
+
+                target.x += wanted * dirZ;
+                target.z -= wanted * dirX;
+                vanilla.x += replaced * dirZ;
+                vanilla.z -= replaced * dirX;
+            }
+
+            if (seismogram)
+            {
+                // ★ 押さえるのは**合計**であって足す分ではない。足す分を押さえると
+                //   打ち消しが崩れ、消したはずのバニラの波が残って混ざる。
+                float total = target.magnitude;
+                if (total > MaxTotalShake) target *= MaxTotalShake / total;
+                return target - vanilla;
             }
 
             // 地震が同時に複数起きうる（§E-1）ので、頭は合計に対して押さえる。
@@ -222,6 +325,63 @@ namespace DisasterPlus.Game
                 added *= MaxAddedShake / magnitude;
             }
             return added;
+        }
+
+        /// <summary>
+        /// この地震の観測距離。**初めて見たフレームの距離をそのまま覚える。**
+        /// 表が満杯なら覚えずに今の距離を返す（覚えられないだけで、揺れは出る）。
+        /// </summary>
+        private static float ObservationDistance(ushort disasterId, uint activationFrame,
+                                                 float current)
+        {
+            if (disasterId == 0) return current;
+
+            for (int i = 0; i < MaxTrackedQuakes; i++)
+            {
+                if (_trackedIds[i] == disasterId && _trackedFrames[i] == activationFrame)
+                {
+                    return _trackedDistances[i];
+                }
+            }
+
+            for (int i = 0; i < MaxTrackedQuakes; i++)
+            {
+                if (_trackedIds[i] != 0) continue;
+                _trackedIds[i] = disasterId;
+                _trackedFrames[i] = activationFrame;
+                _trackedDistances[i] = current;
+                return current;
+            }
+
+            return current;
+        }
+
+        /// <summary>
+        /// もう揺れていない地震の枠を空ける。**空けないと表が埋まったまま**になり、
+        /// 次の地震が観測距離を控えられなくなる（毎フレーム測り直しに落ちる）。
+        /// 毎フレームの経路なので割り当ては無い（添字走査だけ）。
+        /// </summary>
+        private static void ForgetGoneQuakes(IList<EarthquakeReading> quakes)
+        {
+            for (int i = 0; i < MaxTrackedQuakes; i++)
+            {
+                ushort id = _trackedIds[i];
+                if (id == 0) continue;
+
+                bool alive = false;
+                for (int j = 0; j < quakes.Count; j++)
+                {
+                    var q = quakes[j];
+                    if (q.DisasterId != id || q.ActivationFrame != _trackedFrames[i]) continue;
+                    alive = q.Phase == EarthquakePhase.Emerging || q.Phase == EarthquakePhase.Active;
+                    break;
+                }
+
+                if (alive) continue;
+                _trackedIds[i] = 0;
+                _trackedFrames[i] = 0u;
+                _trackedDistances[i] = 0f;
+            }
         }
 
         private static Camera ResolveMainCamera()

@@ -381,18 +381,25 @@ namespace DisasterPlus.Game
         /// **sim スレッド。** <see cref="VolcanoState"/> の位相分岐からのみ呼ぶこと。
         /// 例外が出ても位相を固めない（固めるとプレイヤーは 2 つ目の火山を置けなくなる）。
         /// </summary>
-        /// <param name="terrainRiseMetresPerTick">
-        /// 地形が隆起で 1 tick に上がる量（m）。**隆起の途中に流れを出したときだけ 0 でない。**
+        /// <param name="terrainRiseMetresPerFrame">
+        /// 地形が隆起で**1 sim フレーム**に上がる量（m）。
+        /// **隆起の途中に流れを出したときだけ 0 でない。**
         /// 溶岩が進んだ先で標高が上がるのは、その場合「溶岩が登った」のではなく
         /// 「山が育った」ためなので、その分を観測の許容差に足す
-        /// （<c>VolcanoUplift.RiseMetresPerTick</c> をそのまま渡すこと）。
+        /// （<c>VolcanoUplift.RiseMetresPerFrame</c> をそのまま渡すこと）。
+        ///
+        /// ★ **「1 tick あたり」を渡さないこと。** ⑤の各段は間隔が違う
+        ///   （隆起 4 フレーム、溶岩 <see cref="IntervalFrames"/> ＝ 8 フレーム）ので、
+        ///   隆起の 1 tick ぶんでは溶岩の 1 歩のあいだの上昇を下回り、
+        ///   **「溶岩が登った」の誤検出**で流れが止まる。
+        ///   ここで溶岩自身の間隔を掛け直す。
         /// </param>
         public static void Tick(VolcanoFootprint footprint, uint frame, float deltaMinutes,
-                                float terrainRiseMetresPerTick)
+                                float terrainRiseMetresPerFrame)
         {
             try
             {
-                Step(footprint, deltaMinutes, terrainRiseMetresPerTick);
+                Step(footprint, deltaMinutes, terrainRiseMetresPerFrame);
                 WriteDiag(frame);
             }
             catch (Exception e)
@@ -415,7 +422,7 @@ namespace DisasterPlus.Game
         }
 
         private static void Step(VolcanoFootprint footprint, float deltaMinutes,
-                                 float terrainRiseMetresPerTick)
+                                 float terrainRiseMetresPerFrame)
         {
             if (!footprint.Valid) return;
 
@@ -426,9 +433,10 @@ namespace DisasterPlus.Game
 
             // ★ Start は Reset を通るので、**許容差は Start より後で入れる**
             //   （前に入れると開始した tick だけ 0 に戻る）。
-            _terrainRiseMetres = float.IsNaN(terrainRiseMetresPerTick)
-                                 || terrainRiseMetresPerTick < 0f
-                ? 0f : terrainRiseMetresPerTick;
+            // ★ 溶岩の 1 歩は IntervalFrames フレームぶんなので、そのあいだの上昇量に直す。
+            _terrainRiseMetres = float.IsNaN(terrainRiseMetresPerFrame)
+                                 || terrainRiseMetresPerFrame < 0f
+                ? 0f : terrainRiseMetresPerFrame * IntervalFrames;
 
             if (_finished) return;
 

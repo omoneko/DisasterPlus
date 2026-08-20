@@ -71,6 +71,54 @@ namespace DisasterPlus.Core.Volcano
             return minX <= maxX && minZ <= maxZ;
         }
 
+        /// <summary>
+        /// この矩形は**1 回の <c>UpdateArea</c> でそのまま出せるか**。
+        ///
+        /// 出せる条件は <see cref="TileAt"/> が守っているのと同じ 2 つで、
+        /// **±<see cref="Margin"/> を足したあと**に評価する:
+        ///
+        ///     一辺 + 2*Margin &lt;= MaxPassedSide (99) &lt; 128     … 切り捨てない
+        ///     (一辺 + 2*Margin)^2 &lt;= MaxPassedCells (9801) &lt; 10000 … 途中フラッシュしない
+        ///
+        /// 両方とも <c>CoreTileSide</c>（95）以下という 1 つの条件に帰着する。
+        ///
+        /// **これは「タイル分割を省いてよいか」を判定するためだけにある。**
+        /// false のときは今までどおり <see cref="TileAt"/> で分割すること。
+        /// 「だいたい入るから」で分割を省くと、はみ出した部分が
+        /// **更新されないまま残る**（切り捨ては例外にならない、§A-1）。
+        /// </summary>
+        public static bool FitsSinglePass(int minX, int minZ, int maxX, int maxZ)
+        {
+            if (minX > maxX || minZ > maxZ) return false;
+            return (maxX - minX + 1) <= CoreTileSide && (maxZ - minZ + 1) <= CoreTileSide;
+        }
+
+        /// <summary>
+        /// 矩形を <see cref="Margin"/> だけ広げてクランプする。**そのまま
+        /// <c>UpdateArea</c> へ渡す矩形**（<see cref="TileAt"/> の戻り値と同じ性質で、
+        /// 呼び出し側で margin を足し直してはいけない）。
+        ///
+        /// <see cref="FitsSinglePass"/> が true の矩形にだけ使うこと。
+        /// クランプは縮める向きにしか働かないので、返り値が
+        /// <see cref="MaxPassedSide"/> を超えることはない。
+        /// </summary>
+        public static bool ExpandForPass(int minX, int minZ, int maxX, int maxZ,
+                                         out int pMinX, out int pMinZ, out int pMaxX, out int pMaxZ)
+        {
+            pMinX = 0;
+            pMinZ = 0;
+            pMaxX = 0;
+            pMaxZ = 0;
+
+            if (minX > maxX || minZ > maxZ) return false;
+
+            pMinX = ClampCell(minX - Margin);
+            pMinZ = ClampCell(minZ - Margin);
+            pMaxX = ClampCell(maxX + Margin);
+            pMaxZ = ClampCell(maxZ + Margin);
+            return true;
+        }
+
         /// <summary>矩形を覆うのに要るタイル数。空の矩形なら 0。</summary>
         public static int TileCountFor(int minX, int minZ, int maxX, int maxZ)
         {

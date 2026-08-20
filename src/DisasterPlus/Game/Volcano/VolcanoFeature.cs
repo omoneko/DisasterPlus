@@ -359,9 +359,16 @@ namespace DisasterPlus.Game
                                 + (snapshot.UpliftComplete ? " (complete)" : ""));
             b.Line(2, "active radius", snapshot.ActiveRadiusMetres.ToString("F0")
                                        + " m (as far as the clearing has reached)");
+            // ★ flush 1/1 は「この tick に変わった全域が、同じ tick で画面に出た」
+            //   ＝ いちばん滑らかな状態。2 以上なら分割してタイル総当たりに落ちており、
+            //   目に見える 1 段はその枚数ぶんの上昇量になる（VolcanoUplift のクラス doc）。
+            //   **「断続的なせり上がり」の切り分けはこの 1 行でしかできない。**
             b.Line(2, "cells written", VolcanoUplift.CellsWrittenLastTick
-                                       + " last tick; tile " + snapshot.UpliftTileCursor
-                                       + "/" + snapshot.UpliftTileCount);
+                                       + " last tick; flush " + snapshot.UpliftTileCursor
+                                       + "/" + snapshot.UpliftTileCount
+                                       + " (1/1 = the whole change reached the screen this tick)"
+                                       + "; footprint " + VolcanoUplift.FootprintTileCount
+                                       + " tile(s)");
             b.Line(2, "summit crater", snapshot.CraterCarved ? "carved" : "not carved yet");
             // 山肌の凹凸。0% なら滑らかな円錐そのもの（設定の意味を診断でも名乗る）。
             b.Line(2, "flank relief", ModSettings.VolcanoReliefStrength.value
@@ -370,7 +377,9 @@ namespace DisasterPlus.Game
                                          ? ""
                                          : "; rising "
                                            + VolcanoUplift.RiseMetresPerTick.ToString("F2")
-                                           + " m per uplift tick"));
+                                           + " m per uplift tick ("
+                                           + VolcanoUplift.RiseMetresPerFrame.ToString("F3")
+                                           + " m per sim frame)"));
 
             // 「建てられる地面」と水位の遅れ。**これは不具合ではない**（設計書 §7.3）。
             // 換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。

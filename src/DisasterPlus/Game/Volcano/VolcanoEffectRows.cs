@@ -328,8 +328,10 @@ namespace DisasterPlus.Game
             y = ReflowRow(y, _upliftRadiusLabel,
                 Strings.VolcanoActiveRadiusRow + ": "
                 + s.ActiveRadiusMetres.ToString("F0") + " " + Strings.VolcanoMetres
-                + "    " + Strings.VolcanoTilesRow + ": "
-                + s.UpliftTileCursor + " / " + s.UpliftTileCount);
+                // ★ 1 なら「その tick に変わった分が同じ tick で画面に出た」。
+                //   2 以上なら分割して順番に流しており、目に見える 1 段はその
+                //   回数ぶんの上昇量になる（VolcanoUplift のクラス doc）。
+                + "    " + Strings.VolcanoTilesRow + ": " + s.UpliftTileCount);
 
             y = Reflow(y, _catchUpLabel, CatchUpText(s), CatchUpHeight, CatchUpHeight + 4f);
             y = ReflowRow(y, _craterLabel, s.CraterCarved ? Strings.VolcanoCraterCarved : "");

@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Volcano;
+using DisasterPlus.Tools;
 
 namespace DisasterPlus.Tools.VolcanoPreview
 {
@@ -65,6 +66,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             }
 
             GrowthFrames(outDir, log);
+            Pacing.Report(outDir, log);
 
             File.WriteAllText(Path.Combine(outDir, "measurements.txt"), log.ToString());
             Console.Write(log.ToString());

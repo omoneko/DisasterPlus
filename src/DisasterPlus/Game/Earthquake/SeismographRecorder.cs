@@ -28,14 +28,29 @@ namespace DisasterPlus.Game
         public readonly uint[] Frames;
         public readonly float[] Values;
 
+        /// <summary>
+        /// **合成記象**（<see cref="SeismogramModel"/>）の同じフレームでの値。
+        /// <see cref="Frames"/> と 1 対 1 で、有効なのは同じく先頭 <see cref="Count"/> 件。
+        ///
+        /// **null は「モデルを記録していない」であって「変位 0」ではない。**
+        /// <c>ModSettings.EarthquakeSeismogram</c> が OFF のときはここが null になり、
+        /// 表示側は第 2 層の線を 1 本も描かない。0 で埋めて渡すと、
+        /// 「モデルは動いていたが揺れていなかった」という別の意味になる。
+        /// </summary>
+        public readonly float[] ModelValues;
+
         /// <summary><see cref="Frames"/> / <see cref="Values"/> の**有効な**件数。</summary>
         public readonly int Count;
 
         /// <summary>保持しているサンプルの中の最大振幅（絶対値）。</summary>
         public readonly float PeakAbsolute;
 
+        /// <summary>合成記象の側の最大振幅（絶対値）。記録していなければ 0。</summary>
+        public readonly float ModelPeakAbsolute;
+
         public SeismographTrace(ushort buildingId, Vec3 position, float distanceToEpicentre,
-                                uint[] frames, float[] values, int count, float peakAbsolute)
+                                uint[] frames, float[] values, int count, float peakAbsolute,
+                                float[] modelValues, float modelPeakAbsolute)
         {
             BuildingId = buildingId;
             Position = position;
@@ -44,6 +59,14 @@ namespace DisasterPlus.Game
             Values = values;
             Count = count;
             PeakAbsolute = peakAbsolute;
+            ModelValues = modelValues;
+            ModelPeakAbsolute = modelPeakAbsolute;
+        }
+
+        /// <summary>合成記象の線を描いてよいか（記録があり、件数と噛み合っている）。</summary>
+        public bool HasModel
+        {
+            get { return ModelValues != null && ModelValues.Length >= Count && Count > 0; }
         }
 
         /// <summary>最も新しいサンプルのフレーム。空なら 0。</summary>
@@ -140,6 +163,13 @@ namespace DisasterPlus.Game
             public Vec3 Position;
             public float DistanceToEpicentre;
             public readonly WaveformBuffer Buffer = new WaveformBuffer(Capacity);
+
+            /// <summary>
+            /// 合成記象（第 2 層）の側。**バニラの側と同じフレームに同じ件数だけ**
+            /// 入れる —— 片方にしか入れないと、表示側で 2 本の線の時間軸がずれる。
+            /// 設定が OFF のあいだは 1 件も入らない（<see cref="_modelRecorded"/>）。
+            /// </summary>
+            public readonly WaveformBuffer ModelBuffer = new WaveformBuffer(Capacity);
         }
 
         private static readonly ObservationPoint[] _points = CreatePoints();
@@ -170,6 +200,16 @@ namespace DisasterPlus.Game
         /// <summary>観測点 0 個での再走査を最後に行ったフレーム。0 は「まだ」。</summary>
         private static uint _lastRescanFrame;
 
+        /// <summary>
+        /// 今のバッファに合成記象（第 2 層）が入っているか。
+        ///
+        /// **設定を途中で切り替えたときのため**にある。ON にした瞬間、バニラ側の
+        /// バッファには既に数百件入っているのにモデル側は空なので、そのまま
+        /// 2 本並べると時間軸が食い違った絵になる。切り替わりを見たら
+        /// **両方まとめて捨てて**、そこから揃えて貯め直す。
+        /// </summary>
+        private static bool _modelRecorded;
+
         private static bool _scanErrorLogged;
 
         private static readonly IList<SeismographTrace> NoTraces =
@@ -199,8 +239,10 @@ namespace DisasterPlus.Game
                 _points[i].Position = new Vec3(0f, 0f, 0f);
                 _points[i].DistanceToEpicentre = 0f;
                 _points[i].Buffer.Clear();
+                _points[i].ModelBuffer.Clear();
             }
             _pointCount = 0;
+            _modelRecorded = false;
             _quakeId = 0;
             _cached = null;
             _cachedAtFrame = 0u;
@@ -274,6 +316,30 @@ namespace DisasterPlus.Game
             //    第 1 層のグラフが第 2 層の現象を描いている状態になる。
             //    DisplacementAt は e の閉じた式なので、飛んだフレームで評価するのは
             //    1 回評価するのと同じだけ「実測」である（ShakeWaveform の doc）。
+            // ★ 第 2 層の合成記象。**設定が OFF なら 1 件も貯めない**（既定 OFF）。
+            //   切り替わった瞬間は両方まとめて捨てる —— 片方だけ空のまま 2 本並べると、
+            //   時間軸の食い違った絵になる。
+            bool wantModel = ModSettings.EarthquakeSeismogram.value;
+            if (wantModel != _modelRecorded)
+            {
+                for (int i = 0; i < _points.Length; i++)
+                {
+                    _points[i].Buffer.Clear();
+                    _points[i].ModelBuffer.Clear();
+                }
+                _modelRecorded = wantModel;
+                _cached = null;
+                _dirty = true;
+                _hasLastSample = false;
+            }
+
+            // 種は地震そのものから出す（フレーム番号を混ぜない）ので、
+            // **同じ地震なら同じ記象になる**。VanillaRandomizer は使わない
+            // —— 合成記象はこの MOD が自分で決めることである。
+            SeismogramModel model = wantModel
+                ? SeismogramModel.For(SeismogramSeed(quake), activeDuration)
+                : new SeismogramModel();
+
             uint first = ShakeWaveform.FirstUnsampledFrame(
                 _lastSampleFrame, _hasLastSample, frame, MaxSubSamplesPerTick);
 
@@ -295,6 +361,14 @@ namespace DisasterPlus.Game
                     //    （設計書 §3.5）。式・定数・窓はバニラのまま。
                     float value = ShakeWaveform.DisplacementAt(point.DistanceToEpicentre, t);
                     point.Buffer.Add(f, value);
+
+                    // ★ 合成記象は**同じフレーム・同じ観測点**で評価する。
+                    //   片方だけ間引くと 2 本の線の時間軸がずれる。
+                    if (wantModel)
+                    {
+                        point.ModelBuffer.Add(
+                            f, model.DisplacementAt(point.DistanceToEpicentre, t));
+                    }
                 }
                 wrote = true;
             }
@@ -334,10 +408,22 @@ namespace DisasterPlus.Game
                 var values = new float[count];
                 int written = point.Buffer.CopyTo(frames, values);
 
+                // ★ null は「記録していない」。0 で埋めて渡すと「揺れていない」に化ける。
+                float[] modelValues = null;
+                float modelPeak = 0f;
+                if (_modelRecorded && point.ModelBuffer.Count == count)
+                {
+                    var modelFrames = new uint[count];
+                    modelValues = new float[count];
+                    point.ModelBuffer.CopyTo(modelFrames, modelValues);
+                    modelPeak = point.ModelBuffer.PeakAbsolute;
+                }
+
                 traces.Add(new SeismographTrace(point.BuildingId, point.Position,
                                                 point.DistanceToEpicentre,
                                                 frames, values, written,
-                                                point.Buffer.PeakAbsolute));
+                                                point.Buffer.PeakAbsolute,
+                                                modelValues, modelPeak));
             }
 
             _cached = traces.AsReadOnly();
@@ -346,9 +432,23 @@ namespace DisasterPlus.Game
             return _cached;
         }
 
+        /// <summary>
+        /// 合成記象の種。**地震そのものから出す**（ID と発動フレーム）ので、
+        /// 同じ地震のあいだは何度作り直しても同じ形になり、地震が変われば形も変わる。
+        /// **フレーム番号そのものを混ぜないこと** —— 混ぜると tick ごとに別の記象になる。
+        /// </summary>
+        private static uint SeismogramSeed(EarthquakeReading quake)
+        {
+            return DeterministicRandom.Hash(quake.DisasterId, quake.ActivationFrame);
+        }
+
         private static void ClearAll()
         {
-            for (int i = 0; i < _points.Length; i++) _points[i].Buffer.Clear();
+            for (int i = 0; i < _points.Length; i++)
+            {
+                _points[i].Buffer.Clear();
+                _points[i].ModelBuffer.Clear();
+            }
             _pointCount = 0;
             _quakeId = 0;
             _cached = null;
