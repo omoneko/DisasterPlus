@@ -288,6 +288,15 @@ namespace DisasterPlus.Game
             volcano.AddCheckbox(Strings.VolcanoEruptionFx, ModSettings.VolcanoEruptionFx.value,
                 v => ModSettings.VolcanoEruptionFx.value = v);
 
+            // ★ 斜面を下る土煙の帯（「火砕流」の代用）。**切っても噴火も溶岩も変わらない**
+            //   —— この帯は何も壊さないし、ゲームに火砕流のエフェクトは 1 つも無い
+            //   （Strings.VolcanoPyroclasticNote がそう名乗る）。
+            //   噴火の描画とは別のつまみにしてあるのは、帯 1 本の粒子数が大きく、
+            //   これだけ切りたい人が居る見た目だからである。
+            volcano.AddCheckbox(Strings.VolcanoPyroclasticSetting,
+                ModSettings.VolcanoPyroclasticFx.value,
+                v => ModSettings.VolcanoPyroclasticFx.value = v);
+
             // ★ 噴火の音。**切っても隆起も溶岩も噴煙も変わらない**（音も main スレッド
             //   だけの機能である）。音量つまみはここに置かない ——
             //   ゲーム本体の効果音スライダーとミュートがそのまま効くので、

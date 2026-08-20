@@ -127,8 +127,21 @@ namespace DisasterPlus.Game
 
             // ★ 噴火の描画は main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
             //   設定で切った瞬間に自分で畳む（切ったまま噴煙が残らないこと）。
-            if (ModSettings.VolcanoEruptionFx.value) VolcanoEruption.Render();
-            else VolcanoEruption.Destroy();
+            //   描いているのは**ゲーム自身の粒子エフェクト**である（VolcanoEruptionFx）。
+            bool eruptionFx = ModSettings.VolcanoEruptionFx.value;
+            if (eruptionFx) VolcanoEruptionFx.Update(VolcanoHub.Latest);
+            else VolcanoEruptionFx.Destroy();
+
+            // ★ 火砕流「もどき」の土煙。**別の設定で独立に切れる** ——
+            //   帯 1 本あたり粒子数が大きく、切りたい人が居る見た目である。
+            //   これは火砕流の再現ではない（VolcanoPyroclasticFx のクラス doc）。
+            bool pyroclasticFx = ModSettings.VolcanoPyroclasticFx.value;
+            if (pyroclasticFx) VolcanoPyroclasticFx.Update(VolcanoHub.Latest);
+            else VolcanoPyroclasticFx.Destroy();
+
+            // ★ 両方切ってあるあいだは借り物の複製も手放す（切ったまま抱えない）。
+            //   次に入れ直したフレームで作り直される。
+            if (!eruptionFx && !pyroclasticFx) VolcanoVanillaFx.Destroy();
 
             // ★ 噴火の音も main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
             //   **1 フレームに 1 回だけ**呼ぶこと（2 回積むとバニラの効果音の枠を
@@ -162,10 +175,15 @@ namespace DisasterPlus.Game
             //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
             VolcanoPanel.Destroy();
 
-            // ★ 噴煙の GameObject と Material は自分で Object.Destroy する
-            //   （Material は Component ではないので GameObject の道連れにならない）。
-            //   ここを飛ばすと都市を出入りするたびに 1 個ずつ残る。
-            VolcanoEruption.Destroy();
+            // ★ 噴火の描画側の時計を戻す。
+            VolcanoEruptionFx.Destroy();
+            VolcanoPyroclasticFx.Destroy();
+
+            // ★★ 借り物の複製（GameObject と、その内側に出来る粒子系）は自分で消す。
+            //    内側の複製は "Particle Effects" ルート（DontDestroyOnLoad）の下に
+            //    ぶら下がっていて**外側を消しても道連れにならない**ので、
+            //    ここを飛ばすと都市を出入りするたびに粒子系が 1 組ずつ残る。
+            VolcanoVanillaFx.Destroy();
             // ★ 噴火音の AudioClip と AudioInfo も自分で Object.Destroy する
             //   （どちらも Component ではないので GameObject の道連れにならない）。
             //   ここを飛ばすと都市を出入りするたびに数 MB のクリップが 1 個ずつ残る。
@@ -411,10 +429,17 @@ namespace DisasterPlus.Game
         /// ⑤自前の噴出物だけで噴火は成立する。だから
         /// <c>not available in this environment</c> にはその旨を添える。
         ///
-        /// ★ <c>own particles</c> と <c>borrowed fire effect</c> を別の行にするのは、
-        ///   実機で「何も見えない」を切り分ける材料がここにしか無いからである ——
-        ///   前者が <c>not drawing</c> ならシェーダかマテリアルの問題（火災旋風 §4.9 / §4.8）、
-        ///   後者だけが欠けているならこの環境で借りられないだけである。
+        /// ★ 借り物の 4 つを 1 行ずつ出すのは、実機で「何も見えない」を切り分ける材料が
+        ///   ここにしか無いからである。<c>NOT resolved</c> はその 1 つだけが描かれない
+        ///   ということで、噴火も山も溶岩も止まらない。
+        ///
+        /// ★★ <b>ここは sim スレッドである</b>（<c>DiagnosticDump</c> のクラス doc:
+        ///   main がホットキーで頼み、sim が組み立てる）。だから
+        ///   <c>VolcanoVanillaFx</c> の解決経路を**ここから呼ばない** ——
+        ///   あちらは <c>Object.Instantiate</c> と <c>ParticleSystem</c> に触る。
+        ///   読むのは main スレッドが描画のときに書いておいた
+        ///   <c>bool</c> / <c>int</c> / <c>string</c> のキャッシュだけである
+        ///   （<c>WriteAudio</c> が同じ理由で同じ形をしている）。
         /// </summary>
         private static void WriteEruption(DiagnosticBuilder b, VolcanoSnapshot snapshot)
         {
@@ -426,27 +451,44 @@ namespace DisasterPlus.Game
                                   + ", " + VolcanoEruption.BurstsSoFar + " bursts"
                                   + (VolcanoEruption.Building
                                      ? ", still building the mountain" : "") + ")");
-            b.Line(2, "own particles", VolcanoEruption.Drawing ? "drawing" : "not drawing");
+            var facts = VolcanoEruptionFx.Facts;
 
-            // ★ どのシェーダで解決したかを必ず名乗る（溶岩の描画と同じ扱い）。
-            //   将来のゲーム更新で黙って不可視になったときの唯一の手がかりであり、
-            //   Standard へ落ちた（＝光らない）ことも、ここでしか分からない。
-            b.Line(3, "plume material", VolcanoEruption.ShaderDetail);
-            b.Line(2, "borrowed fire effect", VolcanoEruption.BorrowedEffectAvailable
-                ? "applied (the game's own building fire effect, no DLC needed)"
-                : "not available in this environment (this is normal; the eruption still "
-                  + "shows Disaster +'s own plume)");
+            b.Line(2, "crater effects", VolcanoEruptionFx.Drawing
+                ? "drawing (the game's own particle effects)"
+                : (ModSettings.VolcanoEruptionFx.value ? "not drawing" : "off (setting)"));
 
-            if (!VolcanoEruption.BorrowedEffectAvailable)
+            // ★ 何が引けて何が複製できたかを必ず名乗る。将来のゲーム更新で
+            //   黙って何も出なくなったときの唯一の手がかりである。
+            b.Line(3, "borrowed effects", VolcanoEruptionFx.Detail);
+            b.Line(3, "ash plume", facts.AshResolved
+                ? VolcanoVanillaFx.AshName + " (no DLC needed)" : "NOT resolved");
+            b.Line(3, "flames", facts.FlameResolved
+                ? VolcanoVanillaFx.FlameName + " (the game's own building fire, no DLC needed)"
+                : "NOT resolved");
+            b.Line(3, "ejecta", facts.EjectaResolved
+                ? VolcanoVanillaFx.EjectaName + " (no DLC needed)" : "NOT resolved");
+
+            if (!facts.CameraInfoResolved)
             {
-                b.Line(3, "camera info", VolcanoEruption.CameraInfoAvailable
-                    ? "resolved" : "NOT resolved");
+                b.Line(3, "camera info", "NOT resolved - nothing is drawn this frame");
             }
 
-            // ★ 音は出ない。**IL 実測**（FireEffect.RenderEffect は m_soundEffect に
-            //   1 度も触れず、音は PlayEffect の経路にある）。仕様であることを名乗る。
-            b.Line(2, "sound", "none - the borrowed effect's sound lives on PlayEffect, "
-                               + "not RenderEffect; Disaster + does not open an audio path");
+            // ★★ 火砕流は**バニラに存在しない**。代用であることを診断でも名乗る。
+            b.Line(2, "pyroclastic flow", ModSettings.VolcanoPyroclasticFx.value
+                ? (VolcanoPyroclasticFx.DustResolved
+                    ? VolcanoPyroclasticFx.BandsDrawn + " band(s) of "
+                      + VolcanoVanillaFx.DustName
+                      + " - this is the game's building-collapse dust driven down the lava "
+                      + "path, NOT a real pyroclastic flow; the game has no such effect. "
+                      + "It damages nothing"
+                    : "NOT resolved")
+                : "off (setting)");
+
+            // ★ 粒子を描く経路から音は出ない。**IL 実測**（RenderEffect は
+            //   m_soundEffect に 1 度も触れず、音は PlayEffect の経路にある）。
+            //   ⑤の噴火音は VolcanoEruptionAudio の別経路である。
+            b.Line(2, "sound", "the particle path is silent by design; the eruption sound is "
+                               + "Disaster +'s own file on a separate audio path");
 
             if (!string.IsNullOrEmpty(VolcanoEruption.LastFailure))
             {

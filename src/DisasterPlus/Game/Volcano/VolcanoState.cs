@@ -180,7 +180,7 @@ namespace DisasterPlus.Game
             VolcanoUplift.Reset();
             // ★ 噴火の予定も畳む。**描画側（main）の後始末はここではしない** ——
             //   Unity オブジェクトの破棄は main スレッドの仕事で、
-            //   VolcanoEruption.Render がスナップショットを見て自分で畳む
+            //   VolcanoEruptionFx がスナップショットを見て自分で畳む
             //   （レベルアンロードでは VolcanoFeature が Destroy を呼ぶ）。
             VolcanoEruption.Reset();
             // ★ 溶岩の軌跡も返す（8 本 × 128 点で 8 KB）。**焦げた地面と燃えた建物は
@@ -514,7 +514,7 @@ namespace DisasterPlus.Game
             VolcanoUplift.Reset();
             // ★ 噴火の予定も畳む。**描画側（main）の後始末はここではしない** ——
             //   Unity オブジェクトの破棄は main スレッドの仕事で、
-            //   VolcanoEruption.Render がスナップショットを見て自分で畳む
+            //   VolcanoEruptionFx がスナップショットを見て自分で畳む
             //   （レベルアンロードでは VolcanoFeature が Destroy を呼ぶ）。
             VolcanoEruption.Reset();
             // ★ 溶岩の軌跡も返す（8 本 × 128 点で 8 KB）。**焦げた地面と燃えた建物は

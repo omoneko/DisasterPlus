@@ -66,6 +66,8 @@ namespace DisasterPlus.Game
         private static UILabel _craterLabel;
         private static UILabel _eruptionLabel;
         private static UILabel _eruptionNoteLabel;
+        private static UILabel _eruptionMissingLabel;
+        private static UILabel _pyroclasticNoteLabel;
         private static UILabel _lavaLabel;
         private static UILabel _lavaIgnitedLabel;
         private static UILabel _lavaTreesNoteLabel;
@@ -115,6 +117,12 @@ namespace DisasterPlus.Game
             // ★ 「ゲームに溶岩も噴火も無い」を名乗る注記。4 行ぶん折り返す。
             _eruptionNoteLabel =
                 VolcanoRows.AddRow(p, "EffectEruptionNote", ref y, LongNoteHeight);
+            // ★ バニラのエフェクトが 1 つも引けなかったときだけ出す断り。
+            _eruptionMissingLabel =
+                VolcanoRows.AddRow(p, "EffectEruptionMissing", ref y, NoteHeight);
+            // ★★ 「火砕流」と名乗るものが火砕流ではないことを名乗る唯一の行。
+            _pyroclasticNoteLabel =
+                VolcanoRows.AddRow(p, "EffectPyroclastic", ref y, LongNoteHeight);
 
             // ── 溶岩（T8）────────────────────────────────────
             _lavaLabel = VolcanoRows.AddRow(p, "EffectLava", ref y);
@@ -359,6 +367,8 @@ namespace DisasterPlus.Game
             {
                 y = ReflowRow(y, _eruptionLabel, "");
                 y = Reflow(y, _eruptionNoteLabel, "", LongNoteHeight, LongNoteHeight + 4f);
+                y = ReflowNote(y, _eruptionMissingLabel, "");
+                y = Reflow(y, _pyroclasticNoteLabel, "", LongNoteHeight, LongNoteHeight + 4f);
                 return y;
             }
 
@@ -370,6 +380,19 @@ namespace DisasterPlus.Game
 
             y = Reflow(y, _eruptionNoteLabel, Strings.VolcanoEruptionBorrowedNote,
                        LongNoteHeight, LongNoteHeight + 4f);
+
+            // ★ 引けなかったときだけ断る。**引けている環境で毎回読ませない。**
+            //   設定で切っているだけのときも出さない（「切ってある」と
+            //   「この環境では出せない」を混ぜない）。
+            bool fxOn = ModSettings.VolcanoEruptionFx.value;
+            y = ReflowNote(y, _eruptionMissingLabel,
+                fxOn && !VolcanoEruptionFx.Facts.EruptionUsable
+                    ? Strings.VolcanoEffectsMissing : "");
+
+            // ★★ 火砕流の代用であることを名乗る。**出しているあいだだけ。**
+            y = Reflow(y, _pyroclasticNoteLabel,
+                ModSettings.VolcanoPyroclasticFx.value ? Strings.VolcanoPyroclasticNote : "",
+                LongNoteHeight, LongNoteHeight + 4f);
             return y;
         }
 

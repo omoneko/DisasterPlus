@@ -221,7 +221,7 @@ namespace DisasterPlus.Game
         // ★ この 3 つは**描画のためだけ**に在る。ゲームの状態を 1 つも表さないので、
         //   sim 側（VolcanoState / VolcanoClearing / VolcanoUplift）はこれを読まない。
 
-        /// <summary>噴火が進行中か。main の <c>VolcanoEruption.Render</c> の唯一の門。</summary>
+        /// <summary>噴火が進行中か。main の <c>VolcanoEruptionFx.Update</c> の唯一の門。</summary>
         public readonly bool EruptionActive;
 
         /// <summary>

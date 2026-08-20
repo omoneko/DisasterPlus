@@ -189,6 +189,15 @@ namespace DisasterPlus.Game
         /// </summary>
         public static SavedBool VolcanoLavaRender;
 
+        /// <summary>
+        /// 斜面を下る土煙の帯（「火砕流」の代用）を出すか。
+        /// **これは火砕流の再現ではない** —— ゲームに火砕流のエフェクトは 1 つも無く、
+        /// 出しているのは建物崩壊の粉塵を溶岩の経路へ流したものである
+        /// （<c>VolcanoPyroclasticFx</c> のクラス doc）。
+        /// **切っても噴火も溶岩も何も変わらない**（この帯は何も壊さない）。
+        /// </summary>
+        public static SavedBool VolcanoPyroclasticFx;
+
         /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
         public const int VolcanoShapeShield = 0;
         public const int VolcanoShapeStrato = 1;
@@ -353,6 +362,11 @@ namespace DisasterPlus.Game
 
             // 噴煙を描くか。切っても隆起は止まらない（描画は main スレッドだけの機能）。
             VolcanoEruptionFx = new SavedBool("volcanoEruptionFx", FileName, true, true);
+
+            // 斜面を下る土煙の帯を出すか。既定 ON。
+            // ★ **新しいキーである。既存のキーの名前も既定値も 1 つも変えていない**
+            //   （.cgs は公開契約で、番号も文字列も詰め直さない）。
+            VolcanoPyroclasticFx = new SavedBool("volcanoPyroclasticFx", FileName, true, true);
 
             // 噴火の音を鳴らすか。既定 ON。
             // ★ **新しいキーである。既存のキーの名前も既定値も 1 つも変えていない**

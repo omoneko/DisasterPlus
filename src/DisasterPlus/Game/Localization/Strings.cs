@@ -1086,10 +1086,31 @@ namespace DisasterPlus.Game
         //    **ここは実測に合わせて直すこと** —— 出るものを「出ない」と書き続けるのは、
         //    出ないものを「出る」と書くのと同じ害である。
         public static string VolcanoEruptionBorrowedNote =
-            "The game has no lava, magma or eruption effect of any kind, so Disaster + draws "
-            + "its own. The flames on top are the game's own fire effect, borrowed and placed "
-            + "at the crater. The sound is Disaster +'s own file, played through the game's "
-            + "effect audio group, so your effect volume and mute apply to it.";
+            "The ash plume, the flames and the flying debris are all the game's own particle "
+            + "effects, borrowed and placed at the crater - no DLC is needed for any of them. "
+            + "The game has no lava or magma effect of any kind, so the glowing lava surface "
+            + "is still Disaster +'s own. The sound is Disaster +'s own file, played through "
+            + "the game's effect audio group, so your effect volume and mute apply to it.";
+
+        // --- ⑤火山（火砕流の代用）---
+        //
+        // ★★ **短くしないこと。** 「火砕流」と名乗るものが火砕流ではないことを
+        //   名乗る唯一の場所である。ゲームに火砕流のエフェクトは 1 つも無い
+        //   （出荷アセットの EffectInfo 277 個を全数確認した）。
+        public static string VolcanoPyroclasticSetting =
+            "Show a dust surge running down the slope";
+
+        public static string VolcanoPyroclasticNote =
+            "The game has no pyroclastic flow effect - not in the base game and not in any "
+            + "DLC. What runs down the slope is the game's own building-collapse dust, driven "
+            + "along the path the lava takes. It looks like a grey dust cloud sweeping down "
+            + "the valley, and it damages nothing: only the lava sets anything on fire.";
+
+        // ★ バニラのエフェクトが 1 つも引けなかったときの断り。**噴火は続く。**
+        public static string VolcanoEffectsMissing =
+            "Disaster + could not borrow the game's particle effects in this environment, so "
+            + "the eruption is not drawn. The mountain still rises, the lava still flows and "
+            + "it still sets buildings on fire.";
 
         // --- ⑤火山（Task 8: 溶岩の前進と着火） ---
         //

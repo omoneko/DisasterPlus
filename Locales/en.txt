@@ -295,7 +295,10 @@ VolcanoCraterCarved = Summit crater carved.
 VolcanoEruptionRow = Eruption
 VolcanoEruptionFx = Draw the eruption plume
 VolcanoEruptionSound = Play the eruption sound
-VolcanoEruptionBorrowedNote = The game has no lava, magma or eruption effect of any kind, so Disaster + draws its own. The flames on top are the game's own fire effect, borrowed and placed at the crater. The sound is Disaster +'s own file, played through the game's effect audio group, so your effect volume and mute apply to it.
+VolcanoEruptionBorrowedNote = The ash plume, the flames and the flying debris are all the game's own particle effects, borrowed and placed at the crater - no DLC is needed for any of them. The game has no lava or magma effect of any kind, so the glowing lava surface is still Disaster +'s own. The sound is Disaster +'s own file, played through the game's effect audio group, so your effect volume and mute apply to it.
+VolcanoPyroclasticSetting = Show a dust surge running down the slope
+VolcanoPyroclasticNote = The game has no pyroclastic flow effect - not in the base game and not in any DLC. What runs down the slope is the game's own building-collapse dust, driven along the path the lava takes. It looks like a grey dust cloud sweeping down the valley, and it damages nothing: only the lava sets anything on fire.
+VolcanoEffectsMissing = Disaster + could not borrow the game's particle effects in this environment, so the eruption is not drawn. The mountain still rises, the lava still flows and it still sets buildings on fire.
 VolcanoLavaRow = Lava
 VolcanoLavaFlowsSetting = Number of lava flows (0 = off)
 VolcanoLavaFireSetting = Lava sets fire to what it touches

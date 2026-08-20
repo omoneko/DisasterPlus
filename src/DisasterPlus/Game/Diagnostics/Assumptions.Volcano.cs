@@ -38,7 +38,7 @@ namespace DisasterPlus.Game
     public static partial class Assumptions
     {
         /// <summary>このファイルが持つ検証の数。</summary>
-        private const int VolcanoCheckCount = 8;
+        private const int VolcanoCheckCount = 9;
 
         private static void RunVolcano()
         {
@@ -138,40 +138,70 @@ namespace DisasterPlus.Game
 
             // --- ⑤火山（Task 7: 噴火の借り物エフェクト）ここから ---
 
-            // 5. 借り物の炎。**この検査が FAIL でも噴火は出る**（⑤自前の
-            //   ParticleSystem が主経路で、③で出荷済みの形をそのまま写している）。
-            //   impact 文にそう書くのは、狼少年にしないためである
-            //   （④が DestroyTrees で同じ判断をしている）。
+            // 5. 借りるバニラの粒子エフェクト 3 つ（噴煙・炎・噴石）。
+            //   **この検査が FAIL でも山は育ち、溶岩は流れて建物を燃やす** ——
+            //   欠けた 1 つが描かれなくなるだけである。impact 文にそう書くのは
+            //   狼少年にしないためである（④が DestroyTrees で同じ判断をしている）。
             //
-            //   ★ 述語は VolcanoEruption.RenderBorrowed が実際に門にしている式
-            //     （VolcanoBorrowFacts.Usable）そのものである。「フィールドが解決した」を
-            //     述語にすると、CameraInfo が取れない環境で PASS が出る。
+            //   ★★ 述語は VolcanoEruptionFx が実際に門にしている式そのものである。
+            //     VolcanoVanillaFx は**複製に失敗しても元のプレハブをそのまま描く**ので、
+            //     「引けたか」が「描けるか」と一致する。ここが一致していないと
+            //     「検査は通ったのに機能が動かない」が起きる（本プロジェクトで 2 度出た形）。
             //
-            //   ScanBorrowFacts は副作用の無い走査で、main スレッド専用
-            //   （Run() も main）。Check の外で例外を抑えるのは上の 4 件と同じ理由。
-            VolcanoBorrowFacts borrow;
+            //   ★ この 3 つはどれも DLC 不要である。Natural Disasters の
+            //     爆発・隕石のほうが見た目は良いが、非所持環境には存在しないので
+            //     既定経路には決してしない。
+            //
+            //   ScanFacts は main スレッド専用（Run() も main）。副作用として
+            //   複製を 1 度だけ作りうるが、それは描画側が作るものと同一の 1 個で、
+            //   レベルアンロードで VolcanoVanillaFx.Destroy が畳む。
+            //   Check の外で例外を抑えるのは上の 4 件と同じ理由。
+            VolcanoVanillaFacts vanilla;
             try
             {
-                borrow = VolcanoEruption.ScanBorrowFacts();
+                vanilla = VolcanoVanillaFx.ScanFacts();
             }
             catch
             {
-                borrow = new VolcanoBorrowFacts();
+                vanilla = new VolcanoVanillaFacts();
             }
 
-            Check("EffectInfo.RenderEffect and EffectInfo+SpawnArea(Vector3,Vector3,float) are "
-                  + "usable, and BuildingManager exposes m_properties.m_fireEffect "
-                  + "(fireEffect: " + (borrow.FireEffectResolved ? "ok" : "missing")
-                  + ", cameraInfo: " + (borrow.CameraInfoResolved ? "ok" : "missing") + ")",
-                  "the eruption falls back to Disaster +'s own particles only. Nothing else is "
-                  + "affected, and the volcano still erupts",
-                  delegate { return borrow.Usable; });
+            Check("the game's own particle effects \"" + VolcanoVanillaFx.AshName + "\", \""
+                  + VolcanoVanillaFx.FlameName + "\" and \"" + VolcanoVanillaFx.EjectaName
+                  + "\" can be looked up and rendered (ash: "
+                  + (vanilla.AshResolved ? "ok" : "missing")
+                  + ", flames: " + (vanilla.FlameResolved ? "ok" : "missing")
+                  + ", ejecta: " + (vanilla.EjectaResolved ? "ok" : "missing")
+                  + ", cameraInfo: " + (vanilla.CameraInfoResolved ? "ok" : "missing") + ")",
+                  "the missing piece of the eruption is simply not drawn. The mountain still "
+                  + "rises, the lava still flows and it still sets buildings on fire. None of "
+                  + "these effects needs a DLC",
+                  delegate { return vanilla.EruptionUsable; });
 
             // --- ⑤火山（Task 7: 噴火の借り物エフェクト）ここまで ---
 
+            // --- ⑤火山（火砕流の代用）ここから ---
+
+            // 6. 斜面を下る土煙の帯。**バニラに火砕流のエフェクトは 1 つも無い**ので、
+            //   ⑤は建物崩壊の粉塵を溶岩の経路へ流している。噴火の 3 つとは成否が
+            //   別に決まるので、検査も別にする（片方の欠けでもう片方を巻き込まない）。
+            //
+            //   ★ 述語は VolcanoPyroclasticFx.Step が実際に門にしている式
+            //     （VolcanoVanillaFacts.PyroclasticUsable）そのものである。
+            Check("the game's own particle effect \"" + VolcanoVanillaFx.DustName
+                  + "\" can be looked up and rendered (dust: "
+                  + (vanilla.DustResolved ? "ok" : "missing")
+                  + ", cameraInfo: " + (vanilla.CameraInfoResolved ? "ok" : "missing") + ")",
+                  "the dust surge that stands in for a pyroclastic flow is not drawn. Nothing "
+                  + "else changes - that surge damages nothing, and the game has no real "
+                  + "pyroclastic flow effect to fall back to",
+                  delegate { return vanilla.PyroclasticUsable; });
+
+            // --- ⑤火山（火砕流の代用）ここまで ---
+
             // --- ⑤火山（Task 8: 溶岩の着火経路）ここから ---
 
-            // 6. 着火と水の 3 つ。**溶岩そのものはこれが無くても流れて描かれる**ので、
+            // 7. 着火と水の 3 つ。**溶岩そのものはこれが無くても流れて描かれる**ので、
             //   impact にそこまで書く。
             //
             //   ★ **TreeManager.BurnTree はこの検査に含めない。** ND 非所持で
@@ -191,7 +221,7 @@ namespace DisasterPlus.Game
 
             // --- ⑤火山（Task 9: 溶岩の描画のシェーダ）ここから ---
 
-            // 7. 溶岩の面のシェーダ。
+            // 8. 溶岩の面のシェーダ。
             //
             //   ★★ **述語に「Standard が取れた」を混ぜない。** Standard は
             //     Unity の組み込みなので実質必ず非 null だと思われており、
@@ -210,7 +240,7 @@ namespace DisasterPlus.Game
             //   ★ 述語は VolcanoLavaFx が実際に門にしている式そのものである
             //     （ScanShaderFacts は BuildMaterial と同じ ShaderPool を呼ぶ）。
             //     ShaderPool は main スレッド専用で、Run() も main である。
-            //     Check の外で例外を抑えるのは上の 6 件と同じ理由。
+            //     Check の外で例外を抑えるのは上の 7 件と同じ理由。
             VolcanoLavaShaderFacts lavaShader;
             try
             {
@@ -235,7 +265,7 @@ namespace DisasterPlus.Game
 
             // --- ⑤火山（噴火の音）ここから ---
 
-            // 8. 音の経路。**この検査が FAIL でも噴火はそのまま出る**（音だけが消える）ので、
+            // 9. 音の経路。**この検査が FAIL でも噴火はそのまま出る**（音だけが消える）ので、
             //   impact にそう書く（狼少年にしない）。
             //
             //   ★ 述語は VolcanoEruptionAudio.Update が実際に門にしている式
