@@ -24,8 +24,29 @@ namespace DisasterPlus.Core.Typhoon
     ///
     /// <see cref="ArmCount"/> 本の腕（対数ではなく等間隔の線形スパイラル）と、
     /// 眼のすぐ外を囲む <see cref="EyeWallPuffs"/> 個の環。
-    /// **腕も環も <see cref="EyeFraction"/> より内側には 1 個も置かない** ——
-    /// それが「眼を穴として読める」ことの実装である。テストがこれを固定している。
+    ///
+    /// ── ★ 眼が穴として読めるための条件（オフラインで作図して分かったこと）──────
+    ///
+    /// **「粒の中心を <see cref="EyeFraction"/> より内側に置かない」だけでは足りない。**
+    /// 1 粒は点ではなく、<b>円盤の半径ぶん</b>ばらまかれ、<b>粒径の半分</b>だけ外へ広がる。
+    /// 最初の版は環を <c>EyeFraction × 1.25</c> に置いていたが、実際の粒は
+    /// そこから内側へ 200 m ほど届き、**眼が完全に埋まっていた**
+    /// （実機に持ち込む前に <c>VortexPuffLayout</c> を作図して発見した）。
+    ///
+    /// そこで「粒 1 つが中心からどこまで広がるか」を
+    /// <see cref="PuffExtentFraction"/> として**この型が宣言し**、
+    /// <b>粒を置いてよい最小半径を <see cref="InnerFraction"/>
+    /// ＝ <see cref="EyeFraction"/> + <see cref="PuffExtentFraction"/> にする。</b>
+    ///
+    /// **Game 側（<c>TyphoonCloudFx</c>）はこの約束を守る義務がある**:
+    /// いちばん内側の粒について
+    /// <c>円盤半径 + 粒径 ÷ 2 ≤ PuffExtentFraction × 渦の外周半径</c>。
+    /// 破ると眼が埋まる —— 例外は出ないし、テストでも捕まらない
+    /// （Core は粒径を知らない）。**数字を動かすときは必ず作図して確かめること。**
+    ///
+    /// なお、ここでいう「眼」は<b>雲の穴</b>であって
+    /// <c>TyphoonProfile.EyeFraction</c> の<b>風の眼ではない</b>（あちらのほうが小さい）。
+    /// 粒径に対して読める大きさに取ってある記号である。
     ///
     /// ── 揺らぎ ────────────────────────────────────────────
     ///
@@ -48,11 +69,21 @@ namespace DisasterPlus.Core.Typhoon
         /// <summary>1 フレームに出す <c>RenderEffect</c> の本数。**これが毎フレームの上限である。**</summary>
         public const int PuffCount = ArmCount * PuffsPerArm + EyeWallPuffs;
 
-        /// <summary>眼の半径 ÷ 渦の外周半径。**ここより内側には 1 個も置かない。**</summary>
+        /// <summary>雲の穴（眼）の半径 ÷ 渦の外周半径。**粒はここまで届いてはいけない。**</summary>
         public const float EyeFraction = 0.16f;
 
-        /// <summary>環を置く半径 ÷ 渦の外周半径（眼のすぐ外）。</summary>
-        public const float EyeWallFraction = EyeFraction * 1.25f;
+        /// <summary>
+        /// 粒 1 つが自分の中心からどこまで広がるか ÷ 渦の外周半径
+        /// （＝ 円盤の半径 ＋ 粒径の半分）。**Game 側が守る約束**（クラス doc）。
+        /// </summary>
+        public const float PuffExtentFraction = 0.20f;
+
+        /// <summary>粒の**中心**を置いてよい最小半径 ÷ 渦の外周半径。
+        /// これより内側に置くと粒が眼へ食い込む。</summary>
+        public const float InnerFraction = EyeFraction + PuffExtentFraction;
+
+        /// <summary>環を置く半径 ÷ 渦の外周半径（眼のすぐ外＝置ける最小半径）。</summary>
+        public const float EyeWallFraction = InnerFraction;
 
         /// <summary>腕が外周まで伸びるあいだに回る回転数。</summary>
         public const float SpiralTurns = 0.8f;
@@ -72,8 +103,8 @@ namespace DisasterPlus.Core.Typhoon
         /// 粒 <paramref name="index"/> の置き場所。全部**正規化した比**である。
         ///
         /// <paramref name="angleRadians"/> は [0, 2π)、<paramref name="radiusFraction"/> は
-        /// [<see cref="EyeFraction"/>, 1] より少しはみ出しうる（揺らぎのぶん）が、
-        /// **<see cref="EyeFraction"/> を下回ることはない**（眼は穴のまま）。
+        /// 外周を揺らぎのぶん少しはみ出しうるが、
+        /// **<see cref="InnerFraction"/> を下回ることはない**（眼は穴のまま）。
         ///
         /// <paramref name="heightFraction"/> は雲の厚みのどこに置くか [0, 1]
         /// （1 が上）。壁雲を高く、外側を低くして、渦が皿ではなく漏斗に見えるようにする。
@@ -103,7 +134,7 @@ namespace DisasterPlus.Core.Typhoon
                 float t = (step + 0.5f) / PuffsPerArm;
 
                 angle = TwoPi * arm / ArmCount + TwoPi * SpiralTurns * t;
-                radius = EyeFraction + (1f - EyeFraction) * t;
+                radius = InnerFraction + (1f - InnerFraction) * t;
 
                 // 壁雲側が高く、外へ行くほど低い（漏斗の口）。
                 heightFraction = 1f - 0.55f * t;
@@ -132,7 +163,8 @@ namespace DisasterPlus.Core.Typhoon
             radius += jr * RadiusJitterFraction;
 
             // ★ 眼は穴のまま。揺らぎが内側へ食い込んでも戻す（テストが固定している）。
-            if (radius < EyeFraction) radius = EyeFraction;
+            //   戻す先は EyeFraction ではなく **InnerFraction**（粒の広がりぶん外側）。
+            if (radius < InnerFraction) radius = InnerFraction;
 
             angleRadians = Normalize(angle);
             radiusFraction = radius;

@@ -8,14 +8,33 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheEyeStaysAHole()
         {
-            // 「眼を穴として読める」ことの実装は「EyeFraction より内側に 1 個も置かない」。
+            // ★ 「粒の中心を眼の外に置く」だけでは足りない。1 粒は円盤の半径ぶん
+            //   ばらまかれ、粒径の半分だけ外へ広がる（PuffExtentFraction）。
+            //   だから中心は InnerFraction ＝ EyeFraction + PuffExtentFraction より
+            //   内側に来てはいけない。**最初の版はここを EyeFraction にしていて、
+            //   実際の粒は眼を完全に埋めていた**（作図して発見した）。
             for (int i = 0; i < VortexPuffLayout.PuffCount; i++)
             {
                 float angle, radius, height, size, density;
                 VortexPuffLayout.Puff(i, out angle, out radius, out height, out size, out density);
-                Assert.True(radius >= VortexPuffLayout.EyeFraction,
-                            "puff " + i + " sits inside the eye (r=" + radius + ")");
+                Assert.True(radius >= VortexPuffLayout.InnerFraction,
+                            "puff " + i + " sits close enough to spill into the eye (r="
+                            + radius + ", inner=" + VortexPuffLayout.InnerFraction + ")");
+
+                // 粒の広がりを引いてもなお眼の縁より外であること（これが本当の条件）。
+                Assert.True(radius - VortexPuffLayout.PuffExtentFraction
+                            >= VortexPuffLayout.EyeFraction - 1e-5f,
+                            "puff " + i + " reaches into the eye");
             }
+        }
+
+        [Fact]
+        public void TheEyeIsBigEnoughToRead()
+        {
+            // 穴が粒 1 つより小さいと、そもそも穴として見えない。
+            Assert.True(VortexPuffLayout.EyeFraction >= VortexPuffLayout.PuffExtentFraction * 0.5f);
+            Assert.True(VortexPuffLayout.InnerFraction < 0.5f,
+                        "the arms would start halfway out and the vortex would read as a ring");
         }
 
         [Fact]
@@ -79,7 +98,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
                 VortexPuffLayout.Puff(ringStart + k,
                                       out angle, out radius, out height, out size, out density);
                 Assert.InRange(radius,
-                               VortexPuffLayout.EyeWallFraction - VortexPuffLayout.RadiusJitterFraction,
+                               VortexPuffLayout.EyeWallFraction,
                                VortexPuffLayout.EyeWallFraction + VortexPuffLayout.RadiusJitterFraction);
                 Assert.Equal(1f, height, 6);
             }
@@ -91,11 +110,11 @@ namespace DisasterPlus.Core.Tests.Typhoon
             // 毎フレーム回る経路なので、数え違いでレベルロードを壊さない。
             float angle, radius, height, size, density;
             VortexPuffLayout.Puff(-1, out angle, out radius, out height, out size, out density);
-            Assert.True(radius >= VortexPuffLayout.EyeFraction);
+            Assert.True(radius >= VortexPuffLayout.InnerFraction);
 
             VortexPuffLayout.Puff(VortexPuffLayout.PuffCount + 100,
                                   out angle, out radius, out height, out size, out density);
-            Assert.True(radius >= VortexPuffLayout.EyeFraction);
+            Assert.True(radius >= VortexPuffLayout.InnerFraction);
         }
 
         [Fact]

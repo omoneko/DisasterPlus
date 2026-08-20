@@ -57,8 +57,17 @@ namespace DisasterPlus.Game
     /// 無視されて「毎フレーム湧かし続ける」になる（§B-3。バニラの
     /// <c>SinkholeAI.RenderInstance</c> と同じ形）。
     ///
-    /// **眼は穴のまま。** <see cref="VortexPuffLayout"/> が
-    /// <c>EyeFraction</c> より内側に 1 個も置かないことを保証し、テストが固定している。
+    /// **眼は穴のまま。** <see cref="VortexPuffLayout"/> は粒の中心を
+    /// <c>InnerFraction</c> より内側に置かないが、<b>それだけでは足りない</b> ——
+    /// 1 粒は円盤の半径ぶんばらまかれ、粒径の半分だけ外へ広がる。
+    /// <b>この型は「いちばん内側の粒の 円盤半径 + 粒径÷2 が
+    /// <c>VortexPuffLayout.PuffExtentFraction</c> を超えない」約束を守る義務がある</b>
+    /// （あちらのクラス doc）。破ると眼が埋まる。**例外は出ないしテストでも捕まらない**
+    /// ので、<see cref="DiscFraction"/> / <see cref="SizeFraction"/> を動かすときは
+    /// 必ず作図して確かめること。
+    ///
+    /// 現在の値での検算（いちばん内側の粒は <c>sizeFraction ≒ 0.4</c>）:
+    /// <c>0.11 × (0.55 + 0.9 × 0.4) + 0.16 ÷ 2 = 0.100 + 0.080 = 0.180 ≤ 0.20</c>。
     ///
     /// ── 毎フレームの仕事量の上限（3 本で決まる）──────────────────────
     ///
@@ -163,6 +172,11 @@ namespace DisasterPlus.Game
         //   2 つ目の都市で無言のまま見えなくなる（③火災旋風 §4.8）。
         private static GameObject _cloneObject;
         private static ParticleEffect _effect;
+
+        /// <summary>クローン側の <c>ParticleSystem</c>。**毎フレーム <c>GetComponent</c> を
+        /// 呼ばないために抱えている**（確保はしないがネイティブ呼び出しである）。
+        /// 参照 1 個で持ち、使う直前に <c>== null</c> で見る。</summary>
+        private static ParticleSystem _particles;
 
         private static int _lookupMissCount;
         private static TyphoonCloudFxState _state = TyphoonCloudFxState.Off;
@@ -365,15 +379,16 @@ namespace DisasterPlus.Game
 
         private static void ApplySize(float radius)
         {
-            var ps = _cloneObject != null ? _cloneObject.GetComponent<ParticleSystem>() : null;
-            if (ps == null) return;
+            // ★ 参照そのものを見る。破棄済みなら fake-null で null と等価になり、
+            //   次の Acquire で作り直される。
+            if (_particles == null) return;
 
             float size = radius * SizeFraction;
             if (float.IsNaN(size)) return;
             if (size < MinSizeMetres) size = MinSizeMetres;
             if (size > MaxSizeMetres) size = MaxSizeMetres;
 
-            var main = ps.main;
+            var main = _particles.main;
             main.startSize = size;
         }
 
@@ -576,6 +591,7 @@ namespace DisasterPlus.Game
 
             _cloneObject = clone;
             _effect = effect;
+            _particles = ps;
             _sourceName = name;
             return true;
         }
@@ -641,6 +657,7 @@ namespace DisasterPlus.Game
                 }
             }
             _effect = null;
+            _particles = null;
 
             if (_cloneObject != null) Object.Destroy(_cloneObject);
             _cloneObject = null;
