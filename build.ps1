@@ -47,3 +47,19 @@ if (Test-Path "Locales") {
 } else {
     Write-Host "Note: Locales\ not found; skipped (added in a later task)."
 }
+
+# VolcanoEruptionAudio reads Audio\erupting-volcano.wav at run time, from the mod folder.
+# It is deployed exactly the way Locales\ is: copied next to the DLL, read by name.
+#
+# Do NOT throw when it is missing. The mod is written so that a missing or unreadable
+# wav means "the eruption is silent" and nothing else - a build that refuses to deploy
+# would be stricter than the running mod, and would block anyone who deleted the file
+# on purpose (it is ~6 MB of audio in a Workshop item).
+if (Test-Path "Audio") {
+    $audioDst = Join-Path $modDir "Audio"
+    New-Item -ItemType Directory -Force -Path $audioDst | Out-Null
+    Copy-Item "Audio\*" $audioDst -Force
+    Write-Host "Deployed Audio"
+} else {
+    Write-Host "Note: Audio\ not found; the eruption will be silent."
+}

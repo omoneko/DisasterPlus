@@ -63,9 +63,9 @@ Cities: Skylines（無印）向けの災害 MOD。Natural Disasters DLC の災�
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-`DisasterPlus.dll` と `CitiesHarmony.API.dll`、`Locales\` が Mods フォルダへ配置
-される。ゲーム DLL の場所は環境変数 `CITIES_SKYLINES_MANAGED` で上書きできる。
-未設定なら既定の Steam パスを使う。
+`DisasterPlus.dll` と `CitiesHarmony.API.dll`、`Locales\`、`Audio\` が Mods
+フォルダへ配置される。ゲーム DLL の場所は環境変数 `CITIES_SKYLINES_MANAGED` で
+上書きできる。未設定なら既定の Steam パスを使う。
 
 ## テスト
 
@@ -85,6 +85,19 @@ dotnet test tests/DisasterPlus.Core.Tests/DisasterPlus.Core.Tests.csproj
 `ja.txt` を編集した／キーを追加した後は、両ファイルのキー集合が一致することを
 確認すること。
 
+## 音源
+
+`Audio/erupting-volcano.wav`（44.1 kHz / 2ch / 16 bit / 36.1 秒）は⑤火山の噴火音
+として MOD に同梱され、`build.ps1` が `Locales\` と同じように Mods フォルダへ
+配置する。実行時に読み込まれ、バニラの効果音グループを通して鳴るので、
+**ゲーム本体の「効果音」スライダーとミュートがそのまま効く**（MOD 側に音量つまみは無い）。
+
+ファイルを消しても火山はこれまでどおり動く —— 噴火が無音になり、ログに 1 行残るだけである。
+
+> **この音源はコードのライセンス（MIT）の対象外である。** 本 MOD の所有者が
+> 用意したファイルで、**その配布条件の確認は所有者の責任**である。
+> Workshop へ公開する成果物に第三者の音声を同梱することになるため、公開前に確かめること。
+
 ## ライセンス
 
-MIT
+MIT（`Audio/` 以下の音源を除く。上の「音源」を参照）

@@ -127,6 +127,16 @@ namespace DisasterPlus.Game
         public static SavedBool VolcanoEruptionFx;
 
         /// <summary>
+        /// 噴火の音を鳴らすか。**切っても隆起も溶岩も噴煙もそのまま動く** ——
+        /// 音は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
+        ///
+        /// ★ 音量そのものはここでは持たない。**プレイヤーの効果音スライダーと
+        ///   ミュートがそのまま効く**（<c>VolcanoEruptionAudio</c> のクラス doc）ので、
+        ///   2 本目の音量つまみを作ると、どちらが効いているのか分からなくなる。
+        /// </summary>
+        public static SavedBool VolcanoEruptionSound;
+
+        /// <summary>
         /// 火口から出す溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
         /// 上限は <c>VolcanoLava.MaxFlows</c> が使う側でクランプする。
         /// </summary>
@@ -296,6 +306,12 @@ namespace DisasterPlus.Game
 
             // 噴煙を描くか。切っても隆起は止まらない（描画は main スレッドだけの機能）。
             VolcanoEruptionFx = new SavedBool("volcanoEruptionFx", FileName, true, true);
+
+            // 噴火の音を鳴らすか。既定 ON。
+            // ★ **新しいキーである。既存のキーの名前も既定値も 1 つも変えていない**
+            //   （.cgs は公開契約で、番号も文字列も詰め直さない）。同梱 wav が
+            //   無い環境では ON のままでも黙って無音になるだけなので、既定 ON でよい。
+            VolcanoEruptionSound = new SavedBool("volcanoEruptionSound", FileName, true, true);
 
             // 火口から出す流れの本数。0 で完全に無効（溶岩も着火も出ない）。
             VolcanoLavaFlows = new SavedInt("volcanoLavaFlows", FileName, 4, true);

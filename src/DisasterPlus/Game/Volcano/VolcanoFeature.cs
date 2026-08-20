@@ -130,6 +130,19 @@ namespace DisasterPlus.Game
             if (ModSettings.VolcanoEruptionFx.value) VolcanoEruption.Render();
             else VolcanoEruption.Destroy();
 
+            // ★ 噴火の音も main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
+            //   **1 フレームに 1 回だけ**呼ぶこと（2 回積むとバニラの効果音の枠を
+            //   1 つの音で潰す。VolcanoEruptionAudio のクラス doc）。
+            //   切った瞬間にクリップを手放す（切ったまま数 MB を抱えないこと）。
+            if (ModSettings.VolcanoEruptionSound.value)
+            {
+                VolcanoEruptionAudio.Update(VolcanoHub.Latest);
+            }
+            else
+            {
+                VolcanoEruptionAudio.Destroy();
+            }
+
             // ★ 溶岩の描画も main スレッドだけの機能。sim 側からは 1 度も呼ばれない
             //   （T9 の独立性の実体。VolcanoLavaFx のクラス doc の grep）。
             if (ModSettings.VolcanoLavaRender.value) VolcanoLavaFx.Update(VolcanoHub.Latest);
@@ -153,6 +166,10 @@ namespace DisasterPlus.Game
             //   （Material は Component ではないので GameObject の道連れにならない）。
             //   ここを飛ばすと都市を出入りするたびに 1 個ずつ残る。
             VolcanoEruption.Destroy();
+            // ★ 噴火音の AudioClip と AudioInfo も自分で Object.Destroy する
+            //   （どちらも Component ではないので GameObject の道連れにならない）。
+            //   ここを飛ばすと都市を出入りするたびに数 MB のクリップが 1 個ずつ残る。
+            VolcanoEruptionAudio.Destroy();
             // ★ 溶岩の Mesh / Material / Texture2D も自分で Object.Destroy する
             //   （どれも Component ではないので GameObject の道連れにならない）。
             VolcanoLavaFx.Destroy();
@@ -189,7 +206,59 @@ namespace DisasterPlus.Game
             WriteMode(b, snapshot.GameMode);
             WriteDlc(b, snapshot.Terrain);
             WriteUiState(b);
+            WriteAudio(b);
             WriteState(b, snapshot);
+        }
+
+        /// <summary>
+        /// 噴火音の 2〜3 行。
+        ///
+        /// **音が出ないときの切り分けはここにしか無い。** 「設定で切った」「同梱 wav が
+        /// 無い／壊れている」「ゲーム側の経路が解決しない」は、プレイヤーから見ると
+        /// どれも同じ無音である。3 つを別々の行にする。
+        ///
+        /// ★★ <b>ここは sim スレッドである</b>（<c>DiagnosticDump</c> のクラス doc:
+        ///   main がホットキーで頼み、sim が組み立てる）。だから
+        ///   <c>ScanAudioFacts</c> を**ここから呼ばない** —— あちらは
+        ///   <c>File.Exists</c> と <c>PluginManager.GetInstances</c> に触るので、
+        ///   sim スレッドへ持ち込んではいけない。読むのは main（<c>Assumptions.Run</c>）が
+        ///   レベルロードのたびに走査して置いた <c>LastFacts</c> のキャッシュだけである。
+        /// </summary>
+        private static void WriteAudio(DiagnosticBuilder b)
+        {
+            if (!ModSettings.VolcanoEruptionSound.value)
+            {
+                b.Line(1, "eruption sound", "off (setting)");
+                return;
+            }
+
+            if (!VolcanoEruptionAudio.FactsScanned)
+            {
+                // 「まだ走査していない」を「経路が無い」と混ぜない。
+                b.Line(1, "eruption sound", "not scanned yet");
+                return;
+            }
+
+            VolcanoAudioFacts facts = VolcanoEruptionAudio.LastFacts;
+
+            if (!facts.Usable)
+            {
+                b.Line(1, "eruption sound", "NO USABLE AUDIO PATH (effectGroup="
+                    + (facts.EffectGroupResolved ? "ok" : "missing") + ", addEvent="
+                    + (facts.AddEventResolved ? "ok" : "missing") + ", clipApi="
+                    + (facts.ClipApiResolved ? "ok" : "missing") + ")");
+                b.Line(2, "consequence",
+                    "the eruption is silent. Nothing else is affected: the mountain, the "
+                    + "plume and the lava do not depend on the audio path");
+                return;
+            }
+
+            b.Line(1, "eruption sound", facts.FileFound
+                ? "file present (" + facts.FileBytes + " bytes)"
+                : "NO FILE - " + VolcanoEruptionAudio.AudioFolderName + "\\"
+                  + VolcanoEruptionAudio.FileName + " is not in the mod folder; "
+                  + "the eruption is silent");
+            b.Line(2, "clip", VolcanoEruptionAudio.Detail);
         }
 
         /// <summary>
