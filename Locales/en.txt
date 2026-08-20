@@ -208,16 +208,21 @@ TyphoonWindStrength = Wind damage strength (0 = off)
 TyphoonWindNote = The game has no wind damage of any kind, and no field that makes the wind stronger. This is a model Disaster + invented. The numbers are not wind speeds.
 TyphoonWindShelterNote = Shelters, vaults and dams do not collapse in a typhoon. That is the game refusing, and it is the right answer.
 TyphoonWindCapped = sweep truncated this pass; the outer edge has not been rolled yet
+TyphoonSouthernHemisphere = Southern hemisphere (the dangerous side is the LEFT of the track)
+TyphoonDangerousSideNote = A real typhoon is not symmetric: on one side the spin and the storm's own travel add up. That side gets a slightly wider and slightly more likely damage footprint - the right of the track in the northern hemisphere, the left in the southern one.
+TyphoonDangerousSideRight = stronger on the right of the track
+TyphoonDangerousSideLeft = stronger on the left of the track
 TyphoonFloodRow = River flooding
 TyphoonFloodEnabled = River flooding (raises the map's own water sources)
 TyphoonFloodStrength = River flooding strength (0 = off)
 TyphoonFloodNoSources = This map has no natural water sources near the storm, so no river can rise. Nothing is wrong - the game has no flood disaster of its own, and Disaster + only raises water sources the map already has.
 TyphoonFloodRaised = raised
 TyphoonFloodNote = The water level is restored when the typhoon ends, when you leave the city and before every save. A river must never stay flooded after you remove the mod.
-TyphoonTornadoRow = Accompanying tornadoes
-TyphoonTornadoEnabled = Spawn tornadoes that orbit the typhoon
-TyphoonTornadoCount = Number of tornadoes
-TyphoonTornadoNdrNote = Natural Disasters Renewal replaces vanilla tornado destruction, so these tornadoes follow its settings. The typhoon's own wind damage does not - it never goes through DisasterHelpers.
+TyphoonGustRow = Tornado-strength damage (patches now / collapsed this pass / total / refused by the game)
+TyphoonGustEnabled = Tornado-strength damage patches (no tornado is spawned)
+TyphoonGustStrength = Tornado-strength damage (0 = off)
+TyphoonGustNote = Several small patches under the storm are hit as hard as a tornado would hit them. No tornado, no funnel and no second disaster is created - there is nothing to see coming, only the damage. Each patch is a few dozen metres across, lives for a short while and then stops. They all end with the storm.
+TyphoonTornadoRetiredNote = The old "accompanying tornadoes" option has been removed. Tornado-strength damage now happens without spawning tornadoes, which also keeps it clear of Natural Disasters Renewal's tornado settings. Your old saved value is kept in the settings file but is never read again.
 TyphoonCloudEnabled = Draw the typhoon's cloud spiral
 TyphoonVanillaCloudBoost = Also thicken and speed up the game's own sky clouds
 TyphoonCloudUnavailable = The game's sky cloud settings are not present in this environment, so only Disaster +'s own cloud is drawn.

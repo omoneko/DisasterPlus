@@ -172,6 +172,10 @@ namespace DisasterPlus.Game
             typhoon.AddSlider(Strings.TyphoonWindStrength, 0f, 10f, 1f,
                 ModSettings.TyphoonWindStrength.value,
                 v => ModSettings.TyphoonWindStrength.value = (int)v);
+            // ★ 危険半円の向き。既定は北半球（＝進行方向の右が強い）。
+            typhoon.AddCheckbox(Strings.TyphoonSouthernHemisphere,
+                ModSettings.TyphoonSouthernHemisphere.value,
+                v => ModSettings.TyphoonSouthernHemisphere.value = v);
             // ★ 河川氾濫も既定 ON。**セーブに焼き付く状態を触る唯一の機能**なので、
             //    復元が 3 箇所から掛かることを TyphoonFloodNote が名乗る。
             typhoon.AddCheckbox(Strings.TyphoonFloodEnabled,
@@ -180,16 +184,15 @@ namespace DisasterPlus.Game
             typhoon.AddSlider(Strings.TyphoonFloodStrength, 0f, 10f, 1f,
                 ModSettings.TyphoonFloodStrength.value,
                 v => ModSettings.TyphoonFloodStrength.value = (int)v);
-            // ★ 随伴竜巻は**既定 OFF**（設計書 §2）。バニラの竜巻をそのまま借りるので
-            //    見た目も破壊も無料でバニラ品質だが、その破壊は DisasterHelpers を
-            //    通るため NDR がいる環境ではあちらの設定に従う（下の注記）。
-            typhoon.AddCheckbox(Strings.TyphoonTornadoEnabled,
-                ModSettings.TyphoonTornadoes.value,
-                v => ModSettings.TyphoonTornadoes.value = v);
-            typhoon.AddSlider(Strings.TyphoonTornadoCount, 0f,
-                DisasterPlus.Game.TyphoonTornado.MaxTornadoes, 1f,
-                ModSettings.TyphoonTornadoCount.value,
-                v => ModSettings.TyphoonTornadoCount.value = (int)v);
+            // ★ 竜巻並みの局所被害。**竜巻の実体は 1 つも作らない**（既定 ON）。
+            //    随伴竜巻（バニラの竜巻災害を借りる機能）は撤去された ——
+            //    その代わりがこれである。強さ 0 で完全に無効になる。
+            typhoon.AddCheckbox(Strings.TyphoonGustEnabled,
+                ModSettings.TyphoonGustEnabled.value,
+                v => ModSettings.TyphoonGustEnabled.value = v);
+            typhoon.AddSlider(Strings.TyphoonGustStrength, 0f, 10f, 1f,
+                ModSettings.TyphoonGustStrength.value,
+                v => ModSettings.TyphoonGustStrength.value = (int)v);
             // ★ 雲は既定 ON。**見た目だけの機能**で、切っても他の 5 要素はそのまま動く
             //    （TyphoonCloud のクラス doc の独立性）。
             typhoon.AddCheckbox(Strings.TyphoonCloudEnabled,
@@ -202,19 +205,17 @@ namespace DisasterPlus.Game
             helper.AddGroup(Strings.TyphoonIntensityNote);
             // ★ 「バニラに風害は存在しない」「数値は風速ではない」を設定画面でも名乗る。
             helper.AddGroup(Strings.TyphoonWindNote);
+            // ★ 危険半円がどちら側かを設定画面でも名乗る（左右が逆だと気付けない）。
+            helper.AddGroup(Strings.TyphoonDangerousSideNote);
+            // ★ 「竜巻の姿は出ないのに竜巻並みに壊れる」を設定画面でも名乗る。
+            helper.AddGroup(Strings.TyphoonGustNote);
+            // ★★ **退役した設定を黙って消さない。** 随伴竜巻を ON にしていた
+            //    プレイヤーには、チェックボックスが消えた理由と、.cgs の値が
+            //    もう読まれないことを 1 度は見せる（設定は公開契約である）。
+            helper.AddGroup(Strings.TyphoonTornadoRetiredNote);
             // ★ 「水位は必ず戻す」を設定画面でも名乗る。氾濫の唯一の怖さは
             //    「MOD を外したら川が溢れたままだった」である。
             helper.AddGroup(Strings.TyphoonFloodNote);
-
-            // ★★ NDR がいる環境でだけ出す。**この 1 行が、随伴竜巻の代償を
-            //    プレイヤーに見せる主経路である**（設計書 §2 / IL 事実文書 §F-1）。
-            //    バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので NDR に
-            //    置き換えられるが、④自身の風害は通していないので影響を受けない。
-            //    その区別まで書く（IntensityUnlockHandledByOther と同じ形）。
-            if (ModCompat.NdrPresent)
-            {
-                helper.AddGroup(Strings.TyphoonTornadoNdrNote);
-            }
 
             // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
             // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。

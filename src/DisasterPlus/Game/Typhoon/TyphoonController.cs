@@ -515,6 +515,19 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void Forget()
         {
+            // ★★ **何を返したかを 1 行だけ残す**（持ち主の指摘「台風が去ったら
+            //    暴風雨や竜巻被害がなくなるように」を実機で確かめる主経路）。
+            //    Forget は台風の一生に 1 回しか通らないので Log.Info でよい ——
+            //    毎 tick / 毎フレームの経路ではない。
+            //    **握っていたかどうかを、返す前に**読む（返したあとに読むと
+            //    全部「握っていない」になり、この行が何も証明しなくなる）。
+            bool wasActive = _active;
+            ushort releasedId = TyphoonSlot.Id;
+            bool hadWeather = TyphoonWeather.Driving;
+            int floodTouched = TyphoonFlood.TouchedCount;
+            int windTotal = TyphoonWind.TotalCollapsed;
+            int gustTotal = TyphoonGust.TotalCollapsed;
+
             // ★ バニラの DeactivateDisaster に任せない。DisasterAI.DeactivateNow は
             //    m_flags & Active(8) が無ければ何もしないので（T3 で IL 実測）、
             //    Emerging 中に止めた台風では m_targetRain = 0 が走らない。
@@ -536,11 +549,11 @@ namespace DisasterPlus.Game
             //    RestoreAll は冪等なので重ねて呼んでよい。
             TyphoonFlood.RestoreAll();
 
-            // ★ 随伴竜巻もここで手放す。**Stop ではなくここ**（上の 3 つと同じ理由）。
-            //    StopAll は掴んでいる竜巻をバニラの終了経路へ乗せてから台帳を捨てる
-            //    冪等な操作なので、重ねて呼んでよい。ここを飛ばすと、台風が終わった
-            //    あとに竜巻だけが単独で都市に残る。
-            TyphoonTornado.StopAll();
+            // ★★ 竜巻並みの局所被害（パッチ）もここで畳む。**Stop ではなくここ**
+            //    （上の 3 つと同じ理由）。パッチは台帳ではなく「台風の経過フレームの
+            //    関数」なので、台風が無くなった時点で 1 個も存在しなくなる ——
+            //    ここで戻すのはカウンタと走査位置だけである。冪等。
+            TyphoonGust.Reset();
 
             TyphoonSlot.Forget();
 
@@ -570,6 +583,20 @@ namespace DisasterPlus.Game
             _landfallScanned = false;
             _landfallScanFrame = 0u;
             MinutesToLandfall = 0f;
+
+            if (wasActive)
+            {
+                Log.Info("typhoon #" + releasedId + " released everything it was holding:"
+                         + " weather override=" + (hadWeather ? "restored" : "was not held")
+                         + ", water sources restored=" + floodTouched
+                         + ", lightning queue cleared"
+                         + ", wind sweep stopped (" + windTotal + " collapsed in total)"
+                         + ", tornado-strength patches stopped (" + gustTotal + " collapsed"
+                         + " in total)."
+                         + " The host ThunderStormAI disaster is deliberately left in the"
+                         + " city to expire on its own (design section 4.2); it no longer"
+                         + " drives rain, wind or damage.");
+            }
         }
 
         /// <summary>

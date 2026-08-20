@@ -87,8 +87,29 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonWindStrength;
         public static SavedBool TyphoonFloodEnabled;
         public static SavedInt TyphoonFloodStrength;
+        public static SavedBool TyphoonSouthernHemisphere;
+        /// <summary>
+        /// **退役キー（随伴竜巻）。読む場所はもう 1 つも無い。**
+        ///
+        /// バニラの竜巻災害を台風に随伴させる機能は撤去された。持ち主の指示
+        /// 「竜巻を発生させずに竜巻の被害だけを複数発生させてください」に対して、
+        /// ④は竜巻の実体を作らず <c>TyphoonGust</c> の局所被害域だけを出す。
+        ///
+        /// **それでも宣言は残す。**<c>ForecastButtonX</c> の doc と同じ理由で、
+        /// .cgs のキーと値は公開契約だからである。
+        /// **この 2 本を別の意味で再利用してはいけない** —— 新しい設定
+        /// （<see cref="TyphoonGustEnabled"/> / <see cref="TyphoonGustStrength"/>）には
+        /// 新しいキー名を付けてある。撤去したことは
+        /// <c>Strings.TyphoonTornadoRetiredNote</c> が設定画面で名乗る。
+        /// </summary>
         public static SavedBool TyphoonTornadoes;
         public static SavedInt TyphoonTornadoCount;
+
+        /// <summary>竜巻並みの局所被害を出すか（**竜巻の実体は作らない**）。</summary>
+        public static SavedBool TyphoonGustEnabled;
+
+        /// <summary>その強さ 0〜10。0 で完全に無効。</summary>
+        public static SavedInt TyphoonGustStrength;
         public static SavedBool TyphoonCloudEnabled;
         public static SavedBool TyphoonVanillaCloudBoost;
         public static SavedBool VolcanoEnabled;
@@ -266,23 +287,30 @@ namespace DisasterPlus.Game
             // 範囲はスライダーが縛るが、.cgs の値は公開契約なので使う側でクランプする。
             TyphoonWindStrength = new SavedInt("typhoonWindStrength", FileName, 3, true);
 
+            // ★ 危険半円（進行方向のどちら側を強くするか）。**既定は北半球＝右**。
+            //    実在の台風では渦の回転と移動が足し算になる側が強く、北半球では
+            //    進行方向の右、南半球では左になる（TrackBias のクラス doc）。
+            //    既定を false（＝北半球）にするのは、CS のマップの大半が
+            //    北半球の街を想定して作られているからで、物理的な根拠ではない。
+            TyphoonSouthernHemisphere =
+                new SavedBool("typhoonSouthernHemisphere", FileName, false, true);
+
             // ★ 既定 ON（風害と同じ理由）。ただしこれは**セーブに焼き付く状態を触る
             //    唯一の機能**なので、復元経路は 3 箇所（終了時・アンロード時・保存時）
             //    から呼ばれる（TyphoonFlood のクラス doc）。
             TyphoonFloodEnabled = new SavedBool("typhoonFlood", FileName, true, true);
             TyphoonFloodStrength = new SavedInt("typhoonFloodStrength", FileName, 3, true);
 
-            // ★ 随伴竜巻は**既定 OFF**（設計書 §2 が明示）。風害・氾濫と判断が違うのは、
-            //    これが唯一「④の外の MOD に破壊を渡す」要素だからである ——
-            //    バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので、
-            //    Natural Disasters Renewal がいる環境ではあちらの竜巻設定に従う
-            //    （IL 事実文書 §F-1、TyphoonTornado のクラス doc）。
-            //    見た目が無料でバニラ品質という利点と引き換えなので、
-            //    プレイヤーに明示的に選ばせる。
+            // ★★ **退役キー 2 本。** 随伴竜巻は撤去された（上の doc）。
+            //    宣言だけ残し、読む場所は 1 つも無い。**別の意味で再利用しないこと。**
             TyphoonTornadoes = new SavedBool("typhoonTornado", FileName, false, true);
-            // 0〜3。範囲はスライダーが縛るが、.cgs の値は公開契約なので範囲外が
-            // 入っていても読み捨てず、使う側（TyphoonTornado.Step）でクランプする。
             TyphoonTornadoCount = new SavedInt("typhoonTornadoCount", FileName, 1, true);
+
+            // ★ 竜巻並みの局所被害。**新しいキーである**（退役キーを詰め直していない）。
+            //    既定 ON —— 風害と同じ理由で、台風はプレイヤーが明示的に起こすので
+            //    起きたことの原因が取り違えられない。強さ 0 で完全に無効になる。
+            TyphoonGustEnabled = new SavedBool("typhoonGust", FileName, true, true);
+            TyphoonGustStrength = new SavedInt("typhoonGustStrength", FileName, 3, true);
 
             // ★ 雲は既定 ON。**見た目だけの機能で、ゲームの状態を 1 バイトも変えない**
             //    （main スレッドで Graphics.DrawMesh を出すだけ）。切っても他の 5 要素は

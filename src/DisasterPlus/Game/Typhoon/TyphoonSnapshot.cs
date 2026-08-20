@@ -4,16 +4,19 @@ using DisasterPlus.Core.Typhoon;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <c>ThunderStormAI</c> と <c>VortexAI</c> のプレハブに焼き込まれている 6 つの調整値。
+    /// <c>ThunderStormAI</c> のプレハブに焼き込まれている 3 つの調整値。
+    ///
+    /// ★ **かつてここには <c>VortexAI</c> の 3 値も載っていた**（随伴竜巻の破壊半径と
+    /// 渦車両の <c>m_maxSpeed</c>）。随伴竜巻は退役し、竜巻並みの被害は
+    /// <c>TyphoonGust</c> が自前で出すようになったので、**読む場所が 1 つも無くなった
+    /// 値をここに置き続けない** —— 使われない数字が診断に並ぶと、次の担当者が
+    /// 「これは効いている」と読む。
     ///
     /// **この 6 個の実数値は DLL に存在しない**（IL 事実文書 §A-0 と §B-1。どちらも
     /// PARTIAL 判定）。プレハブのシリアライズ値なので IL 逆アセンブルでは見えず、
     /// **実行時に <c>DisasterManager.FindDisasterInfo&lt;T&gt;()</c> から読んで診断ダンプに
     /// 出すのが唯一の入手経路**であり、それが Task 2 の主目的である。
     /// ④の以後の持続時間・落雷本数・破壊半径・移動速度は全てこの上に乗る。
-    ///
-    /// **嵐と竜巻は独立に解決する。** 竜巻プレハブが読めなくても（随伴竜巻が
-    /// 使えないだけで）台風本体は動く。だからフラグを 2 本に分けてある。
     ///
     /// struct にしているのは、キャッシュしても Unity の fake-null 自己修復問題を
     /// 持ち込まないため（float / uint しか持たないので <c>DisasterInfo</c> や
@@ -38,35 +41,13 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly uint ActiveDuration;
 
-        /// <summary>竜巻側の 3 値を読めたか。**台風本体はこれが false でも動く。**</summary>
-        public readonly bool VortexResolved;
-
-        /// <summary><c>VortexAI.m_destructionRadiusMin</c>。</summary>
-        public readonly float DestructionRadiusMin;
-
-        /// <summary><c>VortexAI.m_destructionRadiusMax</c>。</summary>
-        public readonly float DestructionRadiusMax;
-
-        /// <summary>
-        /// **<c>VehicleInfo.m_maxSpeed</c>**（<c>TornadoAI.m_vortexInfo</c> 側）。
-        /// <c>VortexAI</c> に <c>m_maxSpeed</c> というフィールドは無い。
-        /// 詳細は <see cref="TyphoonReader"/> の doc。
-        /// </summary>
-        public readonly float VortexMaxSpeed;
-
         public TyphoonPrefabFacts(bool stormResolved, float stormRadius,
-                                  uint emergingDuration, uint activeDuration,
-                                  bool vortexResolved, float destructionRadiusMin,
-                                  float destructionRadiusMax, float vortexMaxSpeed)
+                                  uint emergingDuration, uint activeDuration)
         {
             StormResolved = stormResolved;
             StormRadius = stormRadius;
             EmergingDuration = emergingDuration;
             ActiveDuration = activeDuration;
-            VortexResolved = vortexResolved;
-            DestructionRadiusMin = destructionRadiusMin;
-            DestructionRadiusMax = destructionRadiusMax;
-            VortexMaxSpeed = vortexMaxSpeed;
         }
 
         /// <summary>
@@ -280,20 +261,25 @@ namespace DisasterPlus.Game
         /// <summary>直近の走査で中心に適用した上げ幅（m）。</summary>
         public readonly float FloodPeakRiseMetres;
 
-        // ── T10: 随伴竜巻 ─────────────────────────────────────
+        // ── 竜巻並みの局所被害（パッチ）──────────────────────────
         //
-        // 2 つとも④が数えた量である。ゲーム側に「④の竜巻が何個あるか」を
-        // 公開している値は無い。
+        // 4 つとも④が数えた量である。**竜巻の実体は 1 つも作っていない**ので、
+        // 対応するゲーム側の集計も存在しない。
 
-        /// <summary>④が掴んでいる竜巻の数。</summary>
-        public readonly int TornadoCount;
+        /// <summary>今生きているパッチの数。**0 は「今は無い」で不具合ではない。**</summary>
+        public readonly int GustActive;
+
+        /// <summary>直近の走査でパッチが倒した棟数。</summary>
+        public readonly int GustLastCollapsed;
+
+        /// <summary>セッション累計でパッチが倒した棟数。</summary>
+        public readonly int GustTotalCollapsed;
 
         /// <summary>
-        /// そのうち渦車両まで紐づいた数。**<see cref="TornadoCount"/> より小さい
-        /// 状態を隠さない** —— 付いていない竜巻は④の軌道に乗らず、
-        /// バニラの竜巻として自由に流れる。
+        /// 直近の走査でパッチが**バニラに設計上断られた**棟数。
+        /// **0 でないのは正常** —— 防災施設は竜巻でも壊れない。
         /// </summary>
-        public readonly int TornadoAttached;
+        public readonly int GustLastRefused;
 
         public TyphoonSnapshot(bool valid, TyphoonPrefabFacts prefab, uint currentFrame,
                                float rain, float cloud, float fog, float windDirectionDegrees,
@@ -312,10 +298,13 @@ namespace DisasterPlus.Game
                                int windLastUnknownHeight,
                                TyphoonFloodState floodState, int floodNaturalSources,
                                int floodTouched, float floodPeakRiseMetres,
-                               int tornadoCount, int tornadoAttached)
+                               int gustActive, int gustLastCollapsed,
+                               int gustTotalCollapsed, int gustLastRefused)
         {
-            TornadoCount = tornadoCount;
-            TornadoAttached = tornadoAttached;
+            GustActive = gustActive;
+            GustLastCollapsed = gustLastCollapsed;
+            GustTotalCollapsed = gustTotalCollapsed;
+            GustLastRefused = gustLastRefused;
             FloodState = floodState;
             FloodNaturalSources = floodNaturalSources;
             FloodTouched = floodTouched;
@@ -371,7 +360,7 @@ namespace DisasterPlus.Game
                                        0, 0, 0, 0,
                                        0, 0, 0, 0, 0, false, 0,
                                        TyphoonFloodState.Idle, 0, 0, 0f,
-                                       0, 0);
+                                       0, 0, 0, 0);
         }
     }
 }

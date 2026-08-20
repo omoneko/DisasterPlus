@@ -124,8 +124,10 @@ namespace DisasterPlus.Game
                                            TyphoonFlood.NaturalSourceCount,
                                            TyphoonFlood.TouchedCount,
                                            TyphoonFlood.LastPeakRiseMetres,
-                                           TyphoonTornado.Count,
-                                           TyphoonTornado.Attached);
+                                           TyphoonGust.LastActive,
+                                           TyphoonGust.LastCollapsed,
+                                           TyphoonGust.TotalCollapsed,
+                                           TyphoonGust.LastRefused);
             }
             catch (System.Exception e)
             {
@@ -185,12 +187,12 @@ namespace DisasterPlus.Game
         /// プレハブ 6 値をキャッシュ越しに返す。**sim スレッド専用**
         /// （<c>_prefabSearched</c> / <c>_missCallCount</c> を書き換える）。
         ///
-        /// 嵐と竜巻の**両方**が解決するまでは間引きつきで再走査する。DLC 非所持環境では
-        /// どちらも永久に解決しないので、そこでは 64 呼び出しに 1 回の走査で落ち着く。
+        /// 解決するまでは間引きつきで再走査する。DLC 非所持環境では
+        /// 永久に解決しないので、そこでは 64 呼び出しに 1 回の走査で落ち着く。
         /// </summary>
         private static TyphoonPrefabFacts ResolvePrefabFacts()
         {
-            if (_prefabSearched && _prefab.StormResolved && _prefab.VortexResolved) return _prefab;
+            if (_prefabSearched && _prefab.StormResolved) return _prefab;
 
             // 直前の走査が失敗している場合は、レベルロード直後で prefab がまだ
             // 揃っていないだけの可能性がある。「二度と探さない」にはせず、
@@ -228,8 +230,6 @@ namespace DisasterPlus.Game
         /// 最初のプレハブを返すだけ。DLC 判定は中に無く、**DLC が無ければプレハブ自体が
         /// 存在せず null が返る**のが権威。
         ///
-        /// 嵐と竜巻は**別々の try で**囲む。片方の失敗でもう片方まで諦めると、
-        /// 「随伴竜巻が使えないだけ」の環境で台風本体まで止まる。
         /// </summary>
         public static TyphoonPrefabFacts ScanPrefabFacts()
         {
@@ -258,38 +258,12 @@ namespace DisasterPlus.Game
                 active = 0u;
             }
 
-            bool vortexResolved = false;
-            float destructionMin = 0f;
-            float destructionMax = 0f;
-            float maxSpeed = 0f;
+            // ★ **竜巻プレハブはもう読まない。** 随伴竜巻が退役し、竜巻並みの被害は
+            //   TyphoonGust が自前で出すようになったので、VortexAI の破壊半径も
+            //   VehicleInfo.m_maxSpeed も使う場所が 1 つも無い。読める値だからといって
+            //   診断に並べ続けると、次の担当者が「これは効いている」と読む。
 
-            try
-            {
-                var tornadoInfo = DisasterManager.FindDisasterInfo<TornadoAI>();
-                var tornadoAi = tornadoInfo == null ? null : tornadoInfo.m_disasterAI as TornadoAI;
-                // VehicleInfo。UnityEngine.Object の == オーバーロードで fake-null も弾く。
-                var vortexInfo = tornadoAi == null ? null : tornadoAi.m_vortexInfo;
-                var vortexAi = vortexInfo == null ? null : vortexInfo.m_vehicleAI as VortexAI;
-                if (vortexAi != null)
-                {
-                    vortexResolved = true;
-                    destructionMin = vortexAi.m_destructionRadiusMin;
-                    destructionMax = vortexAi.m_destructionRadiusMax;
-                    // ★ VortexAI ではなく VehicleInfo 側（クラス doc の訂正）。
-                    maxSpeed = vortexInfo.m_maxSpeed;
-                }
-            }
-            catch
-            {
-                vortexResolved = false;
-                destructionMin = 0f;
-                destructionMax = 0f;
-                maxSpeed = 0f;
-            }
-
-            return new TyphoonPrefabFacts(stormResolved, stormRadius, emerging, active,
-                                          vortexResolved, destructionMin, destructionMax,
-                                          maxSpeed);
+            return new TyphoonPrefabFacts(stormResolved, stormRadius, emerging, active);
         }
     }
 }
