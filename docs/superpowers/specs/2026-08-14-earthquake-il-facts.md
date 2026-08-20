@@ -15,7 +15,7 @@
 
 | # | 問い | 判定 | 一行の答え |
 |---|---|---|---|
-| A1 | 位相と長さ | CONFIRMED / 数値は PARTIAL | Emerging→Active→Clearing→Finished。長さは `m_emergingDuration` / `m_activeDuration`（プレハブ値、DLL に無い） |
+| A1 | 位相と長さ | CONFIRMED / 数値は PARTIAL | Emerging→Active→Clearing→Finished。長さは `m_emergingDuration` / `m_activeDuration`（プレハブ値。**クラス既定値 4096 / 1024 は DLL にある**、§A-0a） |
 | A2 | 何を壊すか | **CONFIRMED** | `m_targetPosition` からの半径ではない。**断層線に沿った 4 個の円盤（毎ステップ）＋ 半径 `2000+20×intensity` の全体円盤 1 個**。両方とも距離で線形に減衰 |
 | A3 | 出火するか | **CONFIRMED** | する。`DisasterHelpers.DestroyBuildings` 内の `BuildingAI.BurnBuilding(id, ref data, group, false)` が正規経路。加えて `BurnGround` が地面を焦がす |
 | A4 | intensity の入り口 / 100 超 | **CONFIRMED** | 亀裂幅・長さ・全体半径・音量・ハザード半径に入る。**100 でクランプする箇所はコードに無い**。飽和もオーバーフローも無い |
@@ -68,6 +68,36 @@ override: `RenderInstance` / `PlayInstance` / `UpdateHazardMap` / `CreateDisaste
 var info = DisasterManager.FindDisasterInfo<EarthquakeAI>();   // public static generic
 var ai   = (EarthquakeAI)info.m_disasterAI;                     // m_activeDuration 等が読める
 ```
+
+### A-0a. 4 つのプレハブ値の**クラス既定値** — CONFIRMED（2026-08-20 実測）
+
+上の A-0 は「実数値は DLL に無い」と書いていたが、**フィールド初期化子としては DLL の中にある**。
+`EarthquakeAI` の既定コンストラクタを逆アセンブルすると:
+
+```
+EarthquakeAI..ctor:
+IL_0001  ldc.r4  1000  -> m_crackLength
+IL_000C  ldc.r4   100  -> m_crackWidth
+IL_0017  ldc.i4  4096  -> m_emergingDuration
+IL_0022  ldc.i4  1024  -> m_activeDuration
+IL_002D  call    DisasterAI::.ctor
+```
+
+**これは「クラスの既定値」であって「プレハブの値」ではない。** `EarthquakeAI` は `PrefabAI`
+（MonoBehaviour）なので、アセットにシリアライズされた値があればそちらが勝つ。A-0 の
+「実行時に `FindDisasterInfo<EarthquakeAI>()` から読む」は依然として唯一の確実な経路である。
+
+それでも意味がある。**`m_activeDuration = 1024` は揺れの窓の桁を初めて与える**:
+
+- 揺れの窓 1024 フレーム ＝ 22.5 ゲーム内分。
+- §A-7 の包絡線は 256 フレーム周期なので、**1 回の地震で振幅の脈動が 4 回繰り返す**。
+  依頼②の「同じ波形が連続している」は、この 4 回の脈動をそのまま指している。
+- 合成記象（設計書 §4.4）の到達時刻は窓の長さに対する比で決めてあるので、
+  プレハブがこの値を上書きしていても形が壊れない。
+
+**MOD 本体はこの 1024 を定数として持っていない。** 実行時に読んだ `m_activeDuration` だけを使い、
+読めていなければ 1 サンプルも取らない（`ShakeWaveform.IsShaking`）。
+1024 を使っているのはオフライン確認の道具（`tools/WaveformPreview`）だけである。
 
 ### A-1. 位相機械 — CONFIRMED
 
@@ -1037,7 +1067,8 @@ NDR 互換の観点でもこちらが正しい（§E-2）。
 
 - `WaterSimulation.SimulateWater` / `WaterWave.GetSeaLevel` — 上の 1-(b) を選ぶ場合のみ。
   波の減衰・反射・寿命がここにしかない。**PARTIAL のまま実装に入らないこと。**
-- `EarthquakeAI` の `m_emergingDuration` / `m_activeDuration` / `m_crackLength` / `m_crackWidth` の実数値。
+- `EarthquakeAI` の `m_emergingDuration` / `m_activeDuration` / `m_crackLength` / `m_crackWidth` の**プレハブ実数値**
+  （クラス既定値 4096 / 1024 / 1000 / 100 は §A-0a で実測済み。プレハブが上書きしているかは実行時にしか分からない）。
   DLL には無く、UnityPy の型ツリーも読めなかった。**実行時に `FindDisasterInfo<EarthquakeAI>()` から読んで
   診断ダンプに出すのが最短**（Phase 0.5 の `DiagnosticDump` に 4 行足すだけ）。
   持続時間の設計をこの 4 値の上に組むなら、先に実測すること。

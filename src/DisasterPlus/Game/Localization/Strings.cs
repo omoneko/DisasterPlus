@@ -407,6 +407,36 @@ namespace DisasterPlus.Game
         public static string EarthquakeWaveformDrawFailed =
             "Waveform drawing stopped after an error; showing the peak amplitude instead.";
 
+        // --- ②地震（第 2 層: 合成記象 P/S/コーダ） ---
+        //
+        // ★★ **ここの 5 件はどれも第 2 層である。[measured] を付けてはいけない。**
+        //    プレイヤーの指摘（「同じ波形が連続している」）は正しく、バニラの揺れは
+        //    固定の 2 本の正弦波で（§A-7）、到達も立ち上がりも減衰も持たない。
+        //    それを直すには**この MOD が波形を発明するしかない**——つまり
+        //    EarthquakeWaveformNote が名乗っている「ゲーム自身の式」ではなくなる。
+        //    そこで、直すかわりに**バニラの線を消さずに並べて描き**、
+        //    どちらがどちらかを凡例と接頭辞と色の 3 つで名乗る。
+        //
+        //    EarthquakeWaveformModelNote が色を名指ししているのは、グラフには
+        //    接頭辞を書ける場所が無いからである（行の接頭辞は EarthquakeRows が
+        //    付けるが、テクスチャの中には文字を置かない）。
+        public static string EarthquakeSeismogramEnabled =
+            "Synthesize a realistic seismogram (P wave, S wave and coda)";
+        public static string EarthquakeSeismogramNote =
+            "Vanilla shakes the camera with two fixed sine waves that never arrive, never build "
+            + "and never decay. This option replaces that pattern with a synthesized record and "
+            + "adds a second line to the waveform graph. It is Disaster +'s own model, not "
+            + "anything the game computes, so it is off by default.";
+        public static string EarthquakeWaveformModel =
+            "Synthesized seismogram (orange line)";
+        public static string EarthquakeWaveformModelNote =
+            "White is the game's own shake formula; orange is Disaster +'s synthesized record. "
+            + "Both lines share one vertical scale, so their heights can be compared directly.";
+        // 初期微動継続時間。**震源距離とともに開く**のがこのモデルの看板であり、
+        // 数値で出しておかないと「絵がそれらしい」だけになる。
+        public static string EarthquakeWaveformSMinusP = "P-S interval";
+        public static string EarthquakeFrames = "frames";
+
         // --- ②地震（震度分布の地図オーバーレイ） ---
         //
         // 依頼文の「都市内での震源からの距離に応じた震度の分布の概念もありません」に

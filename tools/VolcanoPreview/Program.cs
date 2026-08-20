@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Volcano;
+using DisasterPlus.Tools;
 
 namespace DisasterPlus.Tools.VolcanoPreview
 {

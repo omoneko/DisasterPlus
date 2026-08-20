@@ -2,9 +2,12 @@ using System;
 using System.IO;
 using System.IO.Compression;
 
-namespace DisasterPlus.Tools.VolcanoPreview
+namespace DisasterPlus.Tools
 {
-    /// <summary>最小限の PNG 書き出し（24bit RGB）。外部パッケージを足さないため自前。</summary>
+    /// <summary>
+    /// 最小限の PNG 書き出し（24bit RGB）。外部パッケージを足さないため自前。
+    /// **オフライン確認用の道具どうしで共有する**（VolcanoPreview / WaveformPreview）。
+    /// </summary>
     internal static class Png
     {
         public static void Write(string path, int width, int height, byte[] rgb)

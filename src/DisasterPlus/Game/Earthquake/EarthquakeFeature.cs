@@ -331,6 +331,16 @@ namespace DisasterPlus.Game
                         + "of its own, so there is nothing else to plot)"
                       : ""));
 
+            // ★ 2 本目の線があるかどうか。**「橙の線が出ない」の切り分けはここだけ。**
+            //   理由は 2 つあり（設定が OFF／記録はしているがまだ 0 件）、
+            //   画面上はどちらも「線が 1 本しか無い」で同じ顔になる。
+            b.Line(2, "synthesized line",
+                !ModSettings.EarthquakeSeismogram.value
+                    ? "off (setting)"
+                    : (traces.Count > 0 && traces[0].HasModel
+                        ? "on, " + traces[0].Count + " sample(s)  [Disaster + model, not measured]"
+                        : "on, but nothing recorded yet"));
+
             // ★ 「まだ作っていない」を「使えない」と書かない（全体レビュー I6）。
             //    以前は bool 1 個だったので、パネルを一度も開いていない起動直後の
             //    ダンプが「描画不可（最大振幅の行で代替）」と主張していた。
@@ -415,6 +425,16 @@ namespace DisasterPlus.Game
 
             b.Line(1, "camera shake boost", state);
             b.Line(2, "added last frame", CameraShakeBooster.LastAdded.ToString("F3"));
+
+            // ★ 合成記象は**カメラの揺れの形そのもの**を差し替える（バニラの項を
+            //   打ち消して自分の項を足す）。ON か OFF かで "added last frame" の
+            //   意味が変わるので、必ず隣に出す —— 強度 55 で 0 にならないのは
+            //   不具合ではなく、この設定が ON だからである、を切り分けられるように。
+            b.Line(2, "seismogram model",
+                ModSettings.EarthquakeSeismogram.value
+                    ? "on: the camera follows a synthesized P/S/coda record instead of the "
+                      + "game's two sine waves  [Disaster + model, not measured]"
+                    : "off (setting): the camera follows the game's own two sine waves");
         }
 
         /// <summary>

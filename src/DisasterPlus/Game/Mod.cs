@@ -126,6 +126,15 @@ namespace DisasterPlus.Game
                 earthquake.AddSlider(Strings.EarthquakeLongPeriodStrength, 0f, 10f, 1f,
                     ModSettings.EarthquakeLongPeriodStrength.value,
                     v => ModSettings.EarthquakeLongPeriodStrength.value = (int)v);
+
+                // ★ 合成記象（P 波・S 波・コーダ）。**既定 OFF。**
+                //   こちらは建物を 1 軒も壊さないが、**カメラの揺れの形をバニラから
+                //   変える**ので、やはり第 2 層である。上の EarthquakeShakeBoost が
+                //   既定 ON にできるのは強度 55 で追加分が厳密に 0 になるからで
+                //   （ShakeWaveform.IntensityFactor）、こちらにその逃げ道は無い。
+                earthquake.AddCheckbox(Strings.EarthquakeSeismogramEnabled,
+                    ModSettings.EarthquakeSeismogram.value,
+                    v => ModSettings.EarthquakeSeismogram.value = v);
             }
 
             // 揺れの補正が「既定の強度では何も変えない」ことを名乗る。バニラを抑制せず
@@ -138,6 +147,9 @@ namespace DisasterPlus.Game
             if (ModCompat.NaturalDisastersOwned)
             {
                 helper.AddGroup(Strings.EarthquakeLongPeriodNote);
+
+                // 合成記象が「ゲームが計算しているものではない」ことを設定画面でも名乗る。
+                helper.AddGroup(Strings.EarthquakeSeismogramNote);
             }
 
             // ②は機能そのものが DLC 依存（EarthquakeAI のプレハブが存在しない）。

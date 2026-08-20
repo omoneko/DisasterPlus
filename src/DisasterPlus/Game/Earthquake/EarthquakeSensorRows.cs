@@ -1,4 +1,5 @@
 using ColossalFramework.UI;
+using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Earthquake;
 
 namespace DisasterPlus.Game
@@ -20,6 +21,7 @@ namespace DisasterPlus.Game
         private static UILabel _sensorLeadLabel;
         private static UILabel _sensorCursorLabel;
         private static UILabel _waveformLabel;
+        private static UILabel _waveformModelLabel;
         private static UILabel _waveformUnavailableLabel;
         private static UILabel _waveformNoteLabel;
 
@@ -58,6 +60,15 @@ namespace DisasterPlus.Game
             WaveformView.Build(p, "WaveformPlot", 12f, y);
             if (WaveformView.Available) y += WaveformView.PlotHeight + 6f;
 
+            // ★★ **第 2 層の行がこの節に 1 本だけ入る**（合成記象、既定 OFF）。
+            //    グラフから離れた第 2 層の節へ追い出すと、目の前の橙の線が
+            //    何なのか、その場では分からなくなる。離さない代わりに
+            //    <c>AddLayer2Row</c> を使い、接頭辞（[Disaster + model]）と色の
+            //    両方でこの 1 行だけが層の違う行であることを名乗らせる。
+            //    **接頭辞は EarthquakeRows しか付けられない**ので、この行を
+            //    うっかり実測として出すことはできない（あちらのクラス doc の担保）。
+            _waveformModelLabel = EarthquakeRows.AddLayer2Row(p, "WaveformModel", ref y, 40f);
+
             // ★ 黙って空欄にしない。最大振幅の行（_waveformLabel）は出したうえで、
             //    グラフが出ない理由を名乗る。劣化であって嘘ではない。
             //
@@ -83,6 +94,7 @@ namespace DisasterPlus.Game
             _sensorLeadLabel = null;
             _sensorCursorLabel = null;
             _waveformLabel = null;
+            _waveformModelLabel = null;
             _waveformUnavailableLabel = null;
             _waveformNoteLabel = null;
         }
@@ -201,6 +213,7 @@ namespace DisasterPlus.Game
         internal static void ClearWaveform()
         {
             EarthquakeRows.SetPlain(_waveformLabel, "");
+            EarthquakeRows.SetPlain(_waveformModelLabel, "");
             EarthquakeRows.SetPlain(_waveformNoteLabel, "");
             RefreshWaveformAvailability();
             WaveformView.Render(null);
@@ -274,6 +287,7 @@ namespace DisasterPlus.Game
                 // ★ カメラ位置や市の中心で代用しない。「地震計があるのに波形が
                 //    見られない」への回答なので、地震計に紐づかない波形は意味が違う。
                 EarthquakeRows.SetPlain(_waveformLabel, Strings.EarthquakeWaveformNeedsSensor);
+                EarthquakeRows.SetPlain(_waveformModelLabel, "");
                 EarthquakeRows.SetPlain(_waveformNoteLabel, "");
                 WaveformView.Render(null);
                 return;
@@ -322,10 +336,79 @@ namespace DisasterPlus.Game
             }
 
             EarthquakeRows.SetLayer1(_waveformLabel, header);
+            RefreshWaveformModelRow(snapshot, trace);
 
             // 注記はグラフ（あるいは最大振幅の行）が出ているときだけ添える。
             EarthquakeRows.SetPlain(_waveformNoteLabel, Strings.EarthquakeWaveformNote);
             WaveformView.Render(trace);
+        }
+
+        /// <summary>
+        /// **合成記象の 1 行**（第 2 層）。記録が無ければ空にする。
+        ///
+        /// ★ <b>この行を <c>SetLayer1</c> で書かないこと。</b> ここに出る値は
+        ///   バニラが計算しているものではなく、<c>SeismogramModel</c> が
+        ///   その地震の種から作った波形である。すぐ上の行（同じグラフの
+        ///   もう 1 本の線）が <c>[measured]</c> を名乗っているぶん、
+        ///   取り違えたときの嘘が大きい。
+        ///
+        /// 出すのは 3 つ:
+        ///   - 最大振幅（満目盛りはバニラの線と共通の <c>MaxDisplacement</c>）
+        ///   - 初期微動継続時間 S-P（**震源距離とともに開く**、このモデルの看板）
+        ///   - どちらの色がどちらの層かの凡例
+        /// </summary>
+        private static void RefreshWaveformModelRow(EarthquakeSnapshot snapshot,
+                                                    SeismographTrace trace)
+        {
+            if (!trace.HasModel)
+            {
+                EarthquakeRows.SetPlain(_waveformModelLabel, "");
+                return;
+            }
+
+            float peak = trace.ModelPeakAbsolute;
+            string text = Strings.EarthquakeWaveformModel + ": "
+                          + peak.ToString("F2")
+                          + " / " + ShakeWaveform.MaxDisplacement.ToString("F2")
+                          + "  [" + SeismicScale.BarOf(
+                              ShakeWaveform.NormalisedDisplacement(peak)) + "]";
+
+            // ★ 窓（m_activeDuration）が読めていないときは S-P を出さない。
+            //   モデルの到達時刻は窓の長さから決まるので、窓が無ければ数字も無い。
+            if (snapshot.Prefab.Resolved && snapshot.Prefab.ActiveDuration != 0u)
+            {
+                var model = SeismogramModel.For(
+                    DeterministicRandom.Hash(snapshot.WaveformQuakeId,
+                                             ActivationFrameOf(snapshot)),
+                    snapshot.Prefab.ActiveDuration);
+
+                if (model.Valid)
+                {
+                    text += "   " + Strings.EarthquakeWaveformSMinusP + " "
+                            + model.SMinusPFrames(trace.DistanceToEpicentre).ToString("F0")
+                            + " " + Strings.EarthquakeFrames;
+                }
+            }
+
+            text += "\n" + Strings.EarthquakeWaveformModelNote;
+            EarthquakeRows.SetLayer2(_waveformModelLabel, text);
+        }
+
+        /// <summary>
+        /// 波形を記録している地震の発動フレーム。**種を作るのに要る**
+        /// （<c>SeismographRecorder.SeismogramSeed</c> と同じ組み合わせでなければ、
+        /// 表示している S-P が描いてある線のものと食い違う）。
+        /// 見つからなければ 0 —— そのとき <c>SeismogramModel.For</c> は
+        /// 別の形を返すが、S-P の桁は距離で決まるので表示は壊れない。
+        /// </summary>
+        private static uint ActivationFrameOf(EarthquakeSnapshot snapshot)
+        {
+            for (int i = 0; i < snapshot.Quakes.Count; i++)
+            {
+                if (snapshot.Quakes[i].DisasterId != snapshot.WaveformQuakeId) continue;
+                return snapshot.Quakes[i].ActivationFrame;
+            }
+            return 0u;
         }
 
         /// <summary>
