@@ -8,7 +8,7 @@ namespace DisasterPlus.Game
 {
     /// <summary>
     /// 噴火音がこの環境で鳴らせるか。**「解決した」ではなく「使える」を持たせる**
-    /// （<see cref="VolcanoBorrowFacts"/> と同じ規律。④のレビューと②の監査が、
+    /// （<see cref="VolcanoVanillaFacts"/> と同じ規律。④のレビューと②の監査が、
     /// 「フィールドが解決したか」を述語にした検査が値の使えない環境で PASS を出す
     /// 欠陥を見つけている）。
     ///
