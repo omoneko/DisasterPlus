@@ -125,6 +125,13 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class VolcanoState
     {
+        /// <summary>
+        /// 溶岩が流れはじめる隆起の進捗。**この MOD が決めた演出値である。**
+        /// 0 にすると平らな地面から溶岩を出すことになり、勾配が無いのでその場で溜まる
+        /// （<c>LavaPath.MinSlope</c>）。0.6 なら円錐は最終形の 6 割まで立っている。
+        /// </summary>
+        private const float LavaDuringUpliftFrom = 0.6f;
+
         private static VolcanoPhase _phase = VolcanoPhase.Idle;
         private static VolcanoFootprint _footprint = VolcanoFootprint.None;
         private static string _lastRefusal;
@@ -300,7 +307,15 @@ namespace DisasterPlus.Game
             if (_phase == VolcanoPhase.Erupting)
             {
                 // T7。**噴出の予定を決めるだけ**で、地形も建物も 1 つも変えない。
-                VolcanoEruption.Tick(_footprint, frame, deltaMinutes);
+                //   山はもうできあがっているので進捗に 1 を渡す（＝包絡線が持続から
+                //   衰退へ進む）。噴火そのものは隆起の最初から続いている。
+                VolcanoEruption.Tick(_footprint, frame, deltaMinutes, 1f);
+
+                // ★ 溶岩は隆起の途中から出ているので、ここでも進め続ける ——
+                //   止めると噴火のあいだだけ流れが凍りつく。地形はもう動かないので
+                //   許容差は 0（VolcanoUplift.RiseMetresPerTick が完了後 0 を返す）。
+                VolcanoLava.Tick(_footprint, frame, deltaMinutes,
+                                 VolcanoUplift.RiseMetresPerTick);
 
                 if (!VolcanoEruption.Finished) return;
 
@@ -317,7 +332,7 @@ namespace DisasterPlus.Game
             if (_phase == VolcanoPhase.Flowing)
             {
                 // T8。**地形は変えない**（RawHeights を書くのは T6 だけ）。
-                VolcanoLava.Tick(_footprint, frame, deltaMinutes);
+                VolcanoLava.Tick(_footprint, frame, deltaMinutes, 0f);
 
                 // 本数 0（設定で無効）のときは 1 度も流れずにここを抜ける。
                 if (!VolcanoLava.AllStopped && !VolcanoLava.Finished) return;
@@ -333,7 +348,7 @@ namespace DisasterPlus.Game
             if (_phase == VolcanoPhase.Cooling)
             {
                 // 冷えるのを待つだけ。**新しい流れは出さない。**
-                VolcanoLava.Tick(_footprint, frame, deltaMinutes);
+                VolcanoLava.Tick(_footprint, frame, deltaMinutes, 0f);
 
                 if (!VolcanoLava.Finished) return;
 
@@ -350,6 +365,24 @@ namespace DisasterPlus.Game
             VolcanoClearing.Tick(_footprint, VolcanoUplift.ProgressUnit, deltaMinutes);
             VolcanoUplift.Tick(_footprint, frame, deltaMinutes);
 
+            // ★★ **SimCity 4 の順序。噴火が先で、山はそれに積み上げられる。**
+            //    以前はここが「隆起が終わってから噴火」で、できあがった山が音もなく
+            //    地面から膨らんだあとに煙が出ていた。噴煙と発光は隆起の 1 tick 目から出す。
+            //    T7 は**予定を決めるだけ**で地形も建物も 1 つも変えないので、
+            //    準備 → 隆起の順序（罠 1）には触れていない。
+            VolcanoEruption.Tick(_footprint, frame, deltaMinutes, VolcanoUplift.ProgressUnit);
+
+            // ★ 溶岩も山ができきる前から流れはじめる。**円錐がある程度立ってから**に
+            //   してあるのは、平らな地面から出しても勾配が無くてその場で溜まるだけだからで、
+            //   閾値そのものは演出値である（LavaDuringUpliftFrom）。
+            //   地形はまだ上がっているので、その量を許容差として渡す
+            //   （渡さないと「溶岩が登った」と誤って観測して流れが止まる）。
+            if (VolcanoUplift.ProgressUnit >= LavaDuringUpliftFrom)
+            {
+                VolcanoLava.Tick(_footprint, frame, deltaMinutes,
+                                 VolcanoUplift.RiseMetresPerTick);
+            }
+
             if (!VolcanoUplift.Complete) return;
 
             // ★ T7 がここを <c>Done</c> から <c>Erupting</c> に差し替えた。位相が
@@ -357,7 +390,7 @@ namespace DisasterPlus.Game
             //   （噴火は必ず有限のゲーム内時間で終わり、例外が出た場合も終わる）。
             _phase = VolcanoPhase.Erupting;
             _lastRefusal = null;
-            Log.Info("volcano uplift complete: summit +"
+            Log.Info("volcano uplift complete (the eruption has been running since it started): summit +"
                      + VolcanoUplift.SummitMetres.ToString("F0")
                      + " m, crater " + (VolcanoUplift.CraterCarved ? "carved" : "NOT carved")
                      + "; the eruption starts now");

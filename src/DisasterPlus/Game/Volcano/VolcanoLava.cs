@@ -225,6 +225,13 @@ namespace DisasterPlus.Game
         private static bool _treesAvailable;
         private static bool _outsidePurchasedArea;
 
+        /// <summary>
+        /// 地形がまだ隆起で上がっている量（m / 隆起 1 tick）。
+        /// **下り勾配の符号の観測に足す許容差**であって、勾配そのものには影響しない。
+        /// 隆起が終わっていれば 0 なので、観測はこれまでどおり厳しいままである。
+        /// </summary>
+        private static float _terrainRiseMetres;
+
         private static bool _slopeSignVerified;
         private static bool _slopeSignWarned;
         private static string _lastFailure;
@@ -363,6 +370,7 @@ namespace DisasterPlus.Game
             _treesAvailable = false;
             _outsidePurchasedArea = false;
             _slopeSignVerified = false;
+            _terrainRiseMetres = 0f;
             _lastFailure = null;
 
             _trailPoints = new Vec2[0];
@@ -373,11 +381,18 @@ namespace DisasterPlus.Game
         /// **sim スレッド。** <see cref="VolcanoState"/> の位相分岐からのみ呼ぶこと。
         /// 例外が出ても位相を固めない（固めるとプレイヤーは 2 つ目の火山を置けなくなる）。
         /// </summary>
-        public static void Tick(VolcanoFootprint footprint, uint frame, float deltaMinutes)
+        /// <param name="terrainRiseMetresPerTick">
+        /// 地形が隆起で 1 tick に上がる量（m）。**隆起の途中に流れを出したときだけ 0 でない。**
+        /// 溶岩が進んだ先で標高が上がるのは、その場合「溶岩が登った」のではなく
+        /// 「山が育った」ためなので、その分を観測の許容差に足す
+        /// （<c>VolcanoUplift.RiseMetresPerTick</c> をそのまま渡すこと）。
+        /// </param>
+        public static void Tick(VolcanoFootprint footprint, uint frame, float deltaMinutes,
+                                float terrainRiseMetresPerTick)
         {
             try
             {
-                Step(footprint, deltaMinutes);
+                Step(footprint, deltaMinutes, terrainRiseMetresPerTick);
                 WriteDiag(frame);
             }
             catch (Exception e)
@@ -399,7 +414,8 @@ namespace DisasterPlus.Game
             }
         }
 
-        private static void Step(VolcanoFootprint footprint, float deltaMinutes)
+        private static void Step(VolcanoFootprint footprint, float deltaMinutes,
+                                 float terrainRiseMetresPerTick)
         {
             if (!footprint.Valid) return;
 
@@ -407,6 +423,12 @@ namespace DisasterPlus.Game
             {
                 Start(footprint);
             }
+
+            // ★ Start は Reset を通るので、**許容差は Start より後で入れる**
+            //   （前に入れると開始した tick だけ 0 に戻る）。
+            _terrainRiseMetres = float.IsNaN(terrainRiseMetresPerTick)
+                                 || terrainRiseMetresPerTick < 0f
+                ? 0f : terrainRiseMetresPerTick;
 
             if (_finished) return;
 
@@ -530,7 +552,7 @@ namespace DisasterPlus.Game
             //    止めて名乗る。IL では符号を確定させてあるので、ここが発火するのは
             //    ゲームの更新で挙動が変わったときである。
             if (f.Steps > 0 && f.Steps <= ObservationSteps
-                && height > _lastHeight[index] + UphillToleranceMetres)
+                && height > _lastHeight[index] + UphillToleranceMetres + _terrainRiseMetres)
             {
                 NoteUphill();
                 return Stop(f, StopUphill);

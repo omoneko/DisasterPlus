@@ -137,6 +137,13 @@ namespace DisasterPlus.Game
         /// <summary>強さの下限側のゆらぎ（1 区切りごとに <c>[Floor, 1]</c> を引く）。</summary>
         private const float JitterFloor = 0.62f;
 
+        /// <summary>
+        /// 山が育っているあいだの強さの下限（持続レベルに対する比）。
+        /// **噴火は山ができてから始まるのではなく、噴火が山を積み上げる**（SimCity 4 の順序）。
+        /// 隆起の最初から噴煙と発光を出し、隆起の進みとともにここから 1 へ上げる。
+        /// </summary>
+        private const float BuildFloor = 0.35f;
+
         /// <summary>噴出口を火口の底からどれだけ上げるか（m）。</summary>
         private const float VentLiftMetres = 6f;
 
@@ -157,6 +164,17 @@ namespace DisasterPlus.Game
         private static Vec3 _centre;
         private static Vec3 _summit;
         private static float _elapsedMinutes;
+
+        /// <summary>
+        /// 実時間の積算（ゲーム内分）。<see cref="_elapsedMinutes"/> は山が育っている
+        /// あいだ持続の入口で止めるので、**ゆらぎの区切りにはこちらを使う** ——
+        /// 止まったほうを使うと、育っているあいだ強さが 1 度も引き直されず、
+        /// 噴煙が完全に静止して見える。
+        /// </summary>
+        private static float _clockMinutes;
+
+        /// <summary>山がまだ育っているか（＝隆起と同時に噴いている）。</summary>
+        private static bool _building;
         private static float _intensity;
         private static int _burstIndex;
         private static int _bursts;
@@ -186,6 +204,13 @@ namespace DisasterPlus.Game
 
         /// <summary>噴火が終わったか。<see cref="VolcanoState"/> が次の位相へ進む合図。</summary>
         public static bool Finished { get { return _finished; } }
+
+        /// <summary>
+        /// 山をまだ積み上げている最中か（＝隆起と同時に噴いている）。
+        /// **SimCity 4 と同じ順序**で、噴火は山ができてから始まるのではなく、
+        /// 噴火が山を積み上げる。
+        /// </summary>
+        public static bool Building { get { return _building; } }
 
         /// <summary>今の噴出の強さ <c>[0,1]</c>。**⑤が決めた量**で、ゲームの値ではない。</summary>
         public static float IntensityUnit { get { return _intensity; } }
@@ -273,11 +298,17 @@ namespace DisasterPlus.Game
         /// **sim スレッド。** 噴出の予定を決めるだけで、Unity オブジェクトを 1 つも作らない。
         /// <see cref="VolcanoState"/> の位相分岐からのみ呼ぶこと。
         /// </summary>
-        public static void Tick(VolcanoFootprint footprint, uint frame, float deltaMinutes)
+        /// <param name="buildProgressUnit">
+        /// 隆起の進捗 [0,1]。**1 未満なら「山はまだ育っている」**という意味で、
+        /// 包絡線は持続の入口で止まり、強さは進捗に合わせて上がる。
+        /// 隆起が終わっている位相からは 1 を渡すこと。
+        /// </param>
+        public static void Tick(VolcanoFootprint footprint, uint frame, float deltaMinutes,
+                                float buildProgressUnit)
         {
             try
             {
-                Step(footprint, deltaMinutes);
+                Step(footprint, deltaMinutes, buildProgressUnit);
                 WriteDiag(frame);
             }
             catch (Exception e)
@@ -301,14 +332,32 @@ namespace DisasterPlus.Game
             }
         }
 
-        private static void Step(VolcanoFootprint footprint, float deltaMinutes)
+        private static void Step(VolcanoFootprint footprint, float deltaMinutes,
+                                 float buildProgressUnit)
         {
             if (!footprint.Valid) return;
 
             if (!_started || !SamePoint(_centre, footprint.Centre)) Start(footprint);
             if (_finished) return;
 
-            if (deltaMinutes > 0f) _elapsedMinutes += deltaMinutes;
+            float build = Clamp01(float.IsNaN(buildProgressUnit) ? 1f : buildProgressUnit);
+            _building = build < 1f;
+
+            if (deltaMinutes > 0f)
+            {
+                _elapsedMinutes += deltaMinutes;
+                _clockMinutes += deltaMinutes;
+            }
+
+            // ★★ **山が育っているあいだは包絡線を持続の入口で止める。**
+            //    止めないと、隆起（既定 30 ゲーム内分）のほうが噴火（24 分）より長いので、
+            //    山ができあがったときには噴火がもう終わっている。
+            //    止めるのは包絡線だけで、_clockMinutes は進み続ける（ゆらぎのため）。
+            if (_building)
+            {
+                float sustainStart = RiseFraction * TotalMinutes;
+                if (_elapsedMinutes > sustainStart) _elapsedMinutes = sustainStart;
+            }
 
             if (_elapsedMinutes >= TotalMinutes)
             {
@@ -325,7 +374,7 @@ namespace DisasterPlus.Game
 
             // ★ 区切りは経過ゲーム内時間から出す。**frameIndex % N で組まない**
             //   （DAYTIME_FRAMES = 65536、1 ゲーム内分 ≒ 45.51 フレーム。火災旋風 付録 A-4）。
-            int burst = (int)(_elapsedMinutes / BurstMinutes);
+            int burst = (int)(_clockMinutes / BurstMinutes);
             if (burst != _burstIndex)
             {
                 _burstIndex = burst;
@@ -338,7 +387,11 @@ namespace DisasterPlus.Game
                            + (1f - JitterFloor)
                              * DeterministicRandom.Unit(_seed, (uint)_burstIndex);
 
-            _intensity = Clamp01(Envelope(_elapsedMinutes / TotalMinutes) * jitter);
+            float envelope = Envelope(_elapsedMinutes / TotalMinutes);
+            // 育っているあいだは山の大きさに合わせて強くしていく（小さい山に巨大な噴煙は乗らない）。
+            if (_building) envelope *= BuildFloor + (1f - BuildFloor) * build;
+
+            _intensity = Clamp01(envelope * jitter);
             _active = true;
         }
 
@@ -640,6 +693,8 @@ namespace DisasterPlus.Game
             _centre = new Vec3(0f, 0f, 0f);
             _summit = new Vec3(0f, 0f, 0f);
             _elapsedMinutes = 0f;
+            _clockMinutes = 0f;
+            _building = false;
             _intensity = 0f;
             _burstIndex = 0;
             _bursts = 0;
