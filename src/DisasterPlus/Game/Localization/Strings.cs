@@ -994,14 +994,23 @@ namespace DisasterPlus.Game
         /// <summary>設定のチェックボックス（表示行の <c>VolcanoEruptionRow</c> と別物）。</summary>
         public static string VolcanoEruptionFx = "Draw the eruption plume";
 
+        /// <summary>設定のチェックボックス。音そのものは MOD 同梱の wav である。</summary>
+        public static string VolcanoEruptionSound = "Play the eruption sound";
+
         // ★ **短くしないこと。** ゲームには溶岩も噴火も存在しない（§B-5 で
         //   文字列ヒープにヒット 0）ことを名乗る唯一の場所である。
         //   炎だけがゲーム自身のもので、それも DLC 不要である。
+        //
+        // ★★ 音について「無音である」と書いていた版は**もう正しくない**。
+        //    借り物のエフェクトが鳴らさないのは今も事実だが（§H-17）、⑤は自前の
+        //    音源を同梱してバニラの効果音グループへ流し込むようになった。
+        //    **ここは実測に合わせて直すこと** —— 出るものを「出ない」と書き続けるのは、
+        //    出ないものを「出る」と書くのと同じ害である。
         public static string VolcanoEruptionBorrowedNote =
             "The game has no lava, magma or eruption effect of any kind, so Disaster + draws "
             + "its own. The flames on top are the game's own fire effect, borrowed and placed "
-            + "at the crater. The eruption is silent: the borrowed effect only makes a sound "
-            + "on a code path Disaster + does not use.";
+            + "at the crater. The sound is Disaster +'s own file, played through the game's "
+            + "effect audio group, so your effect volume and mute apply to it.";
 
         // --- ⑤火山（Task 8: 溶岩の前進と着火） ---
         //

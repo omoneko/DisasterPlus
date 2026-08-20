@@ -275,6 +275,14 @@ namespace DisasterPlus.Game
             volcano.AddCheckbox(Strings.VolcanoEruptionFx, ModSettings.VolcanoEruptionFx.value,
                 v => ModSettings.VolcanoEruptionFx.value = v);
 
+            // ★ 噴火の音。**切っても隆起も溶岩も噴煙も変わらない**（音も main スレッド
+            //   だけの機能である）。音量つまみはここに置かない ——
+            //   ゲーム本体の効果音スライダーとミュートがそのまま効くので、
+            //   2 本目を作ると「どちらが効いているのか」が分からなくなる。
+            volcano.AddCheckbox(Strings.VolcanoEruptionSound,
+                ModSettings.VolcanoEruptionSound.value,
+                v => ModSettings.VolcanoEruptionSound.value = v);
+
             // ★ 溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
             //    上限は VolcanoLava.MaxFlows と同じ 8 —— 1 tick あたりの仕事量が
             //    「本数 × 2 歩」で決まるので、ここが費用の上限そのものである。

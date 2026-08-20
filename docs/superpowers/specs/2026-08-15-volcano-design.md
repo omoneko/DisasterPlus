@@ -202,7 +202,32 @@ grown(d, p) = max(0, profile(d) − H·(1 − p))
 - プルームは `DisasterProperties.m_mediumExplosion` を借りられる
   （**`EffectInfo` を借りるのはマテリアルを借りるのとは別**。`RenderEffect` の経路を使う）
 - 発光する噴出物は自作。`DispatchEffect` の magnitude は**粒子密度であってサイズではない**（既知）
-- 音は `AudioInfo.m_clip` を借りられる（既知）
+- **音は MOD 同梱の音源（`Audio/erupting-volcano.wav`）を自分で読んで鳴らす。**
+  設計時は「`AudioInfo.m_clip` を借りられる」と書いていたが、**借りない** ——
+  借用元の `EffectInfo` が音を鳴らすのは `PlayEffect` の側で、`RenderEffect` は
+  `m_soundEffect` に一切触れない（IL 事実文書 §H-17）。⑤が使うのは
+  **`AudioManager.AddEvent(EffectGroup, …)`**、つまりバニラの災害
+  （竜巻・地震・隕石・陥没）とまったく同じ効果音の経路である（§H-23）:
+
+  - 読み込みは**完全に同期**（`AudioClip.Create` ＋ `SetData`）。`WWW` もコルーチンも使わない。
+    バイト列 → サンプルの変換は engine-free なので `Core/Common/WavPcm.cs` にあり、単体テストがある
+  - **プレイヤーの効果音スライダーとミュートがそのまま効く**（`AudioGroup.m_groupVolume` は
+    `Settings.effectAudioVolume` の `SavedFloat`、`m_totalVolume < 0.01` で 1 音も出ない）。
+    したがって **MOD 側に音量つまみは作らない**
+  - 位置は火口。距離減衰・ドップラ・優先度・フェードはすべてバニラ側が持つ。
+    **`AudioSource` も `GameObject` も⑤は 1 つも作らない**
+  - 音量は噴出の強さに追随する（竜巻が `m_intensity` でしているのと同じ）
+  - 止め方は「毎フレームの `AddEvent` をやめる」こと。バニラが 2 秒でフェードして解放する
+  - 同梱ファイルは**定常のアンビエンスではなく 36 秒の噴火 1 回ぶんの録音**（実測。
+    3 秒で立ち上がり、3〜13 秒が山、そこから減衰して無音で終わる）。そのまま回すと
+    36 秒ごとに脈打つので、**山の部分 10 秒をクロスフェードで環にして**回す
+    （`Core/Common/LoopSlice.cs`）。弧そのものは⑤の包絡線が与える
+  - **ファイルが無い・読めない・形式が違うときは、何も鳴らさずログ 1 行で終わる。**
+    火山はそれ以外まったく今日どおりに動く。設定「噴火の音を鳴らす」（既定 ON）でも切れる
+  - 音源の出所: **本 MOD の所有者が用意したファイル**（`erupting-volcano.wav`）。
+    ★ **ライセンスの確認は所有者の責任である。** ここでは何のライセンスであるとも名乗らない ——
+    Workshop へ公開する成果物に約 6 MB の第三者の音声が入るので、
+    公開前に配布条件を所有者が確かめること
 
 ### 4.5 溶岩と、それに沿う火災
 

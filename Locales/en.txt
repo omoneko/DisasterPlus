@@ -281,7 +281,8 @@ VolcanoFrames = simulation frames
 VolcanoCraterCarved = Summit crater carved.
 VolcanoEruptionRow = Eruption
 VolcanoEruptionFx = Draw the eruption plume
-VolcanoEruptionBorrowedNote = The game has no lava, magma or eruption effect of any kind, so Disaster + draws its own. The flames on top are the game's own fire effect, borrowed and placed at the crater. The eruption is silent: the borrowed effect only makes a sound on a code path Disaster + does not use.
+VolcanoEruptionSound = Play the eruption sound
+VolcanoEruptionBorrowedNote = The game has no lava, magma or eruption effect of any kind, so Disaster + draws its own. The flames on top are the game's own fire effect, borrowed and placed at the crater. The sound is Disaster +'s own file, played through the game's effect audio group, so your effect volume and mute apply to it.
 VolcanoLavaRow = Lava
 VolcanoLavaFlowsSetting = Number of lava flows (0 = off)
 VolcanoLavaFireSetting = Lava sets fire to what it touches

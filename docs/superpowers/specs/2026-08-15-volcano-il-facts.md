@@ -1334,10 +1334,14 @@ FireEffect の宣言メソッドは 6 本:
 型 `AudioManager+ListenerInfo`）と `AudioManager.EffectGroup` / `DefaultGroup` / `AmbientGroup`
 （いずれも public プロパティ）は到達できるので、鳴らすこと自体は可能である。
 
-**⑤は鳴らさない。** 計画の決定（音の経路を新設しない）は変えていないが、**理由が違う** ——
-「`RenderEffect` で出るから足さない」のではなく、「`PlayEffect` は毎フレーム呼ぶ想定の API ではなく、
-`ListenerInfo` / `AudioGroup` の扱いに本 MOD の前例が無いから」である。
-**噴火は無音であり、それを診断とパネルとチェックリストで名乗る。**
+**⑤は借りたエフェクトでは鳴らさない。** ここまでは今も有効である。
+
+> ★★ **この節が続けて書いていた「だから噴火は無音である」は、その後 §H-23 で覆した。**
+> 当時の理由は「`PlayEffect` は毎フレーム呼ぶ想定の API ではなく、`ListenerInfo` /
+> `AudioGroup` の扱いに本 MOD の前例が無いから」だったが、**前例は 5 件あった** ——
+> バニラの災害（竜巻・地震・隕石・陥没）はすべて `AudioManager.EffectGroup` へ流し込んでいる。
+> ⑤は `PlayEffect` ではなくその経路（`AudioManager.AddEvent`）を使い、
+> **MOD 同梱の音源**を鳴らす。§H-23 を読むこと。
 
 ### H-18. `RenderEffect` の引数と `CameraInfo` の到達経路 — CONFIRMED
 
@@ -1599,6 +1603,171 @@ DLC 無しなら「木は燃えず、地面の焦げと自前の炎エフェク�
 - **自前で影響矩形の `RawHeights` をコピーして持つ。** 実費は半径 1 km で 31 KB、2 km で 123 KB。安い。
 - セーブに残すなら `ISerializableDataExtension`（付録 A-2b のロード順の注意がそのまま適用）。
 - 復元しても `m_blockHeights` は**下降 8 m / 64 sim フレーム**でしか追いつかない（§A-2）。
+
+---
+
+### H-23. 音を出す経路 — **CONFIRMED（§H-17 の続き。⑤はここを使う）**
+
+§H-17 は「借りたエフェクトは `RenderEffect` では鳴らない」までを確定させ、
+「`PlayEffect` は毎フレーム呼ぶ想定の API ではなく、`ListenerInfo` / `AudioGroup` の扱いに
+前例が無い」ので⑤は無音とした。**その 2 つ目の理由は誤りだった。**
+バニラの災害が音を出す経路を IL で全数当たると、前例は 5 件あった。
+
+**バニラの災害音の呼び出し元（`AudioManager` の 3 つのグループ getter を呼ぶ全メソッドを、
+全型・全メソッドの IL からトークン走査して列挙）:**
+
+```
+EarthquakeAI.PlayInstance      -> AudioManager.EffectGroup      ★ 災害はすべて EffectGroup
+MeteorStrikeAI.PlayInstance    -> AudioManager.EffectGroup
+SinkholeAI.PlayInstance        -> AudioManager.EffectGroup
+TornadoAI.PlayInstance         -> AudioManager.EffectGroup
+WeatherManager.StrikeNow       -> AudioManager.EffectGroup + AddEvent(8 引数)
+DisasterHelpers.DestroyBuildings -> AudioManager.AmbientGroup
+（DefaultGroup は各種ツールの設置音・RocketAI など）
+```
+
+**連続音（＝ループ）の実例 `TornadoAI.PlayInstance`（main スレッド。IL_01C9-01EE）:**
+
+```
+AudioManager.instance.EffectGroup.AddPlayer(
+    listenerInfo,
+    instanceID.RawData,                                  ← 安定した player ID
+    m_vortexSound,                                       ← AudioInfo（m_loop = true）
+    position, velocity,
+    5000f,                                               ← maxDistance
+    Clamp01(angleVelocity * (0.5f + m_intensity*0.005f)),← volume は強さに追随
+    Clamp(1.04f - m_intensity*0.004f, 0.5f, 1f))         ← pitch も
+```
+
+**一発音の実例 `WeatherManager.StrikeNow`（sim スレッド。IL_004D-0094）:**
+
+```
+AudioManager.instance.AddEvent(EffectGroup, info, position, Vector3.zero,
+                               10000f, 1f, rand(600,1100)*0.001f, lightningIndex)
+```
+
+#### 公開 API とその意味（すべて public。IL 実測）
+
+```
+public Void AudioManager.AddEvent(AudioGroup, AudioInfo, Vector3 position, Vector3 velocity,
+                                  Single maxDistance, Single volume, Single pitch, Int32 playerID)
+    IL_0045-007C  SimulationEvent を組み立て、
+                  while (!Monitor.TryEnter(m_eventBuffer, SimulationManager.SYNCHRONIZE_TIMEOUT)) ;
+                  m_eventBuffer.Add(ev)
+    ★ 明示的にスレッド安全。バニラ自身が sim スレッドから呼んでいる
+
+public AudioGroup AudioManager.EffectGroup { get; }      ldfld m_effectGroup
+public Single     AudioManager.MasterVolume { get; }
+public Boolean    AudioManager.MuteAll { get; }
+
+public class AudioInfo : UnityEngine.ScriptableObject        ★ PrefabInfo ではない
+    public AudioClip   m_clip;        public Single  m_volume;
+    public Single      m_pitch;       public Single  m_fadeLength;
+    public Boolean     m_loop;        public Boolean m_is3D;
+    public Boolean     m_randomTime;  public Variation[] m_variations;
+    public AudioClip ObtainClip()  ->  IL_0000 ldarg.0 / ldfld m_clip / ret   （それだけ）
+    public Void ReleaseClip()      ->  IL_0000 ret                            （何もしない）
+```
+
+→ **`AudioInfo` は実行時に `ScriptableObject.CreateInstance` で組み立ててよい。**
+`PrefabInfo` ではないので、③④で問題になった「セーブにプレハブ名が焼き付く」性質を持たない。
+
+#### プレイヤーの音量とミュートが掛かる場所
+
+```
+AudioManager.Awake:
+    m_effectGroup = new AudioGroup(3, new SavedFloat(Settings.effectAudioVolume,
+                                                     Settings.gameSettingsFile,
+                                                     DefaultSettings.effectAudioVolume, true))
+                                      ↑ 設定画面の「効果音」スライダーそのもの
+
+AudioGroup.UpdatePlayers 末尾 (IL_08A5-08CB):
+    m_playerDataCount = 0
+    m_cachedVolume    = (float)m_groupVolume
+    m_totalVolume     = m_cachedVolume * <AudioManager が渡す master>
+
+AudioGroup.AddPlayer 冒頭 (IL_0000-0010):
+    if (m_totalVolume < 0.01f) return;               ★ ミュート／0 なら 1 音も出さない
+AudioGroup.AddPlayer (IL_016E-0180):
+    m_targetVolume = info.m_volume * volume * m_cachedVolume
+```
+
+→ **`EffectGroup` へ流し込むだけで、効果音スライダーとミュートは自動的に掛かる。**
+逆に言えば、自前で `AudioSource` を作った MOD ではこれが一切効かない。
+
+#### ループの維持と停止（`AudioGroup.UpdatePlayers`）
+
+`m_playerData` は毎回 `UpdatePlayers` の末尾で件数 0 に戻る。ループ中の `AudioPlayer` は
+**`m_id`（＋ `m_info`）が一致する `PlayerData` が今フレーム在るか**だけで生死が決まる:
+
+```
+IL_0047-02D2  一致する PlayerData を探し、見つかれば位置／音量／pitch／maxDistance を
+              m_fadeSpeed で追従させ、その PlayerData の m_info / m_clip を null にする
+              （＝二重に新しいプレイヤーを作らない）
+IL_0323-03DA  見つからなければ音量を 0 へフェードし、0.01 を切ったら ReleasePlayer
+IL_0603-0892  どの AudioPlayer にも拾われなかった PlayerData は ObtainPlayer(info) で
+              新しい AudioSource を得る。loop / minDistance=0 / rolloffMode=Linear(1) /
+              spatialBlend = (m_is3D ? 1 : 0) / maxDistance は全部あちらが設定する
+              clip.loadState == Loaded(2) でなければ m_notReady を立てて次フレームへ回す
+```
+
+→ **鳴らし続ける ＝ 毎フレーム同じ id で `AddEvent`。止める ＝ 呼ぶのをやめる。**
+明示的な `Stop()` は不要（プールされた `AudioSource` は MOD のものではない）。
+
+**`AddPlayer` を直接呼んではいけない。** `m_playerDataCount` は `UpdatePlayers` の末尾で
+0 に戻るので、MOD の更新フックが `AudioManager.LateUpdate` より後で走ったフレームでは
+その追加が消える。`AddEvent` なら `LateUpdate` が **`UpdatePlayers` より前に**掃き出すので、
+呼び出し順に依存しない。
+
+**1 フレームに 1 回だけ呼ぶこと。** 同じ id で 2 回積むと `PlayerData` が 2 本並び、
+`EffectGroup` の枠（`m_maxActiveCount = 3`）を 1 つの音で潰す。
+だから⑤は sim スレッド（速度 3 では 1 フレームに複数 tick 回りうる）ではなく
+**main スレッドの描画側から**呼ぶ。
+
+#### 実行時に `AudioClip` を作る（UnityEngine 5.6 実測）
+
+```
+public static AudioClip AudioClip.Create(String name, Int32 lengthSamples, Int32 channels,
+                                         Int32 frequency, Boolean stream)      ★ 非 Obsolete
+public static AudioClip AudioClip.Create(..., Boolean _3D, Boolean stream)     [Obsolete]
+public Boolean AudioClip.SetData(Single[] data, Int32 offsetSamples)
+public AudioDataLoadState AudioClip.loadState { get; }   // Unloaded=0 Loading=1 Loaded=2 Failed=3
+```
+
+→ **5 引数版（`_3D` の無いほう）を使う。** 6 引数版は `[Obsolete]` なので、
+警告 0 を守るビルドでは選んではいけない。3D 化は `AudioInfo.m_is3D` が担う
+（バニラが `spatialBlend` を立てる）。
+
+> `WWW` ＋ `file://` ＋ `GetAudioClip` は使わない。**非同期**なのでコルーチンを回す
+> `MonoBehaviour` と「まだ読めていない」状態が要るが、`Create` ＋ `SetData` は同期で、
+> しかもバイト列 → サンプルの変換にエンジンが要らなくなる（＝ `Core/` に置けてテストできる）。
+
+#### 同梱音源の実測（`Audio/erupting-volcano.wav`）
+
+```
+RIFF/WAVE  PCM(1)  44100 Hz  2 ch  16 bit
+data 6,361,068 bytes = 1,590,267 フレーム = 36.06 秒   （ファイル全体 6,361,112 bytes）
+peak 0.836   overall RMS 0.163
+1 秒ごとの RMS:
+  0.04 0.11 0.21 0.26 0.28 0.27 0.27 0.24 0.24 0.23 0.25 0.22 0.22 0.21 0.19 0.17
+  0.16 0.16 0.15 0.13 0.12 0.11 0.09 0.10 0.08 0.09 0.08 0.07 0.05 0.04 0.03 0.02
+  0.01 0.006 0.002 0.001
+```
+
+→ **定常のアンビエンスではなく「噴火 1 回ぶんの録音」である。**
+3 秒で立ち上がり、3〜13 秒が山、そこから単調に減衰して**無音で終わる**。
+そのままループすると 36 秒ごとに 57 dB の脈打ちになる（末尾 RMS 0.0004 対 山 0.278）。
+⑤は山の 3.0〜13.0 秒を取り、末尾 1 秒に「その続き（13.0〜14.0 秒）」を √ 重みで
+混ぜて環にしている（`Core/Common/LoopSlice.cs`）。オフライン実測:
+
+```
+ループ 10.00 秒 / 882,000 サンプル（3.4 MB。全長を持つと 12.1 MB）
+ループ内 1 秒ごとの RMS: 0.242 0.278 0.274 0.270 0.240 0.242 0.229 0.247 0.222 0.221
+継ぎ目の段差 0.0037 / 0.0025  対  通常の隣接サンプル差 0.051   → 継ぎ目は 14 分の 1 以下
+```
+
+**音源そのものの出所とライセンスは本 MOD の所有者が用意し、確認するものである。**
+本文書はファイルの中身を測っただけで、配布条件について何も名乗らない。
 
 ---
 

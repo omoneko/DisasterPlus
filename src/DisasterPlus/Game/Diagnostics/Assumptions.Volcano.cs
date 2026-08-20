@@ -38,7 +38,7 @@ namespace DisasterPlus.Game
     public static partial class Assumptions
     {
         /// <summary>このファイルが持つ検証の数。</summary>
-        private const int VolcanoCheckCount = 7;
+        private const int VolcanoCheckCount = 8;
 
         private static void RunVolcano()
         {
@@ -232,6 +232,46 @@ namespace DisasterPlus.Game
                   delegate { return lavaShader.ParticleShaderResolved; });
 
             // --- ⑤火山（Task 9: 溶岩の描画のシェーダ）ここまで ---
+
+            // --- ⑤火山（噴火の音）ここから ---
+
+            // 8. 音の経路。**この検査が FAIL でも噴火はそのまま出る**（音だけが消える）ので、
+            //   impact にそう書く（狼少年にしない）。
+            //
+            //   ★ 述語は VolcanoEruptionAudio.Update が実際に門にしている式
+            //     （VolcanoAudioFacts.Usable）そのものである。
+            //
+            //   ★★ **同梱 wav の有無を述語に混ぜない。** ファイルはプレイヤーが
+            //     消せるもので、消えていることは「ゲーム更新で前提が壊れた」ではない。
+            //     混ぜると、自分で消した人に前提違反を名乗ることになる。
+            //     代わりに**名前のほうに実測を出す** —— 音が出ないときに
+            //     「経路が無い」のか「ファイルが無い」のかは、ここでしか区別できない。
+            //
+            //   ScanAudioFacts は副作用の無い走査で main スレッド専用（Run() も main）。
+            //   クリップは読まないので、レベルロードに 6 MB の I/O を持ち込まない。
+            //   Check の外で例外を抑えるのは上の 7 件と同じ理由。
+            VolcanoAudioFacts audio;
+            try
+            {
+                audio = VolcanoEruptionAudio.ScanAudioFacts();
+            }
+            catch
+            {
+                audio = new VolcanoAudioFacts();
+            }
+
+            Check("AudioManager.EffectGroup and AddEvent(AudioGroup,AudioInfo,Vector3,Vector3,"
+                  + "float,float,float,int) are reachable, and AudioClip.Create/SetData resolve "
+                  + "(bundled wav: "
+                  + (audio.FileFound ? audio.FileBytes + " bytes" : "NOT PRESENT")
+                  + ")",
+                  "the eruption is silent. Nothing else changes: the mountain, the plume and "
+                  + "the lava never touch the audio path. This is also the only route through "
+                  + "which the player's effect volume and mute reach the sound, so Disaster + "
+                  + "does not fall back to playing it at a raw fixed volume",
+                  delegate { return audio.Usable; });
+
+            // --- ⑤火山（噴火の音）ここまで ---
         }
 
         /// <summary>
