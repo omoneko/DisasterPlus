@@ -294,6 +294,14 @@ namespace DisasterPlus.Game
                                        + " last tick; tile " + snapshot.UpliftTileCursor
                                        + "/" + snapshot.UpliftTileCount);
             b.Line(2, "summit crater", snapshot.CraterCarved ? "carved" : "not carved yet");
+            // 山肌の凹凸。0% なら滑らかな円錐そのもの（設定の意味を診断でも名乗る）。
+            b.Line(2, "flank relief", ModSettings.VolcanoReliefStrength.value
+                                      + "% (0 = a smooth cone)"
+                                      + (VolcanoUplift.Complete
+                                         ? ""
+                                         : "; rising "
+                                           + VolcanoUplift.RiseMetresPerTick.ToString("F2")
+                                           + " m per uplift tick"));
 
             // 「建てられる地面」と水位の遅れ。**これは不具合ではない**（設計書 §7.3）。
             // 換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。
@@ -337,7 +345,9 @@ namespace DisasterPlus.Game
             b.Line(1, "eruption", (snapshot.EruptionActive ? "active" : "finished")
                                   + " (intensity "
                                   + snapshot.EruptionIntensityUnit.ToString("F2")
-                                  + ", " + VolcanoEruption.BurstsSoFar + " bursts)");
+                                  + ", " + VolcanoEruption.BurstsSoFar + " bursts"
+                                  + (VolcanoEruption.Building
+                                     ? ", still building the mountain" : "") + ")");
             b.Line(2, "own particles", VolcanoEruption.Drawing ? "drawing" : "not drawing");
 
             // ★ どのシェーダで解決したかを必ず名乗る（溶岩の描画と同じ扱い）。

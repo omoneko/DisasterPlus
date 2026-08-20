@@ -103,6 +103,17 @@ namespace DisasterPlus.Game
         public static SavedInt VolcanoClearingLeadMetres;
 
         /// <summary>
+        /// 山肌の凹凸の強さ（%）。**0 で今日どおりの滑らかな円錐**、100 が形態ごとの既定、
+        /// 上限は <c>VolcanoRelief.MaxStrengthUnit</c>（150）である。
+        ///
+        /// これ 1 本だけを出しているのは、起伏の性格（谷の本数・波長・粗さ）が
+        /// 形態ごとに <c>Core/Volcano/VolcanoRelief</c> の表で決まっていて、
+        /// プレイヤーが決めるのは「どのくらい効かせるか」だけだからである。
+        /// **つまみを増やさない。**
+        /// </summary>
+        public static SavedInt VolcanoReliefStrength;
+
+        /// <summary>
         /// 隆起にかけるゲーム内分。<c>UpliftSchedule.TotalTicksFor</c> が
         /// 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰めるので、長すぎる値を
         /// 入れても無言で止まることは無い。
@@ -273,6 +284,11 @@ namespace DisasterPlus.Game
             // 準備の前線が隆起の前線より何メートル先を走るか。0 にすると
             // 「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
             VolcanoClearingLeadMetres = new SavedInt("volcanoClearLead", FileName, 96, true);
+
+            // 山肌の凹凸の強さ（%）。0 で今日どおりの滑らかな円錐。
+            // ★ 新しいキーである。既存のキーの名前も既定値も変えていない
+            //   （.cgs は公開契約で、番号も文字列も詰め直さない）。
+            VolcanoReliefStrength = new SavedInt("volcanoRelief", FileName, 100, true);
 
             // 隆起にかけるゲーム内分。UpliftSchedule.TotalTicksFor が
             // 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰める。

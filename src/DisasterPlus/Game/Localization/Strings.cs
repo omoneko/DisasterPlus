@@ -975,6 +975,7 @@ namespace DisasterPlus.Game
             "Active radius (as far as the clearing has reached)";
         public static string VolcanoTilesRow = "Terrain tiles updated";
         public static string VolcanoUpliftMinutes = "Time the uplift takes (in-game minutes)";
+        public static string VolcanoReliefStrength = "Relief on the mountain's flanks (%, 0 = a smooth cone)";
 
         // ★ 設計書 §7.3 の見積り。**不具合ではない**ことは VolcanoBuildabilityNote が
         //   既に言っているので、ここは数字の見出しだけを持つ。
