@@ -151,5 +151,67 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.False(TileSplit.TileAt(count, minX, minZ, maxX, maxZ, out a, out b, out c, out d));
             Assert.Equal(0, TileSplit.TileCountFor(10, 10, 5, 5));
         }
+
+        [Fact]
+        public void SinglePassIsAllowedOnlyUpToTheCoreTileSide()
+        {
+            Assert.True(TileSplit.FitsSinglePass(500, 500, 500, 500));
+            Assert.True(TileSplit.FitsSinglePass(500, 500,
+                                                500 + TileSplit.CoreTileSide - 1,
+                                                500 + TileSplit.CoreTileSide - 1));
+
+            // 1 セル大きいだけで駄目。**「だいたい入る」を許すと、はみ出した分が
+            // 例外も出さずに更新されないまま残る**（§A-1 の切り捨て）。
+            Assert.False(TileSplit.FitsSinglePass(500, 500,
+                                                  500 + TileSplit.CoreTileSide,
+                                                  500 + TileSplit.CoreTileSide - 1));
+            Assert.False(TileSplit.FitsSinglePass(500, 500,
+                                                  500 + TileSplit.CoreTileSide - 1,
+                                                  500 + TileSplit.CoreTileSide));
+            Assert.False(TileSplit.FitsSinglePass(10, 10, 5, 5));
+        }
+
+        [Fact]
+        public void ASinglePassRectStaysUnderBothLimits()
+        {
+            for (int side = 1; side <= TileSplit.CoreTileSide; side++)
+            {
+                int minX = 400, minZ = 400;
+                int maxX = minX + side - 1, maxZ = minZ + side - 1;
+                Assert.True(TileSplit.FitsSinglePass(minX, minZ, maxX, maxZ));
+
+                int a, b, c, d;
+                Assert.True(TileSplit.ExpandForPass(minX, minZ, maxX, maxZ,
+                                                    out a, out b, out c, out d));
+
+                int width = c - a + 1;
+                int depth = d - b + 1;
+                Assert.Equal(side + 2 * TileSplit.Margin, width);
+                Assert.True(width < 128 && depth < 128);
+                Assert.True(width * depth < 10000);
+                Assert.True(width <= TileSplit.MaxPassedSide);
+            }
+        }
+
+        [Fact]
+        public void ExpandingAtTheMapEdgeClampsInsteadOfWrapping()
+        {
+            int a, b, c, d;
+            Assert.True(TileSplit.ExpandForPass(0, 0, 4, 4, out a, out b, out c, out d));
+            Assert.Equal(0, a);
+            Assert.Equal(0, b);
+            Assert.Equal(6, c);
+            Assert.Equal(6, d);
+
+            Assert.True(TileSplit.ExpandForPass(TileSplit.RawResolution - 4,
+                                                TileSplit.RawResolution - 4,
+                                                TileSplit.RawResolution,
+                                                TileSplit.RawResolution,
+                                                out a, out b, out c, out d));
+            Assert.Equal(TileSplit.RawResolution, c);
+            Assert.Equal(TileSplit.RawResolution, d);
+
+            Assert.False(TileSplit.ExpandForPass(10, 10, 5, 5, out a, out b, out c, out d));
+        }
     }
 }

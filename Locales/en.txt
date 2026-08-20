@@ -281,7 +281,7 @@ VolcanoUpliftRow = Uplift
 VolcanoUpliftProgress = Progress
 VolcanoSummitRow = Summit
 VolcanoActiveRadiusRow = Active radius (as far as the clearing has reached)
-VolcanoTilesRow = Terrain tiles updated
+VolcanoTilesRow = Terrain updates per step
 VolcanoUpliftMinutes = Time the uplift takes (in-game minutes)
 VolcanoReliefStrength = Relief on the mountain's flanks (%, 0 = a smooth cone)
 VolcanoCatchUpRow = Buildable ground catches up in

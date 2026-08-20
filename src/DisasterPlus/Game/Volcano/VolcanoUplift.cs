@@ -86,7 +86,7 @@ namespace DisasterPlus.Game
     /// > 持たない（設計書 §1.3 の「不可逆でよい」）。用途は
     /// > **「元の高さからの絶対目標を計算する」ことだけ**で、セーブにも残さない。
     ///
-    /// ── タイルは 1 tick に 1 枚（罠 3）──────────────────────────
+    /// ── <c>UpdateArea</c> は 1 tick にちょうど 1 回（罠 3）────────────────
     ///
     /// <c>UpdateArea</c> は矩形が 128×128 raw セルを超えた分を**タイル分割せずに無言で
     /// 切り捨てる**（§A-1 の <c>Min(m_maxX, m_minX + 120 + 8)</c>）。加えて**単発の要求面積が
@@ -94,9 +94,44 @@ namespace DisasterPlus.Game
     /// <c>TileSplit</c> が両方を同時に満たす矩形（99×99 = 9801 セル）を返す。
     ///
     /// **全タイルを 1 tick で呼ばない。** 2 枚目以降は <c>merged &gt; 10000</c> の判定に
-    /// 掛かって毎回途中フラッシュする（§A-1 IL_00A8）。タイル数ぶんの tick をかけて
-    /// 一周すればよく、隆起は何百 tick も続くので**遅れは目に見えない**。
-    /// 継ぎ目に段差は出ない —— <c>TileAt</c> が ±2 セルの重なりを持って返すからである。
+    /// 掛かって毎回途中フラッシュする（§A-1 IL_00A8）。
+    ///
+    /// ── 流すのは「実際に変わった矩形」だけ（2026-08-20、実機の指摘⑤）──────────
+    ///
+    /// 実機の指摘は「噴火のアニメーションをもっとスムーズに（現在は断続的な
+    /// せり上がりです）」。**目に見える 1 段は「1 tick の上昇量」ではなく
+    /// 「そのタイルが再び流されるまでの上昇量」である。**
+    ///
+    /// 以前はフットプリント全体（既定 R=1200 m で 151×151）を 4 枚に割って
+    /// **1 tick 1 枚の総当たり**で流していたので、1 枚が流れ直すまで 4 tick ＝ 64 フレーム
+    /// 掛かっていた。600 m / 85 tick = 7.06 m/tick なので、**見える 1 段は 28 m**、
+    /// しかも 4 分割の四半分ずつ順番に跳ね上がる。指摘そのものである。
+    ///
+    /// 直し方は 2 つを同時にやる:
+    ///
+    ///   1. <see cref="IntervalFrames"/> を 16 → 4 にする（tick 数 85 → 341、
+    ///      1 tick の上昇 7.06 m → 1.76 m）。**ゲーム内の所要時間は変えない**
+    ///      （30 ゲーム内分のまま）ので、準備（<c>VolcanoClearing</c>）との
+    ///      追いかけっこも噴火の包絡線との関係も 1 つも変わらない。
+    ///   2. 流す矩形を**その tick に実際に書き換えたセルの外接矩形**にする。
+    ///      隆起は山頂から外へ広がるので（<c>UpliftSchedule.GrowthMetresAt</c>）、
+    ///      変わっているのは半径 R×progress の円盤だけである。既定の成層火山なら
+    ///      progress 0.63 まで 95×95 セルに収まり、その間は
+    ///      **変化した全域が毎 tick 1 回の <c>UpdateArea</c> で流れる**
+    ///      ＝ 見える 1 段が 1.76 m、15 Hz（速度 1）になる。
+    ///
+    /// 収まらなくなったら（progress 0.63 以降）今までどおりタイル総当たりに落ちる ——
+    /// そこでも 4 tick × 4 フレーム ＝ 16 フレームなので、見える 1 段は 7.0 m・3.75 Hz で、
+    /// 従来の 28 m・0.94 Hz より 4 倍細かい。
+    ///
+    /// **<c>UpdateArea</c> の回数は 1 tick に 1 回のまま**で、1 回に渡す矩形も
+    /// 99×99 = 9801 セルを超えない（<c>TileSplit.FitsSinglePass</c> が
+    /// 95 セル以下でしか単発を許さない）。増えるのは**頻度だけ**である。
+    /// 平均のフラッシュ面積は 356 → 約 1,370 セル/フレーム（既定の成層火山、
+    /// オフライン試算）。**1 フレームあたりのピークは変わらない。**
+    ///
+    /// 継ぎ目に段差は出ない —— <c>TileAt</c> / <c>ExpandForPass</c> がどちらも
+    /// ±2 セルの重なりを持って返すからである。
     ///
     /// ── 火口は <c>MakeCrater</c> をちょうど 1 回（罠 4）───────────────────
     ///
@@ -158,11 +193,42 @@ namespace DisasterPlus.Game
     /// 形態の最大（R=3000 m）でも 378² ≒ 142,884 である。
     /// <c>RawHeights</c> への書き込みは**ただの配列書き込み**で、
     /// <c>UpdateArea</c> を呼ぶまで誰も読まない（§D-12）。
+    ///
+    /// ── ファイルが 2 つに分かれている ────────────────────────────
+    ///
+    /// 地形を実際に触る部分（高さの書き込み・<c>UpdateArea</c>・火口）は
+    /// <c>VolcanoUplift.Terrain.cs</c> にある。プロジェクト規約の 800 行を超えたための
+    /// 分割で、**規律はこのクラス doc が全部持っている**
+    /// （<c>VolcanoClearing.Sweep.cs</c> / <c>VolcanoLava.Ignite.cs</c> と同じ形）。
     /// </summary>
-    public static class VolcanoUplift
+    public static partial class VolcanoUplift
     {
-        /// <summary>隆起の間隔（フレーム相当のゲーム内時間）。**毎 sim tick にしない**（§A-3）。</summary>
-        private const int IntervalFrames = 16;
+        /// <summary>
+        /// 隆起の間隔（フレーム相当のゲーム内時間）。**毎 sim tick にしない**（§A-3）。
+        ///
+        /// 16 → 4（2026-08-20、実機の指摘⑤）。**ゲーム内の所要時間は変わらない** ——
+        /// <c>VolcanoUpliftMinutes</c>（既定 30 ゲーム内分 ＝ 1365 sim フレーム）を
+        /// この間隔で割ったものが tick 数なので、間隔を 1/4 にすると tick が 4 倍になり
+        /// 1 tick の上昇が 1/4 になるだけである。準備の前線（<c>ClearingFrontMetres</c>）は
+        /// progress の関数で、progress の進み方はゲーム内時間で決まるので**変わらない**。
+        ///
+        /// **これ以上短くしないこと。** <c>UpdateArea</c> 1 回は対象矩形を detail 解像度
+        /// （raw 1 セルにつき 4×4）で走査して 1 セルあたり <c>SmoothSample</c> を 5 回呼ぶ
+        /// （§A-1）。99×99 のタイルで約 78 万回である。間隔を半分にすれば
+        /// そのぶん毎フレームの平均が倍になる。
+        ///
+        /// ★ <b>1 段は 1 sim tick に 1 回までである。</b> <c>_minutesSinceTick</c> は
+        ///   <c>interval</c> で頭打ちなので余りが繰り越されず、
+        ///   <c>m_currentFrameIndex</c> は 1 tick で <c>FinalSimulationSpeed</c>
+        ///   （速度 1/2/3 で 1/9 まで）進む。したがって 1 段の実効間隔は
+        ///   <c>max(IntervalFrames, FinalSimulationSpeed)</c> フレームで、
+        ///   **速度 2 / 3 では隆起にかかるゲーム内時間が伸びる**
+        ///   （既定で 30 分 → 45 分 / 67 分。設計書 §4.3 の表）。
+        ///   伸びる向きは安全側である —— 準備（64 フレーム間隔）は progress が
+        ///   遅くなるぶん余裕が増え、噴火は育っている間ずっと持続の入口で止まる。
+        ///   **1 tick に 2 回 <c>UpdateArea</c> を出して埋め合わせないこと。**
+        /// </summary>
+        private const int IntervalFrames = 4;
 
         /// <summary><c>RawHeights</c> の 1 行のセル数（1081²、§C-8）。</summary>
         private const int RawStride = 1081;
@@ -193,17 +259,20 @@ namespace DisasterPlus.Game
         private static int _width;
 
         private static int _tileCount;
-        private static int _tileCursor;
+
+        /// <summary>
+        /// **どの矩形をいつ流すか**を決める（<c>Core/Volcano/UpliftFlushPlan</c>）。
+        /// 判断は整数演算だけなので Core にあり、ユニットテストと
+        /// <c>tools/VolcanoPreview</c> がゲームを起動せずに同じ物を回せる。
+        /// </summary>
+        private static readonly UpliftFlushPlan _flush = new UpliftFlushPlan();
+
+        /// <summary>この tick に実際に書き換えたセルの外接矩形。<see cref="_dirtyValid"/> で有効判定。</summary>
+        private static int _dirtyMinX, _dirtyMinZ, _dirtyMaxX, _dirtyMaxZ;
+        private static bool _dirtyValid;
 
         private static int _tick;
         private static int _totalTicks;
-
-        /// <summary>
-        /// 目標に届いたあと、火口を彫るまでに残っているタイルの枚数。
-        /// <c>-1</c> は「まだ届いていない」。**この待ちを外すと山の外側が
-        /// 1 tick ぶん低いまま固まる**（<see cref="Step"/> の該当箇所）。
-        /// </summary>
-        private static int _finalFlushLeft = -1;
 
         private static float _progress;
         private static float _riseMetresPerTick;
@@ -248,6 +317,21 @@ namespace DisasterPlus.Game
             get { return _complete ? 0f : _riseMetresPerTick; }
         }
 
+        /// <summary>
+        /// 育っているセルが**1 sim フレーム**で上がる量（m）。
+        ///
+        /// ★ <see cref="RiseMetresPerTick"/> をそのまま他の機能へ渡さないこと。
+        ///   ⑤の各段は間隔が違う（隆起 <see cref="IntervalFrames"/> ＝ 4、
+        ///   溶岩 8）ので、「1 tick」の長さが揃っていない。**溶岩が要るのは
+        ///   「自分の 1 歩のあいだに地形がどれだけ上がるか」**であり、
+        ///   それはこの値に溶岩自身の間隔を掛けたものである。
+        ///   隆起の間隔を変えた瞬間に溶岩の許容差が狂うのを、この単位が防ぐ。
+        /// </summary>
+        public static float RiseMetresPerFrame
+        {
+            get { return _complete ? 0f : _riseMetresPerTick / IntervalFrames; }
+        }
+
         /// <summary>隆起が終わったか（火口も彫り終えている）。</summary>
         public static bool Complete { get { return _complete; } }
 
@@ -263,11 +347,21 @@ namespace DisasterPlus.Game
         /// <summary>直近 1 tick で実際に値が変わったセル数（0 なら丸めで消えている）。</summary>
         public static int CellsWrittenLastTick { get { return _cellsWrittenLastTick; } }
 
-        /// <summary>影響矩形を覆うタイル数（<c>TileSplit</c>）。</summary>
-        public static int TileCount { get { return _tileCount; } }
+        /// <summary>
+        /// **今この瞬間、変わった範囲を画面に出し切るのに要る <c>UpdateArea</c> の回数。**
+        ///
+        /// 1 なら「その tick に変わった全域が同じ tick で流れている」＝ いちばん滑らかな状態
+        /// （隆起の前半はここ）。2 以上なら分割してタイル総当たりに落ちており、
+        /// 見える 1 段はこの回数ぶんの上昇量になる（クラス doc の計算）。
+        /// **フットプリント全体のタイル数ではない** —— そちらは <see cref="FootprintTileCount"/>。
+        /// </summary>
+        public static int TileCount { get { return _flush.TileCount; } }
 
-        /// <summary>次に <c>UpdateArea</c> するタイルの番号。</summary>
-        public static int TileCursor { get { return _tileCursor; } }
+        /// <summary>総当たりの何枚目か。単発で流せているときは 0。</summary>
+        public static int TileCursor { get { return _flush.Cursor; } }
+
+        /// <summary>フットプリント全体を覆うタイル数（開始時に 1 回決まる）。</summary>
+        public static int FootprintTileCount { get { return _tileCount; } }
 
         /// <summary>
         /// 直近に上げられなかった理由（**英語・診断用**）。上げられていれば null。
@@ -291,10 +385,14 @@ namespace DisasterPlus.Game
             _maxZ = 0;
             _width = 0;
             _tileCount = 0;
-            _tileCursor = 0;
+            _flush.Reset();
+            _dirtyValid = false;
+            _dirtyMinX = 0;
+            _dirtyMinZ = 0;
+            _dirtyMaxX = 0;
+            _dirtyMaxZ = 0;
             _tick = 0;
             _totalTicks = 0;
-            _finalFlushLeft = -1;
             _progress = 0f;
             _riseMetresPerTick = 0f;
             _activeRadius = 0f;
@@ -376,7 +474,7 @@ namespace DisasterPlus.Game
                 footprint.HeightMetres, footprint.HeightMetres, _progress);
 
             if (!WriteHeights(footprint)) return;
-            FlushOneTile();
+            FlushPending();
 
             if (_tick < _totalTicks)
             {
@@ -388,26 +486,25 @@ namespace DisasterPlus.Game
             //    書いたのは activeRadius の内側だけなので、ここで打ち切ると
             //    activeRadius と R のあいだの帯が**元の高さのまま残る**——
             //    山の外側に環状の段差ができる。準備の走査は隆起より間隔が長い
-            //    （64 対 16 フレーム）ので、この待ちは普通に発生する。
+            //    （64 対 4 フレーム）ので、この待ちは普通に発生する。
             //    進捗はもう 1 なので、待っている間の WriteHeights は
             //    「準備が届いた分だけ」を毎 tick 埋め足していく。
             if (_activeRadius < footprint.RadiusMetres - VolcanoShape.MetresPerRawUnit) return;
 
             // ★★ **目標の高さは書き終えたが、まだ全部は見えていない。**
-            //    1 tick に流せるタイルは 1 枚なので（罠 3）、最後の書き込みが
-            //    画面に出ているのは 1 枚ぶんだけで、残りのタイルは 1 tick 前の高さ
+            //    1 tick に流せる矩形は 1 枚なので（罠 3）、最後の書き込みのうち
+            //    画面に出ているのは 1 枚ぶんだけで、残りは 1 tick 前の高さ
             //    ——山頂の 1/_totalTicks ぶん低い形——のまま止まっている。
             //    **そこで火口を彫って終わると、山の外側が永久に低いまま残る。**
-            //    全タイルをここでまとめて呼ぶと merged &gt; 10000 の判定で毎回
+            //    全タイルをここでまとめて呼ぶと merged > 10000 の判定で毎回
             //    途中フラッシュするので（§A-1 IL_00A8）、**1 tick 1 枚のまま
             //    残りを流し切ってから**火口へ進む。
-            //    この間の WriteHeights は progress = 1 のままなので 0 セルしか書かない。
-            if (_finalFlushLeft < 0) _finalFlushLeft = _tileCount - 1;
-            if (_finalFlushLeft > 0)
-            {
-                _finalFlushLeft--;
-                return;
-            }
+            //
+            //    progress = 1 に届いた以降の WriteHeights は 0 セルしか書かないので、
+            //    _flush.HasPending は流し切った時点で自然に false になる。
+            //    **枚数を数え直さないこと** —— 数えると、待っている間に届いた
+            //    最後の書き込み（準備が外周に届いた瞬間の分）を取りこぼす。
+            if (_flush.HasPending) return;
 
             // ★ 最後の 1 回。火口はここでしか彫らない（罠 4）。
             CarveCrater(footprint);
@@ -450,7 +547,6 @@ namespace DisasterPlus.Game
             }
 
             _tileCount = TileSplit.TileCountFor(_minX, _minZ, _maxX, _maxZ);
-            _tileCursor = 0;
 
             // ★ 山頂が毎 tick 1 raw 単位以上動くよう切り詰める（罠 2）。
             //   換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。
@@ -526,124 +622,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 準備が届いた範囲の全セルに、**その時刻における絶対目標**を書く（罠 2）。
-        ///
-        /// **書き込みだけで <c>UpdateArea</c> は呼ばない。** 書いた人が <c>UpdateArea</c> を
-        /// 呼ぶまで誰も読まないのが地形の規律で（§D-12）、こちらは全域へ先に行き、
-        /// 表示がタイル 1 枚ずつ追いつく形になる。
-        /// </summary>
-        private static bool WriteHeights(VolcanoFootprint footprint)
-        {
-            ushort[] raw = ReadRawHeights();
-            if (raw == null || _baseRaw == null) return false;
-
-            if (_profile == null) return false;
-
-            float centreX = footprint.Centre.X;
-            float centreZ = footprint.Centre.Z;
-            float activeSquared = _activeRadius * _activeRadius;
-            float height = footprint.HeightMetres;
-
-            int written = 0;
-
-            for (int z = _minZ; z <= _maxZ; z++)
-            {
-                float worldZ = (z - TileSplit.CellOffset) * TileSplit.RawCellSizeMetres;
-                float dz = worldZ - centreZ;
-                float dz2 = dz * dz;
-                if (dz2 > activeSquared) continue;
-
-                int rowRaw = z * RawStride;
-                int rowBase = (z - _minZ) * _width;
-
-                for (int x = _minX; x <= _maxX; x++)
-                {
-                    float worldX = (x - TileSplit.CellOffset) * TileSplit.RawCellSizeMetres;
-                    float dx = worldX - centreX;
-                    float d2 = dx * dx + dz2;
-                    if (d2 > activeSquared) continue;
-
-                    int cell = rowBase + (x - _minX);
-
-                    // ★★ **山頂から外へ広がる**（UpliftSchedule.GrowthMetresAt の doc）。
-                    //    profile × progress ではない —— あれは山全体が一様に膨らむ。
-                    float grown = UpliftSchedule.GrowthMetresAt(_profile[cell], height, _progress);
-
-                    // 絶対目標なので progress は 1 を渡す（grown が既に「今の高さ」である）。
-                    ushort target = UpliftSchedule.RawTargetAt(_baseRaw[cell], grown, 1f);
-
-                    int index = rowRaw + x;
-                    // ★ バニラの MakeCrater と同じ「変わったときだけ書く」（§C-8 IL_01E7）。
-                    if (raw[index] == target) continue;
-
-                    raw[index] = target;
-                    written++;
-                }
-            }
-
-            _cellsWrittenLastTick = written;
-            return true;
-        }
-
-        /// <summary>
-        /// タイルを 1 枚だけ <c>UpdateArea</c> する（罠 3）。
-        ///
-        /// **<c>TileAt</c> が返すのは「そのまま渡す矩形」である。** ここで margin を
-        /// 足し直してはいけない —— 足すと 103×103 = 10609 セルになり、10000 の閾値を
-        /// 跨いで毎回フラッシュする（<c>TileSplit</c> のクラス doc）。
-        ///
-        /// <c>surface</c> / <c>zones</c> を false にしてあるのはバニラの <c>MakeCrater</c> /
-        /// <c>MakeCrack</c> と同じ引数だからである（§C-8 IL_021C）。
-        /// </summary>
-        private static void FlushOneTile()
-        {
-            if (_tileCount <= 0) return;
-
-            int tMinX, tMinZ, tMaxX, tMaxZ;
-            if (!TileSplit.TileAt(_tileCursor, _minX, _minZ, _maxX, _maxZ,
-                                  out tMinX, out tMinZ, out tMaxX, out tMaxZ))
-            {
-                _tileCursor = 0;
-                return;
-            }
-
-            TerrainModify.UpdateArea(tMinX, tMinZ, tMaxX, tMaxZ, true, false, false);
-
-            _tileCursor++;
-            if (_tileCursor >= _tileCount) _tileCursor = 0;
-        }
-
-        /// <summary>
-        /// 山頂の火口。**⑤全体で <c>MakeCrater</c> を呼ぶのはこの 1 箇所・1 回だけ**（罠 4）。
-        ///
-        /// <c>raiseEdges: true</c> は「深さ 0.7×depth の穴」＋「0.75r に高さ 0.3×depth の
-        /// 環状の縁」（§C-8 の実測表）。火口そのものである。
-        /// <c>VolcanoShape.HeightFor</c> がこの縁の分（<c>CraterRimHeadroomOf</c>）を
-        /// 先に天井から引いてあるので、天井ぎりぎりの山でも縁だけが切られて円環が
-        /// 平らになることはない（§C-10）。
-        ///
-        /// 火口の半径は 400 m 以下（<c>CraterRadiusOf</c> がクランプ）なので、
-        /// <c>MakeCrater</c> が自分で出す矩形は最大 53 セル角 = 2809 セルに収まり、
-        /// 128 セルと 10000 セルの両方の閾値の内側である。
-        /// </summary>
-        private static void CarveCrater(VolcanoFootprint footprint)
-        {
-            if (_craterCarved) return;
-            _craterCarved = true;
-
-            float craterRadius = VolcanoShape.CraterRadiusOf(footprint.RadiusMetres);
-            float craterDepth = VolcanoShape.CraterDepthOf(footprint.HeightMetres);
-            if (!(craterRadius > 0f) || !(craterDepth > 0f)) return;
-
-            DisasterHelpers.MakeCrater(
-                new Vector2(footprint.Centre.X, footprint.Centre.Z),
-                craterRadius, craterDepth, true);
-
-            Log.Info("volcano summit crater carved: r=" + craterRadius.ToString("F0")
-                     + " m, depth=" + craterDepth.ToString("F0") + " m");
-        }
-
-        /// <summary>
         /// <c>RawHeights</c> を取る。**長さが 1081² でなければ 1 セルも書かない** ——
         /// <c>z*1081 + x</c> の添字が別のセルを指し、**マップの無関係な場所が隆起する**
         /// （<see cref="VolcanoTerrainFacts.Usable"/> と同じ述語）。
@@ -704,7 +682,13 @@ namespace DisasterPlus.Game
                 + " summit=" + _summitMetres.ToString("F1")
                 + " active=" + _activeRadius.ToString("F0")
                 + " cells=" + _cellsWrittenLastTick
-                + " tile=" + _tileCursor + "/" + _tileCount
+                // ★ flush=1/1 は「この tick に変わった全域が同じ tick で画面に出た」
+                //   ＝ いちばん滑らかな状態。2 以上なら分割して総当たりに落ちており、
+                //   見える 1 段はその枚数ぶんの上昇量になる（クラス doc）。
+                + " flush=" + _flush.Cursor + "/" + _flush.TileCount
+                + " rect=" + (_dirtyValid ? (_dirtyMaxX - _dirtyMinX + 1) + "x"
+                                            + (_dirtyMaxZ - _dirtyMinZ + 1) : "0")
+                + " tiles=" + _tileCount
                 + (_craterCarved ? " crater=carved" : "")
                 + (_complete ? " (complete)" : ""));
         }

@@ -66,6 +66,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             }
 
             GrowthFrames(outDir, log);
+            Pacing.Report(outDir, log);
 
             File.WriteAllText(Path.Combine(outDir, "measurements.txt"), log.ToString());
             Console.Write(log.ToString());

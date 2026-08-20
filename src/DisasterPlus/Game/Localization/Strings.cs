@@ -1022,7 +1022,12 @@ namespace DisasterPlus.Game
         public static string VolcanoSummitRow = "Summit";
         public static string VolcanoActiveRadiusRow =
             "Active radius (as far as the clearing has reached)";
-        public static string VolcanoTilesRow = "Terrain tiles updated";
+        // ★ 2026-08-20 に意味が変わった行（実機の指摘⑤）。以前は「フットプリントを
+        //   覆うタイルのうち何枚目か」だったが、⑤は今、**その tick に実際に変わった
+        //   範囲だけ**を流す。プレイヤーにとって意味があるのは「変わった分が画面に
+        //   出るまでに地形更新が何回要るか」で、1 なら同じ tick で全部出ている
+        //   ＝ いちばん滑らかな状態である（VolcanoUplift のクラス doc）。
+        public static string VolcanoTilesRow = "Terrain updates per step";
         public static string VolcanoUpliftMinutes = "Time the uplift takes (in-game minutes)";
         public static string VolcanoReliefStrength = "Relief on the mountain's flanks (%, 0 = a smooth cone)";
 
