@@ -275,6 +275,7 @@ VolcanoSummitRow = Summit
 VolcanoActiveRadiusRow = Active radius (as far as the clearing has reached)
 VolcanoTilesRow = Terrain tiles updated
 VolcanoUpliftMinutes = Time the uplift takes (in-game minutes)
+VolcanoReliefStrength = Relief on the mountain's flanks (%, 0 = a smooth cone)
 VolcanoCatchUpRow = Buildable ground catches up in
 VolcanoFrames = simulation frames
 VolcanoCraterCarved = Summit crater carved.

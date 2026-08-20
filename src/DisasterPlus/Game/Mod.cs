@@ -1,5 +1,6 @@
 using ICities;
 using DisasterPlus.Core.FireWhirl;
+using DisasterPlus.Core.Volcano;
 
 namespace DisasterPlus.Game
 {
@@ -258,6 +259,16 @@ namespace DisasterPlus.Game
             volcano.AddSlider(Strings.VolcanoUpliftMinutes, 5f, 240f, 5f,
                 ModSettings.VolcanoUpliftMinutes.value,
                 v => ModSettings.VolcanoUpliftMinutes.value = (int)v);
+
+            // ★ 山肌の凹凸の強さ（%）。**0 で今日どおりの滑らかな円錐**に戻る。
+            //   形態ごとの性格（谷の本数・波長・粗さ）は Core/Volcano/VolcanoRelief が
+            //   持っていて、ここはその全体倍率 1 本だけである（つまみを増やさない）。
+            //   起伏は半径 R と最終高 H を決して超えない —— 掛け算だけで作ってあり、
+            //   実効半径は縮む向きにしか動かない（VolcanoRelief のクラス doc）。
+            volcano.AddSlider(Strings.VolcanoReliefStrength,
+                0f, VolcanoRelief.MaxStrengthUnit * 100f, 10f,
+                ModSettings.VolcanoReliefStrength.value,
+                v => ModSettings.VolcanoReliefStrength.value = (int)v);
 
             // ★ 噴煙を描くか（T7）。**描画は main スレッドだけの機能**なので、
             //    切っても隆起は同じように進む（実機チェックリストの項目でもある）。

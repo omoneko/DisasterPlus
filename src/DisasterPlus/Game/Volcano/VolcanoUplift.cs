@@ -41,6 +41,36 @@ namespace DisasterPlus.Game
     /// 山頂だけは毎 tick 動かなければならないので、<c>UpliftSchedule.TotalTicksFor</c> が
     /// 要求 tick 数を <c>H×64</c> で切り詰める。**この切り詰めを外さないこと。**
     ///
+    /// ── 山は一様に膨らむのではなく、山頂から外へ広がる ───────────────
+    ///
+    /// 1 セルの目標は <c>profile × progress</c> **ではない**。あれは山全体が同じ割合で
+    /// 膨らむので、完成した山が音もなく地面から膨らんだように見える。
+    /// SimCity 4 の隆起は逆で、噴出したものが**積もって**山になる。式は
+    /// <c>UpliftSchedule.GrowthMetresAt</c> の 1 行:
+    ///
+    /// <code>
+    /// grown(d, p) = max(0, profile(d) − H·(1 − p))
+    /// </code>
+    ///
+    /// つまり「最終形を H(1−p) だけ地面へ沈めて、出ている分だけが今の山」である。
+    /// 直線の円錐（成層）なら前線はちょうど <c>R·p</c> で、
+    /// <c>UpliftSchedule.ClearingFrontMetres</c> が先行させる準備の前線と噛み合う。
+    ///
+    /// **罠 2 に対してはむしろ強くなる。** 育っているセルは<b>どれも同じ速さ</b>
+    /// <c>H/totalTicks</c> で上がる（<see cref="RiseMetresPerTick"/>）ので、
+    /// <c>TotalTicksFor</c> の切り詰めが**全セル**に効く。
+    /// <c>profile × progress</c> では外周ほど 1 tick の変化が小さく、
+    /// 「合計の盛り上がりが小さいセル」は丸めで消えていた。
+    ///
+    /// ── 山肌の凹凸は開始時に 1 回だけ焼く（<see cref="_profile"/>）──────────
+    ///
+    /// 形は <c>Core/Volcano/VolcanoRelief</c> が決める。半径 R も最終高 H も
+    /// **決して超えない** —— 実効半径は縮む向きにしか動かず、起伏は削る向きにしか
+    /// 働かない（掛け算だけで組んである。あちらのクラス doc）。
+    /// 設定 <c>ModSettings.VolcanoReliefStrength</c> が 0 なら
+    /// <c>VolcanoShape.ProfileAt</c> そのものに戻り、**今日の出力と 1 bit も違わない**。
+    /// 1 セル 300 flop ほどあるので**毎 tick は呼ばない**。
+    ///
     /// ── <see cref="_baseRaw"/> は開始時に 1 回だけ控える ───────────────────
     ///
     /// **毎 tick 読み直してはいけない。** 読み直すと⑤が前 tick に書いた値が「元の高さ」に
@@ -117,6 +147,11 @@ namespace DisasterPlus.Game
     /// 準備段がフットプリント内の建物を取り除いているので残るのは⑤が壊せなかった建物だけだが、
     /// その規模は <c>VolcanoClearing.LastBuildingsRefused</c> がそのまま示す（診断に出す）。
     ///
+    /// 開始時に 1 回だけ <c>float[]</c> 1 枚（<see cref="_profile"/>）を焼く。
+    /// 実費は影響矩形ぶんの float で、半径 3 km の最大で 378² × 4 B = 558 KB。
+    /// 焼いてしまえば毎 tick の仕事は引き算 1 本だけになり、
+    /// 今日の「<c>sqrt</c> ＋ <c>ProfileAt</c>」より**むしろ安い**。
+    ///
     /// 1 tick の上限は<b>影響矩形のセル数ぶんの配列書き込み 1 回</b>と
     /// <b><c>UpdateArea</c> ちょうど 1 回（99×99 = 9801 セル）</b>。
     /// 矩形は半径 R で <c>(2R/16 + 3)²</c> セル —— 既定の成層火山（R=1200 m）で 153² ≒ 23,409、
@@ -141,6 +176,19 @@ namespace DisasterPlus.Game
         /// </summary>
         private static ushort[] _baseRaw;
 
+        /// <summary>
+        /// 開始時に 1 回だけ焼いた「最終形の盛り上がり」（m）。<see cref="_baseRaw"/> と同じ並び。
+        ///
+        /// <c>VolcanoRelief.ProfileAt</c> は 1 セル 300 flop ほどあるので、**毎 tick
+        /// 全セルぶん呼ばない**。焼いてしまえば毎 tick の仕事は
+        /// <c>UpliftSchedule.GrowthMetresAt</c>（引き算 1 本）だけになり、
+        /// 今日の「sqrt ＋ ProfileAt」より**むしろ安くなる**。
+        /// float で持つのは、強さ 0 のときに今日の出力と 1 bit も違わないようにするため
+        /// （raw 単位へ丸めて持つと二重丸めで 1/64 m ずれる）。
+        /// 半径 3 km の最大で 378² × 4 B = 558 KB。火口を彫ったら捨てる。
+        /// </summary>
+        private static float[] _profile;
+
         private static int _minX, _minZ, _maxX, _maxZ;
         private static int _width;
 
@@ -158,6 +206,7 @@ namespace DisasterPlus.Game
         private static int _finalFlushLeft = -1;
 
         private static float _progress;
+        private static float _riseMetresPerTick;
         private static float _activeRadius;
         private static float _summitMetres;
         private static int _cellsWrittenLastTick;
@@ -184,6 +233,20 @@ namespace DisasterPlus.Game
 
         /// <summary>今の山頂の盛り上がり（m）。元の地形高さからの相対量である。</summary>
         public static float SummitMetres { get { return _summitMetres; } }
+
+        /// <summary>
+        /// 育っているセルが 1 tick で上がる量（m）。**山頂から外へ広がる隆起では
+        /// どのセルも同じ速さで上がる**（<c>UpliftSchedule.GrowthMetresAt</c> の doc）。
+        ///
+        /// <c>VolcanoLava</c> がこれを「地形が上がっているぶんの許容差」として使う ——
+        /// 隆起の途中に出した溶岩は、進んだ先の標高が**溶岩のせいではなく山のせいで**
+        /// 上がることがあり、その分を許さないと下り勾配の符号の観測が誤って発火する。
+        /// 隆起が終わっていれば 0 である。
+        /// </summary>
+        public static float RiseMetresPerTick
+        {
+            get { return _complete ? 0f : _riseMetresPerTick; }
+        }
 
         /// <summary>隆起が終わったか（火口も彫り終えている）。</summary>
         public static bool Complete { get { return _complete; } }
@@ -221,6 +284,7 @@ namespace DisasterPlus.Game
             // ★ 退避配列は必ず捨てる。半径 3 km で 279 KB あり、都市をまたいで
             //    持ち越すと前の都市の地形を「元の高さ」として名乗ることになる。
             _baseRaw = null;
+            _profile = null;
             _minX = 0;
             _minZ = 0;
             _maxX = 0;
@@ -232,6 +296,7 @@ namespace DisasterPlus.Game
             _totalTicks = 0;
             _finalFlushLeft = -1;
             _progress = 0f;
+            _riseMetresPerTick = 0f;
             _activeRadius = 0f;
             _summitMetres = 0f;
             _cellsWrittenLastTick = 0;
@@ -306,7 +371,9 @@ namespace DisasterPlus.Game
             _minutesSinceTick = 0f;
 
             _progress = UpliftSchedule.ProgressAt(_tick, _totalTicks);
-            _summitMetres = footprint.HeightMetres * _progress;
+            // 山頂のプロファイルは H なので、山頂の盛り上がりは今も H×progress である。
+            _summitMetres = UpliftSchedule.GrowthMetresAt(
+                footprint.HeightMetres, footprint.HeightMetres, _progress);
 
             if (!WriteHeights(footprint)) return;
             FlushOneTile();
@@ -350,6 +417,7 @@ namespace DisasterPlus.Game
 
             // もう使わない。メモリを返す（クラス doc の実費表）。
             _baseRaw = null;
+            _profile = null;
         }
 
         /// <summary>
@@ -392,13 +460,69 @@ namespace DisasterPlus.Game
                 : 1;
             _totalTicks = UpliftSchedule.TotalTicksFor(footprint.HeightMetres, requestedTicks);
 
+            // ★ 育っているセルはどれも同じ速さで上がる（GrowthMetresAt の doc）。
+            //   TotalTicksFor が totalTicks を H×64 で切り詰めているので、
+            //   これは必ず 1 raw 単位（1/64 m）以上である。
+            _riseMetresPerTick = footprint.HeightMetres / _totalTicks;
+
+            BakeProfile(footprint, height);
+
             _centre = footprint.Centre;
             _started = true;
             _lastFailure = null;
 
             Log.Info("volcano uplift started: rect " + _width + "x" + height
-                     + " cells, " + _tileCount + " tiles, " + _totalTicks + " ticks");
+                     + " cells, " + _tileCount + " tiles, " + _totalTicks + " ticks, relief "
+                     + ModSettings.VolcanoReliefStrength.value + "%");
             return true;
+        }
+
+        /// <summary>
+        /// 最終形の盛り上がりを 1 回だけ全セルぶん焼く（<see cref="_profile"/>）。
+        ///
+        /// **ここが⑤で唯一 <c>VolcanoRelief</c> を呼ぶ場所である。** 毎 tick 呼ぶと
+        /// 半径 3 km で 1 tick 当たり 14 万セル × 300 flop になる。
+        /// 種は火山の地点から出す（<c>VolcanoEruption</c> / <c>VolcanoLava</c> と同じ作り方）
+        /// ので、**同じ場所に作り直せば同じ山が生える**。
+        /// <c>VanillaRandomizer</c> は使わない —— ⑤はバニラの災害スロットに載らないので、
+        /// 同期すべきバニラの引きが構造上 1 つも存在しない。
+        /// </summary>
+        private static void BakeProfile(VolcanoFootprint footprint, int height)
+        {
+            uint seed = DeterministicRandom.Hash(
+                unchecked((uint)Mathf.RoundToInt(footprint.Centre.X)),
+                unchecked((uint)Mathf.RoundToInt(footprint.Centre.Z)));
+
+            var relief = VolcanoRelief.For(footprint.Form, seed,
+                                           ModSettings.VolcanoReliefStrength.value / 100f);
+
+            float centreX = footprint.Centre.X;
+            float centreZ = footprint.Centre.Z;
+            float radius = footprint.RadiusMetres;
+            float metres = footprint.HeightMetres;
+            float radiusSquared = radius * radius;
+
+            _profile = new float[_width * height];
+
+            for (int z = 0; z < height; z++)
+            {
+                float worldZ = (_minZ + z - TileSplit.CellOffset) * TileSplit.RawCellSizeMetres;
+                float dz = worldZ - centreZ;
+                float dz2 = dz * dz;
+                if (dz2 > radiusSquared) continue;
+
+                int row = z * _width;
+                for (int x = 0; x < _width; x++)
+                {
+                    float worldX = (_minX + x - TileSplit.CellOffset) * TileSplit.RawCellSizeMetres;
+                    float dx = worldX - centreX;
+                    if (dx * dx + dz2 > radiusSquared) continue;
+
+                    // ★★ **半径の外は 0、最終高 H は超えない。** VolcanoRelief が
+                    //    掛け算だけで構造的に守っている（あちらのクラス doc）。
+                    _profile[row + x] = relief.ProfileAt(dx, dz, radius, metres);
+                }
+            }
         }
 
         /// <summary>
@@ -413,12 +537,12 @@ namespace DisasterPlus.Game
             ushort[] raw = ReadRawHeights();
             if (raw == null || _baseRaw == null) return false;
 
+            if (_profile == null) return false;
+
             float centreX = footprint.Centre.X;
             float centreZ = footprint.Centre.Z;
             float activeSquared = _activeRadius * _activeRadius;
-            float radius = footprint.RadiusMetres;
             float height = footprint.HeightMetres;
-            VolcanoForm form = footprint.Form;
 
             int written = 0;
 
@@ -439,11 +563,14 @@ namespace DisasterPlus.Game
                     float d2 = dx * dx + dz2;
                     if (d2 > activeSquared) continue;
 
-                    float d = (float)Math.Sqrt(d2);
-                    float profile = VolcanoShape.ProfileAt(form, d, radius, height);
+                    int cell = rowBase + (x - _minX);
 
-                    ushort target = UpliftSchedule.RawTargetAt(
-                        _baseRaw[rowBase + (x - _minX)], profile, _progress);
+                    // ★★ **山頂から外へ広がる**（UpliftSchedule.GrowthMetresAt の doc）。
+                    //    profile × progress ではない —— あれは山全体が一様に膨らむ。
+                    float grown = UpliftSchedule.GrowthMetresAt(_profile[cell], height, _progress);
+
+                    // 絶対目標なので progress は 1 を渡す（grown が既に「今の高さ」である）。
+                    ushort target = UpliftSchedule.RawTargetAt(_baseRaw[cell], grown, 1f);
 
                     int index = rowRaw + x;
                     // ★ バニラの MakeCrater と同じ「変わったときだけ書く」（§C-8 IL_01E7）。

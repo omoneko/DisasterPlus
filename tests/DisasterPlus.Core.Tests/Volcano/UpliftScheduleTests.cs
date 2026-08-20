@@ -134,5 +134,93 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.Equal(0f, UpliftSchedule.ProgressAt(5, -3), 4);
             Assert.Equal(0.5f, UpliftSchedule.ProgressAt(50, 100), 4);
         }
+        // ── 山頂から外へ広がる隆起（GrowthMetresAt）──────────────────
+
+        [Fact]
+        public void GrowthStartsAtNothingAndEndsAtTheFinalProfile()
+        {
+            Assert.Equal(0f, UpliftSchedule.GrowthMetresAt(300f, 600f, 0f), 4);
+            Assert.Equal(300f, UpliftSchedule.GrowthMetresAt(300f, 600f, 1f), 4);
+            Assert.Equal(600f, UpliftSchedule.GrowthMetresAt(600f, 600f, 1f), 4);
+        }
+
+        [Fact]
+        public void TheSummitStillRisesInProportionToProgress()
+        {
+            // 山頂のプロファイルは H なので、山頂の盛り上がりは H×progress のままである
+            // （パネルと診断が出している「今の山頂」の意味を変えない）。
+            for (float p = 0f; p <= 1f; p += 0.05f)
+            {
+                Assert.Equal(600f * p, UpliftSchedule.GrowthMetresAt(600f, 600f, p), 3);
+            }
+        }
+
+        [Fact]
+        public void TheFrontExpandsOutwardAsProgressAdvances()
+        {
+            // ★★ 本タスクそのもの。山が一様に膨らむのではなく、山頂から外へ広がること。
+            //    直線の円錐（成層）なら、progress p で地表に出ているのは d < R·p である。
+            const float r = 1200f, h = 600f;
+            float previousFront = -1f;
+
+            for (float p = 0.1f; p <= 1.0f; p += 0.1f)
+            {
+                float front = 0f;
+                for (float d = 0f; d <= r; d += 1f)
+                {
+                    float profile = VolcanoShape.ProfileAt(VolcanoForm.Strato, d, r, h);
+                    if (UpliftSchedule.GrowthMetresAt(profile, h, p) > 0f) front = d;
+                }
+
+                Assert.True(front > previousFront, "the front went backwards at p=" + p);
+                Assert.True(front <= r, "the front left the radius at p=" + p);
+                // 直線の円錐なら前線はちょうど R·p（走査の刻み 1 m ぶんだけ内側で見つかる）。
+                Assert.InRange(front, r * p - 2f, r * p);
+                previousFront = front;
+            }
+        }
+
+        [Fact]
+        public void EveryGrowingCellRisesByTheSameAmountEachTick()
+        {
+            // ★★ 罠 2 に対してむしろ強い。profile × progress では外周ほど 1 tick の
+            //    変化が小さく、合計の盛り上がりが小さいセルは丸めで消えていた。
+            //    この式では育っているセルはどれも H/totalTicks だけ上がる。
+            const float h = 600f;
+            int ticks = UpliftSchedule.TotalTicksFor(h, 85);
+            float expected = h / ticks;
+
+            Assert.True(expected >= 1f / UpliftSchedule.RawUnitsPerMetre,
+                "a tick moves less than one raw unit: " + expected);
+
+            foreach (float profile in new float[] { 600f, 300f, 120f, 20f, 0.5f })
+            {
+                for (int t = 1; t < ticks; t++)
+                {
+                    float a = UpliftSchedule.GrowthMetresAt(profile, h,
+                                  UpliftSchedule.ProgressAt(t - 1, ticks));
+                    float b = UpliftSchedule.GrowthMetresAt(profile, h,
+                                  UpliftSchedule.ProgressAt(t, ticks));
+
+                    Assert.True(b >= a, "a cell went down between ticks");
+                    // 育っている最中（0 でも頭打ちでもない）なら、上がる量は H/ticks である。
+                    if (a > 0f && b < profile) Assert.Equal(expected, b - a, 2);
+                }
+            }
+        }
+
+        [Fact]
+        public void GrowthIsNeverNegativeAndNeverPassesTheProfile()
+        {
+            for (float p = -1f; p <= 2f; p += 0.05f)
+            {
+                float v = UpliftSchedule.GrowthMetresAt(250f, 600f, p);
+                Assert.InRange(v, 0f, 250f);
+            }
+            Assert.Equal(0f, UpliftSchedule.GrowthMetresAt(float.NaN, 600f, 0.5f), 4);
+            Assert.Equal(0f, UpliftSchedule.GrowthMetresAt(250f, float.NaN, 0.5f), 4);
+            Assert.Equal(0f, UpliftSchedule.GrowthMetresAt(250f, 600f, float.NaN), 4);
+            Assert.Equal(0f, UpliftSchedule.GrowthMetresAt(-5f, 600f, 0.5f), 4);
+        }
     }
 }

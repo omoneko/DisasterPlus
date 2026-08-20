@@ -274,6 +274,7 @@ VolcanoSummitRow = 山頂
 VolcanoActiveRadiusRow = 有効半径（準備が届いた範囲）
 VolcanoTilesRow = 更新したタイル
 VolcanoUpliftMinutes = 隆起にかける時間（ゲーム内分）
+VolcanoReliefStrength = 山肌の凹凸の強さ（%、0 で滑らかな円錐）
 VolcanoCatchUpRow = 「建てられる地面」が追いつくまで
 VolcanoFrames = シミュレーションフレーム
 VolcanoCraterCarved = 山頂の火口を彫りました。
