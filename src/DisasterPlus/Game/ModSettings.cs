@@ -42,7 +42,7 @@ namespace DisasterPlus.Game
         /// ★★ **退役した保存キー（forecastButtonX/Y・earthquakeButtonX/Y・
         ///     typhoonButtonX/Y・volcanoButtonX/Y の 8 本）。**
         ///
-        /// ①〜⑤のボタンはバニラの災害パネルの中に置かれるようになり、位置は
+        /// ①②④⑤のボタンはバニラの災害パネルの中に置かれるようになり、位置は
         /// パネル自身の autolayout が決める（<c>DisasterPanelBar</c>）。したがって
         /// この 8 本を読む場所はもう 1 つも無い。
         ///

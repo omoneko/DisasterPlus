@@ -206,7 +206,7 @@ namespace DisasterPlus.Game
             // 災害パネルはロード直後にはまだ無いことがある。見つかるまで間隔をあけて再試行する。
             IntensityUnlock.Tick();
 
-            // ①〜⑤のボタンはこの 1 か所が持つ。機能ごとに Tick を呼ばせると、
+            // ①②④⑤のボタンはこの 1 か所が持つ。機能ごとに Tick を呼ばせると、
             // 位置を決める主体がまた 5 つに戻る（DisasterPanelBar のクラス doc）。
             DisasterPanelBar.Tick();
 

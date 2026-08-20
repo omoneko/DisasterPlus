@@ -103,7 +103,7 @@ namespace DisasterPlus.Game
         /// <summary>main スレッド。パネル・ボタンの設置と、表示中のみの内容更新はここから。</summary>
         public void OnMainThreadUpdate()
         {
-            // ボタンは DisasterPanelBar が 5 個まとめて持つ（FeatureHost が呼ぶ）。
+            // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
             EarthquakePanel.Tick();
 
             // ★ パネルが閉じていても必ず呼ぶ。カメラの揺れはパネルの表示物ではなく、
@@ -428,7 +428,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
-            // ボタンは②専用ではなく DisasterPanelBar が 5 個まとめて置く。座標は
+            // ボタンは②専用ではなく DisasterPanelBar が 4 個まとめて置く。座標は
             // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
             b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdEarthquake)
                 ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");

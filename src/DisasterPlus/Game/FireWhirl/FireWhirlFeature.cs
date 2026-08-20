@@ -264,8 +264,8 @@ namespace DisasterPlus.Game
         {
             FireWhirlFlameFx.Sync();
 
-            // 災害パネルはレベルロード時点ではまだ構築されていないことがある。
-            // その再試行は DisasterPanelBar が 5 個ぶんまとめて持つ（FeatureHost が呼ぶ）。
+            // ★ ③に災害パネルのタイルは無い（クラス doc）。ここで設置の再試行を
+            //   することも、DisasterPanelBar に③の行があることも、もう無い。
         }
 
         public void OnLevelUnloading()
