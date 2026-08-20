@@ -96,7 +96,6 @@ namespace DisasterPlus.Game
         // 診断が機能ごとの設置状況を引くための識別子。表示文字列ではない。
         public const string IdForecast = "forecast";
         public const string IdEarthquake = "earthquake";
-        public const string IdFireWhirl = "firewhirl";
         public const string IdTyphoon = "typhoon";
         public const string IdVolcano = "volcano";
 
@@ -158,11 +157,14 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// **並ぶ順序はこの 1 本の並びだけが決める。** 追加するときはここに 1 行足す
-        /// （座標を発明しないこと）。番号順（①予報 ②地震 ③火災旋風 ④台風 ⑤火山）。
+        /// （座標を発明しないこと）。番号順（①予報 ②地震 ④台風 ⑤火山）。
         ///
-        /// ③だけ <c>Wanted</c> が常に true なのは、以前からそうだったからである
-        /// （旧 FireWhirlPanelButton は設定を見ずに常に設置していた）。ここで
-        /// 挙動を変えると、この変更が「配置の付け替え」以外のことをしたことになる。
+        /// ★★ **③火災旋風のタイルはここに無い。**「火災旋風は意図的に起こせるもの
+        ///    ではなく、大火事のときにだけ自然発生する」という所有者の決定により、
+        ///    手動発生の経路（旧 <c>FireWhirlPlacementTool</c>）ごと撤去した
+        ///    （<see cref="FireWhirlFeature"/> のクラス doc）。**何もしないタイルを
+        ///    残さない**ためにタイル自体を消してあるので、③の行をここに足し直さないこと。
+        ///    ③の状態は診断（オーバーレイ／ダンプ）で読む。
         ///
         /// この並びは都市をまたいで生き残る static だが、持っている Unity オブジェクトは
         /// <see cref="Remove"/> が要素ごとに null へ戻す（並びそのものを見て
@@ -183,13 +185,6 @@ namespace DisasterPlus.Game
                       delegate { return ModSettings.EarthquakeEnabled.value; },
                       EarthquakePanel.Toggle,
                       EarthquakePanel.Hide),
-
-            new Entry(IdFireWhirl,
-                      delegate { return Strings.FireWhirlName; },
-                      delegate { return Strings.FireWhirlTooltip; },
-                      delegate { return true; },
-                      FireWhirlPlacementTool.Activate,
-                      null),
 
             new Entry(IdTyphoon,
                       delegate { return Strings.TyphoonTitle; },

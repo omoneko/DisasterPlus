@@ -8,6 +8,21 @@ namespace DisasterPlus.Game
 {
     /// <summary>
     /// ③火災旋風。密集火災を検出して竜巻を生成し、その場に留めて延焼を撒く。
+    ///
+    /// ── ★★ 火災旋風はプレイヤーが起こすものではない ────────────────────
+    ///
+    /// 以前は災害パネルに③のタイルがあり、<c>FireWhirlPlacementTool</c> で
+    /// クリック地点に強制発生させられた。**その経路は撤去した**（設計書 §5.3）。
+    /// 火災旋風は大火災の**結果**として自然に生まれる現象であって、召喚できる
+    /// ものではない、というのが本 MOD の立場である。したがって
+    /// <see cref="TrySpawnNew"/> が唯一の発生経路になった。
+    ///
+    /// 経路が 1 本になった代償は「既定の状態が『何も起きない』になった」ことで、
+    /// 実機テストではそれが「壊れているのか、まだ火が足りないのか分からない」に
+    /// 直結する（実際に <c>DIAG fireWhirl: burning=0 active=0</c> だけが出た
+    /// セッションの報告がある）。だから**発生条件の不足そのものを診断に出す** ——
+    /// <see cref="DisasterPlus.Core.FireWhirl.FireWhirlProspect"/> がその値で、
+    /// <see cref="_prospect"/> に毎 tick 控えて <see cref="WriteDiagnostics"/> が出す。
     /// </summary>
     public class FireWhirlFeature : IDisasterFeature
     {
@@ -31,24 +46,36 @@ namespace DisasterPlus.Game
         /// <summary>終了処理が終わらない旋風を一度でも報告したか。ログを 1 回に留めるため。</summary>
         private bool _endingStallLogged;
 
+        /// <summary>
+        /// 直近の判定パスが見た「発生条件の充足ぐあい」。**sim スレッドだけが読み書きする**
+        /// （<see cref="OnSimulationTick"/> が書き、<c>WriteDiagnostics</c> が読む。
+        /// どちらも sim スレッドなのでロックは要らない）。
+        /// </summary>
+        private FireWhirlProspect _prospect;
+
+        /// <summary>この tick に判定パスを回したか。false のときの <see cref="_prospect"/> は古い。</summary>
+        private bool _prospectFresh;
+
         public void OnLevelLoaded()
         {
             _scanner.Reset();
             FireWhirlSpawner.Reset();
             FireWhirlDamage.Reset();
             _endingStallLogged = false;
+            _prospect = new FireWhirlProspect();
+            _prospectFresh = false;
             HarmonyBootstrap.Install();
 
-            // ツール登録は毎レベルロード必要（ToolController.m_tools はレベル毎に再構築される）。
-            ToolRegistration.Register<FireWhirlPlacementTool>();
-            // ボタンの設置は DisasterPanelBar が 5 個まとめて行う（FeatureHost が呼ぶ）。
+            // ★ ここに ToolRegistration.Register<...>() は無い。③に配置ツールは無く、
+            //   プレイヤーが火災旋風を起こす経路も無い（クラス doc）。
+            // ボタンの設置は DisasterPanelBar が行う（FeatureHost が呼ぶ）。③のタイルは無い。
         }
 
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
             // Natural Disasters DLC が無いと竜巻の DisasterInfo が存在しない。
             // FindTornadoInfo はその都度警告を出すので、DLC 無しの都市では毎 tick 呼ばない。
-            if (!ModCompat.NaturalDisastersOwned) return;
+            if (!ModCompat.NaturalDisastersOwned) { _prospectFresh = false; return; }
 
             // 保守処理（紐づけ・解体済みの回収・クールダウン）は設定に関係なく必ず回す。
             // ここを設定で止めると、機能を OFF にした瞬間にレジストリだけが残り、
@@ -64,6 +91,7 @@ namespace DisasterPlus.Game
                 // 途中で OFF にされた / OFF のままセーブを読んだ場合。
                 // 生存中の旋風はバニラの解体経路に乗せて畳む。
                 EndAllLiveWhirls();
+                _prospectFresh = false;
                 return;
             }
 
@@ -102,8 +130,13 @@ namespace DisasterPlus.Game
                 FeatureHost.ClearDegraded(FeatureName, BarrenSpreadNote);
             }
 
+            // ★ 「何も起きていない」を 1 行で読み解けるようにする。burning=0 active=0 だけを
+            //   出していた頃は、これが「まだ火が足りない」なのか「壊れている」なのか
+            //   実機テストから判断できなかった（クラス doc）。
             Log.Diag("fireWhirl",
-                "burning=" + burning.Count + " active=" + FireWhirlRegistry.Count);
+                "burning=" + burning.Count + " active=" + FireWhirlRegistry.Count
+                + " densest=" + _prospect.DensestCount + "/" + _prospect.RequiredCount
+                + " cooldown=" + FireWhirlRegistry.CoolingCount);
         }
 
         /// <summary>
@@ -207,7 +240,11 @@ namespace DisasterPlus.Game
 
         private void TrySpawnNew(FireWhirlConfig config, IList<BurningBuilding> burning)
         {
-            var candidates = FireWhirlDetector.Detect(burning, config, FireWhirlRegistry.Centers());
+            // ★ 判定と「なぜ出なかったか」は同じ 1 パスで受け取る。別に数え直すと、
+            //   診断が本判定と食い違う（FireWhirlProspect のクラス doc）。
+            var candidates = FireWhirlDetector.Detect(burning, config,
+                                                      FireWhirlRegistry.Centers(), out _prospect);
+            _prospectFresh = true;
             if (candidates.Count == 0) return;
 
             // 1 tick に 1 基まで。連鎖的に湧いて都市が一瞬で消えるのを防ぐ。
@@ -220,7 +257,7 @@ namespace DisasterPlus.Game
             if (!FireWhirlSpawner.TrySpawn(center, SpawnIntensityBase, out disasterId)) return;
 
             FireWhirlRegistry.Add(disasterId, 0, center,
-                FireWhirlStrength.RadiusFor(c.BurningCount), c.BurningCount, false);
+                FireWhirlStrength.RadiusFor(c.BurningCount), c.BurningCount);
         }
 
         public void OnMainThreadUpdate()
@@ -246,11 +283,11 @@ namespace DisasterPlus.Game
         public void WriteDiagnostics(DiagnosticBuilder b)
         {
             b.Line(1, "enabled", ModSettings.FireWhirlEnabled.value ? "yes" : "no");
-            // ③のボタンも①②④⑤と同じ並びに居る（DisasterPanelBar）。以前は
-            // (8,8) 固定の 1 個だけ別扱いだったので、その例外が残っていないことを出す。
-            b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdFireWhirl)
-                ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
+            // ★ ③に災害パネルのタイルは無い。プレイヤーが起こす経路が無いことを
+            //   診断でも名乗る（「ボタンが出ていない＝壊れている」と読まれないため）。
+            b.Line(1, "trigger", "natural only - a fire whirl cannot be placed by hand");
             b.Line(1, "scan", _scanner.DiagnosticSummary());
+            WriteConditionDiagnostics(b);
 
             var views = FireWhirlRegistry.Snapshot();
             b.Line(1, "active", views.Count.ToString());
@@ -285,6 +322,57 @@ namespace DisasterPlus.Game
             b.Line(1, "cooldown", FireWhirlRegistry.CoolingCount.ToString());
 
             WriteSpreadDiagnostics(b);
+        }
+
+        /// <summary>
+        /// **「まだ火が足りない」と「壊れている」を見分けるための行。**
+        ///
+        /// ③は自然発生しか経路を持たないので、実機テストの既定の状態は「何も起きない」で
+        /// ある。その状態で出せる情報が <c>burning=0 active=0</c> だけだと、テスターは
+        /// 「どれだけ燃やせばいいのか」も「そもそも動いているのか」も判断できない ——
+        /// 実際にそれで③の修正が確認できないまま 1 セッションが終わっている。
+        ///
+        /// 出す順序は**プレイヤーが動かせるものから**: 必要条件 → 今どこまで来ているか →
+        /// 抑制（クールダウン／離隔）→ 前提（DLC・prefab）。
+        /// </summary>
+        private void WriteConditionDiagnostics(DiagnosticBuilder b)
+        {
+            var config = ModSettings.ToFireWhirlConfig();
+
+            b.Line(1, "requirement",
+                   config.DetectCount + " buildings burning within "
+                   + config.DetectRadius.ToString("F0") + " m of each other"
+                   + "  (min separation " + config.MinSeparation.ToString("F0")
+                   + " m from a live or cooling fire whirl)");
+
+            if (!ModCompat.NaturalDisastersOwned)
+            {
+                // ★ 前提が無いときは条件の話をしない。ここで「火が足りない」と出すと、
+                //   DLC が無い環境のテスターが永久に火を増やすことになる。
+                b.Line(1, "conditions", "not evaluated: " + Strings.FireWhirlNeedsDlc);
+                return;
+            }
+
+            if (!ModSettings.FireWhirlEnabled.value)
+            {
+                b.Line(1, "conditions", "not evaluated: fire whirls are switched off in the settings");
+                return;
+            }
+
+            if (!_prospectFresh)
+            {
+                b.Line(1, "conditions", "not evaluated yet (no simulation tick since the city loaded)");
+                return;
+            }
+
+            b.Line(1, "conditions", _prospect.Describe());
+            if (_prospect.DensestCount > 0)
+            {
+                b.Line(2, "densest group",
+                       _prospect.DensestCount + "/" + _prospect.RequiredCount
+                       + " at (" + _prospect.DensestCentre.X.ToString("F0")
+                       + "," + _prospect.DensestCentre.Z.ToString("F0") + ")");
+            }
         }
 
         /// <summary>

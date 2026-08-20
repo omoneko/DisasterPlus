@@ -31,6 +31,16 @@ namespace DisasterPlus.Game
         public static string EarthquakeOwnerOther = "Natural Disasters Renewal";
         public static string EarthquakeOwnerSelf = "Disaster +";
 
+        // ★★ **退役した 2 件。** ③のタイル（災害パネルの「火災旋風」ボタン）と、その
+        //    ツールチップ「Place a stationary, burning vortex」の文言だった。
+        //    火災旋風は**意図的に起こせるものではなく、大火事のときにだけ自然発生する**
+        //    ことになり、手動発生の経路ごとタイルを撤去したので、どちらも表示されない。
+        //
+        //    **キーは消さない** —— Strings / Locales\en.txt / Locales\ja.txt のキー集合は
+        //    一致させ続ける必要があり、既訳を捨てる理由も無い（LogChannelFireWhirl・
+        //    *ResetButton と同じ扱い）。**別の意味で再利用してもいけない**
+        //    （とくに Tooltip は「置ける」と言っている。置けなくなった今その文を
+        //     別の場所で使い回すと、嘘の説明がそのまま生き返る）。
         public static string FireWhirlName = "Fire whirl";
         public static string FireWhirlTooltip = "Place a stationary, burning vortex";
 

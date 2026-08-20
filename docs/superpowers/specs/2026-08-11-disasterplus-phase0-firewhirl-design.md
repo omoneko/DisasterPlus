@@ -396,24 +396,57 @@ count = max(100, PI*r*r) * particlesPerSquare      // r = EffectInfo.SpawnArea �
   最小離隔距離（5.10）以内に生存中の旋風があれば抑制し、旋風が消滅した地点はクールダウン
   （既定は最大持続時間と同値）が明けるまで再発生させない
 
-### 5.3 手動発生
+### 5.3 手動発生 — ★★ 撤去済み（2026-08-20）
 
-災害パネルに「火災旋風」ボタンを置き、クリック地点に強制発生させる。テストに必須であり、
-プレイヤーの遊べる幅も広がる。
+> **火災旋風は意図的に起こせるものではなく、大火事のときにのみ自然発生する。**
+> —— 実機テスト後の所有者の決定。
+
+当初は災害パネルに「火災旋風」タイルを置き、`FireWhirlPlacementTool` でクリック地点に
+強制発生させていた。**その経路は丸ごと撤去した。**
+
+| 撤去したもの | 跡地 |
+|---|---|
+| `Game/UI/FireWhirlPlacementTool.cs` | ファイルごと削除 |
+| `FireWhirlFeature.OnLevelLoaded` のツール登録 | 削除（③はツールを 1 個も登録しない） |
+| 災害パネルの③タイル（`DisasterPanelBar` の `IdFireWhirl` 行） | 削除。**何もしないタイルは残さない** |
+| `Strings.FireWhirlName` / `FireWhirlTooltip` | 退役。キーは残す（再利用禁止） |
+| `FireWhirlRegistry.Add` の `manual` 引数 | 削除。ここから作られる旋風は必ず自然発生 |
+| `ActiveFireWhirl.Manual` / セーブ形式 version 2 の 1 バイト | **残す。** 旧セーブの手動旋風が免除を失わないため |
+
+これで **5.2 の自動発生が唯一の経路**になった。代償は「既定の状態が『何も起きない』に
+なった」ことで、そのぶんを診断で埋める（下の 5.3a）。
+
+### 5.3a 「なぜ出ないのか」を出す
+
+手動発生が在った頃は、旋風が出ないときにボタンを押して確かめられた。もう押せないので、
+**出ない理由そのものを診断に出す。**（実際に `DIAG fireWhirl: burning=0 active=0` の
+1 行しか出ないまま、③の修正を確認できずに終わったセッションがある。）
+
+`Core/FireWhirl/FireWhirlProspect` が判定と**同じ 1 パスで**次を持ち帰る:
+
+- 燃焼中の総棟数
+- **いちばん密な塊の棟数と重心**（閾値に届かない塊も数える）
+- 生存中／クールダウン中の旋風に弾かれた候補の数
+- 実際に採用された候補の数
+
+`Describe()` はこれを 1 文にする。**「条件が足りない」「抑制された」「条件は足りている
+（＝原因は火の条件ではない）」を必ず言い分ける**。文面はユニットテストで固定してある。
+
+診断（オーバーレイ／ダンプ）の③には次が出る:
+
+```
+trigger      natural only - a fire whirl cannot be placed by hand
+requirement  12 buildings burning within 150 m of each other  (min separation 300 m ...)
+conditions   47 burning, but the densest group is only 8 within 150 m (need 12; 4 more, ...)
+  densest group  8/12 at (1234,-560)
+cooldown     1
+```
+
+毎 tick の `Log.Diag` も `burning=N active=M densest=K/R cooldown=C` に増やした。
 
 **CS の地形に Unity コライダーは無いので `Physics.Raycast` は絶対に当たらない。**
-カメラレイと高さ場の交差を自前で計算する: 16m 程度で粗くマーチし（詳細マップは約 4m/セル）、
-レイ高さが `TerrainManager.SampleDetailHeight` を下回ったら二分法で収束させる。
-`SampleDetailHeight` は読み取り専用でどちらのスレッドからも安全。
-
-これは純粋な数学なので `Core` に置き、`IHeightSampler` の裏でユニットテストする。
-
-**カスタムツールは `SetTool<T>()` から見えない。** `ToolController.m_tools` は `Awake` で一度だけ
-構築されるため、毎レベルロードで次を行う:
-
-1. `ToolsModifierControl.toolController.gameObject.AddComponent<T>()`
-2. インスタンスを private な `ToolController.m_tools` 配列にリフレクションで差し込む
-3. 静的な `ToolsModifierControl.m_Tools` 辞書にも差し込む
+（`Core/Common/RayGeometry` の高さ場交差は⑤の配置ツールが引き続き使うので残っている。
+撤去したのは③の手動発生であって、この算術ではない。）
 
 ### 5.4 ライフサイクル
 
@@ -432,9 +465,11 @@ count = max(100, PI*r*r) * particlesPerSquare      // r = EffectInfo.SpawnArea �
 ゲーム速度 3 では 1 tick = 9 sim フレームなので最悪 72 フレーム ≒ 1.6 分（付録 A-4）。
 猶予がこれを下回ると、走査 1 周ぶんの古い結果だけで旋風が消える。走査 1 周の約 2 倍を既定にする。
 
-**手動発生（災害パネルのボタン）は発生条件の割り込み判定を免除する。** 火の無い場所に置けることが
-手動発生の存在意義なので、免除しないと置いた次の tick から猶予の消化が始まる。終了は絶対上限だけ。
-このフラグはセーブに保存する（保存しないとロードで自動発生扱いに変わり、猶予だけで消えてしまう）。
+**手動発生の免除は旧セーブのためだけに残っている。** 手動で置けた頃は、火の無い場所に
+置けることが存在意義だったので発生条件の割り込み判定を免除していた（免除しないと置いた次の
+tick から猶予の消化が始まる）。手動発生そのものは 5.3 で撤去したが、
+**セーブ形式 version 2 のフラグと免除のコードは残す** —— 消すと、手動発生が在った頃の
+セーブに残る旋風がロードした瞬間に免除を失い、猶予だけで消える。新しく true になる経路は無い。
 
 **絶対上限は必須。** 「その場に留まる」状態に時間上限を付けないと、永久に居座るか、逆にスタック
 ユニット掃除に消される。これは既知の事故パターンであり、**回帰テストで固定する**。
@@ -526,7 +561,8 @@ CS のマテリアルは借りない（4.9）。`DispatchEffect` を併用する
 
 | クラス | 責務 |
 |---|---|
-| `FireWhirlDetector` | 燃焼中建物の座標リストと (R, N) を受け、発生候補点（重心・強度）を返す。空間グリッド投票＋最小離隔での候補統合 |
+| `FireWhirlDetector` | 燃焼中建物の座標リストと (R, N) を受け、発生候補点（重心・強度）を返す。空間グリッド投票＋最小離隔での候補統合。**同じパスで `FireWhirlProspect` も返す** |
+| `FireWhirlProspect` | 「なぜ出なかったか」の値と 1 文の説明（5.3a）。文面はテストで固定 |
 | `FireWhirlLifecycle` | 旋風 1 基の状態機械。`Update(経過時間, 現在の燃焼棟数)` → 継続 / 消滅。5.4 の 3 条件を実装 |
 | `FireWhirlStrength` | 燃焼棟数 → 旋風半径・破壊力の写像（単調増加＋クランプ） |
 | `IgnitionSpread` | 旋風周囲で今 tick 発火する建物を選ぶ確率モデル。延焼拡大の強さ設定でスケール。`hash(tick, buildingId)` を使う |
@@ -545,7 +581,8 @@ CS のマテリアルは借りない（4.9）。`DispatchEffect` を併用する
 | `FireWhirlPinner` | sim | `VortexAI.SimulationStep` Postfix による位置固定と、寿命到達時の終了（5.6） |
 | `FireWhirlDamage` | sim | Core が選んだ建物に発火を適用 |
 | `FireWhirlFlameFx` | main | 自前 `ParticleSystem` による炎の渦 |
-| `FireWhirlPlacementTool` | main | 手動発生のクリック配置（5.3） |
+
+（`FireWhirlPlacementTool` は 5.3 の撤去で消えた。③は main スレッドのツールを持たない。）
 
 ### 5.9 永続化
 
@@ -794,7 +831,8 @@ IL 逆アセンブラのスクリプトは `docs/tools/` に置く（`ilload.ps1
 
 - `build.ps1` でビルドと配置が通り、ゲームが MOD をエラーなしで読み込む
 - 設定画面が日本語・英語で表示され、言語切替に追従する
-- 災害パネルに「火災旋風」ボタンが出て、クリック地点に手動発生できる
+- **災害パネルに③のタイルは出ない**（火災旋風は手動で起こせない。5.3）
+- 旋風が出ないとき、診断が「あと何棟足りないか」あるいは「抑制されている」ことを言う（5.3a）
 - 密集火災を起こすと自動で火災旋風が発生し、その場に留まり、炎をまとって見える
 - 周囲に延焼が広がり、火が収まるか最大持続時間で消滅する
 - セーブ・ロードで生存中の旋風が復元される
