@@ -17,7 +17,7 @@ namespace DisasterPlus.Game
     public static partial class Assumptions
     {
         /// <summary>このファイルが持つ検証の数。</summary>
-        private const int TyphoonCheckCount = 10;
+        private const int TyphoonCheckCount = 9;
 
         private static void RunTyphoon()
         {
@@ -66,52 +66,6 @@ namespace DisasterPlus.Game
                       //    ダンプも設定画面もこの検証だけ PASS と名乗る**。
                       //    「読めた」を「使える」の代わりに使わない。
                       return TyphoonReader.ScanPrefabFacts().Usable;
-                  },
-                  true);
-
-            // ★ 設計書の記述をここでも訂正して固定する。**VortexAI に m_maxSpeed は
-            //    存在しない。** §B-1 の IL_00AF が読んでいるのは VehicleAI.m_info、
-            //    すなわち VehicleInfo.m_maxSpeed である。到達経路は
-            //    TornadoAI.m_vortexInfo（VehicleInfo）.m_maxSpeed なので、
-            //    m_vortexInfo の**型まで**照合する——ここが VehicleInfo でなくなったら、
-            //    次の担当者は VortexAI 側に無いフィールドを探して推測で別のものを掴む。
-            //
-            //    影響は台風本体には及ばない（随伴竜巻＝ T10 だけが使えない）。
-            //    そのことを impact に書いておかないと、正常に台風が動く環境の
-            //    この FAIL が「台風が壊れている」と読まれる。
-            Check("TornadoAI.m_vortexInfo resolves to a VortexAI with m_destructionRadiusMin / "
-                  + "m_destructionRadiusMax and a VehicleInfo with m_maxSpeed, and "
-                  + "m_maxSpeed / m_destructionRadiusMax are non-zero",
-                  "the optional accompanying tornadoes cannot be sized or steered; the typhoon "
-                  + "itself is unaffected. This also FAILs when the Natural Disasters DLC is "
-                  + "not owned, which is expected.",
-                  delegate
-                  {
-                      var vortexInfoField = typeof(TornadoAI).GetField("m_vortexInfo",
-                          BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                      if (vortexInfoField == null
-                          || vortexInfoField.FieldType != typeof(VehicleInfo))
-                      {
-                          return false;
-                      }
-
-                      if (!HasField(typeof(VortexAI), "m_destructionRadiusMin", typeof(float))
-                          || !HasField(typeof(VortexAI), "m_destructionRadiusMax", typeof(float))
-                          || !HasField(typeof(VehicleInfo), "m_maxSpeed", typeof(float)))
-                      {
-                          return false;
-                      }
-
-                      // ★★ **VortexResolved だけでは足りない**（全体レビュー C1、嵐と同じ形）。
-                      //    随伴竜巻を実際に止めているのは TyphoonTornado.Step の
-                      //    `!prefab.VortexResolved || !(prefab.VortexMaxSpeed > 0f)` で、
-                      //    軌道半径の見積りは m_destructionRadiusMax の上に乗る。
-                      //    値が 0 でも VortexResolved は立つので、ここを Resolved の
-                      //    ままにすると「竜巻が 1 個も出ないのに検証は PASS」になる。
-                      var vortex = TyphoonReader.ScanPrefabFacts();
-                      return vortex.VortexResolved
-                             && vortex.VortexMaxSpeed > 0f
-                             && vortex.DestructionRadiusMax > 0f;
                   },
                   true);
 
@@ -350,45 +304,41 @@ namespace DisasterPlus.Game
 
             // --- ④台風（Task 8）ここまで ---
 
-            // --- ④台風（Task 10: 随伴竜巻）ここから ---
+            // --- ④台風（竜巻並みの局所被害）ここから ---
 
-            // 随伴竜巻の**操舵**の経路。竜巻は「災害」ではなく VortexAI の車両が動くので
-            // （§E-1）、m_targetPosition を書いても車両は追随しない。車両を見つけて
-            // Vehicle.SetTargetPos の**両スロット**に書くのが唯一の手段である
-            // （スロット 0 だけでは次のステップでスロット 1 に上書きされる。
-            //  ③が IL 実測で確定させた事実）。
+            // ★★ **随伴竜巻の 2 件（VortexAI のプレハブ値と Vehicle.SetTargetPos の
+            //    操舵経路）はここから消えた。** バニラの竜巻災害を借りる機能そのものが
+            //    退役し、竜巻並みの被害は TyphoonGust が自前で出すようになったので、
+            //    どちらも「この MOD が依存していない事実」になった。
+            //    使っていない依存を検証し続けると、FAIL したときに何が壊れるのか
+            //    誰も答えられなくなる。
             //
-            // ★ 解決できないときに「竜巻だけ出して操舵を諦める」ことはしない。
-            //   操舵できない竜巻は台風と無関係に都市を横断するので、
-            //   プレイヤーから見ると④が野良の竜巻を落としたのと区別が付かない。
-            //   TyphoonTornado はそのとき 1 個も作らない。
-            //
-            // 引数の型まで指定して見る（②の CollapseBuilding の検査と同じ形）。
-            // 名前だけの一致では、シグネチャが変わったときに偽 PASS を出す。
-            Check("Vehicle.SetTargetPos(int, Vector4) and "
-                  + "InstanceManager.GetAllGroupInstances(InstanceID, FastList<InstanceID>) "
-                  + "are resolvable",
-                  "the accompanying tornadoes cannot be steered around the typhoon. They "
-                  + "would still spawn and drift on vanilla's own path, so the feature "
-                  + "refuses to create them at all rather than dropping loose tornadoes on "
-                  + "the city. Everything else about the typhoon is unaffected",
+            // 局所被害が実際に門にしているのは **BuildingAI.CollapseBuilding** ただ 1 本で、
+            // ④の風害と同じ経路である（DisasterHelpers は 1 度も通らない ＝
+            // Natural Disasters Renewal のパッチ面を完全に迂回する）。
+            // 引数の型まで指定して見る —— 名前だけの一致では、シグネチャが変わったときに
+            // 偽 PASS を出す。
+            Check("BuildingAI.CollapseBuilding(ushort, ref Building, InstanceManager.Group, "
+                  + "bool, bool, ushort) is resolvable",
+                  "the typhoon's tornado-strength damage patches cannot collapse anything, "
+                  + "and neither can its wind damage. Both call this method directly and "
+                  + "never go through DisasterHelpers, which is what keeps them clear of "
+                  + "Natural Disasters Renewal. The rain, the lightning, the flooding and "
+                  + "the cloud are unaffected",
                   delegate
                   {
-                      if (typeof(Vehicle).GetMethod("SetTargetPos",
-                              BindingFlags.Public | BindingFlags.Instance, null,
-                              new Type[] { typeof(int), typeof(UnityEngine.Vector4) },
-                              null) == null)
-                      {
-                          return false;
-                      }
-
-                      return typeof(InstanceManager).GetMethod("GetAllGroupInstances",
-                          BindingFlags.Public | BindingFlags.Static, null,
-                          new Type[] { typeof(InstanceID), typeof(FastList<InstanceID>) },
+                      return typeof(BuildingAI).GetMethod("CollapseBuilding",
+                          BindingFlags.Public | BindingFlags.Instance, null,
+                          new Type[]
+                          {
+                              typeof(ushort), typeof(Building).MakeByRefType(),
+                              typeof(InstanceManager.Group), typeof(bool), typeof(bool),
+                              typeof(ushort)
+                          },
                           null) != null;
                   });
 
-            // --- ④台風（Task 10）ここまで ---
+            // --- ④台風（竜巻並みの局所被害）ここまで ---
 
             // --- ④台風（Task 9: 巨大な回転雲）ここから ---
 

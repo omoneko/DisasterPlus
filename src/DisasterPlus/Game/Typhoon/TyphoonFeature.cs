@@ -71,15 +71,10 @@ namespace DisasterPlus.Game
                 //    「④が作ったものが畳まれる」ことだけで、ゲームが先へ進むわけではない。
                 TyphoonFlood.RestoreAll();
 
-                // ★★ 竜巻と天候も返す（全体レビュー C2）。以前ここは水位しか
-                //    戻しておらず、掴んだままの竜巻の台帳が**1 tick も検証されない
-                //    まま**残った。その間に竜巻は自然終了してスロットが配り直され、
-                //    設定を戻した瞬間か都市を出た瞬間に、④の後始末が
-                //    **他人の生きている災害**を止めるか解放しに行った。
-                //    天候も同じで、切った瞬間に m_targetRain を握ったまま
-                //    台風だけが止まる（雨がやまなくなる）。
-                //    StopAll / Release はどちらも冪等である。
-                TyphoonTornado.StopAll();
+                // ★★ 局所被害のカウンタと天候も返す（全体レビュー C2）。以前ここは
+                //    水位しか戻しておらず、天候を握ったまま台風だけが止まった
+                //    （雨がやまなくなる）。Reset / Release はどちらも冪等である。
+                TyphoonGust.Reset();
                 TyphoonWeather.Release();
                 return;
             }
@@ -124,6 +119,13 @@ namespace DisasterPlus.Game
                 {
                     TyphoonWind.Apply(snapshot, deltaMinutes);
                 }
+
+                // ★ 竜巻並みの局所被害（既定 ON。強さ 0 でも完全に無効）。
+                //   **竜巻の実体は 1 つも作らない**（TyphoonGust のクラス doc）。
+                if (ModSettings.TyphoonGustEnabled.value)
+                {
+                    TyphoonGust.Tick(snapshot, frameIndex, deltaMinutes);
+                }
             }
 
             // ★ 河川氾濫は台風が居なくても呼ぶ。**持ち上げた水位を戻すのが
@@ -140,18 +142,14 @@ namespace DisasterPlus.Game
                 TyphoonFlood.RestoreAll();
             }
 
-            // ★ 随伴竜巻は**既定 OFF**（設計書 §2）。切っている間・台風が居ない間は
-            //    StopAll を通す —— 台風の最中にこの設定を切ったプレイヤーが、
-            //    掴まれたままの竜巻を止める手段を失わないようにする
-            //    （TyphoonFlood.RestoreAll と同じ形。StopAll は台帳が空なら
-            //    1 命令で返るので毎 tick 通ってよい）。
-            if (TyphoonController.Active && ModSettings.TyphoonTornadoes.value)
+            // ★★ 台風が居ない／設定を切ったときは**必ずここを通してカウンタを畳む**。
+            //    パッチそのものは台風の経過フレームの関数なので台風が無ければ
+            //    存在しないが、**診断が「直近の走査」の数字を抱えたままだと
+            //    「台風が去ったのにまだ壊している」ように読める**。
+            //    Reset は台帳を持たないので 1 命令で返る（毎 tick 通ってよい）。
+            if (!TyphoonController.Active || !ModSettings.TyphoonGustEnabled.value)
             {
-                TyphoonTornado.Tick(snapshot, frameIndex, deltaMinutes);
-            }
-            else
-            {
-                TyphoonTornado.StopAll();
+                TyphoonGust.Reset();
             }
         }
 
@@ -220,10 +218,10 @@ namespace DisasterPlus.Game
             //    無関係な川の水位を書き換える。TyphoonFlood.Reset は内部で
             //    RestoreAll を呼んでから台帳を捨てる。
             TyphoonFlood.Reset();
-            // ★ 随伴竜巻も都市をまたがない。持ち越すと、次の都市で**前の都市の
-            //    災害 ID** を操舵しに行き、無関係な災害を引きずり回す。
-            //    TyphoonTornado.Reset は内部で StopAll を呼んでから台帳を捨てる。
-            TyphoonTornado.Reset();
+            // ★ 局所被害のカウンタと借りたエフェクトの参照も都市をまたがない。
+            //   持ち越すと、次の都市で**前の都市の粒子エフェクト**（破棄済み）を
+            //   撃ちに行く。
+            TyphoonGust.Reset();
         }
 
         /// <summary>
@@ -244,7 +242,6 @@ namespace DisasterPlus.Game
             if (snapshot == null || !snapshot.Valid) return;
 
             WriteStormPrefab(b, snapshot.Prefab);
-            WriteVortexPrefab(b, snapshot.Prefab);
             WriteWeather(b, snapshot);
             WriteTyphoon(b, snapshot);
         }
@@ -333,7 +330,7 @@ namespace DisasterPlus.Game
             WriteLightning(b, snapshot);
             WriteWind(b, snapshot);
             WriteFlood(b, snapshot);
-            WriteTornadoes(b, snapshot);
+            WriteGusts(b, snapshot);
             WriteCloud(b);
         }
 
@@ -404,46 +401,79 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 随伴竜巻（T10）。**既定 OFF なので「出ていない」が正常である。**
+        /// 竜巻並みの局所被害（パッチ）。**竜巻の実体は 1 つも作っていない。**
         ///
-        /// <c>attached</c> が <c>count</c> より小さい状態を隠さない ——
-        /// 渦車両が付かなかった竜巻は④の軌道に乗らず、バニラの竜巻として自由に流れる。
-        /// 画面上は「台風の周りを回っていない竜巻」に見えるだけで、原因を指すものが
-        /// 他に無い。
+        /// <c>active 0</c> は不具合ではない —— パッチは
+        /// <c>GustPatchPlan.SpawnIntervalFrames</c> ごとに 1 個生まれて
+        /// <c>LifetimeFrames</c> で消えるので、居ない瞬間がある。
+        /// **「今は無い」と「機能が死んでいる」を見分けられるのがここだけ**なので、
+        /// 倒壊 0 のときも走査回数と生存数を必ず出す。
         /// </summary>
-        private static void WriteTornadoes(DiagnosticBuilder b, TyphoonSnapshot snapshot)
+        private static void WriteGusts(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
-            if (!ModSettings.TyphoonTornadoes.value)
+            if (!ModSettings.TyphoonGustEnabled.value)
             {
-                b.Line(2, "accompanying tornadoes", "off (setting; this is the default)");
+                b.Line(2, "tornado-strength damage", "off (setting)");
                 return;
             }
 
-            b.Line(2, "accompanying tornadoes",
-                snapshot.TornadoCount + " running / " + snapshot.TornadoAttached
-                + " steered / " + ModSettings.TyphoonTornadoCount.value + " requested");
-
-            if (snapshot.TornadoAttached < snapshot.TornadoCount)
+            int gustStrength = ModSettings.TyphoonGustStrength.value;
+            if (gustStrength <= 0)
             {
-                b.Line(3, "not steered",
-                    (snapshot.TornadoCount - snapshot.TornadoAttached)
-                    + " tornado(es) have no vortex vehicle yet. Until one attaches they "
-                    + "drift on vanilla's own path instead of orbiting the typhoon");
+                b.Line(2, "tornado-strength damage", "off (strength slider is 0)");
+                return;
             }
 
-            if (!string.IsNullOrEmpty(TyphoonTornado.LastFailure))
+            b.Line(2, "tornado-strength damage",
+                "pass " + TyphoonGust.Passes
+                + " / " + snapshot.GustActive + " patch(es) alive"
+                + " / collapsed " + snapshot.GustLastCollapsed
+                + " (total " + snapshot.GustTotalCollapsed + ")"
+                + " / refused " + snapshot.GustLastRefused
+                + " / strength " + gustStrength);
+
+            // ★ 「今は無い」と「機能が死んでいる」を見分けられるのはここだけである。
+            b.Line(3, "patches",
+                "no tornado disaster and no funnel is created; up to "
+                + DisasterPlus.Core.Typhoon.GustPatchPlan.MaxActivePatches
+                + " patches of "
+                + (int)DisasterPlus.Core.Typhoon.GustPatchPlan.MinRadiusMetres + "-"
+                + (int)DisasterPlus.Core.Typhoon.GustPatchPlan.MaxRadiusMetres
+                + " m live at once, one born every "
+                + DisasterPlus.Core.Typhoon.GustPatchPlan.SpawnIntervalFrames
+                + " storm frames and gone after "
+                + DisasterPlus.Core.Typhoon.GustPatchPlan.LifetimeFrames
+                + ". 0 alive is normal between spawns");
+
+            // 「壊れていない」と「壊せない」を取り違えさせない（風害と同じ）。
+            if (snapshot.GustLastRefused > 0)
             {
-                b.Line(3, "last failure", TyphoonTornado.LastFailure);
+                b.Line(3, "refused",
+                    snapshot.GustLastRefused
+                    + " (shelters / vaults / dams / decoration / tsunami buoys refuse "
+                    + "demolish:false; that is the game answering correctly, not a failure)");
             }
 
-            // ★ NDR がいる環境で「風害と竜巻で壊れ方が違う」理由は、ここと設定画面と
-            //    パネルにしか出ない（IL 事実文書 §F-1）。
+            if (TyphoonGust.LastCapped)
+            {
+                b.Line(3, "capped",
+                    "the per-pass building budget ran out; some patches were not rolled "
+                    + "this pass");
+            }
+
+            // ★★ NDR がいても**このパッチは影響を受けない**。かつての随伴竜巻は
+            //    DisasterHelpers.DestroyStuff を通っていたので NDR に丸ごと
+            //    置き換えられていたが、パッチは BuildingAI.CollapseBuilding を
+            //    直接呼ぶ（＝④の風害と同じ経路）。**その事実を名乗る** ——
+            //    退役した機能の注意書きが残っていると、次の担当者が
+            //    「まだ NDR に食われている」と読む。
             if (ModCompat.NdrPresent)
             {
                 b.Line(3, "Natural Disasters Renewal",
-                    "present: vanilla tornado destruction is replaced wholesale, so these "
-                    + "tornadoes follow NDR's tornado settings. The typhoon's own wind damage "
-                    + "does not - it never goes through DisasterHelpers");
+                    "present, but it does not affect these patches: they call "
+                    + "BuildingAI.CollapseBuilding directly and never go through "
+                    + "DisasterHelpers, which is the surface NDR replaces. The accompanying "
+                    + "vanilla tornadoes that did go through it have been retired");
             }
         }
 
@@ -694,28 +724,6 @@ namespace DisasterPlus.Game
                 + " m at intensity 100  [Disaster + model]");
 
             b.Line(2, "derived travel speed", TravelSpeedText(prefab.ActiveDuration));
-        }
-
-        /// <summary>
-        /// 竜巻プレハブの 3 実測値。**台風本体はこれが読めなくても動く**ので、
-        /// 読めないことを失敗として書かない（随伴竜巻＝ T10 だけが使えなくなる）。
-        /// </summary>
-        private static void WriteVortexPrefab(DiagnosticBuilder b, TyphoonPrefabFacts prefab)
-        {
-            if (!prefab.VortexResolved)
-            {
-                b.Line(1, "prefab (VortexAI)",
-                    "NOT RESOLVED (expected when the Natural Disasters DLC is not owned; "
-                    + "only the optional accompanying tornadoes need it)");
-                return;
-            }
-
-            b.Line(1, "prefab (VortexAI)", "resolved");
-            b.Line(2, "m_destructionRadiusMin", prefab.DestructionRadiusMin.ToString("F2"));
-            b.Line(2, "m_destructionRadiusMax", prefab.DestructionRadiusMax.ToString("F2"));
-            // ★ VortexAI ではなく VehicleInfo 側にあるフィールドである
-            //    （TyphoonReader のクラス doc の訂正）。ラベルにもそう書く。
-            b.Line(2, "m_maxSpeed (VehicleInfo)", prefab.VortexMaxSpeed.ToString("F2"));
         }
 
         /// <summary>

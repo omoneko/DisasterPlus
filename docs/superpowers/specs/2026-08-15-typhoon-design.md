@@ -62,7 +62,7 @@
 | 論点 | 決定 | 根拠 |
 |---|---|---|
 | 風害の作り方 | **自前の広域走査（(b)）を主。** `BuildingAI.CollapseBuilding(demolish:false, burnAmount:0)` を直接呼ぶ | `DisasterHelpers` を通らないので **NDR と完全に無衝突**（§F-1）。距離減衰・建物高さ・確率モデルを④が持てる。②の長周期被害と同じ経路・同じ規律 |
-| 随伴する竜巻 | **別設定として (a) も出す。既定 OFF** | 見た目が無料でバニラ品質。ただし NDR がいると破壊が NDR の竜巻設定に従う（③で既に受け入れている仕様） |
+| 随伴する竜巻 | **~~別設定として (a) も出す。既定 OFF~~ 撤去した（§4.6）** | 持ち主の指示「竜巻を発生させずに竜巻の被害だけを複数発生させて」。副産物として NDR との衝突面も消えた |
 | 河川氾濫 | **既存の自然水源の `m_target` を持ち上げる（(i)）** | マップの川はこの型の水源で流れている。`natural && terrain >= m_target` のセルはスキップされるので**谷筋しか濡れない**＝河川氾濫そのもの。`m_target` を戻せば自然に引く（§D-4） |
 | 雲 | **④が自前でメッシュとマテリアルを作り、毎フレーム `Graphics.DrawMesh`** | 既製品が無く、バニラ雲はワールド座標を持たないので合成もできない（§C-1、§C-2）。`VortexAI.GenerateMesh()` の手続き生成が手本 |
 | バニラ雲の増強 | **併用する。3 行で済む** | `DayNightDynamicCloudsProperties` の `m_MaxCoverage` / `m_WindForce` / `m_EvolutionSpeed` は上書きされない。**存在しない環境がありうる（PARTIAL）ので、無ければ黙って諦める** |
@@ -237,6 +237,44 @@ TyphoonState（④の所有、sim スレッド）
 これはバニラが引く値ではないので、`DeterministicRandom`（本 MOD 自身の生成器）を使う。
 両者の使い分けは両ファイルの doc に書いてある。
 
+### 4.6 竜巻並みの局所被害 —— 竜巻を出さずに（随伴竜巻の後継）
+
+> 竜巻を発生させずに竜巻の被害だけを複数発生させてください
+
+**随伴竜巻（バニラの `TornadoAI` 災害を借りて台風の周りを回らせる機能）は撤去した。**
+代わりに `Game/Typhoon/TyphoonGust` が「台風の下のあちこちで、短いあいだ、
+狭い範囲だけが竜巻並みに壊れる」という現象だけを起こす。
+**災害の実体も渦の車両も漏斗のメッシュも 1 つも作らない。**
+
+- 置き方と寿命は `Core/Typhoon/GustPatchPlan`、壊れ方は `Core/Typhoon/GustDamageModel`
+  （どちらもテストつき）
+- パッチは 128 台風フレームごとに 1 個生まれ、320 フレームで消える
+  ＝ **同時に最大 4 個**。半径 45〜95 m。中心の倒壊確率は最大 70 %
+  （台風全体の風害の上限 8 % に対しておよそ 9 倍）
+- **危険半円へ寄る**（§4.3 の追加と同じ向き）。相対角で置くので、経路が曲がれば
+  散らばりも一緒に回る
+- 破壊は `BuildingAI.CollapseBuilding(demolish: false, burnAmount: 0)` を直接呼ぶ。
+  `Building.m_fireIntensity` には 1 バイトも書かない
+- **副産物: NDR との衝突面が消えた。** 旧実装の破壊は `DisasterHelpers.DestroyStuff` を
+  通るので NDR に丸ごと置き換えられていた。パッチは④の風害と同じ経路なので**無衝突**である
+
+**1 tick あたりの上限**: 走査は 16 台風フレームに 1 回、パッチ 4 個、
+1 個あたりグリッド 25 セル、全パッチ合計 256 棟、`AddWind` / `DestroyTrees` /
+`DispatchEffect` は 1 回につきパッチ 1 個あたり 1 度ずつ。
+
+**設定の退役**: `typhoonTornado` / `typhoonTornadoCount` は**宣言だけ残して読まない**
+（`.cgs` は公開契約。`ForecastButtonX` と同じ扱い）。
+新設は `typhoonGust`（既定 ON）と `typhoonGustStrength`（既定 3、0 で完全無効）で、
+**旧キーを別の意味で再利用していない**。撤去したことは
+`Strings.TyphoonTornadoRetiredNote` が設定画面で 1 度名乗る。
+
+`VortexAI` のプレハブ値（`m_destructionRadiusMin` / `Max`、`VehicleInfo.m_maxSpeed`）は
+**読むのをやめた**。使う場所が 1 つも無くなったので、診断に並べ続けると
+次の担当者が「これは効いている」と読む。`Assumptions` の竜巻 2 件も同じ理由で消し、
+代わりに `BuildingAI.CollapseBuilding` の 1 件を置いた（＝実際に門にしている式）。
+
+---
+
 ### 4.4 河川氾濫（新規）
 
 ```
@@ -366,7 +404,9 @@ src/DisasterPlus/
 | 検証項目 | 失敗時の影響 |
 |---|---|
 | `ThunderStormAI` の `m_radius` / `m_emergingDuration` / `m_activeDuration` が読めるか | **プレハブ値で DLL に無い。** 落雷本数も破壊半径もこの上に乗る。**持続時間の設計を始める前に実測する** |
-| `VortexAI` の `m_destructionRadiusMin` / `m_destructionRadiusMax` / `m_maxSpeed` | 随伴竜巻の設計の土台 |
+| ~~`VortexAI` の `m_destructionRadiusMin` / `m_destructionRadiusMax` / `m_maxSpeed`~~ | **撤去。** 随伴竜巻の土台だったが、竜巻並みの被害は④が自前で出すようになったので読む場所が無い（§4.6） |
+| `BuildingAI.CollapseBuilding(ushort, ref Building, Group, bool, bool, ushort)` が引ける | 風害も竜巻並みの局所被害も 1 棟も壊せない。**これが両方の唯一の破壊経路である**（NDR のパッチ面を通らない理由でもある） |
+| バニラの雲・煙の `ParticleEffect` が名前で引けるか | 渦を雲の粒で組めない（自前メッシュへ退避する。§4.5） |
 | `QueueLightningStrike` のシグネチャ | 雷雨が出せない |
 | `WaterSimulation.m_waterSources` に `TYPE_NATURAL` が何個あるか、`m_target` の値 | **マップ依存。0 個なら氾濫は起きない**（不具合ではない） |
 | `DayNightDynamicCloudsProperties` が存在するか | バニラ雲の増強だけが効かない。④の自前の雲には影響しない |
@@ -412,7 +452,7 @@ src/DisasterPlus/
 4. 風害（自前の `CollapseBuilding` ＋ `AddWind`）— 中
 5. 河川氾濫（`WaterSource.m_target` の一時変更と復元）— 中
 6. 巨大な回転雲（自前メッシュ＋自前マテリアル）— **高。単独タスク**
-7. 随伴竜巻（既定 OFF）— 低
+7. ~~随伴竜巻（既定 OFF）~~ → **竜巻並みの局所被害**（竜巻を出さない。§4.6）— 中
 
 ---
 
@@ -420,7 +460,7 @@ src/DisasterPlus/
 
 | 対象 | なぜ要るか | どの段 |
 |---|---|---|
-| `ThunderStormAI` / `VortexAI` のプレハブ実数値 6 つ | 持続時間・落雷本数・破壊半径の土台。**DLL に無い** | 1, 3, 7 |
+| `ThunderStormAI` のプレハブ実数値 3 つ | 持続時間・落雷本数・半径の土台。**DLL に無い** | 1, 3 |
 | `DayNightDynamicCloudsProperties` の実在 | 無ければバニラ雲の増強を諦める | 6 |
 | 対象マップの `TYPE_NATURAL` 水源の個数と `m_target` | 氾濫が成立するかがこれで決まる | 5 |
 | NDR のバイナリ | ④が `DisasterHelpers` を通らない限り実害無し | — |

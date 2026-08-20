@@ -775,24 +775,37 @@ namespace DisasterPlus.Game
             "The water level is restored when the typhoon ends, when you leave the city and "
             + "before every save. A river must never stay flooded after you remove the mod.";
 
-        // --- ④台風（Task 10: 随伴竜巻） ---
+        // --- ④台風（竜巻並みの局所被害。随伴竜巻の後継） ---
         //
-        // ★ TyphoonTornadoNdrNote は**この要素だけが持つ代償**を名乗る行である。
-        //   バニラ竜巻の破壊は DisasterHelpers.DestroyStuff を通るので、
-        //   Natural Disasters Renewal はそれを竜巻と嗅ぎ分けて完全に置き換える
-        //   （IL 事実文書 §F-1）。④自身の風害は同じ影響を受けない
-        //   （DisasterHelpers を 1 度も通さないため）。**その区別まで書く** ——
-        //   同じ都市で両方が動いたとき、片方だけが他 MOD の設定に従う理由が
-        //   これ以外のどこにも出ない。
-        //   設定画面（NDR 検出時）とパネルの両方に出す。
-        public static string TyphoonTornadoRow = "Accompanying tornadoes";
-        public static string TyphoonTornadoEnabled =
-            "Spawn tornadoes that orbit the typhoon";
-        public static string TyphoonTornadoCount = "Number of tornadoes";
-        public static string TyphoonTornadoNdrNote =
-            "Natural Disasters Renewal replaces vanilla tornado destruction, so these "
-            + "tornadoes follow its settings. The typhoon's own wind damage does not - it "
-            + "never goes through DisasterHelpers.";
+        // ★★ TyphoonGustNote は**この機能の説明そのもの**である。
+        //   「竜巻の姿はどこにも出ないのに、狭い範囲だけが竜巻並みに壊れる」は
+        //   説明が無ければ不具合にしか見えない。**短くしないこと。**
+        //
+        // ★★ TyphoonTornadoRetiredNote は**退役の告知**である。随伴竜巻を ON に
+        //   していたプレイヤーには、チェックボックスが消えた理由と、.cgs に残った
+        //   値がもう読まれないことを 1 度は見せる。設定は公開契約なので、
+        //   黙って消したり別の意味で再利用したりしない
+        //   （ModSettings.TyphoonTornadoes の doc）。
+        //
+        // TyphoonGustRow は他の行と同じく**並べる順序をラベルが語で名乗る**
+        // （書式文字列を使わない。翻訳の {0} がずれると実行時に落ちる）。
+        public static string TyphoonGustRow =
+            "Tornado-strength damage (patches now / collapsed this pass / total / refused "
+            + "by the game)";
+        public static string TyphoonGustEnabled =
+            "Tornado-strength damage patches (no tornado is spawned)";
+        public static string TyphoonGustStrength =
+            "Tornado-strength damage (0 = off)";
+        public static string TyphoonGustNote =
+            "Several small patches under the storm are hit as hard as a tornado would hit "
+            + "them. No tornado, no funnel and no second disaster is created - there is "
+            + "nothing to see coming, only the damage. Each patch is a few dozen metres "
+            + "across, lives for a short while and then stops. They all end with the storm.";
+        public static string TyphoonTornadoRetiredNote =
+            "The old \"accompanying tornadoes\" option has been removed. Tornado-strength "
+            + "damage now happens without spawning tornadoes, which also keeps it clear of "
+            + "Natural Disasters Renewal's tornado settings. Your old saved value is kept in "
+            + "the settings file but is never read again.";
 
         // --- ④台風（Task 9: 巨大な回転雲） ---
         //
