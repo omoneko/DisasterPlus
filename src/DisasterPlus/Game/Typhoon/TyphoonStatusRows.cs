@@ -114,15 +114,21 @@ namespace DisasterPlus.Game
         /// 台風が居ないときに出す 1 行。**「何も起きていない」と「起こせなかった」を
         /// 見分けられるようにする。**
         ///
-        /// 優先順は「依頼を出した直後（次の sim tick を待っている）」＞「プレハブが
-        /// 読めない（＝この環境では 1 個も起こせない）」＞「理由つきで断られた」＞
+        /// 優先順は「配置カーソルを構えている（地点待ち）」＞「依頼を出した直後
+        /// （次の sim tick を待っている）」＞「プレハブが読めない（＝この環境では
+        /// 1 個も起こせない）」＞「理由つきで断られた」＞
         /// 「ただ起きていない」。<see cref="TyphoonHub.PendingRequest"/> を見るのは
         /// **二度押しで 2 個発生する誤解を防ぐため**で、依頼から発生までには
         /// 設計上 1 tick の遅れがある（計画 §5.4）。
         /// </summary>
         private static string InactiveText(TyphoonSnapshot s)
         {
-            if (TyphoonHub.PendingRequest != TyphoonRequest.None) return Strings.TyphoonWaiting;
+            // ★ 構えている間は「地図をクリックしてください」。これが無いと、
+            //   タイルを押した直後のパネルが「台風は発生していません」のままになり、
+            //   **プレイヤーは指す前にもう一度タイルを押す**。
+            if (TyphoonPlacementTool.IsActive) return Strings.TyphoonPlaceHint;
+
+            if (TyphoonHub.PendingRequest.Kind != TyphoonRequest.None) return Strings.TyphoonWaiting;
 
             // 設計書 §6: 読めなければ推測せず何もしない。**その事実を隠さない。**
             if (!s.Prefab.Usable) return Strings.TyphoonPrefabUnreadable;

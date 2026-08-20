@@ -38,6 +38,13 @@ namespace DisasterPlus.Game
             TyphoonReader.Reset();
             TyphoonController.Reset();
             TyphoonWeather.Reset();
+
+            // ★★ **毎レベルロードで登録し直すこと。** ToolController.m_tools は Awake で
+            //    一度だけ構築され、ToolsModifierControl.SetTool<T> は静的辞書を引くだけ
+            //    なので、登録しないと**黙って空振りする**（「タイルは押せるのに
+            //    カーソルが変わらない」という、例外の出ない壊れ方）。
+            //    ToolController は都市ごとに作り直されるので前の都市の登録は使えない。
+            ToolRegistration.Register<TyphoonPlacementTool>();
         }
 
         /// <summary>
@@ -180,6 +187,12 @@ namespace DisasterPlus.Game
 
         public void OnLevelUnloading()
         {
+            // ★★ 配置ツールが選ばれたまま都市を出させない。次の都市でカーソルが
+            //    「台風を置く」のまま始まると、プレイヤーが意図せず地点を指しうる。
+            //    **アクティブでないときは何もしない**ので、他 MOD が選んでいたツールを
+            //    横から戻すことはない（⑤と同じ）。
+            TyphoonPlacementTool.Deactivate();
+
             // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
             //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
@@ -252,6 +265,9 @@ namespace DisasterPlus.Game
             b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdTyphoon)
                 ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "panel body", TyphoonPanel.IsVisible ? "shown" : "hidden");
+            // ★ タイルは配置カーソルを構える（バニラの災害ボタンと同じ約束）。
+            //   構えたまま指していないのか、指したのに何も起きないのかを見分ける。
+            b.Line(1, "placement tool", TyphoonPlacementTool.IsActive ? "active" : "idle");
         }
 
         /// <summary>

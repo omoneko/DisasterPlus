@@ -6,6 +6,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
 {
     public class TyphoonTrackTests
     {
+        /// <summary>プレイヤーが指した地点の代わり。マップの中の 1 点。</summary>
+        private static readonly Vec2 Pointed = new Vec2(1200f, -800f);
+
         [Fact]
         public void BearingIsInsideOneTurnAndDependsOnTheSeed()
         {
@@ -27,38 +30,46 @@ namespace DisasterPlus.Core.Tests.Typhoon
             float speed = TyphoonTrack.SpeedFor(20000u);
             for (uint s = 1; s < 50; s++)
             {
-                Vec2 a = TyphoonTrack.CentreAt(s, 5000u, speed);
-                Vec2 b = TyphoonTrack.CentreAt(s, 5000u, speed);
+                Vec2 a = TyphoonTrack.CentreAt(Pointed, s, 5000u, speed);
+                Vec2 b = TyphoonTrack.CentreAt(Pointed, s, 5000u, speed);
                 Assert.Equal(a.X, b.X, 4);
                 Assert.Equal(a.Z, b.Z, 4);
             }
         }
 
         [Fact]
-        public void TheStormStartsOutsideTheMap()
+        public void TheStormStartsExactlyWhereThePlayerPointed()
         {
-            // マップの中でいきなり湧くと「接近」の位相が意味を失う。
+            // ★★ バニラの災害ボタンと同じ約束（設計書 §4.1）。指した地点から始まる。
+            //    ずれると「押した場所と違うところに台風が出る」になり、
+            //    しかも例外は 1 つも出ない。
+            float speed = TyphoonTrack.SpeedFor(20000u);
             for (uint s = 1; s < 100; s++)
             {
-                Assert.False(TyphoonTrack.IsInsideMap(TyphoonTrack.EntryOf(s)),
-                    "entry point for seed " + s + " is already inside the map");
+                Vec2 start = TyphoonTrack.CentreAt(Pointed, s, 0u, speed);
+                Assert.Equal(Pointed.X, start.X, 3);
+                Assert.Equal(Pointed.Z, start.Z, 3);
+                Assert.True(TyphoonTrack.IsInsideMap(start));
             }
         }
 
         [Fact]
-        public void TheTrackActuallyReachesTheMap()
+        public void TheTrackLeavesTheMapWithinItsLifetime()
         {
-            // 出発点も向きも種から引くので、「掠めもせずに通り過ぎる」経路が
-            // 出せてしまう。それは「台風が来たのに何も起きない」になる。
-            float speed = TyphoonTrack.SpeedFor(20000u);
+            // 終了条件のひとつが「1 度中に入ってから外へ出た」なので、
+            // 出ない経路があると台風が持続時間いっぱい居座る（あるいは
+            // 上限だけで終わる）。マップの中から始まる以上、必ず出ること。
+            const uint dur = 20000u;
+            float speed = TyphoonTrack.SpeedFor(dur);
             for (uint s = 1; s < 100; s++)
             {
-                bool entered = false;
-                for (uint t = 0; t <= 20000u && !entered; t += 100u)
+                bool left = false;
+                for (uint t = 0; t <= dur && !left; t += 100u)
                 {
-                    if (TyphoonTrack.IsInsideMap(TyphoonTrack.CentreAt(s, t, speed))) entered = true;
+                    if (!TyphoonTrack.IsInsideMap(TyphoonTrack.CentreAt(Pointed, s, t, speed)))
+                        left = true;
                 }
-                Assert.True(entered, "track for seed " + s + " never enters the map");
+                Assert.True(left, "track for seed " + s + " never leaves the map");
             }
         }
 
@@ -84,8 +95,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
             float speed = TyphoonTrack.SpeedFor(20000u);
             for (uint s = 1; s < 30; s++)
             {
-                Vec2 a = TyphoonTrack.CentreAt(s, 4000u, speed);
-                Vec2 b = TyphoonTrack.CentreAt(s, 4001u, speed);
+                Vec2 a = TyphoonTrack.CentreAt(Pointed, s, 4000u, speed);
+                Vec2 b = TyphoonTrack.CentreAt(Pointed, s, 4001u, speed);
                 float d = (float)System.Math.Sqrt(a.DistanceSquaredTo(b));
                 Assert.Equal(speed, d, 2);
             }
@@ -94,7 +105,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void SpeedIsDerivedFromTheMeasuredActiveDuration()
         {
-            // 長い嵐ほどゆっくり動く。経路長は同じなので、持続時間の逆数になる。
+            // 長い嵐ほどゆっくり動く。経路長（マップ 1 辺）は同じなので、持続時間の逆数になる。
             Assert.True(TyphoonTrack.SpeedFor(40000u) < TyphoonTrack.SpeedFor(10000u));
             Assert.InRange(TyphoonTrack.SpeedFor(10u),
                            TyphoonTrack.MinSpeedMetresPerFrame,

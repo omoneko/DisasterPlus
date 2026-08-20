@@ -1,3 +1,5 @@
+using DisasterPlus.Core.Common;
+
 namespace DisasterPlus.Game
 {
     /// <summary>
@@ -18,6 +20,36 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
+    /// 依頼 1 件。**⑤の <see cref="VolcanoRequestData"/> と同じ形にしてある。**
+    ///
+    /// ★★ ④のタイルはバニラの災害ボタンと同じように**配置カーソルを構える**ように
+    ///    なったので、依頼は<b>座標を運ぶ</b>（<see cref="TyphoonPlacementTool"/>）。
+    ///    enum 1 本のままにすると、sim 側が「どこに」を自分で発明することになる。
+    ///
+    /// <see cref="Kind"/> が <see cref="TyphoonRequest.None"/> ／
+    /// <see cref="TyphoonRequest.Stop"/> のとき <see cref="Point"/> は読まれない。
+    /// </summary>
+    public struct TyphoonRequestData
+    {
+        public readonly TyphoonRequest Kind;
+
+        /// <summary>クリックされたワールド座標（<c>Start</c> のときだけ意味を持つ）。</summary>
+        public readonly Vec3 Point;
+
+        public TyphoonRequestData(TyphoonRequest kind, Vec3 point)
+        {
+            Kind = kind;
+            Point = point;
+        }
+
+        /// <summary>「依頼なし」。<c>default(TyphoonRequestData)</c> と同じだが、意図を名乗る。</summary>
+        public static TyphoonRequestData None
+        {
+            get { return new TyphoonRequestData(TyphoonRequest.None, new Vec3(0f, 0f, 0f)); }
+        }
+    }
+
+    /// <summary>
     /// sim スレッドが Publish し main スレッドが <see cref="Latest"/> を読む。
     /// ①の <c>ForecastHub</c>・②の <see cref="EarthquakeHub"/> と同形
     /// （net35 に <c>System.Collections.Concurrent</c> は無いので素の lock 1 本）。
@@ -33,7 +65,7 @@ namespace DisasterPlus.Game
     {
         private static readonly object _gate = new object();
         private static TyphoonSnapshot _latest;
-        private static TyphoonRequest _request;
+        private static TyphoonRequestData _request;
 
         public static void Publish(TyphoonSnapshot snapshot)
         {
@@ -53,7 +85,7 @@ namespace DisasterPlus.Game
         /// 「最後に押したほうが勝つ」で正しい —— 発生と停止を続けて押した人が
         /// 望んでいるのは後者だけである。
         /// </summary>
-        public static void Request(TyphoonRequest request)
+        public static void Request(TyphoonRequestData request)
         {
             lock (_gate) { _request = request; }
         }
@@ -69,7 +101,7 @@ namespace DisasterPlus.Game
         /// <see cref="TakeRequest"/> と違って**取り出さない**。ここで消費すると
         /// パネルを開いているかどうかで sim の挙動が変わる。
         /// </summary>
-        public static TyphoonRequest PendingRequest
+        public static TyphoonRequestData PendingRequest
         {
             get { lock (_gate) { return _request; } }
         }
@@ -79,12 +111,12 @@ namespace DisasterPlus.Game
         /// に戻す。**1 tick に 1 回だけ呼ぶこと**（2 回呼ぶと 2 回目が必ず None になり、
         /// 呼び出し順に依存した取りこぼしを作る）。
         /// </summary>
-        public static TyphoonRequest TakeRequest()
+        public static TyphoonRequestData TakeRequest()
         {
             lock (_gate)
             {
                 var r = _request;
-                _request = TyphoonRequest.None;
+                _request = TyphoonRequestData.None;
                 return r;
             }
         }
@@ -99,7 +131,7 @@ namespace DisasterPlus.Game
                 _latest = null;
                 // ★ 戻し忘れると、次の都市がロードされた瞬間に
                 //    前の都市で押されたボタンが発火する。
-                _request = TyphoonRequest.None;
+                _request = TyphoonRequestData.None;
             }
         }
     }

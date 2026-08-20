@@ -6,9 +6,26 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ①〜⑤のボタンを **バニラの災害パネルの中** にまとめて置く、唯一の持ち主。
+    /// ①②④⑤のボタンを **バニラの災害パネルの中** にまとめて置く、唯一の持ち主。
     ///
-    /// なぜ 1 つの型が 5 個ぜんぶを持つのか
+    /// タイルは 2 種類ある（★ 足すときはどちらかを選ぶこと）
+    /// ------------------------------------------------
+    /// | 種別 | タイル | 押すと |
+    /// |---|---|---|
+    /// | 情報だけ | ①予報 ②地震 | パネルが開閉する（**出す物が無いので構えない**） |
+    /// | 災害を起こす | ④台風 ⑤火山 | **配置カーソルが構わる**＋パネルが開く |
+    ///
+    /// 後者はバニラの災害ボタンと同じ約束である —— 押す、地図をクリックする、
+    /// 出現の遅れを置いてその地点で始まる。所有者の指摘
+    /// 「押してその場でしばらくしたら発生するオリジナルの挙動が達成されていない」
+    /// への回答がこの表で、入口は <c>TyphoonPanel.ArmPlacement</c> /
+    /// <c>VolcanoPanel.ArmPlacement</c>。**どちらもパネルを同時に開く**ので、
+    /// 説明と診断（断り文・上陸予測・確認の行）への経路は塞がらない。
+    /// カーソルだけを解くのは右クリック、パネルを閉じるのは X。
+    ///
+    /// ③火災旋風のタイルは**無い**（自然発生しかしない。<c>FireWhirlFeature</c> の doc）。
+    ///
+    /// なぜ 1 つの型が 4 個ぜんぶを持つのか
     /// ----------------------------------
     /// 以前は 5 個のボタンがそれぞれ別の型で、それぞれが同じ preferred 座標 (8,50) から
     /// <see cref="FreeSlotFinder"/> で空きを探していた。初回の実機テストの output_log.txt は
@@ -20,7 +37,7 @@ namespace DisasterPlus.Game
     ///   typhoon panel button installed at (8,50)
     ///   volcano panel button installed at (8,50)
     ///
-    /// 4 個が同じ 1 点に積み上がった。**位置を決める主体が 5 つある限り、この事故は
+    /// 4 個が同じ 1 点に積み上がった。**位置を決める主体が複数ある限り、この事故は
     /// 形を変えて何度でも起きる。** そこで位置を決める主体を 1 つにし、順序の付いた
     /// 1 本の並びを 1 回のループで配置する —— 2 個が同じ位置に来ることが構造として
     /// あり得なくなる。③のボタン（旧 FireWhirlPanelButton）が持っていた固定座標
@@ -47,7 +64,7 @@ namespace DisasterPlus.Game
     /// 触らない（IL 実測）ので、この行が自動配置であることは IL から言える。行は
     /// <c>UIScrollablePanel</c>（横スクロールバー付き。Awake が
     /// <c>horizontalScrollbar.incrementAmount = 109</c> を設定している）なので、
-    /// **5 個増えて入り切らなくてもパネルを広げる必要は無い。溢れた分はスクロールする。**
+    /// **タイルが増えて入り切らなくてもパネルを広げる必要は無い。溢れた分はスクロールする。**
     ///
     /// バニラの索引再利用に巻き込まれないための唯一の条件
     /// ------------------------------------------------
@@ -186,18 +203,21 @@ namespace DisasterPlus.Game
                       EarthquakePanel.Toggle,
                       EarthquakePanel.Hide),
 
+            // ★★ ④⑤は**災害を起こすタイル**なので、押すと配置カーソルが構わる
+            //    （バニラの災害ボタンと同じ約束）。①②は出すものが無いので従来どおり
+            //    パネルの開閉である。**この違いはツールチップで名乗ること。**
             new Entry(IdTyphoon,
                       delegate { return Strings.TyphoonTitle; },
-                      delegate { return Strings.TyphoonTitle; },
+                      delegate { return Strings.TyphoonButtonTooltip; },
                       delegate { return ModSettings.TyphoonEnabled.value; },
-                      TyphoonPanel.Toggle,
+                      TyphoonPanel.ArmPlacement,
                       TyphoonPanel.Hide),
 
             new Entry(IdVolcano,
                       delegate { return Strings.VolcanoButtonLabel; },
                       delegate { return Strings.VolcanoButtonTooltip; },
                       delegate { return ModSettings.VolcanoEnabled.value; },
-                      VolcanoPanel.Toggle,
+                      VolcanoPanel.ArmPlacement,
                       VolcanoPanel.Hide),
         };
 
