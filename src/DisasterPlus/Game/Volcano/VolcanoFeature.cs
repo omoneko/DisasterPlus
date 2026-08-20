@@ -429,10 +429,17 @@ namespace DisasterPlus.Game
         /// ⑤自前の噴出物だけで噴火は成立する。だから
         /// <c>not available in this environment</c> にはその旨を添える。
         ///
-        /// ★ <c>own particles</c> と <c>borrowed fire effect</c> を別の行にするのは、
-        ///   実機で「何も見えない」を切り分ける材料がここにしか無いからである ——
-        ///   前者が <c>not drawing</c> ならシェーダかマテリアルの問題（火災旋風 §4.9 / §4.8）、
-        ///   後者だけが欠けているならこの環境で借りられないだけである。
+        /// ★ 借り物の 4 つを 1 行ずつ出すのは、実機で「何も見えない」を切り分ける材料が
+        ///   ここにしか無いからである。<c>NOT resolved</c> はその 1 つだけが描かれない
+        ///   ということで、噴火も山も溶岩も止まらない。
+        ///
+        /// ★★ <b>ここは sim スレッドである</b>（<c>DiagnosticDump</c> のクラス doc:
+        ///   main がホットキーで頼み、sim が組み立てる）。だから
+        ///   <c>VolcanoVanillaFx</c> の解決経路を**ここから呼ばない** ——
+        ///   あちらは <c>Object.Instantiate</c> と <c>ParticleSystem</c> に触る。
+        ///   読むのは main スレッドが描画のときに書いておいた
+        ///   <c>bool</c> / <c>int</c> / <c>string</c> のキャッシュだけである
+        ///   （<c>WriteAudio</c> が同じ理由で同じ形をしている）。
         /// </summary>
         private static void WriteEruption(DiagnosticBuilder b, VolcanoSnapshot snapshot)
         {

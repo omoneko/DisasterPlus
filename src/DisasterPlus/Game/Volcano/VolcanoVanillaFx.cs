@@ -179,6 +179,22 @@ namespace DisasterPlus.Game
 
         private static bool _inventoryLogged;
 
+        // ── 診断が読むキャッシュ（**bool と int と string だけ**）─────────────
+        //
+        // ★★ IDisasterFeature.WriteDiagnostics は **sim スレッド専用**である。
+        //    そこから Unity のオブジェクトに触ってはいけない —— 参照の == null さえ、
+        //    ネイティブへ降りる比較なので main スレッドの契約の外にある。
+        //    だから診断へ出すのは、main スレッドが解決したときに書いておいた
+        //    この平の値だけにする（Detail / *ResolvedCached が読むのはここ）。
+
+        private static bool _ashOk;
+        private static bool _flameOk;
+        private static bool _ejectaOk;
+        private static bool _dustOk;
+        private static bool _ashCloned;
+        private static bool _ejectaCloned;
+        private static bool _dustCloned;
+
         /// <summary>直近に測った在庫（診断の 1 行に出す）。</summary>
         private static int _effectCount;
         private static int _particleMaterialCount;
@@ -195,6 +211,16 @@ namespace DisasterPlus.Game
 
         /// <summary>噴煙に使うエフェクト。引けなければ null（**呼び出し側が黙って飛ばす**）。</summary>
         internal static ParticleEffect AshPlume()
+        {
+            // ★ 解決の結果をここで控える。診断（sim スレッド）は
+            //   Unity のオブジェクトに触れないので、この平の bool を読む。
+            ParticleEffect resolved = ResolveAsh();
+            _ashOk = resolved != null;
+            _ashCloned = _ashClone != null;
+            return resolved;
+        }
+
+        private static ParticleEffect ResolveAsh()
         {
             if (_ashClone != null) return _ashClone;
 
@@ -239,6 +265,13 @@ namespace DisasterPlus.Game
         ///   **バニラの中で NRE になる**。
         /// </summary>
         internal static ParticleEffect Flames()
+        {
+            ParticleEffect resolved = ResolveFlames();
+            _flameOk = resolved != null;
+            return resolved;
+        }
+
+        private static ParticleEffect ResolveFlames()
         {
             if (_flame != null) return _flame;
 
@@ -294,6 +327,16 @@ namespace DisasterPlus.Game
         /// <summary>噴石。**重力を下向きに直した複製**を返す（元は上向き＝爆炎用）。</summary>
         internal static ParticleEffect Ejecta()
         {
+            // ★ 解決の結果をここで控える。診断（sim スレッド）は
+            //   Unity のオブジェクトに触れないので、この平の bool を読む。
+            ParticleEffect resolved = ResolveEjecta();
+            _ejectaOk = resolved != null;
+            _ejectaCloned = _ejectaClone != null;
+            return resolved;
+        }
+
+        private static ParticleEffect ResolveEjecta()
+        {
             if (_ejectaClone != null) return _ejectaClone;
 
             ParticleEffect source = Source(EjectaName, ref _ejectaMiss, ref _ejectaMissLogged);
@@ -319,6 +362,16 @@ namespace DisasterPlus.Game
 
         /// <summary>火砕流もどきの土煙。**ほぼ水平に広がる複製**を返す。</summary>
         internal static ParticleEffect PyroclasticDust()
+        {
+            // ★ 解決の結果をここで控える。診断（sim スレッド）は
+            //   Unity のオブジェクトに触れないので、この平の bool を読む。
+            ParticleEffect resolved = ResolveDust();
+            _dustOk = resolved != null;
+            _dustCloned = _dustClone != null;
+            return resolved;
+        }
+
+        private static ParticleEffect ResolveDust()
         {
             if (_dustClone != null) return _dustClone;
 
@@ -401,6 +454,11 @@ namespace DisasterPlus.Game
         /// <summary>
         /// 診断に出す 1 行（**英語**）。将来のゲーム更新で黙って何も出なくなったときの
         /// 唯一の手がかりなので、**何が引けて何が複製できたか**を必ず名乗る。
+        ///
+        /// ★★ **ここから解決を走らせないこと。** 診断は sim スレッドから組み立てられる
+        ///   （<c>FeatureHost.BuildReport</c>）ので、<c>Object.Instantiate</c> はもちろん
+        ///   Unity の参照比較すら踏んではいけない。読むのは main スレッドが
+        ///   書いておいた平の値だけである。
         /// </summary>
         internal static string Detail
         {
@@ -409,12 +467,18 @@ namespace DisasterPlus.Game
                 return "builtin effects=" + (_effectCount > 0 ? _effectCount.ToString() : "?")
                        + ", particle materials="
                        + (_particleMaterialCount > 0 ? _particleMaterialCount.ToString() : "?")
-                       + "; ash=" + State(AshPlume(), _ashClone, _ashCloneRefused)
-                       + ", flames=" + (Flames() != null ? "shared" : "MISSING")
-                       + ", ejecta=" + State(Ejecta(), _ejectaClone, _ejectaCloneRefused)
-                       + ", dust=" + State(PyroclasticDust(), _dustClone, _dustCloneRefused);
+                       + "; ash=" + State(_ashOk, _ashCloned, _ashCloneRefused)
+                       + ", flames=" + (_flameOk ? "shared" : "MISSING")
+                       + ", ejecta=" + State(_ejectaOk, _ejectaCloned, _ejectaCloneRefused)
+                       + ", dust=" + State(_dustOk, _dustCloned, _dustCloneRefused);
             }
         }
+
+        /// <summary>
+        /// 土煙を直近に引けていたか。**診断専用の平の読み取り**で、
+        /// 解決は 1 度も走らせない（<see cref="Detail"/> と同じ理由）。
+        /// </summary>
+        internal static bool DustResolvedCached { get { return _dustOk; } }
 
         /// <summary>
         /// **実機で 1 度だけ在庫を数える**（事実文書の在庫が PARTIAL のままなので）。
@@ -491,6 +555,13 @@ namespace DisasterPlus.Game
             _inventoryLogged = false;
             _effectCount = 0;
             _particleMaterialCount = 0;
+            _ashOk = false;
+            _flameOk = false;
+            _ejectaOk = false;
+            _dustOk = false;
+            _ashCloned = false;
+            _ejectaCloned = false;
+            _dustCloned = false;
             // ★ _ashMissLogged などは戻さない（ゲームのビルドに対する事実であって
             //   都市ごとの状態ではない。④⑤の他の型と同じ判断）。
         }
@@ -583,10 +654,10 @@ namespace DisasterPlus.Game
             }
         }
 
-        private static string State(ParticleEffect resolved, ParticleEffect clone, bool refused)
+        private static string State(bool resolved, bool cloned, bool refused)
         {
-            if (resolved == null) return "MISSING";
-            if (clone != null) return "cloned";
+            if (!resolved) return "MISSING";
+            if (cloned) return "cloned";
             return refused ? "shared (clone refused)" : "shared";
         }
     }

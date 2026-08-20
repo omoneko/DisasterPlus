@@ -79,15 +79,14 @@ namespace DisasterPlus.Game
         public static int BandsDrawn { get { return _bandsDrawn; } }
 
         /// <summary>
-        /// 土煙のエフェクトをこの環境で引けているか。**診断専用。**
-        /// 引けていなければここで 1 度引き直しにいくので、
-        /// **毎フレームの経路からは呼ばないこと**（引けているときは参照 1 個の検査で終わる）。
-        /// <see cref="Step"/> が門にしているのと同じ式である。
+        /// 土煙のエフェクトを直近に引けていたか。**診断専用の平の読み取り。**
+        ///
+        /// ★★ ここから解決を走らせないこと。診断は sim スレッドから組み立てられる
+        ///   （<c>FeatureHost.BuildReport</c>）ので、Unity のオブジェクトには
+        ///   参照比較ですら触れない。<see cref="Step"/> が main スレッドで
+        ///   引いた結果を読むだけである。
         /// </summary>
-        public static bool DustResolved
-        {
-            get { return VolcanoVanillaFx.PyroclasticDust() != null; }
-        }
+        public static bool DustResolved { get { return VolcanoVanillaFx.DustResolvedCached; } }
 
         /// <summary>**main スレッド、毎フレーム。**</summary>
         public static void Update(VolcanoSnapshot snapshot)

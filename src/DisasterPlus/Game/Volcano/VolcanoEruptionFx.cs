@@ -102,7 +102,11 @@ namespace DisasterPlus.Game
         private static bool _flameDrawn;
         private static bool _ejectaDrawn;
 
-        /// <summary>今フレーム、火口に何か 1 つでも出したか。</summary>
+        /// <summary>
+        /// 今フレーム、火口に何か 1 つでも出したか。
+        /// **診断（sim スレッド）から読まれるので <c>bool</c> のまま持つ** ——
+        /// ここで Unity の参照を <c>== null</c> と比べてはいけない。
+        /// </summary>
         public static bool Drawing { get { return _plumeDrawn || _flameDrawn || _ejectaDrawn; } }
 
         /// <summary>
