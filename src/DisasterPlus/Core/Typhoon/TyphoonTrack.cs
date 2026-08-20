@@ -50,18 +50,17 @@ namespace DisasterPlus.Core.Typhoon
         /// <summary>マップ半辺（m）。CS のマップは 1080 セル × 16 m = 17280 m 四方。</summary>
         public const float MapHalfExtent = 8640f;
 
-        /// <summary>進入点を進行方向の逆へどれだけ下げるか（m）。<see cref="EntryOf"/>。</summary>
-        public const float EntryDistance = 12000f;
-
-        /// <summary>直進経路がマップ中心から外れてよい横方向の最大量（m）。</summary>
-        public const float LateralMax = 4000f;
-
         /// <summary>
         /// 想定する総経路長（m）。<see cref="SpeedFor"/> がこれを
-        /// <c>m_activeDuration</c> で割って速度にする。進入点までの距離
-        /// （最大 <see cref="EntryDistance"/> ＋ 横ずれぶん）の 2 倍弱にしてある。
+        /// <c>m_activeDuration</c> で割って速度にする。
+        ///
+        /// ★ **マップの一辺そのものにしてある**（発明した数ではない）。台風は
+        ///   プレイヤーが指した地点から発生するので（<see cref="CentreAt"/>）、
+        ///   「持続時間いっぱいでマップを 1 回横切る」が自然な尺度である。
+        ///   以前はマップ外の進入点から入ってくる設計で、進入距離ぶんを足した
+        ///   24000 m を使っていた。**その進入距離はもう存在しない。**
         /// </summary>
-        public const float NominalPathLength = 24000f;
+        public const float NominalPathLength = MapHalfExtent * 2f;
 
         public const float MinSpeedMetresPerFrame = 0.25f;
         public const float MaxSpeedMetresPerFrame = 6f;
@@ -82,21 +81,6 @@ namespace DisasterPlus.Core.Typhoon
         public const float RampFraction = 0.25f;
 
         /// <summary>
-        /// 進入点をここまで外へ押し出す半径（m）。
-        ///
-        /// マップの**角**までの距離は <see cref="MapHalfExtent"/> × √2 ≒ 12219 m で、
-        /// <see cref="EntryDistance"/>（12000）より長い。つまり進入方位が 45 度付近だと
-        /// 「12000 m 手前」がまだマップの中に入る。半径だけを外へ押し出せば、
-        /// |entry| ≧ 12400 &gt; 8640√2 から max(|X|,|Z|) &gt; 8640 が必ず言えるので、
-        /// 進入点は常にマップの外になる（<see cref="IsInsideMap"/> の否定）。
-        ///
-        /// 押し出しは半径方向なので進行方位 θ0 を変えず、横ずれの絶対量も
-        /// <see cref="LateralMax"/> を超えない（押し出しが効くのは |lateral| が
-        /// 小さいときだけで、そのとき横ずれ自身も小さい）。
-        /// </summary>
-        private const float OutsideRadius = 12400f;
-
-        /// <summary>
         /// これ未満の曲率は直線として扱う（rad/frame）。
         ///
         /// 円弧の閉形式は v/κ を含むので κ = 0 で 0/0 になる。実際に使う曲率は
@@ -110,7 +94,6 @@ namespace DisasterPlus.Core.Typhoon
         // 第 2 引数（用途タグ）で、同じ種から独立な値を引くためだけにある。
         private const uint SaltBearing = 0x54595048u;    // "TYPH"
         private const uint SaltCurvature = 0x43555256u;  // "CURV"
-        private const uint SaltLateral = 0x4C415452u;    // "LATR"
 
         /// <summary>進行方位（rad、[0, 2π)）。種だけで決まる。</summary>
         public static float BearingOf(uint seed)
@@ -125,38 +108,6 @@ namespace DisasterPlus.Core.Typhoon
         {
             return (DeterministicRandom.Unit(seed, SaltCurvature) * 2f - 1f)
                    * MaxCurvatureRadPerFrame;
-        }
-
-        /// <summary>
-        /// 進入点。進行方向 θ0 の**逆**へ <see cref="EntryDistance"/> 進み、
-        /// θ0 に直交する向きへ [-<see cref="LateralMax"/>, +LateralMax] ずらす。
-        /// こうすると直進経路は必ずマップ中心から LateralMax 以内を通る
-        /// （LateralMax 4000 &lt; MapHalfExtent 8640）＝「掠めもせずに通り過ぎる」
-        /// 経路が出ない。
-        ///
-        /// 最後に <see cref="OutsideRadius"/> まで押し出す（その doc を参照）。
-        /// </summary>
-        public static Vec2 EntryOf(uint seed)
-        {
-            float theta = BearingOf(seed);
-            float dirX = (float)Math.Cos(theta);
-            float dirZ = (float)Math.Sin(theta);
-
-            float lateral = (DeterministicRandom.Unit(seed, SaltLateral) * 2f - 1f) * LateralMax;
-
-            // θ0 に直交する単位ベクトル。
-            float x = -dirX * EntryDistance - dirZ * lateral;
-            float z = -dirZ * EntryDistance + dirX * lateral;
-
-            float r = (float)Math.Sqrt(x * x + z * z);
-            if (r < OutsideRadius)
-            {
-                // r は EntryDistance 以上なので 0 除算にならない。
-                float k = OutsideRadius / r;
-                x *= k;
-                z *= k;
-            }
-            return new Vec2(x, z);
         }
 
         /// <summary>
@@ -218,10 +169,22 @@ namespace DisasterPlus.Core.Typhoon
             return theta;
         }
 
-        /// <summary>台風の中心（真の位置。マップ外にもなる）。</summary>
-        public static Vec2 CentreAt(uint seed, uint elapsedFrames, float speed)
+        /// <summary>
+        /// 台風の中心（真の位置。マップ外にもなる）。
+        ///
+        /// ★★ <paramref name="origin"/> は**プレイヤーが指した地点**である。
+        ///
+        /// 以前は進入点を種から引き、必ずマップの外から入ってくるようにしていた。
+        /// いまは④のタイルがバニラの災害ボタンと同じように配置カーソルを構え、
+        /// クリックした地点から台風が発生する（設計書 §4.1）。**種が決めるのは
+        /// 進行方位と曲率だけ**で、出発点は決めない。
+        ///
+        /// 種を残しているのは、同じ災害 ID・同じ地点なら同じ経路を描くため
+        /// （§4.1「同じセーブで再現できること」）。
+        /// </summary>
+        public static Vec2 CentreAt(Vec2 origin, uint seed, uint elapsedFrames, float speed)
         {
-            return ArcPosition(EntryOf(seed), BearingOf(seed), CurvatureOf(seed),
+            return ArcPosition(origin, BearingOf(seed), CurvatureOf(seed),
                                elapsedFrames, speed);
         }
 

@@ -1,4 +1,5 @@
 using ColossalFramework.UI;
+using DisasterPlus.Core.Common;
 using UnityEngine;
 
 namespace DisasterPlus.Game
@@ -24,12 +25,18 @@ namespace DisasterPlus.Game
     /// 担保の実体は <see cref="TyphoonRows"/> に置いてある。
     /// **このファイルには <c>UILabel</c> の生成も <c>.text</c> への代入も 1 つも無い。**
     ///
-    /// ── 発生ボタンは sim へ「依頼」を出すだけ ────────────────────────
+    /// ── 発生は「地点を指す」から始まる ───────────────────────────
     ///
-    /// <c>eventClick</c> は <see cref="TyphoonHub.Request"/> を呼ぶだけで、
-    /// **main スレッドから <c>DisasterManager</c> に触らない**。実際に災害を作るのは
-    /// 次の sim tick の <see cref="TyphoonController"/> である。したがって押してから
-    /// 見た目が変わるまで **1 tick の遅れがある**。二度押しで 2 個発生したように
+    /// ★★ 災害パネルの④のタイルも、このパネルの「発生」ボタンも、押すと
+    ///    <b>配置カーソルを構える</b>（<see cref="TyphoonPlacementTool"/>）。
+    ///    バニラの災害ボタンと同じ約束で、地図をクリックした地点から台風が始まる。
+    ///    <see cref="ArmPlacement"/> がその入口で、**タイルはこれを呼ぶ**。
+    ///
+    /// 「止める」ボタンだけは地点を要らないので、従来どおり
+    /// <see cref="TyphoonHub.Request"/> に依頼を積むだけである。
+    /// どちらも **main スレッドから <c>DisasterManager</c> に触らない**。実際に災害を
+    /// 作るのは次の sim tick の <see cref="TyphoonController"/> である。したがって
+    /// 指してから見た目が変わるまで **1 tick の遅れがある**。二度指して 2 個発生したように
     /// 見えないよう、その間は「最初のシミュレーション更新を待っています」を出す
     /// （<see cref="TyphoonStatusRows"/> が <see cref="TyphoonHub.PendingRequest"/> を見る）。
     /// なお sim 側は同時に 1 個しか作らない（<c>TyphoonController.Start</c>）。
@@ -42,6 +49,9 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class TyphoonPanel
     {
+        /// <summary>ボタン 1 個の動作。net35 なので <c>Action</c> ではなく自前の delegate。</summary>
+        private delegate void ClickHandler();
+
         private const string PanelName = FreeSlotFinder.SelfPrefix + "TyphoonPanel";
 
         /// <summary>ボタン 1 個の大きさ。発生・停止の 2 個を横に並べる。</summary>
@@ -74,9 +84,32 @@ namespace DisasterPlus.Game
             if (_panel != null) _panel.Hide();
         }
 
-        public static void Toggle()
+        /// <summary>
+        /// ★★ **災害パネルの④タイルの動作。** 配置カーソルを構え、同時にこのパネルを開く。
+        ///
+        /// パネルも開くのは、**パネルを画面から到達できなくしないため**である。
+        /// パネルは④の唯一の説明の置き場（出所の見出し・上陸予測・「起こせなかった」
+        /// 理由）で、タイルが配置専用になった時点でここを開く経路が無くなると、
+        /// 診断だけが読めないまま残る。右クリックでカーソルだけを解除でき、
+        /// パネルは開いたまま残る（閉じるのは X）。
+        ///
+        /// 機能が切られているときは何もしない —— タイル自体が消えているので通常は
+        /// 到達しないが、押せてしまう経路が将来足されたときに黙って構えないこと。
+        /// </summary>
+        public static void ArmPlacement()
         {
-            if (IsVisible) Hide(); else Show();
+            if (!ModSettings.TyphoonEnabled.value) return;
+
+            // パネルを先に出す。**構えられない環境でも理由は必ず読める。**
+            Show();
+
+            // ★ この環境で④が原理的に起こせない（ND DLC 非所持）なら、カーソルは
+            //   構えない。構えてしまうと「指しても何も起きないカーソル」ができ、
+            //   パネルに出ている理由（Strings.TyphoonNeedsDlc）まで届かない。
+            //   述語は本体が本文を組むかどうかと同じ式にする（_bodyBuilt の doc）。
+            if (!_bodyBuilt) return;
+
+            TyphoonPlacementTool.Activate();
         }
 
         /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
@@ -221,34 +254,42 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 「台風を発生させる」「台風を止める」。**どちらも sim へ依頼を積むだけ**
-        /// （クラス doc）。ボタンのテキストは <c>UIButton.text</c> であって
-        /// <c>UILabel.text</c> ではないので、<see cref="TyphoonRows"/> の担保
-        /// （<c>UILabel</c> の生成と <c>.text</c> 代入の一元化）とは無関係である。
+        /// 「発生地点を指す」「台風を止める」。
+        ///
+        /// 左は<b>配置カーソルを構える</b>（<see cref="ArmPlacement"/>／クラス doc）。
+        /// 右は地点が要らないので依頼を積むだけ。ボタンのテキストは
+        /// <c>UIButton.text</c> であって <c>UILabel.text</c> ではないので、
+        /// <see cref="TyphoonRows"/> の担保（<c>UILabel</c> の生成と <c>.text</c> 代入の
+        /// 一元化）とは無関係である。
         /// </summary>
         private static void AddActionButtons(UIPanel panel, ref float y)
         {
-            AddActionButton(panel, "StartButton", Strings.TyphoonStart,
-                TyphoonRows.RowLeft, y, TyphoonRequest.Start);
-            AddActionButton(panel, "StopButton", Strings.TyphoonStop,
-                TyphoonRows.RowLeft + ActionButtonWidth + 12f, y, TyphoonRequest.Stop);
+            AddButton(panel, "StartButton", Strings.TyphoonStart, Strings.TyphoonPlaceHint,
+                TyphoonRows.RowLeft, y,
+                delegate { TyphoonPlacementTool.Activate(); });
+
+            AddButton(panel, "StopButton", Strings.TyphoonStop, null,
+                TyphoonRows.RowLeft + ActionButtonWidth + 12f, y,
+                delegate { TyphoonHub.Request(new TyphoonRequestData(TyphoonRequest.Stop,
+                                                                     new Vec3(0f, 0f, 0f))); });
             y += ActionButtonHeight + 10f;
         }
 
-        private static void AddActionButton(UIPanel panel, string suffix, string text,
-                                            float x, float y, TyphoonRequest request)
+        private static void AddButton(UIPanel panel, string suffix, string text, string tooltip,
+                                      float x, float y, ClickHandler onClick)
         {
             var button = (UIButton)panel.AddUIComponent(typeof(UIButton));
             button.name = FreeSlotFinder.SelfPrefix + "Typhoon" + suffix;
             button.text = text;
+            if (!string.IsNullOrEmpty(tooltip)) button.tooltip = tooltip;
             button.width = ActionButtonWidth;
             button.height = ActionButtonHeight;
             button.relativePosition = new Vector3(x, y);
             button.normalBgSprite = "ButtonMenu";
             button.hoveredBgSprite = "ButtonMenuHovered";
             button.pressedBgSprite = "ButtonMenuPressed";
-            // ★ main スレッドから DisasterManager に触らない。依頼を積むだけ。
-            button.eventClick += (c, e) => TyphoonHub.Request(request);
+            // ★ main スレッドから DisasterManager に触らない。構えるか、依頼を積むだけ。
+            button.eventClick += (c, e) => onClick();
         }
 
         /// <summary>

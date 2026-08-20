@@ -82,6 +82,12 @@ namespace DisasterPlus.Game
 
         private static bool _active;
 
+        /// <summary>
+        /// **プレイヤーが指した発生地点**（クランプ前のワールド XZ）。
+        /// 経路はここから始まる（<c>TyphoonTrack.CentreAt</c>）。
+        /// </summary>
+        private static Vec2 _origin;
+
         private static uint _seed;
         private static float _speed;
         private static byte _peakIntensity;
@@ -227,8 +233,12 @@ namespace DisasterPlus.Game
             // ★ 1 tick に 1 回だけ（TyphoonHub.TakeRequest の doc）。
             var request = TyphoonHub.TakeRequest();
 
-            if (request == TyphoonRequest.Stop && _active) Stop();
-            else if (request == TyphoonRequest.Start) Start(snapshot, frame);
+            if (request.Kind == TyphoonRequest.Stop && _active) Stop();
+            else if (request.Kind == TyphoonRequest.Start)
+            {
+                // ★ 依頼は**地点を運ぶ**。ここで座標を発明しないこと。
+                Start(snapshot, frame, request.Point.ToVec2());
+            }
 
             if (!_active) return;
 
@@ -249,7 +259,7 @@ namespace DisasterPlus.Game
         /// スロットの取得と開始は <see cref="TyphoonSlot"/> が持ち、ここは
         /// **起こしてよいかの判断と、④のモデルの初期化**だけを行う。
         /// </summary>
-        private static void Start(TyphoonSnapshot snapshot, uint frame)
+        private static void Start(TyphoonSnapshot snapshot, uint frame, Vec2 origin)
         {
             if (_active)
             {
@@ -287,8 +297,10 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 種は災害 ID。同じセーブなら同じ経路になる（設計書 §4.1）。
+            // 種は災害 ID。**同じセーブで同じ地点を指せば同じ経路になる**（設計書 §4.1）。
+            // 種が決めるのは進行方位と曲率だけで、出発点はプレイヤーが決める。
             _seed = TyphoonSlot.Id;
+            _origin = origin;
             _speed = speed;
             _peakIntensity = ClampIntensity(ModSettings.TyphoonIntensity.value);
             _totalFrames = prefab.ActiveDuration;
@@ -302,7 +314,7 @@ namespace DisasterPlus.Game
             _landfallScanFrame = 0u;
             MinutesToLandfall = 0f;
 
-            _centre = TyphoonTrack.CentreAt(_seed, 0u, _speed);
+            _centre = TyphoonTrack.CentreAt(_origin, _seed, 0u, _speed);
             _heading = TyphoonTrack.HeadingAt(_seed, 0u, _speed);
             _phase = TyphoonTrack.PhaseAt(0u, _totalFrames);
             _intensity = TyphoonTrack.IntensityAt(_peakIntensity, 0u, _totalFrames, 0f);
@@ -322,6 +334,7 @@ namespace DisasterPlus.Game
             _lastRefusal = null;
 
             Log.Info("typhoon started: disaster #" + TyphoonSlot.Id
+                     + " at (" + _origin.X.ToString("F0") + "," + _origin.Z.ToString("F0") + ")"
                      + " intensity=" + _intensity
                      + " speed=" + _speed.ToString("F3") + " m/frame"
                      + " duration=" + _totalFrames + " frames");
@@ -346,7 +359,7 @@ namespace DisasterPlus.Game
             _lastFrame = frame;
 
             // 経路は elapsedFrames の閉じた関数。積算しない（Core の doc）。
-            _centre = TyphoonTrack.CentreAt(_seed, _elapsedFrames, _speed);
+            _centre = TyphoonTrack.CentreAt(_origin, _seed, _elapsedFrames, _speed);
             _heading = TyphoonTrack.HeadingAt(_seed, _elapsedFrames, _speed);
 
             bool inside = TyphoonTrack.IsInsideMap(_centre);
@@ -444,7 +457,7 @@ namespace DisasterPlus.Game
                 uint elapsed = _elapsedFrames + ahead;
                 if (elapsed > _totalFrames) return;
 
-                var c = TyphoonTrack.CentreAt(_seed, elapsed, _speed);
+                var c = TyphoonTrack.CentreAt(_origin, _seed, elapsed, _speed);
                 if (!TyphoonTrack.IsInsideMap(c)) continue;
                 if (HasWaterAt(c)) continue;
 
@@ -533,6 +546,9 @@ namespace DisasterPlus.Game
 
             _active = false;
             _seed = 0u;
+            // ★ 指された地点も持ち越さない。残すと、次に地点を運ばない経路が
+            //   足されたときに**前の台風の地点**から静かに始まる。
+            _origin = new Vec2(0f, 0f);
             _speed = 0f;
             _peakIntensity = 0;
             _totalFrames = 0u;

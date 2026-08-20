@@ -31,6 +31,16 @@ namespace DisasterPlus.Game
         public static string EarthquakeOwnerOther = "Natural Disasters Renewal";
         public static string EarthquakeOwnerSelf = "Disaster +";
 
+        // ★★ **退役した 2 件。** ③のタイル（災害パネルの「火災旋風」ボタン）と、その
+        //    ツールチップ「Place a stationary, burning vortex」の文言だった。
+        //    火災旋風は**意図的に起こせるものではなく、大火事のときにだけ自然発生する**
+        //    ことになり、手動発生の経路ごとタイルを撤去したので、どちらも表示されない。
+        //
+        //    **キーは消さない** —— Strings / Locales\en.txt / Locales\ja.txt のキー集合は
+        //    一致させ続ける必要があり、既訳を捨てる理由も無い（LogChannelFireWhirl・
+        //    *ResetButton と同じ扱い）。**別の意味で再利用してもいけない**
+        //    （とくに Tooltip は「置ける」と言っている。置けなくなった今その文を
+        //     別の場所で使い回すと、嘘の説明がそのまま生き返る）。
         public static string FireWhirlName = "Fire whirl";
         public static string FireWhirlTooltip = "Place a stationary, burning vortex";
 
@@ -605,7 +615,15 @@ namespace DisasterPlus.Game
             "The numbers on this panel come from Disaster +'s own model. The game does not "
             + "compute a typhoon, wind damage, a positioned cloud or a flood of its own. "
             + "Only the rows marked {measured} are values read straight from the game.";
-        public static string TyphoonStart = "Raise a typhoon";
+        // ★ ④のタイルもこのボタンも、押すと**配置カーソルが構わる**（バニラの災害
+        //   ボタンと同じ約束）。文言を「起こす」から「地点を指す」へ改めてあるのは、
+        //   押した瞬間には何も起きないからである —— 起きると書いてあるのに起きないと、
+        //   プレイヤーは壊れたと判断してもう一度押す。
+        public static string TyphoonStart = "Choose where the typhoon forms";
+        public static string TyphoonPlaceHint =
+            "Click the map where the typhoon should form. Right-click to cancel.";
+        public static string TyphoonButtonTooltip =
+            "Raise a typhoon: click, then click the map";
         public static string TyphoonStop = "Stop the typhoon";
         public static string TyphoonInactive = "No typhoon right now.";
         public static string TyphoonWaiting = "Waiting for the first simulation update.";
@@ -784,7 +802,8 @@ namespace DisasterPlus.Game
         // 溶岩の「温度」も「粘性」も⑤は持っていない。
         public static string VolcanoTitle = "Volcano";
         public static string VolcanoButtonLabel = "Volcano";
-        public static string VolcanoButtonTooltip = "Open the Disaster + volcano panel";
+        public static string VolcanoButtonTooltip =
+            "Place a volcano: click, then click the map (you still confirm before anything is destroyed)";
         public static string VolcanoModelHeader = "Computed by Disaster +";
 
         // ★★ **この文に印の文字列そのものを書かないこと**（④の全体レビュー I5 と

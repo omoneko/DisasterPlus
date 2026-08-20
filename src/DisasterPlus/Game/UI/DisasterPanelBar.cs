@@ -6,9 +6,26 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ①〜⑤のボタンを **バニラの災害パネルの中** にまとめて置く、唯一の持ち主。
+    /// ①②④⑤のボタンを **バニラの災害パネルの中** にまとめて置く、唯一の持ち主。
     ///
-    /// なぜ 1 つの型が 5 個ぜんぶを持つのか
+    /// タイルは 2 種類ある（★ 足すときはどちらかを選ぶこと）
+    /// ------------------------------------------------
+    /// | 種別 | タイル | 押すと |
+    /// |---|---|---|
+    /// | 情報だけ | ①予報 ②地震 | パネルが開閉する（**出す物が無いので構えない**） |
+    /// | 災害を起こす | ④台風 ⑤火山 | **配置カーソルが構わる**＋パネルが開く |
+    ///
+    /// 後者はバニラの災害ボタンと同じ約束である —— 押す、地図をクリックする、
+    /// 出現の遅れを置いてその地点で始まる。所有者の指摘
+    /// 「押してその場でしばらくしたら発生するオリジナルの挙動が達成されていない」
+    /// への回答がこの表で、入口は <c>TyphoonPanel.ArmPlacement</c> /
+    /// <c>VolcanoPanel.ArmPlacement</c>。**どちらもパネルを同時に開く**ので、
+    /// 説明と診断（断り文・上陸予測・確認の行）への経路は塞がらない。
+    /// カーソルだけを解くのは右クリック、パネルを閉じるのは X。
+    ///
+    /// ③火災旋風のタイルは**無い**（自然発生しかしない。<c>FireWhirlFeature</c> の doc）。
+    ///
+    /// なぜ 1 つの型が 4 個ぜんぶを持つのか
     /// ----------------------------------
     /// 以前は 5 個のボタンがそれぞれ別の型で、それぞれが同じ preferred 座標 (8,50) から
     /// <see cref="FreeSlotFinder"/> で空きを探していた。初回の実機テストの output_log.txt は
@@ -20,7 +37,7 @@ namespace DisasterPlus.Game
     ///   typhoon panel button installed at (8,50)
     ///   volcano panel button installed at (8,50)
     ///
-    /// 4 個が同じ 1 点に積み上がった。**位置を決める主体が 5 つある限り、この事故は
+    /// 4 個が同じ 1 点に積み上がった。**位置を決める主体が複数ある限り、この事故は
     /// 形を変えて何度でも起きる。** そこで位置を決める主体を 1 つにし、順序の付いた
     /// 1 本の並びを 1 回のループで配置する —— 2 個が同じ位置に来ることが構造として
     /// あり得なくなる。③のボタン（旧 FireWhirlPanelButton）が持っていた固定座標
@@ -47,7 +64,7 @@ namespace DisasterPlus.Game
     /// 触らない（IL 実測）ので、この行が自動配置であることは IL から言える。行は
     /// <c>UIScrollablePanel</c>（横スクロールバー付き。Awake が
     /// <c>horizontalScrollbar.incrementAmount = 109</c> を設定している）なので、
-    /// **5 個増えて入り切らなくてもパネルを広げる必要は無い。溢れた分はスクロールする。**
+    /// **タイルが増えて入り切らなくてもパネルを広げる必要は無い。溢れた分はスクロールする。**
     ///
     /// バニラの索引再利用に巻き込まれないための唯一の条件
     /// ------------------------------------------------
@@ -96,7 +113,6 @@ namespace DisasterPlus.Game
         // 診断が機能ごとの設置状況を引くための識別子。表示文字列ではない。
         public const string IdForecast = "forecast";
         public const string IdEarthquake = "earthquake";
-        public const string IdFireWhirl = "firewhirl";
         public const string IdTyphoon = "typhoon";
         public const string IdVolcano = "volcano";
 
@@ -158,11 +174,14 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// **並ぶ順序はこの 1 本の並びだけが決める。** 追加するときはここに 1 行足す
-        /// （座標を発明しないこと）。番号順（①予報 ②地震 ③火災旋風 ④台風 ⑤火山）。
+        /// （座標を発明しないこと）。番号順（①予報 ②地震 ④台風 ⑤火山）。
         ///
-        /// ③だけ <c>Wanted</c> が常に true なのは、以前からそうだったからである
-        /// （旧 FireWhirlPanelButton は設定を見ずに常に設置していた）。ここで
-        /// 挙動を変えると、この変更が「配置の付け替え」以外のことをしたことになる。
+        /// ★★ **③火災旋風のタイルはここに無い。**「火災旋風は意図的に起こせるもの
+        ///    ではなく、大火事のときにだけ自然発生する」という所有者の決定により、
+        ///    手動発生の経路（旧 <c>FireWhirlPlacementTool</c>）ごと撤去した
+        ///    （<see cref="FireWhirlFeature"/> のクラス doc）。**何もしないタイルを
+        ///    残さない**ためにタイル自体を消してあるので、③の行をここに足し直さないこと。
+        ///    ③の状態は診断（オーバーレイ／ダンプ）で読む。
         ///
         /// この並びは都市をまたいで生き残る static だが、持っている Unity オブジェクトは
         /// <see cref="Remove"/> が要素ごとに null へ戻す（並びそのものを見て
@@ -184,25 +203,21 @@ namespace DisasterPlus.Game
                       EarthquakePanel.Toggle,
                       EarthquakePanel.Hide),
 
-            new Entry(IdFireWhirl,
-                      delegate { return Strings.FireWhirlName; },
-                      delegate { return Strings.FireWhirlTooltip; },
-                      delegate { return true; },
-                      FireWhirlPlacementTool.Activate,
-                      null),
-
+            // ★★ ④⑤は**災害を起こすタイル**なので、押すと配置カーソルが構わる
+            //    （バニラの災害ボタンと同じ約束）。①②は出すものが無いので従来どおり
+            //    パネルの開閉である。**この違いはツールチップで名乗ること。**
             new Entry(IdTyphoon,
                       delegate { return Strings.TyphoonTitle; },
-                      delegate { return Strings.TyphoonTitle; },
+                      delegate { return Strings.TyphoonButtonTooltip; },
                       delegate { return ModSettings.TyphoonEnabled.value; },
-                      TyphoonPanel.Toggle,
+                      TyphoonPanel.ArmPlacement,
                       TyphoonPanel.Hide),
 
             new Entry(IdVolcano,
                       delegate { return Strings.VolcanoButtonLabel; },
                       delegate { return Strings.VolcanoButtonTooltip; },
                       delegate { return ModSettings.VolcanoEnabled.value; },
-                      VolcanoPanel.Toggle,
+                      VolcanoPanel.ArmPlacement,
                       VolcanoPanel.Hide),
         };
 
@@ -380,7 +395,7 @@ namespace DisasterPlus.Game
         /// <summary>
         /// 望まれている集合と実際に居る集合を一致させる。食い違ったときは
         /// **こちらのボタンを全部作り直す** —— 足りない分だけ後ろに足すと、
-        /// 設定を切り替えた順序でこちらの並び順が変わってしまう。5 個なので安い。
+        /// 設定を切り替えた順序でこちらの並び順が変わってしまう。4 個なので安い。
         /// </summary>
         private static void SyncButtons(UIScrollablePanel row, UIButton sample)
         {
@@ -651,7 +666,7 @@ namespace DisasterPlus.Game
         /// 画面に浮かぶ 1 本のバーへ退避する。**ボタンが 1 個も出ない方が悪い。**
         ///
         /// ここが <see cref="FreeSlotFinder"/> の唯一の呼び出し元である。呼ぶのは
-        /// **バー全体の起点 1 点** についてだけで、5 個ぶんの探索はしない ——
+        /// **バー全体の起点 1 点** についてだけで、4 個ぶんの探索はしない ——
         /// 中のボタンは起点からの相対位置に 1 回のループで並べる。実機テストで
         /// 4 個が同じ点に積み上がったのは「5 つの主体がそれぞれ探した」からであって、
         /// 探索そのものが誤りだったからではない。

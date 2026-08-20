@@ -28,10 +28,17 @@ namespace DisasterPlus.Game
         public float EndingMinutes;
 
         /// <summary>
-        /// プレイヤーが災害パネルから手動で置いた旋風。
-        /// 発生条件（R 内に N 棟）の割り込み判定を免除し、絶対上限だけで終わらせる。
-        /// これが無いと、火の無い場所に置いた瞬間に条件割り込みが始まり、
-        /// 猶予（既定 3 分 ≒ 136 フレーム）で消えてしまい、動作確認に使えない。
+        /// ★★ **退役したフラグ。新しく true になることはもう無い。**
+        ///
+        /// かつてプレイヤーが災害パネルから手動で置けた旋風の印で、発生条件
+        /// （R 内に N 棟）の割り込み判定を免除するために使っていた。手動発生の
+        /// 経路そのものを撤去した（<see cref="FireWhirlFeature"/> のクラス doc）ので、
+        /// これを true にする書き手は <see cref="FireWhirlRegistry.RestoreFromSave"/>
+        /// ——つまり**手動発生が在った頃のセーブ**——しか残っていない。
+        ///
+        /// **消さないこと。** セーブ形式 version 2 はこの 1 バイトを持っており、
+        /// 保存形式は公開契約である。読み書きをやめると旧セーブの旋風が
+        /// 免除を失い、ロードした瞬間に猶予だけで消える。
         /// </summary>
         public bool Manual;
     }
@@ -92,9 +99,17 @@ namespace DisasterPlus.Game
         private static readonly List<ActiveFireWhirl> _active = new List<ActiveFireWhirl>();
         private static readonly List<CoolingSpot> _cooling = new List<CoolingSpot>();
 
-        /// <param name="manual">プレイヤーが手動で置いたか。条件割り込みの免除に使う。</param>
+        /// <summary>
+        /// 自然発生した旋風を 1 基登録する。
+        ///
+        /// ★ <c>manual</c> の引数はもう無い。**プレイヤーが火災旋風を置く経路が
+        ///   存在しない**ので（<see cref="FireWhirlFeature"/> のクラス doc）、
+        ///   ここから作られる旋風は必ず自然発生である。
+        ///   <see cref="ActiveFireWhirl.Manual"/> が残っているのは**旧セーブのため**で、
+        ///   復元経路（<see cref="RestoreFromSave"/>）だけが true を入れうる。
+        /// </summary>
         public static void Add(ushort disasterId, ushort vehicleId, Vec3 center, float radius,
-                               int burningCount, bool manual)
+                               int burningCount)
         {
             lock (_gate)
             {
@@ -108,7 +123,9 @@ namespace DisasterPlus.Game
                     Life = FireWhirlLifecycle.Start(),
                     Ending = false,
                     EndingMinutes = 0f,
-                    Manual = manual,
+                    // ★ 自然発生しか経路が無いので必ず false。旧セーブから読み直した
+                    //   旋風だけが true を持ちうる（RestoreFromSave）。
+                    Manual = false,
                 });
             }
         }

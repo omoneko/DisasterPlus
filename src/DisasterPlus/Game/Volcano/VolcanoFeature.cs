@@ -122,7 +122,7 @@ namespace DisasterPlus.Game
         /// </summary>
         public void OnMainThreadUpdate()
         {
-            // ボタンは DisasterPanelBar が 5 個まとめて持つ（FeatureHost が呼ぶ）。
+            // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
             VolcanoPanel.Tick();
 
             // ★ 噴火の描画は main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
@@ -526,7 +526,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b)
         {
-            // ボタンは⑤専用ではなく DisasterPanelBar が 5 個まとめて置く。座標は
+            // ボタンは⑤専用ではなく DisasterPanelBar が 4 個まとめて置く。座標は
             // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
             b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdVolcano)
                 ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");

@@ -38,6 +38,13 @@ namespace DisasterPlus.Game
             TyphoonReader.Reset();
             TyphoonController.Reset();
             TyphoonWeather.Reset();
+
+            // ★★ **毎レベルロードで登録し直すこと。** ToolController.m_tools は Awake で
+            //    一度だけ構築され、ToolsModifierControl.SetTool<T> は静的辞書を引くだけ
+            //    なので、登録しないと**黙って空振りする**（「タイルは押せるのに
+            //    カーソルが変わらない」という、例外の出ない壊れ方）。
+            //    ToolController は都市ごとに作り直されるので前の都市の登録は使えない。
+            ToolRegistration.Register<TyphoonPlacementTool>();
         }
 
         /// <summary>
@@ -155,7 +162,7 @@ namespace DisasterPlus.Game
         /// </summary>
         public void OnMainThreadUpdate()
         {
-            // ボタンは DisasterPanelBar が 5 個まとめて持つ（FeatureHost が呼ぶ）。
+            // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
             TyphoonPanel.Tick();
 
             // ★ 雲は main スレッドだけの機能で、**sim 側からは 1 度も呼ばれない。**
@@ -180,6 +187,12 @@ namespace DisasterPlus.Game
 
         public void OnLevelUnloading()
         {
+            // ★★ 配置ツールが選ばれたまま都市を出させない。次の都市でカーソルが
+            //    「台風を置く」のまま始まると、プレイヤーが意図せず地点を指しうる。
+            //    **アクティブでないときは何もしない**ので、他 MOD が選んでいたツールを
+            //    横から戻すことはない（⑤と同じ）。
+            TyphoonPlacementTool.Deactivate();
+
             // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
             //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
@@ -239,7 +252,7 @@ namespace DisasterPlus.Game
         /// <summary>
         /// UI の状態。①②③⑤と同じ形（<see cref="DisasterPanelBar"/> に問い合わせるだけ）。
         ///
-        /// **「①②のボタンと重なっていないか」はもう診断項目ではない。** 5 個の位置は
+        /// **「①②のボタンと重なっていないか」はもう診断項目ではない。** 4 個の位置は
         /// 1 本の並びに対する 1 回のループが決めるので、重なる経路が存在しない
         /// （DisasterPanelBar のクラス doc）。ここで見るのは
         /// 「④のボタンが実際に居るか」と「どこに居るか（バニラのパネルの中か、
@@ -247,11 +260,14 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b)
         {
-            // ボタンは④専用ではなく DisasterPanelBar が 5 個まとめて置く。座標は
+            // ボタンは④専用ではなく DisasterPanelBar が 4 個まとめて置く。座標は
             // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
             b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdTyphoon)
                 ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "panel body", TyphoonPanel.IsVisible ? "shown" : "hidden");
+            // ★ タイルは配置カーソルを構える（バニラの災害ボタンと同じ約束）。
+            //   構えたまま指していないのか、指したのに何も起きないのかを見分ける。
+            b.Line(1, "placement tool", TyphoonPlacementTool.IsActive ? "active" : "idle");
         }
 
         /// <summary>

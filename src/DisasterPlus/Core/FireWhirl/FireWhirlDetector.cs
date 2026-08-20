@@ -10,13 +10,47 @@ namespace DisasterPlus.Core.FireWhirl
     /// </summary>
     public static class FireWhirlDetector
     {
+        /// <summary>
+        /// 判定だけを行う短い形。**診断が要らない呼び出し（テスト）のためだけに在る。**
+        /// 本番の呼び出しは <see cref="FireWhirlProspect"/> を受け取る側を使うこと ——
+        /// ③は自然発生しか経路を持たないので、「出なかった理由」を捨ててよい経路が
+        /// 実質存在しない。
+        /// </summary>
         public static List<FireWhirlCandidate> Detect(
             IList<BurningBuilding> burning,
             FireWhirlConfig config,
             IList<Vec2> existingWhirls)
         {
+            FireWhirlProspect ignored;
+            return Detect(burning, config, existingWhirls, out ignored);
+        }
+
+        /// <summary>
+        /// 判定と、**同じ 1 パスで**「なぜ出なかったか」を返す
+        /// （<see cref="FireWhirlProspect"/> のクラス doc）。
+        /// </summary>
+        public static List<FireWhirlCandidate> Detect(
+            IList<BurningBuilding> burning,
+            FireWhirlConfig config,
+            IList<Vec2> existingWhirls,
+            out FireWhirlProspect prospect)
+        {
             var result = new List<FireWhirlCandidate>();
-            if (burning == null || burning.Count < config.DetectCount) return result;
+
+            // いちばん密な塊。**閾値に届かない塊もここでだけは数える** ——
+            // 届かないことこそが「出ない理由」なので、判定で捨てる前に控える。
+            int densest = 0;
+            var densestCentre = new Vec2(0f, 0f);
+            int suppressed = 0;
+
+            if (burning == null || burning.Count == 0)
+            {
+                prospect = new FireWhirlProspect(0, 0, densestCentre,
+                    config.DetectRadius, config.DetectCount, 0, 0);
+                return result;
+            }
+
+            int burningTotal = burning.Count;
 
             // セルは半径と同じ大きさにする。近傍探索が 3x3 セルで済む。
             var grid = new GridVote(config.DetectRadius);
@@ -41,11 +75,26 @@ namespace DisasterPlus.Core.FireWhirl
                     sz += other.Position.Z;
                 }
 
+                var centre = new Vec2(sx / count, sz / count);
+
+                // ★ 判定より先に控える。ここを if の後ろに置くと、閾値に届かない
+                //   ——つまり診断がいちばん要る——場合にだけ数え損なう。
+                if (count > densest)
+                {
+                    densest = count;
+                    densestCentre = centre;
+                }
+
                 if (count < config.DetectCount) continue;
-                raw.Add(new FireWhirlCandidate(new Vec2(sx / count, sz / count), count));
+                raw.Add(new FireWhirlCandidate(centre, count));
             }
 
-            if (raw.Count == 0) return result;
+            if (raw.Count == 0)
+            {
+                prospect = new FireWhirlProspect(burningTotal, densest, densestCentre,
+                    config.DetectRadius, config.DetectCount, 0, 0);
+                return result;
+            }
 
             // 燃焼棟数の多い順に確定させ、近すぎる候補を捨てる。
             // 入力順に依存しないよう、同数のときはインデックスで決着させる（決定論のため）。
@@ -69,6 +118,11 @@ namespace DisasterPlus.Core.FireWhirl
                     }
                 }
 
+                // ★ 生存中／クールダウン中の旋風に弾かれた数だけを数える。
+                //   同じパスで採用済みの候補に弾かれたぶんは数えない ——
+                //   そのときは result が空でないので「出なかった理由」ではない。
+                if (blocked) suppressed++;
+
                 if (!blocked)
                 {
                     for (int a = 0; a < result.Count; a++)
@@ -80,6 +134,8 @@ namespace DisasterPlus.Core.FireWhirl
                 if (!blocked) result.Add(cand);
             }
 
+            prospect = new FireWhirlProspect(burningTotal, densest, densestCentre,
+                config.DetectRadius, config.DetectCount, suppressed, result.Count);
             return result;
         }
 
