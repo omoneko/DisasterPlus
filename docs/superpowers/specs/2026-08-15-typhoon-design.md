@@ -231,6 +231,47 @@ TyphoonState（④の所有、sim スレッド）
 **④で最も高い要素。単独のタスクに切り出し、他の要素から依存されないこと。**
 雲が出せなくても残り 4 要素は成立する。
 
+#### ★ 改訂（持ち主の指摘「現在の巨大な渦を雲から構成するように」）
+
+**渦の本経路は「バニラの雲・煙の粒子エフェクトを借りて撒く」形になった**
+（`Game/Typhoon/TyphoonCloudFx`、置き場所は `Core/Typhoon/VortexPuffLayout`）。
+以下の自前メッシュの記述は**退避経路**として今も有効だが、**既定では使われない**。
+
+理由は 2 つある。
+
+1. 自前メッシュには自前マテリアルが要り、それにはシェーダが要る。
+   **実機の `Shader.Find` は `"Standard"` を含めて全ての名前に null を返した。**
+   `ShaderPool`（読み込み済みマテリアルからシェーダだけ借りる）は回避策だが
+   **まだ 1 度も実機で通っていない**。
+2. 通っても、下の「★」段落のとおり出来上がるのは**半径およそ 900 m の平らな
+   渦巻き 1 枚＝渦の記号**であって、空を覆う雲ではない。
+
+バニラの粒子エフェクトは**既に読み込まれ、既に動くマテリアルを持っている**。
+しかもそのマテリアルは `ParticleSystemRenderer` に付くので、
+③が確定させた「CS のマテリアルを借りると自前 `MeshRenderer` で不可視になる」問題には
+**当たらない**（エフェクト実測文書 §D-3。バニラ自身が
+`EffectsWrapper.CreateParticleEffect` で同じことをしている）。
+
+- 素材は `Factory Smoke` → `Factory Steam` → `Large Pool Steam` → `Pool Steam` →
+  `Collapse Particles` → `Factory Smoke Small` → `BuildingProperties.m_collapseEffect`
+  の順に試し、**最初に取れたものを使う**。`Factory Smoke` は `EffectCollection` に
+  登録されていないので `EffectsWrapper.GetBuiltinEffect` でしか取れない（§A-3）
+- **必ずクローンしてから色・粒径・寿命・可視距離を変える。** 共有プレハブを直接
+  書き換えると**街じゅうの工場の煙**が嵐雲色になり、メモリ上に残る（§D-5）
+- クローンした `GameObject` はアクティブなシーンに入るので、`InitializeEffect()` の
+  **前に** `emission.enabled = false` を書く。書かないとワールド原点で煙を吐く
+- 撒き方は `RenderEffect(..., timeOffset: -1f, timeDelta: m_simulationTimeDelta, ...)`
+  ＝**継続モード**（§B-3。`SinkholeAI.RenderInstance` と同じ形）
+- **眼は穴のまま。** `VortexPuffLayout` は `EyeFraction`（0.16）より内側に 1 個も置かない
+- **毎フレームの上限は 3 本で決まる**: `RenderEffect` は `PuffCount`（30）回ちょうど、
+  新しく湧く粒子は 620 個／秒（`MagnitudeFor` が §B-4 の式を逆に解く）、
+  生きている粒子はクローンの `maxParticles`（7000）で頭打ち（バニラ自身が
+  `pps ×= (1 - fill²)` で絞る）。**ヒープ確保は 0 バイト**
+- **1 つも借りられなければログ 1 行を出してメッシュへ退避する。** 例外は投げない。
+  `Assumptions` の検証 1 件が同じ `Lookup` を呼んで名指しする
+
+以下、退避経路（自前メッシュ）の設計:
+
 - ④が円環状のスパイラルメッシュを手続き生成する（中心に眼の穴）。
   手本は `VortexAI.GenerateMesh()`（16250 頂点・高さ 2000 m の漏斗を
   `Randomizer(2975689)` の固定シードで生成）

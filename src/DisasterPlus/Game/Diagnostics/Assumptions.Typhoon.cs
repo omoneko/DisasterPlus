@@ -17,7 +17,7 @@ namespace DisasterPlus.Game
     public static partial class Assumptions
     {
         /// <summary>このファイルが持つ検証の数。</summary>
-        private const int TyphoonCheckCount = 9;
+        private const int TyphoonCheckCount = 10;
 
         private static void RunTyphoon()
         {
@@ -460,6 +460,53 @@ namespace DisasterPlus.Game
                   });
 
             // --- ④台風（Task 9）ここまで ---
+
+            // --- ④台風（渦を雲の粒で組む）ここから ---
+
+            // 渦の**本経路**はバニラの粒子エフェクトを借りて雲の粒を撒くことである
+            // （TyphoonCloudFx）。借りられるかどうかは実行時にしか分からない ——
+            // EffectCollection の登録は 186 個だが Factory Smoke はそこに**入っておらず**
+            // （エフェクト実測文書 §A-3 の未登録 17 個）、実行時の在庫は
+            // EffectsWrapper.m_BuiltinEffects（Resources.FindObjectsOfTypeAll の結果）
+            // でしか確かめられない（同 §A-2、PARTIAL）。
+            //
+            // ★ 述語は**この機能が実際に門にしている式**である。候補の並びをここへ
+            //   書き写すと、報告する名前と実際に借りる素材が黙ってずれる ——
+            //   だから TyphoonCloudFx.Lookup をそのまま共有する（雲のシェーダ検証が
+            //   ShaderPool を共有しているのと同じ形）。
+            //
+            // ★ FAIL は「雲が消える」ではない。旧来の自前スパイラルメッシュへ退避する
+            //   （そちらの可否は 1 つ上の検証が名乗る）。台風の他の要素は 1 つも止まらない。
+            string borrowed;
+            bool canBorrow = TyphoonCloudFx.CanBorrow(out borrowed);
+            Check("EffectInfo.RenderEffect(InstanceID, SpawnArea, Vector3, float, float, "
+                  + "float, float, CameraInfo) is reachable and a vanilla cloud/smoke "
+                  + "ParticleEffect can be borrowed for the vortex (resolved: "
+                  + (canBorrow ? borrowed : "none") + ")",
+                  "the typhoon's vortex falls back to the mod's own spiral mesh, which is a "
+                  + "flat ~900 m symbol of a vortex rather than a sky-filling canopy, and "
+                  + "which needs a shader of its own. Every other part of the typhoon is "
+                  + "unaffected.",
+                  delegate
+                  {
+                      if (typeof(EffectInfo).GetMethod("RenderEffect",
+                              BindingFlags.Public | BindingFlags.Instance, null,
+                              new Type[]
+                              {
+                                  typeof(InstanceID), typeof(EffectInfo.SpawnArea),
+                                  typeof(UnityEngine.Vector3), typeof(float), typeof(float),
+                                  typeof(float), typeof(float),
+                                  typeof(RenderManager.CameraInfo)
+                              },
+                              null) == null)
+                      {
+                          return false;
+                      }
+
+                      return canBorrow;
+                  });
+
+            // --- ④台風（渦を雲の粒で組む）ここまで ---
         }
 
         /// <summary>

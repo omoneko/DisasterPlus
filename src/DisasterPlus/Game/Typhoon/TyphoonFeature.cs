@@ -355,9 +355,14 @@ namespace DisasterPlus.Game
 
             b.Line(2, "cloud", CloudStateText());
 
-            // ★ どのシェーダで解決したかを必ず名乗る（③⑤と同じ扱い）。
-            //   Standard へ落ちた／借りてきたことは、ここでしか分からない。
-            b.Line(3, "cloud material", TyphoonCloud.ShaderDetail);
+            // ★★ **どちらの経路で出しているかを必ず名乗る。** 本経路はバニラの
+            //    粒子エフェクトを借りた雲の粒で、メッシュはそれが取れなかった
+            //    ときの退避である。ここが唯一の見分け方になる。
+            b.Line(3, "cloud puffs", TyphoonCloudFx.EffectDetail);
+
+            // ★ 退避経路のシェーダ。Standard へ落ちた／借りてきたことは
+            //   ここでしか分からない（③⑤と同じ扱い）。
+            b.Line(3, "fallback mesh material", TyphoonCloud.ShaderDetail);
 
             if (!ModSettings.TyphoonVanillaCloudBoost.value)
             {
@@ -375,8 +380,14 @@ namespace DisasterPlus.Game
         {
             switch (TyphoonCloud.State)
             {
+                case TyphoonCloudState.Puffs:
+                    return "cloud puffs (" + TyphoonCloudFx.LastRenderCalls
+                           + " RenderEffect/frame, radius "
+                           + TyphoonCloud.LastRadiusMetres.ToString("F0") + " m)";
+
                 case TyphoonCloudState.Drawing:
-                    return "drawing (" + TyphoonCloud.LastDrawCalls + " draw call/frame, radius "
+                    return "fallback spiral mesh (" + TyphoonCloud.LastDrawCalls
+                           + " draw call/frame, radius "
                            + TyphoonCloud.LastRadiusMetres.ToString("F0") + " m)";
 
                 case TyphoonCloudState.ShaderMissing:

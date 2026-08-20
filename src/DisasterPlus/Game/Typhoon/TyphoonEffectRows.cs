@@ -144,9 +144,15 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void RefreshCloud()
         {
+            // ★ 渦が出ているのは「粒」でも「退避のメッシュ」でも同じ扱いにする。
+            //   ここが名乗るのはバニラ空の増強が使えないことだけで、
+            //   どちらの経路で渦を出しているかは診断ダンプの担当である。
+            bool drawing = TyphoonCloud.State == TyphoonCloudState.Puffs
+                           || TyphoonCloud.State == TyphoonCloudState.Drawing;
+
             bool unavailable = ModSettings.TyphoonCloudEnabled.value
                                && ModSettings.TyphoonVanillaCloudBoost.value
-                               && TyphoonCloud.State == TyphoonCloudState.Drawing
+                               && drawing
                                && !TyphoonCloud.VanillaBoostApplied;
 
             TyphoonRows.SetPlain(_cloudNoteLabel,

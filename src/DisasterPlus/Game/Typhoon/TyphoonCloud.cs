@@ -13,7 +13,13 @@ namespace DisasterPlus.Game
         /// <summary>台風が居ないので描いていない。**不具合ではない。**</summary>
         NotBuilt,
 
-        /// <summary>毎フレーム描いている。</summary>
+        /// <summary>
+        /// **本経路。** バニラの粒子エフェクトを借りた雲の粒で渦を組んでいる
+        /// （<see cref="TyphoonCloudFx"/>）。
+        /// </summary>
+        Puffs,
+
+        /// <summary>退避経路。自前のスパイラルメッシュを毎フレーム描いている。</summary>
         Drawing,
 
         /// <summary>メッシュかマテリアルの構築が失敗した。</summary>
@@ -80,14 +86,23 @@ namespace DisasterPlus.Game
     /// <c>TyphoonFeature.OnMainThreadUpdate</c> が毎フレーム <see cref="Update"/> を呼び、
     /// **スナップショットが <c>Active == false</c> になったフレームで自分で後始末する**。
     ///
-    /// ── これは「渦の記号」であって空を覆う雲ではない（全体レビューの記録）──────
+    /// ── ★ 今は本経路ではない（雲は粒で組む） ────────────────────────
     ///
-    /// 実物の台風の雲は数十 km に広がるが、④が描くのは**半径およそ 900 m の
-    /// 平らな渦巻き 1 枚**である。眼の上に「渦がある」ことが読める記号として置いて
-    /// あり、空を埋める雲ではない。空全体を重くするのは
-    /// <see cref="ApplyVanillaBoost"/> の担当で、それも環境によっては効かない。
-    /// **画面写真を見て「思ったより小さい」と驚かないこと。** この判断は
-    /// 設計書 §4.5 と実機チェックリストにも書いてある（今回のレビューで拡大はしない）。
+    /// 持ち主の指摘「現在の巨大な渦を雲から構成するように」を受けて、渦は
+    /// <see cref="TyphoonCloudFx"/> が**バニラの粒子エフェクトを借りた雲の粒**で
+    /// 組むようになった。このファイルのメッシュ経路は<b>退避経路として残してある</b>:
+    ///
+    /// - 借りられる粒子エフェクトが 1 つも無い環境（ゲーム更新・別 MOD）でも
+    ///   渦の位置は読めたほうがよい。
+    /// - <see cref="ShaderPool"/> 経路は<b>まだ 1 度も実機で通っていない</b>ので、
+    ///   ここで消すと「効かないと分かっているもの」ではなく
+    ///   「効くか分からないもの」を消すことになる。
+    ///
+    /// 退避したときの見え方は下の段落のとおり **半径およそ 900 m の平らな渦巻き
+    /// 1 枚＝渦の記号**であって空を覆う雲ではない。実物の台風の雲は数十 km に
+    /// 広がる。空全体を重くするのは <see cref="ApplyVanillaBoost"/> の担当で、
+    /// それも環境によっては効かない。**画面写真を見て「思ったより小さい」と
+    /// 驚かないこと。** 判断は設計書 §4.5 と実機チェックリストにもある。
     ///
     /// ── 毎フレームの費用 ─────────────────────────────────
     ///
@@ -260,6 +275,33 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            // ★ ポーズ中は回さない（全体レビュー）。ここは main スレッドの
+            //   毎フレーム経路なので Time.deltaTime はポーズしても進み続ける ——
+            //   何も動いていない都市の上で雲だけが回っていた。
+            //   SimulationManager.SimulationPaused は bool のプロパティで、
+            //   main スレッドから読んでよい（②の CameraShakeBooster と同じ扱い）。
+            //   **粒とメッシュで同じ角度を使う**ので、退避しても向きが飛ばない。
+            if (!SimulationIsPaused())
+            {
+                _spinDegrees += SpinDegreesPerSecond * Time.deltaTime;
+                if (_spinDegrees >= 360f) _spinDegrees -= 360f;
+            }
+
+            // ★★ **本経路は粒**（クラス doc）。借りた雲の粒で渦が組めたら、
+            //    メッシュは 1 枚も描かないし、**組みもしない** —— 両方出すと
+            //    粒の中に円盤が透けて見えるし、使わないシェーダを毎フレーム
+            //    探しに行って実機のログが埋まる。
+            if (TyphoonCloudFx.Update(snapshot, _spinDegrees))
+            {
+                _state = TyphoonCloudState.Puffs;
+                _lastDrawCalls = 0;
+                _lastRadius = radius;
+                ApplyVanillaBoost(snapshot.Intensity);
+                return;
+            }
+
+            // ── ここから下は退避経路（自前メッシュ）────────────────────
+
             // ★ 罠 2: 参照そのものを毎フレーム見る。破棄済みなら Unity の fake-null で
             //   null と等価になり、ここで作り直される（2 つ目の都市の自己修復）。
             if (_mesh == null) _mesh = BuildMesh();
@@ -268,17 +310,6 @@ namespace DisasterPlus.Game
             {
                 _lastDrawCalls = 0;
                 return;
-            }
-
-            // ★ ポーズ中は回さない（全体レビュー）。ここは main スレッドの
-            //   毎フレーム経路なので Time.deltaTime はポーズしても進み続ける ——
-            //   何も動いていない都市の上で雲だけが回っていた。
-            //   SimulationManager.SimulationPaused は bool のプロパティで、
-            //   main スレッドから読んでよい（②の CameraShakeBooster と同じ扱い）。
-            if (!SimulationIsPaused())
-            {
-                _spinDegrees += SpinDegreesPerSecond * Time.deltaTime;
-                if (_spinDegrees >= 360f) _spinDegrees -= 360f;
             }
 
             Vec3 centre = snapshot.Centre;
@@ -562,6 +593,10 @@ namespace DisasterPlus.Game
         public static void Destroy()
         {
             ReleaseVanillaBoost();
+
+            // ★ 粒のクローン（GameObject と、その内側の ParticleEffect）も必ず畳む。
+            //   DontDestroyOnLoad で作ってあるので、放っておくと都市をまたいで残る。
+            TyphoonCloudFx.Destroy();
 
             if (_mesh != null) Object.Destroy(_mesh);
             _mesh = null;
