@@ -80,6 +80,56 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
+        /// **山頂から外へ広がる隆起**（m）。<paramref name="progress"/> の時点で
+        /// この地点がどれだけ盛り上がっているか。
+        ///
+        /// ── なぜ <c>profile × progress</c> ではないのか ──────────────
+        ///
+        /// <c>profile × progress</c> は**山全体が一様に膨らむ**。完成した山が地面から
+        /// 音もなく空気を入れられたように見え、SimCity 4 の隆起とは順序が逆である。
+        /// あちらは噴出したものが**積もって**山になる —— 山頂が先に立ち上がり、
+        /// 裾が後から外へ広がる。
+        ///
+        /// それをそのまま式にすると「最終形を H(1−p) だけ下へ沈めて、地面から
+        /// 出ている分だけが今の山」になる:
+        ///
+        /// <code>
+        /// grown(d, p) = max(0, profile(d) − H·(1 − p))
+        /// </code>
+        ///
+        /// p のとき地表に出ているのは <c>profile(d) &gt; H(1−p)</c> の範囲、つまり
+        /// **山頂まわりの小さな円錐**で、それが p とともに外へ広がる。
+        /// 直線の円錐（成層）なら前線はちょうど <c>R·p</c> で、
+        /// <see cref="ClearingFrontMetres"/> が先行させる準備の前線と噛み合う。
+        ///
+        /// ── 罠 2 に対しては<b>むしろ強くなる</b>───────────────────
+        ///
+        /// 育っている最中のセルは<b>どれも同じ速さ</b> H/totalTicks で上がる
+        /// （p で微分すると H）。<see cref="TotalTicksFor"/> が totalTicks を H×64 で
+        /// 切り詰めているので、これは必ず 1 raw 単位/tick 以上である。
+        /// <c>profile × progress</c> では外周ほど 1 tick の変化が小さく、
+        /// **「合計の盛り上がりが小さいセル」は丸めで消えていた**。この式にはその場所が無い。
+        ///
+        /// 異常入力は 0。<paramref name="heightMetres"/> が 0 以下のときだけは
+        /// 従来どおり比例で返す（H が分からなければ沈める量も決まらない）。
+        /// </summary>
+        public static float GrowthMetresAt(float profileMetres, float heightMetres, float progress)
+        {
+            if (float.IsNaN(profileMetres) || float.IsNaN(heightMetres) || float.IsNaN(progress))
+            {
+                return 0f;
+            }
+            if (profileMetres <= 0f) return 0f;
+
+            float p = progress < 0f ? 0f : (progress > 1f ? 1f : progress);
+            if (p >= 1f) return profileMetres;
+            if (heightMetres <= 0f) return profileMetres * p;
+
+            float grown = profileMetres - heightMetres * (1f - p);
+            return grown > 0f ? grown : 0f;
+        }
+
+        /// <summary>
         /// このセルの、この時刻における**絶対目標** raw 高さ。
         ///
         /// <paramref name="progress"/> は [0,1] へクランプするが、
