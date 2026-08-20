@@ -292,9 +292,59 @@ grown(d, p) = max(0, profile(d) − H·(1 − p))
 - 溶岩は隆起の進捗 0.6 から流しはじめる。**地形がまだ上がっている量を許容差として渡す** ——
   渡さないと「溶岩が登った」と誤って観測して流れが止まる（`VolcanoUplift.RiseMetresPerTick`）
 
-- プルームは `DisasterProperties.m_mediumExplosion` を借りられる
-  （**`EffectInfo` を借りるのはマテリアルを借りるのとは別**。`RenderEffect` の経路を使う）
-- 発光する噴出物は自作。`DispatchEffect` の magnitude は**粒子密度であってサイズではない**（既知）
+#### 見た目は全部ゲーム自身の粒子エフェクトを借りる（自前ポリゴンは撤去）
+
+設計時は「発光する噴出物は自作」と書いていた。**その自作は実機で 1 粒も描かれなかった** ——
+`Shader.Find` が組み込みの `"Standard"` を含めて全ての名前に `null` を返す環境だったためで、
+自前 `Material` を作る経路がそこで折れていた。バニラの粒子エフェクトは
+**既に読み込まれ、既に動くマテリアルを持っている**。借りるべきものが最初から在った。
+
+| 要素 | 借りるもの | 複製 | 変えるところ |
+|---|---|---|---|
+| 噴煙（灰の柱） | `Factory Smoke` | する | 灰黒・寿命 7–16s・初速 26–48・可視 10 km・粒径 34 |
+| 炎 | `Fire Particles` | **しない** | **1 バイトも変えない**（建物火災と共有。変えると街じゅうの火災が道連れ） |
+| 噴石 | `Medium Explosion Particles` | する | 重力を **+1.6**（元は −1 ＝ 上向きの爆炎）・粒径 6・寿命 2.4–4.2s |
+| 火砕流「もどき」 | `Collapse Particles` | する | 放出角 70–95°・寿命 4.5–9s・粒径 28・可視 10 km |
+
+- **4 つとも基本ゲームのもので、DLC ゲートが掛からない。** Natural Disasters の
+  `Huge/Large Explosion Particles` と `Meteor Particles` は見た目が更に良いが
+  **非所持環境には存在しない**ので、既定経路には決してしない
+- 引き方は `EffectManager.instance.m_EffectsWrapper.GetBuiltinEffect(name)`。
+  `EffectCollection.FindEffect` は保険（`Factory Smoke` はそちらに**登録されていない**）
+- 呼び方は `ParticleEffect.RenderEffect(..., timeOffset = -1f, ...)` の**継続モード**を毎フレーム。
+  `DispatchEffect` は使わない —— あれは予定をキューに積んで**あとで**実行するので、
+  レベルアンロードで複製を破棄したあとにバニラの中から触られうる
+- `magnitude` は**粒子密度であってサイズではない**。大きさは `SpawnArea` の半径で決める。
+  その写像は `Core/Volcano/EruptionEffectPlan`（engine-free・テスト付き）に置く
+- 時間差は `SimulationManager.m_simulationTimeDelta`。**`Time.deltaTime` ではない** ——
+  バニラの `EffectManager.EndRenderingImpl` がそちらを渡しており、
+  こちらだと一時停止しても噴き続け、ゲーム速度を上げても濃さが変わらない
+- **複製に失敗したら元のプレハブをそのまま描く。** 複製は色と寿命の改善であって
+  必要条件ではない。この設計のおかげで `Assumptions` の述語（「名前で引けたか」）が
+  **描画側の門と一致する**
+- 引けなかったら**その 1 つを出さないだけ**。例外は投げず、ログは 1 行、噴火は続く
+
+#### ★ 火砕流はバニラに存在しない（代用であることを名乗る）
+
+出荷アセットの `EffectInfo` を全数（277 個）調べても、「地面を這って高速で流れ下る濃密な雲」に
+当たるものは**基本ゲームにも DLC にも 1 つも無い**。⑤が出しているのは
+**建物が崩れるときの粉塵（`Collapse Particles`）を、溶岩の通り道に沿ったベジェ帯へ湧かせ、
+`RenderEffect` の `velocity` 引数で下り方向へ押したもの**である。
+見えるのは「谷筋を下っていく幅 50〜180 m の灰色の土煙の帯」であって、火砕流の再現ではない。
+**パネルの注記と設定画面と診断ダンプが、そう名乗る。**
+
+- 経路は自分で辿らない。`VolcanoLava` が既に下り方向へ辿った軌跡（スナップショットの
+  不変配列）をそのまま使う。地形の解釈を sim 側の 1 か所に閉じたままにできるうえ、
+  火砕流も溶岩も同じ谷を下るので経路が一致しているほうが正しい
+- 帯の頭が火口から経路の端まで 95 m/秒 で走り、抜け切ったら火口へ戻ってやり直す（サージ）。
+  幾何は `Core/Volcano/PyroclasticSurge`（engine-free・テスト付き）
+- ベジェ帯の落とし穴（IL 実測）: `SpawnArea(bezier, halfWidth, halfHeight)` は
+  **第 4 引数を帯の半幅として使い、第 3 引数を読まない**。初速は**上向き成分にしか入らない**ので、
+  横へ流すのは `velocity` 引数のほうである
+- **何も壊さない。** 燃やすのは溶岩だけである（同じ経路を 2 本にすると
+  「どちらが燃やしたか」が誰にも分からなくなる）。`Building.m_fireIntensity` は
+  どちらの経路からも**直接書かない**
+- 同時に出すのは最大 2 本（費用の上限そのもの）。設定 `volcanoPyroclasticFx`（既定 ON）で切れる
 - **音は MOD 同梱の音源（`Audio/erupting-volcano.wav`）を自分で読んで鳴らす。**
   設計時は「`AudioInfo.m_clip` を借りられる」と書いていたが、**借りない** ——
   借用元の `EffectInfo` が音を鳴らすのは `PlayEffect` の側で、`RenderEffect` は
