@@ -172,6 +172,10 @@ namespace DisasterPlus.Game
             typhoon.AddSlider(Strings.TyphoonWindStrength, 0f, 10f, 1f,
                 ModSettings.TyphoonWindStrength.value,
                 v => ModSettings.TyphoonWindStrength.value = (int)v);
+            // ★ 危険半円の向き。既定は北半球（＝進行方向の右が強い）。
+            typhoon.AddCheckbox(Strings.TyphoonSouthernHemisphere,
+                ModSettings.TyphoonSouthernHemisphere.value,
+                v => ModSettings.TyphoonSouthernHemisphere.value = v);
             // ★ 河川氾濫も既定 ON。**セーブに焼き付く状態を触る唯一の機能**なので、
             //    復元が 3 箇所から掛かることを TyphoonFloodNote が名乗る。
             typhoon.AddCheckbox(Strings.TyphoonFloodEnabled,
@@ -202,6 +206,8 @@ namespace DisasterPlus.Game
             helper.AddGroup(Strings.TyphoonIntensityNote);
             // ★ 「バニラに風害は存在しない」「数値は風速ではない」を設定画面でも名乗る。
             helper.AddGroup(Strings.TyphoonWindNote);
+            // ★ 危険半円がどちら側かを設定画面でも名乗る（左右が逆だと気付けない）。
+            helper.AddGroup(Strings.TyphoonDangerousSideNote);
             // ★ 「水位は必ず戻す」を設定画面でも名乗る。氾濫の唯一の怖さは
             //    「MOD を外したら川が溢れたままだった」である。
             helper.AddGroup(Strings.TyphoonFloodNote);

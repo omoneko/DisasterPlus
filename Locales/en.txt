@@ -208,6 +208,10 @@ TyphoonWindStrength = Wind damage strength (0 = off)
 TyphoonWindNote = The game has no wind damage of any kind, and no field that makes the wind stronger. This is a model Disaster + invented. The numbers are not wind speeds.
 TyphoonWindShelterNote = Shelters, vaults and dams do not collapse in a typhoon. That is the game refusing, and it is the right answer.
 TyphoonWindCapped = sweep truncated this pass; the outer edge has not been rolled yet
+TyphoonSouthernHemisphere = Southern hemisphere (the dangerous side is the LEFT of the track)
+TyphoonDangerousSideNote = A real typhoon is not symmetric: on one side the spin and the storm's own travel add up. That side gets a slightly wider and slightly more likely damage footprint - the right of the track in the northern hemisphere, the left in the southern one.
+TyphoonDangerousSideRight = stronger on the right of the track
+TyphoonDangerousSideLeft = stronger on the left of the track
 TyphoonFloodRow = River flooding
 TyphoonFloodEnabled = River flooding (raises the map's own water sources)
 TyphoonFloodStrength = River flooding strength (0 = off)

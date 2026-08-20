@@ -93,6 +93,27 @@ namespace DisasterPlus.Game
     /// 内側は再抽選しない」という別の挙動になるので、実機で挙動を見る前に
     /// 入れ替えない。
     ///
+    /// ── 進行方向右側の危険半円（持ち主の指摘）─────────────────────────
+    ///
+    /// > 台風直下の範囲内で、進行方向〔右〕側に被害半径や被害の確率を若干強化して
+    ///
+    /// 実在の台風は左右対称ではない。渦の回転と台風自身の移動が足し算になる側を
+    /// 危険半円と呼び、北半球では**進行方向の右**である（<see cref="TrackBias"/>）。
+    /// ④はそこで
+    ///
+    /// - **被害半径**を最大 +18 %: 風速の場そのものを引き伸ばす
+    ///   （<c>WindAt(距離 ÷ RadiusFactor, …)</c>）。半径の定数は書き換えない
+    /// - **倒壊確率**を最大 +30 %: <c>CollapseChance</c> の結果に掛ける
+    ///
+    /// **走査の矩形も同じ倍率だけ広げる。** 広げないと、伸びた側の外縁の建物が
+    /// そもそも走査に入らず、半径を伸ばした意味が消える（例外の出ない壊れ方）。
+    /// 広げるのは矩形だけで、**リングの順序（眼から外へ）は 1 ビットも変えない。**
+    ///
+    /// 偏りは<b>毎走査 <c>TyphoonController.HeadingRadians</c> を読み直す</b>ので、
+    /// 経路が曲がればその場で回る。方位をここへキャッシュしないこと。
+    ///
+    /// 南半球（左が危険半円）は <c>ModSettings.TyphoonSouthernHemisphere</c> で切り替わる。
+    ///
     /// ── 乱数にフレームを混ぜない ──────────────────────────────
     ///
     /// 選定は (台風 ID, 建物 ID) だけで決まる。混ぜると同じ建物が走査のたびに
@@ -397,12 +418,18 @@ namespace DisasterPlus.Game
             var grid = bm.m_buildingGrid;
             if (buildings == null || grid == null) return;
 
+            // ★ 危険半円側で風速の場を引き伸ばすぶん、**矩形も同じ倍率だけ広げる**
+            //   （クラス doc）。片側だけ広げることもできるが、矩形の 4 辺はどのみち
+            //   セル境界に丸められるので全周に掛けたほうが読みやすく、広げすぎても
+            //   「風速 0 の建物を数えずに飛ばす」だけで害が無い。
+            float scanRange = range * (1f + TrackBias.MaxRadiusBoost);
+
             // 建物グリッドは 1 セル 64m、270x270（バニラの DestroyBuildings と同じ
             // セル 64・オフセット 135・[0,269] クランプ）。
-            int minX = Clamp((int)((centre.X - range) / 64f + 135f));
-            int maxX = Clamp((int)((centre.X + range) / 64f + 135f));
-            int minZ = Clamp((int)((centre.Z - range) / 64f + 135f));
-            int maxZ = Clamp((int)((centre.Z + range) / 64f + 135f));
+            int minX = Clamp((int)((centre.X - scanRange) / 64f + 135f));
+            int maxX = Clamp((int)((centre.X + scanRange) / 64f + 135f));
+            int minZ = Clamp((int)((centre.Z - scanRange) / 64f + 135f));
+            int maxZ = Clamp((int)((centre.Z + scanRange) / 64f + 135f));
 
             int cellCount = (maxX - minX + 1) * (maxZ - minZ + 1);
             if (cellCount <= 0) return;
@@ -425,6 +452,13 @@ namespace DisasterPlus.Game
                 OutwardCellOrder.RingRadiusFor(centreX, centreZ, minX, maxX, minZ, maxZ));
 
             var group = GroupOf(typhoonId);
+
+            // ★ 偏りは**毎走査読み直す**（クラス doc）。ここでキャッシュした値は
+            //   この 1 走査のあいだだけ有効で、次の走査ではまた読み直される ——
+            //   だから経路が曲がれば偏りも回る。
+            float heading = TyphoonController.HeadingRadians;
+            bool southern = ModSettings.TyphoonSouthernHemisphere.value;
+            int biasedSelected = 0;
 
             int scanned = 0, selected = 0, attempted = 0, refused = 0, collapsed = 0;
             int unknownHeight = 0, cells = 0;
@@ -471,8 +505,17 @@ namespace DisasterPlus.Game
                     if ((buildings[id].m_flags & CandidateMask) == Building.Flags.Created)
                     {
                         var p = buildings[id].m_position;
+                        float offsetX = p.x - centre.X;
+                        float offsetZ = p.z - centre.Z;
                         float d = Distance(centre, p.x, p.z);
-                        float wind = TyphoonProfile.WindAt(d, intensity, prefabRadius);
+
+                        // ★★ 危険半円（クラス doc）。**半径の定数は書き換えず、
+                        //    「もっと眼に近い」ことにして風速の場を引き伸ばす。**
+                        //    左側と正面・真後ろでは倍率がちょうど 1 なので、
+                        //    そちらは今日までと 1 ビットも変わらない。
+                        float radiusFactor = TrackBias.RadiusFactor(heading, offsetX, offsetZ, southern);
+                        float wind = TyphoonProfile.WindAt(d / radiusFactor,
+                                                           intensity, prefabRadius);
                         if (wind > 0f)
                         {
                             scanned++;
@@ -482,7 +525,10 @@ namespace DisasterPlus.Game
                             float metres = BuildingHeight.MetresOf(ref buildings[id]);
                             if (metres <= 0f) unknownHeight++;
 
-                            if (IsSelected(typhoonId, id, wind, metres, strength))
+                            float chanceFactor = TrackBias.ChanceFactor(heading, offsetX, offsetZ, southern);
+                            if (chanceFactor > 1f) biasedSelected++;
+
+                            if (IsSelected(typhoonId, id, wind, metres, strength, chanceFactor))
                             {
                                 selected++;
                                 bool accepted;
@@ -529,7 +575,8 @@ namespace DisasterPlus.Game
             //    「近くに建物が無い」がログ上で区別できなくなる（③で実際に起きた形）。
             WriteDiag(typhoonId, strength, range, cells, cellCount,
                       startOrdinal, ordinal, scanned, selected, attempted,
-                      refused, collapsed, unknownHeight, capped);
+                      refused, collapsed, unknownHeight, capped,
+                      heading, southern, biasedSelected);
         }
 
         /// <summary>
@@ -540,10 +587,17 @@ namespace DisasterPlus.Game
         /// **フレームを混ぜない**（クラス doc）。
         /// </summary>
         private static bool IsSelected(ushort typhoonId, ushort buildingId,
-                                       float wind, float heightMetres, int strength)
+                                       float wind, float heightMetres, int strength,
+                                       float chanceFactor)
         {
             float chance = WindDamageModel.CollapseChance(wind, heightMetres, strength);
             if (chance <= 0f) return false;
+
+            // ★ 危険半円の上乗せは**モデルの外**で掛ける。WindDamageModel は
+            //   「風速と高さと設定から確率を出す」ことだけを持ち、台風の向きを
+            //   知らない。壊れた倍率が来ても抽選を狂わせない。
+            if (!float.IsNaN(chanceFactor) && chanceFactor > 1f) chance *= chanceFactor;
+            if (chance > 1f) chance = 1f;
 
             float roll = DeterministicRandom.Unit(typhoonId, buildingId);
             return roll < chance;
@@ -668,7 +722,8 @@ namespace DisasterPlus.Game
         private static void WriteDiag(ushort typhoonId, int strength, float range,
                                       int cells, int cellCount, int startOrdinal, int ordinal,
                                       int scanned, int selected, int attempted, int refused,
-                                      int collapsed, int unknownHeight, bool capped)
+                                      int collapsed, int unknownHeight, bool capped,
+                                      float heading, bool southern, int biasedSelected)
         {
             if (!Log.DiagEnabled(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon)) return;
 
@@ -685,6 +740,11 @@ namespace DisasterPlus.Game
                 + " attempted=" + attempted + " refused=" + refused
                 + " collapsed=" + collapsed
                 + " unknownHeight=" + unknownHeight
+                // ★ 危険半円がどちらを向いていて、何棟がその側に居たか。
+                //   偏りが「効いていない」と「その側に建物が無い」を見分ける唯一の手。
+                + " dangerousSide=" + (southern ? "left" : "right")
+                + " heading=" + (heading * 57.29578f).ToString("F0") + "deg"
+                + " onDangerousSide=" + biasedSelected
                 + (_treesUnavailable ? " trees=unavailable" : " trees=felled")
                 // ★ 「次回続きから」とは書かない（全体レビュー I1）。中心のセルが
                 //   変わると _cursorOrdinal は 0 に戻り、次の走査は眼から

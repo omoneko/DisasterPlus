@@ -745,6 +745,18 @@ namespace DisasterPlus.Game
         public static string TyphoonWindCapped =
             "sweep truncated this pass; the outer edge has not been rolled yet";
 
+        // ★ 危険半円。**左右が逆でもプレイヤーには気付けない**ので、どちら側が
+        //   強いかを設定画面とパネルの両方で名乗る。
+        public static string TyphoonSouthernHemisphere =
+            "Southern hemisphere (the dangerous side is the LEFT of the track)";
+        public static string TyphoonDangerousSideNote =
+            "A real typhoon is not symmetric: on one side the spin and the storm's own "
+            + "travel add up. That side gets a slightly wider and slightly more likely "
+            + "damage footprint - the right of the track in the northern hemisphere, the "
+            + "left in the southern one.";
+        public static string TyphoonDangerousSideRight = "stronger on the right of the track";
+        public static string TyphoonDangerousSideLeft = "stronger on the left of the track";
+
         // --- ④台風（Task 8: 河川氾濫） ---
         //
         // ★ TyphoonFloodNoSources は「なぜ何も起きないか」を出す行である

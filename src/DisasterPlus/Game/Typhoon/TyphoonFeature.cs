@@ -516,6 +516,17 @@ namespace DisasterPlus.Game
                 + " / refused " + snapshot.WindLastRefused
                 + " / strength " + strength);
 
+            // ★★ 危険半円がどちら側か。**左右が逆でもプレイヤーには気付けない**ので、
+            //    向きと上乗せの大きさをここで名乗る。数字は TrackBias が持っている
+            //    定数そのもので、ここに写した別の値ではない。
+            b.Line(3, "dangerous side",
+                (ModSettings.TyphoonSouthernHemisphere.value
+                    ? "left of the track (southern hemisphere)"
+                    : "right of the track (northern hemisphere)")
+                + " - radius x" + (1f + TrackBias.MaxRadiusBoost).ToString("F2")
+                + ", collapse chance x" + (1f + TrackBias.MaxChanceBoost).ToString("F2")
+                + " at its strongest; the other side is unchanged");
+
             // 「壊れていない」と「壊せない」を取り違えさせない（§F-2）。
             // ★ 送電柱・索道の支柱はここに入らない（全体レビュー）。あれらは
             //   dry-run で false を返した直後に本物の倒壊を行うので、collapsed に

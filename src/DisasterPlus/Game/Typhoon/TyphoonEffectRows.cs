@@ -252,7 +252,12 @@ namespace DisasterPlus.Game
             // 直近の走査の倒壊 / 累計 / 調べた棟数 / ゲームに断られた棟数。
             string text = Strings.TyphoonWindRow + ": "
                 + s.WindLastCollapsed + " / " + s.WindTotalCollapsed + " / "
-                + s.WindLastScanned + " / " + s.WindLastRefused;
+                + s.WindLastScanned + " / " + s.WindLastRefused
+                // ★ 危険半円の向き。**左右が逆でもプレイヤーには気付けない**ので、
+                //   風害が動いているあいだは常に出す。
+                + "   " + (ModSettings.TyphoonSouthernHemisphere.value
+                    ? Strings.TyphoonDangerousSideLeft
+                    : Strings.TyphoonDangerousSideRight);
 
             // 外縁がまだ判定されていないことを黙って隠さない（巨大都市で起きる）。
             if (s.WindLastCapped) text += "   " + Strings.TyphoonWindCapped;

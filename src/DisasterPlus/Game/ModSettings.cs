@@ -87,6 +87,7 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonWindStrength;
         public static SavedBool TyphoonFloodEnabled;
         public static SavedInt TyphoonFloodStrength;
+        public static SavedBool TyphoonSouthernHemisphere;
         public static SavedBool TyphoonTornadoes;
         public static SavedInt TyphoonTornadoCount;
         public static SavedBool TyphoonCloudEnabled;
@@ -265,6 +266,14 @@ namespace DisasterPlus.Game
             // 0〜10。0 で完全に無効（WindDamageModel.CollapseChance が厳密に 0 を返す）。
             // 範囲はスライダーが縛るが、.cgs の値は公開契約なので使う側でクランプする。
             TyphoonWindStrength = new SavedInt("typhoonWindStrength", FileName, 3, true);
+
+            // ★ 危険半円（進行方向のどちら側を強くするか）。**既定は北半球＝右**。
+            //    実在の台風では渦の回転と移動が足し算になる側が強く、北半球では
+            //    進行方向の右、南半球では左になる（TrackBias のクラス doc）。
+            //    既定を false（＝北半球）にするのは、CS のマップの大半が
+            //    北半球の街を想定して作られているからで、物理的な根拠ではない。
+            TyphoonSouthernHemisphere =
+                new SavedBool("typhoonSouthernHemisphere", FileName, false, true);
 
             // ★ 既定 ON（風害と同じ理由）。ただしこれは**セーブに焼き付く状態を触る
             //    唯一の機能**なので、復元経路は 3 箇所（終了時・アンロード時・保存時）
