@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 台風の渦をゲームを起動せずに描いて確かめるための開発用ツール。
+       MOD 本体（net35）には入らない。Core だけを直接コンパイルする。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>DisasterPlus.Tools.TyphoonPreview</RootNamespace>
+    <AssemblyName>TyphoonPreview</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\src\DisasterPlus\Core\**\*.cs" />
+    <Compile Include="..\Shared\*.cs" />
+    <Compile Include="**\*.cs" Exclude="bin\**\*.cs;obj\**\*.cs" />
+  </ItemGroup>
+</Project>

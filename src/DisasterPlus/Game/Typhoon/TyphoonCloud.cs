@@ -273,7 +273,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            float radius = snapshot.GaleRadius;
+            // ★ 大きさは粒の側と**同じ 1 本**から取る（TyphoonCloudFx.VortexRadiusMetres）。
+            //   2 か所で決めると、退避したときに渦の大きさが飛ぶ。
+            float radius = TyphoonCloudFx.VortexRadiusMetres(snapshot);
             if (!(radius > 0f))
             {
                 ReleaseVanillaBoost();

@@ -413,24 +413,26 @@ namespace DisasterPlus.Game
 
             // --- ④台風（渦を雲の粒で組む）ここから ---
 
-            // 渦の**本経路**はバニラの粒子エフェクトを借りて雲の粒を撒くことである
+            // 渦の**本経路**はバニラの粒子エフェクトを借りて入道雲の粒を撒くことである
             // （TyphoonCloudFx）。借りられるかどうかは実行時にしか分からない ——
-            // EffectCollection の登録は 186 個だが Factory Smoke はそこに**入っておらず**
-            // （エフェクト実測文書 §A-3 の未登録 17 個）、実行時の在庫は
+            // EffectCollection の登録は 186 個だが蒸気系（Factory Steam）はそこに
+            // **入っておらず**（エフェクト実測文書 §A-3 の未登録 17 個）、実行時の在庫は
             // EffectsWrapper.m_BuiltinEffects（Resources.FindObjectsOfTypeAll の結果）
             // でしか確かめられない（同 §A-2、PARTIAL）。
             //
-            // ★ 述語は**この機能が実際に門にしている式**である。候補の並びをここへ
+            // ★ 述語は**この機能が実際に門にしている式**である。素材の選び方をここへ
             //   書き写すと、報告する名前と実際に借りる素材が黙ってずれる ——
             //   だから TyphoonCloudFx.Lookup をそのまま共有する（雲のシェーダ検証が
-            //   ShaderPool を共有しているのと同じ形）。
+            //   ShaderPool を共有しているのと同じ形）。あちらは名前ではなく
+            //   **粒子マテリアル名**で採点して選ぶので、ここが報告する名前は
+            //   「このビルドで実際にいちばん雲らしかったもの」である。
             //
             // ★ FAIL は「雲が消える」ではない。旧来の自前スパイラルメッシュへ退避する
             //   （そちらの可否は 1 つ上の検証が名乗る）。台風の他の要素は 1 つも止まらない。
             string borrowed;
             bool canBorrow = TyphoonCloudFx.CanBorrow(out borrowed);
             Check("EffectInfo.RenderEffect(InstanceID, SpawnArea, Vector3, float, float, "
-                  + "float, float, CameraInfo) is reachable and a vanilla cloud/smoke "
+                  + "float, float, CameraInfo) is reachable and a vanilla cloud-like "
                   + "ParticleEffect can be borrowed for the vortex (resolved: "
                   + (canBorrow ? borrowed : "none") + ")",
                   "the typhoon's vortex falls back to the mod's own spiral mesh, which is a "

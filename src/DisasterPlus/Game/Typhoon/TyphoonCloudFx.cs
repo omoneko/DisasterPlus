@@ -25,167 +25,160 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// 台風の渦を**バニラの雲（粒子エフェクト）で組む**。<b>main スレッド専用。</b>
+    /// 台風の渦を**バニラの粒子エフェクトで組んだ入道雲**として描く。<b>main スレッド専用。</b>
     ///
-    /// ── 持ち主の指摘と、それがなぜ正しいか ──────────────────────────
+    /// ── 持ち主の指摘（2026-08-22）と、その原因 ────────────────────────
     ///
-    /// > 現在の巨大な渦を雲から構成するようにして
+    /// &gt; 雲のエフェクトが煙になっているので見た目がとても変です。
+    /// &gt; 渦を巻く入道雲をイメージして作り直してください。
     ///
-    /// 旧実装（<see cref="TyphoonCloud"/> のメッシュ経路）は**自前メッシュ 1 枚 ＋
-    /// 自前マテリアル**で、2 つの問題があった:
+    /// <b>原因は素材と形の 2 つで、素材のほうが決定的だった。</b>
     ///
-    /// 1. マテリアルにはシェーダが要るが、**実機の <c>Shader.Find</c> は
-    ///    <c>"Standard"</c> を含めて全ての名前に null を返した**（本プロジェクト
-    ///    13 回目の誤った「確認済み」）。<c>ShaderPool</c> は読み込み済みマテリアルから
-    ///    シェーダだけを借りる回避策だが**まだ 1 度も実機で通っていない**。
-    /// 2. 通ったとしても、④の全体レビューが「半径 900 m の平らな渦巻き＝
-    ///    渦の記号であって空を覆う雲ではない」と結論していた。
+    /// 旧実装は候補の先頭に <c>Factory Smoke</c> を置いていた。出荷アセット
+    /// （<c>sharedassets11.assets</c>）から粒子マテリアルのテクスチャを取り出して測ると:
     ///
-    /// バニラの粒子エフェクトは<b>既に読み込まれ、既に動くマテリアルを持っている</b>。
-    /// しかもそのマテリアルは <c>ParticleSystemRenderer</c> に付くので、
-    /// 「CS のマテリアルを借りると自前 <c>MeshRenderer</c> で不可視になる」問題には
-    /// **当たらない**（エフェクト実測文書 §D-3。バニラ自身が
-    /// <c>EffectsWrapper.CreateParticleEffect</c> で同じことをしている）。
+    /// <code>
+    /// マテリアル     テクスチャ         平均 RGB        見た目
+    /// Smoke         smoke            ( 75,  78,  80)  暗い煤色の丸い塊（火の粉の点入り）
+    /// Steam         steam            (168, 184, 189)  淡い青白の綿。**雲そのもの**
+    /// Water         water            (201, 222, 254)  白青の飛沫
+    /// Placement Dust placement-dust  (198, 165, 131)  砂色の土煙
+    /// IndustryDust  IndustryDust     ( 99,  94,  79)  茶灰の粉塵
+    /// </code>
     ///
-    /// ── どう組むか ────────────────────────────────────────
+    /// **<c>Smoke</c> は「灰色に塗られた雲」ではなく、煤と火の粉の絵である。**
+    /// <c>startColor</c> は乗算で掛かるので、白を掛けても暗いままで、
+    /// どんな形に並べても煙にしか見えない。**指摘は素材の話として正しい。**
     ///
-    /// <see cref="VortexPuffLayout"/> が置き場所（腕 3 本 ＋ 壁雲の環）を正規化した比で
-    /// 出し、ここがそれを台風の座標・半径・回転へ直して
-    /// <c>ParticleEffect.RenderEffect(..., timeOffset: -1f, ...)</c> を
-    /// <see cref="VortexPuffLayout.PuffCount"/> 回呼ぶ。<c>timeOffset</c> が負なので
-    /// **継続モード**になり、<c>m_renderDuration</c> も <c>m_intensityCurve</c> も
-    /// 無視されて「毎フレーム湧かし続ける」になる（§B-3。バニラの
-    /// <c>SinkholeAI.RenderInstance</c> と同じ形）。
+    /// ── だから名前ではなく<b>マテリアル</b>で選ぶ ─────────────────────────
     ///
-    /// **眼は穴のまま。** <see cref="VortexPuffLayout"/> は粒の中心を
-    /// <c>InnerFraction</c> より内側に置かないが、<b>それだけでは足りない</b> ——
-    /// 1 粒は円盤の半径ぶんばらまかれ、粒径の半分だけ外へ広がる。
-    /// <b>この型は「いちばん内側の粒の 円盤半径 + 粒径÷2 が
-    /// <c>VortexPuffLayout.PuffExtentFraction</c> を超えない」約束を守る義務がある</b>
-    /// （あちらのクラス doc）。破ると眼が埋まる。**例外は出ないしテストでも捕まらない**
-    /// ので、<see cref="DiscFraction"/> / <see cref="SizeFraction"/> を動かすときは
-    /// 必ず作図して確かめること。
+    /// エフェクト実測文書の在庫は <b>PARTIAL</b>（アセットに在ることと実行時 API が
+    /// 返すことは別）である。名前を書き並べて先頭から試す旧実装は、その名前が
+    /// このビルドに在るかどうかに賭けていた。いまは
     ///
-    /// 現在の値での検算（いちばん内側の粒は <c>sizeFraction ≒ 0.4</c>）:
-    /// <c>0.11 × (0.55 + 0.9 × 0.4) + 0.16 ÷ 2 = 0.100 + 0.080 = 0.180 ≤ 0.20</c>。
+    /// 1. <c>EffectsWrapper.m_BuiltinEffects</c> と <c>EffectCollection.Effects</c> を
+    ///    <b>実際に列挙し</b>、
+    /// 2. 各 <c>ParticleEffect</c> の <c>ParticleSystemRenderer.sharedMaterial.name</c> を読み、
+    /// 3. <b>マテリアル名で採点して</b>いちばん雲らしいものを採る
+    ///    （<c>Steam</c> ≫ <c>Water</c> &gt; 粉塵 &gt; <c>Smoke</c>、
+    ///     火・爆発の加算合成マテリアルは**除外**）。
+    ///
+    /// 名前の一覧は**同点の並べ替えにしか使わない**。ゲームが更新されて名前が変わっても、
+    /// マテリアルが同じなら同じ絵が出る。<c>sharedMaterial</c> を読むこと ——
+    /// <c>material</c> はレンダラのマテリアルを**複製して差し替える**（共有状態を壊す）。
+    ///
+    /// ── 形は <see cref="VortexPuffLayout"/> と <see cref="VortexCloudProfile"/> が持つ ────
+    ///
+    /// <b>雲底（暗く平ら）・塔（明るくもこもこ、2 段）・かなとこ（いちばん白く広い）</b>の
+    /// 3 層で、層ごとに**別の複製**を作る。色と粒径は <c>ParticleSystem</c> 側の共有状態で
+    /// <c>RenderEffect</c> の呼び出しごとには変えられないので（§B-4）、
+    /// **明暗を変えたい単位がそのまま複製の数**になる。旧実装は複製 1 つ・均一な灰色だった。
+    ///
+    /// 撒き方は <c>RenderEffect(..., timeOffset: -1f, ...)</c> ＝ **継続モード**
+    /// （§B-3。バニラの <c>SinkholeAI.RenderInstance</c> と同じ形）で、
+    /// <c>SpawnArea(位置, 上, 円盤半径, 帯の高さ)</c> の**円柱**を 1 段ぶんずつ湧かす。
+    ///
+    /// ── 眼は穴のまま（約束の持ち主が変わった）────────────────────────
+    ///
+    /// 旧 doc は「Game 側がこの約束を守る義務がある。破ると眼が埋まる ——
+    /// 例外は出ないしテストでも捕まらない」と書いていた。**いまは Core が守る。**
+    /// 円盤半径も粒径も <see cref="VortexPuffLayout"/> が宣言していて、
+    /// <c>EyeClearanceOf</c> をテストが全粒について固定している。
+    ///
+    /// ここに残る唯一の逃げ道は粒径の下限クランプ（<see cref="MinSizeMetres"/>）である。
+    /// **効くのはいちばん小さい渦だけで、そこでも眼は埋まらない**（検算しておく）:
+    /// 渦の下限 <see cref="MinVortexRadiusMetres"/> ＝ 900 m のとき塔の粒径は
+    /// 0.040 × 900 ＝ 36 m で、40 m へ持ち上がる ——
+    /// 粒の届く先が 2 m 伸びる。塔の余白は (0.26 − 0.16 − 0.062 − 0.020) × 900 ＝
+    /// 16.2 m なので、14.2 m 残る。**下限を上げるならここを計算し直すこと。**
     ///
     /// ── 毎フレームの仕事量の上限（3 本で決まる）──────────────────────
     ///
-    /// 1. <c>RenderEffect</c> は <b><see cref="VortexPuffLayout.PuffCount"/> 回</b>ちょうど。
-    /// 2. 新しく湧く粒子は <b><see cref="ParticlesPerSecond"/> 個／秒</b>
-    ///    （<see cref="VortexPuffLayout.MagnitudeFor"/> が §B-4 の式を逆に解いて
-    ///    <c>magnitude</c> を決める。フレームレートにもゲーム速度にも依らない）。
-    /// 3. 生きている粒子の総数は <b><see cref="MaxParticles"/></b> で頭打ち ——
+    /// 1. <c>RenderEffect</c> は <b><see cref="VortexPuffLayout.PuffCount"/> 回</b>ちょうど
+    ///    （88 回。旧実装は 30 回）。1 回あたりの費用は <c>SpawnArea</c> の値渡しと
+    ///    距離カリング 2 本で、**確保は 0 バイト**（§E）。撃つ粒子の総数は下の 2. が
+    ///    決めていて呼び出し回数には依らないので、増えたのは呼び出しの定数費用だけである。
+    /// 2. 新しく湧く粒子は <b><see cref="ParticlesPerSecond"/> 個／秒</b>を全粒で分け合う
+    ///    （<see cref="VortexPuffLayout.MagnitudeFor"/> が §B-4 の式を逆に解く。
+    ///    フレームレートにもゲーム速度にも依らない）。
+    /// 3. 生きている粒子の総数は<b>複製ごとの <c>maxParticles</c></b> で頭打ち
+    ///    （2600 + 3600 + 1800 = 8000。旧実装は 1 系で 7000）。
     ///    バニラ自身が <c>pps ×= (1 - fill²)</c> で絞り込む（§B-4）。
-    ///
-    /// <b>ヒープ確保は 0 バイト。</b><c>SpawnArea</c> / <c>InstanceID</c> /
-    /// <c>Vector3</c> / <c>MainModule</c> はすべて struct で、
-    /// <c>RenderEffect</c> の内側にも確保は無い（§E）。
-    ///
-    /// ── クローンする理由と、その副作用 ───────────────────────────
-    ///
-    /// <c>ParticleSystem</c> の色・粒径・寿命・可視距離は**エフェクトの共有状態**である。
-    /// <c>Factory Smoke</c> をそのまま書き換えると**街じゅうの工場の煙**が嵐雲色になり、
-    /// セーブではなくメモリ上に残る（§D-5）。だから
-    /// <c>Object.Instantiate</c> でクローンしてから触る。
-    ///
-    /// クローンした <c>GameObject</c> は**アクティブなシーンに入る**ので、そのままだと
-    /// 自分の <c>ParticleSystem</c> が原点で煙を吐く。<see cref="BuildClone"/> は
-    /// <c>emission.enabled = false</c> にしてからでないと <c>InitializeEffect()</c> を
-    /// 呼ばない（<c>ParticleEffect.CreateEffect</c> は**その状態をもう 1 段クローンする**ので、
-    /// 内側にも同じ設定が渡る。IL 実測）。<c>playOnAwake</c> は**触らない** ——
-    /// 内側のクローンは <c>ParticleEffect.Update</c> が <c>isPaused</c> を見て
-    /// <c>Play()</c> し直す作りなので、止めた状態を配ると粒子が動かなくなる。
     ///
     /// ── 取れなければ静かに諦める ──────────────────────────────
     ///
-    /// <c>FindEffect</c> / <c>GetBuiltinEffect</c> は**null を返しうる**（未登録・
-    /// ゲーム更新・別 MOD）。返ったら <see cref="TyphoonCloudFxState.NoEffect"/> にして
-    /// **ログ 1 行**を出し、例外は投げない。呼び出し側（<see cref="TyphoonCloud"/>）は
-    /// 旧メッシュ経路へ退避する。台風の他の要素は 1 つも止まらない。
+    /// 列挙も <c>FindEffect</c> も**空を返しうる**（未登録・ゲーム更新・別 MOD）。
+    /// そのときは <see cref="TyphoonCloudFxState.NoEffect"/> にして**ログ 1 行**を出し、
+    /// 例外は投げない。呼び出し側（<see cref="TyphoonCloud"/>）は旧メッシュ経路へ退避する。
+    /// 台風の他の要素は 1 つも止まらない。
     /// </summary>
-    public static class TyphoonCloudFx
+    public static partial class TyphoonCloudFx
     {
         /// <summary>渦全体で 1 秒あたりに湧かす粒子の数。**④が選んだ演出値。**</summary>
-        private const float ParticlesPerSecond = 620f;
+        private const float ParticlesPerSecond = 700f;
 
-        /// <summary>クローン側の粒子の上限。生きている粒子の総数はここで頭打ちになる。</summary>
-        private const int MaxParticles = 7000;
+        /// <summary>
+        /// 渦の外周半径 ÷ 暴風域半径。
+        ///
+        /// ★★ <b>旧実装は強風域半径（暴風域の 2.2 倍）をそのまま使っていた。</b>
+        ///   強度 128 でそれは 10.6 km ＝ <b>直径 21 km</b> で、
+        ///   <b>マップの一辺（17.3 km）より大きい。</b> 同じ粒の数を 4.8 倍の面積へ
+        ///   撒くことになるので、粒はどこまでも離れて並び、渦にも雲にも見えず
+        ///   **ぽつぽつと湧く煙の柱**として読める。持ち主の「煙になっている」という
+        ///   指摘には、素材（<c>Smoke</c>）だけでなくこの大きさも効いている。
+        ///
+        ///   いまは暴風域半径（バニラの落雷散布円・ハザード円盤と同じ式）を基準にし、
+        ///   <see cref="MaxVortexRadiusMetres"/> で頭打ちにする。**マップに収まって
+        ///   はじめて渦は渦に見える。**
+        /// </summary>
+        private const float VortexRadiusFactor = 1.35f;
 
-        /// <summary>クローン側に固定する <c>emission.rateOverTime</c>。
-        /// **0 にしてはいけない**（0 だと粒子が 1 個も出ない。§D-2 の罠）。
-        /// 借りた素材ごとに違う値（15〜200）が入っているので、ここで揃えて
-        /// <see cref="VortexPuffLayout.MagnitudeFor"/> の入力を確定させる。</summary>
-        private const float RateOverTime = 20f;
+        /// <summary>渦の外周半径の上限（m）。マップ半辺は 8640 m なので、
+        /// 直径 12 km ＝ マップの 7 割に収まる。</summary>
+        private const float MaxVortexRadiusMetres = 6000f;
 
-        /// <summary>1 粒の円盤半径 ÷ 渦の外周半径（<see cref="VortexPuffLayout"/> の
-        /// size 比で腕の外側ほど広がる）。</summary>
-        private const float DiscFraction = 0.11f;
+        /// <summary>同下限（m）。これより小さいと眼が粒 1 個で埋まる。</summary>
+        private const float MinVortexRadiusMetres = 900f;
 
-        /// <summary>粒径 ÷ 渦の外周半径。</summary>
-        private const float SizeFraction = 0.16f;
+        /// <summary>粒径の下限（m）。小さすぎると点にしか見えない。
+        /// **いちばん小さい渦でだけ効き、そこでも眼は埋まらない**（クラス doc の検算）。</summary>
+        private const float MinSizeMetres = 40f;
 
-        /// <summary>粒径の下限・上限（m）。小さすぎると点、大きすぎると板に見える。</summary>
-        private const float MinSizeMetres = 45f;
+        /// <summary>粒径の上限（m）。大きすぎると板に見えるし、透過の重なりが重い。</summary>
+        private const float MaxSizeMetres = 900f;
 
-        private const float MaxSizeMetres = 420f;
+        /// <summary>雲底の基準高度（m）。**旧実装（900 m）より低い** ——
+        /// 入道雲は下面が低く、そこから上へ伸びる。</summary>
+        private const float BaseAltitudeMetres = 560f;
 
-        /// <summary>雲の厚み（m）。<c>heightFraction</c> がこの中のどこに置くかを決める。</summary>
-        private const float ThicknessMetres = 320f;
+        /// <summary>山岳マップで山に埋まらないための、中心の地形高からの最低クリアランス（m）。</summary>
+        private const float MinClearanceMetres = 300f;
 
-        /// <summary>粒が渦に沿って流れる速さ（m/s）。**④が選んだ演出値。**</summary>
-        private const float SwirlSpeed = 26f;
+        /// <summary>雲の厚み（m）。<c>HeightFraction</c> がこの中のどこに置くかを決める。
+        /// **旧実装の 320 m から 2200 m へ上げた** —— 積乱雲の鉛直の伸びが指摘の中心である。
+        /// かなとこの帯はここから更に少し上へ出るので、雲頂はおよそ 3000 m になる。
+        /// バニラの竜巻メッシュが高さ 2000 m なので、ゲームの尺度から外れてはいない。</summary>
+        private const float ThicknessMetres = 2200f;
 
-        /// <summary>寿命（秒）。長いほど空が埋まるが、<see cref="MaxParticles"/> が上限を握る。</summary>
-        private const float MinLifeTime = 7f;
+        /// <summary>雲底が渦に沿って流れる速さ（m/秒）。上層ほど遅い（<c>SwirlFraction</c>）。</summary>
+        private const float SwirlMetresPerSecond = 34f;
 
-        private const float MaxLifeTime = 17f;
+        /// <summary>半径方向の速さ（m/秒）。下層は吸い込み、かなとこは吹き出す。</summary>
+        private const float RadialMetresPerSecond = 20f;
+
+        /// <summary>上昇の速さ（m/秒）。塔の中がいちばん強い。</summary>
+        private const float RiseMetresPerSecond = 16f;
 
         /// <summary>遠景から見えること（借り元は 500〜1000 m しかない）。</summary>
         private const float VisibilityMetres = 12000f;
 
         /// <summary>エフェクトを探し直すまでに空けるフレーム数。
-        /// <c>FindEffect</c> は失敗すると <c>CODebugBase.Warn</c> を出すので毎フレームは引かない。</summary>
+        /// 列挙は <c>Dictionary</c> 1 周ぶんの費用があるので毎フレームは走らせない。</summary>
         private const int LookupRetryFrames = 600;
-
-        /// <summary>
-        /// 借りる候補。**上から順に試し、最初に取れたものを使う。**
-        /// どれも基本ゲーム（DLC 不要）で、灰色〜白の粒子である
-        /// （エフェクト実測文書 §A-6）。<c>Factory Smoke</c> は
-        /// <c>EffectCollection</c> に**登録されていない**ので
-        /// <c>GetBuiltinEffect</c> でしか取れない —— だから
-        /// <see cref="Lookup"/> は 2 経路とも試す。
-        /// </summary>
-        private static readonly string[] CandidateNames =
-        {
-            "Factory Smoke",
-            "Factory Steam",
-            "Large Pool Steam",
-            "Pool Steam",
-            "Collapse Particles",
-            "Factory Smoke Small",
-        };
-
-        // ★ 参照 1 個ずつで持つ（配列にしない）。UnityEngine.Object の == は
-        //   破棄済みを null と等価に見せるが、**配列参照の比較にはそれが効かない** ——
-        //   static な配列は破棄済みの中身を抱えたまま非 null であり続け、
-        //   2 つ目の都市で無言のまま見えなくなる（③火災旋風 §4.8）。
-        private static GameObject _cloneObject;
-        private static ParticleEffect _effect;
-
-        /// <summary>クローン側の <c>ParticleSystem</c>。**毎フレーム <c>GetComponent</c> を
-        /// 呼ばないために抱えている**（確保はしないがネイティブ呼び出しである）。
-        /// 参照 1 個で持ち、使う直前に <c>== null</c> で見る。</summary>
-        private static ParticleSystem _particles;
 
         private static int _lookupMissCount;
         private static TyphoonCloudFxState _state = TyphoonCloudFxState.Off;
         private static int _lastRenderCalls;
-        private static string _sourceName;
-
-        /// <summary>借りられないことを 1 度だけ名乗ったか。**<see cref="Destroy"/> で戻さない**
-        /// （ゲームのビルドに対する事実であって都市ごとの状態ではない）。</summary>
-        private static bool _unavailableLogged;
 
         private static bool _errorLogged;
 
@@ -199,14 +192,35 @@ namespace DisasterPlus.Game
         {
             get
             {
-                if (_effect == null)
+                if (!AnyClone())
                 {
                     return "NONE (no vanilla particle effect could be borrowed)";
                 }
-                return "cloned \"" + (_sourceName ?? "?") + "\" ("
+                return "cloned \"" + (SourceName ?? "?") + "\" [material \""
+                       + (SourceMaterial ?? "?") + "\"] into "
+                       + CloneCount() + " layer(s): "
                        + VortexPuffLayout.PuffCount + " puffs/frame, "
-                       + (int)ParticlesPerSecond + " particles/s, cap " + MaxParticles + ")";
+                       + (int)ParticlesPerSecond + " particles/s, cap " + TotalParticleCap();
             }
+        }
+
+        /// <summary>
+        /// 渦の外周半径（m）。**退避経路のメッシュもこの 1 本を使う** ——
+        /// 2 か所で決めると、粒とメッシュで大きさが食い違う。
+        /// 読めていなければ 0（＝描かない。推測した半径で空を埋めない）。
+        /// </summary>
+        public static float VortexRadiusMetres(TyphoonSnapshot snapshot)
+        {
+            if (snapshot == null) return 0f;
+
+            float storm = snapshot.StormRadius;
+            if (!(storm > 0f)) return 0f;
+
+            float radius = storm * VortexRadiusFactor;
+            if (float.IsNaN(radius)) return 0f;
+            if (radius > MaxVortexRadiusMetres) radius = MaxVortexRadiusMetres;
+            if (radius < MinVortexRadiusMetres) radius = MinVortexRadiusMetres;
+            return radius;
         }
 
         /// <summary>
@@ -221,7 +235,8 @@ namespace DisasterPlus.Game
         {
             try
             {
-                return Lookup(out name) != null;
+                string material;
+                return Lookup(out name, out material) != null;
             }
             catch
             {
@@ -256,7 +271,7 @@ namespace DisasterPlus.Game
                 }
 
                 // 壊れたクローンを抱えたまま毎フレーム投げ続けない。
-                DestroyClone();
+                DestroyClones();
                 return false;
             }
         }
@@ -265,12 +280,12 @@ namespace DisasterPlus.Game
         {
             if (snapshot == null || !snapshot.Valid || !snapshot.Active)
             {
-                if (_effect != null) _state = TyphoonCloudFxState.Idle;
+                if (AnyClone()) _state = TyphoonCloudFxState.Idle;
                 _lastRenderCalls = 0;
                 return false;
             }
 
-            float radius = snapshot.GaleRadius;
+            float radius = VortexRadiusMetres(snapshot);
             if (!(radius > 0f))
             {
                 _lastRenderCalls = 0;
@@ -279,7 +294,7 @@ namespace DisasterPlus.Game
 
             // ★ 参照そのものを毎フレーム見る。破棄済みなら fake-null で null と
             //   等価になり、ここで作り直される（2 つ目の都市の自己修復）。
-            if (_effect == null && !Acquire()) return false;
+            if (!AnyClone() && !Acquire()) return false;
 
             var camera = CurrentCamera();
             if (camera == null)
@@ -310,15 +325,9 @@ namespace DisasterPlus.Game
             float altitude = centre.Y + MinClearanceMetres;
             if (altitude < BaseAltitudeMetres) altitude = BaseAltitudeMetres;
 
-            if (!(radius * DiscFraction > 0f))
-            {
-                _lastRenderCalls = 0;
-                return;
-            }
-
             // 粒径は渦の大きさに合わせる。**共有状態ではなくクローン側**なので
             // 毎フレーム書いてよい（MainModule は struct、確保は 0 バイト）。
-            ApplySize(radius);
+            ApplySizes(radius);
 
             // ★ default(InstanceID) の RawData は 0 で、Randomizer の種が 0 に固定される
             //   （§B-6）。ParticleEffect 直呼びなら probability = 100 固定なので実害は
@@ -331,24 +340,32 @@ namespace DisasterPlus.Game
 
             for (int i = 0; i < VortexPuffLayout.PuffCount; i++)
             {
-                float angle, radiusFraction, heightFraction, sizeFraction, densityFraction;
-                VortexPuffLayout.Puff(i, out angle, out radiusFraction,
-                                      out heightFraction, out sizeFraction, out densityFraction);
+                VortexPuff puff = VortexPuffLayout.PuffAt(i);
 
-                float a = angle + spin;
+                ParticleEffect effect = CloneFor(puff.Layer);
+                if (effect == null) continue;
+
+                float a = puff.AngleRadians + spin;
                 float cos = Mathf.Cos(a);
                 float sin = Mathf.Sin(a);
-                float r = radiusFraction * radius;
+                float r = puff.RadiusFraction * radius;
 
                 var position = new Vector3(centre.X + cos * r,
-                                           altitude + heightFraction * ThicknessMetres,
+                                           altitude + puff.HeightFraction * ThicknessMetres,
                                            centre.Z + sin * r);
 
-                // 接線方向へ流す。**渦の回り方と同じ向き**（spin と符号を合わせる）。
-                var velocity = new Vector3(-sin * SwirlSpeed, 0f, cos * SwirlSpeed);
+                // 二次循環。接線（渦の回る向き）＋ 半径方向（下層は内へ、上層は外へ）
+                // ＋ 上昇。**渦の回り方と同じ向き**（spin と符号を合わせる）。
+                float swirl = SwirlMetresPerSecond * puff.SwirlFraction;
+                float radial = RadialMetresPerSecond * puff.RadialFraction;
+                var velocity = new Vector3(-sin * swirl + cos * radial,
+                                           RiseMetresPerSecond * puff.RiseFraction,
+                                           cos * swirl + sin * radial);
 
-                // 腕の外側ほど円盤を広げる（渦の腕が末広がりになる）。
-                float discRadius = radius * DiscFraction * (0.55f + 0.9f * sizeFraction);
+                float discRadius = puff.DiscFraction * radius;
+                if (!(discRadius > 0f)) continue;
+
+                float band = puff.BandFraction * ThicknessMetres;
 
                 // ★ magnitude は円盤ごとに解き直す。§B-4 の式は面積で効くので、
                 //   円盤を広げたぶんだけ密度を下げないと外側だけ濃くなる。
@@ -357,243 +374,20 @@ namespace DisasterPlus.Game
                                                                 VortexPuffLayout.PuffCount);
                 if (!(magnitude > 0f)) continue;
 
-                // SpawnArea(pos, dir, radius) は必ず「点/円盤」経路に落ちる（§B-2）。
-                var area = new EffectInfo.SpawnArea(position, Vector3.up, discRadius);
+                // SpawnArea(pos, dir, radius, halfHeight) は必ず「点/円盤」経路に落ちる
+                // （§B-2）。halfHeight は **上へだけ** [0, band) で散らす（§B-4）ので、
+                // HeightFraction を段の下端にしてあることと噛み合う。
+                var area = new EffectInfo.SpawnArea(position, Vector3.up, discRadius, band);
 
                 // timeOffset = -1f ＝ **継続モード**（§B-3）。
-                _effect.RenderEffect(id, area, velocity, 0f,
-                                     magnitude * densityFraction,
-                                     -1f, timeDelta, camera);
+                effect.RenderEffect(id, area, velocity, 0f,
+                                    magnitude * puff.DensityFraction,
+                                    -1f, timeDelta, camera);
                 calls++;
             }
 
             _lastRenderCalls = calls;
-            _state = TyphoonCloudFxState.Emitting;
-        }
-
-        /// <summary>雲の基準高度（m）。旧メッシュ経路と同じ値にそろえてある。</summary>
-        private const float BaseAltitudeMetres = 900f;
-
-        /// <summary>山岳マップで山に埋まらないための、中心の地形高からの最低クリアランス（m）。</summary>
-        private const float MinClearanceMetres = 300f;
-
-        private static void ApplySize(float radius)
-        {
-            // ★ 参照そのものを見る。破棄済みなら fake-null で null と等価になり、
-            //   次の Acquire で作り直される。
-            if (_particles == null) return;
-
-            float size = radius * SizeFraction;
-            if (float.IsNaN(size)) return;
-            if (size < MinSizeMetres) size = MinSizeMetres;
-            if (size > MaxSizeMetres) size = MaxSizeMetres;
-
-            var main = _particles.main;
-            main.startSize = size;
-        }
-
-        // ── 借りる ────────────────────────────────────────────
-
-        /// <summary>
-        /// 借りて、クローンして、初期化する。取れなければ false（**例外は投げない**）。
-        /// </summary>
-        private static bool Acquire()
-        {
-            // ★ 毎フレーム探しに行かない。FindEffect は失敗すると CODebugBase.Warn を
-            //   出すので、実機のログが埋まる。
-            if (_lookupMissCount > 0)
-            {
-                _lookupMissCount--;
-                return false;
-            }
-
-            string name;
-            ParticleEffect source = Lookup(out name);
-            if (source == null)
-            {
-                _lookupMissCount = LookupRetryFrames;
-                _state = TyphoonCloudFxState.NoEffect;
-
-                if (!_unavailableLogged)
-                {
-                    _unavailableLogged = true;
-                    Log.Warn("typhoon cloud: no vanilla particle effect could be borrowed for "
-                             + "the vortex (tried Factory Smoke / Factory Steam / Large Pool "
-                             + "Steam / Pool Steam / Collapse Particles); falling back to the "
-                             + "mod's own spiral mesh. Everything else about the typhoon is "
-                             + "unaffected.");
-                }
-                return false;
-            }
-
-            if (!BuildClone(source, name))
-            {
-                _lookupMissCount = LookupRetryFrames;
-                _state = TyphoonCloudFxState.NoEffect;
-                return false;
-            }
-
-            Log.Info("typhoon cloud: borrowed \"" + name + "\" for the vortex ("
-                     + VortexPuffLayout.PuffCount + " puffs/frame, "
-                     + (int)ParticlesPerSecond + " particles/s, cap " + MaxParticles + ")");
-            return true;
-        }
-
-        /// <summary>
-        /// 名前で 1 つ引く。**2 経路とも試す** —— <c>EffectCollection</c> に登録されて
-        /// いるのは 186 個だけで、<c>Factory Smoke</c> はそこに**入っていない**
-        /// （§A-3 の未登録 17 個）。最後にゲーム自身が握っている
-        /// <c>BuildingProperties</c> のエフェクトから拾う。
-        /// </summary>
-        private static ParticleEffect Lookup(out string name)
-        {
-            name = null;
-
-            for (int i = 0; i < CandidateNames.Length; i++)
-            {
-                ParticleEffect e = Extract(FromWrapper(CandidateNames[i]))
-                                   ?? Extract(FromCollection(CandidateNames[i]));
-                if (e != null)
-                {
-                    name = CandidateNames[i];
-                    return e;
-                }
-            }
-
-            // 最後の手段: ゲーム自身が握っている崩壊の粉塵（灰色）。
-            ParticleEffect fallback = Extract(BuildingCollapseEffect());
-            if (fallback != null)
-            {
-                name = "BuildingProperties.m_collapseEffect";
-                return fallback;
-            }
-
-            return null;
-        }
-
-        private static EffectInfo FromWrapper(string name)
-        {
-            try
-            {
-                if (!Singleton<EffectManager>.exists) return null;
-                var wrapper = Singleton<EffectManager>.instance.m_EffectsWrapper;
-                if (wrapper == null) return null;
-                return wrapper.GetBuiltinEffect(name) as EffectInfo;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static EffectInfo FromCollection(string name)
-        {
-            try
-            {
-                return EffectCollection.FindEffect(name);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static EffectInfo BuildingCollapseEffect()
-        {
-            try
-            {
-                if (!Singleton<BuildingManager>.exists) return null;
-                var properties = Singleton<BuildingManager>.instance.m_properties;
-                return properties != null ? properties.m_collapseEffect : null;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// <c>EffectInfo</c> から粒子を取り出す。<c>MultiEffect</c>（＝
-        /// <c>Collapse Effect</c> のように粒子と音の束）と <c>FireEffect</c> は
-        /// 中に <c>ParticleEffect</c> を抱えている（§B-7）。
-        /// **音のほうを掴まないこと** —— <c>SoundEffect.RenderEffect</c> は
-        /// override されておらず、呼んでも何も起きない。
-        /// </summary>
-        private static ParticleEffect Extract(EffectInfo info)
-        {
-            if (info == null) return null;
-
-            var direct = info as ParticleEffect;
-            if (direct != null) return direct;
-
-            var fire = info as FireEffect;
-            if (fire != null) return fire.m_particleEffect;
-
-            var multi = info as MultiEffect;
-            if (multi != null && multi.m_effects != null)
-            {
-                for (int i = 0; i < multi.m_effects.Length; i++)
-                {
-                    var child = multi.m_effects[i].m_effect as ParticleEffect;
-                    if (child != null) return child;
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// クローンして嵐雲に仕立てる。**共有状態は 1 バイトも触らない**（§D-5）。
-        /// </summary>
-        private static bool BuildClone(ParticleEffect source, string name)
-        {
-            var sourceObject = source.gameObject;
-            if (sourceObject == null) return false;
-
-            var clone = Object.Instantiate(sourceObject) as GameObject;
-            if (clone == null) return false;
-
-            clone.name = "DisasterPlus_TyphoonVortexCloud";
-            Object.DontDestroyOnLoad(clone);
-
-            var effect = clone.GetComponent<ParticleEffect>();
-            var ps = clone.GetComponent<ParticleSystem>();
-            if (effect == null || ps == null)
-            {
-                Object.Destroy(clone);
-                return false;
-            }
-
-            // ★★ **InitializeEffect の前に**外側の放出を止める。止めないと、この
-            //    GameObject 自身がワールド原点で煙を吐き続ける（クラス doc）。
-            //    playOnAwake は触らない（内側のクローンが Play できなくなる）。
-            var emission = ps.emission;
-            emission.enabled = false;
-            emission.rateOverTime = RateOverTime;
-
-            var main = ps.main;
-            main.startColor = new Color(0.60f, 0.62f, 0.66f, 0.62f);
-            main.startSize = MinSizeMetres;
-            main.gravityModifier = -0.02f;
-            main.maxParticles = MaxParticles;
-
-            effect.m_maxVisibilityDistance = VisibilityMetres;
-            effect.m_minLifeTime = MinLifeTime;
-            effect.m_maxLifeTime = MaxLifeTime;
-            effect.m_minStartSpeed = 2f;
-            effect.m_maxStartSpeed = 9f;
-            effect.m_minSpawnAngle = 0f;
-            effect.m_maxSpawnAngle = 90f;
-            effect.m_renderDuration = 0f;      // 継続モードで使う（§B-3）
-            effect.m_extraRadius = 0f;         // 借り元によっては 2〜9 m 勝手に足す
-
-            effect.InitializeEffect();
-
-            _cloneObject = clone;
-            _effect = effect;
-            _particles = ps;
-            _sourceName = name;
-            return true;
+            _state = calls > 0 ? TyphoonCloudFxState.Emitting : TyphoonCloudFxState.NoEffect;
         }
 
         private static RenderManager.CameraInfo CurrentCamera()
@@ -620,7 +414,9 @@ namespace DisasterPlus.Game
             try
             {
                 if (!Singleton<SimulationManager>.exists) return 0f;
-                return Singleton<SimulationManager>.instance.m_simulationTimeDelta;
+                float dt = Singleton<SimulationManager>.instance.m_simulationTimeDelta;
+                if (float.IsNaN(dt) || float.IsInfinity(dt) || dt < 0f) return 0f;
+                return dt;
             }
             catch
             {
@@ -628,40 +424,16 @@ namespace DisasterPlus.Game
             }
         }
 
-        // ── 後始末 ────────────────────────────────────────────
-
         /// <summary>
         /// **レベルアンロードと、設定で雲を切ったときに呼ぶ。** main スレッド専用。冪等。
         /// </summary>
         public static void Destroy()
         {
-            DestroyClone();
+            DestroyClones();
             _lookupMissCount = 0;
             _lastRenderCalls = 0;
             _state = TyphoonCloudFxState.Off;
             // ★ _unavailableLogged / _errorLogged は戻さない（クラス doc）。
-        }
-
-        private static void DestroyClone()
-        {
-            if (_effect != null)
-            {
-                try
-                {
-                    // 内側のクローン（ParticleEffect.CreateEffect が作ったもの）を畳む。
-                    _effect.ReleaseEffect();
-                }
-                catch
-                {
-                    // 畳めなくても外側は必ず消す。
-                }
-            }
-            _effect = null;
-            _particles = null;
-
-            if (_cloneObject != null) Object.Destroy(_cloneObject);
-            _cloneObject = null;
-            _sourceName = null;
         }
     }
 }
