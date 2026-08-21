@@ -141,6 +141,7 @@ namespace DisasterPlus.Game
             WriteGusts(b, snapshot);
             WriteCloud(b);
             WriteStormFx(b);
+            WriteStormSound(b);
         }
 
         /// <summary>
@@ -247,6 +248,26 @@ namespace DisasterPlus.Game
             b.Line(3, "driving rain", TyphoonSquallFx.Detail);
             b.Line(3, "gusts pushing citizens", TyphoonWind.GalePushes
                    + " push(es) so far (every 64 frames; citizens and vehicles only)");
+        }
+
+        /// <summary>
+        /// 風の音。**何を借りたのか**を必ず名乗る —— 将来ゲームが更新されて
+        /// 音が消えたときの唯一の手がかりである。
+        /// </summary>
+        private static void WriteStormSound(DiagnosticBuilder b)
+        {
+            if (!ModSettings.TyphoonStormSound.value)
+            {
+                b.Line(2, "storm sound", "off (setting)");
+                return;
+            }
+
+            b.Line(2, "storm sound", TyphoonStormAudio.Detail);
+            b.Line(3, "volume this frame", TyphoonStormAudio.LastVolume > 0f
+                   ? TyphoonStormAudio.LastVolume.ToString("F2")
+                     + " (the player's effect volume slider and mute are applied by the game "
+                     + "on top of this)"
+                   : "silent (no typhoon, or the camera is outside the storm)");
         }
 
         private static string SquallStateText()

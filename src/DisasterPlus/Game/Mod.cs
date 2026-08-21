@@ -221,6 +221,10 @@ namespace DisasterPlus.Game
             typhoon.AddCheckbox(Strings.TyphoonStormFx,
                 ModSettings.TyphoonStormFx.value,
                 v => ModSettings.TyphoonStormFx.value = v);
+            // ★ 風の音。EffectGroup へ流すので効果音スライダーとミュートは効く。
+            typhoon.AddCheckbox(Strings.TyphoonStormSound,
+                ModSettings.TyphoonStormSound.value,
+                v => ModSettings.TyphoonStormSound.value = v);
             // ★ ④の解説 5 本もこの画面から降ろした。
             //   - 強度の目安（バニラの嵐は 55）は**スライダーのラベル**に畳んだ
             //   - 危険半円がどちら側かは**チェックボックスのラベル**が名乗っている

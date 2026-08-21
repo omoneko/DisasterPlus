@@ -235,6 +235,7 @@ TyphoonTornadoRetiredNote = 旧「随伴する竜巻」の設定は廃止しま�
 TyphoonCloudEnabled = 台風の渦巻き雲を描く
 TyphoonVanillaCloudBoost = ゲーム自身の空の雲も濃く・速く流す
 TyphoonCloudUnavailable = この環境にはゲームの空の雲の設定が無いため、Disaster + 自身の雲だけを描いています。
+TyphoonStormSound = 台風の風の音を鳴らす
 TyphoonStormFx = 地上の暴風雨を見せる
 TyphoonStormFxNote = 強風域の中にカメラが居るあいだ、横殴りの飛沫が舞い、突風が市民と車を今までの 4 倍の頻度で吹き飛ばします。ここに建物・道路・樹木を壊すものは 1 つもありません（それは上の風害の設定です）。台風が近づくにつれて空気も濁り、視程が下がります。
 GroupVolcano = 火山

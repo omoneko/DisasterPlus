@@ -122,6 +122,13 @@ namespace DisasterPlus.Game
         ///   「被害は要らないが嵐は見たい」も、その逆も選べる。
         /// </summary>
         public static SavedBool TyphoonStormFx;
+
+        /// <summary>
+        /// 台風の風の音。**⑤の噴火音と同じ経路**（<c>AudioManager.EffectGroup</c>）なので、
+        /// プレイヤーの効果音スライダーとミュートはゲームが掛ける。
+        /// ④が鳴らすのは**1 本だけ**である（<c>EffectGroup</c> の席を奪わない）。
+        /// </summary>
+        public static SavedBool TyphoonStormSound;
         public static SavedBool VolcanoEnabled;
         public static SavedInt VolcanoButtonX;
         public static SavedInt VolcanoButtonY;
@@ -343,6 +350,10 @@ namespace DisasterPlus.Game
             //    （飛沫は描画だけ、吹き飛ばしは市民と車だけ）。
             //    ★★ 保存値のキーは公開契約。既存のキーを詰め直さず、末尾に足す。
             TyphoonStormFx = new SavedBool("typhoonStormFx", FileName, true, true);
+
+            // ★ 風の音は既定 ON。**それまで④は音を 1 つも鳴らしていなかった。**
+            //    ★★ 保存値のキーは公開契約。既存のキーを詰め直さず、末尾に足す。
+            TyphoonStormSound = new SavedBool("typhoonStormSound", FileName, true, true);
 
             // ★ ⑤火山は既定 ON。**DLC 非所持を理由に止めない** —— ⑤は Natural
             //    Disasters を要らない（設計書 §1.4）。しかも⑤は自動では 1 度も

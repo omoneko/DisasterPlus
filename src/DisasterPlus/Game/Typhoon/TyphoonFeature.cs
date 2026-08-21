@@ -206,6 +206,18 @@ namespace DisasterPlus.Game
             {
                 TyphoonSquallFx.Destroy();
             }
+
+            // ★ 風の音も main スレッドだけ（Unity のオーディオ資産は全て main）。
+            //   1 フレームに 1 回だけ AddEvent を積む —— sim スレッドから呼ぶと
+            //   速度 3 で 1 フレームに複数回積まれ、EffectGroup の席を潰す。
+            if (ModSettings.TyphoonEnabled.value && ModSettings.TyphoonStormSound.value)
+            {
+                TyphoonStormAudio.Update(TyphoonHub.Latest);
+            }
+            else
+            {
+                TyphoonStormAudio.Destroy();
+            }
         }
 
         public void OnLevelUnloading()
@@ -226,6 +238,9 @@ namespace DisasterPlus.Game
             TyphoonCloud.Destroy();
             // ★ 飛沫の複製も都市をまたがない（雲と同じ。破棄済みの粒子系を撃ちに行く）。
             TyphoonSquallFx.Destroy();
+            // ★ 音のクリップと AudioInfo も都市をまたがない（借り物のクリップは
+            //   破棄しない。TyphoonStormAudio のクラス doc）。
+            TyphoonStormAudio.Destroy();
 
             TyphoonHub.Clear();
             TyphoonReader.Reset();

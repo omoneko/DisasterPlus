@@ -864,6 +864,7 @@ namespace DisasterPlus.Game
         // ★ 「被害」ではないことを名乗る。飛沫は描画だけ、吹き飛ばしは市民と車だけで、
         //   建物・道路・樹木には一切触れない（風害のつまみとは別である）。
         public static string TyphoonStormFx = "Show the storm at ground level";
+        public static string TyphoonStormSound = "Play the storm's wind sound";
         public static string TyphoonStormFxNote =
             "Wind-driven spray around the camera while it is inside the storm, and a gust "
             + "that pushes citizens and vehicles four times as often as before. Nothing here "
