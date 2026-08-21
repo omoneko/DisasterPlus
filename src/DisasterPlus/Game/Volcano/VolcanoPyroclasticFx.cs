@@ -148,6 +148,19 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            // ★★ **位相で門にする。** 経路を溶岩の軌跡から外した（扇にした）ので、
+            //    「軌跡が空なら描かない」という以前の門はもう働かない。
+            //    <c>VolcanoLava.CoolUnit</c> は火山が 1 つも無いとき **1 を返す**
+            //    （AllStopped が false ＝「まだ止まっていない」）ので、位相を見ないと
+            //    **山が無いところで土煙が全力で出る**。
+            if (!snapshot.EruptionActive
+                && snapshot.Phase != VolcanoPhase.Flowing
+                && snapshot.Phase != VolcanoPhase.Cooling)
+            {
+                _clockSeconds = 0f;
+                return;
+            }
+
             // 噴火が続いているあいだはその強さ、終わったあとは溶岩の冷え具合で薄れる。
             // **どちらも 0 になったら 1 粒も出さない**（止まった谷に灰が残り続けない）。
             float unit = snapshot.EruptionActive
@@ -174,10 +187,16 @@ namespace DisasterPlus.Game
                 unchecked((uint)Mathf.RoundToInt(snapshot.Footprint.Centre.X)),
                 unchecked((uint)Mathf.RoundToInt(snapshot.Footprint.Centre.Z)));
 
+            // ★ 扇は**今そこに在る山の大きさ**までしか下れない。隆起の途中に
+            //   出来上がりの半径を渡すと、まだ平らな地面の上を土煙が走る。
+            //   短くなりすぎた舌は PyroclasticSurge.MinPathMetres で自然に消える。
+            float reachRadius = snapshot.UpliftComplete
+                ? snapshot.Footprint.RadiusMetres
+                : snapshot.Footprint.RadiusMetres * Clamp01(snapshot.ProgressUnit);
+
             for (int i = 0; i < PyroclasticSurge.LobeCount; i++)
             {
-                if (RenderLobe(dust, camera, vent, seed, i, channels,
-                               snapshot.Footprint.RadiusMetres, unit, dt))
+                if (RenderLobe(dust, camera, vent, seed, i, channels, reachRadius, unit, dt))
                 {
                     _bandsDrawn++;
                 }
@@ -279,6 +298,12 @@ namespace DisasterPlus.Game
                                 -1f,   // ★ 継続モード
                                 dt, camera);
             return true;
+        }
+
+        private static float Clamp01(float v)
+        {
+            if (float.IsNaN(v) || v < 0f) return 0f;
+            return v > 1f ? 1f : v;
         }
 
         /// <summary>
