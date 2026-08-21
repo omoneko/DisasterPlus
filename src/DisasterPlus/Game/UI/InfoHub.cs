@@ -181,6 +181,39 @@ namespace DisasterPlus.Game
         /// <summary>診断向け。ボタンが今、画面に居るか。</summary>
         public static bool IsInstalled { get { return _button != null; } }
 
+        /// <summary>
+        /// ★★ **この MOD で 2 番目に画面へ物を浮かせる者のための出口。**
+        ///
+        /// <see cref="FreeSlotFinder"/> のクラス doc は「呼び出し元は 1 か所だけ」と
+        /// 定めている。理由は初回の実機テストで実証済みで、**探索する主体が複数ある
+        /// 限り、全員が空きを見つけられなかったときに全員が同じ preferred へ落ちる。**
+        ///
+        /// <c>DisasterPanelBar</c> の退避バー（バニラの災害パネルがどうしても
+        /// 見つからない環境でだけ現れる）が 2 番目の主体になる。そこで
+        /// **こちらのボタンより下から探し始める点**を渡す —— 探索は下方向にしか
+        /// 進まないので、退避バーがこのボタンの位置を返すことは構造として起きない。
+        ///
+        /// <c>false</c> を返すのは「ボタンをまだ置いていない（置けるかも分からない）」
+        /// ときで、そのあいだ**退避バーは待つべきである**。諦めたあと
+        /// （<see cref="_gaveUp"/>）はボタンが存在しないので、退避バーは自分の
+        /// 好きな位置から探してよい —— <see cref="Abandoned"/> がそれを名乗る。
+        /// </summary>
+        public static bool TryGetBelowAnchor(out Vector2 point)
+        {
+            point = Vector2.zero;
+            if (_button == null) return false;
+
+            point = new Vector2(_origin.x, _origin.y + ButtonSize + 2f + StripHeight + 8f);
+            return true;
+        }
+
+        /// <summary>
+        /// ボタンを置くのを恒久的に諦めたか。<c>true</c> のあいだ画面に
+        /// このボタンは存在しないので、<see cref="TryGetBelowAnchor"/> が
+        /// <c>false</c> を返しても待つ意味は無い。
+        /// </summary>
+        public static bool Abandoned { get { return _gaveUp || _dead; } }
+
         /// <summary>診断向け。ボタンが今どこに居るかを 1 行で。</summary>
         public static string Placement
         {
@@ -388,9 +421,12 @@ namespace DisasterPlus.Game
             if (_strip.width != width) LayoutStrip(width);
 
             _strip.isVisible = true;
-            _strip.BringToFront();
 
             if (_shownId == active.Id) return;
+
+            // ★ 前面へ出すのは切り替えたときだけ。保守パスのたびに呼ぶと、
+            //   0.5 秒ごとに他 MOD の UI より前へ割り込み続けることになる。
+            _strip.BringToFront();
 
             for (int i = 0; i < Tabs.Count; i++)
             {

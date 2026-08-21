@@ -740,11 +740,23 @@ namespace DisasterPlus.Game
         /// 災害パネルが見つからないまま <see cref="FallbackAfterAttempts"/> 回過ぎたら、
         /// 画面に浮かぶ 1 本のバーへ退避する。**ボタンが 1 個も出ない方が悪い。**
         ///
-        /// ここが <see cref="FreeSlotFinder"/> の唯一の呼び出し元である。呼ぶのは
-        /// **バー全体の起点 1 点** についてだけで、4 個ぶんの探索はしない ——
-        /// 中のボタンは起点からの相対位置に 1 回のループで並べる。実機テストで
-        /// 4 個が同じ点に積み上がったのは「5 つの主体がそれぞれ探した」からであって、
-        /// 探索そのものが誤りだったからではない。
+        /// ★★ **ここは <see cref="FreeSlotFinder"/> の 2 番目の呼び出し元である。**
+        /// 1 番目は <see cref="InfoHub"/>（左上のショートカット）で、あちらは常に
+        /// 画面に居る。<c>FreeSlotFinder</c> のクラス doc が「呼び出し元は 1 か所だけ」と
+        /// 定めているのは、**全員が空きを見つけられなかったときに全員が同じ
+        /// preferred へ落ちる**からである —— 初回の実機テストで 4 個のボタンが
+        /// (8,50) に積み上がったのがそれだった。
+        ///
+        /// そこでこのバーは**自分で preferred を決めない。**
+        /// <see cref="InfoHub.TryGetBelowAnchor"/> が返す「ショートカットより下」の
+        /// 点から探し始める。探索は下方向にしか進まないので、
+        /// **このバーがショートカットの位置を返すことは構造として起きない。**
+        /// ショートカットがまだ置かれていないあいだは**作らずに待つ**
+        /// （<see cref="InfoHub.Abandoned"/> なら、そもそもボタンが存在しないので
+        /// 従来どおりの preferred から探してよい）。
+        ///
+        /// 呼ぶのは **バー全体の起点 1 点** についてだけで、2 個ぶんの探索はしない ——
+        /// 中のボタンは起点からの相対位置に 1 回のループで並べる。
         /// </summary>
         private static void EnsureFallbackBar()
         {
@@ -755,6 +767,21 @@ namespace DisasterPlus.Game
             {
                 Log.Diag("panelBar", "no UIView yet; the fallback bar cannot be created");
                 return;
+            }
+
+            Vector2 preferred;
+            if (!InfoHub.TryGetBelowAnchor(out preferred))
+            {
+                if (!InfoHub.Abandoned)
+                {
+                    // ショートカットの位置が決まるまで待つ。**先に置くと、
+                    // あちらが後からこのバーを避けることになり、探索する主体が
+                    // 2 つある状態そのものが戻る。**
+                    Log.Diag("panelBar", "waiting for the info shortcut before placing the fallback bar");
+                    return;
+                }
+                // ショートカットは置かれない（画面にボタンは存在しない）。
+                preferred = new Vector2(8f, 50f);
             }
 
             int wanted = 0;
@@ -771,7 +798,7 @@ namespace DisasterPlus.Game
             bool foundFree;
             // owner は null。バーはこの呼び出しの後に生成されるので、除外すべき
             // 「自分自身」がまだ画面に存在しない（FreeSlotFinder.Find の doc）。
-            Vector2 origin = FreeSlotFinder.Find(new Vector2(8f, 50f), size, h + gap, 30, null, out foundFree);
+            Vector2 origin = FreeSlotFinder.Find(preferred, size, h + gap, 30, null, out foundFree);
             _fallbackOrigin = origin;
             _fallbackFoundFreeSlot = foundFree;
 
