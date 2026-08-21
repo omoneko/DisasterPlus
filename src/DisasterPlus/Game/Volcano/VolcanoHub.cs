@@ -38,16 +38,33 @@ namespace DisasterPlus.Game
         /// <summary>クリックされたワールド座標（<c>Survey</c> / <c>Start</c> のときだけ意味を持つ）。</summary>
         public readonly Vec3 Point;
 
-        public VolcanoRequestData(VolcanoRequest kind, Vec3 point)
+        /// <summary>
+        /// クリックした瞬間に**バニラのスライダーが指していた大きさの倍率**
+        /// （<c>Survey</c> のときだけ意味を持つ）。1.0 が設定画面どおりのサイズで、
+        /// 2.0 なら半径も最終高も 2 倍になる（<c>Core.Volcano.VolcanoSizeScale</c>）。
+        ///
+        /// ★ 実際に何メートルになるかは形態ごとの帯がさらにクランプし、
+        ///   **確認の行がその結果をメートルで見せてから**でないと 1 つも壊れない。
+        /// </summary>
+        public readonly float SizeScale;
+
+        public VolcanoRequestData(VolcanoRequest kind, Vec3 point, float sizeScale)
         {
             Kind = kind;
             Point = point;
+            SizeScale = sizeScale;
+        }
+
+        /// <summary>地点も倍率も要らない依頼（<c>Start</c> / <c>Cancel</c> / <c>Stop</c>）。</summary>
+        public static VolcanoRequestData Of(VolcanoRequest kind)
+        {
+            return new VolcanoRequestData(kind, new Vec3(0f, 0f, 0f), 1f);
         }
 
         /// <summary>「依頼なし」。<c>default(VolcanoRequestData)</c> と同じだが、意図を名乗る。</summary>
         public static VolcanoRequestData None
         {
-            get { return new VolcanoRequestData(VolcanoRequest.None, new Vec3(0f, 0f, 0f)); }
+            get { return Of(VolcanoRequest.None); }
         }
     }
 

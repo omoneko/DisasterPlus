@@ -87,40 +87,6 @@ namespace DisasterPlus.Game
             if (_panel != null) _panel.Hide();
         }
 
-        /// <summary>
-        /// ★★ **災害パネルの⑤タイルの動作。** 配置カーソルを構え、同時にこのパネルを開く。
-        ///
-        /// バニラの災害ボタンと同じく、押した時点でカーソルが構わる。以前はタイルが
-        /// このパネルを開くだけで、配置は**パネルの中のボタンをもう 1 回押す**必要が
-        /// あった（所有者の指摘「押してその場でしばらくしたら発生するオリジナルの
-        /// 挙動が達成されていない」）。
-        ///
-        /// ★ **確認は迂回しない。** 構えたカーソルでクリックしても積まれるのは
-        ///   <c>Survey</c> だけで、地形が変わるのはプレイヤーが確認の行を読んで
-        ///   「この場所に火山を作る」を押したときだけである
-        ///   （<see cref="VolcanoPlacementTool"/> ／ <see cref="VolcanoState"/> の doc）。
-        ///   短くなったのは**確認の前**の 1 手であって、確認そのものではない。
-        ///
-        /// パネルも開くのは、**パネルを画面から到達できなくしないため**である
-        /// （確認の行も、進行中の各段も、断り文もここにしか出ない）。
-        /// 右クリックでカーソルだけを解除でき、パネルは開いたまま残る（閉じるのは X）。
-        /// </summary>
-        public static void ArmPlacement()
-        {
-            if (!ModSettings.VolcanoEnabled.value) return;
-
-            // パネルを先に出す。**構えられない環境でも理由は必ず読める。**
-            Show();
-
-            // ★ 地形の書き込み経路が解決できない環境では 1 メートルも山を上げられない。
-            //   そこでカーソルを構えると「指しても何も起きないカーソル」ができ、
-            //   パネルに出ている理由（Strings.VolcanoTerrainUnavailable）まで届かない。
-            //   述語は本体が本文を組むかどうかと同じ式である（_bodyBuilt の doc）。
-            if (!_bodyBuilt) return;
-
-            VolcanoPlacementTool.Activate();
-        }
-
         /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
         public static void Tick()
         {
@@ -273,7 +239,7 @@ namespace DisasterPlus.Game
             button.normalBgSprite = "ButtonMenu";
             button.hoveredBgSprite = "ButtonMenuHovered";
             button.pressedBgSprite = "ButtonMenuPressed";
-            button.eventClick += (c, e) => VolcanoPlacementTool.Activate();
+            button.eventClick += (c, e) => VolcanoPlacementTool.Arm();
             y += PlaceButtonHeight + 10f;
         }
 

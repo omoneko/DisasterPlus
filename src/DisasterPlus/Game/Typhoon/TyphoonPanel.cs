@@ -84,34 +84,6 @@ namespace DisasterPlus.Game
             if (_panel != null) _panel.Hide();
         }
 
-        /// <summary>
-        /// ★★ **災害パネルの④タイルの動作。** 配置カーソルを構え、同時にこのパネルを開く。
-        ///
-        /// パネルも開くのは、**パネルを画面から到達できなくしないため**である。
-        /// パネルは④の唯一の説明の置き場（出所の見出し・上陸予測・「起こせなかった」
-        /// 理由）で、タイルが配置専用になった時点でここを開く経路が無くなると、
-        /// 診断だけが読めないまま残る。右クリックでカーソルだけを解除でき、
-        /// パネルは開いたまま残る（閉じるのは X）。
-        ///
-        /// 機能が切られているときは何もしない —— タイル自体が消えているので通常は
-        /// 到達しないが、押せてしまう経路が将来足されたときに黙って構えないこと。
-        /// </summary>
-        public static void ArmPlacement()
-        {
-            if (!ModSettings.TyphoonEnabled.value) return;
-
-            // パネルを先に出す。**構えられない環境でも理由は必ず読める。**
-            Show();
-
-            // ★ この環境で④が原理的に起こせない（ND DLC 非所持）なら、カーソルは
-            //   構えない。構えてしまうと「指しても何も起きないカーソル」ができ、
-            //   パネルに出ている理由（Strings.TyphoonNeedsDlc）まで届かない。
-            //   述語は本体が本文を組むかどうかと同じ式にする（_bodyBuilt の doc）。
-            if (!_bodyBuilt) return;
-
-            TyphoonPlacementTool.Activate();
-        }
-
         /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
         public static void Tick()
         {
@@ -266,12 +238,11 @@ namespace DisasterPlus.Game
         {
             AddButton(panel, "StartButton", Strings.TyphoonStart, Strings.TyphoonPlaceHint,
                 TyphoonRows.RowLeft, y,
-                delegate { TyphoonPlacementTool.Activate(); });
+                delegate { TyphoonPlacementTool.Arm(); });
 
             AddButton(panel, "StopButton", Strings.TyphoonStop, null,
                 TyphoonRows.RowLeft + ActionButtonWidth + 12f, y,
-                delegate { TyphoonHub.Request(new TyphoonRequestData(TyphoonRequest.Stop,
-                                                                     new Vec3(0f, 0f, 0f))); });
+                delegate { TyphoonHub.Request(TyphoonRequestData.Of(TyphoonRequest.Stop)); });
             y += ActionButtonHeight + 10f;
         }
 

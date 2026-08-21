@@ -653,7 +653,7 @@ namespace DisasterPlus.Game
         public static string TyphoonPlaceHint =
             "Click the map where the typhoon should form. Right-click to cancel.";
         public static string TyphoonButtonTooltip =
-            "Raise a typhoon: click, then click the map";
+            "Typhoon: pick a strength on the slider, then click the map";
         public static string TyphoonStop = "Stop the typhoon";
         public static string TyphoonInactive = "No typhoon right now.";
         public static string TyphoonWaiting = "Waiting for the first simulation update.";
@@ -858,7 +858,7 @@ namespace DisasterPlus.Game
         public static string VolcanoTitle = "Volcano";
         public static string VolcanoButtonLabel = "Volcano";
         public static string VolcanoButtonTooltip =
-            "Place a volcano: click, then click the map (you still confirm before anything is destroyed)";
+            "Volcano: pick a size on the slider, then click the map (you confirm before anything is destroyed)";
         public static string VolcanoModelHeader = "Computed by Disaster +";
 
         // ★★ **この文に印の文字列そのものを書かないこと**（④の全体レビュー I5 と

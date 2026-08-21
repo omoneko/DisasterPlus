@@ -299,8 +299,7 @@ namespace DisasterPlus.Game
             button.isVisible = false;
             button.isEnabled = false;
             button.eventClick += (c, e) =>
-                VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Stop,
-                    new DisasterPlus.Core.Common.Vec3(0f, 0f, 0f)));
+                VolcanoHub.Request(VolcanoRequestData.Of(VolcanoRequest.Stop));
             return button;
         }
 

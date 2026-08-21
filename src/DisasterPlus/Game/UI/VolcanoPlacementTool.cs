@@ -1,5 +1,6 @@
 using ColossalFramework.UI;
 using DisasterPlus.Core.Common;
+using DisasterPlus.Core.Volcano;
 using UnityEngine;
 
 namespace DisasterPlus.Game
@@ -68,6 +69,36 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>
+        /// ★★ **災害パネルの⑤タイルの動作。バニラの災害ボタンと同じ 3 手である。**
+        ///
+        ///   1. タイルを押す      → カーソルが構わり、**スライダーが出る**
+        ///   2. スライダーを動かす → 山の大きさ（設定サイズに対する倍率。
+        ///                          <see cref="VolcanoSizeScale"/>）
+        ///   3. 地図をクリック    → その地点を**調べて**、確認を出す
+        ///
+        /// ★ **確認は迂回しない。** クリックが積むのは <see cref="VolcanoRequest.Survey"/>
+        ///   だけで、地形が変わるのはプレイヤーが確認を読んで「作る」を押したときだけ
+        ///   である。短くなったのは**確認の前**の手数であって、確認そのものではない。
+        ///
+        /// **説明のパネルはもう開かない。** 出るのは確認だけで、⑤の状態と説明は
+        /// 左上のショートカットの側にある。
+        /// </summary>
+        public static void Arm()
+        {
+            if (!ModSettings.VolcanoEnabled.value) return;
+            if (!VolcanoReader.ScanTerrainFacts().Usable) return;
+
+            Activate();
+            if (!IsActive) return;
+
+            // ★ 構えるたびに既定値（倍率 1.0 ＝ 設定どおりのサイズ）を入れる。
+            //   スライダーは 1 本しかないのに、④と⑤では数字の意味が違う
+            //   （IntensitySlider のクラス doc）。
+            IntensitySlider.Seed(VolcanoSizeScale.AnchorRaw);
+            IntensitySlider.Show();
+        }
+
         public static void Activate()
         {
             var controller = ToolsModifierControl.toolController;
@@ -88,6 +119,10 @@ namespace DisasterPlus.Game
             try
             {
                 if (!IsActive) return;
+
+                // ★ スライダーを畳むのは**このツールが構えていたときだけ**。
+                //   無条件に畳むと、バニラの災害を構えている人のスライダーを横から消す。
+                IntensitySlider.Hide();
                 ToolsModifierControl.SetTool<DefaultTool>();
             }
             catch (System.Exception e)
@@ -115,15 +150,20 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            // ★ 大きさは**クリックした瞬間のスライダーの値**である（バニラと同じ）。
+            //   読めない環境では倍率 1.0 ＝ 設定どおりのサイズへ落とす。
+            float scale = VolcanoSizeScale.ScaleFor(
+                IntensitySlider.ReadOr(VolcanoSizeScale.AnchorRaw));
+
             // ★ 積むのは「調べてくれ」だけ（クラス doc）。ここで壊す判断はしない。
-            VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Survey, hit));
+            VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Survey, hit, scale));
 
             // 指したら用は済んでいる。押しっぱなしで 2 つ目を指させない。
             Deactivate();
 
-            // 調査の結果はパネルにしか出ない。開いていなければ開く ——
-            // **黙って調べて黙って終わる**のが、⑤でいちばんしてはいけないことである。
-            VolcanoPanel.Show();
+            // ★ **黙って調べて黙って終わる**のが、⑤でいちばんしてはいけないことである。
+            //   調査の結果と不可逆の断りは <see cref="VolcanoConfirmPanel"/> が出す
+            //   （説明のパネルではなく、確認だけの小さな窓）。
         }
 
         private static bool TryPickGround(out Vec3 hit)

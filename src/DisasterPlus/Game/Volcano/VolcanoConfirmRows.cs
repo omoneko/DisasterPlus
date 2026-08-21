@@ -428,9 +428,7 @@ namespace DisasterPlus.Game
             // ★ main スレッドからゲームのバッファに触らない。依頼を積むだけ。
             //   座標は sim 側が持っている調査結果の中心を使うので、ここでは運ばない
             //   （VolcanoState のクラス doc）。
-            button.eventClick += (c, e) =>
-                VolcanoHub.Request(new VolcanoRequestData(request,
-                    new DisasterPlus.Core.Common.Vec3(0f, 0f, 0f)));
+            button.eventClick += (c, e) => VolcanoHub.Request(VolcanoRequestData.Of(request));
             return button;
         }
 
