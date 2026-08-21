@@ -62,7 +62,7 @@ namespace DisasterPlus.Game
     ///                 → VolcanoSurvey.Run(...) が建物と道路を**数えるだけ**
     ///                 → Phase = AwaitingConfirmation、Footprint をスナップショットへ
     ///         v
-    /// [main] パネルが確認の行を出す（VolcanoConfirmRows）
+    /// [main] パネルが確認の行を出す（VolcanoConfirmPanel）
     ///                 → プレイヤーが [この場所に火山を作る] を押す
     ///                 → VolcanoHub.Request(Start, point)
     ///         v
@@ -79,7 +79,7 @@ namespace DisasterPlus.Game
     /// <code>
     /// grep -rn --include=*.cs "VolcanoRequest.Start" src/DisasterPlus | grep -v '///'
     /// # -> 2 件だけ:
-    /// #    VolcanoConfirmRows.cs  … 確認ボタンが積む唯一の場所
+    /// #    VolcanoConfirmPanel.cs  … 確認ボタンが積む唯一の場所
     /// #    VolcanoState.cs        … 受け口（このファイル）
     /// # 列挙の宣言（VolcanoHub.cs）は "Start," と書くのでこの grep には当たらない。
     /// </code>
@@ -217,7 +217,7 @@ namespace DisasterPlus.Game
         /// <c>Start</c> だけは通さない —— あれは不可逆の破壊の開始そのものなので、
         /// ポーズ中に位相を進めない。**ただし黙って捨てず、理由を残す**
         /// （パネルは確認の行に「ポーズ中は着手できません」を出し、
-        /// [作る] を押せなくする。<see cref="VolcanoConfirmRows"/>）。
+        /// [作る] を押せなくする。<see cref="VolcanoConfirmPanel"/>）。
         ///
         /// <see cref="VolcanoHub.TakeRequest"/> は<b>1 tick にちょうど 1 回</b>
         /// しか呼ばない（2 回呼ぶと 2 回目が必ず None になり、呼び出し順に依存した

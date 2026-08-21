@@ -876,8 +876,7 @@ namespace DisasterPlus.Game
         //   「うるさいから」と条件付きにしないこと —— 利用者は「不可逆でよい」と
         //   判断したが、それはプレイヤーに黙っていてよいという意味ではない。
         public static string VolcanoIrreversibleWarning =
-            "Building a volcano changes the terrain permanently. Neither the game nor "
-            + "Disaster + can undo it, and it is written into your save.";
+            "The terrain change is permanent: nothing can undo it and it is saved.";
 
         public static string VolcanoInactive = "No volcano right now.";
         public static string VolcanoWaiting = "Waiting for the first simulation update.";
@@ -912,8 +911,16 @@ namespace DisasterPlus.Game
         public static string VolcanoConfirmHeader = "Build a volcano here?";
         public static string VolcanoConfirmYes = "Build the volcano here";
         public static string VolcanoConfirmNo = "Cancel";
-        public static string VolcanoBuildingsRow = "Buildings inside the footprint";
-        public static string VolcanoSegmentsRow = "Roads inside the footprint";
+        public static string VolcanoBuildingsRow = "buildings";
+        public static string VolcanoSegmentsRow = "roads";
+
+        /// <summary>
+        /// 確認の窓の「壊されるもの（概算）」。**「（概算）」の 3 文字が、
+        /// かつて 2 行あった言い訳の代わりである**（<c>VolcanoConfirmPanel</c> の
+        /// クラス doc の表）。数は調査した瞬間のもので、地面をならしている間も
+        /// 街は動き続けるので実際の数は前後する —— それは診断ダンプに書いてある。
+        /// </summary>
+        public static string VolcanoConfirmDestroyed = "Will be destroyed (approx.)";
 
         // ★ §7.2 の「概数であることも明示する」。実数をそのまま出すとプレイヤーは
         //   「ぴったりその数だけ壊れる」と読む（ClearanceEstimate のクラス doc）。
@@ -921,6 +928,11 @@ namespace DisasterPlus.Game
         // ★★ 全体レビュー I3。**丸めた数は [measured] の行から降りて、この注記に来た。**
         //   印の意味は「ゲームの配列から読んだだけの値」であり、丸めは本 MOD の計算である。
         //   上の 2 行は数えた実数、こちらが「およそ」を名乗る。
+        // ★ **退役した 2 件。** 概数の言い訳の 2 行は確認の窓から降ろし、
+        //   見出しの「（概算）」（VolcanoConfirmDestroyed）と診断ダンプへ移した
+        //   （所有者の指示「あれこれ説明は出さなくていい」）。
+        //   **キーは消さない**（LogChannelFireWhirl・*ResetButton と同じ扱い）。
+        //   **別の意味で再利用してもいけない。**
         public static string VolcanoEstimateApprox = "About this many will be removed";
         public static string VolcanoEstimateNote =
             "The two rows above are what the survey counted at that moment. The city keeps "
@@ -931,28 +943,25 @@ namespace DisasterPlus.Game
         //   ことも消すこともできない形で残る。同じ場所に置き直すと**その上に積み上がる**
         //   （VolcanoUplift は「今の地形」を元の高さとして控え直す）。
         public static string VolcanoSaveWarning =
-            "Do not save while a volcano is still being built. Disaster + does not store an "
-            + "unfinished volcano: after loading, the mountain stays exactly as far as it got "
-            + "- no crater, no eruption, no lava - and there is no way to finish or remove it. "
-            + "Placing a new volcano on the same spot piles a second mountain on top of it.";
+            "Do not save while it is being built: an unfinished volcano cannot be "
+            + "finished or removed.";
 
         // ★★ 全体レビュー I1。ポーズ中は着手できない。**黙って何もしないをやらない。**
-        public static string VolcanoPausedNote =
-            "The game is paused. Disaster + does not start destroying the city while the "
-            + "simulation is stopped. Unpause, then press the button.";
+        public static string VolcanoPausedNote = "The game is paused. Unpause to start.";
 
         // ★ 走査が 1 tick ぶんの上限で打ち切られたとき。**上の概数は下限になる。**
         //   これを黙っていると、概数どころか「実際より少ない数」を確定値のように見せる。
         public static string VolcanoSurveyCapped =
-            "The survey stopped at its per-tick limit, so the counts above are a lower "
-            + "bound: the outer edge of the footprint was not reached.";
+            "The survey hit its limit, so the counts are a lower bound.";
 
         public static string VolcanoSegmentsUnknown =
-            "Disaster + could not count the roads inside the footprint in this build of the "
-            + "game. They are still going to be destroyed.";
+            "(roads could not be counted, but they are destroyed too)";
 
         // ★ §1.2 そのもの。**「壊さずに地面を上げる」が選べない理由**を書く ——
         //   これが書いていないと、破壊は MOD の乱暴な選択に見える。
+        // ★ **退役 1 件。**「なぜ壊す必要があるのか」は設計の説明であって、
+        //   確認の場でする判断ではない。同じ内容は診断ダンプにある
+        //   （VolcanoFeature.WriteNotes）。キーは残すが再利用しないこと。
         public static string VolcanoClearingWarning =
             "The roads and buildings inside the footprint will be destroyed. Raising the "
             + "ground without clearing them first does not work: the game pins the terrain "
@@ -961,18 +970,16 @@ namespace DisasterPlus.Game
 
         // ★ §7.3。**不具合ではないと明示する**（①の「なぜハザードマップが空か」と同じ扱い）。
         public static string VolcanoBuildabilityNote =
-            "The buildable ground and the water level do not follow the visible terrain "
-            + "straight away. They catch up at 2 m per 64 simulation frames. This is not a bug.";
+            "Buildable ground and the water level catch up slowly (2 m per 64 frames). "
+            + "Not a bug.";
 
         // ★ §C-10。天井に当たっても例外は出ず**無言で山頂が平らな台地になる**ので、
         //   黙って低い山を作らずに先に言う。
         public static string VolcanoHeightLimited =
-            "The terrain has a hard ceiling at 1024 m, so the volcano here is lower than the "
-            + "height you asked for.";
+            "The 1024 m terrain ceiling makes this volcano lower than asked.";
 
         public static string VolcanoSettingsChanged =
-            "The shape, radius or height changed after the survey, so Disaster + is surveying "
-            + "again before it starts.";
+            "The settings changed, so the area was surveyed again.";
 
         /// <summary>ゲーム内の分。**実在の物理単位ではない**ので m/s の類とは扱いが違う。</summary>
         public static string VolcanoMinutes = "in-game minutes";

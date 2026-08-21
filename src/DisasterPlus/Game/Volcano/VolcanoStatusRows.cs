@@ -128,8 +128,13 @@ namespace DisasterPlus.Game
         /// 公開契約で手で編集されうるので、生の設定値をそのまま画面に出さない）。
         ///
         /// **天井（§C-10）による切り下げはここでは掛けない** —— それは
-        /// 設置地点の地形高さが決まって初めて分かる量で、確認の行
-        /// （<see cref="VolcanoConfirmRows"/>）が名乗る。
+        /// 設置地点の地形高さが決まって初めて分かる量で、確認の窓
+        /// （<see cref="VolcanoConfirmPanel"/>）が名乗る。
+        ///
+        /// ★ **スライダーの倍率もここでは掛けない。** 倍率が決まるのは地図を
+        ///   クリックした瞬間で（<c>Core.Volcano.VolcanoSizeScale</c>）、この行は
+        ///   「設定でいま選ばれている基準の大きさ」である。倍率を掛けた実寸は
+        ///   確認の窓が出す。
         /// </summary>
         private static void RefreshShapeRow()
         {
