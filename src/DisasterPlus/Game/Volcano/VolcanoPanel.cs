@@ -51,13 +51,13 @@ namespace DisasterPlus.Game
     {
         private const string PanelName = FreeSlotFinder.SelfPrefix + "VolcanoPanel";
 
-        /// <summary>「火山を設置する」ボタンの大きさ。</summary>
-        private const float PlaceButtonWidth = 240f;
-
-        private const float PlaceButtonHeight = 28f;
-
-        /// <summary>パネルの既定の左上。<see cref="ClampToView"/> が縦だけ寄せる。</summary>
-        private static readonly Vector3 BasePosition = new Vector3(620f, 60f);
+        /// <summary>
+        /// パネルの左上。**決めるのは <see cref="InfoHub"/> 1 つだけ**で、
+        /// ここにあるのは位置が決まる前の既定値である
+        /// （<c>DisasterPanelBar</c> のクラス doc と同じ規律）。
+        /// <see cref="ClampToView"/> が縦だけ寄せる。
+        /// </summary>
+        private static Vector3 _origin = new Vector3(620f, 60f);
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
@@ -73,6 +73,22 @@ namespace DisasterPlus.Game
         private static bool _bodyBuilt;
 
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
+
+        /// <summary>このパネルの幅。<see cref="InfoHub"/> がタブ帯の幅を合わせるために読む。</summary>
+        internal static float Width { get { return VolcanoRows.PanelWidth; } }
+
+        /// <summary>
+        /// 左上を決める。**位置を決める主体は <see cref="InfoHub"/> 1 つだけである。**
+        /// ここで座標を発明しないこと。
+        /// </summary>
+        internal static void MoveTo(Vector3 origin)
+        {
+            _origin = origin;
+            if (_panel == null) return;
+            // ★ 高さの再適用と同じ経路を通す（既定の左上へ戻してから寄せ直す）。
+            _panel.relativePosition = _origin;
+            ClampToView(_panel);
+        }
 
         public static void Show()
         {
@@ -170,8 +186,9 @@ namespace DisasterPlus.Game
             panel.width = VolcanoRows.PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
-            // クラス doc の「パネルの位置」。重なる相手は②だけで、その上端 90 px は空く。
-            panel.relativePosition = BasePosition;
+            // 位置は InfoHub が決める（MoveTo）。ここには既定値しか無い ——
+            // パネルは同時に 1 枚しか出ないので、互いに避ける座標はもう要らない。
+            panel.relativePosition = _origin;
             panel.isVisible = false;
 
             float y = 8f;
@@ -180,7 +197,7 @@ namespace DisasterPlus.Game
                 VolcanoRows.PanelWidth - 44f, 24f);
             _titleLabel.textScale = 1.1f;
 
-            AddCloseButton(panel, y);
+            // ★ 閉じるボタンはここには無い。**タブ帯の X が 1 つだけ持つ**（InfoHub）。
             y += 30f;
 
             // ★ 述語は⑤の機能そのものの門と同じ式（クラス doc）。
@@ -203,8 +220,9 @@ namespace DisasterPlus.Game
             //   ここで文を組み立てない（あちらの SetModelNote の doc）。
             VolcanoRows.SetModelNote(note);
 
-            AddPlaceButton(panel, ref y);
-
+            // ★★ **火山を設置するボタンはここには無い。** 置くのは災害パネルの
+            //    ⑤タイル（バニラの災害ボタンと同じ 3 手）だけである。このパネルは
+            //    <b>読むための場所</b>で、起こす場所ではない。
             VolcanoStatusRows.Build(panel, ref y);
 
             // ★ 確認の一式は**このパネルにはもう無い**（VolcanoConfirmPanel）。
@@ -213,27 +231,6 @@ namespace DisasterPlus.Game
             VolcanoEffectRows.Build(panel, ref y);
 
             ApplyHeight(panel, VolcanoEffectRows.BlockTop + 8f);
-        }
-
-        /// <summary>
-        /// 「火山を設置する」。押すと配置ツールが起動し、地面をクリックすると
-        /// **調査の依頼だけ**が積まれる（<see cref="VolcanoPlacementTool"/> のクラス doc）。
-        /// **このボタンは何も壊さない。**
-        /// </summary>
-        private static void AddPlaceButton(UIPanel panel, ref float y)
-        {
-            var button = (UIButton)panel.AddUIComponent(typeof(UIButton));
-            button.name = FreeSlotFinder.SelfPrefix + "VolcanoPlaceButton";
-            button.text = Strings.VolcanoPlace;
-            button.tooltip = Strings.VolcanoPlaceHint;
-            button.width = PlaceButtonWidth;
-            button.height = PlaceButtonHeight;
-            button.relativePosition = new Vector3(VolcanoRows.RowLeft, y);
-            button.normalBgSprite = "ButtonMenu";
-            button.hoveredBgSprite = "ButtonMenuHovered";
-            button.pressedBgSprite = "ButtonMenuPressed";
-            button.eventClick += (c, e) => VolcanoPlacementTool.Arm();
-            y += PlaceButtonHeight + 10f;
         }
 
         /// <summary>
@@ -253,22 +250,8 @@ namespace DisasterPlus.Game
             _appliedHeight = height;
 
             panel.height = height;
-            panel.relativePosition = BasePosition;
+            panel.relativePosition = _origin;
             ClampToView(panel);
-        }
-
-        private static void AddCloseButton(UIPanel panel, float y)
-        {
-            var closeButton = (UIButton)panel.AddUIComponent(typeof(UIButton));
-            closeButton.name = FreeSlotFinder.SelfPrefix + "VolcanoCloseButton";
-            closeButton.text = "X";
-            closeButton.width = 24f;
-            closeButton.height = 24f;
-            closeButton.relativePosition = new Vector3(VolcanoRows.PanelWidth - 32f, y);
-            closeButton.normalBgSprite = "ButtonMenu";
-            closeButton.hoveredBgSprite = "ButtonMenuHovered";
-            closeButton.pressedBgSprite = "ButtonMenuPressed";
-            closeButton.eventClick += (c, e) => Hide();
         }
 
         /// <summary>

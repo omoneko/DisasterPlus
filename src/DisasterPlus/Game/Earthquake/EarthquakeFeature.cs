@@ -448,10 +448,14 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
-            // ボタンは②専用ではなく DisasterPanelBar が 4 個まとめて置く。座標は
-            // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
-            b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdEarthquake)
-                ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
+            // ★ ①②のタイルは災害パネルから撤去された（読むだけのものは
+            //   左上のショートカットから開く。InfoHub のクラス doc）。
+            //   出すのは「ボタンが居るか」と「どこに居るか」だけである。
+            //   **ここは sim スレッドだが、読むのは Unity オブジェクトの
+            //   ネイティブポインタ比較と文字列だけで、UI には触らない**
+            //   （DisasterPanelBar.IsInstalled と同じ扱い）。
+            b.Line(1, "info button", (InfoHub.IsInstalled ? "installed" : "not installed")
+                + "  (" + InfoHub.Placement + ")");
 
             // sim スレッドから main の持ち物を読んでいるが、これは InfoModeSwitch の
             // クラス doc が IL 実測つきで明示的に許可している唯一の例外である

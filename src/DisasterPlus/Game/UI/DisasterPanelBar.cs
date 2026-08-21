@@ -120,8 +120,11 @@ namespace DisasterPlus.Game
     public static class DisasterPanelBar
     {
         // 診断が機能ごとの設置状況を引くための識別子。表示文字列ではない。
-        public const string IdForecast = "forecast";
-        public const string IdEarthquake = "earthquake";
+        //
+        // ★ ①予報 ②地震の識別子はここには**無い**。あの 2 つのタイルは
+        //   災害パネルから撤去され（読むだけのものは InfoHub から開く）、
+        //   診断は InfoHub.IsInstalled / InfoHub.Placement を引くようになった。
+        //   使われない定数を「いつか使うかも」で残さない。
         public const string IdTyphoon = "typhoon";
         public const string IdVolcano = "volcano";
 
@@ -220,22 +223,11 @@ namespace DisasterPlus.Game
         /// </summary>
         private static readonly List<Entry> Entries = new List<Entry>
         {
-            new Entry(IdForecast,
-                      delegate { return Strings.ForecastTitle; },
-                      delegate { return Strings.ForecastTitle; },
-                      delegate { return ModSettings.ForecastEnabled.value; },
-                      ForecastPanel.Toggle,
-                      ForecastPanel.Hide,
-                      null, null),
-
-            new Entry(IdEarthquake,
-                      delegate { return Strings.EarthquakeTitle; },
-                      delegate { return Strings.EarthquakeTitle; },
-                      delegate { return ModSettings.EarthquakeEnabled.value; },
-                      EarthquakePanel.Toggle,
-                      EarthquakePanel.Hide,
-                      null, null),
-
+            // ★★ ①予報 ②地震のタイルは**ここには無い。** 読むだけのものは
+            //    左上のショートカット（<c>InfoHub</c>）へ移した（所有者の依頼
+            //    「情報画面は…左上のショートカットボタンから開けるように」）。
+            //    **災害パネルに戻さないこと** —— タブは「起こす」ための場所である。
+            //
             // ★★ ④⑤は**災害を起こすタイル**である。押すと配置カーソルが構わり、
             //    **バニラの強度スライダーが出る**（IntensitySlider）。地図を
             //    クリックすればその地点で起きる —— バニラの災害ボタンと同じ 3 手で、

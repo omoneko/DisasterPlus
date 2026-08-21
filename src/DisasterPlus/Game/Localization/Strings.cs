@@ -51,6 +51,27 @@ namespace DisasterPlus.Game
         public static string FireWhirlNeedsDlc =
             "Fire whirls require the Natural Disasters DLC.";
 
+        // --- 左上のショートカットと、その下のタブ帯（InfoHub）---
+        //
+        // ★ ボタンの見分けは**文字**で付ける。スプライト名はアトラスのデータで
+        //   あってアセンブリからは読めないので、アイコン名を当てにいくと
+        //   「見えないボタン」になり得る（InfoHub のクラス doc）。
+        //   そのため InfoButtonLabel は**短い文字列でなければならない**
+        //   （32 px 四方のボタンに収まること）。
+        public static string InfoButtonLabel = "D+";
+        public static string InfoButtonTooltip = "Disaster + information";
+        public static string InfoTabDiagnostics = "Diagnostics";
+
+        // --- 診断のタブ ---
+        public static string DiagnosticsTitle = "Diagnostics";
+        public static string DiagnosticsOverlayRow = "Overlay";
+        public static string DiagnosticsHotkeyRow = "Hotkey";
+        public static string DiagnosticsOn = "on";
+        public static string DiagnosticsOff = "off";
+        public static string DiagnosticsDumpButton = "Write a diagnostics dump";
+        public static string DiagnosticsDumpHint =
+            "The dump is written into the mod folder.";
+
         public static string GroupDebug = "Debug";
         public static string OverlayEnabled = "Enable diagnostic overlay";
         public static string OverlayHotkey = "Overlay hotkey (Ctrl + key writes a dump file)";
@@ -649,6 +670,10 @@ namespace DisasterPlus.Game
         //   ボタンと同じ約束）。文言を「起こす」から「地点を指す」へ改めてあるのは、
         //   押した瞬間には何も起きないからである —— 起きると書いてあるのに起きないと、
         //   プレイヤーは壊れたと判断してもう一度押す。
+        // ★ **退役した 2 件。** 台風を起こすのは災害パネルの④タイルだけになり
+        //   （バニラの災害ボタンと同じ 3 手）、パネルの中の「発生」ボタンは撤去した。
+        //   **キーは消さない**（LogChannelFireWhirl・*ResetButton と同じ扱い）。
+        //   **別の意味で再利用してもいけない。**
         public static string TyphoonStart = "Choose where the typhoon forms";
         public static string TyphoonPlaceHint =
             "Click the map where the typhoon should form. Right-click to cancel.";
@@ -904,6 +929,9 @@ namespace DisasterPlus.Game
         //
         // ★ **単位を名乗る文字列はメートルとゲーム内分だけ。** ⑤は m/s も度も
         //   カロリーも持っていない（設計書 §7.5）。
+        // ★ **退役した 2 件。** 火山を置くのは災害パネルの⑤タイルだけになり
+        //   （バニラの災害ボタンと同じ 3 手）、パネルの中の「設置」ボタンは撤去した。
+        //   **キーは消さない。別の意味で再利用してもいけない。**
         public static string VolcanoPlace = "Place a volcano";
         public static string VolcanoPlaceHint =
             "Click where the volcano should rise. Right-click to cancel.";

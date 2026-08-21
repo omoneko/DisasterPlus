@@ -69,7 +69,27 @@ namespace DisasterPlus.Game
         /// </summary>
         private static bool _bodyBuilt;
 
+        /// <summary>左上。既定値は <see cref="InfoHub"/> が位置を決める前だけ使う。</summary>
+        private static Vector3 _origin = new Vector3(1260f, 120f);
+
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
+
+        /// <summary>このパネルの幅。<see cref="InfoHub"/> がタブ帯の幅を合わせるために読む。</summary>
+        internal static float Width { get { return TyphoonRows.PanelWidth; } }
+
+        /// <summary>
+        /// 左上を決める。**位置を決める主体は <see cref="InfoHub"/> 1 つだけである**
+        /// （<c>DisasterPanelBar</c> のクラス doc「位置を決める主体が複数ある限り、
+        /// この事故は形を変えて何度でも起きる」と同じ規律）。
+        /// ここで座標を発明しないこと。
+        /// </summary>
+        internal static void MoveTo(Vector3 origin)
+        {
+            _origin = origin;
+            if (_panel == null) return;
+            _panel.relativePosition = _origin;
+            ClampToView(_panel);
+        }
 
         public static void Show()
         {
@@ -166,11 +186,9 @@ namespace DisasterPlus.Game
             panel.width = TyphoonRows.PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
-            // ①の予報パネル（x=200、幅 380）とも②の地震パネル（x=600、幅 640）とも
-            // 重ならない位置。UIView の座標系は高さ 1080 に正規化され、16:9 なら幅は
-            // およそ 1920 になるので、x=1260 + 640 = 1900 は画面内に収まる。
-            // 収まらない解像度では ClampToView が縦だけ寄せる（横は動かさない）。
-            panel.relativePosition = new Vector3(1260f, 120f);
+            // 位置は InfoHub が決める（MoveTo）。ここには既定値しか無い ——
+            // パネルは同時に 1 枚しか出ないので、互いに避ける座標はもう要らない。
+            panel.relativePosition = _origin;
             panel.isVisible = false;
 
             float y = 8f;
@@ -179,7 +197,7 @@ namespace DisasterPlus.Game
                 TyphoonRows.PanelWidth - 44f, 24f);
             _titleLabel.textScale = 1.1f;
 
-            AddCloseButton(panel, y);
+            // ★ 閉じるボタンはここには無い。**タブ帯の X が 1 つだけ持つ**（InfoHub）。
             y += 30f;
 
             // DLC が無い環境では台風そのものが存在しない。行を出さずに理由を書く。
@@ -211,37 +229,23 @@ namespace DisasterPlus.Game
             ClampToView(panel);
         }
 
-        private static void AddCloseButton(UIPanel panel, float y)
-        {
-            var closeButton = (UIButton)panel.AddUIComponent(typeof(UIButton));
-            closeButton.name = FreeSlotFinder.SelfPrefix + "TyphoonCloseButton";
-            closeButton.text = "X";
-            closeButton.width = 24f;
-            closeButton.height = 24f;
-            closeButton.relativePosition = new Vector3(TyphoonRows.PanelWidth - 32f, y);
-            closeButton.normalBgSprite = "ButtonMenu";
-            closeButton.hoveredBgSprite = "ButtonMenuHovered";
-            closeButton.pressedBgSprite = "ButtonMenuPressed";
-            closeButton.eventClick += (c, e) => Hide();
-        }
-
         /// <summary>
-        /// 「発生地点を指す」「台風を止める」。
+        /// 「台風を止める」の 1 個だけ。
         ///
-        /// 左は<b>配置カーソルを構える</b>（<see cref="ArmPlacement"/>／クラス doc）。
-        /// 右は地点が要らないので依頼を積むだけ。ボタンのテキストは
+        /// ★★ **発生させるボタンはここには無い。** 台風を起こすのは災害パネルの
+        ///    ④タイル（バニラの災害ボタンと同じ 3 手）だけである。このパネルは
+        ///    <b>読むための場所</b>で、起こす場所ではない —— 2 か所から起こせると、
+        ///    「押してから地図をクリック」という約束の入口が 2 つになる。
+        ///
+        /// 止めるのは地点が要らないので依頼を積むだけ。ボタンのテキストは
         /// <c>UIButton.text</c> であって <c>UILabel.text</c> ではないので、
         /// <see cref="TyphoonRows"/> の担保（<c>UILabel</c> の生成と <c>.text</c> 代入の
         /// 一元化）とは無関係である。
         /// </summary>
         private static void AddActionButtons(UIPanel panel, ref float y)
         {
-            AddButton(panel, "StartButton", Strings.TyphoonStart, Strings.TyphoonPlaceHint,
-                TyphoonRows.RowLeft, y,
-                delegate { TyphoonPlacementTool.Arm(); });
-
             AddButton(panel, "StopButton", Strings.TyphoonStop, null,
-                TyphoonRows.RowLeft + ActionButtonWidth + 12f, y,
+                TyphoonRows.RowLeft, y,
                 delegate { TyphoonHub.Request(TyphoonRequestData.Of(TyphoonRequest.Stop)); });
             y += ActionButtonHeight + 10f;
         }
