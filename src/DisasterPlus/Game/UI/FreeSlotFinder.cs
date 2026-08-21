@@ -1,4 +1,5 @@
 using ColossalFramework.UI;
+using DisasterPlus.Core.Common;
 using UnityEngine;
 
 namespace DisasterPlus.Game
@@ -31,6 +32,22 @@ namespace DisasterPlus.Game
     /// **そのパネルがどうしても見つからない環境で、退避用のバー 1 本の起点を
     /// 1 回だけ決めるとき**に限られる。バーの中のボタンは起点からの相対位置に
     /// 1 回のループで並ぶので、ここへ 5 回問い合わせることはもう無い。
+    ///
+    /// ── そして 2 度目の壊れ方（実機 2 回目） ─────────────────────────
+    ///
+    /// 上を直したあと、今度は逆側に外れた ——
+    /// <c>Disaster + info button installed at (8,1094)</c>。高さ 1080 の画面で
+    /// y = 1094 である。探索は下へ 30 回ぶん無条件に降り、**画面の外に出たところを
+    /// 「空いている」と正しく判定していた**（外なのだから何とも重ならない）。
+    /// 重なって使えないのと、見えなくて使えないのは、どちらも同じだけ壊れている。
+    ///
+    /// そこで<b>「画面の外へは 1 歩も出ない」を探索の上位の制約に置いた</b>。
+    /// 候補の数は <see cref="DisasterPlus.Core.Common.ScreenSlot"/> が決め
+    /// （Core、テストが境界を固定している）、画面の広さは
+    /// <c>UIView.GetScreenResolution()</c> から読む —— **1080 を仮定しない。**
+    /// 画面内に空きが 1 つも無ければ preferred（これも画面内へ丸めてある）へ落ちる。
+    /// <b>その分岐は本当に到達する</b>ようになった。以前は到達しても
+    /// 画面外の「空き」が先に見つかるので、事実上死んでいた。
     ///
     /// API 実測（docs/tools/ilload.ps1 + ildasm.ps1 で ColossalManaged.dll / UnityEngine.dll を
     /// 直接確認。詳細は task-2-report.md）:
@@ -69,6 +86,15 @@ namespace DisasterPlus.Game
         /// preferred から下方向へ stepY ずつずらし、可視要素と重ならない最初の位置を返す。
         /// 見つからなければ preferred を返し foundFree=false にする
         /// （隠れて見つからないより、見えて重なる方がマシ）。
+        ///
+        /// ★★ **候補は必ず画面の中に限る**（<see cref="ScreenSlot"/>）。
+        ///   実機の初回テストで <c>installed at (8,1094)</c>——高さ 1080 の画面で
+        ///   y = 1094——が出た。探索は下端を歩いて画面の外へ出て、そこを
+        ///   「空いている」と**正しく**判定していた。空いていたのは画面の外だからである。
+        ///   以前の壊れ方（4 個が同じ座標に積み上がる）と、今度の壊れ方
+        ///   （見えない）はどちらも使えないが、**重なるほうがまだ押せる**。
+        ///   だからここは「画面の外へは 1 歩も出ない」を上位の制約に置き、
+        ///   空きが無ければ画面内に丸めた preferred へ落ちる。
         /// </summary>
         /// <param name="owner">
         /// 今まさに配置しようとしているコンポーネント。これ自身とその子孫だけを
@@ -98,6 +124,20 @@ namespace DisasterPlus.Game
                 var view = UIView.GetAView();
                 if (view == null) return preferred;
 
+                // ★ 画面の広さ。**1080 を仮定しない。**
+                //   UIView.GetScreenResolution() は IL 実測（ColossalManaged）で
+                //   「UI 座標系での解像度」を返す —— uiCamera があれば
+                //   pixelSize / (pixelHeight / fixedHeight * scale)、無ければ
+                //   (fixedWidth, fixedHeight)。absolutePosition / relativePosition と
+                //   同じ空間なので、そのまま比較してよい。
+                //   読めない環境（0 や NaN）では ScreenSlot が「制限しない」側に倒れる。
+                Vector2 screen = ReadScreenSize(view);
+
+                // preferred 自体が画面の外を指していることもある（呼び出し元は
+                // 別のボタンの真下から探し始めるので、そちらが下寄りなら起こりうる）。
+                preferred = new Vector2(ScreenSlot.ClampInto(preferred.x, size.x, screen.x),
+                                        ScreenSlot.ClampInto(preferred.y, size.y, screen.y));
+
                 // includeInactive は既定の false のまま使う。UIComponent.set_isVisible を
                 // IL 実測すると m_IsVisible を書き換えて可視キャッシュを更新するだけで
                 // GameObject.SetActive は一切呼んでいない。つまり Hide() された（＝
@@ -120,7 +160,19 @@ namespace DisasterPlus.Game
                 // stepY <= 0 だと毎回同じ候補を検査することになり、探索として意味がない。
                 // 1 回だけ検査して打ち切る。そうしないと「maxTries 回試した」という警告が
                 // 実態（同じ点を繰り返しただけ）と食い違う。
-                int effectiveTries = stepY > 0f ? maxTries : 1;
+                // 画面の下端も同じ理由で打ち切る —— そこから先の候補は、空いていても
+                // 押せない（クラス doc の (8,1094)）。
+                int effectiveTries = ScreenSlot.CandidatesInside(preferred.y, size.y, stepY,
+                                                                screen.y, maxTries);
+                if (effectiveTries <= 0)
+                {
+                    // 最初の候補すら画面に入らない。下へ進めばもっと外れるので探索しない。
+                    Log.Warn("no on-screen UI slot is available for a "
+                             + size.x + "x" + size.y + " button in a "
+                             + screen.x + "x" + screen.y + " view; placing it at "
+                             + preferred.x + "," + preferred.y + " (it may overlap)");
+                    return preferred;
+                }
 
                 for (int attempt = 0; attempt < effectiveTries; attempt++)
                 {
@@ -132,14 +184,55 @@ namespace DisasterPlus.Game
                     }
                 }
 
+                // ★ ここがクラス doc の言う「隠れて見つからないより、見えて重なる方がマシ」
+                //   の実体である。**この分岐は本当に到達する**（左上の列が他 MOD で
+                //   埋まっている環境）。preferred は上で画面内へ丸めてあるので、
+                //   戻り値が画面の外を指すことはない。
                 Log.Warn("no free UI slot found after " + effectiveTries
-                         + " tries; placing the button at the preferred position (it may overlap)");
+                         + " on-screen tries (view " + screen.x + "x" + screen.y
+                         + "); placing the button at the preferred position (it may overlap)");
                 return preferred;
             }
             catch (System.Exception e)
             {
                 Log.Error("free slot search failed", e);
                 return preferred;
+            }
+        }
+
+        /// <summary>
+        /// UI 座標系での画面の広さ。**読めなければ (0,0) を返す** ——
+        /// <see cref="ScreenSlot"/> はそれを「制限しない」と解釈するので、
+        /// 寸法が読めない環境でボタンが 1 個も置けなくなることはない。
+        ///
+        /// <c>GetScreenResolution()</c> が例外を投げる経路（uiCamera が破棄済み等）は
+        /// 実測できていないので、握って (0,0) に倒す。**Warn は出さない** ——
+        /// ここは配置のたびに 1 回しか通らないが、出しても打つ手が無い。
+        /// <c>fixedHeight</c> は保険で、こちらは常に読める整数である。
+        /// </summary>
+        private static Vector2 ReadScreenSize(UIView view)
+        {
+            try
+            {
+                Vector2 res = view.GetScreenResolution();
+                if (ScreenSlot.IsUsableExtent(res.x) && ScreenSlot.IsUsableExtent(res.y))
+                {
+                    return res;
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Diag("freeSlot", "screen resolution unreadable: " + e.GetType().Name);
+            }
+
+            try
+            {
+                return new Vector2(view.fixedWidth, view.fixedHeight);
+            }
+            catch (System.Exception e)
+            {
+                Log.Diag("freeSlot", "fixed view size unreadable: " + e.GetType().Name);
+                return new Vector2(0f, 0f);
             }
         }
 
