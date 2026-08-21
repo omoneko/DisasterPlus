@@ -30,9 +30,15 @@ namespace DisasterPlus.Core.Volcano
     /// </code>
     ///
     /// **最終高 H を 1 mm も超えない。** <c>HeightFor</c> / <c>HeadroomMetres</c> /
-    /// <c>HeightWasLimitedByCeiling</c> / <c>CraterRimHeadroomOf</c> と 1024 m の
+    /// <c>HeightWasLimitedByCeiling</c> と 1024 m の
     /// 生の天井（§C-10）が全部 H を基準に考えている。したがって起伏は
     /// **削る向きにしか働かない**:
+    ///
+    /// > ★ 呼び出し側（<c>VolcanoCrater.ProfileAt</c>）が渡してくる H は
+    /// > **火口の縁で山の高さに届くように立て直した仮想の頂**である。
+    /// > この型の約束は「渡された H を超えない」であって、そこは 1 つも変わらない ——
+    /// > 仮想の頂は火口の天井が必ず切り落とすので、地形には 1 セルも書かれない
+    /// > （あちらのクラス doc）。
     ///
     /// <code>
     /// profile = VolcanoShape.ProfileAt(form, d, Reff(θ), H) × carve(θ, d)
@@ -180,6 +186,12 @@ namespace DisasterPlus.Core.Volcano
 
         /// <summary>この起伏の強さ（0 = 今日の滑らかな円錐そのもの）。</summary>
         public float StrengthUnit { get { return _strength; } }
+
+        /// <summary>
+        /// この起伏が作られた形態。<see cref="VolcanoCrater"/> が火口の天井を出すのに使う
+        /// （形態ごとに、火口半径のところで円錐が残している割合が違う）。
+        /// </summary>
+        public VolcanoForm Form { get { return _form; } }
 
         /// <summary>放射谷の本数（診断とテスト用）。方位系列の零交差の数である。</summary>
         public int GullyCount { get { return (_gullyFirst + 2) * 2; } }

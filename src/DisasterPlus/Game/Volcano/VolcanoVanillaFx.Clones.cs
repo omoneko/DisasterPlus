@@ -1,4 +1,5 @@
 using System;
+using DisasterPlus.Core.Volcano;
 using UnityEngine;
 
 namespace DisasterPlus.Game
@@ -31,9 +32,21 @@ namespace DisasterPlus.Game
     internal static partial class VolcanoVanillaFx
     {
         /// <summary>
-        /// 噴煙の複製。**高く・長く・遠くから見えるように**する。
+        /// 噴煙<b>柱</b>の複製。**高く・長く・遠くから見えるように**する。
         /// <c>Factory Smoke</c> の素の可視距離は 1000 m しかなく、火山の噴煙は
         /// 遠景から見えてほしい。
+        ///
+        /// ★★ <b>初速を 26-48 m/s から 3-11 m/s へ落としてある</b>（2026-08-22、指摘③）。
+        ///   柱の形はもう「どこに湧かせるか」で作っている（<c>Core/Volcano/EruptionColumn</c>
+        ///   の 9 段）ので、粒子自身が上がり続けると**傘に天井が出来ない** ——
+        ///   中立浮力高度で止まって横へ広がるのが噴火柱の姿である。
+        ///   寿命も 7-16s から 4-9s へ短くした。段に湧いた粒子はその場で消え、
+        ///   毎フレーム湧き直すことで<b>供給され続ける柱</b>になる。
+        ///
+        /// 色は暗い灰褐色。**噴出口の近くほど濃く暗い**のは段ごとの密度が担っていて
+        /// （下の段ほど重みが大きい）、色はここで 1 つに決める ——
+        /// <c>startColor</c> は <c>ParticleSystem</c> 側の共有状態で、
+        /// <c>RenderEffect</c> の呼び出しごとには変えられない（IL 実測 §B-4）。
         /// </summary>
         private static GameObject CloneAsh(ParticleEffect source)
         {
@@ -44,29 +57,48 @@ namespace DisasterPlus.Game
             var particles = go.GetComponent<ParticleSystem>();
             if (effect == null || particles == null) return Reject(go);
 
-            effect.m_minLifeTime = 7f;
-            effect.m_maxLifeTime = 16f;
-            effect.m_minStartSpeed = 26f;
-            effect.m_maxStartSpeed = 48f;
-            effect.m_minSpawnAngle = 0f;
-            effect.m_maxSpawnAngle = 13f;
-            effect.m_maxVisibilityDistance = 10000f;
-            // ★ 0 にしておくこと。継続モード（timeOffset < 0）で回すので、
-            //   0 以外だと m_intensityCurve の位相ゲートが掛かる。
-            effect.m_renderDuration = 0f;
+            // ★ 数値表は Core にある（EruptionAshProfile）。tools/VolcanoPreview が
+            //   同じ数字で噴煙柱を描くので、**ここに直書きしない**。
+            Apply(effect, particles, EruptionAshProfile.Column, 10000f);
 
             var main = particles.main;
             main.startColor = new ParticleSystem.MinMaxGradient(
-                new Color(0.24f, 0.22f, 0.21f, 1f), new Color(0.09f, 0.08f, 0.08f, 1f));
-            main.startSize = 34f;
-            main.gravityModifier = -0.04f;   // わずかに浮く
-            main.maxParticles = 5000;
+                new Color(0.26f, 0.21f, 0.17f, 1f), new Color(0.08f, 0.07f, 0.065f, 1f));
 
-            // ★★ rateOverTime を 0 にしないこと。emission.enabled が false でも
-            //    EmitParticles は rateOverTime.constant を**粒子数の乗数として読む**。
-            //    0 にすると 1 粒も出ない（いちばん踏みやすい罠）。
-            var emission = particles.emission;
-            emission.rateOverTime = 42f;
+            return Initialize(go, effect);
+        }
+
+        /// <summary>
+        /// 噴煙柱の<b>傘</b>の複製。中立浮力高度で横へ広がる、淡くて大きくて長生きの灰。
+        ///
+        /// 柱と分けてあるのは <c>startColor</c> / <c>startSize</c> / 寿命が
+        /// <c>ParticleSystem</c> 側の**共有状態**で、<c>RenderEffect</c> の呼び出しごとには
+        /// 変えられないからである（IL 実測 §B-4）。傘は
+        ///
+        /// <list type="bullet">
+        /// <item>柱より<b>淡い</b>（薄く広がった灰は空に対して明るい）</item>
+        /// <item>粒が 3 倍以上<b>大きい</b>（半径 500 m 級の面を粒 30 で埋めると数が要る）</item>
+        /// <item><b>長生き</b>（18-34s）。滞留して積み上がることで平たい面になる</item>
+        /// <item>放出角 55-95°。<b>ほぼ水平に広がる</b> ——
+        ///   <c>direction</c> が上なので、この角度がそのまま横向きの初速になる</item>
+        /// </list>
+        ///
+        /// 引けなくても⑤は止まらない（柱の複製で代用する。<c>AshUmbrella</c> の doc）。
+        /// </summary>
+        private static GameObject CloneAshUmbrella(ParticleEffect source)
+        {
+            GameObject go = CloneObject(source, "DisasterPlus_VolcanoUmbrella");
+            if (go == null) return null;
+
+            var effect = go.GetComponent<ParticleEffect>();
+            var particles = go.GetComponent<ParticleSystem>();
+            if (effect == null || particles == null) return Reject(go);
+
+            Apply(effect, particles, EruptionAshProfile.Umbrella, 12000f);
+
+            var main = particles.main;
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                new Color(0.44f, 0.42f, 0.41f, 1f), new Color(0.19f, 0.18f, 0.175f, 1f));
 
             return Initialize(go, effect);
         }
@@ -144,6 +176,36 @@ namespace DisasterPlus.Game
             emission.rateOverTime = 26f;
 
             return Initialize(go, effect);
+        }
+
+        /// <summary>
+        /// Core の数値表（<see cref="EruptionAshProfile"/>）を複製へ書き写す。
+        ///
+        /// ★ <c>m_renderDuration</c> は必ず 0 にする。継続モード（<c>timeOffset &lt; 0</c>）で
+        ///   回すので、0 以外だと <c>m_intensityCurve</c> の位相ゲートが掛かる。
+        /// ★★ <c>rateOverTime</c> を 0 にしないこと。<c>emission.enabled</c> が false でも
+        ///   <c>EmitParticles</c> は <c>rateOverTime.constant</c> を**粒子数の乗数として
+        ///   読み続ける**（IL 実測）。0 にすると 1 粒も出ない。
+        /// </summary>
+        private static void Apply(ParticleEffect effect, ParticleSystem particles,
+                                  EruptionAshProfile profile, float visibilityMetres)
+        {
+            effect.m_minLifeTime = profile.LifeMinSeconds;
+            effect.m_maxLifeTime = profile.LifeMaxSeconds;
+            effect.m_minStartSpeed = profile.SpeedMin;
+            effect.m_maxStartSpeed = profile.SpeedMax;
+            effect.m_minSpawnAngle = profile.SpawnAngleMinDegrees;
+            effect.m_maxSpawnAngle = profile.SpawnAngleMaxDegrees;
+            effect.m_maxVisibilityDistance = visibilityMetres;
+            effect.m_renderDuration = 0f;
+
+            var main = particles.main;
+            main.startSize = profile.SizeMetres;
+            main.gravityModifier = profile.GravityModifier;
+            main.maxParticles = profile.MaxParticles;
+
+            var emission = particles.emission;
+            emission.rateOverTime = profile.RateOverTime;
         }
 
         /// <summary>

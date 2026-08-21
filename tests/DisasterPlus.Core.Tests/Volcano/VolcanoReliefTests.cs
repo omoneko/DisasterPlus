@@ -101,8 +101,10 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheProfileNeverExceedsTheFinalHeight()
         {
-            // ★★ 制約 2。HeightFor / HeadroomMetres / CraterRimHeadroomOf と 1024 m の
-            //    生の天井（§C-10）が全部 H を基準に考えている。
+            // ★★ 制約 2。HeightFor / HeadroomMetres と 1024 m の生の天井（§C-10）が
+            //    全部 H を基準に考えている。**渡された H を超えない**が約束であって、
+            //    火口のぶん立て直した仮想の頂を渡すのは呼び出し側の話である
+            //    （VolcanoCrater が必ず切り落とす）。
             for (int i = 0; i < AllForms.Length; i++)
             {
                 VolcanoForm form = AllForms[i];
@@ -124,7 +126,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSummitIsStillExactlyTheFinalHeight()
         {
-            // 山頂がずれると HeightFor が引いた火口の縁の余裕がその分だけ嘘になる。
+            // 山頂がずれると、火口の縁が山の高さ H に届かなくなる
+            //    （VolcanoCrater.SummitScale はここが厳密に H であることを前提にしている）。
             for (int i = 0; i < AllForms.Length; i++)
             {
                 var relief = VolcanoRelief.For(AllForms[i], Seed, 1f);

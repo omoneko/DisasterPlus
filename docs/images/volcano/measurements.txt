@@ -6,12 +6,12 @@ grid = 16 m (the game's own terrain grid)
 ## shield  R=2000 m  H=200 m
   gullies             : 8 channels, ~864 m apart at 0.55R
   finest wavelength   : 170 m (11 cells)
-  max height relief=1 : 200.0000 m   (ceiling H = 200)
+  max height relief=1 : 198.8792 m   (ceiling H = 200)
   max height relief=0 : 200.0000 m
   max height beyond R : 0.0000 m   (must be 0)
   relief=0 vs today   : max |diff| = 0 m   (must be 0)
   cross-section @0.55R = 1100 m:
-    smooth cone       : 162.7 m
+    smooth cone       : 162.8 m
     deepest gully     : 141.1 m  (-21.7 m, azimuth 180 deg)
     highest interfluve: 157.6 m  (-5.1 m)
     ridge-to-valley   : 16.5 m
@@ -21,40 +21,73 @@ grid = 16 m (the game's own terrain grid)
 ## strato  R=1200 m  H=600 m
   gullies             : 18 channels, ~230 m apart at 0.55R
   finest wavelength   : 110 m (7 cells)
-  max height relief=1 : 600.0000 m   (ceiling H = 600)
+  max height relief=1 : 594.9014 m   (ceiling H = 600)
   max height relief=0 : 600.0000 m
   max height beyond R : 0.0000 m   (must be 0)
   relief=0 vs today   : max |diff| = 0 m   (must be 0)
   cross-section @0.55R = 660 m:
-    smooth cone       : 270.0 m
-    deepest gully     : 172.2 m  (-97.8 m, azimuth 342 deg)
-    highest interfluve: 249.1 m  (-20.9 m)
-    ridge-to-valley   : 76.9 m
+    smooth cone       : 306.8 m
+    deepest gully     : 195.7 m  (-111.2 m, azimuth 342 deg)
+    highest interfluve: 283.1 m  (-23.7 m)
+    ridge-to-valley   : 87.4 m
     mean slope        : 26.6 deg (smooth cone)
     footprint radius  : min 1080 m / max 1200 m  (R = 1200)
 
 ## dome  R=350 m  H=300 m
   gullies             : 10 channels, ~121 m apart at 0.55R
   finest wavelength   : 110 m (7 cells)
-  max height relief=1 : 300.0000 m   (ceiling H = 300)
-  max height relief=0 : 300.0000 m
+  max height relief=1 : 290.8618 m   (ceiling H = 300)
+  max height relief=0 : 298.5903 m
   max height beyond R : 0.0000 m   (must be 0)
   relief=0 vs today   : max |diff| = 0 m   (must be 0)
   cross-section @0.55R = 192 m:
-    smooth cone       : 146.0 m
-    deepest gully     : 83.7 m  (-62.3 m, azimuth 78 deg)
-    highest interfluve: 127.0 m  (-18.9 m)
-    ridge-to-valley   : 43.4 m
+    smooth cone       : 150.2 m
+    deepest gully     : 86.1 m  (-64.1 m, azimuth 78 deg)
+    highest interfluve: 130.8 m  (-19.5 m)
+    ridge-to-valley   : 44.6 m
     mean slope        : 40.6 deg (smooth cone)
     footprint radius  : min 298 m / max 350 m  (R = 350)
 
 ## growth (strato, summit-outward)
   progress | summit m | front m (first cell that reaches 0) | raised cells
-     0.12   |   72.0  |  113   |  142
-     0.30   |   180.0  |  294   |  933
-     0.50   |   300.0  |  551   |  3015
-     0.72   |   432.0  |  838   |  7194
+     0.12   |   72.0  |  218   |  526
+     0.30   |   180.0  |  403   |  1654
+     0.50   |   300.0  |  626   |  3929
+     0.72   |   432.0  |  882   |  8063
      1.00   |   600.0  |  1199   |  15730
+
+## crater (strato, part of the profile from the first tick)
+  crater radius = 144 m, depth = 60 m, cone scale = 1.136
+  progress | rim m | floor m | depression m | rim ring radius m
+     0.03   |  8.8 |  0.0  |   8.8   |  128
+     0.08   |  38.8 |  0.0  |   38.8   |  128
+     0.20   |  110.8 |  60.0  |   50.8   |  128
+     0.55   |  320.8 |  270.0  |   50.8   |  128
+     1.00   |  590.8 |  540.0  |   50.8   |  128
+
+## eruption column (strato, crater r = 144 m)
+  t/total | intensity | column m | umbrella r m | bend m | vent r m
+    0.04  |    0.50   |   1110    |     675      |  333   |  86
+    0.10  |    1.00   |   1800    |     856      |  540   |  86
+    0.30  |    1.00   |   1800    |     856      |  540   |  86
+    0.55  |    1.00   |   1800    |     856      |  540   |  86
+    0.80  |    0.57   |   1209    |     700      |  363   |  86
+    0.95  |    0.14   |   617    |     545      |  185   |  86
+
+## lava band (glow is a function of place, never of time)
+  v = 0 is the vent, v = 1 is the advancing front
+  cool | mean brightness | max brightness
+   1.00 |      0.021      |     0.459
+   0.60 |      0.010      |     0.213
+   0.30 |      0.003      |     0.075
+   0.10 |      0.001      |     0.015
+   0.00 |      0.000      |     0.000
+
+## pyroclastic fan (strato, intensity 1.0, 4 lava flows)
+  lobes            : 6
+  lava covers      : 0.338 km2
+  the fan covers   : 4.242 km2  (12.5x the lava)
+  of that, on lava : 7 %   (the rest is flank the lava never touched)
 
 ## uplift pacing (strato, R = 1200 m, H = 600 m, 30 in-game minutes)
   in-game duration is UNCHANGED: 30 in-game minutes = 1365 sim frames

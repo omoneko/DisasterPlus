@@ -43,7 +43,7 @@ namespace DisasterPlus.Game
     /// ── 準備は隆起の前を走る（ring lockstep）───────────────────────
     ///
     /// <code>
-    /// front   = UpliftSchedule.ClearingFrontMetres(R, progress, VolcanoClearingLeadMetres)
+    /// front   = UpliftSchedule.ClearingFrontMetres(R, frontUnit, VolcanoClearingLeadMetres)
     /// cleared = 実際に走査を終えた半径（front 以下。届かなければ届いた分だけ）
     /// </code>
     ///
@@ -387,15 +387,22 @@ namespace DisasterPlus.Game
         /// sim スレッド。**必ず <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
         /// 下から呼ぶこと**（ポーズ中に建物が消える）。
         ///
-        /// <paramref name="progress"/> は<b>隆起の進捗 [0,1]</b>である。準備が始まった
+        /// <paramref name="frontUnit"/> は<b>隆起の前線 [0,1]</b>である。準備が始まった
         /// ばかり（隆起がまだ動いていない）なら 0 で、前線は
         /// <c>ModSettings.VolcanoClearingLeadMetres</c> だけになる。
+        ///
+        /// ★★ **進捗そのものを渡さないこと**（<c>VolcanoUplift.GrowthFrontUnit</c> を渡す）。
+        ///   火口のぶん円錐を立て直しているので、隆起の前線は進捗より先に出る
+        ///   （<c>UpliftSchedule.GrowthFrontUnit</c>）。進捗を渡すと、準備が届く前に
+        ///   隆起が届いてしまい、山の外周が切り立った円で止まって見える
+        ///   ——**危険側ではない**（<c>ActiveRadiusMetres</c> が書き込みを止める）が、
+        ///   毎回そこで待たされる。
         /// </summary>
-        public static void Tick(VolcanoFootprint footprint, float progress, float deltaMinutes)
+        public static void Tick(VolcanoFootprint footprint, float frontUnit, float deltaMinutes)
         {
             try
             {
-                Step(footprint, progress, deltaMinutes);
+                Step(footprint, frontUnit, deltaMinutes);
             }
             catch (Exception e)
             {
@@ -413,7 +420,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        private static void Step(VolcanoFootprint footprint, float progress, float deltaMinutes)
+        private static void Step(VolcanoFootprint footprint, float frontUnit, float deltaMinutes)
         {
             if (!footprint.Valid) return;
 
@@ -441,7 +448,7 @@ namespace DisasterPlus.Game
             if (framesPerMinute <= 0f) return;
 
             _frontRadius = UpliftSchedule.ClearingFrontMetres(
-                footprint.RadiusMetres, progress, LeadMetres());
+                footprint.RadiusMetres, frontUnit, LeadMetres());
 
             // 前線に既に届いているなら走らない。**累積を消費しない**ので、
             // 前線が伸びた次の tick で即座に走る。

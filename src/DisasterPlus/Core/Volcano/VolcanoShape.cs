@@ -31,7 +31,12 @@ namespace DisasterPlus.Core.Volcano
     /// **呼ぶたびに地形の強制フラッシュが 1 回走る**。段階的隆起で毎 tick 呼べば
     /// バニラのバッチ最適化を毎 tick 無効化することになる（§A-1 の設計上の結論 3）。
     /// 形は同じで、コストだけが違う。**「MakeCrater 1 発で済む」と言って
-    /// 戻さないこと。** 山頂の火口だけは MakeCrater を 1 回使う（Game/Volcano/VolcanoUplift）。
+    /// 戻さないこと。**
+    ///
+    /// ★ 山頂の火口も 2026-08-22 に <c>MakeCrater</c> をやめた（実機の指摘①
+    /// 「噴火口が最初から窪みとして生成される方がいい」）。火口は
+    /// <see cref="VolcanoCrater"/> が**高さプロファイルの一部**として返すので、
+    /// 山と一緒に育つ。⑤は <c>MakeCrater</c> をもうどこからも呼ばない。
     ///
     /// 勾配クランプも侵食も平滑化パスも存在しない（§C-9）ので、急峻な円錐は潰れない。
     /// 制約は「16 m 格子」と「1/64 m 量子」の 2 つだけである。だから
@@ -39,8 +44,8 @@ namespace DisasterPlus.Core.Volcano
     /// それ以下は「山」ではなく地面のノイズに見える。
     ///
     /// 高さの天井は 65535/64 = 1023.984375 m で、**超えても例外は出ず無言で
-    /// 山頂が平らな台地になる**（§C-10）。<see cref="HeightFor"/> が起点の地形高さと
-    /// 火口の縁の分を先に引き、<see cref="HeightWasLimitedByCeiling"/> が
+    /// 山頂が平らな台地になる**（§C-10）。<see cref="HeightFor"/> が起点の地形高さを
+    /// 先に引き、<see cref="HeightWasLimitedByCeiling"/> が
     /// 「切ったかどうか」を別に返す。呼び出し側はそれをプレイヤーに先に見せること。
     /// </summary>
     public static class VolcanoShape
@@ -76,10 +81,11 @@ namespace DisasterPlus.Core.Volcano
         private const float CraterDepthFraction = 0.12f;
 
         /// <summary>
-        /// 火口の縁が火口の深さに対して山頂よりどれだけ上に出るか。
-        /// §C-8 の <c>raiseEdges:true</c> は 0.75r に <c>+0.3 × depth</c> の縁を作る。
+        /// 火口の深さが山の高さに対して超えてはいけない比。**低い山を貫かないため**で、
+        /// これが無いと <see cref="MinCraterDepthMetres"/>（10 m）が 15 m の山に
+        /// 10 m の穴を空け、火口の底が元の地面まで抜ける。
         /// </summary>
-        private const float CraterRimFraction = 0.3f;
+        private const float MaxCraterDepthOfHeight = 0.45f;
 
         private const float MinCraterRadiusMetres = 40f;
         private const float MaxCraterRadiusMetres = 400f;
@@ -186,8 +192,15 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 要求高さを形態の帯へクランプしたうえで、**天井（§C-10）と火口の縁の分だけ
-        /// さらに切る**。
+        /// 要求高さを形態の帯へクランプしたうえで、**天井（§C-10）の分だけさらに切る**。
+        ///
+        /// ★ かつてここは火口の縁の余裕（<c>CraterRimHeadroomOf</c>）も引いていた。
+        ///   <c>MakeCrater(raiseEdges:true)</c> が <b>山頂より上に</b> 環状の縁を盛っていて、
+        ///   その分が天井を突き抜けると縁だけが無言で平らになったからである。
+        ///   火口を高さプロファイルへ畳み込んだ（<see cref="VolcanoCrater"/>）いま、
+        ///   **⑤が書く最大の高さはちょうど <c>base + H</c> である** ——
+        ///   火口の縁が H そのもので、そこから上には 1 mm も書かない。
+        ///   したがって引くものはもう無い。
         ///
         /// 標高の高い場所では <c>limit</c> が <see cref="MinHeightOf"/> を割ることがある。
         /// そのときは最小値へ引き上げず、**そのまま小さい値を返す** ——
@@ -201,7 +214,7 @@ namespace DisasterPlus.Core.Volcano
                 ? DefaultHeightOf(form)
                 : Clamp(requestedHeightMetres, MinHeightOf(form), MaxHeightOf(form));
 
-            float limit = HeadroomMetres(baseHeightMetres) - CraterRimHeadroomOf(h);
+            float limit = HeadroomMetres(baseHeightMetres);
             if (limit < h) h = limit;
             return Clamp(h, 0f, MaxHeightOf(form));
         }
@@ -275,24 +288,21 @@ namespace DisasterPlus.Core.Volcano
                          MinCraterRadiusMetres, MaxCraterRadiusMetres);
         }
 
-        /// <summary>山頂の火口の深さ（m）。山を貫かないよう上限つき。</summary>
+        /// <summary>
+        /// 山頂の火口の深さ（m）。**山を貫かないよう 2 段の上限**がある ——
+        /// 絶対値の <see cref="MaxCraterDepthMetres"/> と、山の高さに対する
+        /// <see cref="MaxCraterDepthOfHeight"/> である。後者が無いと、天井ぎりぎりで
+        /// 15 m しか立てられなかった山に 10 m の穴が空く。
+        /// </summary>
         public static float CraterDepthOf(float heightMetres)
         {
             if (float.IsNaN(heightMetres) || heightMetres <= 0f) return 0f;
-            return Clamp(heightMetres * CraterDepthFraction,
-                         MinCraterDepthMetres, MaxCraterDepthMetres);
-        }
 
-        /// <summary>
-        /// 火口の縁が山頂より上に出る量（m）。§C-8 の <c>raiseEdges:true</c> は
-        /// 0.75r に <c>+0.3 × depth</c> の縁を作る。
-        ///
-        /// <see cref="HeightFor"/> がこれを先に引くのは、天井ぎりぎりの山で
-        /// **縁だけが無言で切られて円環が平らになる**のを防ぐためである。
-        /// </summary>
-        public static float CraterRimHeadroomOf(float heightMetres)
-        {
-            return CraterRimFraction * CraterDepthOf(heightMetres);
+            float depth = Clamp(heightMetres * CraterDepthFraction,
+                                MinCraterDepthMetres, MaxCraterDepthMetres);
+
+            float limit = heightMetres * MaxCraterDepthOfHeight;
+            return depth < limit ? depth : limit;
         }
 
         private static float Clamp(float v, float min, float max)

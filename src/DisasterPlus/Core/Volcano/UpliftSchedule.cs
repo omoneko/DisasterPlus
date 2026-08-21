@@ -167,6 +167,35 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
+        /// 隆起の前線が進捗 <paramref name="progress"/> でどこまで出ているか（半径に対する比）。
+        ///
+        /// <c>GrowthMetresAt</c> は <c>profile(d) &gt; H(1−p)</c> の範囲だけを地表に出す。
+        /// 直線の円錐（成層）で、火口のぶん立て直した倍率を <paramref name="summitScale"/> と
+        /// すると <c>profile(d) = H·scale·(1 − d/R)</c> なので、前線はちょうど
+        ///
+        /// <code>
+        /// front / R = 1 − (1 − p) / scale
+        /// </code>
+        ///
+        /// である。**倍率 1 なら今までどおり p そのもの**に戻る。
+        ///
+        /// ★ 盾状・鐘状の前線はこの式より少しだけ先に出る（プロファイルが直線でないため）。
+        ///   そこは <c>ClearingFrontMetres</c> の <c>leadMetres</c> が呑む —— 火口を
+        ///   入れる前からその関係だったので、ここで新しく甘くなったものは 1 つも無い。
+        /// </summary>
+        public static float GrowthFrontUnit(float progress, float summitScale)
+        {
+            if (float.IsNaN(progress)) return 0f;
+
+            float p = progress < 0f ? 0f : (progress > 1f ? 1f : progress);
+            if (float.IsNaN(summitScale) || summitScale < 1f) return p;
+
+            float front = 1f - (1f - p) / summitScale;
+            if (front < 0f) return 0f;
+            return front > 1f ? 1f : front;
+        }
+
+        /// <summary>
         /// 準備（破壊）の前線が今どこまで行っているべきか（m）。
         /// 隆起の前線（<c>shapeRadius × progress</c>）より <paramref name="leadMetres"/> だけ先行し、
         /// 山の半径を超えない。**決して後ろへ下がらない。**

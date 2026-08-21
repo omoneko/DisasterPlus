@@ -15,8 +15,8 @@ namespace DisasterPlus.Game
     /// 自己修復問題を持ち込まない）。既定値は全て false ＝「まだ／もう読めていない」。
     ///
     /// **フラグは 1 本にまとめない。** 山（<see cref="HeightsResolved"/> /
-    /// <see cref="UpdateAreaResolved"/>）・火口と焦げ（<see cref="CraterResolved"/> /
-    /// <see cref="BurnGroundResolved"/>）・溶岩の流路（<see cref="SlopeSampleResolved"/>）は
+    /// <see cref="UpdateAreaResolved"/>）・溶岩の焦げ（<see cref="BurnGroundResolved"/>）・
+    /// 溶岩の流路（<see cref="SlopeSampleResolved"/>）は
     /// 独立に壊れうる。まとめると「溶岩が流れないだけ」の環境で山まで止まる。
     /// </summary>
     public struct VolcanoTerrainFacts
@@ -39,8 +39,9 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly bool UpdateAreaResolved;
 
-        /// <summary><c>DisasterHelpers.MakeCrater(Vector2,float,float,bool)</c>（§C-8）。</summary>
-        public readonly bool CraterResolved;
+        // ★ かつてここに CraterResolved（DisasterHelpers.MakeCrater が引けるか）が在った。
+        //   火口は高さプロファイルの一部になり（Core/Volcano/VolcanoCrater）、⑤は
+        //   MakeCrater をもうどこからも呼ばない。**誰も門にしない事実を測り続けない。**
 
         /// <summary><c>DisasterHelpers.BurnGround(Vector2,float,float)</c>（§B-7b。**DLC 不要**）。</summary>
         public readonly bool BurnGroundResolved;
@@ -59,14 +60,13 @@ namespace DisasterPlus.Game
         public readonly bool NaturalDisastersOwned;
 
         public VolcanoTerrainFacts(bool heightsResolved, int rawArrayLength,
-                                   bool updateAreaResolved, bool craterResolved,
+                                   bool updateAreaResolved,
                                    bool burnGroundResolved, bool slopeSampleResolved,
                                    bool naturalDisastersOwned)
         {
             HeightsResolved = heightsResolved;
             RawArrayLength = rawArrayLength;
             UpdateAreaResolved = updateAreaResolved;
-            CraterResolved = craterResolved;
             BurnGroundResolved = burnGroundResolved;
             SlopeSampleResolved = slopeSampleResolved;
             NaturalDisastersOwned = naturalDisastersOwned;
@@ -204,8 +204,12 @@ namespace DisasterPlus.Game
         /// <summary>隆起が終わったか。</summary>
         public readonly bool UpliftComplete;
 
-        /// <summary>山頂の火口を彫ったか（⑤全体で 1 回だけ起きる）。</summary>
-        public readonly bool CraterCarved;
+        /// <summary>
+        /// 山頂の窪みが満杯の深さに達したか。**「彫ったか」ではない** ——
+        /// 火口は高さプロファイルの一部で、隆起の最初の tick から在る
+        /// （<c>Core/Volcano/VolcanoCrater</c>）。
+        /// </summary>
+        public readonly bool CraterFormed;
 
         /// <summary>影響矩形を覆うタイル数。</summary>
         public readonly int UpliftTileCount;
@@ -228,11 +232,12 @@ namespace DisasterPlus.Game
         public readonly float EruptionIntensityUnit;
 
         /// <summary>
-        /// 噴出口のワールド座標（<c>Y</c> は <c>SampleDetailHeight</c> ＋ 少しの浮き）。
+        /// 噴出口のワールド座標。<c>Y</c> は<b>火口の底</b>（<c>SampleDetailHeight</c> ＋
+        /// 少しの浮き）で、**山頂の縁ではない**（実機の指摘②）。
         /// sim が読んだ値を main がそのまま使う ——
         /// **main スレッドから地形を引き直さない**（経路を 1 本にする）。
         /// </summary>
-        public readonly Vec3 SummitWorld;
+        public readonly Vec3 VentWorld;
 
         // ── T8（溶岩）が足した 9 つ ───────────────────────────────
 
@@ -282,10 +287,10 @@ namespace DisasterPlus.Game
                                int buildingsRefused, bool clearingCapped,
                                bool clearingPathAvailable,
                                float summitMetres, float activeRadiusMetres,
-                               bool upliftComplete, bool craterCarved,
+                               bool upliftComplete, bool craterFormed,
                                int upliftTileCount, int upliftTileCursor,
                                bool eruptionActive, float eruptionIntensityUnit,
-                               Vec3 summitWorld,
+                               Vec3 ventWorld,
                                int lavaFlowCount, int lavaAliveCount, float lavaLongestMetres,
                                int lavaBuildingsIgnited, int lavaTreesIgnited,
                                bool lavaTreesAvailable, Vec2[] lavaTrailPoints,
@@ -309,12 +314,12 @@ namespace DisasterPlus.Game
             SummitMetres = summitMetres;
             ActiveRadiusMetres = activeRadiusMetres;
             UpliftComplete = upliftComplete;
-            CraterCarved = craterCarved;
+            CraterFormed = craterFormed;
             UpliftTileCount = upliftTileCount;
             UpliftTileCursor = upliftTileCursor;
             EruptionActive = eruptionActive;
             EruptionIntensityUnit = eruptionIntensityUnit;
-            SummitWorld = summitWorld;
+            VentWorld = ventWorld;
             LavaFlowCount = lavaFlowCount;
             LavaAliveCount = lavaAliveCount;
             LavaLongestMetres = lavaLongestMetres;

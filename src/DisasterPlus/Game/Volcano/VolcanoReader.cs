@@ -89,12 +89,12 @@ namespace DisasterPlus.Game
                                            VolcanoUplift.SummitMetres,
                                            VolcanoUplift.ActiveRadiusMetres,
                                            VolcanoUplift.Complete,
-                                           VolcanoUplift.CraterCarved,
+                                           VolcanoUplift.CraterFormed,
                                            VolcanoUplift.TileCount,
                                            VolcanoUplift.TileCursor,
                                            VolcanoEruption.Active,
                                            VolcanoEruption.IntensityUnit,
-                                           VolcanoEruption.SummitWorld,
+                                           VolcanoEruption.VentWorld,
                                            VolcanoLava.FlowCount,
                                            VolcanoLava.AliveCount,
                                            VolcanoLava.LongestMetres,
@@ -232,12 +232,6 @@ namespace DisasterPlus.Game
                     typeof(bool), typeof(bool), typeof(bool)
                 });
 
-            bool craterResolved = HasMethod(typeof(DisasterHelpers), "MakeCrater", true,
-                new Type[]
-                {
-                    typeof(UnityEngine.Vector2), typeof(float), typeof(float), typeof(bool)
-                });
-
             bool burnGroundResolved = HasMethod(typeof(DisasterHelpers), "BurnGround", true,
                 new Type[]
                 {
@@ -264,7 +258,7 @@ namespace DisasterPlus.Game
             }
 
             return new VolcanoTerrainFacts(heightsResolved, rawLength, updateAreaResolved,
-                                           craterResolved, burnGroundResolved,
+                                           burnGroundResolved,
                                            slopeSampleResolved, dlc);
         }
 

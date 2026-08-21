@@ -1,175 +1,283 @@
+using System;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Volcano;
 using Xunit;
 
 namespace DisasterPlus.Core.Tests.Volcano
 {
+    /// <summary>
+    /// 土煙の扇（実機の指摘⑤「火砕流は溶岩流の上だけでなく、もっと裾野に広がるはず」）。
+    ///
+    /// ここで固定するのは 5 つ:
+    ///   1. 舌は火口のまわりに**散らばる**（溶岩の上に重ならない）
+    ///   2. 下るほど**広がる**
+    ///   3. 谷へは**裾へ行くほどだけ**引かれる（源では尾根を越える）
+    ///   4. 溶岩が 1 本も無くても扇は出る
+    ///   5. 粒子の総量は増えない（帯の面積で正規化してある）
+    /// </summary>
     public class PyroclasticSurgeTests
     {
-        /// <summary>X 方向にまっすぐ <paramref name="metres"/> だけ伸びる経路。</summary>
-        private static Vec2[] StraightPath(float metres, int points)
+        private static readonly uint Seed = DeterministicRandom.Hash(275u, unchecked((uint)(-283)));
+
+        private static readonly Vec2 Vent = new Vec2(100f, -50f);
+
+        [Fact]
+        public void TheLobesAreSpreadAroundTheVent()
         {
-            var a = new Vec2[points];
-            for (int i = 0; i < points; i++)
+            var seen = new float[PyroclasticSurge.LobeCount];
+            for (int i = 0; i < PyroclasticSurge.LobeCount; i++)
             {
-                a[i] = new Vec2(metres * i / (points - 1), 0f);
+                seen[i] = PyroclasticSurge.LobeAzimuth(Seed, i, PyroclasticSurge.LobeCount);
             }
-            return a;
+
+            // 隣どうしが入れ替わらない（＝ゆらぎが等間隔の半分を超えない）。
+            float step = (float)(2.0 * Math.PI / PyroclasticSurge.LobeCount);
+            for (int i = 1; i < seen.Length; i++)
+            {
+                float gap = seen[i] - seen[i - 1];
+                Assert.InRange(gap, step * 0.3f, step * 1.7f);
+            }
+
+            // 番号が範囲外でも壊れない（呼び出し側のループの外側を守る）。
+            Assert.False(Bad(PyroclasticSurge.LobeAzimuth(Seed, -3, 5)));
+            Assert.False(Bad(PyroclasticSurge.LobeAzimuth(Seed, 99, 5)));
+            Assert.False(Bad(PyroclasticSurge.LobeAzimuth(Seed, 0, 0)));
         }
 
         [Fact]
-        public void ThePathLengthIsTheSumOfTheSegments()
+        public void TheBandWidensAsItDescends()
         {
-            var p = StraightPath(600f, 7);
-            Assert.Equal(600f, PyroclasticSurge.PathLengthMetres(p, 0, p.Length), 2);
+            float near = PyroclasticSurge.HalfWidthMetres(0f);
+            float mid = PyroclasticSurge.HalfWidthMetres(600f);
+            float far = PyroclasticSurge.HalfWidthMetres(100000f);
+
+            Assert.Equal(PyroclasticSurge.HalfWidthBaseMetres, near, 3);
+            Assert.True(mid > near * 2f, "the surge should fan out as it descends");
+            Assert.Equal(PyroclasticSurge.HalfWidthMaxMetres, far, 3);
+
+            Assert.Equal(PyroclasticSurge.HalfWidthBaseMetres,
+                         PyroclasticSurge.HalfWidthMetres(float.NaN), 3);
         }
 
         [Fact]
-        public void ABrokenCoordinateTruncatesThePathInsteadOfPoisoningIt()
+        public void TheValleyPullsOnlyNearTheFoot()
         {
-            // NaN から先を信じると帯が地図の外へ飛ぶ。そこで打ち切るのが正しい。
-            var p = new Vec2[] {
-                new Vec2(0f, 0f), new Vec2(100f, 0f), new Vec2(float.NaN, 0f),
-                new Vec2(300f, 0f)
-            };
-            Assert.Equal(2, PyroclasticSurge.UsableCount(p, 0, p.Length));
-            Assert.Equal(100f, PyroclasticSurge.PathLengthMetres(p, 0, p.Length), 2);
+            // ★ 源では尾根を越え、裾で谷に集まる。
+            Assert.Equal(0f, PyroclasticSurge.ChannelPullAt(0f), 4);
+            Assert.True(PyroclasticSurge.ChannelPullAt(0.25f) < 0.1f);
+            Assert.Equal(PyroclasticSurge.ChannelPullMax, PyroclasticSurge.ChannelPullAt(1f), 4);
+
+            // **半分を超えない** —— 超えると「溶岩の上だけを流れる」に戻る。
+            Assert.True(PyroclasticSurge.ChannelPullMax <= 0.5f);
+
+            for (float t = 0f; t <= 1.2f; t += 0.05f)
+            {
+                Assert.InRange(PyroclasticSurge.ChannelPullAt(t), 0f,
+                               PyroclasticSurge.ChannelPullMax);
+            }
+            Assert.Equal(0f, PyroclasticSurge.ChannelPullAt(float.NaN), 4);
         }
 
         [Fact]
-        public void APointAtADistanceLandsOnThePath()
+        public void TheLobeLeavesTheVentOnItsOwnBearingAndTurnsTowardTheValley()
         {
-            var p = StraightPath(400f, 5);
-            Vec2 q;
-            Assert.True(PyroclasticSurge.TryPointAt(p, 0, p.Length, 250f, out q));
-            Assert.Equal(250f, q.X, 2);
-            Assert.Equal(0f, q.Z, 2);
+            const float reach = 900f;
+            const float baseAzimuth = 0f;                 // +X へ出る
+            float channel = (float)(Math.PI * 0.5);       // 谷は +Z
+
+            Vec2 near = PyroclasticSurge.PointAt(Vent, baseAzimuth, channel - baseAzimuth,
+                                                 reach, 60f);
+            Vec2 far = PyroclasticSurge.PointAt(Vent, baseAzimuth, channel - baseAzimuth,
+                                                reach, reach);
+
+            // 源のすぐそばは、ほぼ舌そのものの向き（谷へは曲がっていない）。
+            float nearAngle = (float)Math.Atan2(near.Z - Vent.Z, near.X - Vent.X);
+            Assert.InRange(nearAngle, -0.6f, 0.6f);
+
+            // 裾では谷の側へ回り込んでいる（ただし谷そのものにはならない）。
+            float farAngle = (float)Math.Atan2(far.Z - Vent.Z, far.X - Vent.X);
+            Assert.True(farAngle > nearAngle + 0.2f, "the lobe never turned toward the valley");
+            Assert.True(farAngle < channel - 0.2f, "the lobe collapsed onto the lava path");
         }
 
         [Fact]
-        public void ADistancePastTheEndIsClampedToTheEnd()
+        public void TheFanIsThereEvenWhenNoLavaIsFlowing()
         {
-            var p = StraightPath(400f, 5);
-            Vec2 q;
-            Assert.True(PyroclasticSurge.TryPointAt(p, 0, p.Length, 9000f, out q));
-            Assert.Equal(400f, q.X, 2);
+            bool found;
+            float azimuth = 1.2f;
+            Assert.Equal(azimuth, PyroclasticSurge.NearestChannel(azimuth, null, 0, out found), 4);
+            Assert.False(found);
 
-            Assert.True(PyroclasticSurge.TryPointAt(p, 0, p.Length, -50f, out q));
-            Assert.Equal(0f, q.X, 2);
+            Assert.Equal(azimuth,
+                         PyroclasticSurge.NearestChannel(azimuth, new float[0], 0, out found), 4);
+            Assert.False(found);
+
+            // 舌そのものは出る（谷に引かれないだけ）。
+            Vec2 a, b, c, d;
+            Assert.True(PyroclasticSurge.TryLobe(Vent, azimuth, azimuth, 900f, 400f,
+                                                 out a, out b, out c, out d));
+            Assert.False(Bad(a.X) || Bad(a.Z) || Bad(d.X) || Bad(d.Z));
         }
 
         [Fact]
-        public void TheHeadWrapsRoundAndRestartsAtTheCrater()
+        public void TheNearestValleyIsFoundAcrossTheWrapAround()
         {
-            float path = 600f;
+            bool found;
+            var bearings = new float[] { 3.0f, 0.5f };
+
+            // -3.1 の近くは 3.0（+π と −π を跨ぐ）。差は 0.18 で、0.5 との差より小さい。
+            float result = PyroclasticSurge.NearestChannel(-3.1f, bearings, 2, out found);
+            Assert.True(found);
+            Assert.Equal(-3.1f + -0.1831853f, result, 3);
+
+            // NaN が混じっていても落ちない。
+            var dirty = new float[] { float.NaN, 0.4f };
+            result = PyroclasticSurge.NearestChannel(0.5f, dirty, 2, out found);
+            Assert.True(found);
+            Assert.Equal(0.4f, result, 3);
+        }
+
+        [Fact]
+        public void TheHeadRunsDownTheLobeAndStartsOver()
+        {
+            const float path = 900f;
             float cycle = PyroclasticSurge.CycleSeconds(path);
+
             Assert.Equal(0f, PyroclasticSurge.HeadMetres(0f, path), 2);
             Assert.Equal(0f, PyroclasticSurge.HeadMetres(cycle, path), 1);
             Assert.True(PyroclasticSurge.HeadMetres(cycle * 0.5f, path) > 0f);
-        }
 
-        [Fact]
-        public void TheCycleIsNeverZeroSoTheClockCannotDivideByIt()
-        {
             Assert.True(PyroclasticSurge.CycleSeconds(0f) > 0f);
             Assert.True(PyroclasticSurge.CycleSeconds(float.NaN) > 0f);
             Assert.True(PyroclasticSurge.CycleSeconds(-100f) > 0f);
+
+            // 舌ごとに位相がずれている（5 本が隊列を組まない）。
+            float previous = -1f;
+            for (int i = 0; i < PyroclasticSurge.LobeCount; i++)
+            {
+                float phase = PyroclasticSurge.LobePhaseSeconds(i, PyroclasticSurge.LobeCount,
+                                                                path);
+                Assert.InRange(phase, 0f, cycle);
+                Assert.True(phase > previous);
+                previous = phase;
+            }
         }
 
         [Fact]
-        public void TheBandFadesInAtBothEndsOfThePath()
+        public void TheParticleBudgetDoesNotGrowWithTheFan()
         {
-            float path = 900f;
-            float mid = PyroclasticSurge.Magnitude(1f, path * 0.5f, path);
-            float justStarted = PyroclasticSurge.Magnitude(
-                1f, PyroclasticSurge.BandLengthMetres * 0.1f, path);
-            float leaving = PyroclasticSurge.Magnitude(
-                1f, path + PyroclasticSurge.BandLengthMetres * 0.9f, path);
+            // ★ ベジェ帯の粒子数は 2 x halfWidth x 経路長 x pps（IL §B-5）。
+            //   幅を 90 -> 260 m、本数を 2 -> 5 に増やしても、扇ぜんぶの
+            //   「面積 x magnitude」が従来の 2 本ぶんを超えないこと。
+            const float path = 1200f;
+            float worst = 0f;
 
-            Assert.True(mid > justStarted);
-            Assert.True(mid > leaving);
-            Assert.True(justStarted > 0f);
+            for (float head = 0f; head <= path; head += 25f)
+            {
+                float half = PyroclasticSurge.HalfWidthMetres(head);
+                float m = PyroclasticSurge.Magnitude(1f, head, path, half);
+                float area = 2f * half * PyroclasticSurge.BandLengthMetres
+                             * PyroclasticSurge.LobeCount;
+                float budget = area * m;
+                if (budget > worst) worst = budget;
+            }
+
+            float before = PyroclasticSurge.ReferenceAreaSquareMetres
+                           * PyroclasticSurge.MagnitudeMax;
+            Assert.True(worst <= before * 1.01f,
+                "the fan emits more particles than the two old bands did");
         }
 
         [Fact]
-        public void AShortPathGetsNoBandAtAll()
+        public void NothingIsDrawnBeforeTheHeadHasLeftTheVentOrAfterItHasGone()
         {
-            // 火口のすぐそばの数点に帯を巻くと、山頂に灰の球が乗る。
-            Assert.Equal(0f, PyroclasticSurge.Magnitude(1f, 10f, 20f), 4);
+            const float path = 900f;
 
-            var p = StraightPath(40f, 4);
+            // 帯が経路に 1 mm も載っていないあいだは 0（＝呼び出し側は描かない）。
+            Assert.Equal(0f, PyroclasticSurge.Magnitude(1f, 0f, path, 50f), 4);
+
+            // 経路が短すぎる山では 1 本も出さない（山頂に灰の球が乗る）。
+            Assert.Equal(0f, PyroclasticSurge.Magnitude(
+                1f, 40f, PyroclasticSurge.MinPathMetres - 1f, 50f), 4);
+
             Vec2 a, b, c, d;
-            Assert.False(PyroclasticSurge.TryBand(p, 0, p.Length, 20f, out a, out b, out c, out d));
-        }
-
-        [Fact]
-        public void TheBandRunsFromTailToHeadAlongThePath()
-        {
-            var p = StraightPath(1000f, 21);
-            Vec2 a, b, c, d;
-            float head = 600f;
-            Assert.True(PyroclasticSurge.TryBand(p, 0, p.Length, head,
-                                                 out a, out b, out c, out d));
-
-            Assert.Equal(head - PyroclasticSurge.BandLengthMetres, a.X, 1);
-            Assert.Equal(head, d.X, 1);
-            Assert.True(a.X < b.X && b.X < c.X && c.X < d.X);
-        }
-
-        [Fact]
-        public void TheBandIsClippedToThePathWhenTheHeadHasRunOffTheEnd()
-        {
-            var p = StraightPath(500f, 11);
-            Vec2 a, b, c, d;
-            Assert.True(PyroclasticSurge.TryBand(p, 0, p.Length, 620f,
-                                                 out a, out b, out c, out d));
-            Assert.Equal(500f, d.X, 1);
-            Assert.True(a.X >= 620f - PyroclasticSurge.BandLengthMetres - 0.01f);
-        }
-
-        [Fact]
-        public void ABandThatHasLeftThePathCompletelyIsRefused()
-        {
-            var p = StraightPath(500f, 11);
-            Vec2 a, b, c, d;
-            float gone = 500f + PyroclasticSurge.BandLengthMetres + 10f;
-            Assert.False(PyroclasticSurge.TryBand(p, 0, p.Length, gone,
+            Assert.False(PyroclasticSurge.TryLobe(Vent, 0f, 0f, 40f, 20f,
                                                   out a, out b, out c, out d));
-            Assert.Equal(0f, PyroclasticSurge.Magnitude(1f, gone, 500f), 4);
+            Assert.Equal(Vent.X, a.X, 3);
         }
 
         [Fact]
-        public void TheBandWidensDownhillButIsCapped()
+        public void TheReachGrowsWithTheEruptionAndVariesByLobe()
         {
-            Assert.True(PyroclasticSurge.HalfWidthMetres(1000f)
-                        > PyroclasticSurge.HalfWidthMetres(0f));
-            Assert.Equal(PyroclasticSurge.HalfWidthMaxMetres,
-                         PyroclasticSurge.HalfWidthMetres(100000f), 2);
-            Assert.Equal(PyroclasticSurge.HalfWidthBaseMetres,
-                         PyroclasticSurge.HalfWidthMetres(float.NaN), 2);
+            const float radius = 1200f;
+
+            float weak = PyroclasticSurge.ReachMetres(radius, 0f, Seed, 0);
+            float strong = PyroclasticSurge.ReachMetres(radius, 1f, Seed, 0);
+            Assert.True(strong > weak);
+            Assert.InRange(strong, radius * 0.7f, radius * 1.2f);
+
+            // 舌ごとに違う（全部同じだと扇の縁が真円になる）。
+            float first = PyroclasticSurge.ReachMetres(radius, 1f, Seed, 0);
+            bool differs = false;
+            for (int i = 1; i < PyroclasticSurge.LobeCount; i++)
+            {
+                if (Math.Abs(PyroclasticSurge.ReachMetres(radius, 1f, Seed, i) - first) > 1f)
+                {
+                    differs = true;
+                }
+            }
+            Assert.True(differs, "every lobe reaches exactly as far as the others");
+
+            Assert.Equal(0f, PyroclasticSurge.ReachMetres(float.NaN, 1f, Seed, 0), 4);
+            Assert.Equal(0f, PyroclasticSurge.ReachMetres(0f, 1f, Seed, 0), 4);
         }
 
         [Fact]
-        public void NullAndEmptyInputsAreRefusedRatherThanGuessed()
+        public void GarbageInputIsNeverNaN()
         {
+            Vec2 bad = new Vec2(float.NaN, 0f);
             Vec2 a, b, c, d;
-            Assert.False(PyroclasticSurge.TryBand(null, 0, 4, 100f, out a, out b, out c, out d));
-            Assert.Equal(0, PyroclasticSurge.UsableCount(null, 0, 4));
-            Assert.Equal(0, PyroclasticSurge.UsableCount(new Vec2[3], 5, 4));
-            Assert.Equal(0f, PyroclasticSurge.PathLengthMetres(new Vec2[0], 0, 0), 4);
+
+            Assert.False(PyroclasticSurge.TryLobe(bad, 0f, 0f, 900f, 400f,
+                                                  out a, out b, out c, out d));
+            Assert.False(PyroclasticSurge.TryLobe(Vent, 0f, 0f, float.NaN, 400f,
+                                                  out a, out b, out c, out d));
+            Assert.False(PyroclasticSurge.TryLobe(Vent, 0f, 0f, 900f, float.NaN,
+                                                  out a, out b, out c, out d));
+
+            // 強さが読めないときは**いちばん薄い帯**（0 ではない）。
+            // EruptionEffectPlan と同じ扱いで、「読めない」を「出さない」にしない。
+            Assert.True(PyroclasticSurge.Magnitude(float.NaN, 300f, 900f, 50f) >= 0f);
+            Assert.False(Bad(PyroclasticSurge.Magnitude(float.NaN, 300f, 900f, 50f)));
+            Assert.Equal(0f, PyroclasticSurge.Magnitude(1f, 100f, float.NaN, 50f), 4);
+            Assert.True(PyroclasticSurge.Magnitude(1f, 300f, 900f, float.NaN) >= 0f);
+
+            Vec2 p = PyroclasticSurge.PointAt(Vent, 0f, 0f, 900f, float.NaN);
+            Assert.Equal(Vent.X, p.X, 3);
         }
 
         [Fact]
-        public void ASliceInTheMiddleOfAPackedArrayIsHonoured()
+        public void TheLavaBearingPointsWhereTheFlowWent()
         {
-            // スナップショットは全流路を 1 本の配列に詰めて渡してくる。
-            var packed = new Vec2[] {
-                new Vec2(-999f, -999f),
-                new Vec2(0f, 0f), new Vec2(200f, 0f), new Vec2(400f, 0f),
-                new Vec2(999f, 999f)
+            var points = new[]
+            {
+                new Vec2(100f, -50f), new Vec2(160f, -50f), new Vec2(240f, -50f),
             };
-            Assert.Equal(3, PyroclasticSurge.UsableCount(packed, 1, 3));
-            Assert.Equal(400f, PyroclasticSurge.PathLengthMetres(packed, 1, 3), 2);
+
+            float bearing;
+            Assert.True(PyroclasticSurge.TryBearing(points, 0, points.Length, Vent, out bearing));
+            Assert.Equal(0f, bearing, 2);   // +X へ流れた
+
+            // 点が足りない・壊れているときは false（**推測で向きを作らない**）。
+            Assert.False(PyroclasticSurge.TryBearing(null, 0, 3, Vent, out bearing));
+            Assert.False(PyroclasticSurge.TryBearing(points, 0, 1, Vent, out bearing));
+            Assert.False(PyroclasticSurge.TryBearing(
+                new[] { Vent, Vent }, 0, 2, Vent, out bearing));
+        }
+
+        private static bool Bad(float v)
+        {
+            return float.IsNaN(v) || float.IsInfinity(v);
         }
     }
 }

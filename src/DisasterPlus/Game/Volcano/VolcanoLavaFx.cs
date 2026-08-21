@@ -92,9 +92,10 @@ namespace DisasterPlus.Game
     ///
     /// ── 毎フレームの費用 ─────────────────────────────────
     ///
-    /// <c>Graphics.DrawMesh</c> **1 回**（頂点は最大 8 本 × 128 点 × 2 = 2048、
-    /// 三角形の添字は最大 6096。影は落とさず受けない）と、UV のスクロール 1 回。
-    /// **ヒープ確保は 0 バイト**（<c>Matrix4x4</c> / <c>Vector2</c> は struct）。
+    /// <c>Graphics.DrawMesh</c> **1 回**だけ（頂点は最大 8 本 × 128 点 × 2 = 2048、
+    /// 三角形の添字は最大 6096。影は落とさず受けない）。
+    /// **ヒープ確保は 0 バイト**（<c>Matrix4x4</c> は struct）。
+    /// 色を書き直すのは冷え具合が <see cref="TintStep"/> 動いたときだけである。
     ///
     /// メッシュを組み直すのは <b>スナップショットの軌跡配列が差し替わったフレームだけ</b>
     /// である。<c>VolcanoLava</c> は前進した回にしか配列を作り直さないので、
@@ -102,11 +103,26 @@ namespace DisasterPlus.Game
     /// 前進は 8 sim フレームぶんのゲーム内時間に 1 回までなので、
     /// **組み直しは毎秒 6 回を超えない。**
     ///
-    /// ── ポーズ中は流れない ────────────────────────────────
+    /// ── ★★ 時間で動くものが 1 つも無い（2026-08-22、実機の指摘④）─────────────
     ///
-    /// ここは main スレッドの毎フレーム経路なので <c>Time.deltaTime</c> は
-    /// ポーズしても進み続ける。④のレビューが同じ欠陥（止まった都市の上で
-    /// 雲だけが回る）を見つけているので、UV のスクロールはポーズ中に進めない。
+    /// > 熔岩流の光り方が点滅しているのはリアルではありません。
+    /// > 噴火が終わっても光り続けているのは修正してください。
+    ///
+    /// 以前はここが UV を毎秒 0.35 流していた。帯の全長に明暗の縞が 3 本しか
+    /// 無いところへ流していたので、**地面のある 1 点は 1 秒弱で明 → 暗 → 明を
+    /// 繰り返していた**。それが「点滅」である。いまは
+    ///
+    /// <list type="bullet">
+    /// <item><b>輝きは場所の関数</b>（<c>Core/Volcano/LavaGlow</c>）—— 冷えた地殻と、
+    ///   板と板のあいだの光る割れ目と、火口・前進端の熱い帯</item>
+    /// <item><b>年齢で冷える</b> —— 溶岩が前へ進むと軌跡に点が増え、既に置かれた
+    ///   場所の <c>v</c> が前進端の帯から外れて地殻の側へ入る。時間は参照しない</item>
+    /// <item><b>冷え切ったら面ごと畳む</b>（<c>LavaGlow.Visible</c>）——
+    ///   軌跡の配列は火山が終わっても残るので、ここで止めないと帯が地面に残り続ける</item>
+    /// </list>
+    ///
+    /// したがって<b>ポーズ中に動くものはもう 1 つも無い</b>（④のレビューが挙げた
+    /// 「止まった都市の上で雲だけが回る」欠陥は、構造的に起こしようがなくなった）。
     ///
     /// ── この型は sim スレッドから 1 度も呼ばれない ────────────────────
     ///
@@ -133,8 +149,12 @@ namespace DisasterPlus.Game
         /// <summary>地面からどれだけ浮かせるか（m）。地形の量子 1/64 m よりずっと大きく取る。</summary>
         private const float HeightOffsetMetres = 1.5f;
 
-        /// <summary>UV が 1 周する速さ（毎秒）。**⑤が決めた演出値。**</summary>
-        private const float ScrollPerSecond = 0.35f;
+        // ★★ かつてここに ScrollPerSecond（UV を毎秒 0.35 流す）が在った。
+        //    **あれが「点滅」の正体である**（2026-08-22、実機の指摘④）。
+        //    帯の全長に明暗の縞が 3 本しか無いところへ UV を流していたので、
+        //    地面のある 1 点は 1 秒弱で明 → 暗 → 明を繰り返していた。
+        //    **輝きは時間ではなく場所の関数にする**（Core/Volcano/LavaGlow）。
+        //    戻さないこと。
 
         /// <summary>描画に使うレイヤー。0 ＝ Default はどのカメラのカリングマスクにも入る。</summary>
         private const int LavaLayer = 0;
@@ -142,8 +162,12 @@ namespace DisasterPlus.Game
         /// <summary>色を書き直す冷え具合の刻み（毎フレーム書かないため）。</summary>
         private const float TintStep = 0.02f;
 
-        /// <summary>自作テクスチャの 1 辺（帯を横切る方向 × 帯に沿う方向）。</summary>
-        private const int TextureSize = 32;
+        /// <summary>
+        /// 自作テクスチャの 1 辺（帯を横切る方向 × 帯に沿う方向）。
+        /// **Core が持っている**（tools/VolcanoPreview と同じ絵を焼くため。
+        /// 32 → 128 に上げたのは、割れ目の線が 32 では階段になるからである）。
+        /// </summary>
+        private const int TextureSize = LavaGlow.TextureSize;
 
         /// <summary>シェーダを探し直すまでに空けるフレーム数（④の <c>TyphoonCloud</c> と同じ間引き）。</summary>
         private const int ShaderRetryFrames = 300;
@@ -169,7 +193,6 @@ namespace DisasterPlus.Game
         private static bool _shaderWarned;
         private static bool _errorLogged;
 
-        private static float _scroll;
         private static float _tintedCool = -1f;
         private static int _drawCalls;
         private static int _pointsDrawn;
@@ -255,6 +278,17 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            // ★★ **冷え切ったら面ごと畳む**（2026-08-22、実機の指摘④
+            //    「噴火が終わっても光り続けているのは修正してください」）。
+            //    軌跡の配列は火山が終わっても残る（次の山まで捨てない）ので、
+            //    ここで止めないと帯はいつまでも地面に在り続ける。
+            //    冷える途中は CoolFade が 0 へ向かって暗くしていく。
+            if (!LavaGlow.Visible(snapshot.LavaCoolUnit))
+            {
+                Destroy();
+                return;
+            }
+
             // ★ 参照が変わったときだけ組み直す（クラス doc の費用表）。
             //   VolcanoLava は前進した回にしか配列を作り直さない。
             //
@@ -271,15 +305,9 @@ namespace DisasterPlus.Game
             if (_material == null) _material = BuildMaterial();
             if (_mesh == null || _material == null) return;
 
-            // ★ ポーズ中は流さない（クラス doc）。
-            if (!SimulationIsPaused())
-            {
-                _scroll += ScrollPerSecond * Time.deltaTime;
-                if (_scroll >= 1f) _scroll -= 1f;
-            }
-
-            if (_hasMainTex) _material.SetTextureOffset("_MainTex", new Vector2(0f, -_scroll));
-
+            // ★★ UV は 1 mm も動かさない。**輝きは場所の関数である**（LavaGlow）。
+            //    ゆっくり変わるのは「溶岩が前へ進んで、既に置かれた場所の v が
+            //    前進端の帯から外れていく」ためで、時間を参照した結果ではない。
             ApplyTint(snapshot.LavaCoolUnit);
 
             // ★ 影を落とさない・受けない（④のレビューが同じ指摘をしている）。
@@ -362,6 +390,12 @@ namespace DisasterPlus.Game
                 _buildFailed = true;
                 return;
             }
+
+            // ★ 使わなかった頂点を先頭へ畳む。<c>LavaRibbon.Build</c> が 1 本でも
+            //   断ると、その流れのぶんの頂点が (0,0,0) のまま残る。三角形は 1 つも
+            //   指していないので何も描かれないが、<c>RecalculateBounds</c> が
+            //   **マップの原点まで境界を伸ばして視錐台カリングを殺す**。
+            for (int i = vOut; i < vertices.Length; i++) vertices[i] = vertices[0];
 
             var mesh = new Mesh();
             mesh.name = "DisasterPlus_VolcanoLava";
@@ -496,9 +530,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 帯のテクスチャ 1 枚。<c>u</c> が帯を横切る方向（縁でアルファを落とす）、
-        /// <c>v</c> が帯に沿う方向（明暗の縞。**UV スクロールで「流れて」見えるのは
-        /// この縞である**）。作れなければ割り当てないだけで、べた塗りになる。
+        /// 帯のテクスチャ 1 枚。<c>u</c> が帯を横切る方向、
+        /// <c>v</c> が帯に沿う方向（<b>0 が火口、1 が前進端</b>）。
+        /// **模様は <c>Core/Volcano/LavaGlow</c> が決める** —— 冷えた地殻と、
+        /// 板と板のあいだの光る割れ目と、両端（火口と前進端）の熱い帯である。
+        ///
+        /// ★★ **UV は動かさない。** 以前はここに明暗の縞を焼いて毎フレーム
+        ///   流していたが、それが指摘④の「点滅」だった（あちらのクラス doc）。
+        ///
+        /// 作れなければ割り当てないだけで、べた塗りになる。
         /// </summary>
         private static Texture2D BuildTexture()
         {
@@ -506,35 +546,32 @@ namespace DisasterPlus.Game
             {
                 var pixels = new Color32[TextureSize * TextureSize];
 
-                for (int v = 0; v < TextureSize; v++)
+                for (int y = 0; y < TextureSize; y++)
                 {
-                    // 帯に沿う縞。1 枚のテクスチャで 3 周させる。
-                    float band = 0.55f + 0.45f * Mathf.Sin(v / (float)TextureSize
-                                                           * Mathf.PI * 2f * 3f);
+                    float v = y / (float)(TextureSize - 1);
 
-                    for (int u = 0; u < TextureSize; u++)
+                    for (int x = 0; x < TextureSize; x++)
                     {
-                        // 縁で 0 になる山型。中央がいちばん明るい。
-                        float across = 1f - Mathf.Abs(u / (float)(TextureSize - 1) * 2f - 1f);
-                        float a = across * across * band;
+                        float u = x / (float)(TextureSize - 1);
 
-                        // 明るいところは黄白、暗いところは赤へ落とす（溶岩の色）。
-                        byte r = (byte)Mathf.Clamp(Mathf.RoundToInt(255f * band), 0, 255);
-                        byte g = (byte)Mathf.Clamp(Mathf.RoundToInt(160f * band * band), 0, 255);
-                        byte b = (byte)Mathf.Clamp(Mathf.RoundToInt(40f * band * band * band),
-                                                   0, 255);
+                        float glow = LavaGlow.GlowUnit(u, v);
+                        float alpha = LavaGlow.AcrossFalloff(u) * (0.30f + 0.70f * glow);
 
-                        pixels[v * TextureSize + u] =
-                            new Color32(r, g, b,
-                                        (byte)Mathf.Clamp(Mathf.RoundToInt(a * 255f), 0, 255));
+                        // 熱いところは黄白、冷えたところは暗い赤褐色へ落ちる。
+                        float g2 = glow * glow;
+                        pixels[y * TextureSize + x] = new Color32(
+                            Byte(0.10f + 0.90f * glow),
+                            Byte(0.02f + 0.62f * g2),
+                            Byte(0.01f + 0.22f * g2 * glow),
+                            Byte(alpha));
                     }
                 }
 
                 var t = new Texture2D(TextureSize, TextureSize, TextureFormat.RGBA32, false);
                 t.name = "DisasterPlus_VolcanoLavaBand";
-                // u は帯を横切る 1 本ぶんしか無いので折り返さない。
-                // v はスクロールさせるので繰り返す。
-                t.wrapMode = TextureWrapMode.Repeat;
+                // ★ どちらの向きも [0,1] を 1 枚で覆う。**繰り返さない** ——
+                //   v = 0 は火口、v = 1 は前進端という意味を持つ軸である。
+                t.wrapMode = TextureWrapMode.Clamp;
                 t.filterMode = FilterMode.Bilinear;
                 t.SetPixels32(pixels);
                 t.Apply(false, false);
@@ -542,14 +579,27 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // 作れなくても溶岩は出る（縞が無くなるだけ）。ログは出さない。
+                // 作れなくても溶岩は出る（模様が無くなるだけ）。ログは出さない。
                 return null;
             }
         }
 
+        /// <summary>[0,1] を 0-255 のバイトへ。</summary>
+        private static byte Byte(float v)
+        {
+            int i = Mathf.RoundToInt(v * 255f);
+            return (byte)(i < 0 ? 0 : (i > 255 ? 255 : i));
+        }
+
         /// <summary>
         /// 冷え具合で色を落とす。**止まった溶岩が永久に光っていないこと**が要件で、
-        /// <c>VolcanoLava.CoolUnit</c> が 1 → 0 に落ちるあいだに暗くなる。
+        /// <c>VolcanoLava.CoolUnit</c> が 1 → 0 に落ちるあいだに暗くなり、
+        /// <b>0 でちょうど消える</b>（<c>LavaGlow.CoolFade</c>）。
+        ///
+        /// ★★ かつてここは <c>k = 0.15 + 0.85 × cool</c> /
+        ///   <c>α = 0.55 + 0.45 × cool</c> だった。**冷え切っても k = 0.15 / α = 0.55 が
+        ///   残る式**で、どれだけ待っても消えなかった（指摘④の後半そのもの）。
+        ///
         /// **毎フレームは書かない**（<see cref="TintStep"/>）。
         /// </summary>
         private static void ApplyTint(float coolUnit)
@@ -562,9 +612,9 @@ namespace DisasterPlus.Game
             if (_tintedCool >= 0f && Mathf.Abs(cool - _tintedCool) < TintStep) return;
             _tintedCool = cool;
 
-            // 冷えるほど暗い赤へ。完全に冷えても真っ黒にはしない（0.15 残す）。
-            float k = 0.15f + 0.85f * cool;
-            var tint = new Color(k, k * 0.55f, k * 0.2f, 0.55f + 0.45f * cool);
+            // 冷えるほど暗い赤へ。**0 で完全に消える。**
+            float k = LavaGlow.CoolFade(cool);
+            var tint = new Color(k, k * 0.55f, k * 0.2f, k);
 
             // 粒子系のティントは _TintColor、Standard は _Color（③が確定させた区別）。
             // **効かないほうを書いて満足しない**ので、実在するプロパティにだけ入れる。
@@ -572,22 +622,8 @@ namespace DisasterPlus.Game
             if (_material.HasProperty("_Color")) _material.SetColor("_Color", tint);
         }
 
-        /// <summary>
-        /// シミュレーションが止まっているか。読めなければ「止まっていない」に倒す
-        /// （読めない環境で溶岩が永久に静止するのを避ける）。
-        /// </summary>
-        private static bool SimulationIsPaused()
-        {
-            try
-            {
-                if (!ColossalFramework.Singleton<SimulationManager>.exists) return false;
-                return ColossalFramework.Singleton<SimulationManager>.instance.SimulationPaused;
-            }
-            catch
-            {
-                return false;
-            }
-        }
+        // ★ かつてここに SimulationIsPaused（UV のスクロールをポーズ中に止めるため）が
+        //   在った。**動かすものが 1 つも無くなったので消した**（LavaGlow）。
 
         private static void DestroyMesh()
         {
@@ -616,7 +652,6 @@ namespace DisasterPlus.Game
             _texture = null;
 
             _hasMainTex = false;
-            _scroll = 0f;
             _tintedCool = -1f;
             _drawCalls = 0;
             _shaderMissCount = 0;

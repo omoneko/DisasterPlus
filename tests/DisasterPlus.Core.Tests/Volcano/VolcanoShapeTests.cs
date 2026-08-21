@@ -106,12 +106,12 @@ namespace DisasterPlus.Core.Tests.Volcano
         public void TheSummitNeverReachesTheTerrainCeiling()
         {
             // ★ §C-10: 天井に当たっても例外は出ず、山頂が無言で平らな台地になる。
-            //   火口の縁は山頂より上に出るので、その分も先に引いておく。
+            //   ⑤が書く最大の高さは base + H ちょうどである（火口の縁が H で、
+            //   そこから上には 1 mm も書かない。VolcanoCrater のクラス doc）。
             const float baseHeight = 900f;
             float h = VolcanoShape.HeightFor(VolcanoForm.Strato, 700f, baseHeight);
-            Assert.True(baseHeight + h + VolcanoShape.CraterRimHeadroomOf(h)
-                        <= VolcanoShape.MaxTerrainMetres,
-                "the summit plus the crater rim would be clipped at " + (baseHeight + h));
+            Assert.True(baseHeight + h <= VolcanoShape.MaxTerrainMetres,
+                "the summit would be clipped at " + (baseHeight + h));
             Assert.True(VolcanoShape.HeightWasLimitedByCeiling(VolcanoForm.Strato, 700f, baseHeight));
 
             // 海面 40 m の平地なら 700 m は素通りする（§C-10 の 983.98 m の余裕）。
@@ -173,8 +173,6 @@ namespace DisasterPlus.Core.Tests.Volcano
                 Assert.True(VolcanoShape.CraterDepthOf(h) < h,
                     "the crater would punch through the mountain at H=" + h);
                 Assert.True(VolcanoShape.CraterDepthOf(h) > 0f);
-                Assert.True(VolcanoShape.CraterRimHeadroomOf(h) > 0f);
-                Assert.True(VolcanoShape.CraterRimHeadroomOf(h) < VolcanoShape.CraterDepthOf(h));
             }
             for (float r = 250f; r <= 3000f; r += 50f)
             {
@@ -184,6 +182,11 @@ namespace DisasterPlus.Core.Tests.Volcano
             }
             Assert.Equal(0f, VolcanoShape.CraterDepthOf(float.NaN), 4);
             Assert.Equal(0f, VolcanoShape.CraterRadiusOf(float.NaN), 4);
+
+            // ★ 低い山では「高さの 45 %」の上限のほうが効く（10 m の下限より優先）。
+            //   これが無いと 15 m の山に 10 m の穴が空き、火口の底が元の地面まで抜ける。
+            Assert.True(VolcanoShape.CraterDepthOf(15f) <= 15f * 0.45f + 0.001f);
+            Assert.True(VolcanoShape.CraterDepthOf(15f) > 0f);
         }
     }
 }

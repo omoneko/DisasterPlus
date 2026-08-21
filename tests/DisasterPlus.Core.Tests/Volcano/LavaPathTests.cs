@@ -119,6 +119,26 @@ namespace DisasterPlus.Core.Tests.Volcano
         }
 
         [Fact]
+        public void TheVentSitsOutsideTheCraterRim()
+        {
+            // ★ 縁の真上から出すと、下り方向が火口の内側を指して溶岩が窪みに溜まる。
+            //   必ず「比」と「絶対値」の両方より外へ出ること。
+            for (float crater = 40f; crater <= 400f; crater += 20f)
+            {
+                float vent = LavaPath.VentRadiusMetres(crater);
+                Assert.True(vent >= crater * LavaPath.VentRimClearanceFactor - 0.001f);
+                Assert.True(vent >= crater + LavaPath.VentRimClearanceMetres - 0.001f);
+                // それでも山の外へ出るほどは離れない（いちばん小さい山でも半径 250 m）。
+                Assert.True(vent < 250f || crater > 180f);
+            }
+
+            // 読めないときも中心から出さない（0 を返さない）。
+            Assert.Equal(LavaPath.StepMetres, LavaPath.VentRadiusMetres(0f), 3);
+            Assert.Equal(LavaPath.StepMetres, LavaPath.VentRadiusMetres(float.NaN), 3);
+            Assert.Equal(LavaPath.StepMetres, LavaPath.VentRadiusMetres(-1f), 3);
+        }
+
+        [Fact]
         public void TheStepBudgetIsFiniteAndDeclared()
         {
             // 「止まらない溶岩」を作らない。上限は定数として名乗る。

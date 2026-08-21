@@ -149,6 +149,13 @@ namespace DisasterPlus.Game
 
         private static GameObject _ashObject;
         private static ParticleEffect _ashClone;
+
+        /// <summary>
+        /// 噴煙柱の**傘**に使う 2 個目の複製（淡い灰・粒が大きい・寿命が長い）。
+        /// 引けなくても柱の複製で代用できるので、こちらは<b>門にしない</b>。
+        /// </summary>
+        private static GameObject _umbrellaObject;
+        private static ParticleEffect _umbrellaClone;
         private static GameObject _ejectaObject;
         private static ParticleEffect _ejectaClone;
         private static GameObject _dustObject;
@@ -162,17 +169,24 @@ namespace DisasterPlus.Game
 
         private static int _ashMiss;
         private static int _ashAltMiss;
+
+        // ★ 傘は**自分の**間引きカウンタを持つ。噴煙柱と共有すると、同じフレームで
+        //   2 回減るので RetryFrames が実質半分になる（引けない環境で探索が倍になる）。
+        private static int _umbrellaMiss;
+        private static int _umbrellaAltMiss;
         private static int _flameMiss;
         private static int _ejectaMiss;
         private static int _dustMiss;
 
         /// <summary>複製に失敗したので、以後は元のプレハブをそのまま使う。</summary>
         private static bool _ashCloneRefused;
+        private static bool _umbrellaCloneRefused;
         private static bool _ejectaCloneRefused;
         private static bool _dustCloneRefused;
 
         /// <summary>「引けなかった」を名前ごとに 1 度だけ名乗るための旗。</summary>
         private static bool _ashMissLogged;
+        private static bool _umbrellaRefusedLogged;
         private static bool _flameMissLogged;
         private static bool _ejectaMissLogged;
         private static bool _dustMissLogged;
@@ -192,6 +206,7 @@ namespace DisasterPlus.Game
         private static bool _ejectaOk;
         private static bool _dustOk;
         private static bool _ashCloned;
+        private static bool _umbrellaCloned;
         private static bool _ejectaCloned;
         private static bool _dustCloned;
 
@@ -247,6 +262,59 @@ namespace DisasterPlus.Game
             }
 
             return _ashClone;
+        }
+
+        /// <summary>
+        /// 噴煙柱の**傘**に使う複製。引けない・複製できないときは <c>null</c> を返す ——
+        /// **元のプレハブへは落とさない**。呼び出し側（<see cref="VolcanoEruptionFx"/>）は
+        /// そのとき柱の複製で傘を描くので、素の <c>Factory Smoke</c>（可視 1 km・粒 7）で
+        /// 代用するより見た目が良い。
+        /// </summary>
+        internal static ParticleEffect AshUmbrella()
+        {
+            ParticleEffect resolved = ResolveUmbrella();
+            _umbrellaCloned = _umbrellaClone != null;
+            return resolved;
+        }
+
+        private static ParticleEffect ResolveUmbrella()
+        {
+            if (_umbrellaClone != null) return _umbrellaClone;
+            if (_umbrellaCloneRefused) return null;
+
+            // ★ 元プレハブは噴煙柱と同じものだが、**間引きカウンタは別**にする
+            //   （共有すると同じフレームで 2 回減って RetryFrames が半分になる）。
+            //   「引けなかった」の 1 行だけは名前ごとなので共有でよい。
+            ParticleEffect source = Source(AshName, ref _umbrellaMiss, ref _ashMissLogged);
+            if (source == null)
+            {
+                source = Source(AshAltName, ref _umbrellaAltMiss, ref _ashMissLogged);
+            }
+            if (source == null) return null;
+
+            ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
+
+            _umbrellaObject = CloneAshUmbrella(source);
+            _umbrellaClone = _umbrellaObject == null
+                ? null : _umbrellaObject.GetComponent<ParticleEffect>();
+            if (_umbrellaClone == null)
+            {
+                ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
+                _umbrellaCloneRefused = true;
+
+                // ★ **黙って諦めない。** 1 行だけ名乗る（毎フレームの経路なので
+                //   Warn は使わない。噴火はそのまま続き、傘は柱の複製で描かれる）。
+                if (!_umbrellaRefusedLogged)
+                {
+                    _umbrellaRefusedLogged = true;
+                    Log.Info("volcano effects: the ash umbrella could not be cloned in this "
+                             + "environment; Disaster + draws the umbrella with the column's "
+                             + "own clone instead (it looks denser) and the eruption carries on");
+                }
+                return null;
+            }
+
+            return _umbrellaClone;
         }
 
         /// <summary>
@@ -468,6 +536,8 @@ namespace DisasterPlus.Game
                        + ", particle materials="
                        + (_particleMaterialCount > 0 ? _particleMaterialCount.ToString() : "?")
                        + "; ash=" + State(_ashOk, _ashCloned, _ashCloneRefused)
+                       + ", umbrella=" + (_umbrellaCloned ? "cloned"
+                            : (_umbrellaCloneRefused ? "shares the column clone" : "not yet"))
                        + ", flames=" + (_flameOk ? "shared" : "MISSING")
                        + ", ejecta=" + State(_ejectaOk, _ejectaCloned, _ejectaCloneRefused)
                        + ", dust=" + State(_dustOk, _dustCloned, _dustCloneRefused);
@@ -536,6 +606,7 @@ namespace DisasterPlus.Game
         internal static void Destroy()
         {
             ReleaseAndDestroy(ref _ashObject, ref _ashClone);
+            ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
             ReleaseAndDestroy(ref _ejectaObject, ref _ejectaClone);
             ReleaseAndDestroy(ref _dustObject, ref _dustClone);
 
@@ -545,10 +616,13 @@ namespace DisasterPlus.Game
             _flame = null;
 
             _ashCloneRefused = false;
+            _umbrellaCloneRefused = false;
             _ejectaCloneRefused = false;
             _dustCloneRefused = false;
             _ashMiss = 0;
             _ashAltMiss = 0;
+            _umbrellaMiss = 0;
+            _umbrellaAltMiss = 0;
             _flameMiss = 0;
             _ejectaMiss = 0;
             _dustMiss = 0;
@@ -560,6 +634,7 @@ namespace DisasterPlus.Game
             _ejectaOk = false;
             _dustOk = false;
             _ashCloned = false;
+            _umbrellaCloned = false;
             _ejectaCloned = false;
             _dustCloned = false;
             // ★ _ashMissLogged などは戻さない（ゲームのビルドに対する事実であって

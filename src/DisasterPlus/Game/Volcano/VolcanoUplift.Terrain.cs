@@ -13,7 +13,7 @@ namespace DisasterPlus.Game
     ///
     /// 規律は本体側のクラス doc がすべて持っている。特にここで守るのは 3 つ:
     ///   - <c>UpdateArea</c> は **1 tick にちょうど 1 回**（罠 3）
-    ///   - <c>MakeCrater</c> は**全体で 1 回だけ**（罠 4）
+    ///   - <c>MakeCrater</c> は**呼ばない**（火口は高さプロファイルの一部。指摘①）
     ///   - <c>Begin/EndUpdateArea</c> は**呼ばない**（§D-12）
     ///
     /// **sim スレッド専用。**
@@ -135,34 +135,9 @@ namespace DisasterPlus.Game
             TerrainModify.UpdateArea(tMinX, tMinZ, tMaxX, tMaxZ, true, false, false);
         }
 
-        /// <summary>
-        /// 山頂の火口。**⑤全体で <c>MakeCrater</c> を呼ぶのはこの 1 箇所・1 回だけ**（罠 4）。
-        ///
-        /// <c>raiseEdges: true</c> は「深さ 0.7×depth の穴」＋「0.75r に高さ 0.3×depth の
-        /// 環状の縁」（§C-8 の実測表）。火口そのものである。
-        /// <c>VolcanoShape.HeightFor</c> がこの縁の分（<c>CraterRimHeadroomOf</c>）を
-        /// 先に天井から引いてあるので、天井ぎりぎりの山でも縁だけが切られて円環が
-        /// 平らになることはない（§C-10）。
-        ///
-        /// 火口の半径は 400 m 以下（<c>CraterRadiusOf</c> がクランプ）なので、
-        /// <c>MakeCrater</c> が自分で出す矩形は最大 53 セル角 = 2809 セルに収まり、
-        /// 128 セルと 10000 セルの両方の閾値の内側である。
-        /// </summary>
-        private static void CarveCrater(VolcanoFootprint footprint)
-        {
-            if (_craterCarved) return;
-            _craterCarved = true;
-
-            float craterRadius = VolcanoShape.CraterRadiusOf(footprint.RadiusMetres);
-            float craterDepth = VolcanoShape.CraterDepthOf(footprint.HeightMetres);
-            if (!(craterRadius > 0f) || !(craterDepth > 0f)) return;
-
-            DisasterHelpers.MakeCrater(
-                new Vector2(footprint.Centre.X, footprint.Centre.Z),
-                craterRadius, craterDepth, true);
-
-            Log.Info("volcano summit crater carved: r=" + craterRadius.ToString("F0")
-                     + " m, depth=" + craterDepth.ToString("F0") + " m");
-        }
+        // ★★ かつてここに CarveCrater（DisasterHelpers.MakeCrater を 1 回）が在った。
+        //    火口は高さプロファイルの一部になったので消した（2026-08-22、実機の指摘①）。
+        //    **戻さないこと** —— 戻すと窪みの生まれる時刻がまた「隆起の最後」になり、
+        //    しかも強制フラッシュが 1 回増える。形は Core/Volcano/VolcanoCrater にある。
     }
 }
