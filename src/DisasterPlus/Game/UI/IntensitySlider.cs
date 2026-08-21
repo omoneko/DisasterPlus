@@ -70,7 +70,7 @@ namespace DisasterPlus.Game
         public static void Show()
         {
             var panel = FindPanel();
-            if (panel == null) return;
+            if (panel == null) { Log.Diag("intensitySlider", "no DisastersOptionPanel to show"); return; }
             try { panel.ShowPanel(); }
             catch (System.Exception e) { Log.Warn("intensity slider show failed: " + e.GetType().Name); }
         }
@@ -82,7 +82,7 @@ namespace DisasterPlus.Game
         public static void Hide()
         {
             var panel = FindPanel();
-            if (panel == null) return;
+            if (panel == null) { Log.Diag("intensitySlider", "no DisastersOptionPanel to hide"); return; }
             try { panel.HidePanel(); }
             catch (System.Exception e) { Log.Warn("intensity slider hide failed: " + e.GetType().Name); }
         }
@@ -94,7 +94,14 @@ namespace DisasterPlus.Game
         public static void Seed(int raw)
         {
             var slider = FindSlider();
-            if (slider == null) return;
+            if (slider == null)
+            {
+                // ★ 黙って落とさない。初回の実機テストでは
+                //   「警告が 1 行も出ていないのでスライダーは読めているはず」と
+                //   推論するしか無かった。**読めなかったことも 1 行残す。**
+                Log.Diag("intensitySlider", "no slider to seed; the tile will fall back to the options value");
+                return;
+            }
             try { slider.value = Clamp(raw); }
             catch (System.Exception e) { Log.Warn("intensity slider seed failed: " + e.GetType().Name); }
         }
@@ -108,7 +115,11 @@ namespace DisasterPlus.Game
         public static int ReadOr(int fallback)
         {
             var slider = FindSlider();
-            if (slider == null) return fallback;
+            if (slider == null)
+            {
+                Log.Diag("intensitySlider", "slider unreadable; using the options value " + fallback);
+                return fallback;
+            }
 
             try { return Clamp(Mathf.RoundToInt(slider.value)); }
             catch (System.Exception e)
