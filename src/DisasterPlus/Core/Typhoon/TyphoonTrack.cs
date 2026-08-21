@@ -81,6 +81,28 @@ namespace DisasterPlus.Core.Typhoon
         public const float RampFraction = 0.25f;
 
         /// <summary>
+        /// 包絡線の下限（最盛期に対する比）。**生きている台風を強度 0 にしないため**にある。
+        ///
+        /// 台形の素の形は 0 フレーム目でちょうど 0 を返す。ところがその値は
+        /// <c>DisasterData.m_intensity</c> にそのまま書かれ、ログにも出る ——
+        /// 実機の初回テストで <c>intensity=0</c> と出たのはこれである。
+        /// 強度 0 の災害はバニラ側の全部（落雷本数のランプ、ハザードマップの半径）が
+        /// 0 になるので、**居るのに何も起きない台風**になり、しかも
+        /// 「値が読めなかった」との区別が付かない。
+        ///
+        /// バニラの台形とわずかにずれるが、ずれるのは立ち上がり／立ち下がりの
+        /// 端の数百フレームだけである。**0 と紛らわしいことのほうが高くつく。**
+        /// </summary>
+        public const float MinRampFraction = 0.08f;
+
+        /// <summary>
+        /// 生きている台風が名乗る最小の強度。丸めで 0 に落ちるのを防ぐだけの値で、
+        /// <b>上陸で減衰しきった台風は今までどおり 0 を返す</b>（そちらは
+        /// 「弱くなった」という事実であって、丸め誤差ではない）。
+        /// </summary>
+        public const byte MinLiveIntensity = 1;
+
+        /// <summary>
         /// これ未満の曲率は直線として扱う（rad/frame）。
         ///
         /// 円弧の閉形式は v/κ を含むので κ = 0 で 0/0 になる。実際に使う曲率は
@@ -239,6 +261,10 @@ namespace DisasterPlus.Core.Typhoon
         /// 今の強度。**バニラの落雷本数ランプと同じ台形**（§A-1、クラス doc）に
         /// 上陸減衰を引いたもの。
         ///
+        /// ★ 台形は <see cref="MinRampFraction"/> で下から支えてある。
+        ///   **生きている台風は 0 を名乗らない**（その doc）。0 を返すのは
+        ///   「持続時間が読めなかった」か「減衰しきった」ときだけである。
+        ///
         /// ★ <c>(byte)</c> へのキャストの**前に**必ずクランプする。C# の float→byte は
         /// 範囲外で未定義に近い値を返す（負値が 255 付近に化ける）ので、
         /// 減衰しきった台風が最強になる、という最悪の壊れ方をする。
@@ -260,13 +286,18 @@ namespace DisasterPlus.Core.Typhoon
                 if (rise < ramp) ramp = rise;
                 if (fall < ramp) ramp = fall;
             }
-            if (ramp < 0f) ramp = 0f;
+            // ★ 台形の端を 0 のままにしない（MinRampFraction の doc）。
+            if (ramp < MinRampFraction) ramp = MinRampFraction;
             if (ramp > 1f) ramp = 1f;
 
             float value = peak * ramp - decay;
             if (float.IsNaN(value) || value <= 0f) return 0;
             if (value >= 255f) return 255;
-            return (byte)value;
+
+            // ★ 丸めで 0 に落ちた「生きている台風」を 0 と名乗らせない。
+            //   減衰しきった側（value <= 0）は上で 0 を返しており、ここには来ない。
+            byte rounded = (byte)value;
+            return rounded == 0 ? MinLiveIntensity : rounded;
         }
 
         /// <summary>

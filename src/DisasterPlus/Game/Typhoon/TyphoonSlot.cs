@@ -39,6 +39,16 @@ namespace DisasterPlus.Game
     /// <c>disasterIndex = 0</c> を出す**（例外は出ない。地震 §E-1）。見ないで書くと
     /// **他人の災害スロットを書き潰す**。<see cref="Create"/> は必ず戻り値を見る。
     ///
+    /// ── 罠 3: <c>m_activationFrame</c> の既定値（実機で 0 除算した） ───────────
+    ///
+    /// <c>StartDisaster</c> が書く既定値は <c>m_startFrame + m_emergingDuration</c> で、
+    /// Thunderstorm プレハブの <c>m_emergingDuration</c> は <b>8192</b>（実測）。
+    /// そのままにすると <c>ThunderStormAI.GetFireSpreadProbability</c> の
+    /// <c>1500 / (8 + (num &gt;&gt; 10))</c> が <b>0 で割る</b>
+    /// （<see cref="DisasterPlus.Core.Typhoon.VanillaFireSpread"/> に事実と算術がある）。
+    /// しかも活性化は寿命が尽きた後になるので、台風は一生 Emerging のままになる。
+    /// <see cref="Begin"/> は活性化フレームを開始フレームまで引き寄せる。
+    ///
     /// ── ID は再利用される ───────────────────────────────────
     ///
     /// 災害 ID は解放後に再利用される。別の災害に化けたまま <c>m_targetPosition</c> を
@@ -65,7 +75,9 @@ namespace DisasterPlus.Game
         internal static ushort Id { get { return _id; } }
 
         /// <summary>
-        /// <c>StartDisaster</c> が書いた <c>m_startFrame + m_emergingDuration</c>。
+        /// 災害の <c>m_activationFrame</c>。<b><see cref="Begin"/> が開始フレームまで
+        /// 引き寄せた値</b>であって、<c>StartDisaster</c> の既定値
+        /// （<c>m_startFrame + m_emergingDuration</c>）ではない（罠 3）。
         /// スロットが再利用されたことを見分ける最も安いキーであり、
         /// **落雷の予算がバニラの取り分を見積もるための起点**でもある
         /// （<c>LightningBudget.VanillaRampCount</c>）。
@@ -185,7 +197,7 @@ namespace DisasterPlus.Game
 
             // ★ SelfTrigger が本当に効いたかを、その場で確かめる。StartDisaster が
             //    通っていれば m_activationFrame = m_startFrame + m_emergingDuration が
-            //    入っている（§A-1 IL_003F）。
+            //    入っている（§A-1 IL_003F）。**この検査は書き換える前に行う。**
             if (buffer[_id].m_activationFrame == 0u)
             {
                 refusal = "StartDisaster did not schedule an activation frame; "
@@ -196,7 +208,29 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            _activationFrame = buffer[_id].m_activationFrame;
+            // ★★ 活性化フレームを**開始フレームまで引き寄せる**。理由は 2 つあり、
+            //    どちらも「④の台風は押した瞬間にそこで始まる」という設計から出る。
+            //
+            //    1. 0 除算を消すため（DisasterPlus.Core.Typhoon.VanillaFireSpread）。
+            //       StartDisaster が書く既定値は m_startFrame + m_emergingDuration で、
+            //       Thunderstorm プレハブの m_emergingDuration は 8192。そのとき
+            //       ThunderStormAI.GetFireSpreadProbability の
+            //       1500 / (8 + (num >> 10)) は num = -8192 でちょうど 0 で割る。
+            //       ④は Emerging のうちから落雷を撒くので、その火が付いた時点で
+            //       バニラの中で DivideByZeroException が出る（実機で発生）。
+            //
+            //    2. 引き寄せないと**台風が一生 Emerging のまま終わる**。
+            //       m_emergingDuration も m_activeDuration も 8192 で、④の寿命は
+            //       m_activeDuration ぶんしかない。活性化する頃には④はもう
+            //       手放しており、Deactivate は Active 旗が無いので空振りする。
+            //
+            //    m_activationFrame == 0 は「予定が無い」の意味なので（IsStillEmerging の
+            //    IL_0015 が 0 を恒久 true として扱う）、フレーム 0 でも 0 を書かない。
+            uint activation = DisasterPlus.Core.Typhoon.VanillaFireSpread
+                                  .SafeActivationFrame(buffer[_id].m_startFrame);
+            buffer[_id].m_activationFrame = activation;
+
+            _activationFrame = activation;
             return true;
         }
 
