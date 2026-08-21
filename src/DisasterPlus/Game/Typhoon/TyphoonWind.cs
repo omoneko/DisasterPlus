@@ -145,11 +145,10 @@ namespace DisasterPlus.Game
     /// **<c>burnRadiusMin</c> / <c>burnRadiusMax</c> は 0 を渡す。** 台風で木が
     /// **燃える**のはおかしい（<c>TreeManager.BurnTree</c> も使わない）。
     /// </summary>
-    public static class TyphoonWind
+    public static partial class TyphoonWind
     {
         /// <summary>走査の間隔（フレーム相当のゲーム内時間）。②の長周期と同じ 256。</summary>
         private const int IntervalFrames = 256;
-
         /// <summary>1 回の走査で見るグリッドセルの上限。</summary>
         private const int MaxCellsPerPass = 32768;
 
@@ -287,6 +286,8 @@ namespace DisasterPlus.Game
         public static void Reset()
         {
             _minutesSincePass = 0f;
+            _minutesSinceGale = 0f;
+            _galePushes = 0;
             _typhoonId = 0;
             _centreCellX = -1;
             _centreCellZ = -1;

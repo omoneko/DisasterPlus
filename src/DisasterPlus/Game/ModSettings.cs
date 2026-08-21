@@ -112,6 +112,23 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonGustStrength;
         public static SavedBool TyphoonCloudEnabled;
         public static SavedBool TyphoonVanillaCloudBoost;
+
+        /// <summary>
+        /// 暴風雨の演出（横殴りの飛沫と、市民・車の吹き飛ばし）。
+        ///
+        /// ★ **建物にも道路にも樹木にも触れない。** 飛沫は main スレッドの描画だけ、
+        ///   吹き飛ばしは <c>DisasterHelpers.AddWind</c>（市民と車だけ）である。
+        ///   だから風害（<see cref="TyphoonWindDamage"/>）とは別のつまみにしてある ——
+        ///   「被害は要らないが嵐は見たい」も、その逆も選べる。
+        /// </summary>
+        public static SavedBool TyphoonStormFx;
+
+        /// <summary>
+        /// 台風の風の音。**⑤の噴火音と同じ経路**（<c>AudioManager.EffectGroup</c>）なので、
+        /// プレイヤーの効果音スライダーとミュートはゲームが掛ける。
+        /// ④が鳴らすのは**1 本だけ**である（<c>EffectGroup</c> の席を奪わない）。
+        /// </summary>
+        public static SavedBool TyphoonStormSound;
         public static SavedBool VolcanoEnabled;
         public static SavedInt VolcanoButtonX;
         public static SavedInt VolcanoButtonY;
@@ -328,6 +345,15 @@ namespace DisasterPlus.Game
             // バニラのスカイドームの雲を濃く・速くする。**存在しない環境がありうる**
             // （DLC・グラフィック設定。IL 事実文書 §C-2、PARTIAL）。無ければ黙って諦める。
             TyphoonVanillaCloudBoost = new SavedBool("typhoonCloudBoost", FileName, true, true);
+
+            // ★ 暴風雨の演出は既定 ON。**ゲームの状態を壊す方向には 1 バイトも動かさない**
+            //    （飛沫は描画だけ、吹き飛ばしは市民と車だけ）。
+            //    ★★ 保存値のキーは公開契約。既存のキーを詰め直さず、末尾に足す。
+            TyphoonStormFx = new SavedBool("typhoonStormFx", FileName, true, true);
+
+            // ★ 風の音は既定 ON。**それまで④は音を 1 つも鳴らしていなかった。**
+            //    ★★ 保存値のキーは公開契約。既存のキーを詰め直さず、末尾に足す。
+            TyphoonStormSound = new SavedBool("typhoonStormSound", FileName, true, true);
 
             // ★ ⑤火山は既定 ON。**DLC 非所持を理由に止めない** —— ⑤は Natural
             //    Disasters を要らない（設計書 §1.4）。しかも⑤は自動では 1 度も

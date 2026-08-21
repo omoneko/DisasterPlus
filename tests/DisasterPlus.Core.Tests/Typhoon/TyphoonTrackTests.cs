@@ -54,24 +54,46 @@ namespace DisasterPlus.Core.Tests.Typhoon
         }
 
         [Fact]
-        public void TheTrackLeavesTheMapWithinItsLifetime()
+        public void TheTrackStaysOnTheMapForMostOfItsLifetime()
         {
-            // 終了条件のひとつが「1 度中に入ってから外へ出た」なので、
-            // 出ない経路があると台風が持続時間いっぱい居座る（あるいは
-            // 上限だけで終わる）。マップの中から始まる以上、必ず出ること。
-            const uint dur = 20000u;
+            // ★★ **2026-08-22 に意味が反転した。**
+            //   持ち主の指摘「進行をもっとゆっくりに」で NominalPathLength を
+            //   マップの一辺から半辺へ半分にしたので、**台風は普通マップの外へ出ない**。
+            //   以前ここは「必ず外へ出ること」を固定していた（＝終了条件が
+            //   「1 度中に入ってから外へ出た」だけだと思っていた）。
+            //   いまの通常の終わり方は「持続時間を使い切った」であり、
+            //   その経路も同じ TyphoonController.Stop -> Forget を通る。
+            //
+            //   ここで固定するのは**都市の上に居続けること**である ——
+            //   暴風雨を再現する機能なので、寿命の半分を過ぎても中心がまだ
+            //   マップの中に居ること。
+            const uint dur = TyphoonPrefabActiveDuration;
             float speed = TyphoonTrack.SpeedFor(dur);
+
             for (uint s = 1; s < 100; s++)
             {
-                bool left = false;
-                for (uint t = 0; t <= dur && !left; t += 100u)
-                {
-                    if (!TyphoonTrack.IsInsideMap(TyphoonTrack.CentreAt(Pointed, s, t, speed)))
-                        left = true;
-                }
-                Assert.True(left, "track for seed " + s + " never leaves the map");
+                Vec2 half = TyphoonTrack.CentreAt(Pointed, s, dur / 2u, speed);
+                Assert.True(TyphoonTrack.IsInsideMap(half),
+                            "track for seed " + s + " has already left the map at half life");
             }
         }
+
+        [Fact]
+        public void TheStormMovesAtHalfTheSpeedItUsedTo()
+        {
+            // ★ 持ち主の指摘への直接の答え。実測のプレハブ値での速度を固定する。
+            //   NominalPathLength を戻すとここが赤くなる。
+            float speed = TyphoonTrack.SpeedFor(TyphoonPrefabActiveDuration);
+            Assert.Equal(1.0547f, speed, 3);
+
+            // マップの一辺（17280 m）を渡り切るのに掛かるフレーム数 ＝ 寿命の 2 倍。
+            float framesToCross = TyphoonTrack.MapHalfExtent * 2f / speed;
+            Assert.Equal(2f * TyphoonPrefabActiveDuration, framesToCross, 0);
+        }
+
+        /// <summary><c>ThunderStormAI.m_activeDuration</c> の実測値
+        /// （<c>sharedassets55.assets</c> の生バイトから復元。IL 事実文書 §A-0b）。</summary>
+        private const uint TyphoonPrefabActiveDuration = 8192u;
 
         [Fact]
         public void ZeroCurvatureIsTheLimitOfSmallCurvature()

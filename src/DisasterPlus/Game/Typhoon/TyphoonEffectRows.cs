@@ -43,6 +43,7 @@ namespace DisasterPlus.Game
         private static UILabel _gustLabel;
         private static UILabel _gustNoteLabel;
         private static UILabel _cloudNoteLabel;
+        private static UILabel _stormFxNoteLabel;
 
         /// <summary>パネル構築時に 1 回。</summary>
         internal static void Build(UIPanel p, ref float y)
@@ -94,6 +95,12 @@ namespace DisasterPlus.Game
             //    だけを出す —— バニラ空の雲の設定がこの環境に無いのは正当な状態で
             //    （§C-2、PARTIAL）、それを黙っていると「④の雲が壊れている」と読まれる。
             _cloudNoteLabel = TyphoonRows.AddRow(p, "CloudNote", ref y, 40f);
+
+            // ★ 暴風雨の演出。**常設**にする —— 「飛沫が舞って市民が飛ばされるのに
+            //    建物は壊れない」は、説明が無ければ不具合にしか見えない
+            //    （風害のつまみと取り違えられる）。高さは 4 行ぶん。
+            _stormFxNoteLabel = TyphoonRows.AddRow(p, "StormFxNote", ref y, 72f);
+            TyphoonRows.SetPlain(_stormFxNoteLabel, Strings.TyphoonStormFxNote);
         }
 
         /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
@@ -278,6 +285,7 @@ namespace DisasterPlus.Game
             _gustLabel = null;
             _gustNoteLabel = null;
             _cloudNoteLabel = null;
+            _stormFxNoteLabel = null;
         }
     }
 }
