@@ -9,17 +9,20 @@ namespace DisasterPlus.Game
     ///
     /// <see cref="Idle"/> / <see cref="Done"/> / <see cref="Refused"/> の 3 つが
     /// 「今は何も進んでいない」であり、そこからしか新しい火山は始まらない。
+    ///
+    /// ★★ <b>1 番（Surveying）と 2 番（AwaitingConfirmation）は 2026-08-21 に退役した。</b>
+    /// 確認の窓を撤去したので、クリック 1 回で
+    /// <c>Idle</c> → <c>Clearing</c>（または <c>Refused</c>）まで**同じ tick の中で**進む。
+    /// 調査そのものは残っているが、**外から観測できる位相ではなくなった**ので
+    /// 位相にもしていない（誰も到達できない状態を残さない）。
+    /// **番号は詰めていない** —— 退役した番号を別の意味で使い回さないためである。
     /// </summary>
     public enum VolcanoPhase
     {
         /// <summary>何も無い。</summary>
         Idle = 0,
 
-        /// <summary>調査中（実際には 1 tick で終わるので、外から見えるのは一瞬）。</summary>
-        Surveying = 1,
-
-        /// <summary>**プレイヤーの確認待ち。まだ何も壊していない。**</summary>
-        AwaitingConfirmation = 2,
+        // 1 = Surveying（退役）／2 = AwaitingConfirmation（退役）。再利用しないこと。
 
         /// <summary>準備（道路と建物の段階的破壊）。T5。</summary>
         Clearing = 3,
@@ -46,82 +49,53 @@ namespace DisasterPlus.Game
     /// <summary>
     /// ⑤の位相機械。**sim スレッド専用。**
     ///
-    /// ── クリックから着手までは 2 往復する（計画 §4.1）─────────────────
+    /// ── クリック 1 回で着手まで行く（2026-08-21 変更）───────────────
     ///
-    /// <c>BuildingManager.m_buildingGrid</c> と <c>NetManager.m_segmentGrid</c> は
-    /// sim スレッドが所有しているので、**main スレッド（ツールのクリックハンドラ）から
-    /// 数えることはできない**。したがって⑤は必ず次の 2 往復を通る。
-    /// **1 往復で済ませようとしてはいけない。**
+    /// 所有者の指示:
+    ///
+    /// > ほかの災害と同じようにタブから選択してスケール選択して発生個所押したら
+    /// > その災害が起こるようにしてください。
+    ///
+    /// **確認の窓は撤去した。** クリックが「作る」であり、そこから先に人の入る隙は無い。
     ///
     /// <code>
     /// [main] クリック → RayGeometry.IntersectTerrain で地点を取る
-    ///                 → VolcanoHub.Request(Survey, point)
-    ///                 → ツールを解除し、パネルを開く（「調査しています」）
+    ///                 → VolcanoHub.Request(Place, point, sizeScale)
+    ///                 → ツールを解除する（パネルは開かない）
     ///         v
-    /// [sim ] VolcanoState.Tick が TakeRequest() で拾う
-    ///                 → VolcanoSurvey.Run(...) が建物と道路を**数えるだけ**
-    ///                 → Phase = AwaitingConfirmation、Footprint をスナップショットへ
-    ///         v
-    /// [main] パネルが確認の行を出す（VolcanoConfirmPanel）
-    ///                 → プレイヤーが [この場所に火山を作る] を押す
-    ///                 → VolcanoHub.Request(Start, point)
-    ///         v
-    /// [sim ] VolcanoState.Tick が拾い、Phase = Clearing へ（T5）
+    /// [sim ] VolcanoState.HandleRequest が TakeRequest() で拾う
+    ///                 → VolcanoSurvey.Run(...) が建物と道路を数え、Footprint を作る
+    ///                 → Phase = Clearing（T5 が動き出す）
     /// </code>
     ///
-    /// ── 確認は迂回できない ────────────────────────────────
+    /// ★ **調査は無くなっていない。** <c>BuildingManager.m_buildingGrid</c> と
+    /// <c>NetManager.m_segmentGrid</c> は sim スレッドが所有しているので、
+    /// **main スレッド（ツールのクリックハンドラ）から数えることはできない**。
+    /// 変わったのは「調査の結果を人に見せて待つ」段が消えたことだけで、
+    /// main → sim の 1 往復は今も要る。
     ///
-    /// <see cref="VolcanoRequest.Start"/> を受け付けるのは
-    /// <see cref="VolcanoPhase.AwaitingConfirmation"/> のときだけである。
-    /// 配置ツールは <see cref="VolcanoRequest.Survey"/> しか積まない（あちらのクラス doc）。
+    /// ★ 調べた影響範囲の数（建物・道路）と、実際に届いた山頂の高さと、断った理由は
+    ///   **火山タブ（<c>VolcanoEffectRows</c> / <c>VolcanoStatusRows</c>）と
+    ///   診断ダンプ（<c>VolcanoFeature</c>）**にある。消えたのは
+    ///   「先に読ませて止める」段であって、情報そのものではない。
     ///
-    /// **レビューの grep（実際に走らせて件数を合わせてある）**:
-    /// <code>
-    /// grep -rn --include=*.cs "VolcanoRequest.Start" src/DisasterPlus | grep -v '///'
-    /// # -> 2 件だけ:
-    /// #    VolcanoConfirmPanel.cs  … 確認ボタンが積む唯一の場所
-    /// #    VolcanoState.cs        … 受け口（このファイル）
-    /// # 列挙の宣言（VolcanoHub.cs）は "Start," と書くのでこの grep には当たらない。
-    /// </code>
-    ///
-    /// さらに <see cref="VolcanoRequest.Start"/> は<b>依頼に載っている座標を使わない</b>。
-    /// 使うのは sim 側が持っている <see cref="Footprint"/> の中心である ——
-    /// 「プレイヤーが見た概数」と「実際に着手する場所」がずれないことを、
-    /// 型ではなくこの 1 行で担保する。
-    ///
-    /// ── 確認の直前に設定が変わっていたら、着手せずに調べ直す ─────────────
-    ///
-    /// <see cref="Footprint"/> は形態・半径・最終高を持っているので、
-    /// <c>Start</c> を受けた時点で現在の設定と突き合わせる。違っていたら調査からやり直し、
-    /// パネルは <c>Strings.VolcanoSettingsChanged</c> を出す。**古い概数で壊し始めない。**
-    ///
-    /// ── 同時に 1 つだけ ─────────────────────────────────
-    ///
-    /// 進行中（<see cref="VolcanoPhase.Clearing"/> 以降）なら <c>Survey</c> も
-    /// <c>Start</c> も無視し、理由を <see cref="LastRefusal"/> に残す。
-    ///
-    /// > **計画 §4.1 からの 1 点の逸脱を明記する。** 計画は
-    /// > 「Idle / Done / Refused 以外なら <c>Survey</c> も無視」と書いているが、
-    /// > <see cref="VolcanoPhase.AwaitingConfirmation"/> は**まだ 1 つも壊していない状態**
-    /// > である。ここで <c>Survey</c> を無視すると、確認を出したまま別の場所を
-    /// > 指し直したプレイヤーに対して**画面が何も変わらない行き止まり**ができる
-    /// > （配置ツールは押せるし、クリックも通るのに、結果だけが黙って捨てられる）。
-    /// > したがって <c>AwaitingConfirmation</c> からの <c>Survey</c> は受け付け、
-    /// > 前の調査結果を置き換える。計画の意図（**同時に 1 つの火山だけ**）は
-    /// > <c>Clearing</c> 以降で守られている。
-    ///
-    /// **黙って何もしないをやらない。** 断ったときは必ず <see cref="LastRefusal"/> に
-    /// 英語 1 文を残す（④の <c>TyphoonSnapshot.Refusal</c> と同じ扱い）。
-    ///
-    /// ── ポーズ中も依頼には答える（全体レビュー I1）──────────────────
+    /// ── ポーズ中に指しても捨てない ─────────────────────────
     ///
     /// 依頼の受け取り（<see cref="HandleRequest"/>）は
     /// <c>VolcanoFeature.OnSimulationTick</c> の**ポーズガードより上**にあり、
-    /// 位相の前進（<see cref="Tick"/>）だけがガードの下にある。
-    /// <c>Survey</c> / <c>Cancel</c> / <c>Stop</c> は何も壊さないのでポーズ中も答え、
-    /// <c>Start</c> だけは断って理由を残す。**山を作る前にポーズするのは最も自然な
-    /// 操作**であり、そこで確認が永久に出てこないのは
-    /// このクラス doc が禁じている「黙って何もしない」そのものだった。
+    /// 位相の前進（<see cref="Tick"/>）だけがガードの下にある。したがって
+    /// ポーズ中のクリックは<b>位相を <c>Clearing</c> にするところまで</b>進み、
+    /// **建物も道路も地形も 1 つも変わらないまま**、解除した瞬間から動き出す ——
+    /// バニラの災害をポーズ中に起こしたときと同じ挙動である。
+    /// **黙って捨てない**（このクラス doc がいちばん禁じている形）。
+    ///
+    /// ── 同時に 1 つだけ ─────────────────────────────────
+    ///
+    /// 進行中（<see cref="VolcanoPhase.Clearing"/> 以降）なら <c>Place</c> は無視し、
+    /// 理由を <see cref="LastRefusal"/> に残す。止めたいときは <c>Stop</c> である。
+    ///
+    /// **黙って何もしないをやらない。** 断ったときは必ず <see cref="LastRefusal"/> に
+    /// 英語 1 文を残す（④の <c>TyphoonSnapshot.Refusal</c> と同じ扱い）。
     /// </summary>
     public static class VolcanoState
     {
@@ -135,18 +109,6 @@ namespace DisasterPlus.Game
         private static VolcanoPhase _phase = VolcanoPhase.Idle;
         private static VolcanoFootprint _footprint = VolcanoFootprint.None;
         private static string _lastRefusal;
-        private static bool _settingsChanged;
-
-        /// <summary>
-        /// 直近の調査で選ばれていた**大きさの倍率**（1.0 ＝ 設定画面どおりのサイズ）。
-        ///
-        /// タイルを押してから地図をクリックするまでの間に動かした
-        /// バニラのスライダーの値がここへ来る（<c>Core.Volcano.VolcanoSizeScale</c>）。
-        /// **確認のあとで設定が変わっていないかを調べ直す比較にも同じ値を使う**
-        /// —— 片方だけ設定から読み直すと、毎回「設定が変わった」と判定されて
-        /// 確認が二度出る。
-        /// </summary>
-        private static float _sizeScale = 1f;
 
         /// <summary>今の位相。</summary>
         public static VolcanoPhase Phase { get { return _phase; } }
@@ -169,22 +131,14 @@ namespace DisasterPlus.Game
         public static string LastRefusal { get { return _lastRefusal; } }
 
         /// <summary>
-        /// 確認の直前に設定が変わったので調べ直したか。パネルが
-        /// <c>Strings.VolcanoSettingsChanged</c> を出すためだけに在る。
-        /// </summary>
-        public static bool SettingsChanged { get { return _settingsChanged; } }
-
-        /// <summary>
         /// レベルのロード／アンロードで呼ぶ。**全状態を捨てる。**
-        /// 持ち越すと、次の都市で前の都市の地点に確認が出る。
+        /// 持ち越すと、次の都市で前の都市の地点の火山が動き続ける。
         /// </summary>
         public static void Reset()
         {
             _phase = VolcanoPhase.Idle;
             _footprint = VolcanoFootprint.None;
             _lastRefusal = null;
-            _settingsChanged = false;
-            _sizeScale = 1f;
             // 準備の実績も持ち越さない。**進行中の火山は保存しない**ので、
             // 都市を出入りすると準備は 0 からになる（地形はそのままの形で残る）。
             VolcanoClearing.Reset();
@@ -206,24 +160,20 @@ namespace DisasterPlus.Game
         /// ★★ <b>これは <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
         /// <u>上</u>から呼ぶ</b>（全体レビュー I1）。ガードの下に置いていた頃、
         /// **ポーズ中に地面をクリックしたプレイヤーには何も起きなかった** ——
-        /// 状態の行は「影響範囲を調べています…」のまま永久に止まり、確認は一度も
-        /// 出ず、ログにも診断にも何も残らなかった。**山を作る前にポーズするのは
-        /// 最も自然な操作**であり、そこが「黙って何もしない」になっていた
-        /// （クラス doc がまさに禁じている形）。
+        /// 状態の行は止まったまま、ログにも診断にも何も残らなかった。
+        /// **山を作る前にポーズするのは最も自然な操作**であり、そこが
+        /// 「黙って何もしない」になっていた（クラス doc がまさに禁じている形）。
         ///
-        /// <paramref name="running"/> が false（ポーズ中）でも通すのは
-        /// <c>Survey</c> / <c>Cancel</c> / <c>Stop</c> の 3 つで、**どれも
-        /// 建物も道路も地形も 1 つも変えない**（調べる・捨てる・やめる）。
-        /// <c>Start</c> だけは通さない —— あれは不可逆の破壊の開始そのものなので、
-        /// ポーズ中に位相を進めない。**ただし黙って捨てず、理由を残す**
-        /// （パネルは確認の行に「ポーズ中は着手できません」を出し、
-        /// [作る] を押せなくする。<see cref="VolcanoConfirmPanel"/>）。
+        /// ポーズ中でも <c>Place</c> を受けるが、**位相を <c>Clearing</c> にするだけ**で
+        /// 建物も道路も地形も 1 つも変わらない —— 実際に壊し始めるのは
+        /// <see cref="Tick"/> であり、あちらはポーズガードの下に在る。
+        /// バニラの災害をポーズ中に起こしたときと同じ挙動である。
         ///
         /// <see cref="VolcanoHub.TakeRequest"/> は<b>1 tick にちょうど 1 回</b>
         /// しか呼ばない（2 回呼ぶと 2 回目が必ず None になり、呼び出し順に依存した
         /// 取りこぼしを作る。あちらの doc）。**その 1 回はここである。**
         /// </summary>
-        public static void HandleRequest(VolcanoSnapshot snapshot, bool running)
+        public static void HandleRequest(VolcanoSnapshot snapshot)
         {
             VolcanoRequestData request = VolcanoHub.TakeRequest();
             if (request.Kind == VolcanoRequest.None) return;
@@ -240,26 +190,8 @@ namespace DisasterPlus.Game
 
             switch (request.Kind)
             {
-                case VolcanoRequest.Survey:
-                    HandleSurvey(request.Point, request.SizeScale);
-                    break;
-
-                case VolcanoRequest.Start:
-                    if (!running)
-                    {
-                        // **捨てない。名乗る。** 押した人が次に見るのは確認の行なので、
-                        // そこに出る文言と同じことをここでも残しておく。
-                        Refuse("no in-game time passed on this tick (the game is paused); "
-                               + "Disaster + does not start destroying the city while the "
-                               + "simulation is stopped. Press the button again with the "
-                               + "game running");
-                        break;
-                    }
-                    HandleStart();
-                    break;
-
-                case VolcanoRequest.Cancel:
-                    HandleCancel();
+                case VolcanoRequest.Place:
+                    HandlePlace(request.Point, request.SizeScale);
                     break;
 
                 case VolcanoRequest.Stop:
@@ -409,53 +341,22 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 調査。**何も壊さない。** 進行中（<see cref="VolcanoPhase.Clearing"/> 以降）なら断る。
+        /// **地図をクリックされた。ここが「作る」である。**
+        ///
+        /// 調査（<c>VolcanoSurvey.Run</c>）と着手を 1 つの呼び出しで済ませる ——
+        /// 確認の窓が無くなったので、この 2 つの間に人の判断は入らない
+        /// （クラス doc）。**この 2 つを別の位相に割らないこと**:
+        /// 間の状態は誰も観測できず、到達不能な位相が 1 つ増えるだけである。
+        ///
+        /// 断る順序は「進行中 → 破壊経路が無い → 調査が失敗」で、
+        /// **どれも 1 つも壊す前に返る**。理由は必ず <see cref="LastRefusal"/> に残す。
         /// </summary>
-        private static void HandleSurvey(Vec3 point, float sizeScale)
+        private static void HandlePlace(Vec3 point, float sizeScale)
         {
             if (InProgress())
             {
                 Refuse("a volcano is already in progress (phase=" + _phase
-                       + "); the survey request was ignored");
-                return;
-            }
-
-            _phase = VolcanoPhase.Surveying;
-            _settingsChanged = false;
-            // ★ 倍率は**依頼が運んできたもの**を控える。ここでスライダーを読み直す
-            //   ことはできない（sim スレッドから UI に触らない）し、読み直せたと
-            //   しても「クリックした時の値」ではなくなる。
-            _sizeScale = sizeScale;
-            RunSurveyAt(point);
-        }
-
-        /// <summary>
-        /// 着手。**<see cref="VolcanoPhase.AwaitingConfirmation"/> のときだけ通る。**
-        /// 依頼に載っている座標は使わない（クラス doc）。
-        /// </summary>
-        private static void HandleStart()
-        {
-            if (_phase != VolcanoPhase.AwaitingConfirmation || !_footprint.Valid)
-            {
-                Refuse("no surveyed spot is waiting for confirmation (phase=" + _phase
-                       + "); the start request was ignored");
-                return;
-            }
-
-            // ★ 確認を出したあとで形態・半径・最終高が変わっていたら、
-            //   **古い概数で壊し始めない**。調べ直して、もう一度確認を取る。
-            VolcanoForm form = CurrentForm();
-            float radius = VolcanoShape.RadiusFor(form, CurrentRadius());
-            float height = VolcanoShape.HeightFor(form, CurrentHeight(),
-                                                  _footprint.GroundHeightMetres);
-
-            if (form != _footprint.Form
-                || !Same(radius, _footprint.RadiusMetres)
-                || !Same(height, _footprint.HeightMetres))
-            {
-                _phase = VolcanoPhase.Surveying;
-                RunSurveyAt(_footprint.Centre);
-                _settingsChanged = true;
+                       + "); the placement request was ignored. Stop it first");
                 return;
             }
 
@@ -469,38 +370,40 @@ namespace DisasterPlus.Game
             //      環境で **火山が確定して <c>Clearing</c> のまま永久に止まった。**
             if (!VolcanoClearing.ClearingPathAvailable)
             {
-                _settingsChanged = false;
-                _phase = VolcanoPhase.Refused;
-                _lastRefusal = "no usable destruction path for the roads and buildings inside "
-                               + "the footprint; raising the ground would leave flat trenches "
-                               + "and bowls where they stand";
-                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Volcano, "VolcState",
-                         _lastRefusal);
+                RefuseAndForget("no usable destruction path for the roads and buildings in "
+                                + "this build of the game; raising the ground would leave flat "
+                                + "trenches and bowls where they stand");
                 return;
             }
 
-            _settingsChanged = false;
+            // ★ 倍率は**依頼が運んできたもの**を使う。ここでスライダーを読み直す
+            //   ことはできない（sim スレッドから UI に触らない）し、読み直せたと
+            //   しても「クリックした時の値」ではなくなる。
+            VolcanoForm form = CurrentForm();
+            VolcanoFootprint footprint;
+
+            if (!VolcanoSurvey.Run(
+                    point, form,
+                    VolcanoSizeScale.Apply(ModSettings.VolcanoRadius.value, sizeScale),
+                    VolcanoSizeScale.Apply(ModSettings.VolcanoHeight.value, sizeScale),
+                    out footprint))
+            {
+                RefuseAndForget(VolcanoSurvey.LastFailure
+                                ?? "the survey failed for an unknown reason");
+                return;
+            }
+
+            _footprint = footprint;
             _lastRefusal = null;
             // ★ ここから先が「壊す」である。T5 の VolcanoClearing がこの位相を動かす。
+            //   ポーズ中なら位相がここまで進むだけで、実際の破壊は解除まで始まらない
+            //   （VolcanoFeature のポーズガード）。
             _phase = VolcanoPhase.Clearing;
-            Log.Info("volcano confirmed at (" + _footprint.Centre.X.ToString("F0") + ","
-                     + _footprint.Centre.Z.ToString("F0") + "); clearing starts now");
-        }
-
-        /// <summary>確認を閉じる。**何も起きずに <see cref="VolcanoPhase.Idle"/> へ戻る。**</summary>
-        private static void HandleCancel()
-        {
-            if (InProgress())
-            {
-                Refuse("a volcano is already in progress (phase=" + _phase
-                       + "); use Stop, not Cancel");
-                return;
-            }
-
-            _phase = VolcanoPhase.Idle;
-            _footprint = VolcanoFootprint.None;
-            _lastRefusal = null;
-            _settingsChanged = false;
+            Log.Info("volcano placed at (" + _footprint.Centre.X.ToString("F0") + ","
+                     + _footprint.Centre.Z.ToString("F0") + "): " + _footprint.Form
+                     + " r=" + _footprint.RadiusMetres.ToString("F0")
+                     + " m h=" + _footprint.HeightMetres.ToString("F0")
+                     + " m; clearing starts now");
         }
 
         /// <summary>
@@ -522,7 +425,6 @@ namespace DisasterPlus.Game
 
             _phase = VolcanoPhase.Idle;
             _footprint = VolcanoFootprint.None;
-            _settingsChanged = false;
             // ★ 準備の実績も畳む。**既に壊した建物と道路は戻らない**（不可逆）。
             //   畳まないと、次に開いたパネルが前の火山の破壊数を名乗る。
             VolcanoClearing.Reset();
@@ -539,27 +441,8 @@ namespace DisasterPlus.Game
             _lastRefusal = "stopped by the player; the terrain that already changed stays changed";
         }
 
-        private static void RunSurveyAt(Vec3 point)
-        {
-            VolcanoForm form = CurrentForm();
-            VolcanoFootprint footprint;
-
-            if (VolcanoSurvey.Run(point, form, CurrentRadius(), CurrentHeight(), out footprint))
-            {
-                _footprint = footprint;
-                _phase = VolcanoPhase.AwaitingConfirmation;
-                _lastRefusal = null;
-                return;
-            }
-
-            _footprint = VolcanoFootprint.None;
-            _phase = VolcanoPhase.Refused;
-            _lastRefusal = VolcanoSurvey.LastFailure ?? "the survey failed for an unknown reason";
-        }
-
         /// <summary>
-        /// 「もう新しい火山は始められない」位相か。
-        /// <see cref="VolcanoPhase.AwaitingConfirmation"/> は**含めない**（クラス doc の逸脱）。
+        /// 「もう新しい火山は始められない」位相か。**壊し始めてからの 5 つ**である。
         /// </summary>
         private static bool InProgress()
         {
@@ -576,37 +459,23 @@ namespace DisasterPlus.Game
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Volcano, "VolcState", reason);
         }
 
+        /// <summary>
+        /// 置こうとした地点そのものを断る。**位相を <see cref="VolcanoPhase.Refused"/> へ
+        /// 落として調査結果も捨てる** —— 断ったのに前の火山の影響範囲が残っていると、
+        /// 火山タブが「作られなかった山」の数を名乗り続ける。
+        /// </summary>
+        private static void RefuseAndForget(string reason)
+        {
+            _footprint = VolcanoFootprint.None;
+            _phase = VolcanoPhase.Refused;
+            Refuse(reason);
+        }
+
         /// <summary>設定の形態。範囲外の値は <c>VolcanoShape.FormOf</c> が既定へ落とす。</summary>
         private static VolcanoForm CurrentForm()
         {
             return VolcanoShape.FormOf(ModSettings.VolcanoShapeSetting.value);
         }
 
-        /// <summary>
-        /// 設定の半径に、調査時に選ばれていた倍率を掛けた値（m）。
-        /// 形態ごとの帯へのクランプは <c>VolcanoShape.RadiusFor</c> が行う。
-        /// </summary>
-        private static float CurrentRadius()
-        {
-            return VolcanoSizeScale.Apply(ModSettings.VolcanoRadius.value, _sizeScale);
-        }
-
-        /// <summary>設定の最終高に同じ倍率を掛けた値（m）。</summary>
-        private static float CurrentHeight()
-        {
-            return VolcanoSizeScale.Apply(ModSettings.VolcanoHeight.value, _sizeScale);
-        }
-
-        /// <summary>
-        /// 1/64 m（raw 1 単位）より細かい差は「同じ」とみなす。スライダーは整数
-        /// メートルしか作らないので実際には厳密一致するが、float の比較を
-        /// <c>==</c> で書かない習慣のほうを守る。
-        /// </summary>
-        private static bool Same(float a, float b)
-        {
-            float d = a - b;
-            if (d < 0f) d = -d;
-            return d < VolcanoShape.MetresPerRawUnit;
-        }
     }
 }

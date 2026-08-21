@@ -225,7 +225,7 @@ namespace DisasterPlus.Game
             //    <b>読むための場所</b>で、起こす場所ではない。
             VolcanoStatusRows.Build(panel, ref y);
 
-            // ★ 確認の一式は**このパネルにはもう無い**（VolcanoConfirmPanel）。
+            // ★ 確認の一式はもうどこにも無い（2026-08-21 に撤去）。
             //   進行中の各段の行がいちばん下で、出していないときはパネルを
             //   その手前まで縮めるので空白が残らない。
             VolcanoEffectRows.Build(panel, ref y);

@@ -9,11 +9,14 @@ namespace DisasterPlus.Game
     /// 火山を置く地点を指すツール。**main スレッド専用。**
     /// ③の <see cref="FireWhirlPlacementTool"/> をそのまま写している。
     ///
-    /// ★★ <b>このツールは「調べてくれ」としか言わない。</b> クリックが積むのは
-    /// <see cref="VolcanoRequest.Survey"/> だけで、<c>Start</c> は 1 度も積まない。
-    /// 実際に着手するのは、プレイヤーが確認の行を読んで
-    /// <c>[この場所に火山を作る]</c> を押したときだけである
-    /// （<see cref="VolcanoState"/> のクラス doc「確認は迂回できない」）。
+    /// ★★ <b>クリックが「作る」である（2026-08-21 変更）。</b> 積むのは
+    /// <see cref="VolcanoRequest.Place"/> 1 件で、**確認の窓はもう出ない** ——
+    /// 所有者の指示により、⑤はほかの災害とまったく同じ
+    /// 「タイル → スライダー → 地図をクリック」で起きる
+    /// （<see cref="VolcanoState"/> のクラス doc）。
+    ///
+    /// **地形の変更は今も取り消せない。** 消えたのは着手前の門であって、
+    /// 不可逆であることそのものではない（火山タブの常設警告が名乗り続ける）。
     ///
     /// ── 登録しないと <c>SetTool&lt;T&gt;()</c> は黙って空振りする ─────────────
     ///
@@ -75,14 +78,11 @@ namespace DisasterPlus.Game
         ///   1. タイルを押す      → カーソルが構わり、**スライダーが出る**
         ///   2. スライダーを動かす → 山の大きさ（設定サイズに対する倍率。
         ///                          <see cref="VolcanoSizeScale"/>）
-        ///   3. 地図をクリック    → その地点を**調べて**、確認を出す
+        ///   3. 地図をクリック    → **そこに火山ができる**
         ///
-        /// ★ **確認は迂回しない。** クリックが積むのは <see cref="VolcanoRequest.Survey"/>
-        ///   だけで、地形が変わるのはプレイヤーが確認を読んで「作る」を押したときだけ
-        ///   である。短くなったのは**確認の前**の手数であって、確認そのものではない。
-        ///
-        /// **説明のパネルはもう開かない。** 出るのは確認だけで、⑤の状態と説明は
-        /// 左上のショートカットの側にある。
+        /// **窓は 1 枚も開かない。** 説明のパネルも確認の窓も出ない ——
+        /// ⑤の状態・影響範囲の数・不可逆の警告は、左上のショートカットの
+        /// 「火山」タブと診断ダンプにある。
         /// </summary>
         public static void Arm()
         {
@@ -155,15 +155,16 @@ namespace DisasterPlus.Game
             float scale = VolcanoSizeScale.ScaleFor(
                 IntensitySlider.ReadOr(VolcanoSizeScale.AnchorRaw));
 
-            // ★ 積むのは「調べてくれ」だけ（クラス doc）。ここで壊す判断はしない。
-            VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Survey, hit, scale));
+            // ★ 積むのは「ここに作ってくれ」1 件（クラス doc）。実際に調べて壊し始める
+            //   のは sim スレッドの VolcanoState.HandlePlace である ——
+            //   **main スレッドから建物・道路・地形のバッファに触らない。**
+            VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Place, hit, scale));
 
             // 指したら用は済んでいる。押しっぱなしで 2 つ目を指させない。
             Deactivate();
 
-            // ★ **黙って調べて黙って終わる**のが、⑤でいちばんしてはいけないことである。
-            //   調査の結果と不可逆の断りは <see cref="VolcanoConfirmPanel"/> が出す
-            //   （説明のパネルではなく、確認だけの小さな窓）。
+            // ★ **黙って終わらない。** 何が起きたか（影響範囲の数・進行中の段・
+            //   断られた理由）は火山タブと診断ダンプが名乗る。
         }
 
         private static bool TryPickGround(out Vec3 hit)

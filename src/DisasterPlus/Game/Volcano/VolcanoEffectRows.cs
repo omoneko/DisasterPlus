@@ -10,35 +10,40 @@ namespace DisasterPlus.Game
     /// 行を作るのも文字を入れるのも <see cref="VolcanoRows"/> を通す。
     /// **このファイルに <c>UILabel</c> の生成も <c>.text</c> への代入も 1 つも無い。**
     ///
-    /// ── 出所の印は 1 つも付かない ────────────────────────────────
+    /// ── 出所の印が付く行は 1 つだけ ─────────────────────────────
     ///
     /// 走査した半径も、壊した建物と道路の数も、**⑤が自分で数えた実績**である。
-    /// ゲームが計算した値ではないので <c>VolcanoRows.SetMeasured</c> は呼ばない
-    /// （⑤で <c>SetMeasured</c> を呼んでよいのは <see cref="VolcanoConfirmPanel"/> の
-    /// 1 行だけ。<see cref="VolcanoRows"/> のクラス doc の grep 5）。
+    /// ゲームが計算した値ではないので <c>VolcanoRows.SetMeasured</c> は呼ばない。
+    ///
+    /// ★★ <b>唯一の例外が「影響範囲」の行</b>（<see cref="RefreshFootprint"/>）である。
+    /// あれは調査がゲームの配列（<c>m_buildingGrid</c> / <c>m_segmentGrid</c>）から
+    /// 数えただけの値で、⑤は 1 つも計算していない。**2026-08-21 に撤去した
+    /// 確認の窓が持っていた行がここへ来た** —— 窓は消えたが、
+    /// 「何が巻き込まれたか」を読む場所は残す（<see cref="VolcanoRows"/> の grep 5）。
     ///
     /// ── パネルのいちばん下に置く ──────────────────────────────
     ///
-    /// 確認の一式は**このパネルにはもう無い**（<see cref="VolcanoConfirmPanel"/> という
-    /// 独立した窓になった）。したがってこの一式がパネルのいちばん下であり、
-    /// 出していないときはパネルの高さを <see cref="BlockTop"/> まで縮める
-    /// —— <c>relativePosition</c> は絶対値なので、隠すだけでは空白が残る。
+    /// この一式がパネルのいちばん下であり、出していないときはパネルの高さを
+    /// <see cref="BlockTop"/> まで縮める —— <c>relativePosition</c> は絶対値なので、
+    /// 隠すだけでは空白が残る。
     ///
     /// ── 条件つきの注記は、当てはまらないときに場所も取らない ───────────────
     ///
-    /// <see cref="VolcanoConfirmPanel"/> と同じ <c>Reflow</c> の形。空文字を入れるだけでは
-    /// 「何か出るはずの場所が空いている」ように見えるので、毎回積み直す。
+    /// 空文字を入れるだけでは「何か出るはずの場所が空いている」ように見えるので、
+    /// <c>Reflow</c> で毎回積み直す。
     ///
     /// ── ★★ [止める] ボタン（全体レビュー I5）─────────────────────
     ///
     /// <c>VolcanoRequest.Stop</c> には完全な受け口（<c>VolcanoState.HandleStop</c>）が
-    /// 最初から在ったのに、**それを積む場所が 1 つも無かった。** つまり確認を押した
+    /// 最初から在ったのに、**それを積む場所が 1 つも無かった。** つまり着手した
     /// あとの唯一の抜け道は設定の「火山を有効にする」を切ることで、あれは
     /// <c>VolcanoFeature</c> の入口で位相ごと捨てたうえに**ボタンとパネルも同時に
     /// 消す**ので、半分削れて半分盛り上がった山だけが残り、画面には何の説明も出ない。
     /// **自分の都市が壊されているのを見ている人には、止める手段が要る。**
     ///
     /// 止まるのは「これからの破壊と隆起」だけである（<c>Strings.VolcanoStopNote</c>）。
+    ///
+    /// ★ 確認の窓が無くなった今、**[止める] が唯一の「やめる」経路である。**
     /// </summary>
     internal static class VolcanoEffectRows
     {
@@ -51,11 +56,13 @@ namespace DisasterPlus.Game
         /// <summary>長い注記の行の高さ（道路の断りと噴火の注記。4〜5 行ぶん）。</summary>
         private const float LongNoteHeight = 72f;
 
-        /// <summary>[止める] ボタンの大きさ（確認の一式のボタンと揃える）。</summary>
+        /// <summary>[止める] ボタンの大きさ。</summary>
         private const float StopButtonWidth = 240f;
 
         private const float StopButtonHeight = 28f;
 
+        private static UILabel _footprintLabel;
+        private static UILabel _footprintNoteLabel;
         private static UILabel _clearingLabel;
         private static UILabel _clearingCountsLabel;
         private static UILabel _clearingRefusedNoteLabel;
@@ -98,6 +105,12 @@ namespace DisasterPlus.Game
         internal static void Build(UIPanel p, ref float y)
         {
             _blockTop = y;
+
+            // ★★ 撤去した確認の窓から降りてきた 2 行（2026-08-21）。
+            //    調査がゲームの配列から数えた実数なので、⑤で唯一 [実測] が付く行である
+            //    （VolcanoRows のクラス doc の grep 5）。
+            _footprintLabel = VolcanoRows.AddMeasuredRow(p, "EffectFootprint", ref y);
+            _footprintNoteLabel = VolcanoRows.AddRow(p, "EffectFootprintNote", ref y, NoteHeight);
 
             _clearingLabel = VolcanoRows.AddRow(p, "EffectClearing", ref y);
             _clearingCountsLabel = VolcanoRows.AddRow(p, "EffectClearingCounts", ref y);
@@ -190,6 +203,8 @@ namespace DisasterPlus.Game
 
             if (clearing)
             {
+                y = RefreshFootprint(y, s);
+
                 y = ReflowRow(y, _clearingLabel,
                     Strings.VolcanoClearingRow + ": " + Strings.VolcanoClearedRadius + " "
                     + s.ClearedRadiusMetres.ToString("F0") + " " + Strings.VolcanoMetres
@@ -215,6 +230,8 @@ namespace DisasterPlus.Game
             }
             else
             {
+                y = ReflowMeasured(y, _footprintLabel, "");
+                y = ReflowNote(y, _footprintNoteLabel, "");
                 y = ReflowRow(y, _clearingLabel, "");
                 y = ReflowRow(y, _clearingCountsLabel, "");
                 y = ReflowNote(y, _clearingRefusedNoteLabel, "");
@@ -249,7 +266,7 @@ namespace DisasterPlus.Game
         ///   火山の実績を出したままにするので（あちらの doc）、位相そのものを見る。
         /// ★ 押した直後の 1 フレームはまだ位相が変わらない（設計上 1 tick の遅れ）。
         ///   依頼が積まれている間はボタンを畳む —— **押しても何も変わらない
-        ///   ボタンは二度押される**（<see cref="VolcanoConfirmPanel"/> と同じ判断）。
+        ///   ボタンは二度押される。**
         /// </summary>
         private static float RefreshStop(float y, VolcanoSnapshot s)
         {
@@ -301,6 +318,77 @@ namespace DisasterPlus.Game
             button.eventClick += (c, e) =>
                 VolcanoHub.Request(VolcanoRequestData.Of(VolcanoRequest.Stop));
             return button;
+        }
+
+        /// <summary>
+        /// **影響範囲の 2 行。撤去した確認の窓が持っていた中身そのものである。**
+        ///
+        /// ★ 1 行目は調査がゲームの配列から数えた建物数と道路セグメント数で、
+        ///   ⑤で唯一 <c>SetMeasured</c> を呼んでよい行である
+        ///   （<see cref="VolcanoRows"/> のクラス doc の grep 5）。
+        ///   数は**調べた瞬間のもの**なので、地面をならしている間に街が動けば
+        ///   実際に消えた数とは前後する（診断ダンプの <c>note: counts</c>）。
+        ///
+        /// ★ 道路は**「0 本」と「数えられなかった」を混ぜない。** 数えられなかった
+        ///   ときは印を付けない（読めなかった値をゲームの実測値として名乗らない）。
+        ///
+        /// ★ 2 行目は「結果が変わる」条件つきの注記だけ —— 走査の打ち切りと、
+        ///   1024 m の天井による切り下げである。当てはまらなければ場所も取らない。
+        /// </summary>
+        private static float RefreshFootprint(float y, VolcanoSnapshot s)
+        {
+            VolcanoFootprint f = s.Footprint;
+            if (!f.Valid)
+            {
+                y = ReflowMeasured(y, _footprintLabel, "");
+                return ReflowNote(y, _footprintNoteLabel, "");
+            }
+
+            string body = Strings.VolcanoFootprintRow + ": "
+                          + FormLabel(f.Form)
+                          + "    " + Strings.VolcanoRadiusRow + " "
+                          + f.RadiusMetres.ToString("F0") + " " + Strings.VolcanoMetres
+                          + "    " + Strings.VolcanoHeightRow + " "
+                          + f.HeightMetres.ToString("F0") + " " + Strings.VolcanoMetres
+                          + "    " + Strings.VolcanoBuildingsRow + " " + f.BuildingCount
+                          + " / " + Strings.VolcanoSegmentsRow + " "
+                          + (f.SegmentCount < 0 ? "?" : f.SegmentCount.ToString());
+
+            if (f.SegmentCount < 0)
+            {
+                // 数えられなかったので印を付けない。**読めなかった値をゲームの
+                // 実測値として名乗らない。**
+                y = ReflowRow(y, _footprintLabel, body + "   " + Strings.VolcanoSegmentsUnknown);
+            }
+            else
+            {
+                y = ReflowMeasured(y, _footprintLabel, body);
+            }
+
+            string note = "";
+            if (f.Capped) note = Strings.VolcanoSurveyCapped;
+            if (f.HeightLimitedByCeiling)
+            {
+                note = note.Length == 0
+                    ? Strings.VolcanoHeightLimited
+                    : note + " " + Strings.VolcanoHeightLimited;
+            }
+            return ReflowNote(y, _footprintNoteLabel, note);
+        }
+
+        /// <summary>
+        /// 形態の表示名。**メソッドであることに意味がある** ——
+        /// <c>static readonly string[]</c> にすると起動時の言語で凍る
+        /// （<c>Strings</c> のクラス doc）。
+        /// </summary>
+        private static string FormLabel(DisasterPlus.Core.Volcano.VolcanoForm form)
+        {
+            switch (form)
+            {
+                case DisasterPlus.Core.Volcano.VolcanoForm.Shield: return Strings.VolcanoFormShield;
+                case DisasterPlus.Core.Volcano.VolcanoForm.Dome: return Strings.VolcanoFormDome;
+                default: return Strings.VolcanoFormStrato;
+            }
         }
 
         /// <summary>
@@ -471,10 +559,7 @@ namespace DisasterPlus.Game
             return text + "  " + Strings.VolcanoBuildabilityNote;
         }
 
-        /// <summary>
-        /// 「進行中」の位相か。<see cref="VolcanoPhase.AwaitingConfirmation"/> は**含めない**
-        /// —— そちらは <see cref="VolcanoConfirmPanel"/> が別の窓に出す。
-        /// </summary>
+        /// <summary>「進行中」の位相か。**壊し始めてからの 5 つ**である。</summary>
         private static bool InProgress(VolcanoPhase phase)
         {
             return phase == VolcanoPhase.Clearing
@@ -487,6 +572,22 @@ namespace DisasterPlus.Game
         private static float ReflowRow(float y, UILabel label, string text)
         {
             return Reflow(y, label, text, VolcanoRows.RowHeight, VolcanoRows.RowStep);
+        }
+
+        /// <summary>
+        /// [実測] の印が付く行。**接頭辞は <c>VolcanoRows.SetMeasured</c> が付ける**ので、
+        /// ここでは空文字のときだけ素通しする（空の行に印だけが残らないこと）。
+        /// </summary>
+        private static float ReflowMeasured(float y, UILabel label, string body)
+        {
+            if (label == null) return y;
+            if (string.IsNullOrEmpty(body)) return ReflowRow(y, label, "");
+
+            VolcanoRows.SetMeasured(label, body);
+            label.isVisible = true;
+            label.relativePosition = new Vector3(VolcanoRows.RowLeft, y);
+            label.height = VolcanoRows.RowHeight;
+            return y + VolcanoRows.RowStep;
         }
 
         private static float ReflowNote(float y, UILabel label, string text)
@@ -527,6 +628,8 @@ namespace DisasterPlus.Game
         private static void SetVisible(bool visible)
         {
             _showing = visible;
+            SetLabelVisible(_footprintLabel, visible);
+            SetLabelVisible(_footprintNoteLabel, visible);
             SetLabelVisible(_clearingLabel, visible);
             SetLabelVisible(_clearingCountsLabel, visible);
             SetLabelVisible(_clearingRefusedNoteLabel, visible);
@@ -548,7 +651,7 @@ namespace DisasterPlus.Game
             SetLabelVisible(_stopNoteLabel, visible);
 
             // ★ 見えないボタンがクリックを拾える経路を残さない
-            //   （<see cref="VolcanoConfirmPanel"/> と同じ扱い）。
+            //   （見えないボタンがクリックを拾える経路を残さない）。
             if (_stopButton != null)
             {
                 _stopButton.isVisible = visible;
@@ -568,6 +671,8 @@ namespace DisasterPlus.Game
         /// </summary>
         internal static void Destroy()
         {
+            _footprintLabel = null;
+            _footprintNoteLabel = null;
             _clearingLabel = null;
             _clearingCountsLabel = null;
             _clearingRefusedNoteLabel = null;

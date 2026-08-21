@@ -888,8 +888,8 @@ namespace DisasterPlus.Game
         // ★ ここから下の行ラベルは全て**印の付かない行**に入る。出所は
         //   VolcanoModelHeader / VolcanoModelNote が見出しで一度だけ名乗る
         //   （設計書 §7.4）。⑤で [measured] が付いてよいのは
-        //   **設置地点の地形高さ・範囲内の建物数・範囲内の道路セグメント数**の
-        //   3 行だけで、接頭辞は VolcanoRows.SetMeasured が付ける。
+        //   **火山タブの「影響範囲」の 1 行**（範囲内の建物数と道路セグメント数）
+        //   だけで、接頭辞は VolcanoRows.SetMeasured が付ける。
         //
         // **実在の物理単位を名乗る文字列を足さないこと**（設計書 §7.5）。
         // ⑤が出してよいのは距離 (m)・高さ (m)・ゲーム内時間・0〜10 の段階だけで、
@@ -897,7 +897,7 @@ namespace DisasterPlus.Game
         public static string VolcanoTitle = "Volcano";
         public static string VolcanoButtonLabel = "Volcano";
         public static string VolcanoButtonTooltip =
-            "Volcano: pick a size on the slider, then click the map (you confirm before anything is destroyed)";
+            "Volcano: pick a size on the slider, then click the map. The terrain change is permanent.";
         public static string VolcanoModelHeader = "Computed by Disaster +";
 
         // ★★ **この文に印の文字列そのものを書かないこと**（④の全体レビュー I5 と
@@ -934,7 +934,7 @@ namespace DisasterPlus.Game
         public static string VolcanoGroundHeightRow = "Ground at the chosen spot";
         public static string VolcanoMetres = "m";
 
-        // --- ⑤火山（Task 4: 配置ツール・影響範囲の調査・不可逆の確認） ---
+        // --- ⑤火山（Task 4: 配置ツール・影響範囲の調査） ---
         //
         // ★★ 設計書 §7.1 / §7.2 / §7.3 の 3 つの断定は、全部この節の文字列である。
         //   VolcanoIrreversibleWarning（§7.1）・VolcanoEstimateNote（§7.2）・
@@ -949,29 +949,44 @@ namespace DisasterPlus.Game
         public static string VolcanoPlace = "Place a volcano";
         public static string VolcanoPlaceHint =
             "Click where the volcano should rise. Right-click to cancel.";
+
+        /// <summary>
+        /// 依頼を積んでから sim が拾うまでの 1 tick に出る行。**位相ではない** ——
+        /// <c>VolcanoPhase.Surveying</c> は退役した（<c>VolcanoState</c> のクラス doc）。
+        /// </summary>
         public static string VolcanoSurveying = "Surveying the area...";
+
+        // ★★ **退役した 5 件（2026-08-21）。** 確認の窓を撤去したときに
+        //    表示されなくなった行である。所有者の指示は「ほかの災害と同じように
+        //    タイル → スライダー → クリックで起こす」で、確認の段そのものが無くなった。
+        //
+        //    **キーは消さない** —— Strings / Locales\en.txt / Locales\ja.txt のキー集合は
+        //    一致させ続ける必要があり、既訳を捨てる理由も無い（FireWhirlName /
+        //    FireWhirlTooltip と同じ扱い）。**別の意味で再利用してもいけない。**
+        //    とくに ConfirmYes / ConfirmNo / SettingsChanged / PausedNote は
+        //    「押せば始まる」「もう一度確認が出る」という、今は存在しない挙動を
+        //    名乗っている。
         public static string VolcanoConfirmHeader = "Build a volcano here?";
         public static string VolcanoConfirmYes = "Build the volcano here";
         public static string VolcanoConfirmNo = "Cancel";
+        public static string VolcanoConfirmDestroyed = "Will be destroyed (approx.)";
+
         public static string VolcanoBuildingsRow = "buildings";
         public static string VolcanoSegmentsRow = "roads";
 
         /// <summary>
-        /// 確認の窓の「壊されるもの（概算）」。**「（概算）」の 3 文字が、
-        /// かつて 2 行あった言い訳の代わりである**（<c>VolcanoConfirmPanel</c> の
-        /// クラス doc の表）。数は調査した瞬間のもので、地面をならしている間も
-        /// 街は動き続けるので実際の数は前後する —— それは診断ダンプに書いてある。
+        /// 火山タブの「影響範囲（概算）」の行。**確認の窓から降りてきた唯一の行**で、
+        /// ⑤で <c>[実測]</c> の印が付くのもここだけである（<c>VolcanoRows</c> の grep 5）。
+        /// 数は調べた瞬間のもので、地面をならしている間も街は動き続けるので
+        /// 実際の数は前後する —— それは診断ダンプの <c>note: counts</c> に書いてある。
         /// </summary>
-        public static string VolcanoConfirmDestroyed = "Will be destroyed (approx.)";
+        public static string VolcanoFootprintRow = "Footprint (approx.)";
 
         // ★ §7.2 の「概数であることも明示する」。実数をそのまま出すとプレイヤーは
         //   「ぴったりその数だけ壊れる」と読む（ClearanceEstimate のクラス doc）。
         //
-        // ★★ 全体レビュー I3。**丸めた数は [measured] の行から降りて、この注記に来た。**
-        //   印の意味は「ゲームの配列から読んだだけの値」であり、丸めは本 MOD の計算である。
-        //   上の 2 行は数えた実数、こちらが「およそ」を名乗る。
-        // ★ **退役した 2 件。** 概数の言い訳の 2 行は確認の窓から降ろし、
-        //   見出しの「（概算）」（VolcanoConfirmDestroyed）と診断ダンプへ移した
+        // ★ **退役した 2 件。** 概数の言い訳の 2 行は画面から降ろし、
+        //   行の見出しの「（概算）」（VolcanoFootprintRow）と診断ダンプへ移した
         //   （所有者の指示「あれこれ説明は出さなくていい」）。
         //   **キーは消さない**（LogChannelFireWhirl・*ResetButton と同じ扱い）。
         //   **別の意味で再利用してもいけない。**
@@ -988,10 +1003,12 @@ namespace DisasterPlus.Game
             "Do not save while it is being built: an unfinished volcano cannot be "
             + "finished or removed.";
 
-        // ★★ 全体レビュー I1。ポーズ中は着手できない。**黙って何もしないをやらない。**
+        // ★★ **退役（2026-08-21）。** 確認の窓と一緒に消えた。ポーズ中でも地図を
+        //    クリックすれば火山は確定し、**解除した瞬間から動き出す**（バニラの災害と
+        //    同じ）。**キーは消さない。別の意味で再利用してもいけない。**
         public static string VolcanoPausedNote = "The game is paused. Unpause to start.";
 
-        // ★ 走査が 1 tick ぶんの上限で打ち切られたとき。**上の概数は下限になる。**
+        // ★ 走査が 1 tick ぶんの上限で打ち切られたとき。**影響範囲の概数は下限になる。**
         //   これを黙っていると、概数どころか「実際より少ない数」を確定値のように見せる。
         public static string VolcanoSurveyCapped =
             "The survey hit its limit, so the counts are a lower bound.";
@@ -1002,7 +1019,7 @@ namespace DisasterPlus.Game
         // ★ §1.2 そのもの。**「壊さずに地面を上げる」が選べない理由**を書く ——
         //   これが書いていないと、破壊は MOD の乱暴な選択に見える。
         // ★ **退役 1 件。**「なぜ壊す必要があるのか」は設計の説明であって、
-        //   確認の場でする判断ではない。同じ内容は診断ダンプにある
+        //   起こす場でする判断ではない。同じ内容は診断ダンプにある
         //   （VolcanoFeature.WriteNotes）。キーは残すが再利用しないこと。
         public static string VolcanoClearingWarning =
             "The roads and buildings inside the footprint will be destroyed. Raising the "
@@ -1016,10 +1033,15 @@ namespace DisasterPlus.Game
             + "Not a bug.";
 
         // ★ §C-10。天井に当たっても例外は出ず**無言で山頂が平らな台地になる**ので、
-        //   黙って低い山を作らずに先に言う。
+        //   火山タブの影響範囲の行に添えて名乗る（確認の窓が無くなったので、
+        //   これは「置く前の警告」ではなく「なぜ低いのか」の説明になった）。
         public static string VolcanoHeightLimited =
             "The 1024 m terrain ceiling makes this volcano lower than asked.";
 
+        // ★★ **退役（2026-08-21）。** 確認の窓が無くなったので「確認の直前に設定が
+        //    変わっていたら調べ直す」経路そのものが消えた（クリックした瞬間の設定と
+        //    スライダーの値で 1 回だけ調べる）。
+        //    **キーは消さない。別の意味で再利用してもいけない。**
         public static string VolcanoSettingsChanged =
             "The settings changed, so the area was surveyed again.";
 

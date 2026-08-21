@@ -148,9 +148,6 @@ namespace DisasterPlus.Game
         /// <summary>直近に断った理由（**英語・診断用**）。断っていなければ null。</summary>
         public readonly string Refusal;
 
-        /// <summary>確認の直前に設定が変わったので調べ直したか。</summary>
-        public readonly bool SettingsChanged;
-
         // ── T5（準備）が足した 7 つ ────────────────────────────────
 
         /// <summary>
@@ -279,7 +276,7 @@ namespace DisasterPlus.Game
         public VolcanoSnapshot(bool valid, VolcanoTerrainFacts terrain,
                                uint currentFrame, bool gameMode,
                                VolcanoPhase phase, VolcanoFootprint footprint,
-                               float progressUnit, string refusal, bool settingsChanged,
+                               float progressUnit, string refusal,
                                float clearedRadiusMetres, bool clearingComplete,
                                int buildingsDestroyed, int segmentsDestroyed,
                                int buildingsRefused, bool clearingCapped,
@@ -302,7 +299,6 @@ namespace DisasterPlus.Game
             Footprint = footprint;
             ProgressUnit = progressUnit;
             Refusal = refusal;
-            SettingsChanged = settingsChanged;
             ClearedRadiusMetres = clearedRadiusMetres;
             ClearingComplete = clearingComplete;
             BuildingsDestroyed = buildingsDestroyed;
@@ -341,7 +337,7 @@ namespace DisasterPlus.Game
         public static VolcanoSnapshot Invalid()
         {
             return new VolcanoSnapshot(false, new VolcanoTerrainFacts(), 0u, true,
-                                       VolcanoPhase.Idle, VolcanoFootprint.None, 0f, null, false,
+                                       VolcanoPhase.Idle, VolcanoFootprint.None, 0f, null,
                                        0f, false, 0, 0, 0, false, true,
                                        0f, 0f, false, false, 0, 0,
                                        false, 0f, new Vec3(0f, 0f, 0f),
