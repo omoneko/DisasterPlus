@@ -402,18 +402,10 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 1 粒ぶんの <c>magnitude</c>（＝粒子の密度）。
-        ///
-        /// エフェクト実測文書 §B-4 の粒子数の式
-        /// <code>count = max(100, π·r²) × (timeDelta × magnitude × 0.01 × rateOverTime)</code>
-        /// を **1 秒あたりの粒子数**から逆に解いたもの。<c>timeDelta</c> は両辺で
-        /// 打ち消し合うので、返す値はフレームレートにもゲーム速度にも依らない。
-        ///
-        /// **これが毎フレームの仕事量の上限を決めている 1 本目**である
-        /// （2 本目は <c>ParticleSystem.maxParticles</c> に対するバニラ自身の
-        /// 絞り込み <c>pps × (1 - fill²)</c>）。
-        ///
-        /// 壊れた入力（0 以下・NaN）には 0 を返す ——「粒子数 NaN で空が埋まる」を作らない。
+        /// 1 粒ぶんの <c>magnitude</c>（＝粒子の密度）。中身は
+        /// <see cref="ParticleBudget.MagnitudeFor"/> そのもの ——
+        /// **④の渦と暴風雨で同じ式を使う**ためにあちらへ移した。
+        /// ここに残してあるのは、渦の側の呼び出しと doc がこの名前で書かれているからである。
         /// </summary>
         /// <param name="discRadius">1 粒の円盤半径（m）。</param>
         /// <param name="rateOverTime">エフェクト側の <c>emission.rateOverTime.constant</c>。</param>
@@ -422,17 +414,8 @@ namespace DisasterPlus.Core.Typhoon
         public static float MagnitudeFor(float discRadius, float rateOverTime,
                                          float particlesPerSecond, int puffCount)
         {
-            if (!(discRadius > 0f) || !(rateOverTime > 0f)) return 0f;
-            if (!(particlesPerSecond > 0f) || puffCount <= 0) return 0f;
-
-            float area = 3.14159265f * discRadius * discRadius;
-            if (area < 100f) area = 100f;      // §B-4 の max(100, πr²)
-
-            float perPuff = particlesPerSecond / puffCount;
-            float magnitude = perPuff / (area * 0.01f * rateOverTime);
-
-            if (float.IsNaN(magnitude) || magnitude <= 0f) return 0f;
-            return magnitude;
+            return ParticleBudget.MagnitudeFor(discRadius, rateOverTime,
+                                               particlesPerSecond, puffCount);
         }
 
         private static float Normalize(float radians)

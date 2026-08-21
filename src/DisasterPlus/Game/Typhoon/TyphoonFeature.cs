@@ -130,6 +130,14 @@ namespace DisasterPlus.Game
                 {
                     TyphoonGust.Tick(snapshot, frameIndex, deltaMinutes);
                 }
+
+                // ★ 暴風雨の吹き飛ばし（市民と車だけ）。**風害とは別の設定**で、
+                //   建物・道路・樹木には一切触れない（ModSettings.TyphoonStormFx の doc）。
+                //   走査ではないので、風害を切っていても吹く。
+                if (ModSettings.TyphoonStormFx.value)
+                {
+                    TyphoonWind.Gale(snapshot, deltaMinutes);
+                }
             }
 
             // ★ 河川氾濫は台風が居なくても呼ぶ。**持ち上げた水位を戻すのが
@@ -185,6 +193,19 @@ namespace DisasterPlus.Game
             {
                 TyphoonCloud.Destroy();
             }
+
+            // ★ 横殴りの飛沫も main スレッドだけの機能である（雲とまったく同じ扱い）。
+            //   sim 側からは 1 度も呼ばれないので、TyphoonController.Forget の
+            //   後始末列にこの型を足さないこと。台風が終わったフレームには
+            //   Active でないスナップショットが渡り、あちらが自分で出すのをやめる。
+            if (ModSettings.TyphoonEnabled.value && ModSettings.TyphoonStormFx.value)
+            {
+                TyphoonSquallFx.Update(TyphoonHub.Latest);
+            }
+            else
+            {
+                TyphoonSquallFx.Destroy();
+            }
         }
 
         public void OnLevelUnloading()
@@ -203,6 +224,8 @@ namespace DisasterPlus.Game
             //    道連れにならない。**自分で Object.Destroy する**（TyphoonCloud の
             //    クラス doc）。バニラ空の雲の設定もここで元へ戻る。
             TyphoonCloud.Destroy();
+            // ★ 飛沫の複製も都市をまたがない（雲と同じ。破棄済みの粒子系を撃ちに行く）。
+            TyphoonSquallFx.Destroy();
 
             TyphoonHub.Clear();
             TyphoonReader.Reset();

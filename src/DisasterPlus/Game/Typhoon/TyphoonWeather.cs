@@ -64,6 +64,7 @@ namespace DisasterPlus.Game
     /// near  = 1 - clamp01(|centre| / galeRadius)     // 強風域に入るほど 1 へ
     /// rain  = clamp01(0.35 + 0.65 * near)
     /// cloud = clamp01(0.55 + 0.45 * near)
+    /// fog   = clamp01(0.45 * near)                   // ★ 2026-08-22 に足した（視程）
     /// </code>
     /// バニラに参照すべき制約は無い（設計書 §1.2）。距離は**マップ原点＝都市の中心**から
     /// 台風の中心（クランプ前）までで測る。
@@ -118,7 +119,7 @@ namespace DisasterPlus.Game
     /// | 上書きするもの | 戻し方 |
     /// |---|---|
     /// | <c>m_targetRain</c> / <c>m_targetCloud</c> | **明示的に 0 を書く。** |
-    /// | <c>m_targetFog</c> | 書くのをやめる（④が入れる値は 0 なので既に無害） |
+    /// | <c>m_targetFog</c> | **明示的に 0 を書く。**（④は最大 0.45 まで上げるので、やめるだけでは晴れない） |
     /// | <c>m_forceWeatherOn</c> | 書くのをやめる。<c>0.001/step</c> で自然に切れる |
     /// | <c>m_targetDirection</c> | 書くのをやめる。到達した瞬間にバニラが再抽選する（§A-4） |
     ///
@@ -157,8 +158,25 @@ namespace DisasterPlus.Game
         private const float CloudBase = 0.55f;
         private const float CloudRange = 0.45f;
 
-        /// <summary>台風に霧は出さない（バニラの嵐と同じ。§A-1）。</summary>
-        private const float TargetFog = 0f;
+        /// <summary>
+        /// 台風が最も近いときの <c>m_targetFog</c>。
+        ///
+        /// ★★ <b>2026-08-22 に 0 から変えた</b>（持ち主の指摘「暴風雨を再現してほしい」）。
+        ///   以前はバニラの嵐に合わせて 0 を書いていた。だが暴風雨の見え方の半分は
+        ///   <b>視程が落ちること</b>で、④が地上でそれを出せる手段は霧しか無い ——
+        ///   雨量はもう 1.0 に張り付いていて、しかも 0.8 超はゲーム自身に雷雨災害を
+        ///   作らせる境界なので**上げる余地が無い**（クラス doc 6.）。
+        ///
+        ///   <b>霧はその境界に一切関わらない。</b> <c>WeatherManager</c> が
+        ///   <c>QueueLightningStrike</c> を呼ぶ条件は <c>m_currentRain &gt; 0.8</c> だけで、
+        ///   <c>m_currentFog</c> はどこにも出てこない（本タスクで IL 再確認）。
+        ///   **落雷の釣り合いは 1 ビットも動かない。**
+        ///
+        ///   0.45 に留めてあるのは、都市が見えなくなると遊べなくなるからである。
+        ///   遷移レートは雨と同じ <c>0.0002/step</c> なので、近づくにつれて
+        ///   ゆっくり霞み、去ればゆっくり晴れる。
+        /// </summary>
+        private const float FogPeak = 0.45f;
 
         private static bool _driving;
         private static float _lastRain;
@@ -240,9 +258,11 @@ namespace DisasterPlus.Game
             float direction = WindDegreesOf(TyphoonController.HeadingRadians);
 
             // ★ 毎 tick 書く（クラス doc 1.）。
+            float fog = Clamp01(FogPeak * near);
+
             w.m_targetRain = rain;
             w.m_targetCloud = cloud;
-            w.m_targetFog = TargetFog;
+            w.m_targetFog = fog;
 
             // ★ これが無いと天候 OFF の環境で全部 0 に潰される（クラス doc 2.）。
             w.m_forceWeatherOn = ForceWeatherOn;
@@ -253,7 +273,7 @@ namespace DisasterPlus.Game
             _driving = true;
             _lastRain = rain;
             _lastCloud = cloud;
-            _lastFog = TargetFog;
+            _lastFog = fog;
             _lastDirectionDegrees = direction;
             _weatherDisabledByPlayer = !w.m_enableWeather;
         }
@@ -324,6 +344,11 @@ namespace DisasterPlus.Game
                     var w = Singleton<WeatherManager>.instance;
                     w.m_targetRain = 0f;
                     w.m_targetCloud = 0f;
+                    // ★★ **霧も明示的に 0 を書く。** ④が入れる値が 0 だった頃は
+                    //    「書くのをやめる」だけでよかったが、いまは最大 0.45 まで
+                    //    上げている（FogPeak）。書くのをやめるだけだと、
+                    //    バニラが振り直すまで（期待値 2 万 step）霞んだままになる。
+                    w.m_targetFog = 0f;
                     // ★ m_forceWeatherOn と m_targetDirection には書かない（クラス doc 7.）。
                 }
             }
@@ -398,6 +423,9 @@ namespace DisasterPlus.Game
                 var w = Singleton<WeatherManager>.instance;
                 w.m_targetRain = 0f;
                 w.m_targetCloud = 0f;
+                // ★★ 霧も降ろす。**セーブに焼き付く 5 値のうちの 1 つ**である
+                //    （WeatherManager+Data.Serialize の並び。クラス doc 8.）。
+                w.m_targetFog = 0f;
                 // ★ ここでは m_forceWeatherOn も 0 にする（Release とは判断が違う）。
                 //   Release が触らないのは「台風が去った瞬間に雨が消える」のを
                 //   避けるためで、あれは**画面の見え方**の話である。セーブに

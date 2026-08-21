@@ -24,6 +24,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
     /// - <c>vortex-eyewall-elevation.png</c> 真横から、眼のまわりに 3 倍寄る。
     ///   **塔の高さともこもこ**を見る
     /// - <c>vortex-oblique.png</c>   ゲームのカメラに近い俯角 35 度。**実機の見え方**
+    /// - <c>squall-elevation.png</c> 吹き付ける雨を真横から。**風下へ流れているか**を見る
     /// </summary>
     internal static class Program
     {
@@ -91,6 +92,16 @@ namespace DisasterPlus.Tools.TyphoonPreview
             Write(outDir, "vortex-elevation.png", Elevation(specks, 1f));
             Write(outDir, "vortex-eyewall-elevation.png", Elevation(specks, 3f));
             Write(outDir, "vortex-oblique.png", Oblique(specks));
+
+            // ★ 暴風雨（横殴りの飛沫）。**カメラの周りに置く**ものなので、
+            //   渦とは別の絵にする。カメラの高さ 260 m ＝ 街を見るくらいの引き。
+            Speck[] spray = Squall.Build(260f, 1f, 0x53515544u);
+            log.AppendLine("driving rain particles drawn = " + spray.Length
+                           + " (cap " + SquallLayout.MaxParticles + ", spread "
+                           + F(SquallLayout.SpreadFor(260f)) + " m at 260 m camera height, drift "
+                           + F(SquallLayout.DriftMetresPerSecond) + " m/s)");
+            log.AppendLine();
+            Write(outDir, "squall-elevation.png", SquallElevation(spray));
 
             File.WriteAllText(Path.Combine(outDir, "measurements.txt"), log.ToString());
             Console.WriteLine("wrote " + Path.Combine(outDir, "measurements.txt"));
@@ -255,6 +266,33 @@ namespace DisasterPlus.Tools.TyphoonPreview
             }
 
             return Compose(cover, colour, false);
+        }
+
+        /// <summary>
+        /// 吹き付ける雨を真横から。**風は +X 向き**なので、粒が右へ流れて落ちていれば
+        /// 「横殴り」になっている。縦横は同じ尺度である。
+        /// </summary>
+        private static byte[] SquallElevation(Speck[] specks)
+        {
+            var cover = new float[Pixels * Pixels];
+            var colour = new float[Pixels * Pixels * 3];
+
+            // 窓は幅 1400 m。地面は下から 6% のところ。
+            const float windowMetres = 900f;
+            float scale = Pixels / windowMetres;
+            float half = Pixels * 0.5f;
+            float groundY = Pixels * 0.94f;
+
+            Array.Sort(specks, delegate (Speck a, Speck b) { return b.Z.CompareTo(a.Z); });
+
+            for (int i = 0; i < specks.Length; i++)
+            {
+                Speck s = specks[i];
+                Splat(cover, colour, half + s.X * scale, groundY - s.Y * scale,
+                      s.SizeMetres * 0.5f * scale, s);
+            }
+
+            return Compose(cover, colour, true);
         }
 
         // ── 描画の下請け ────────────────────────────────────────

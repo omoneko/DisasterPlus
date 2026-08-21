@@ -140,6 +140,7 @@ namespace DisasterPlus.Game
             WriteFlood(b, snapshot);
             WriteGusts(b, snapshot);
             WriteCloud(b);
+            WriteStormFx(b);
         }
 
         /// <summary>
@@ -228,6 +229,52 @@ namespace DisasterPlus.Game
                 ? "applied"
                 : "not available in this environment (this is normal on some DLC/graphics "
                   + "settings; Disaster + draws its own cloud regardless)");
+        }
+
+        /// <summary>
+        /// 暴風雨の演出（横殴りの飛沫と吹き飛ばし）。
+        /// **どれも建物・道路・樹木には触れない**ので、被害の行とは分けて出す。
+        /// </summary>
+        private static void WriteStormFx(DiagnosticBuilder b)
+        {
+            if (!ModSettings.TyphoonStormFx.value)
+            {
+                b.Line(2, "storm effects", "off (setting)");
+                return;
+            }
+
+            b.Line(2, "storm effects", SquallStateText());
+            b.Line(3, "driving rain", TyphoonSquallFx.Detail);
+            b.Line(3, "gusts pushing citizens", TyphoonWind.GalePushes
+                   + " push(es) so far (every 64 frames; citizens and vehicles only)");
+        }
+
+        private static string SquallStateText()
+        {
+            switch (TyphoonSquallFx.State)
+            {
+                case TyphoonSquallState.Emitting:
+                    return "driving rain (" + TyphoonSquallFx.LastRenderCalls
+                           + " RenderEffect/frame, strength "
+                           + TyphoonSquallFx.LastStrength.ToString("F2") + ")";
+
+                case TyphoonSquallState.OutsideStorm:
+                    return "the camera is outside the storm, so no spray is drawn "
+                           + "(this is normal)";
+
+                case TyphoonSquallState.Idle:
+                    return "idle (no typhoon)";
+
+                case TyphoonSquallState.NoEffect:
+                    return "NOT DRAWN: no vanilla water particle effect could be borrowed. "
+                           + "The rain, the wind damage and the vortex are unaffected";
+
+                case TyphoonSquallState.Failed:
+                    return "NOT DRAWN: the spray path threw (see output_log.txt)";
+
+                default:
+                    return "off";
+            }
         }
 
         private static string CloudStateText()

@@ -859,6 +859,17 @@ namespace DisasterPlus.Game
             "The game's sky cloud settings are not present in this environment, so only "
             + "Disaster +'s own cloud is drawn.";
 
+        // --- ④台風（暴風雨の演出） ---
+        //
+        // ★ 「被害」ではないことを名乗る。飛沫は描画だけ、吹き飛ばしは市民と車だけで、
+        //   建物・道路・樹木には一切触れない（風害のつまみとは別である）。
+        public static string TyphoonStormFx = "Show the storm at ground level";
+        public static string TyphoonStormFxNote =
+            "Wind-driven spray around the camera while it is inside the storm, and a gust "
+            + "that pushes citizens and vehicles four times as often as before. Nothing here "
+            + "damages buildings, roads or trees - that is the wind damage option above. "
+            + "The storm also thickens the air as it closes in, so visibility drops.";
+
         // --- ⑤火山（Task 2: 骨格・地形 API の解決・前提検証） ---
         //
         // このタスクの時点では**パネルもボタンも火山も無い**（T3 以降で入る）。

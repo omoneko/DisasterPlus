@@ -1,4 +1,3 @@
-using ColossalFramework;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Typhoon;
 using UnityEngine;
@@ -296,7 +295,7 @@ namespace DisasterPlus.Game
             //   等価になり、ここで作り直される（2 つ目の都市の自己修復）。
             if (!AnyClone() && !Acquire()) return false;
 
-            var camera = CurrentCamera();
+            var camera = VanillaParticles.CameraInfo();
             if (camera == null)
             {
                 // ★ null を渡すと ParticleEffect.RenderEffect の先頭で NRE になる
@@ -305,7 +304,7 @@ namespace DisasterPlus.Game
                 return true;   // エフェクトは持っている。メッシュへ退避させない。
             }
 
-            float timeDelta = SimulationTimeDelta();
+            float timeDelta = VanillaParticles.TimeDelta();
             if (!(timeDelta > 0f))
             {
                 // ポーズ中・速度 0。粒は湧かないが渦は残る（既存の粒子が漂う）。
@@ -388,40 +387,6 @@ namespace DisasterPlus.Game
 
             _lastRenderCalls = calls;
             _state = calls > 0 ? TyphoonCloudFxState.Emitting : TyphoonCloudFxState.NoEffect;
-        }
-
-        private static RenderManager.CameraInfo CurrentCamera()
-        {
-            try
-            {
-                if (!Singleton<RenderManager>.exists) return null;
-                return Singleton<RenderManager>.instance.CurrentCameraInfo;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// 粒子の進み方は <c>Time.deltaTime</c> ではなく
-        /// <c>SimulationManager.m_simulationTimeDelta</c> で測る（§B-3）。
-        /// ポーズと速度変更に追随し、<c>ParticleEffect.Update</c> が
-        /// <c>m_useSimulationTime</c> で <c>Pause()</c> する挙動とも一致する。
-        /// </summary>
-        private static float SimulationTimeDelta()
-        {
-            try
-            {
-                if (!Singleton<SimulationManager>.exists) return 0f;
-                float dt = Singleton<SimulationManager>.instance.m_simulationTimeDelta;
-                if (float.IsNaN(dt) || float.IsInfinity(dt) || dt < 0f) return 0f;
-                return dt;
-            }
-            catch
-            {
-                return 0f;
-            }
         }
 
         /// <summary>

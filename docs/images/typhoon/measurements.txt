@@ -41,3 +41,5 @@ columns = 22 (eyewall 7 + arms 3x5), levels = 4, RenderEffect calls/frame = 88
 
 particles drawn = 7953 (the live cap the game enforces: 8000)
 
+driving rain particles drawn = 2994 (cap 3000, spread 411 m at 260 m camera height, drift 46 m/s)
+
