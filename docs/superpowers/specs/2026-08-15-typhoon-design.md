@@ -376,7 +376,63 @@ TyphoonState（④の所有、sim スレッド）
 **④で最も高い要素。単独のタスクに切り出し、他の要素から依存されないこと。**
 雲が出せなくても残り 4 要素は成立する。
 
-#### ★ 改訂（持ち主の指摘「現在の巨大な渦を雲から構成するように」）
+#### ★ 改訂 2（2026-08-22、持ち主の指摘「雲のエフェクトが煙になっている／渦を巻く入道雲を」）
+
+**渦は入道雲（積乱雲）の並びとして組み直した。** 原因は 3 つあり、全部直した。
+
+**1. 素材。** 旧実装は候補の先頭に `Factory Smoke` を置いていた。出荷アセット
+（`sharedassets11.assets`）から粒子マテリアルのテクスチャを取り出して測ると:
+
+| マテリアル | テクスチャ | 平均 RGB | 見た目 |
+|---|---|---|---|
+| `Smoke` | `smoke` | (75, 78, 80) | **暗い煤色の丸い塊**（火の粉の点まで入っている） |
+| `Steam` | `steam` | (168, 184, 189) | **淡い青白の綿。雲そのもの** |
+| `Water` | `water` | (201, 222, 254) | 白青の飛沫 |
+| `Placement Dust` | `placement-dust` | (198, 165, 131) | 砂色の土煙 |
+| `IndustryDust` | `IndustryDust` | (99, 94, 79) | 茶灰の粉塵 |
+
+`startColor` は乗算で掛かるので、**素材が煤なら何色を掛けても煙にしか見えない。**
+指摘は素材の話として正しかった。
+
+→ **名前で引くのをやめた。** `EffectsWrapper.m_BuiltinEffects` と
+`EffectCollection.Effects` を**実際に列挙**し、各 `ParticleEffect` の
+`ParticleSystemRenderer.sharedMaterial.name` を読んで、**マテリアル名で採点**して
+いちばん雲らしいものを採る（`Steam` ≫ `Water` > 粉塵 > `Smoke`、加算合成の火・爆発は除外）。
+名前の一覧は同点の並べ替えにしか使わない。列挙・採点・複製は
+`Game/Typhoon/VanillaParticles` にあり、暴風雨の飛沫と共有する。
+事実文書の在庫は **PARTIAL**（アセットに在ることと実行時 API が返すことは別）なので、
+名前に賭けないのが要点である。
+
+**2. 形。** 旧実装は「腕 3 本 ＋ 環」を**平らに 1 段**置いていた。入道雲は鉛直に
+伸びる塔で、上は日に照らされて白く盛り上がり（cauliflower）、下は平たく暗い。
+
+→ `Core/Typhoon/VortexPuffLayout` を作り直した。**22 本の柱**（眼の壁雲 7 本 ＋
+腕 3 本 × 5 本）に、**雲底・塔（2 段）・かなとこ**の 4 段を積む。
+1 フレームの `RenderEffect` は **88 回**（旧 30 回）。厚みは 320 m → **2200 m**。
+下層は吸い込み・上層は吹き出す**二次循環**も入れた（`RadialFraction`）。
+
+層ごとに**別の複製**を作る。色と粒径は `ParticleSystem` 側の共有状態で
+`RenderEffect` の呼び出しごとには変えられないので（§B-4）、**明暗を変えたい単位が
+そのまま複製の数**になる。数値表は `Core/Typhoon/VortexCloudProfile`
+（`tools/TyphoonPreview` が同じ数字で描くので 2 か所に書かない）。
+
+**3. 大きさ。** 旧実装は**強風域半径**をそのまま渦の外周にしていた。強度 128 で
+それは 10.6 km ＝ **直径 21 km** で、**マップの一辺（17.3 km）より大きい**。
+同じ粒の数を 4.8 倍の面積へ撒くので、渦にも雲にも見えず「ぽつぽつ湧く煙の柱」になる。
+
+→ **暴風域半径 × 1.35（上限 6000 m）**にした。退避経路のメッシュも同じ 1 本
+（`TyphoonCloudFx.VortexRadiusMetres`）から大きさを取る。
+
+**眼が穴として残る約束の持ち主も変えた。** 旧 doc は「Game 側が守る義務がある。
+破ると眼が埋まる —— 例外は出ないしテストでも捕まらない」と書いていた。
+いまは円盤半径も粒径も Core が宣言しているので、`EyeClearanceOf` を
+**テストが全粒について固定している**。
+
+見た目は `tools/TyphoonPreview` でオフラインに描いて確かめた
+（`docs/images/typhoon/vortex-plan.png` / `vortex-eyewall-elevation.png` /
+`vortex-oblique.png`、数値は同フォルダの `measurements.txt`）。
+
+#### ★ 改訂 1（持ち主の指摘「現在の巨大な渦を雲から構成するように」）
 
 **渦の本経路は「バニラの雲・煙の粒子エフェクトを借りて撒く」形になった**
 （`Game/Typhoon/TyphoonCloudFx`、置き場所は `Core/Typhoon/VortexPuffLayout`）。
@@ -394,24 +450,14 @@ TyphoonState（④の所有、sim スレッド）
 バニラの粒子エフェクトは**既に読み込まれ、既に動くマテリアルを持っている**。
 しかもそのマテリアルは `ParticleSystemRenderer` に付くので、
 ③が確定させた「CS のマテリアルを借りると自前 `MeshRenderer` で不可視になる」問題には
-**当たらない**（エフェクト実測文書 §D-3。バニラ自身が
-`EffectsWrapper.CreateParticleEffect` で同じことをしている）。
+**当たらない**（エフェクト実測文書 §D-3）。
 
-- 素材は `Factory Smoke` → `Factory Steam` → `Large Pool Steam` → `Pool Steam` →
-  `Collapse Particles` → `Factory Smoke Small` → `BuildingProperties.m_collapseEffect`
-  の順に試し、**最初に取れたものを使う**。`Factory Smoke` は `EffectCollection` に
-  登録されていないので `EffectsWrapper.GetBuiltinEffect` でしか取れない（§A-3）
 - **必ずクローンしてから色・粒径・寿命・可視距離を変える。** 共有プレハブを直接
-  書き換えると**街じゅうの工場の煙**が嵐雲色になり、メモリ上に残る（§D-5）
+  書き換えると**街じゅうの工場の煙・プールの蒸気**が嵐雲色になり、メモリ上に残る（§D-5）
 - クローンした `GameObject` はアクティブなシーンに入るので、`InitializeEffect()` の
-  **前に** `emission.enabled = false` を書く。書かないとワールド原点で煙を吐く
+  **前に** `emission.enabled = false` を書く。書かないとワールド原点で吐く
 - 撒き方は `RenderEffect(..., timeOffset: -1f, timeDelta: m_simulationTimeDelta, ...)`
   ＝**継続モード**（§B-3。`SinkholeAI.RenderInstance` と同じ形）
-- **眼は穴のまま。** `VortexPuffLayout` は `EyeFraction`（0.16）より内側に 1 個も置かない
-- **毎フレームの上限は 3 本で決まる**: `RenderEffect` は `PuffCount`（30）回ちょうど、
-  新しく湧く粒子は 620 個／秒（`MagnitudeFor` が §B-4 の式を逆に解く）、
-  生きている粒子はクローンの `maxParticles`（7000）で頭打ち（バニラ自身が
-  `pps ×= (1 - fill²)` で絞る）。**ヒープ確保は 0 バイト**
 - **1 つも借りられなければログ 1 行を出してメッシュへ退避する。** 例外は投げない。
   `Assumptions` の検証 1 件が同じ `Lookup` を呼んで名指しする
 
@@ -434,13 +480,12 @@ TyphoonState（④の所有、sim スレッド）
   貼ってリボンの縁を落とす。**中央は 255 のまま**なので、雲の濃さは今までどおり
   マテリアルのティントの α だけで決まる（縁を柔らかくするだけで、濃くも薄くもしない）
 
-**★ これは「渦がある」ことを示す記号であって、空を覆う雲ではない（全体レビューの記録）。**
-実物の台風の雲は数十 km に広がるが、④が描くのは**半径およそ 900 m の平らな
-渦巻き 1 枚**である。眼の上にそれらしい渦を置く記号として設計してあり、
-画面写真では「思ったより小さい」と見える。**この枝では拡大しない**
-（拡大は頂点数・透過の重なり・スカイドームとの見え方に別の判断が要る）。
-本文がここまで「巨大な回転雲」と呼び続けているのは名前としての話で、
-**実際の見え方はこの段落が正である。**
+**★ 退避経路は「渦がある」ことを示す記号であって、空を覆う雲ではない（全体レビューの記録）。**
+メッシュは `TyphoonCloudFx.VortexRadiusMetres`（＝粒と同じ 1 本）まで拡大されるので
+大きさは渦と揃うが、**平らな渦巻き 1 枚**であることは変わらない。
+画面写真では「思ったより薄い」と見える。**この枝では作り込まない**
+（作り込むには頂点数・透過の重なり・スカイドームとの見え方に別の判断が要る）。
+本経路は粒のほうで、あちらは入道雲の塔として鉛直に伸びる（改訂 2）。
 
 補助として `DayNightDynamicCloudsProperties` の `m_MaxCoverage` / `m_WindForce` /
 `m_EvolutionSpeed` を上げ、空全体の雲を濃く速く流す。**存在しない環境がありうる。
