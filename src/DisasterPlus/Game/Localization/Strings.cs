@@ -44,8 +44,12 @@ namespace DisasterPlus.Game
         public static string FireWhirlName = "Fire whirl";
         public static string FireWhirlTooltip = "Place a stationary, burning vortex";
 
+        // ★ 1 文に縮めたが、**「バニラ由来の破壊はあちらの竜巻設定に従う」は
+        //   落とせない** —— これは挙動の事実であって解説ではない。
+        //   （落とした「延焼拡大は影響を受けません」は③のパネルと診断が名乗る。）
         public static string NdrDetected =
-            "Natural Disasters Renewal detected.";
+            "Natural Disasters Renewal detected: vanilla-side destruction follows its "
+            + "tornado settings.";
 
         public static string FireWhirlNeedsDlc =
             "Fire whirls require the Natural Disasters DLC.";
@@ -629,7 +633,12 @@ namespace DisasterPlus.Game
         public static string LogChannelTyphoon = "Typhoon";
 
         // --- ④台風（Task 3: 論理オブジェクトと経路追従） ---
-        public static string TyphoonIntensity = "Typhoon intensity (10-255; vanilla storms use 55)";
+        // ★ **これは「既定値」である。** 実際に使う強度は災害パネルの④タイルを
+        //   押したときに出るスライダーで選ぶ（そのスライダーの初期値がこの値）。
+        //   ラベルが「既定」と名乗らないと、スライダーで変えた強度が
+        //   ここに従っていないように見える。
+        public static string TyphoonIntensity =
+            "Default typhoon intensity (10-255; vanilla storms use 55)";
         // ★ **設定画面からは降ろした。** 「バニラの嵐は 55」はスライダーの
         //   ラベル（TyphoonIntensity）に畳んである。
         public static string TyphoonIntensityNote =

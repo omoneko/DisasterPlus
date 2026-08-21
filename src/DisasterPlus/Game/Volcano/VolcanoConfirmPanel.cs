@@ -76,6 +76,14 @@ namespace DisasterPlus.Game
         /// ★ 依頼が積まれている間は畳む。位相の反映には設計上 1 tick の遅れがあるので、
         ///   押した直後の 1 フレームだけ [作る] が押せる状態で残る。
         ///   **押しても何も変わらないボタンは二度押される。**
+        ///
+        /// ★ この窓は <c>VolcanoHub</c> のロックを毎フレーム 2 回取る
+        ///   （<c>Latest</c> と <c>PendingRequest</c>）。⑤のパネルも別に
+        ///   <c>Latest</c> を取るので、パネルが開いていれば 1 フレームに 3 回になる。
+        ///   **「スナップショットは 1 フレームに 1 回」という規律は 1 枚のパネルの中の
+        ///   行どうしが食い違わないためのもの**で、独立した 2 枚の窓が別々に取ること
+        ///   自体は矛盾を生まない（この窓の表示は自分が取った 1 枚だけで完結している）。
+        ///   ロックは非競合で、取得は 1 フレームに数回である。
         /// </summary>
         internal static void Tick()
         {
@@ -234,6 +242,11 @@ namespace DisasterPlus.Game
 
             // ★ ポーズ中は着手できない。**押しても何も起きないボタンは二度押される。**
             if (_yesButton != null) _yesButton.isEnabled = !paused;
+
+            // ★ ボタンの文字も読み直す。構築時に入れたきりにすると、ゲーム内で
+            //   言語を切り替えたときに 2 つのボタンだけが前の言語のまま残る。
+            SetButtonText(_yesButton, Strings.VolcanoConfirmYes);
+            SetButtonText(_noButton, Strings.VolcanoConfirmNo);
         }
 
         /// <summary>
@@ -248,6 +261,12 @@ namespace DisasterPlus.Game
             if (s.SettingsChanged) note = Join(note, Strings.VolcanoSettingsChanged);
             if (paused) note = Join(note, Strings.VolcanoPausedNote);
             return note;
+        }
+
+        private static void SetButtonText(UIButton button, string text)
+        {
+            if (button == null) return;
+            if (button.text != text) button.text = text;
         }
 
         private static string Join(string a, string b)

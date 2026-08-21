@@ -260,6 +260,11 @@ namespace DisasterPlus.Game
                 + "not work: the game pins the terrain back to the height of every road and "
                 + "building on every update, so the mountain would end up full of flat "
                 + "trenches and bowls (design section 1.2)");
+            b.Line(1, "note: unfinished volcano",
+                "Disaster + does not store an unfinished volcano. After loading a save made "
+                + "mid-build the mountain stays exactly as far as it got - no crater, no "
+                + "eruption, no lava - and there is no way to finish or remove it. Placing a "
+                + "new volcano on the same spot piles a second mountain on top of it");
             b.Line(1, "note: buildable ground",
                 "the buildable ground and the water level do not follow the visible terrain "
                 + "straight away; they catch up at 2 m per 64 simulation frames "
