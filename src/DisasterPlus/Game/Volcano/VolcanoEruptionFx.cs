@@ -18,10 +18,38 @@ namespace DisasterPlus.Game
     /// 存在しないので、既定経路には決してしない）。
     ///
     /// <code>
-    /// 噴煙  Factory Smoke              複製して 灰黒 / 寿命 7-16s / 可視 10 km
-    /// 炎    Fire Particles             **複製しない**（建物火災と同じ見た目が欲しい）
-    /// 噴石  Medium Explosion Particles 複製して 重力を下向き / 粒径 6 に
+    /// 噴煙柱 Factory Smoke              複製して 暗い灰褐色 / 粒 30 / 寿命 4-9s
+    /// 傘     Factory Smoke              **もう 1 個**複製して 淡い灰 / 粒 95 / 寿命 18-34s
+    /// 炎     Fire Particles             **複製しない**（建物火災と同じ見た目が欲しい）
+    /// 噴石   Medium Explosion Particles 複製して 重力を下向き / 粒径 6 に
     /// </code>
+    ///
+    /// ── ★★ 噴煙は「柱」である（2026-08-22、実機の指摘③）──────────────────
+    ///
+    /// > 噴煙がただの煙だまりになってしまっています。これは MissileMOD のキノコ雲の
+    /// > Method を参考にリアルな噴煙（キノコ雲ではない …）を作ってほしいです。
+    ///
+    /// 以前は <c>RenderEffect</c> **1 回**で、噴出口の真上の円盤（半径 40〜80 m）から
+    /// 煙を湧かせていただけだった。粒子は自分の初速で 7〜16 秒上がって消えるので、
+    /// 出来上がるのは<b>火口の上に浮いた煙の塊</b>である。柱にも傘にもならない。
+    ///
+    /// いまは形を <c>Core/Volcano/EruptionColumn</c>（純粋・テスト付き）が決め、ここは
+    /// **その 9 段を <c>SpawnArea(位置, 上, 半径, 高さ)</c> の円柱として湧かすだけ**である
+    /// （ミサイル MOD の <c>CloudPuffs</c> と同じ分業。形は借りない ——
+    /// あちらは単発の泡、こちらは火口から供給され続ける柱で、物理が違う）。
+    /// ガス推力域 → 対流域 → 傘の 3 区間と風下への傾きはあちらのクラス doc にある。
+    ///
+    /// **粒子の総量は今までと同じ**である。段ごとの密度は面積で正規化してあり
+    /// （<c>EruptionColumn.MagnitudeFor</c>）、重みの和が 1 なので、
+    /// 柱ぜんぶで従来の 1 回ぶんに等しい。増えるのは <c>RenderEffect</c> の
+    /// 回数（1 → 最大 9）だけで、1 回あたりの粒子数はむしろ減る。
+    ///
+    /// ── ★ 高さの基準は「噴出口 ＝ 火口の底」である（指摘②）───────────────
+    ///
+    /// 4 つとも <c>snapshot.VentWorld</c>（火口の底 ＋ 少しの浮き）に乗せる。
+    /// 山頂（火口の縁）に乗せると**窪みの深さのぶんだけ丸ごと宙に浮く**。
+    /// 底は山と一緒に上がるので、sim 側が毎 tick 引き直したものをそのまま使う
+    /// （<c>VolcanoEruption.SampleVent</c>）。
     ///
     /// ── 強弱の付け方（magnitude は密度であってサイズではない）───────────────
     ///
@@ -77,15 +105,7 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class VolcanoEruptionFx
     {
-        /// ── ★ 高さの基準は「噴出口 ＝ 火口の底」である（2026-08-22、指摘②）────────
-        ///
-        /// 所有者の指摘は「噴火口の炎が浮いて見えるので、この窪みと一致させてください」。
-        /// 3 つとも <c>snapshot.VentWorld</c>（火口の底 ＋ 少しの浮き）に乗せる。
-        /// 山頂（火口の縁）に乗せると、**窪みの深さのぶんだけ丸ごと宙に浮く**。
-        /// 底は山と一緒に上がるので、sim 側が毎 tick 引き直したものをそのまま使う
-        /// （<c>VolcanoEruption.SampleVent</c>）。
-        ///
-        /// <summary>噴煙を噴出口からどれだけ上げるか（m）。</summary>
+        /// <summary>噴煙柱の足元を噴出口からどれだけ上げるか（m）。</summary>
         private const float PlumeLiftMetres = 8f;
 
         /// <summary>炎を噴出口からどれだけ上げるか（m）。</summary>
@@ -93,6 +113,18 @@ namespace DisasterPlus.Game
 
         /// <summary>噴石を噴出口からどれだけ上げるか（m）。</summary>
         private const float EjectaLiftMetres = 4f;
+
+        /// <summary>風向きを引く塩（<see cref="DeterministicRandom"/>）。**地点だけから決める。**</summary>
+        private const uint WindDirectionSalt = 0x57494E44u;
+
+        /// <summary>風速を引く塩。</summary>
+        private const uint WindSpeedSalt = 0x57535044u;
+
+        /// <summary>噴煙を倒す風速の下限（m/秒）。**⑤が決めた演出値**（気象の実測ではない）。</summary>
+        private const float WindSpeedMinMetresPerSecond = 6f;
+
+        /// <summary>同上の上限。</summary>
+        private const float WindSpeedMaxMetresPerSecond = 16f;
 
         /// <summary>
         /// 噴石の窓を刻む時計（秒）。**バニラの効果時計**である ——
@@ -110,12 +142,24 @@ namespace DisasterPlus.Game
         private static bool _flameDrawn;
         private static bool _ejectaDrawn;
 
+        /// <summary>今フレームに湧かせた噴煙柱の段数（診断用。0 なら柱は 1 段も出ていない）。</summary>
+        private static int _plumeSegments;
+
+        /// <summary>直近に組んだ柱の高さ（m。診断用）。</summary>
+        private static float _plumeHeightMetres;
+
         /// <summary>
         /// 今フレーム、火口に何か 1 つでも出したか。
         /// **診断（sim スレッド）から読まれるので <c>bool</c> のまま持つ** ——
         /// ここで Unity の参照を <c>== null</c> と比べてはいけない。
         /// </summary>
         public static bool Drawing { get { return _plumeDrawn || _flameDrawn || _ejectaDrawn; } }
+
+        /// <summary>今フレームに湧かせた噴煙柱の段数（診断用）。</summary>
+        public static int PlumeSegments { get { return _plumeSegments; } }
+
+        /// <summary>直近に組んだ噴煙柱の高さ（m。噴出口からの相対。診断用）。</summary>
+        public static float PlumeHeightMetres { get { return _plumeHeightMetres; } }
 
         /// <summary>
         /// 直近のフレームで実際に門にした借用の可否（診断とパネルの断りに出す）。
@@ -142,6 +186,8 @@ namespace DisasterPlus.Game
                 _flameDrawn = false;
                 _ejectaDrawn = false;
 
+                _plumeSegments = 0;
+
                 if (!_renderErrorLogged)
                 {
                     _renderErrorLogged = true;
@@ -161,6 +207,8 @@ namespace DisasterPlus.Game
             _plumeDrawn = false;
             _flameDrawn = false;
             _ejectaDrawn = false;
+            _plumeSegments = 0;
+            _plumeHeightMetres = 0f;
         }
 
         private static void Step(VolcanoSnapshot snapshot)
@@ -168,6 +216,7 @@ namespace DisasterPlus.Game
             _plumeDrawn = false;
             _flameDrawn = false;
             _ejectaDrawn = false;
+            _plumeSegments = 0;
 
             if (snapshot == null || !snapshot.Valid || !snapshot.EruptionActive)
             {
@@ -204,6 +253,7 @@ namespace DisasterPlus.Game
             float craterRadius = VolcanoShape.CraterRadiusOf(snapshot.Footprint.RadiusMetres);
 
             ParticleEffect ash = VolcanoVanillaFx.AshPlume();
+            ParticleEffect umbrella = VolcanoVanillaFx.AshUmbrella();
             ParticleEffect flames = VolcanoVanillaFx.Flames();
             ParticleEffect ejecta = VolcanoVanillaFx.Ejecta();
 
@@ -216,30 +266,80 @@ namespace DisasterPlus.Game
             //   継続モードの粒子数は timeDelta に比例するので、渡しても 0 になる。
             if (dt <= 0f) return;
 
-            _plumeDrawn = RenderAsh(ash, camera, vent, craterRadius, unit, dt);
+            _plumeDrawn = RenderColumn(ash, umbrella, camera, vent,
+                                       snapshot.Footprint.Centre, craterRadius, unit, dt);
             _flameDrawn = RenderFlames(flames, camera, vent, craterRadius, unit, dt);
             _ejectaDrawn = RenderEjecta(ejecta, camera, vent, craterRadius, unit, dt);
         }
 
-        /// <summary>灰の柱。**継続モード**（<c>timeOffset &lt; 0</c>）で毎フレーム押し出す。</summary>
-        private static bool RenderAsh(ParticleEffect effect, RenderManager.CameraInfo camera,
-                                      Vec3 vent, float craterRadius, float unit, float dt)
+        /// <summary>
+        /// <b>噴火柱</b>。<c>Core/Volcano/EruptionColumn</c> が決めた 9 段を、段ごとに
+        /// <c>SpawnArea(位置, 上, 半径, 高さ)</c> の**円柱**として湧かす。
+        /// **継続モード**（<c>timeOffset &lt; 0</c>）で毎フレーム押し出す。
+        ///
+        /// ★ 傘の段は別の複製（<c>AshUmbrella</c>）で描く —— 淡くて粒が大きく、寿命が長い。
+        ///   引けなければ**柱の複製で代用する**（傘が濃くなるだけで、消えはしない）。
+        ///
+        /// ★ 風は火山の地点から決まる（<see cref="DeterministicRandom"/>）ので、
+        ///   **同じ山なら毎回同じ向きに倒れる**。<c>SwayAt</c> の 1 本の正弦だけが
+        ///   ゆっくり左右へ振る（37 秒周期）。フレーム番号は 1 度も混ぜない。
+        /// </summary>
+        private static bool RenderColumn(ParticleEffect column, ParticleEffect umbrella,
+                                         RenderManager.CameraInfo camera, Vec3 vent,
+                                         Vec3 centre, float craterRadius, float unit, float dt)
         {
-            if (effect == null) return false;
+            if (column == null && umbrella == null) return false;
 
-            var area = new EffectInfo.SpawnArea(
-                new Vector3(vent.X, vent.Y + PlumeLiftMetres, vent.Z),
-                Vector3.up,
-                EruptionEffectPlan.PlumeRadiusMetres(craterRadius, unit));
+            uint seed = DeterministicRandom.Hash(
+                unchecked((uint)Mathf.RoundToInt(centre.X)),
+                unchecked((uint)Mathf.RoundToInt(centre.Z)));
 
-            // InstanceID は空でよい。ParticleEffect は probability に定数 100 を渡す
-            // （＝必ず出す）ので、Randomizer の種が 0 に固定されても影響が無い。
-            // 建物の旗の検査も「建物 0 なら飛ばす」形になっている（IL 実測）。
-            effect.RenderEffect(default(InstanceID), area, Vector3.zero, 0f,
-                                EruptionEffectPlan.PlumeMagnitude(unit),
-                                -1f,   // ★ 継続モード。バニラの陥没穴と同じ形
-                                dt, camera);
-            return true;
+            float bearing = 2f * Mathf.PI * DeterministicRandom.Unit(seed, WindDirectionSalt)
+                            + EruptionColumn.SwayAt(_clockSeconds);
+            float windSpeed = WindSpeedMinMetresPerSecond
+                              + (WindSpeedMaxMetresPerSecond - WindSpeedMinMetresPerSecond)
+                                * DeterministicRandom.Unit(seed, WindSpeedSalt);
+
+            var plume = new EruptionColumn(craterRadius, unit,
+                                           Mathf.Cos(bearing), Mathf.Sin(bearing), windSpeed);
+            _plumeHeightMetres = plume.HeightMetres;
+
+            float baseX = vent.X;
+            float baseY = vent.Y + PlumeLiftMetres;
+            float baseZ = vent.Z;
+
+            int drawn = 0;
+            for (int i = 0; i < plume.SegmentCount; i++)
+            {
+                EruptionColumnSegment segment = plume.SegmentAt(i);
+                if (segment.Magnitude <= 0f) continue;
+
+                ParticleEffect effect = segment.Umbrella
+                    ? (umbrella != null ? umbrella : column)
+                    : column;
+                if (effect == null) continue;
+
+                var area = new EffectInfo.SpawnArea(
+                    new Vector3(baseX + segment.OffsetX,
+                                baseY + segment.OffsetY,
+                                baseZ + segment.OffsetZ),
+                    Vector3.up,
+                    segment.RadiusMetres,
+                    segment.HalfHeightMetres);
+
+                // InstanceID は空でよい。ParticleEffect は probability に定数 100 を渡す
+                // （＝必ず出す）ので、Randomizer の種が 0 に固定されても影響が無い。
+                // 建物の旗の検査も「建物 0 なら飛ばす」形になっている（IL 実測）。
+                effect.RenderEffect(default(InstanceID), area,
+                                    new Vector3(segment.DriftX, segment.DriftY, segment.DriftZ),
+                                    0f, segment.Magnitude,
+                                    -1f,   // ★ 継続モード。バニラの陥没穴と同じ形
+                                    dt, camera);
+                drawn++;
+            }
+
+            _plumeSegments = drawn;
+            return drawn > 0;
         }
 
         /// <summary>火口の炎。<b>ゲーム自身の建物火災の炎そのもの。</b></summary>

@@ -506,6 +506,11 @@ namespace DisasterPlus.Game
             b.Line(3, "borrowed effects", VolcanoEruptionFx.Detail);
             b.Line(3, "ash plume", facts.AshResolved
                 ? VolcanoVanillaFx.AshName + " (no DLC needed)" : "NOT resolved");
+            // ★ 噴煙は 1 回ではなく「柱の段」で出す（Core/Volcano/EruptionColumn）。
+            //   0 段なら柱は 1 本も立っていない ——「引けている」と「出ている」は別である。
+            b.Line(3, "eruption column", VolcanoEruptionFx.PlumeSegments + " of "
+                + EruptionColumn.MaxSegments + " segment(s) this frame, "
+                + VolcanoEruptionFx.PlumeHeightMetres.ToString("F0") + " m tall");
             b.Line(3, "flames", facts.FlameResolved
                 ? VolcanoVanillaFx.FlameName + " (the game's own building fire, no DLC needed)"
                 : "NOT resolved");

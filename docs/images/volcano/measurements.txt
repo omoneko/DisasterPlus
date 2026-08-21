@@ -65,6 +65,15 @@ grid = 16 m (the game's own terrain grid)
      0.55   |  320.8 |  270.0  |   50.8   |  128
      1.00   |  590.8 |  540.0  |   50.8   |  128
 
+## eruption column (strato, crater r = 144 m)
+  t/total | intensity | column m | umbrella r m | bend m | vent r m
+    0.04  |    0.50   |   1110    |     675      |  333   |  86
+    0.10  |    1.00   |   1800    |     856      |  540   |  86
+    0.30  |    1.00   |   1800    |     856      |  540   |  86
+    0.55  |    1.00   |   1800    |     856      |  540   |  86
+    0.80  |    0.57   |   1209    |     700      |  363   |  86
+    0.95  |    0.14   |   617    |     545      |  185   |  86
+
 ## uplift pacing (strato, R = 1200 m, H = 600 m, 30 in-game minutes)
   in-game duration is UNCHANGED: 30 in-game minutes = 1365 sim frames
   (1 in-game minute = 45.51 sim frames; wall clock depends on the game speed and the fixed-update rate)

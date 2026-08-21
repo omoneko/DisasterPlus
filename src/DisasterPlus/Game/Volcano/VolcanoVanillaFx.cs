@@ -149,6 +149,13 @@ namespace DisasterPlus.Game
 
         private static GameObject _ashObject;
         private static ParticleEffect _ashClone;
+
+        /// <summary>
+        /// 噴煙柱の**傘**に使う 2 個目の複製（淡い灰・粒が大きい・寿命が長い）。
+        /// 引けなくても柱の複製で代用できるので、こちらは<b>門にしない</b>。
+        /// </summary>
+        private static GameObject _umbrellaObject;
+        private static ParticleEffect _umbrellaClone;
         private static GameObject _ejectaObject;
         private static ParticleEffect _ejectaClone;
         private static GameObject _dustObject;
@@ -168,6 +175,7 @@ namespace DisasterPlus.Game
 
         /// <summary>複製に失敗したので、以後は元のプレハブをそのまま使う。</summary>
         private static bool _ashCloneRefused;
+        private static bool _umbrellaCloneRefused;
         private static bool _ejectaCloneRefused;
         private static bool _dustCloneRefused;
 
@@ -192,6 +200,7 @@ namespace DisasterPlus.Game
         private static bool _ejectaOk;
         private static bool _dustOk;
         private static bool _ashCloned;
+        private static bool _umbrellaCloned;
         private static bool _ejectaCloned;
         private static bool _dustCloned;
 
@@ -247,6 +256,45 @@ namespace DisasterPlus.Game
             }
 
             return _ashClone;
+        }
+
+        /// <summary>
+        /// 噴煙柱の**傘**に使う複製。引けない・複製できないときは <c>null</c> を返す ——
+        /// **元のプレハブへは落とさない**。呼び出し側（<see cref="VolcanoEruptionFx"/>）は
+        /// そのとき柱の複製で傘を描くので、素の <c>Factory Smoke</c>（可視 1 km・粒 7）で
+        /// 代用するより見た目が良い。
+        /// </summary>
+        internal static ParticleEffect AshUmbrella()
+        {
+            ParticleEffect resolved = ResolveUmbrella();
+            _umbrellaCloned = _umbrellaClone != null;
+            return resolved;
+        }
+
+        private static ParticleEffect ResolveUmbrella()
+        {
+            if (_umbrellaClone != null) return _umbrellaClone;
+            if (_umbrellaCloneRefused) return null;
+
+            // ★ 探索の間引きは噴煙柱の側（Source）が持っている。ここで 2 本目の
+            //   カウンタを増やさないよう、同じ 1 個の元プレハブを使い回す。
+            ParticleEffect source = Source(AshName, ref _ashMiss, ref _ashMissLogged);
+            if (source == null) source = Source(AshAltName, ref _ashAltMiss, ref _ashMissLogged);
+            if (source == null) return null;
+
+            ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
+
+            _umbrellaObject = CloneAshUmbrella(source);
+            _umbrellaClone = _umbrellaObject == null
+                ? null : _umbrellaObject.GetComponent<ParticleEffect>();
+            if (_umbrellaClone == null)
+            {
+                ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
+                _umbrellaCloneRefused = true;
+                return null;
+            }
+
+            return _umbrellaClone;
         }
 
         /// <summary>
@@ -468,6 +516,8 @@ namespace DisasterPlus.Game
                        + ", particle materials="
                        + (_particleMaterialCount > 0 ? _particleMaterialCount.ToString() : "?")
                        + "; ash=" + State(_ashOk, _ashCloned, _ashCloneRefused)
+                       + ", umbrella=" + (_umbrellaCloned ? "cloned"
+                            : (_umbrellaCloneRefused ? "shares the column clone" : "not yet"))
                        + ", flames=" + (_flameOk ? "shared" : "MISSING")
                        + ", ejecta=" + State(_ejectaOk, _ejectaCloned, _ejectaCloneRefused)
                        + ", dust=" + State(_dustOk, _dustCloned, _dustCloneRefused);
@@ -536,6 +586,7 @@ namespace DisasterPlus.Game
         internal static void Destroy()
         {
             ReleaseAndDestroy(ref _ashObject, ref _ashClone);
+            ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
             ReleaseAndDestroy(ref _ejectaObject, ref _ejectaClone);
             ReleaseAndDestroy(ref _dustObject, ref _dustClone);
 
@@ -545,6 +596,7 @@ namespace DisasterPlus.Game
             _flame = null;
 
             _ashCloneRefused = false;
+            _umbrellaCloneRefused = false;
             _ejectaCloneRefused = false;
             _dustCloneRefused = false;
             _ashMiss = 0;
@@ -560,6 +612,7 @@ namespace DisasterPlus.Game
             _ejectaOk = false;
             _dustOk = false;
             _ashCloned = false;
+            _umbrellaCloned = false;
             _ejectaCloned = false;
             _dustCloned = false;
             // ★ _ashMissLogged などは戻さない（ゲームのビルドに対する事実であって
