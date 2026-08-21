@@ -45,8 +45,7 @@ namespace DisasterPlus.Game
         public static string FireWhirlTooltip = "Place a stationary, burning vortex";
 
         public static string NdrDetected =
-            "Natural Disasters Renewal detected. Vanilla-side destruction follows its tornado settings; "
-            + "fire spread is unaffected.";
+            "Natural Disasters Renewal detected.";
 
         public static string FireWhirlNeedsDlc =
             "Fire whirls require the Natural Disasters DLC.";
@@ -372,6 +371,9 @@ namespace DisasterPlus.Game
         // この設定を既定 ON にしてよい根拠そのものである（強度 55 で追加分が厳密に 0）。
         public static string EarthquakeShakeBoost =
             "Scale camera shake with intensity and distance";
+        // ★ **設定画面からは降ろした。** 何をする設定かは EarthquakeShakeBoost の
+        //   ラベルが名乗っており、「バニラはこうしている」の解説は診断ダンプにある
+        //   （Mod.OnSettingsUI の doc の表）。**キーは消さない。再利用もしない。**
         public static string EarthquakeShakeBoostNote =
             "Vanilla ignores intensity here, so a 25.5 quake shakes exactly as much as a 5.5 one. "
             + "At the vanilla default intensity (5.5) this option changes nothing.";
@@ -442,7 +444,8 @@ namespace DisasterPlus.Game
         //    接頭辞を書ける場所が無いからである（行の接頭辞は EarthquakeRows が
         //    付けるが、テクスチャの中には文字を置かない）。
         public static string EarthquakeSeismogramEnabled =
-            "Synthesize a realistic seismogram (P wave, S wave and coda)";
+            "Synthesize a realistic seismogram (also changes how the camera shakes)";
+        // ★ **設定画面からは降ろした**（EarthquakeShakeBoostNote と同じ扱い）。
         public static string EarthquakeSeismogramNote =
             "Vanilla shakes the camera with two fixed sine waves that never arrive, never build "
             + "and never decay. This option replaces that pattern with a synthesized record and "
@@ -626,7 +629,9 @@ namespace DisasterPlus.Game
         public static string LogChannelTyphoon = "Typhoon";
 
         // --- ④台風（Task 3: 論理オブジェクトと経路追従） ---
-        public static string TyphoonIntensity = "Typhoon intensity (10-255)";
+        public static string TyphoonIntensity = "Typhoon intensity (10-255; vanilla storms use 55)";
+        // ★ **設定画面からは降ろした。** 「バニラの嵐は 55」はスライダーの
+        //   ラベル（TyphoonIntensity）に畳んである。
         public static string TyphoonIntensityNote =
             "The game's own storms use 55. Above 100 is beyond anything vanilla generates.";
 
@@ -774,6 +779,8 @@ namespace DisasterPlus.Game
         //   強いかを設定画面とパネルの両方で名乗る。
         public static string TyphoonSouthernHemisphere =
             "Southern hemisphere (the dangerous side is the LEFT of the track)";
+        // ★ **設定画面からは降ろした。** どちら側が危険半円かは
+        //   TyphoonSouthernHemisphere のラベルが名乗っており、理屈は診断ダンプにある。
         public static string TyphoonDangerousSideNote =
             "A real typhoon is not symmetric: on one side the spin and the storm's own "
             + "travel add up. That side gets a slightly wider and slightly more likely "
@@ -827,10 +834,8 @@ namespace DisasterPlus.Game
             + "nothing to see coming, only the damage. Each patch is a few dozen metres "
             + "across, lives for a short while and then stops. They all end with the storm.";
         public static string TyphoonTornadoRetiredNote =
-            "The old \"accompanying tornadoes\" option has been removed. Tornado-strength "
-            + "damage now happens without spawning tornadoes, which also keeps it clear of "
-            + "Natural Disasters Renewal's tornado settings. Your old saved value is kept in "
-            + "the settings file but is never read again.";
+            "The old \"accompanying tornadoes\" option was removed; its saved value is "
+            + "never read again.";
 
         // --- ④台風（Task 9: 巨大な回転雲） ---
         //

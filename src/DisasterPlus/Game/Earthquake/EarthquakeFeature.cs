@@ -165,6 +165,36 @@ namespace DisasterPlus.Game
             WriteTsunamiChain(b, snapshot);
             WriteLongPeriod(b, snapshot);
             WriteQuakes(b, snapshot);
+            WriteNotes(b);
+        }
+
+        /// <summary>
+        /// **設定画面から降ろした解説の行き場**（<c>Mod.OnSettingsUI</c> の doc の表）。
+        ///
+        /// 所有者の指示は「Option 画面も説明書きが長すぎます」だった。何をする設定かは
+        /// チェックボックスのラベルが名乗っているので、**「バニラはこうしている」という
+        /// 事実**だけがここへ来る。テスターと不具合報告が読むのはこのファイルであり、
+        /// 設定を選ぼうとしている人が読む場所ではない。
+        ///
+        /// ★ ここは sim スレッドである（<c>DiagnosticDump</c> のクラス doc）。
+        ///   ゲームのバッファにも UI にも触らない、定数の行だけにすること。
+        /// </summary>
+        private static void WriteNotes(DiagnosticBuilder b)
+        {
+            b.Line(1, "note: camera shake",
+                "vanilla ignores intensity in the camera shake, so a 25.5 quake shakes "
+                + "exactly as much as a 5.5 one. At the vanilla default intensity (55 raw, "
+                + "shown as 5.5) the mod's addition is exactly zero, which is why the option "
+                + "can default to on (design appendix A-7)");
+            b.Line(1, "note: seismogram",
+                "vanilla shakes the camera with two fixed sine waves that never arrive, never "
+                + "build and never decay. The seismogram option replaces that pattern with a "
+                + "synthesized record. It is Disaster +'s own model, not anything the game "
+                + "computes, so it is off by default");
+            b.Line(1, "note: long-period",
+                "vanilla ignores building height entirely, both in the shaking and in the "
+                + "damage. Long-period motion is a model Disaster + invented and it collapses "
+                + "buildings vanilla would not, so it is off by default");
         }
 
         /// <summary>

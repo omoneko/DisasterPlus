@@ -13,6 +13,30 @@ namespace DisasterPlus.Game
         /// <summary>
         /// メインメニューの起動中に 1 回だけ呼ばれる（言語切替でも再実行される）。
         /// レベルロード後にしか分からない情報からオプションを組み立ててはいけない。
+        ///
+        /// ── ★★ この画面に文章を足す前に読むこと ────────────────────
+        ///
+        /// 所有者の指示は「Option 画面も説明書きが長すぎます。もっとシンプルに」である。
+        /// 線引きはこう決めた:
+        ///
+        /// | ここに出す | 例 |
+        /// |---|---|
+        /// | **選ぶために要ること** | つまみのラベル、範囲、既定値の意味 |
+        /// | **使えない理由** | 「Natural Disasters DLC が必要です」 |
+        /// | **取り返しがつかないこと** | 火山の地形変更は戻せない |
+        /// | **設定が消えた告知** | 退役した項目（.cgs は公開契約である） |
+        ///
+        /// | ここに出さない | 行き先 |
+        /// |---|---|
+        /// | 「バニラはこうしている」の解説 | 診断ダンプ（<c>WriteNotes</c>） |
+        /// | 機能の仕組みの説明 | その機能のパネル（左上のショートカット） |
+        /// | テスターが切り分けに使う事実 | 診断ダンプ |
+        ///
+        /// **落としたのは説明であって、情報ではない。** 説明の 1 行を消すときは、
+        /// その内容がダンプかパネルのどちらにあるかを確かめてから消すこと。
+        ///
+        /// ★ ラベルに畳めるものはラベルに畳む。1 行の注記より、選ぶ対象の名前に
+        ///   書いてあるほうが短くて確実である（例: 危険半円がどちら側か）。
         /// </summary>
         public void OnSettingsUI(UIHelperBase helper)
         {
@@ -137,20 +161,12 @@ namespace DisasterPlus.Game
                     v => ModSettings.EarthquakeSeismogram.value = v);
             }
 
-            // 揺れの補正が「既定の強度では何も変えない」ことを名乗る。バニラを抑制せず
-            // 足すだけで、強度 55（バニラ既定）では追加分が厳密に 0 になる（§A-7）。
-            // 注記の出し方は IntensityUnlockHandledByOther と同じ（root への AddGroup）。
-            helper.AddGroup(Strings.EarthquakeShakeBoostNote);
-
-            // 長周期地震動が「バニラのどこにも無い量」であることを、設定画面でも名乗る。
-            // パネルの第 2 層の注記と同じ文（EarthquakeLongPeriodNote）。
-            if (ModCompat.NaturalDisastersOwned)
-            {
-                helper.AddGroup(Strings.EarthquakeLongPeriodNote);
-
-                // 合成記象が「ゲームが計算しているものではない」ことを設定画面でも名乗る。
-                helper.AddGroup(Strings.EarthquakeSeismogramNote);
-            }
+            // ★ ②の解説 3 本（揺れの補正・長周期・合成記象）はこの画面から降ろした。
+            //   - 何をする設定かは**チェックボックスのラベル**が名乗っている
+            //     （「バニラには無い被害を足します」等）
+            //   - 「バニラはこうしている」の解説は診断ダンプ（EarthquakeFeature.WriteNotes）
+            //   - 長周期の注記は②のパネルにも同じ文が出る（EarthquakeLayer2Rows）
+            //   消したのは説明であって、情報ではない（このメソッドの doc の表）。
 
             // ②は機能そのものが DLC 依存（EarthquakeAI のプレハブが存在しない）。
             // ForecastHazardNeedsDlc / FireWhirlNeedsDlc と同じ形で理由を書く。
@@ -201,21 +217,17 @@ namespace DisasterPlus.Game
             typhoon.AddCheckbox(Strings.TyphoonVanillaCloudBoost,
                 ModSettings.TyphoonVanillaCloudBoost.value,
                 v => ModSettings.TyphoonVanillaCloudBoost.value = v);
-            // 強度がバニラの領域を超えることを名乗る（EarthquakeShakeBoostNote と同じ形）。
-            helper.AddGroup(Strings.TyphoonIntensityNote);
-            // ★ 「バニラに風害は存在しない」「数値は風速ではない」を設定画面でも名乗る。
-            helper.AddGroup(Strings.TyphoonWindNote);
-            // ★ 危険半円がどちら側かを設定画面でも名乗る（左右が逆だと気付けない）。
-            helper.AddGroup(Strings.TyphoonDangerousSideNote);
-            // ★ 「竜巻の姿は出ないのに竜巻並みに壊れる」を設定画面でも名乗る。
-            helper.AddGroup(Strings.TyphoonGustNote);
-            // ★★ **退役した設定を黙って消さない。** 随伴竜巻を ON にしていた
-            //    プレイヤーには、チェックボックスが消えた理由と、.cgs の値が
-            //    もう読まれないことを 1 度は見せる（設定は公開契約である）。
+            // ★ ④の解説 5 本もこの画面から降ろした。
+            //   - 強度の目安（バニラの嵐は 55）は**スライダーのラベル**に畳んだ
+            //   - 危険半円がどちら側かは**チェックボックスのラベル**が名乗っている
+            //   - 風害・局所被害・氾濫の説明は④のパネルに同じ文が出る
+            //     （TyphoonEffectRows。左上のショートカットから 1 クリック）
+            //   - 危険半円の理屈は診断ダンプ（TyphoonFeatureDiagnostics.WriteNotes）
+            //
+            // ★★ **退役した設定の告知だけは残す。** 随伴竜巻を ON にしていた
+            //    プレイヤーには、その項目が消えたことと .cgs の値がもう読まれない
+            //    ことを 1 度は見せる（設定は公開契約である）。
             helper.AddGroup(Strings.TyphoonTornadoRetiredNote);
-            // ★ 「水位は必ず戻す」を設定画面でも名乗る。氾濫の唯一の怖さは
-            //    「MOD を外したら川が溢れたままだった」である。
-            helper.AddGroup(Strings.TyphoonFloodNote);
 
             // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
             // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。
@@ -365,6 +377,9 @@ namespace DisasterPlus.Game
 
             dbg.AddDropdown(Strings.OverlayHotkey, keys, current2,
                 v => ModSettings.OverlayHotkey.value = codes[v]);
+            // ★ 診断ダンプの出し方はもうここに書かない。左上のショートカットの
+            //   「診断」タブに**押せるボタン**がある（DiagnosticsPanel）——
+            //   説明を減らすというのは、出し方ごと隠すことではない。
 
             // Assembly-CSharp にも同名の LogChannel (ゲーム側の別物) があるため、
             // using を足すと解決が衝突する。常に完全修飾で参照する。

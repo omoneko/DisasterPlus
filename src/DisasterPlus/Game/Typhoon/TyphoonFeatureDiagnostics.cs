@@ -39,6 +39,25 @@ namespace DisasterPlus.Game
             WriteStormPrefab(b, snapshot.Prefab);
             WriteWeather(b, snapshot);
             WriteTyphoon(b, snapshot);
+            WriteNotes(b);
+        }
+
+        /// <summary>
+        /// **設定画面から降ろした解説の行き場**（<c>Mod.OnSettingsUI</c> の doc の表）。
+        ///
+        /// 風害・局所被害・氾濫の説明は④のパネルに同じ文が出る（<c>TyphoonEffectRows</c>）。
+        /// ここに置くのは、パネルにも設定画面にも無い**危険半円の理屈**だけである。
+        ///
+        /// ★ ここは sim スレッドである（<c>DiagnosticDump</c> のクラス doc）。
+        ///   ゲームのバッファにも UI にも触らない、定数の行だけにすること。
+        /// </summary>
+        private static void WriteNotes(DiagnosticBuilder b)
+        {
+            b.Line(1, "note: dangerous side",
+                "a real typhoon is not symmetric: on one side the spin and the storm's own "
+                + "travel add up. That side gets a slightly wider and slightly more likely "
+                + "damage footprint - the right of the track in the northern hemisphere, the "
+                + "left in the southern one. Which side is used is a setting");
         }
 
         /// <summary>
