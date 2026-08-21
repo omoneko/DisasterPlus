@@ -209,8 +209,13 @@ namespace DisasterPlus.Core.Volcano
         /// <summary>柱がゆっくり左右に振れる周期（秒）。**点滅ではなく、ゆらぎである。**</summary>
         public const float SwaySeconds = 37f;
 
-        /// <summary>同上の振れ幅（ラジアン）。</summary>
-        public const float SwayRadians = 0.16f;
+        /// <summary>
+        /// 同上の振れ幅（ラジアン）。**風向きそのものを回す**ので、傘のいちばん遠い端は
+        /// この角度 × その距離だけ横へ動く（既定で ±230 m ほど）。傘の半径より小さいので
+        /// 「輪郭がゆっくりぼやける」に見える。**これ以上大きくしないこと** ——
+        /// 大きくすると傘が首を振り、湧かす場所の移動が風速そのものより速くなる。
+        /// </summary>
+        public const float SwayRadians = 0.10f;
 
         /// <summary>半径がこれを下回ったら使わない（m）。<see cref="EruptionEffectPlan"/> と同じ下限。</summary>
         public const float MinRadiusMetres = EruptionEffectPlan.MinRadiusMetres;
