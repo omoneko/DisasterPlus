@@ -77,6 +77,14 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class VolcanoEruptionFx
     {
+        /// ── ★ 高さの基準は「噴出口 ＝ 火口の底」である（2026-08-22、指摘②）────────
+        ///
+        /// 所有者の指摘は「噴火口の炎が浮いて見えるので、この窪みと一致させてください」。
+        /// 3 つとも <c>snapshot.VentWorld</c>（火口の底 ＋ 少しの浮き）に乗せる。
+        /// 山頂（火口の縁）に乗せると、**窪みの深さのぶんだけ丸ごと宙に浮く**。
+        /// 底は山と一緒に上がるので、sim 側が毎 tick 引き直したものをそのまま使う
+        /// （<c>VolcanoEruption.SampleVent</c>）。
+        ///
         /// <summary>噴煙を噴出口からどれだけ上げるか（m）。</summary>
         private const float PlumeLiftMetres = 8f;
 
@@ -191,7 +199,7 @@ namespace DisasterPlus.Game
             if (dt > 0f) _clockSeconds += dt;
 
             float unit = Clamp01(snapshot.EruptionIntensityUnit);
-            Vec3 summit = snapshot.SummitWorld;
+            Vec3 vent = snapshot.VentWorld;
 
             float craterRadius = VolcanoShape.CraterRadiusOf(snapshot.Footprint.RadiusMetres);
 
@@ -208,19 +216,19 @@ namespace DisasterPlus.Game
             //   継続モードの粒子数は timeDelta に比例するので、渡しても 0 になる。
             if (dt <= 0f) return;
 
-            _plumeDrawn = RenderAsh(ash, camera, summit, craterRadius, unit, dt);
-            _flameDrawn = RenderFlames(flames, camera, summit, craterRadius, unit, dt);
-            _ejectaDrawn = RenderEjecta(ejecta, camera, summit, craterRadius, unit, dt);
+            _plumeDrawn = RenderAsh(ash, camera, vent, craterRadius, unit, dt);
+            _flameDrawn = RenderFlames(flames, camera, vent, craterRadius, unit, dt);
+            _ejectaDrawn = RenderEjecta(ejecta, camera, vent, craterRadius, unit, dt);
         }
 
         /// <summary>灰の柱。**継続モード**（<c>timeOffset &lt; 0</c>）で毎フレーム押し出す。</summary>
         private static bool RenderAsh(ParticleEffect effect, RenderManager.CameraInfo camera,
-                                      Vec3 summit, float craterRadius, float unit, float dt)
+                                      Vec3 vent, float craterRadius, float unit, float dt)
         {
             if (effect == null) return false;
 
             var area = new EffectInfo.SpawnArea(
-                new Vector3(summit.X, summit.Y + PlumeLiftMetres, summit.Z),
+                new Vector3(vent.X, vent.Y + PlumeLiftMetres, vent.Z),
                 Vector3.up,
                 EruptionEffectPlan.PlumeRadiusMetres(craterRadius, unit));
 
@@ -236,12 +244,12 @@ namespace DisasterPlus.Game
 
         /// <summary>火口の炎。<b>ゲーム自身の建物火災の炎そのもの。</b></summary>
         private static bool RenderFlames(ParticleEffect effect, RenderManager.CameraInfo camera,
-                                         Vec3 summit, float craterRadius, float unit, float dt)
+                                         Vec3 vent, float craterRadius, float unit, float dt)
         {
             if (effect == null) return false;
 
             var area = new EffectInfo.SpawnArea(
-                new Vector3(summit.X, summit.Y + FlameLiftMetres, summit.Z),
+                new Vector3(vent.X, vent.Y + FlameLiftMetres, vent.Z),
                 Vector3.up,
                 EruptionEffectPlan.FlameRadiusMetres(craterRadius, unit));
 
@@ -260,7 +268,7 @@ namespace DisasterPlus.Game
         /// 継続モードで自分で窓を作れば、生存期間は完全にこちらの手の内にある。
         /// </summary>
         private static bool RenderEjecta(ParticleEffect effect, RenderManager.CameraInfo camera,
-                                         Vec3 summit, float craterRadius, float unit, float dt)
+                                         Vec3 vent, float craterRadius, float unit, float dt)
         {
             if (effect == null) return false;
 
@@ -270,7 +278,7 @@ namespace DisasterPlus.Game
             if (magnitude <= 0f) return false;
 
             var area = new EffectInfo.SpawnArea(
-                new Vector3(summit.X, summit.Y + EjectaLiftMetres, summit.Z),
+                new Vector3(vent.X, vent.Y + EjectaLiftMetres, vent.Z),
                 Vector3.up,
                 EruptionEffectPlan.EjectaRadiusMetres(craterRadius));
 

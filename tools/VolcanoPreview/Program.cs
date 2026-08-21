@@ -66,6 +66,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             }
 
             GrowthFrames(outDir, log);
+            CraterFrames(outDir, log);
             Pacing.Report(outDir, log);
 
             File.WriteAllText(Path.Combine(outDir, "measurements.txt"), log.ToString());
@@ -107,7 +108,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                 for (int x = 0; x < size; x++)
                 {
                     float dx = (x - half) * Cell;
-                    f.H[z * size + x] = f.Relief.ProfileAt(dx, dz, radius, height);
+                    // ★ ゲームが実際に書く形そのもの（火口はプロファイルの一部である）。
+                    f.H[z * size + x] = VolcanoCrater.ProfileAt(f.Relief, dx, dz, radius, height);
                 }
             }
             return f;
@@ -256,8 +258,12 @@ namespace DisasterPlus.Tools.VolcanoPreview
                     if (b > maxOff) maxOff = b;
                     if (d >= r && a > worstOutside) worstOutside = a;
 
-                    // 強さ 0 は VolcanoShape.ProfileAt そのものでなければならない。
-                    float today = VolcanoShape.ProfileAt(form, d, r, h);
+                    // 強さ 0 は「立て直した円錐 ∧ 火口の天井」そのものでなければならない
+                    // （ここだけは VolcanoCrater を通さず、式を独立に組み直して比べる）。
+                    float cone = VolcanoShape.ProfileAt(form, d, r,
+                                                        h * VolcanoCrater.SummitScale(form, r));
+                    float ceiling = VolcanoCrater.CeilingMetres(d, r, h);
+                    float today = cone < ceiling ? cone : ceiling;
                     double e = Math.Abs(today - b);
                     if (e > diff) diff = e;
                 }
@@ -300,11 +306,12 @@ namespace DisasterPlus.Tools.VolcanoPreview
                 double th = 2.0 * Math.PI * a / 720.0;
                 float dx = (float)(Math.Cos(th) * ring);
                 float dz = (float)(Math.Sin(th) * ring);
-                float v = on.Relief.ProfileAt(dx, dz, r, h);
+                float v = VolcanoCrater.ProfileAt(on.Relief, dx, dz, r, h);
                 if (v < deep) { deep = v; deepAngle = th; }
                 if (v > shallow) { shallow = v; shallowAngle = th; }
             }
-            float smooth = VolcanoShape.ProfileAt(form, ring, r, h);
+            float smooth = VolcanoShape.ProfileAt(form, ring, r,
+                                                  h * VolcanoCrater.SummitScale(form, r));
 
             log.AppendLine("  cross-section @0.55R = " + F(ring) + " m:");
             log.AppendLine("    smooth cone       : " + F1(smooth) + " m");
@@ -325,8 +332,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
             for (int i = 0; i < samples; i++)
             {
                 float d = i * Cell;
-                gully[i] = on.Relief.ProfileAt((float)(Math.Cos(deepAngle) * d),
-                                               (float)(Math.Sin(deepAngle) * d), r, h);
+                gully[i] = VolcanoCrater.ProfileAt(on.Relief, (float)(Math.Cos(deepAngle) * d),
+                                                   (float)(Math.Sin(deepAngle) * d), r, h);
             }
 
             Plot(Path.Combine(dir, Name(form) + "-section.png"), h, r,
@@ -364,7 +371,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
             float last = 0f;
             for (float d = 0f; d <= r; d += 2f)
             {
-                float v = f.Relief.ProfileAt((float)(Math.Cos(th) * d), (float)(Math.Sin(th) * d), r, h);
+                float v = VolcanoCrater.ProfileAt(f.Relief, (float)(Math.Cos(th) * d),
+                                                  (float)(Math.Sin(th) * d), r, h);
                 if (v > 0f) last = d;
             }
             return last;
@@ -437,6 +445,99 @@ namespace DisasterPlus.Tools.VolcanoPreview
 
             Png.Write(Path.Combine(dir, "growth-strato-sheet.png"), sheetW * 2, n * 2,
                       Upscale(sheet, sheetW, n, 2));
+            log.AppendLine();
+        }
+
+        // ── 火口（実機の指摘①「最初から窪みとして」）─────────────────────
+
+        /// <summary>
+        /// 山頂まわりを拡大して、**隆起の途中の各時刻で火口が窪んでいること**を描いて数える。
+        /// 「見た目の変更は自分でオフラインに描画・計測してから実機テストを頼む」の実体である。
+        /// </summary>
+        private static void CraterFrames(string dir, StringBuilder log)
+        {
+            const VolcanoForm form = VolcanoForm.Strato;
+            float r = VolcanoShape.DefaultRadiusOf(form);
+            float h = VolcanoShape.DefaultHeightOf(form);
+            var relief = VolcanoRelief.For(form, Seed, 1f);
+
+            float crater = VolcanoShape.CraterRadiusOf(r);
+            float depth = VolcanoShape.CraterDepthOf(h);
+
+            log.AppendLine("## crater (strato, part of the profile from the first tick)");
+            log.AppendLine("  crater radius = " + F(crater) + " m, depth = " + F(depth)
+                           + " m, cone scale = "
+                           + VolcanoCrater.SummitScale(form, r).ToString("F3", CultureInfo.InvariantCulture));
+            log.AppendLine("  progress | rim m | floor m | depression m | rim ring radius m");
+
+            int half = (int)Math.Ceiling(crater * 2.4f / Cell);
+            int n = half * 2 + 1;
+            float[] steps = { 0.03f, 0.08f, 0.20f, 0.55f, 1.00f };
+
+            int sheetW = n * steps.Length + (steps.Length - 1) * 2;
+            var sheet = new byte[sheetW * n * 3];
+
+            var sections = new float[steps.Length][];
+            var colours = new int[steps.Length];
+            int[] palette = { 0xB0B0B0, 0x8AA0C8, 0x2F6BE0, 0xE07A2F, 0xE04A2F };
+
+            for (int s = 0; s < steps.Length; s++)
+            {
+                float p = steps[s];
+                var frame = new Field
+                {
+                    Size = n, RadiusMetres = crater * 2.4f, HeightMetres = h,
+                    H = new float[n * n], Relief = relief
+                };
+
+                for (int z = 0; z < n; z++)
+                {
+                    float dz = (z - half) * Cell;
+                    for (int x = 0; x < n; x++)
+                    {
+                        float dx = (x - half) * Cell;
+                        frame.H[z * n + x] = UpliftSchedule.GrowthMetresAt(
+                            VolcanoCrater.ProfileAt(relief, dx, dz, r, h), h, p);
+                    }
+                }
+
+                // 縁と底を東西の走査から実測する（式ではなく、描いた高さ場から読む）。
+                float rim = 0f, rimAt = 0f;
+                for (int x = half; x < n; x++)
+                {
+                    float v = frame.At(x, half);
+                    if (v > rim) { rim = v; rimAt = (x - half) * Cell; }
+                }
+                float floor = frame.At(half, half);
+
+                log.AppendLine("     " + p.ToString("F2", CultureInfo.InvariantCulture)
+                               + "   |  " + F1(rim) + " |  " + F1(floor) + "  |   "
+                               + F1(rim - floor) + "   |  " + F(rimAt));
+
+                byte[] small = Shade(frame, rim > 1f ? rim : 1f,
+                                     rim > 8f ? rim / 10f : 0f);
+                int ox = s * (n + 2);
+                for (int z = 0; z < n; z++)
+                {
+                    for (int x = 0; x < n; x++)
+                    {
+                        int d = (z * sheetW + ox + x) * 3;
+                        int c = (z * n + x) * 3;
+                        sheet[d] = small[c]; sheet[d + 1] = small[c + 1]; sheet[d + 2] = small[c + 2];
+                    }
+                }
+
+                var line = new float[half + 1];
+                for (int i = 0; i <= half; i++) line[i] = frame.At(half + i, half);
+                sections[s] = line;
+                colours[s] = palette[s % palette.Length];
+            }
+
+            Png.Write(Path.Combine(dir, "crater-strato-sheet.png"), sheetW * 4, n * 4,
+                      Upscale(sheet, sheetW, n, 4));
+            Console.WriteLine("wrote " + Path.Combine(dir, "crater-strato-sheet.png"));
+
+            Plot(Path.Combine(dir, "crater-strato-section.png"), h, half * Cell, sections, colours);
             log.AppendLine();
         }
 

@@ -63,7 +63,10 @@ namespace DisasterPlus.Game
         /// </summary>
         private const float BuildFloor = 0.35f;
 
-        /// <summary>噴出口を火口の底からどれだけ上げるか（m）。</summary>
+        /// <summary>
+        /// 噴出口を火口の底からどれだけ上げるか（m）。
+        /// **「山頂から」ではない**（<see cref="SampleVent"/>）。
+        /// </summary>
         private const float VentLiftMetres = 6f;
 
         // ── sim 側の状態 ──────────────────────────────────────
@@ -72,7 +75,7 @@ namespace DisasterPlus.Game
         private static bool _active;
         private static bool _finished;
         private static Vec3 _centre;
-        private static Vec3 _summit;
+        private static Vec3 _vent;
         private static float _elapsedMinutes;
 
         /// <summary>
@@ -108,8 +111,12 @@ namespace DisasterPlus.Game
         /// <summary>今の噴出の強さ <c>[0,1]</c>。**⑤が決めた量**で、ゲームの値ではない。</summary>
         public static float IntensityUnit { get { return _intensity; } }
 
-        /// <summary>噴出口のワールド座標（<c>Y</c> は <c>SampleDetailHeight</c> ＋ 少しの浮き）。</summary>
-        public static Vec3 SummitWorld { get { return _summit; } }
+        /// <summary>
+        /// 噴出口のワールド座標。<c>Y</c> は<b>火口の底</b>（＋少しの浮き）である。
+        /// **山頂（縁）ではない** —— 縁に乗せると、炎も噴煙も噴石も窪みの上に浮く
+        /// （2026-08-22、実機の指摘②「噴火口の炎が浮いて見える」）。
+        /// </summary>
+        public static Vec3 VentWorld { get { return _vent; } }
 
         /// <summary>これまでに強さを引き直した回数（診断用）。</summary>
         public static int BurstsSoFar { get { return _bursts; } }
@@ -190,10 +197,10 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 山頂は毎 tick 引き直す（クラス doc の費用表）。火口を彫った
-            //   UpdateArea が m_detailHeights に届くのは数フレーム遅れるので、
-            //   1 回しか読まないと噴煙が彫る前の高さに張り付く。
-            _summit = SampleSummit(footprint);
+            // ★★ 噴出口は毎 tick 引き直す。**山はまだ育っていて、火口の底も
+            //    一緒に上がっている**（VolcanoCrater のクラス doc）ので、
+            //    1 回しか読まないと炎が置き去りになって宙に浮く（指摘②）。
+            _vent = SampleVent(footprint);
 
             // ★ 区切りは経過ゲーム内時間から出す。**frameIndex % N で組まない**
             //   （DAYTIME_FRAMES = 65536、1 ゲーム内分 ≒ 45.51 フレーム。火災旋風 付録 A-4）。
@@ -237,7 +244,7 @@ namespace DisasterPlus.Game
             Reset();
             _started = true;
             _centre = footprint.Centre;
-            _summit = SampleSummit(footprint);
+            _vent = SampleVent(footprint);
 
             // 地点から決まる種。**都市をまたいでも同じ地点なら同じ噴火**になる
             // （DeterministicRandom は状態を持たないハッシュ）。
@@ -247,15 +254,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴出口のワールド座標。**sim スレッド専用**（<c>TerrainManager</c>）。
-        /// 読めなければ調査時の地形高さ ＋ 山の高さで代用する ——
-        /// **0 を並べた「それらしい」座標を作らない**（地面の中で噴火することになる）。
+        /// 噴出口（＝**火口の底**）のワールド座標。**sim スレッド専用**（<c>TerrainManager</c>）。
+        ///
+        /// 中心の地形高さをそのまま読めばよい —— 火口は高さプロファイルの一部なので
+        /// （<c>Core/Volcano/VolcanoCrater</c>）、**中心のセルはもう火口の底そのもの**である。
+        /// 育っているあいだも毎 tick 読み直すので、底が上がれば噴出口も上がる。
+        ///
+        /// 読めなければ「調査時の地形高さ ＋ 出来上がりの火口の底」で代用する ——
+        /// **0 を並べた「それらしい」座標を作らない**（地面の中で噴火することになる）し、
+        /// **山頂で代用もしない**（それが指摘②の見え方そのものである）。
         /// </summary>
-        private static Vec3 SampleSummit(VolcanoFootprint footprint)
+        private static Vec3 SampleVent(VolcanoFootprint footprint)
         {
             float x = footprint.Centre.X;
             float z = footprint.Centre.Z;
-            float fallback = footprint.GroundHeightMetres + footprint.HeightMetres;
+            float fallback = footprint.GroundHeightMetres
+                             + VolcanoCrater.FloorMetresAt(footprint.HeightMetres,
+                                                           footprint.HeightMetres);
 
             float y = fallback;
             try
@@ -286,7 +301,7 @@ namespace DisasterPlus.Game
             _active = false;
             _finished = false;
             _centre = new Vec3(0f, 0f, 0f);
-            _summit = new Vec3(0f, 0f, 0f);
+            _vent = new Vec3(0f, 0f, 0f);
             _elapsedMinutes = 0f;
             _clockMinutes = 0f;
             _building = false;

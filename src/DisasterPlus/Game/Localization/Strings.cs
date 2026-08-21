@@ -1132,7 +1132,7 @@ namespace DisasterPlus.Game
         public static string VolcanoCatchUpRow = "Buildable ground catches up in";
         public static string VolcanoFrames = "simulation frames";
 
-        public static string VolcanoCraterCarved = "Summit crater carved.";
+        public static string VolcanoCraterFormed = "The summit crater has reached its full depth.";
 
         // --- ⑤火山（Task 7: 噴火） ---
         //

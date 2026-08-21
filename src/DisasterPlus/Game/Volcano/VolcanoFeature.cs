@@ -430,7 +430,8 @@ namespace DisasterPlus.Game
                                        + " (1/1 = the whole change reached the screen this tick)"
                                        + "; footprint " + VolcanoUplift.FootprintTileCount
                                        + " tile(s)");
-            b.Line(2, "summit crater", snapshot.CraterCarved ? "carved" : "not carved yet");
+            b.Line(2, "summit crater", snapshot.CraterFormed
+                ? "at full depth" : "still shallower than its final depth");
             // 山肌の凹凸。0% なら滑らかな円錐そのもの（設定の意味を診断でも名乗る）。
             b.Line(2, "flank relief", ModSettings.VolcanoReliefStrength.value
                                       + "% (0 = a smooth cone)"
@@ -667,19 +668,16 @@ namespace DisasterPlus.Game
                     "no volcano can be built: written heights would never reach the game");
             }
 
-            if (terrain.CraterResolved && terrain.BurnGroundResolved)
+            if (terrain.BurnGroundResolved)
             {
-                b.Line(1, "crater / scorch",
-                    "resolved (DisasterHelpers.MakeCrater, BurnGround)");
+                b.Line(1, "lava scorch", "resolved (DisasterHelpers.BurnGround)");
             }
             else
             {
-                b.Line(1, "crater / scorch", "NOT RESOLVED"
-                    + (terrain.CraterResolved ? " (BurnGround)"
-                                              : (terrain.BurnGroundResolved ? " (MakeCrater)" : "")));
+                b.Line(1, "lava scorch", "NOT RESOLVED");
                 b.Line(2, "consequence",
-                    "the summit crater is not carved and the ground is not scorched along the "
-                    + "lava; the mountain and the lava themselves still work");
+                    "the ground is not scorched along the lava; the mountain, the summit "
+                    + "crater and the lava themselves still work");
             }
 
             if (terrain.SlopeSampleResolved)

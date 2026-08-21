@@ -42,6 +42,36 @@ namespace DisasterPlus.Core.Volcano
         /// <summary>1 本の流れが進める最大歩数。**止まらない溶岩を作らない。**</summary>
         public const int MaxSteps = 512;
 
+        /// <summary>
+        /// 溶岩を出す点を火口の縁からどれだけ外へ出すか（火口半径に対する比）。
+        ///
+        /// ★★ **縁のちょうど上から出さないこと。** 火口は 2026-08-22 から高さ
+        ///   プロファイルの一部で、縁は<b>稜線（局所的な最大）</b>である。その真上で
+        ///   <c>SampleDetailHeight</c> の勾配を読むと、下り方向が**火口の内側を指すことが
+        ///   ある** —— 溶岩は窪みへ流れ落ち、<c>StopFlat</c> でその場に溜まって終わる。
+        ///   例外は 1 つも出ないので、症状は「溶岩が 1 本も山を下らない」だけである。
+        /// </summary>
+        public const float VentRimClearanceFactor = 1.15f;
+
+        /// <summary>
+        /// 同上の絶対値の下限（m）。地形の raw セルが 16 m なので、その 1.5 倍だけ外へ出て
+        /// 「縁のセル」から確実に離れる。小さい火口（半径 40 m）では比より効く。
+        /// </summary>
+        public const float VentRimClearanceMetres = 24f;
+
+        /// <summary>
+        /// 溶岩を出す半径（m）。<paramref name="craterRadiusMetres"/> が読めないときは
+        /// 1 歩ぶん（<see cref="StepMetres"/>）を返す —— **0 を返して中心から出さない。**
+        /// </summary>
+        public static float VentRadiusMetres(float craterRadiusMetres)
+        {
+            if (IsBad(craterRadiusMetres) || craterRadiusMetres <= 0f) return StepMetres;
+
+            float byFactor = craterRadiusMetres * VentRimClearanceFactor;
+            float byMetres = craterRadiusMetres + VentRimClearanceMetres;
+            return byFactor > byMetres ? byFactor : byMetres;
+        }
+
         /// <summary>火口を出た直後の流れの幅（半径 m）。</summary>
         public const float SpreadBaseMetres = 20f;
 

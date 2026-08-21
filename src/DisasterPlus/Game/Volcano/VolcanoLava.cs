@@ -488,8 +488,11 @@ namespace DisasterPlus.Game
 
             _trails = new Vec2[MaxFlows][];
 
-            float craterRadius = VolcanoShape.CraterRadiusOf(footprint.RadiusMetres);
-            if (!(craterRadius > 0f)) craterRadius = LavaPath.StepMetres;
+            // ★★ 火口の**縁の外側**から出す。縁の真上は稜線なので、そこで勾配を読むと
+            //    下り方向が火口の内側を指すことがあり、溶岩が窪みへ落ちて溜まる
+            //    （LavaPath.VentRimClearanceFactor の doc）。
+            float ventRadius = LavaPath.VentRadiusMetres(
+                VolcanoShape.CraterRadiusOf(footprint.RadiusMetres));
 
             uint seed = DeterministicRandom.Hash(
                 unchecked((uint)Mathf.RoundToInt(footprint.Centre.X)),
@@ -498,8 +501,8 @@ namespace DisasterPlus.Game
             for (int i = 0; i < flows; i++)
             {
                 Vec2 dir = LavaPath.InitialDirection(seed, i, flows);
-                var head = new Vec2(footprint.Centre.X + dir.X * craterRadius,
-                                    footprint.Centre.Z + dir.Z * craterRadius);
+                var head = new Vec2(footprint.Centre.X + dir.X * ventRadius,
+                                    footprint.Centre.Z + dir.Z * ventRadius);
 
                 _flows[i] = new LavaFlow(true, head, 0f, 0, StopNone);
                 _trails[i] = new Vec2[MaxTrailPoints];

@@ -23,7 +23,7 @@ namespace DisasterPlus.Game
     /// <code>
     /// 検証 1 ← VolcanoTerrainFacts.Usable
     ///          （= HeightsResolved &amp;&amp; RawArrayLength == 1081^2 &amp;&amp; UpdateAreaResolved）
-    /// 検証 2 ← CraterResolved &amp;&amp; BurnGroundResolved   （T6 の火口と T8 の焦げの門）
+    /// 検証 2 ← BurnGroundResolved                     （T8 の焦げの門）
     /// 検証 3 ← SlopeSampleResolved                    （T8 の溶岩の門）
     /// </code>
     ///
@@ -78,17 +78,18 @@ namespace DisasterPlus.Game
                   + "change are the two calls the whole feature rests on",
                   delegate { return facts.Usable; });
 
-            // 2. 火口と焦げ。**山と溶岩そのものはこれが無くても動く**ので、
+            // 2. 溶岩の焦げ。**山も火口も溶岩の前進もこれが無くても動く**ので、
             //   impact にそこまで書く（狼少年にしない）。
-            //   述語は T6 の火口と T8 の焦げが実際に門にする 2 つの and である。
-            //   どちらも DLC ゲートが無い（§C-8 / §B-7b）ので、
+            //   述語は T8 の焦げが実際に門にする 1 つである。DLC ゲートは無い（§B-7b）ので
             //   expectedWithoutDlc は付けない —— 付けると DLC 非所持環境で
             //   本当の欠落まで「正常な FAIL」に紛れる。
-            Check("DisasterHelpers.MakeCrater(Vector2,float,float,bool) and "
-                  + "BurnGround(Vector2,float,float) are resolvable",
-                  "the summit crater is not carved and the ground is not scorched along the "
-                  + "lava; the mountain and the lava still work",
-                  delegate { return facts.CraterResolved && facts.BurnGroundResolved; });
+            //
+            //   ★ かつてここは MakeCrater も見ていた。火口は高さプロファイルの一部に
+            //     なったので（Core/Volcano/VolcanoCrater）、あの呼び出しはもう存在しない。
+            Check("DisasterHelpers.BurnGround(Vector2,float,float) is resolvable",
+                  "the ground is not scorched along the lava; the mountain, the crater and "
+                  + "the lava still work",
+                  delegate { return facts.BurnGroundResolved; });
 
             // 3. 勾配サンプリング。**溶岩の門はこれ 1 つだけ**（T8）。
             //   ★ 1 引数版ではなく 3 引数版（out float slopeX, out float slopeZ）を見る。

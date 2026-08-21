@@ -429,7 +429,7 @@ namespace DisasterPlus.Game
                 + "    " + Strings.VolcanoTilesRow + ": " + s.UpliftTileCount);
 
             y = Reflow(y, _catchUpLabel, CatchUpText(s), CatchUpHeight, CatchUpHeight + 4f);
-            y = ReflowRow(y, _craterLabel, s.CraterCarved ? Strings.VolcanoCraterCarved : "");
+            y = ReflowRow(y, _craterLabel, s.CraterFormed ? Strings.VolcanoCraterFormed : "");
             return y;
         }
 

@@ -398,8 +398,8 @@ namespace DisasterPlus.Game
             float unit = Clamp01(snapshot.EruptionIntensityUnit);
             float volume = MinVolumeUnit + (1f - MinVolumeUnit) * unit;
 
-            Vec3 summit = snapshot.SummitWorld;
-            var position = new Vector3(summit.X, summit.Y, summit.Z);
+            Vec3 vent = snapshot.VentWorld;
+            var position = new Vector3(vent.X, vent.Y, vent.Z);
 
             // 火口は動かないので velocity は 0（ドップラを掛けない）。
             // pitch は 1 のまま —— 噴出の強さは音量で表す。ループの再生速度を

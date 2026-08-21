@@ -306,7 +306,9 @@ namespace DisasterPlus.Game
             // ★★ **順序がこの 2 行そのものである**（設計書 §1.2 / 罠 1）。
             //    準備を先に、隆起の進捗を渡して前へ走らせ、そのあとで隆起が
             //    「準備が届いた半径」の内側だけを上げる。入れ替えてはいけない。
-            VolcanoClearing.Tick(_footprint, VolcanoUplift.ProgressUnit, deltaMinutes);
+            //   ★ 渡すのは進捗ではなく**隆起の前線**である（火口のぶん円錐を立て直して
+            //     いるので、前線は進捗より先に出る。VolcanoClearing.Tick の doc）。
+            VolcanoClearing.Tick(_footprint, VolcanoUplift.GrowthFrontUnit, deltaMinutes);
             VolcanoUplift.Tick(_footprint, frame, deltaMinutes);
 
             // ★★ **SimCity 4 の順序。噴火が先で、山はそれに積み上げられる。**
@@ -336,7 +338,7 @@ namespace DisasterPlus.Game
             _lastRefusal = null;
             Log.Info("volcano uplift complete (the eruption has been running since it started): summit +"
                      + VolcanoUplift.SummitMetres.ToString("F0")
-                     + " m, crater " + (VolcanoUplift.CraterCarved ? "carved" : "NOT carved")
+                     + " m, crater " + (VolcanoUplift.CraterFormed ? "at full depth" : "SHALLOW")
                      + "; the eruption starts now");
         }
 

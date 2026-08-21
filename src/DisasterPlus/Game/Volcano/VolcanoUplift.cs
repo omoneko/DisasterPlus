@@ -133,13 +133,28 @@ namespace DisasterPlus.Game
     /// 継ぎ目に段差は出ない —— <c>TileAt</c> / <c>ExpandForPass</c> がどちらも
     /// ±2 セルの重なりを持って返すからである。
     ///
-    /// ── 火口は <c>MakeCrater</c> をちょうど 1 回（罠 4）───────────────────
+    /// ── ★★ 火口は「最後に彫る穴」ではなく「最初から在る窪み」（2026-08-22、指摘①）──
     ///
-    /// <c>MakeCrater</c> は先頭で <c>TerrainModify.RefreshAllModifications()</c> を呼ぶ
-    /// （§C-8 IL_0006）。これは <c>UpdateAreaImplementation</c> そのものなので、
-    /// **呼ぶたびに強制フラッシュが 1 回走り**、その tick にバニラのマネージャが溜めた分まで
-    /// 巻き込んで吐き出す。したがって⑤は**隆起の最後に 1 回だけ**呼ぶ。
-    /// <see cref="CraterCarved"/> が二度呼びを防ぐ。
+    /// 所有者の指摘は
+    /// 「噴火口が一番最後に生成されるのではなく最初から窪みとして生成される方がいい」。
+    ///
+    /// かつてここは隆起の最後に <c>DisasterHelpers.MakeCrater</c> を 1 回だけ呼んでいた。
+    /// あれは先頭で <c>TerrainModify.RefreshAllModifications()</c> を呼ぶ（§C-8 IL_0006）ので
+    /// **呼ぶたびに強制フラッシュが 1 回走り**、毎 tick の経路には置けない ——
+    /// つまり「最後に 1 回」という制約が、窪みの生まれる時刻をそのまま決めていた。
+    ///
+    /// **いまは火口を <see cref="_profile"/> そのものに畳み込んである**
+    /// （<c>Core/Volcano/VolcanoCrater</c>）。隆起は毎 tick「その時刻における絶対目標」を
+    /// 書いているので、目標の形に窪みが在れば窪みも山と一緒に育つ。
+    /// 縁は <c>H·p</c>、底は <c>max(0, H·p − depth)</c> で上がり、窪みの深さは
+    /// 進捗 <c>depth/H</c>（既定の成層火山で 10 %）で満杯になってからずっと一定である。
+    /// <b>⑤は <c>MakeCrater</c> をもうどこからも呼ばない</b>（強制フラッシュも 1 回消えた）。
+    ///
+    /// **レビューの grep**（コメント行を落として 0 件）:
+    /// <code>
+    /// grep -rn --include=*.cs "MakeCrater" src/DisasterPlus/ \
+    ///   | grep -vE ':[0-9]+: *//' | grep -v '///' | wc -l          # -> 0
+    /// </code>
     ///
     /// ── 呼んではいけないもの（§D-12）───────────────────────────
     ///
@@ -282,7 +297,16 @@ namespace DisasterPlus.Game
 
         private static bool _started;
         private static bool _complete;
-        private static bool _craterCarved;
+
+        /// <summary>この山の最終高（m）。**火口の深さと底の高さを出すのに使う。**</summary>
+        private static float _heightMetres;
+
+        /// <summary>
+        /// 火口の縁が H に届くよう円錐を立て直した倍率（<c>VolcanoCrater.SummitScale</c>）。
+        /// **準備の前線を決めるのにも要る** —— 隆起の前線がこの倍率のぶん先へ出るので、
+        /// 倍率を渡さないと準備が追いつかず、山の外周が切り立った円で止まって見える。
+        /// </summary>
+        private static float _summitScale = 1f;
 
         private static Vec3 _centre;
         private static float _minutesSinceTick;
@@ -332,11 +356,36 @@ namespace DisasterPlus.Game
             get { return _complete ? 0f : _riseMetresPerTick / IntervalFrames; }
         }
 
-        /// <summary>隆起が終わったか（火口も彫り終えている）。</summary>
+        /// <summary>隆起が終わったか。</summary>
         public static bool Complete { get { return _complete; } }
 
-        /// <summary>山頂の火口を彫ったか。**二度彫らないための旗**（罠 4）。</summary>
-        public static bool CraterCarved { get { return _craterCarved; } }
+        /// <summary>
+        /// 山頂の窪みが満杯の深さに達したか。**「彫ったか」ではない** ——
+        /// 火口は形の一部なので最初の tick から在り、縁が <c>depth</c> だけ上がった時点で
+        /// 深さが揃う（クラス doc）。
+        /// </summary>
+        public static bool CraterFormed
+        {
+            get { return VolcanoCrater.FullDepthReached(_summitMetres, _heightMetres); }
+        }
+
+        /// <summary>
+        /// 今の火口の底の盛り上がり（m。元の地形高さからの相対量）。
+        /// **噴出口（炎・噴煙・噴石）の高さはこれで決める**（実機の指摘②）。
+        /// </summary>
+        public static float CraterFloorMetres
+        {
+            get { return VolcanoCrater.FloorMetresAt(_summitMetres, _heightMetres); }
+        }
+
+        /// <summary>
+        /// 隆起の前線が今どこまで出ているか [0,1]。**準備（<c>VolcanoClearing</c>）へ渡すのは
+        /// 進捗そのものではなくこちら**である（<c>UpliftSchedule.GrowthFrontUnit</c> の doc）。
+        /// </summary>
+        public static float GrowthFrontUnit
+        {
+            get { return UpliftSchedule.GrowthFrontUnit(_progress, _summitScale); }
+        }
 
         /// <summary>これまでに進んだ tick 数。</summary>
         public static int Ticks { get { return _tick; } }
@@ -400,7 +449,8 @@ namespace DisasterPlus.Game
             _cellsWrittenLastTick = 0;
             _started = false;
             _complete = false;
-            _craterCarved = false;
+            _heightMetres = 0f;
+            _summitScale = 1f;
             _centre = new Vec3(0f, 0f, 0f);
             _minutesSinceTick = 0f;
             _lastFailure = null;
@@ -506,8 +556,7 @@ namespace DisasterPlus.Game
             //    最後の書き込み（準備が外周に届いた瞬間の分）を取りこぼす。
             if (_flush.HasPending) return;
 
-            // ★ 最後の 1 回。火口はここでしか彫らない（罠 4）。
-            CarveCrater(footprint);
+            // ★ 火口はここで彫らない。**最初の tick から形の一部として在る**（クラス doc）。
             _progress = 1f;
             _summitMetres = footprint.HeightMetres;
             _complete = true;
@@ -548,6 +597,10 @@ namespace DisasterPlus.Game
 
             _tileCount = TileSplit.TileCountFor(_minX, _minZ, _maxX, _maxZ);
 
+            // ★ 火口の分だけ円錐を立て直す倍率。**準備の前線もこれを見る**（_summitScale の doc）。
+            _heightMetres = footprint.HeightMetres;
+            _summitScale = VolcanoCrater.SummitScale(footprint.Form, footprint.RadiusMetres);
+
             // ★ 山頂が毎 tick 1 raw 単位以上動くよう切り詰める（罠 2）。
             //   換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。
             float framesPerMinute = FeatureHost.FramesPerMinute;
@@ -569,7 +622,11 @@ namespace DisasterPlus.Game
 
             Log.Info("volcano uplift started: rect " + _width + "x" + height
                      + " cells, " + _tileCount + " tiles, " + _totalTicks + " ticks, relief "
-                     + ModSettings.VolcanoReliefStrength.value + "%");
+                     + ModSettings.VolcanoReliefStrength.value + "%, crater r="
+                     + VolcanoShape.CraterRadiusOf(footprint.RadiusMetres).ToString("F0")
+                     + " m depth=" + VolcanoShape.CraterDepthOf(footprint.HeightMetres).ToString("F0")
+                     + " m (part of the profile from the first tick), cone scale "
+                     + _summitScale.ToString("F3"));
             return true;
         }
 
@@ -614,9 +671,11 @@ namespace DisasterPlus.Game
                     float dx = worldX - centreX;
                     if (dx * dx + dz2 > radiusSquared) continue;
 
-                    // ★★ **半径の外は 0、最終高 H は超えない。** VolcanoRelief が
-                    //    掛け算だけで構造的に守っている（あちらのクラス doc）。
-                    _profile[row + x] = relief.ProfileAt(dx, dz, radius, metres);
+                    // ★★ **半径の外は 0、最終高 H は超えない。** 起伏は掛け算だけ、
+                    //    火口は min だけで働くので、どちらも構造的に守られている
+                    //    （VolcanoRelief / VolcanoCrater のクラス doc）。
+                    //    **山頂の窪みはここで入る。あとから彫らない。**
+                    _profile[row + x] = VolcanoCrater.ProfileAt(relief, dx, dz, radius, metres);
                 }
             }
         }
@@ -689,7 +748,8 @@ namespace DisasterPlus.Game
                 + " rect=" + (_dirtyValid ? (_dirtyMaxX - _dirtyMinX + 1) + "x"
                                             + (_dirtyMaxZ - _dirtyMinZ + 1) : "0")
                 + " tiles=" + _tileCount
-                + (_craterCarved ? " crater=carved" : "")
+                + " crater=" + (CraterFormed ? "full" : "growing")
+                + " floor=" + CraterFloorMetres.ToString("F1")
                 + (_complete ? " (complete)" : ""));
         }
     }

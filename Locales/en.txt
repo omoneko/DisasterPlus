@@ -303,7 +303,7 @@ VolcanoUpliftMinutes = Time the uplift takes (in-game minutes)
 VolcanoReliefStrength = Relief on the mountain's flanks (%, 0 = a smooth cone)
 VolcanoCatchUpRow = Buildable ground catches up in
 VolcanoFrames = simulation frames
-VolcanoCraterCarved = Summit crater carved.
+VolcanoCraterFormed = The summit crater has reached its full depth.
 VolcanoEruptionRow = Eruption
 VolcanoEruptionFx = Draw the eruption plume
 VolcanoEruptionSound = Play the eruption sound
