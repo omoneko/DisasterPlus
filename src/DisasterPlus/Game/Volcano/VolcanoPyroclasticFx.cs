@@ -30,12 +30,21 @@ namespace DisasterPlus.Game
     /// 同じ経路を 2 本にすると「どちらが燃やしたか」が誰にも分からなくなる）。
     /// <c>Building.m_fireIntensity</c> は**決して直接書かない**。
     ///
-    /// ── 経路をどこから取るか ────────────────────────────────
+    /// ── ★★ 扇である。溶岩の上のリボンではない（2026-08-22、実機の指摘⑤）───────
     ///
-    /// 自分で斜面を辿らない。<see cref="VolcanoHub"/> のスナップショットが運んでくる
-    /// **溶岩の軌跡（不変配列）**をそのまま経路にする。地形の解釈を sim 側の 1 か所に
-    /// 閉じたままにできるうえ、火砕流も溶岩も同じ谷を下るので経路が一致しているほうが正しい。
-    /// 幾何は <see cref="PyroclasticSurge"/>（Core、テスト付き）にある。
+    /// > 火砕流については溶岩流の上だけを今は流れ落ちていますが、実際はもっと裾野に
+    /// > 広がっていくはずです。
+    ///
+    /// 以前は**溶岩の軌跡そのもの**を経路にしていた。溶岩と同じ谷を下るのは正しいが、
+    /// **火砕流は溶岩の幅では流れない** —— 重い雲であって流体の筋ではないので、
+    /// 下るにつれて横へ広がり、裾野いっぱいに扇を作る。地形に完全には従わず、
+    /// 源に近いところでは尾根を越える。
+    ///
+    /// いまは <see cref="PyroclasticSurge"/>（Core、テスト付き）が扇そのものを組む ——
+    /// 火口のまわりに <c>LobeCount</c> 本の舌を配り、裾へ行くほど幅を広げ（最大 260 m）、
+    /// **裾へ行くほどだけ**谷（＝溶岩が下った向き）へ引かれる。
+    /// 溶岩の軌跡はここで「谷がどこにあるか」を知る手がかりとしてだけ使い、
+    /// 方位を 1 本ずつ取り出して Core へ渡す（<see cref="_bearings"/>）。
     ///
     /// ── ベジェ帯の落とし穴（IL 実測）──────────────────────────
     ///
@@ -50,20 +59,32 @@ namespace DisasterPlus.Game
     ///
     /// ── 毎フレームの費用 ─────────────────────────────────
     ///
-    /// 帯は最大 <see cref="MaxBands"/> 本。1 本あたり
+    /// 帯は <c>PyroclasticSurge.LobeCount</c> 本（2 → 5）。1 本あたり
     /// <c>SampleDetailHeight</c> 4 回（読み取り。<c>TerrainHeightSampler</c> の doc）と
     /// <c>RenderEffect</c> 1 回。<c>Bezier3</c> / <c>SpawnArea</c> / <c>Vector3</c> は
-    /// すべて struct なので **ヒープ確保は 0 バイト**である。
+    /// すべて struct で、方位の配列は**開始時に 1 本だけ確保して使い回す**ので
+    /// **ヒープ確保は 0 バイト**である。
+    ///
+    /// ★ 粒子の総量は増えない。<c>PyroclasticSurge.Magnitude</c> が帯の面積で
+    ///   正規化するので、**扇ぜんぶで従来の 2 本ぶんと同じ量**に収まる。
     ///
     /// ── この型は sim スレッドから 1 度も呼ばれない ────────────────────
     /// </summary>
     public static class VolcanoPyroclasticFx
     {
-        /// <summary>同時に出す帯の本数の上限。**費用の上限そのもの。**</summary>
-        public const int MaxBands = 2;
-
         /// <summary>帯を地面からどれだけ浮かせるか（m）。</summary>
         private const float LiftMetres = 5f;
+
+        /// <summary>
+        /// 溶岩が下った向き（ラジアン）。**谷がどこにあるかの手がかり**で、
+        /// 経路そのものではない（クラス doc）。
+        ///
+        /// ★ 配列は 1 本だけ確保して使い回す。毎フレーム作ると 60 fps で
+        ///   1 秒に 60 個のごみになる（この型は毎フレーム走る）。
+        ///   <c>float[]</c> なので Unity の fake-null は関係が無い
+        ///   （**あの罠は <c>UnityEngine.Object</c> の配列の話である**）。
+        /// </summary>
+        private static readonly float[] _bearings = new float[VolcanoLava.MaxFlows];
 
         /// <summary>
         /// バニラの効果時計（秒）。<c>EffectManager</c> 自身が描画 1 フレームごとに
@@ -121,9 +142,7 @@ namespace DisasterPlus.Game
         {
             _bandsDrawn = 0;
 
-            if (snapshot == null || !snapshot.Valid
-                || snapshot.LavaTrailPoints == null || snapshot.LavaTrailCounts == null
-                || snapshot.LavaTrailPoints.Length < PyroclasticSurge.MinPoints)
+            if (snapshot == null || !snapshot.Valid || !snapshot.Footprint.Valid)
             {
                 _clockSeconds = 0f;
                 return;
@@ -146,43 +165,88 @@ namespace DisasterPlus.Game
             if (dt <= 0f) return;
             _clockSeconds += dt;
 
+            // ★ 扇は火口から出る。噴出口（火口の底）の水平位置をそのまま使う。
+            var vent = new Vec2(snapshot.VentWorld.X, snapshot.VentWorld.Z);
+
+            int channels = ReadBearings(snapshot, vent);
+
+            uint seed = DeterministicRandom.Hash(
+                unchecked((uint)Mathf.RoundToInt(snapshot.Footprint.Centre.X)),
+                unchecked((uint)Mathf.RoundToInt(snapshot.Footprint.Centre.Z)));
+
+            for (int i = 0; i < PyroclasticSurge.LobeCount; i++)
+            {
+                if (RenderLobe(dust, camera, vent, seed, i, channels,
+                               snapshot.Footprint.RadiusMetres, unit, dt))
+                {
+                    _bandsDrawn++;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 溶岩の軌跡から「谷の向き」を <see cref="_bearings"/> へ取り出す。
+        /// **溶岩が 1 本も流れていなくてもよい**（0 を返し、扇は谷に引かれないだけ）。
+        /// </summary>
+        private static int ReadBearings(VolcanoSnapshot snapshot, Vec2 vent)
+        {
             Vec2[] points = snapshot.LavaTrailPoints;
             int[] counts = snapshot.LavaTrailCounts;
+            if (points == null || counts == null) return 0;
 
+            int found = 0;
             int cursor = 0;
-            for (int i = 0; i < counts.Length && _bandsDrawn < MaxBands; i++)
+            for (int i = 0; i < counts.Length && found < _bearings.Length; i++)
             {
                 int declared = counts[i] > 0 ? counts[i] : 0;
                 int available = declared;
                 if (cursor + available > points.Length) available = points.Length - cursor;
 
-                if (available >= PyroclasticSurge.MinPoints
-                    && RenderBand(dust, camera, points, cursor, available, unit, dt))
+                float bearing;
+                if (available >= 2
+                    && PyroclasticSurge.TryBearing(points, cursor, available, vent, out bearing))
                 {
-                    _bandsDrawn++;
+                    _bearings[found++] = bearing;
                 }
 
                 cursor += declared;
                 if (cursor >= points.Length) break;
             }
+
+            return found;
         }
 
         /// <summary>
-        /// 1 本ぶんの帯。出せなければ <c>false</c> を返すだけで、例外は投げない。
+        /// 舌 1 本ぶんの帯。出せなければ <c>false</c> を返すだけで、例外は投げない。
         /// </summary>
-        private static bool RenderBand(ParticleEffect effect, RenderManager.CameraInfo camera,
-                                       Vec2[] points, int start, int count, float unit, float dt)
+        private static bool RenderLobe(ParticleEffect effect, RenderManager.CameraInfo camera,
+                                       Vec2 vent, uint seed, int index, int channels,
+                                       float radiusMetres, float unit, float dt)
         {
-            float path = PyroclasticSurge.PathLengthMetres(points, start, count);
-            if (path < PyroclasticSurge.MinPathMetres) return false;
+            float reach = PyroclasticSurge.ReachMetres(radiusMetres, unit, seed, index);
+            if (reach < PyroclasticSurge.MinPathMetres) return false;
 
-            float head = PyroclasticSurge.HeadMetres(_clockSeconds, path);
+            float azimuth = PyroclasticSurge.LobeAzimuth(seed, index, PyroclasticSurge.LobeCount);
 
-            float magnitude = PyroclasticSurge.Magnitude(unit, head, path);
+            // ★ 谷の手がかり。1 本も無ければ引かれないだけで、扇そのものは出る。
+            bool found;
+            float channel = PyroclasticSurge.NearestChannel(azimuth, _bearings, channels,
+                                                            out found);
+            if (!found) channel = azimuth;
+
+            // ★ 舌ごとに位相をずらす（5 本が隊列を組んで走らないため）。
+            float clock = _clockSeconds
+                          + PyroclasticSurge.LobePhaseSeconds(index, PyroclasticSurge.LobeCount,
+                                                              reach);
+            float head = PyroclasticSurge.HeadMetres(clock, reach);
+            float halfWidth = PyroclasticSurge.HalfWidthMetres(head);
+
+            float magnitude = PyroclasticSurge.Magnitude(unit, head, reach, halfWidth);
             if (magnitude <= 0f) return false;
 
             Vec2 a, b, c, d;
-            if (!PyroclasticSurge.TryBand(points, start, count, head, out a, out b, out c, out d))
+            if (!PyroclasticSurge.TryLobe(vent, azimuth, channel, reach, head,
+                                          out a, out b, out c, out d))
             {
                 return false;
             }
@@ -191,8 +255,6 @@ namespace DisasterPlus.Game
             Vector3 pb = OnGround(b);
             Vector3 pc = OnGround(c);
             Vector3 pd = OnGround(d);
-
-            float halfWidth = PyroclasticSurge.HalfWidthMetres(head);
 
             // ★ 第 3 引数は読まれない（IL 実測）。両方に同じ値を入れておく。
             var area = new EffectInfo.SpawnArea(new Bezier3(pa, pb, pc, pd),

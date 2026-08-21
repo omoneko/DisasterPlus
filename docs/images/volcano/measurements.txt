@@ -83,6 +83,12 @@ grid = 16 m (the game's own terrain grid)
    0.10 |      0.001      |     0.015
    0.00 |      0.000      |     0.000
 
+## pyroclastic fan (strato, intensity 1.0, 4 lava flows)
+  lobes            : 6
+  lava covers      : 0.338 km2
+  the fan covers   : 4.242 km2  (12.5x the lava)
+  of that, on lava : 7 %   (the rest is flank the lava never touched)
+
 ## uplift pacing (strato, R = 1200 m, H = 600 m, 30 in-game minutes)
   in-game duration is UNCHANGED: 30 in-game minutes = 1365 sim frames
   (1 in-game minute = 45.51 sim frames; wall clock depends on the game speed and the fixed-update rate)

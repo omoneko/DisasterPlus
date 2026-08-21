@@ -1169,13 +1169,15 @@ namespace DisasterPlus.Game
         //   名乗る唯一の場所である。ゲームに火砕流のエフェクトは 1 つも無い
         //   （出荷アセットの EffectInfo 277 個を全数確認した）。
         public static string VolcanoPyroclasticSetting =
-            "Show a dust surge running down the slope";
+            "Show a dust surge fanning out down the slopes";
 
         public static string VolcanoPyroclasticNote =
             "The game has no pyroclastic flow effect - not in the base game and not in any "
-            + "DLC. What runs down the slope is the game's own building-collapse dust, driven "
-            + "along the path the lava takes. It looks like a grey dust cloud sweeping down "
-            + "the valley, and it damages nothing: only the lava sets anything on fire.";
+            + "DLC. What runs down the slopes is the game's own building-collapse dust, sent "
+            + "out in lobes that fan across the flanks and widen as they descend, only partly "
+            + "drawn toward the valleys the lava found. It looks like grey dust clouds "
+            + "sweeping down the mountain, and it damages nothing: only the lava sets "
+            + "anything on fire.";
 
         // ★ バニラのエフェクトが 1 つも引けなかったときの断り。**噴火は続く。**
         public static string VolcanoEffectsMissing =

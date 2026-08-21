@@ -525,11 +525,11 @@ namespace DisasterPlus.Game
             // ★★ 火砕流は**バニラに存在しない**。代用であることを診断でも名乗る。
             b.Line(2, "pyroclastic flow", ModSettings.VolcanoPyroclasticFx.value
                 ? (VolcanoPyroclasticFx.DustResolved
-                    ? VolcanoPyroclasticFx.BandsDrawn + " band(s) of "
+                    ? VolcanoPyroclasticFx.BandsDrawn + " of "
+                      + PyroclasticSurge.LobeCount + " lobe(s) of "
                       + VolcanoVanillaFx.DustName
-                      + " - this is the game's building-collapse dust driven down the lava "
-                      + "path, NOT a real pyroclastic flow; the game has no such effect. "
-                      + "It damages nothing"
+                      + " fanning down the flanks, NOT a real pyroclastic flow; the game has "
+                      + "no such effect. It damages nothing"
                     : "NOT resolved")
                 : "off (setting)");
 
