@@ -87,13 +87,16 @@ namespace DisasterPlus.Game
     /// ── ★ 引けなかったときに何が起きるか ────────────────────────────
     ///
     /// **その 1 つを出さないだけ。** 例外は出さず、ログは 1 行、噴火は続く。
-    /// カメラ情報が取れないフレームは 3 つとも飛ばす
+    /// カメラ情報が取れないフレームは全部飛ばす
     /// （<c>ParticleEffect.RenderEffect</c> は先頭で <c>cameraInfo</c> を参照するので
     /// null を渡すと NRE になる）。
     ///
     /// ── 毎フレームの費用 ─────────────────────────────────
     ///
-    /// <c>RenderEffect</c> を最大 3 回。<c>SpawnArea</c> / <c>InstanceID</c> /
+    /// <c>RenderEffect</c> を最大 11 回（噴煙柱の 9 段 ＋ 炎 ＋ 噴石）。
+    /// **1 回あたりの粒子数は以前より少ない** —— 段ごとの密度を面積で正規化してあり、
+    /// 柱ぜんぶで従来の噴煙 1 回ぶんと同じ量だからである。
+    /// <c>SpawnArea</c> / <c>InstanceID</c> /
     /// <c>Vector3</c> はすべて struct で、<c>EmitParticles</c> の経路にヒープ確保は無い
     /// （IL 実測）。**ヒープ確保は 0 バイト。**
     /// 粒子数は <c>maxParticles</c> に対する自動絞り込みで頭打ちになる。
@@ -221,7 +224,10 @@ namespace DisasterPlus.Game
             if (snapshot == null || !snapshot.Valid || !snapshot.EruptionActive)
             {
                 // 噴火が終わったフレームで**自分で**時計を戻す。sim 側からは呼ばれない。
+                // ★ 柱の高さも一緒に捨てる。残すと診断が
+                //   「0 段しか出ていないのに 1450 m の柱」という読めない行を出し続ける。
                 _clockSeconds = 0f;
+                _plumeHeightMetres = 0f;
                 return;
             }
 

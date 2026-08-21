@@ -153,11 +153,16 @@ namespace DisasterPlus.Core.Volcano
         public static float GlowUnit(float u, float v)
         {
             float ends = AlongFlowUnit(v);
-            float crust = CrustFloor + CrackStrength * CrackUnit(u, v);
+
+            // ★ 割れ目は 1 回だけ評価する（三角関数 3 回）。2 回呼ぶと、
+            //   128² のテクスチャを焼くたびに sin が 10 万回近く走る。
+            float crack = CrackUnit(u, v);
+
+            float crust = CrustFloor + CrackStrength * crack;
             float glow = ends > crust ? ends : crust;
 
             // 端の熱い帯では割れ目の模様も一緒に明るくなる（板ごと溶けている）。
-            glow += ends * CrackStrength * CrackUnit(u, v) * 0.5f;
+            glow += ends * CrackStrength * crack * 0.5f;
 
             if (glow < 0f) return 0f;
             return glow > 1f ? 1f : glow;

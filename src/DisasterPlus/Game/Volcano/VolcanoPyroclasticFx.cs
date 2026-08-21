@@ -59,7 +59,7 @@ namespace DisasterPlus.Game
     ///
     /// ── 毎フレームの費用 ─────────────────────────────────
     ///
-    /// 帯は <c>PyroclasticSurge.LobeCount</c> 本（2 → 5）。1 本あたり
+    /// 帯は <c>PyroclasticSurge.LobeCount</c> 本（2 → 6）。1 本あたり
     /// <c>SampleDetailHeight</c> 4 回（読み取り。<c>TerrainHeightSampler</c> の doc）と
     /// <c>RenderEffect</c> 1 回。<c>Bezier3</c> / <c>SpawnArea</c> / <c>Vector3</c> は
     /// すべて struct で、方位の配列は**開始時に 1 本だけ確保して使い回す**ので
@@ -95,6 +95,15 @@ namespace DisasterPlus.Game
 
         private static bool _renderErrorLogged;
         private static int _bandsDrawn;
+
+        /// <summary>
+        /// 直近に噴いていたときの強さ <c>[0,1]</c>。**噴火が終わったあとの濃さの上限**である。
+        ///
+        /// ★★ <c>LavaCoolUnit</c> は流れが 1 本でも動いているあいだ **1 のまま**なので、
+        ///   これを掛けないと<b>弱い噴火（強さ 0.2）でも、溶岩が流れているあいだずっと
+        ///   最大の濃さの土煙が出る</b>。しかも溶岩の前進は噴火より長い。
+        /// </summary>
+        private static float _lastIntensity;
 
         /// <summary>今フレームに出した帯の本数（診断用）。</summary>
         public static int BandsDrawn { get { return _bandsDrawn; } }
@@ -136,6 +145,7 @@ namespace DisasterPlus.Game
         {
             _clockSeconds = 0f;
             _bandsDrawn = 0;
+            _lastIntensity = 0f;
         }
 
         private static void Step(VolcanoSnapshot snapshot)
@@ -158,15 +168,28 @@ namespace DisasterPlus.Game
                 && snapshot.Phase != VolcanoPhase.Cooling)
             {
                 _clockSeconds = 0f;
+                _lastIntensity = 0f;
                 return;
             }
 
-            // 噴火が続いているあいだはその強さ、終わったあとは溶岩の冷え具合で薄れる。
+            // 噴火が続いているあいだはその強さ、終わったあとは
+            // **その噴火の強さを上限にして**溶岩の冷え具合で薄れる。
+            // ★ 冷え具合だけで決めると、流れが 1 本でも動いているあいだ CoolUnit は 1 な
+            //   ので、弱い噴火でも最大の濃さの土煙が出続ける（_lastIntensity の doc）。
             // **どちらも 0 になったら 1 粒も出さない**（止まった谷に灰が残り続けない）。
-            float unit = snapshot.EruptionActive
-                ? snapshot.EruptionIntensityUnit : snapshot.LavaCoolUnit;
-            if (float.IsNaN(unit) || unit <= 0f) return;
-            if (unit > 1f) unit = 1f;
+            float unit;
+            if (snapshot.EruptionActive)
+            {
+                unit = Clamp01(snapshot.EruptionIntensityUnit);
+                if (unit > _lastIntensity) _lastIntensity = unit;
+            }
+            else
+            {
+                float cool = Clamp01(snapshot.LavaCoolUnit);
+                unit = cool < _lastIntensity ? cool : _lastIntensity;
+            }
+
+            if (unit <= 0f) return;
 
             RenderManager.CameraInfo camera = VolcanoVanillaFx.CameraInfo();
             if (camera == null) return;
@@ -253,7 +276,7 @@ namespace DisasterPlus.Game
                                                             out found);
             if (!found) channel = azimuth;
 
-            // ★ 舌ごとに位相をずらす（5 本が隊列を組んで走らないため）。
+            // ★ 舌ごとに位相をずらす（舌が隊列を組んで走らないため）。
             float clock = _clockSeconds
                           + PyroclasticSurge.LobePhaseSeconds(index, PyroclasticSurge.LobeCount,
                                                               reach);

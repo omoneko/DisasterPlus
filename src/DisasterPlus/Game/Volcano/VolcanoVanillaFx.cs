@@ -169,6 +169,11 @@ namespace DisasterPlus.Game
 
         private static int _ashMiss;
         private static int _ashAltMiss;
+
+        // ★ 傘は**自分の**間引きカウンタを持つ。噴煙柱と共有すると、同じフレームで
+        //   2 回減るので RetryFrames が実質半分になる（引けない環境で探索が倍になる）。
+        private static int _umbrellaMiss;
+        private static int _umbrellaAltMiss;
         private static int _flameMiss;
         private static int _ejectaMiss;
         private static int _dustMiss;
@@ -181,6 +186,7 @@ namespace DisasterPlus.Game
 
         /// <summary>「引けなかった」を名前ごとに 1 度だけ名乗るための旗。</summary>
         private static bool _ashMissLogged;
+        private static bool _umbrellaRefusedLogged;
         private static bool _flameMissLogged;
         private static bool _ejectaMissLogged;
         private static bool _dustMissLogged;
@@ -276,10 +282,14 @@ namespace DisasterPlus.Game
             if (_umbrellaClone != null) return _umbrellaClone;
             if (_umbrellaCloneRefused) return null;
 
-            // ★ 探索の間引きは噴煙柱の側（Source）が持っている。ここで 2 本目の
-            //   カウンタを増やさないよう、同じ 1 個の元プレハブを使い回す。
-            ParticleEffect source = Source(AshName, ref _ashMiss, ref _ashMissLogged);
-            if (source == null) source = Source(AshAltName, ref _ashAltMiss, ref _ashMissLogged);
+            // ★ 元プレハブは噴煙柱と同じものだが、**間引きカウンタは別**にする
+            //   （共有すると同じフレームで 2 回減って RetryFrames が半分になる）。
+            //   「引けなかった」の 1 行だけは名前ごとなので共有でよい。
+            ParticleEffect source = Source(AshName, ref _umbrellaMiss, ref _ashMissLogged);
+            if (source == null)
+            {
+                source = Source(AshAltName, ref _umbrellaAltMiss, ref _ashMissLogged);
+            }
             if (source == null) return null;
 
             ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
@@ -291,6 +301,16 @@ namespace DisasterPlus.Game
             {
                 ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
                 _umbrellaCloneRefused = true;
+
+                // ★ **黙って諦めない。** 1 行だけ名乗る（毎フレームの経路なので
+                //   Warn は使わない。噴火はそのまま続き、傘は柱の複製で描かれる）。
+                if (!_umbrellaRefusedLogged)
+                {
+                    _umbrellaRefusedLogged = true;
+                    Log.Info("volcano effects: the ash umbrella could not be cloned in this "
+                             + "environment; Disaster + draws the umbrella with the column's "
+                             + "own clone instead (it looks denser) and the eruption carries on");
+                }
                 return null;
             }
 
@@ -601,6 +621,8 @@ namespace DisasterPlus.Game
             _dustCloneRefused = false;
             _ashMiss = 0;
             _ashAltMiss = 0;
+            _umbrellaMiss = 0;
+            _umbrellaAltMiss = 0;
             _flameMiss = 0;
             _ejectaMiss = 0;
             _dustMiss = 0;

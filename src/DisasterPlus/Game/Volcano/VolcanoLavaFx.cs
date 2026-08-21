@@ -391,6 +391,12 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            // ★ 使わなかった頂点を先頭へ畳む。<c>LavaRibbon.Build</c> が 1 本でも
+            //   断ると、その流れのぶんの頂点が (0,0,0) のまま残る。三角形は 1 つも
+            //   指していないので何も描かれないが、<c>RecalculateBounds</c> が
+            //   **マップの原点まで境界を伸ばして視錐台カリングを殺す**。
+            for (int i = vOut; i < vertices.Length; i++) vertices[i] = vertices[0];
+
             var mesh = new Mesh();
             mesh.name = "DisasterPlus_VolcanoLava";
             mesh.vertices = vertices;
