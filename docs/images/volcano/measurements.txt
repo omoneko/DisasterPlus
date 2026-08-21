@@ -74,6 +74,15 @@ grid = 16 m (the game's own terrain grid)
     0.80  |    0.57   |   1209    |     700      |  363   |  86
     0.95  |    0.14   |   617    |     545      |  185   |  86
 
+## lava band (glow is a function of place, never of time)
+  v = 0 is the vent, v = 1 is the advancing front
+  cool | mean brightness | max brightness
+   1.00 |      0.021      |     0.459
+   0.60 |      0.010      |     0.213
+   0.30 |      0.003      |     0.075
+   0.10 |      0.001      |     0.015
+   0.00 |      0.000      |     0.000
+
 ## uplift pacing (strato, R = 1200 m, H = 600 m, 30 in-game minutes)
   in-game duration is UNCHANGED: 30 in-game minutes = 1365 sim frames
   (1 in-game minute = 45.51 sim frames; wall clock depends on the game speed and the fixed-update rate)
