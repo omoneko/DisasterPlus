@@ -48,11 +48,13 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class TyphoonController
     {
-        /// <summary>強度の下限。<c>.cgs</c> の値は公開契約なので範囲外でも読み捨てず、
-        /// 使う側でクランプする（②の <c>EarthquakeLongPeriodStrength</c> と同じ扱い）。</summary>
-        private const int MinIntensity = 10;
+        /// <summary>強度の下限。<c>.cgs</c> の値もタイルのスライダーの値も公開契約なので
+        /// 範囲外でも読み捨てず、使う側で引き上げる（②の
+        /// <c>EarthquakeLongPeriodStrength</c> と同じ扱い）。範囲そのものは Core の
+        /// <see cref="TyphoonIntensity"/> が持ち、テストが固定している。</summary>
+        private const int MinIntensity = TyphoonIntensity.MinPeak;
 
-        private const int MaxIntensity = 255;
+        private const int MaxIntensity = TyphoonIntensity.MaxPeak;
 
         /// <summary>上陸予測の先読みサンプル数の上限（計画 §3.6）。</summary>
         private const int LandfallSamples = 64;
@@ -338,9 +340,17 @@ namespace DisasterPlus.Game
             _active = true;
             _lastRefusal = null;
 
+            // ★ **強度は 2 つ書く。** 以前はランプの現在値だけを
+            //   "intensity=" として出しており、それは 0 フレーム目なので
+            //   必ず小さい—— 初回の実機テストで "intensity=0" と出て、
+            //   「スライダーが読めていない」と読まれた。
+            //   **選ばれた値（peak）と今の値を別々に名乗ること。**
             Log.Info("typhoon started: disaster #" + TyphoonSlot.Id
                      + " at (" + _origin.X.ToString("F0") + "," + _origin.Z.ToString("F0") + ")"
-                     + " intensity=" + _intensity
+                     + " peakIntensity=" + _peakIntensity
+                     + " (requested " + requestedIntensity + ")"
+                     + " rampIntensity=" + _intensity
+                     + " activationFrame=" + TyphoonSlot.ActivationFrame
                      + " speed=" + _speed.ToString("F3") + " m/frame"
                      + " duration=" + _totalFrames + " frames");
         }
@@ -605,15 +615,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>.cgs</c> の値は公開契約なので範囲外でも読み捨てず、ここでクランプする。
+        /// <c>.cgs</c> の値もスライダーの値も公開契約なので範囲外でも読み捨てず、
+        /// ここで <see cref="TyphoonIntensity"/> の範囲へ引き上げる。
         /// **<c>(byte)</c> へのキャストの前にクランプすること**（範囲外を先にキャストすると
         /// いちばん弱い設定がいちばん強い台風になる）。
         /// </summary>
         private static byte ClampIntensity(int value)
         {
-            if (value < MinIntensity) value = MinIntensity;
-            if (value > MaxIntensity) value = MaxIntensity;
-            return (byte)value;
+            return TyphoonIntensity.PeakOf(value);
         }
     }
 }

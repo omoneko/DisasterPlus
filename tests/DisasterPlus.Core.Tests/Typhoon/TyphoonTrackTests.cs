@@ -140,6 +140,32 @@ namespace DisasterPlus.Core.Tests.Typhoon
         }
 
         [Fact]
+        public void ALiveTyphoonNeverReportsZeroIntensity()
+        {
+            // 実機の初回テストで "intensity=0" と出たのはこれである。
+            // 台形の端が 0 だと、居るのに何も起きない台風になり、
+            // しかも「値が読めなかった」との区別が付かない。
+            const uint dur = 8192u;
+
+            foreach (byte peak in new byte[] { 10, 120, 255 })
+            {
+                Assert.True(TyphoonTrack.IntensityAt(peak, 0u, dur, 0f) > 0,
+                            "peak " + peak + " must not start at zero");
+                Assert.True(TyphoonTrack.IntensityAt(peak, dur, dur, 0f) > 0,
+                            "peak " + peak + " must not end at zero either");
+            }
+        }
+
+        [Fact]
+        public void ZeroIntensityStillMeansUnreadableOrFullyDecayed()
+        {
+            // 上の床は「丸めで 0 に落ちる」を防ぐだけであって、
+            // 0 の意味を奇抜しにしない。
+            Assert.Equal(0, TyphoonTrack.IntensityAt(200, 0u, 0u, 0f));      // 持続時間が読めない
+            Assert.Equal(0, TyphoonTrack.IntensityAt(200, 4096u, 8192u, 5000f)); // 減衰しきった
+        }
+
+        [Fact]
         public void LandfallWeakensTheStormAndTheSeaGivesItBackSlowly()
         {
             float overLand = TyphoonTrack.DecayAfter(0f, true, 10f);

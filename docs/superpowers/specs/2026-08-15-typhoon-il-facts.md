@@ -65,6 +65,55 @@ override: `UpdateHazardMap` / `CreateDisaster` / `SimulationStep` / `StartDisast
 > `m_radius` / `m_emergingDuration` / `m_activeDuration` の実数値は DLL に無い（プレハブ値）。
 > 実行時に `DisasterManager.FindDisasterInfo<ThunderStormAI>()` から読むこと。**PARTIAL**。
 
+### A-0b. プレハブ値の実測 — CONFIRMED（2026-08-21）
+
+`Cities_Data\sharedassets55.assets` の MonoBehaviour（m_Script = globalgamemanagers.assets
+pathID 455 = `ThunderStormAI`）の生バイトを直接読んだ。
+型ツリーは剥がされているので、C# のフィールド宣言順に手で当てた:
+
+```
+06000000 9400000000000000   PPtr m_experienceMilestone
+0000 7a45                   m_radius            = 4000.0f
+0020 0000                   m_emergingDuration  = 8192
+0020 0000                   m_activeDuration    = 8192
+```
+
+検算: 実機ログの `duration=8192 frames` / `speed=2.109 m/frame`
+（= 17280 / 8192）と一致する。同じ方法で `EarthquakeAI` は
+`m_crackLength=1000 / m_crackWidth=100 / m_emergingDuration=8192 / m_activeDuration=2048`。
+いずれもクラス既定値（.ctor の IL）のちょうど 2 倍である。
+
+> **`m_emergingDuration == m_activeDuration == 8192` が重要である。**
+> ④の台風の寿命は `m_activeDuration` ぶんしか無いので、
+> `StartDisaster` が書く既定の活性化フレームをそのままにすると
+> **台風は一生 Emerging のまま終わる**。さらに §A-5 の 0 除算を踏む。
+
+### A-5. `GetFireSpreadProbability` の整数除算 — CONFIRMED（実機で落ちた）
+
+```
+IL_0000  if (m_disableFireSpread && m_randomDisastersProbability == 0
+          && IsNullOrEmpty(m_ScenarioAsset)) return 0;
+IL_003E  num = (int)(SimulationManager.m_currentFrameIndex - data.m_activationFrame)
+IL_0050  ldc.i4 1500
+IL_0055  ldc.i4.8
+IL_0056  ldloc.0
+IL_0057  ldc.i4.s 10
+IL_0059  shr          // ★ shr.un ではない＝num は符号付き
+IL_005A  add
+IL_005B  div          // ★ 整数除算。0 で割ると DivideByZeroException
+```
+すなわち `1500 / (8 + (num >> 10))`。算術シフトは下方向に丸めるので
+**`num ∈ [-8192, -7169]` （ちょうど 1024 フレーム）で除数が 0 になる**。
+それより小さいと商が負になるだけで例外は出ない。
+
+呼ばれるのは `CommonBuildingAI.HandleFireSpread`（IL_020B）と
+`TreeManager.HandleFireSpread` だけで、**災害グループに属する建物・木が
+燃えているとき**に限られる。バニラの嵐は Active になるまで火を出さないので
+`num >= 0` でしか呼ばれない。④はクリックした瞬間から落雷を撡くので、
+Emerging（num = -8192）のうちに火が付き、**バニラの中で例外が出る**。
+対処は `TyphoonSlot.Begin` が `m_activationFrame` を開始フレームまで引き寄せること
+（算術と境界は Core の `VanillaFireSpread` がテストで固定している）。
+
 ### A-1. 位相と、嵐が何をするか — CONFIRMED
 
 `ThunderStormAI.StartDisaster`（地震・竜巻と同型）:
