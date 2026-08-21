@@ -54,13 +54,35 @@ namespace DisasterPlus.Core.Typhoon
         /// 想定する総経路長（m）。<see cref="SpeedFor"/> がこれを
         /// <c>m_activeDuration</c> で割って速度にする。
         ///
-        /// ★ **マップの一辺そのものにしてある**（発明した数ではない）。台風は
-        ///   プレイヤーが指した地点から発生するので（<see cref="CentreAt"/>）、
-        ///   「持続時間いっぱいでマップを 1 回横切る」が自然な尺度である。
-        ///   以前はマップ外の進入点から入ってくる設計で、進入距離ぶんを足した
-        ///   24000 m を使っていた。**その進入距離はもう存在しない。**
+        /// ★★ <b>2026-08-22、持ち主の指摘「進行をもっとゆっくりに」で半分にした。</b>
+        ///   マップの一辺（17280 m）＝「持続時間いっぱいでマップを 1 回横切る」から、
+        ///   <b>マップの半辺（8640 m）＝「持続時間いっぱいでマップを半分だけ渡る」</b>へ。
+        ///   実測値（<c>m_activeDuration</c> = 8192）での速度は
+        ///   <c>8640 / 8192 = 1.055 m/frame</c>（以前は 2.109 m/frame）で、
+        ///   この速さでマップの一辺を渡り切るには <b>16384 フレーム
+        ///   ＝ ゲーム内 360 分（6 時間）＝ 台風の寿命のちょうど 2 倍</b>かかる。
+        ///
+        /// ★★ <b>「もっとゆっくり」を寿命の延長では実現していない。その理由。</b>
+        ///   <c>ThunderStormAI.IsStillActive</c> は
+        ///   <c>currentFrame - m_activationFrame &lt; m_activeDuration</c> なので
+        ///   （IL 事実文書 §A-1）、宿主の嵐は <b>8192 フレームより長生きできない</b>。
+        ///   延ばす手は 2 つあり、どちらも高い:
+        ///
+        ///   1. <c>m_activationFrame</c> を毎 tick 前へ押す。すると
+        ///      <c>GetFireSpreadProbability</c> の <c>1500 / (8 + (num &gt;&gt; 10))</c> の
+        ///      <c>num</c> が小さいままになり、**延焼確率が最大に張り付く**
+        ///      （§A-5。しかもその式はバニラの中にある）。
+        ///   2. 宿主より④が長生きする。すると <c>WeatherManager</c> が
+        ///      「Active な雷雨が居ない」と判断して<b>自前の雷雨災害を作り始める</b>
+        ///      （§A-3。④の落雷の予算が宿主のぶんを空けて抑え込んでいる釣り合いが崩れる）。
+        ///
+        ///   どちらも「ゆっくり動く」より高くつく。**経路を短くするのが正解である。**
+        ///
+        ///   なお、経路が短くなったので<b>台風は普通マップの外へは出ない</b> ——
+        ///   終わり方は「持続時間を使い切った」のほうが通常になる。終了経路は
+        ///   どちらも <c>TyphoonController.Stop</c> ＝ <c>Forget</c> を通る（設計書 §4.2）。
         /// </summary>
-        public const float NominalPathLength = MapHalfExtent * 2f;
+        public const float NominalPathLength = MapHalfExtent;
 
         public const float MinSpeedMetresPerFrame = 0.25f;
         public const float MaxSpeedMetresPerFrame = 6f;

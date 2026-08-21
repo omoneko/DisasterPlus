@@ -153,12 +153,27 @@ TyphoonState（④の所有、sim スレッド）
   ②で確認済み・sim スレッド専用）
 - 経路は決定論にする（`DeterministicRandom`、種は災害 ID）。
   **同じセーブで同じ地点を指せば同じ経路になること**
-- 想定経路長 `NominalPathLength` は**マップの一辺そのもの**（`MapHalfExtent * 2` ＝ 17280 m）。
-  「持続時間いっぱいでマップを 1 回横切る」という尺度で、発明した数ではない。
-  進入距離を足した 24000 m は、進入点が無くなったので意味を失った
-- 台風はマップの中から始まるので、`_wasInsideMap` は最初の tick で立つ。
-  したがって**終了条件「1 度中に入ってから外へ出た」は必ず成立する**
-  （Core のテスト `TheTrackLeavesTheMapWithinItsLifetime` が固定している）
+- **★ 改訂（2026-08-22、持ち主の指摘「進行をもっとゆっくりに、暴風雨を再現してほしい」）。**
+  想定経路長 `NominalPathLength` は**マップの半辺**（`MapHalfExtent` ＝ 8640 m）。
+  「持続時間いっぱいでマップを**半分**渡る」という尺度である。実測のプレハブ値
+  （`m_activeDuration` = 8192）での速度は **1.055 m/frame**（以前は 2.109 m/frame）で、
+  この速さでマップの一辺（17280 m）を渡り切るには **16384 フレーム ＝ ゲーム内 360 分
+  ＝ 台風の寿命のちょうど 2 倍**かかる。
+- **「ゆっくり」を寿命の延長で実現していない理由。** `ThunderStormAI.IsStillActive` は
+  `currentFrame - m_activationFrame < m_activeDuration` なので（§A-1）、宿主の嵐は
+  8192 フレームより長生きできない。延ばす手は 2 つあり、どちらも高い:
+  (1) `m_activationFrame` を前へ押すと `GetFireSpreadProbability` の
+  `1500 / (8 + (num >> 10))` の `num` が小さいままになり**延焼確率が最大に張り付く**（§A-5）。
+  (2) 宿主より④が長生きすると `WeatherManager` が「Active な雷雨が居ない」と見て
+  **自前の雷雨災害を作り始める**（§A-3。④の落雷の予算が保っている釣り合いが崩れる）。
+  **経路を短くするのが正解である。**
+- 台風はマップの中から始まるので、`_wasInsideMap` は最初の tick で立つ。ただし
+  **経路が短くなったので普通はマップの外へ出ない** —— 通常の終わり方は
+  「持続時間を使い切った」のほうである。**終了経路は両方とも
+  `TyphoonController.Stop` → `Forget` を通る**ので、後始末の担保は変わらない。
+  Core のテストは `TheTrackStaysOnTheMapForMostOfItsLifetime`（寿命の半分の時点で
+  まだマップの中に居ること）と `TheStormMovesAtHalfTheSpeedItUsedTo`（速度そのもの）
+  の 2 本で固定している
 - パネルに現在位置・進行方向・中心気圧相当（＝強度）を出す
 
 **押した瞬間には壊れない。** 遅れは 2 つあり、どちらも既存のものである:
