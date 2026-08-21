@@ -114,7 +114,31 @@ namespace DisasterPlus.Game
         /// </summary>
         private static bool _hazardRowsBuilt;
 
+        /// <summary>
+        /// 左上。既定値は <see cref="InfoHub"/> がまだ位置を決めていないときだけ使う。
+        /// </summary>
+        private static Vector3 _origin = new Vector3(200f, 150f);
+
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
+
+        /// <summary>
+        /// このパネルの幅。<see cref="InfoHub"/> がタブ帯の幅を合わせるために読む。
+        /// </summary>
+        internal static float Width { get { return PanelWidth; } }
+
+        /// <summary>
+        /// 左上を決める。**位置を決める主体は <see cref="InfoHub"/> 1 つだけである**
+        /// （<c>DisasterPanelBar</c> のクラス doc「位置を決める主体が複数ある限り、
+        /// この事故は形を変えて何度でも起きる」と同じ規律）。
+        /// ここで座標を発明しないこと。
+        /// </summary>
+        internal static void MoveTo(Vector3 origin)
+        {
+            _origin = origin;
+            if (_panel == null) return;
+            _panel.relativePosition = _origin;
+            ClampToView(_panel);
+        }
 
         public static void Show()
         {
@@ -127,11 +151,6 @@ namespace DisasterPlus.Game
         public static void Hide()
         {
             if (_panel != null) _panel.Hide();
-        }
-
-        public static void Toggle()
-        {
-            if (IsVisible) Hide(); else Show();
         }
 
         /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
@@ -234,9 +253,8 @@ namespace DisasterPlus.Game
             panel.width = PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
-            // 中央付近に出す。ボタンの位置探索とは独立(パネル自体は同時に 1 枚しか無いので
-            // 重なり回避の対象にしない)。
-            panel.relativePosition = new Vector3(200f, 150f);
+            // 位置は InfoHub が決める（MoveTo）。ここには既定値しか無い。
+            panel.relativePosition = _origin;
             panel.isVisible = false;
 
             float y = 8f;
@@ -244,17 +262,8 @@ namespace DisasterPlus.Game
             _titleLabel = AddLabel(panel, "Title", 10f, y, PanelWidth - 44f, 24f);
             _titleLabel.textScale = 1.1f;
 
-            var closeButton = (UIButton)panel.AddUIComponent(typeof(UIButton));
-            closeButton.name = FreeSlotFinder.SelfPrefix + "ForecastCloseButton";
-            closeButton.text = "X";
-            closeButton.width = 24f;
-            closeButton.height = 24f;
-            closeButton.relativePosition = new Vector3(PanelWidth - 32f, y);
-            closeButton.normalBgSprite = "ButtonMenu";
-            closeButton.hoveredBgSprite = "ButtonMenuHovered";
-            closeButton.pressedBgSprite = "ButtonMenuPressed";
-            closeButton.eventClick += (c, e) => Hide();
-
+            // ★ 閉じるボタンはここには無い。**タブ帯の X が 1 つだけ持つ**
+            //   （InfoHub）。パネルごとに X を置くと、閉じる主体が 5 つになる。
             y += 30f;
 
             _temperatureLabel = AddLabel(panel, "Temperature", 12f, y, PanelWidth - 24f, 20f);
@@ -297,6 +306,7 @@ namespace DisasterPlus.Game
                 y += 40f;
 
                 panel.height = y;
+                ClampToView(panel);
                 return;
             }
 
@@ -322,6 +332,32 @@ namespace DisasterPlus.Game
             y += 60f;
 
             panel.height = y;
+            ClampToView(panel);
+        }
+
+        /// <summary>
+        /// パネルの下端がビューからはみ出さない位置まで上げる（②④⑤の同名メソッドと同じ）。
+        /// **横は動かさない** —— 横位置は <see cref="InfoHub"/> が決めている。
+        /// </summary>
+        private static void ClampToView(UIPanel panel)
+        {
+            try
+            {
+                var view = panel.GetUIView();
+                float viewHeight = view != null ? view.fixedHeight : 0f;
+                if (viewHeight <= 0f) return;
+
+                const float Margin = 8f;
+                var pos = panel.relativePosition;
+                float top = pos.y;
+                if (top + panel.height > viewHeight - Margin) top = viewHeight - Margin - panel.height;
+                if (top < Margin) top = Margin;
+                panel.relativePosition = new Vector3(pos.x, top);
+            }
+            catch (System.Exception e)
+            {
+                Log.Warn("forecast panel clamp failed: " + e.GetType().Name);
+            }
         }
 
         private static UILabel AddLabel(UIPanel parent, string suffix, float x, float y, float width, float height)

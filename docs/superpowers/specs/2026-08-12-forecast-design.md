@@ -237,9 +237,26 @@ src/DisasterPlus/
     InfoModeSwitch.cs              SetCurrentMode のラッパー
     ForecastPanel.cs               パネル UI（main スレッド）
   Game/UI/
-    FreeSlotFinder.cs              空き位置の走査（②以降も使う）
-    ForecastPanelButton.cs         トグルボタン
+    FreeSlotFinder.cs              空き位置の走査（呼び出し元は 2 か所だけ）
+    InfoHub.cs                     ★ 左上のショートカット 1 個 + タブ帯 1 本
 ```
+
+**★★ ①のボタンは単独では存在しない（2026-08-21 変更）。**
+
+所有者の指示「情報画面はサイレン MOD や CS:WARFRONT と同様に左上の
+ショートカットボタンから開けるようにしてください」により、①②④⑤と診断の
+「読む側」は**左上のボタン 1 個**（`InfoHub`）から開くタブになった。
+
+- `ForecastPanelButton` は撤去済み（①専用のボタンはもう無い）
+- ①のパネルは**自分では位置を決めない**（`ForecastPanel.MoveTo`）。
+  タブ帯の真下・同じ左端に置くのは `InfoHub` である
+- パネルごとの `X` も撤去し、タブ帯の `X` 1 個に統一した
+- **同時に出るパネルは 1 枚だけ**なので、①②④⑤が互いに避ける座標はもう要らない
+
+`FreeSlotFinder` を呼ぶのは **`InfoHub`（ボタン 1 個）と、`DisasterPanelBar` の
+退避バー**の 2 か所だけである。後者は自分で preferred を決めず
+**前者の真下から**探し始めるので、2 つが同じ位置を返す経路は存在しない
+（初回の実機テストで 4 個が `(8,50)` に積み上がった事故の構造的な封じ込め）。
 
 ### 6.1 スレッド境界
 

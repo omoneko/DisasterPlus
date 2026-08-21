@@ -62,7 +62,7 @@ namespace DisasterPlus.Game
     ///                 → VolcanoSurvey.Run(...) が建物と道路を**数えるだけ**
     ///                 → Phase = AwaitingConfirmation、Footprint をスナップショットへ
     ///         v
-    /// [main] パネルが確認の行を出す（VolcanoConfirmRows）
+    /// [main] パネルが確認の行を出す（VolcanoConfirmPanel）
     ///                 → プレイヤーが [この場所に火山を作る] を押す
     ///                 → VolcanoHub.Request(Start, point)
     ///         v
@@ -79,7 +79,7 @@ namespace DisasterPlus.Game
     /// <code>
     /// grep -rn --include=*.cs "VolcanoRequest.Start" src/DisasterPlus | grep -v '///'
     /// # -> 2 件だけ:
-    /// #    VolcanoConfirmRows.cs  … 確認ボタンが積む唯一の場所
+    /// #    VolcanoConfirmPanel.cs  … 確認ボタンが積む唯一の場所
     /// #    VolcanoState.cs        … 受け口（このファイル）
     /// # 列挙の宣言（VolcanoHub.cs）は "Start," と書くのでこの grep には当たらない。
     /// </code>
@@ -137,6 +137,17 @@ namespace DisasterPlus.Game
         private static string _lastRefusal;
         private static bool _settingsChanged;
 
+        /// <summary>
+        /// 直近の調査で選ばれていた**大きさの倍率**（1.0 ＝ 設定画面どおりのサイズ）。
+        ///
+        /// タイルを押してから地図をクリックするまでの間に動かした
+        /// バニラのスライダーの値がここへ来る（<c>Core.Volcano.VolcanoSizeScale</c>）。
+        /// **確認のあとで設定が変わっていないかを調べ直す比較にも同じ値を使う**
+        /// —— 片方だけ設定から読み直すと、毎回「設定が変わった」と判定されて
+        /// 確認が二度出る。
+        /// </summary>
+        private static float _sizeScale = 1f;
+
         /// <summary>今の位相。</summary>
         public static VolcanoPhase Phase { get { return _phase; } }
 
@@ -173,6 +184,7 @@ namespace DisasterPlus.Game
             _footprint = VolcanoFootprint.None;
             _lastRefusal = null;
             _settingsChanged = false;
+            _sizeScale = 1f;
             // 準備の実績も持ち越さない。**進行中の火山は保存しない**ので、
             // 都市を出入りすると準備は 0 からになる（地形はそのままの形で残る）。
             VolcanoClearing.Reset();
@@ -205,7 +217,7 @@ namespace DisasterPlus.Game
         /// <c>Start</c> だけは通さない —— あれは不可逆の破壊の開始そのものなので、
         /// ポーズ中に位相を進めない。**ただし黙って捨てず、理由を残す**
         /// （パネルは確認の行に「ポーズ中は着手できません」を出し、
-        /// [作る] を押せなくする。<see cref="VolcanoConfirmRows"/>）。
+        /// [作る] を押せなくする。<see cref="VolcanoConfirmPanel"/>）。
         ///
         /// <see cref="VolcanoHub.TakeRequest"/> は<b>1 tick にちょうど 1 回</b>
         /// しか呼ばない（2 回呼ぶと 2 回目が必ず None になり、呼び出し順に依存した
@@ -229,7 +241,7 @@ namespace DisasterPlus.Game
             switch (request.Kind)
             {
                 case VolcanoRequest.Survey:
-                    HandleSurvey(request.Point);
+                    HandleSurvey(request.Point, request.SizeScale);
                     break;
 
                 case VolcanoRequest.Start:
@@ -399,7 +411,7 @@ namespace DisasterPlus.Game
         /// <summary>
         /// 調査。**何も壊さない。** 進行中（<see cref="VolcanoPhase.Clearing"/> 以降）なら断る。
         /// </summary>
-        private static void HandleSurvey(Vec3 point)
+        private static void HandleSurvey(Vec3 point, float sizeScale)
         {
             if (InProgress())
             {
@@ -410,6 +422,10 @@ namespace DisasterPlus.Game
 
             _phase = VolcanoPhase.Surveying;
             _settingsChanged = false;
+            // ★ 倍率は**依頼が運んできたもの**を控える。ここでスライダーを読み直す
+            //   ことはできない（sim スレッドから UI に触らない）し、読み直せたと
+            //   しても「クリックした時の値」ではなくなる。
+            _sizeScale = sizeScale;
             RunSurveyAt(point);
         }
 
@@ -566,14 +582,19 @@ namespace DisasterPlus.Game
             return VolcanoShape.FormOf(ModSettings.VolcanoShapeSetting.value);
         }
 
+        /// <summary>
+        /// 設定の半径に、調査時に選ばれていた倍率を掛けた値（m）。
+        /// 形態ごとの帯へのクランプは <c>VolcanoShape.RadiusFor</c> が行う。
+        /// </summary>
         private static float CurrentRadius()
         {
-            return ModSettings.VolcanoRadius.value;
+            return VolcanoSizeScale.Apply(ModSettings.VolcanoRadius.value, _sizeScale);
         }
 
+        /// <summary>設定の最終高に同じ倍率を掛けた値（m）。</summary>
         private static float CurrentHeight()
         {
-            return ModSettings.VolcanoHeight.value;
+            return VolcanoSizeScale.Apply(ModSettings.VolcanoHeight.value, _sizeScale);
         }
 
         /// <summary>

@@ -125,6 +125,11 @@ namespace DisasterPlus.Game
             // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
             VolcanoPanel.Tick();
 
+            // ★ 確認の窓は説明のパネルとは独立に出る。⑤のタイルは説明のパネルを
+            //   開かなくなったので（所有者の依頼）、確認だけがここから出る。
+            //   **パネルを閉じていても確認は必ず出る。**
+            VolcanoConfirmPanel.Tick();
+
             // ★ 噴火の描画は main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
             //   設定で切った瞬間に自分で畳む（切ったまま噴煙が残らないこと）。
             //   描いているのは**ゲーム自身の粒子エフェクト**である（VolcanoEruptionFx）。
@@ -174,6 +179,7 @@ namespace DisasterPlus.Game
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
             //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
             VolcanoPanel.Destroy();
+            VolcanoConfirmPanel.Destroy();
 
             // ★ 噴火の描画側の時計を戻す。
             VolcanoEruptionFx.Destroy();
@@ -226,6 +232,43 @@ namespace DisasterPlus.Game
             WriteUiState(b);
             WriteAudio(b);
             WriteState(b, snapshot);
+            WriteNotes(b);
+        }
+
+        /// <summary>
+        /// **確認の窓から降ろした説明の行き場。**
+        ///
+        /// 所有者の指示は「あれこれ説明は出さなくていい」だった。⑤の確認は残すが、
+        /// そこに出すのは「何が壊れるか（数）」と「取り消せないこと」だけにした
+        /// （<see cref="VolcanoConfirmPanel"/> のクラス doc の表）。
+        /// **落としたのは説明であって、情報ではない** —— 落とした 3 件はここにある。
+        /// テスターと不具合報告が読むのはこのファイルであり、
+        /// 山を建てようとしている人が読む場所ではない。
+        ///
+        /// ★ ここは sim スレッドである（<c>DiagnosticDump</c> のクラス doc）。
+        ///   ゲームのバッファにも UI にも触らない、定数の行だけにすること。
+        /// </summary>
+        private static void WriteNotes(DiagnosticBuilder b)
+        {
+            b.Line(1, "note: counts",
+                "the building and road counts in the confirmation are what the survey "
+                + "counted at that moment. The city keeps changing while the ground is "
+                + "cleared, so the real number will differ. That is why the heading says "
+                + "\"approx.\"");
+            b.Line(1, "note: why clear first",
+                "raising the ground without destroying the roads and buildings first does "
+                + "not work: the game pins the terrain back to the height of every road and "
+                + "building on every update, so the mountain would end up full of flat "
+                + "trenches and bowls (design section 1.2)");
+            b.Line(1, "note: unfinished volcano",
+                "Disaster + does not store an unfinished volcano. After loading a save made "
+                + "mid-build the mountain stays exactly as far as it got - no crater, no "
+                + "eruption, no lava - and there is no way to finish or remove it. Placing a "
+                + "new volcano on the same spot piles a second mountain on top of it");
+            b.Line(1, "note: buildable ground",
+                "the buildable ground and the water level do not follow the visible terrain "
+                + "straight away; they catch up at 2 m per 64 simulation frames "
+                + "(design section 7.3). This is not a bug");
         }
 
         /// <summary>
@@ -582,6 +625,7 @@ namespace DisasterPlus.Game
             b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdVolcano)
                 ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "panel body", VolcanoPanel.IsVisible ? "shown" : "hidden");
+            b.Line(1, "confirm window", VolcanoConfirmPanel.IsVisible ? "shown" : "hidden");
         }
 
         /// <summary>

@@ -14,19 +14,19 @@ namespace DisasterPlus.Game
     ///
     /// 走査した半径も、壊した建物と道路の数も、**⑤が自分で数えた実績**である。
     /// ゲームが計算した値ではないので <c>VolcanoRows.SetMeasured</c> は呼ばない
-    /// （⑤で <c>SetMeasured</c> を呼んでよいのは <see cref="VolcanoConfirmRows"/> の
-    /// 3 行だけ。<see cref="VolcanoRows"/> のクラス doc の grep 5）。
+    /// （⑤で <c>SetMeasured</c> を呼んでよいのは <see cref="VolcanoConfirmPanel"/> の
+    /// 1 行だけ。<see cref="VolcanoRows"/> のクラス doc の grep 5）。
     ///
-    /// ── 確認の一式と同じ場所に置く ──────────────────────────────
+    /// ── パネルのいちばん下に置く ──────────────────────────────
     ///
-    /// 「確認待ち」と「進行中」は**同時に成立しない位相**なので、この一式は
-    /// <c>VolcanoConfirmRows.BlockTop</c> と同じ y から始める。<c>relativePosition</c> は
-    /// 絶対値なので、上下に並べると出していないほうのぶんだけ空白が残る。
-    /// パネルの高さは <see cref="VolcanoPanel"/> がどちらが出ているかで選ぶ。
+    /// 確認の一式は**このパネルにはもう無い**（<see cref="VolcanoConfirmPanel"/> という
+    /// 独立した窓になった）。したがってこの一式がパネルのいちばん下であり、
+    /// 出していないときはパネルの高さを <see cref="BlockTop"/> まで縮める
+    /// —— <c>relativePosition</c> は絶対値なので、隠すだけでは空白が残る。
     ///
     /// ── 条件つきの注記は、当てはまらないときに場所も取らない ───────────────
     ///
-    /// <see cref="VolcanoConfirmRows"/> と同じ <c>Reflow</c> の形。空文字を入れるだけでは
+    /// <see cref="VolcanoConfirmPanel"/> と同じ <c>Reflow</c> の形。空文字を入れるだけでは
     /// 「何か出るはずの場所が空いている」ように見えるので、毎回積み直す。
     ///
     /// ── ★★ [止める] ボタン（全体レビュー I5）─────────────────────
@@ -85,7 +85,7 @@ namespace DisasterPlus.Game
         private static float _blockBottom;
         private static bool _showing;
 
-        /// <summary>この一式が始まる y（＝<c>VolcanoConfirmRows.BlockTop</c> と同じ）。</summary>
+        /// <summary>この一式が始まる y（＝出していないときのパネルの下端）。</summary>
         internal static float BlockTop { get { return _blockTop; } }
 
         /// <summary>この一式の下端（＝出しているときのパネルの下端）。</summary>
@@ -249,7 +249,7 @@ namespace DisasterPlus.Game
         ///   火山の実績を出したままにするので（あちらの doc）、位相そのものを見る。
         /// ★ 押した直後の 1 フレームはまだ位相が変わらない（設計上 1 tick の遅れ）。
         ///   依頼が積まれている間はボタンを畳む —— **押しても何も変わらない
-        ///   ボタンは二度押される**（<see cref="VolcanoConfirmRows"/> と同じ判断）。
+        ///   ボタンは二度押される**（<see cref="VolcanoConfirmPanel"/> と同じ判断）。
         /// </summary>
         private static float RefreshStop(float y, VolcanoSnapshot s)
         {
@@ -299,8 +299,7 @@ namespace DisasterPlus.Game
             button.isVisible = false;
             button.isEnabled = false;
             button.eventClick += (c, e) =>
-                VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Stop,
-                    new DisasterPlus.Core.Common.Vec3(0f, 0f, 0f)));
+                VolcanoHub.Request(VolcanoRequestData.Of(VolcanoRequest.Stop));
             return button;
         }
 
@@ -474,7 +473,7 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// 「進行中」の位相か。<see cref="VolcanoPhase.AwaitingConfirmation"/> は**含めない**
-        /// —— そちらは <see cref="VolcanoConfirmRows"/> が同じ場所に出す。
+        /// —— そちらは <see cref="VolcanoConfirmPanel"/> が別の窓に出す。
         /// </summary>
         private static bool InProgress(VolcanoPhase phase)
         {
@@ -549,7 +548,7 @@ namespace DisasterPlus.Game
             SetLabelVisible(_stopNoteLabel, visible);
 
             // ★ 見えないボタンがクリックを拾える経路を残さない
-            //   （<see cref="VolcanoConfirmRows"/> と同じ扱い）。
+            //   （<see cref="VolcanoConfirmPanel"/> と同じ扱い）。
             if (_stopButton != null)
             {
                 _stopButton.isVisible = visible;

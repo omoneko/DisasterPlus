@@ -236,8 +236,9 @@ namespace DisasterPlus.Game
             if (request.Kind == TyphoonRequest.Stop && _active) Stop();
             else if (request.Kind == TyphoonRequest.Start)
             {
-                // ★ 依頼は**地点を運ぶ**。ここで座標を発明しないこと。
-                Start(snapshot, frame, request.Point.ToVec2());
+                // ★ 依頼は**地点と強度を運ぶ**。ここで座標も強度も発明しないこと
+                //   （強度を設定画面から読み直すと「押した時と違う強度で始まる」）。
+                Start(snapshot, frame, request.Point.ToVec2(), request.Intensity);
             }
 
             if (!_active) return;
@@ -259,7 +260,8 @@ namespace DisasterPlus.Game
         /// スロットの取得と開始は <see cref="TyphoonSlot"/> が持ち、ここは
         /// **起こしてよいかの判断と、④のモデルの初期化**だけを行う。
         /// </summary>
-        private static void Start(TyphoonSnapshot snapshot, uint frame, Vec2 origin)
+        private static void Start(TyphoonSnapshot snapshot, uint frame, Vec2 origin,
+                                  int requestedIntensity)
         {
             if (_active)
             {
@@ -302,7 +304,10 @@ namespace DisasterPlus.Game
             _seed = TyphoonSlot.Id;
             _origin = origin;
             _speed = speed;
-            _peakIntensity = ClampIntensity(ModSettings.TyphoonIntensity.value);
+            // ★ 強度は**タイルのスライダーが指していた値**（依頼が運んできたもの）。
+            //   設定画面の値はスライダーが読めない環境の落とし所で、その差し替えは
+            //   配置ツール側で済んでいる（TyphoonPlacementTool.OnToolUpdate）。
+            _peakIntensity = ClampIntensity(requestedIntensity);
             _totalFrames = prefab.ActiveDuration;
             _prefabRadius = prefab.StormRadius;
             _elapsedFrames = 0u;

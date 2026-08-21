@@ -44,12 +44,36 @@ namespace DisasterPlus.Game
         public static string FireWhirlName = "Fire whirl";
         public static string FireWhirlTooltip = "Place a stationary, burning vortex";
 
+        // ★ 1 文に縮めたが、**「バニラ由来の破壊はあちらの竜巻設定に従う」は
+        //   落とせない** —— これは挙動の事実であって解説ではない。
+        //   （落とした「延焼拡大は影響を受けません」は③のパネルと診断が名乗る。）
         public static string NdrDetected =
-            "Natural Disasters Renewal detected. Vanilla-side destruction follows its tornado settings; "
-            + "fire spread is unaffected.";
+            "Natural Disasters Renewal detected: vanilla-side destruction follows its "
+            + "tornado settings.";
 
         public static string FireWhirlNeedsDlc =
             "Fire whirls require the Natural Disasters DLC.";
+
+        // --- 左上のショートカットと、その下のタブ帯（InfoHub）---
+        //
+        // ★ ボタンの見分けは**文字**で付ける。スプライト名はアトラスのデータで
+        //   あってアセンブリからは読めないので、アイコン名を当てにいくと
+        //   「見えないボタン」になり得る（InfoHub のクラス doc）。
+        //   そのため InfoButtonLabel は**短い文字列でなければならない**
+        //   （32 px 四方のボタンに収まること）。
+        public static string InfoButtonLabel = "D+";
+        public static string InfoButtonTooltip = "Disaster + information";
+        public static string InfoTabDiagnostics = "Diagnostics";
+
+        // --- 診断のタブ ---
+        public static string DiagnosticsTitle = "Diagnostics";
+        public static string DiagnosticsOverlayRow = "Overlay";
+        public static string DiagnosticsHotkeyRow = "Hotkey";
+        public static string DiagnosticsOn = "on";
+        public static string DiagnosticsOff = "off";
+        public static string DiagnosticsDumpButton = "Write a diagnostics dump";
+        public static string DiagnosticsDumpHint =
+            "The dump is written into the mod folder.";
 
         public static string GroupDebug = "Debug";
         public static string OverlayEnabled = "Enable diagnostic overlay";
@@ -351,6 +375,9 @@ namespace DisasterPlus.Game
         // この設定を既定 ON にしてよい根拠そのものである（強度 55 で追加分が厳密に 0）。
         public static string EarthquakeShakeBoost =
             "Scale camera shake with intensity and distance";
+        // ★ **設定画面からは降ろした。** 何をする設定かは EarthquakeShakeBoost の
+        //   ラベルが名乗っており、「バニラはこうしている」の解説は診断ダンプにある
+        //   （Mod.OnSettingsUI の doc の表）。**キーは消さない。再利用もしない。**
         public static string EarthquakeShakeBoostNote =
             "Vanilla ignores intensity here, so a 25.5 quake shakes exactly as much as a 5.5 one. "
             + "At the vanilla default intensity (5.5) this option changes nothing.";
@@ -421,7 +448,8 @@ namespace DisasterPlus.Game
         //    接頭辞を書ける場所が無いからである（行の接頭辞は EarthquakeRows が
         //    付けるが、テクスチャの中には文字を置かない）。
         public static string EarthquakeSeismogramEnabled =
-            "Synthesize a realistic seismogram (P wave, S wave and coda)";
+            "Synthesize a realistic seismogram (also changes how the camera shakes)";
+        // ★ **設定画面からは降ろした**（EarthquakeShakeBoostNote と同じ扱い）。
         public static string EarthquakeSeismogramNote =
             "Vanilla shakes the camera with two fixed sine waves that never arrive, never build "
             + "and never decay. This option replaces that pattern with a synthesized record and "
@@ -605,7 +633,14 @@ namespace DisasterPlus.Game
         public static string LogChannelTyphoon = "Typhoon";
 
         // --- ④台風（Task 3: 論理オブジェクトと経路追従） ---
-        public static string TyphoonIntensity = "Typhoon intensity (10-255)";
+        // ★ **これは「既定値」である。** 実際に使う強度は災害パネルの④タイルを
+        //   押したときに出るスライダーで選ぶ（そのスライダーの初期値がこの値）。
+        //   ラベルが「既定」と名乗らないと、スライダーで変えた強度が
+        //   ここに従っていないように見える。
+        public static string TyphoonIntensity =
+            "Default typhoon intensity (10-255; vanilla storms use 55)";
+        // ★ **設定画面からは降ろした。** 「バニラの嵐は 55」はスライダーの
+        //   ラベル（TyphoonIntensity）に畳んである。
         public static string TyphoonIntensityNote =
             "The game's own storms use 55. Above 100 is beyond anything vanilla generates.";
 
@@ -649,11 +684,15 @@ namespace DisasterPlus.Game
         //   ボタンと同じ約束）。文言を「起こす」から「地点を指す」へ改めてあるのは、
         //   押した瞬間には何も起きないからである —— 起きると書いてあるのに起きないと、
         //   プレイヤーは壊れたと判断してもう一度押す。
+        // ★ **退役した 2 件。** 台風を起こすのは災害パネルの④タイルだけになり
+        //   （バニラの災害ボタンと同じ 3 手）、パネルの中の「発生」ボタンは撤去した。
+        //   **キーは消さない**（LogChannelFireWhirl・*ResetButton と同じ扱い）。
+        //   **別の意味で再利用してもいけない。**
         public static string TyphoonStart = "Choose where the typhoon forms";
         public static string TyphoonPlaceHint =
             "Click the map where the typhoon should form. Right-click to cancel.";
         public static string TyphoonButtonTooltip =
-            "Raise a typhoon: click, then click the map";
+            "Typhoon: pick a strength on the slider, then click the map";
         public static string TyphoonStop = "Stop the typhoon";
         public static string TyphoonInactive = "No typhoon right now.";
         public static string TyphoonWaiting = "Waiting for the first simulation update.";
@@ -749,6 +788,8 @@ namespace DisasterPlus.Game
         //   強いかを設定画面とパネルの両方で名乗る。
         public static string TyphoonSouthernHemisphere =
             "Southern hemisphere (the dangerous side is the LEFT of the track)";
+        // ★ **設定画面からは降ろした。** どちら側が危険半円かは
+        //   TyphoonSouthernHemisphere のラベルが名乗っており、理屈は診断ダンプにある。
         public static string TyphoonDangerousSideNote =
             "A real typhoon is not symmetric: on one side the spin and the storm's own "
             + "travel add up. That side gets a slightly wider and slightly more likely "
@@ -802,10 +843,8 @@ namespace DisasterPlus.Game
             + "nothing to see coming, only the damage. Each patch is a few dozen metres "
             + "across, lives for a short while and then stops. They all end with the storm.";
         public static string TyphoonTornadoRetiredNote =
-            "The old \"accompanying tornadoes\" option has been removed. Tornado-strength "
-            + "damage now happens without spawning tornadoes, which also keeps it clear of "
-            + "Natural Disasters Renewal's tornado settings. Your old saved value is kept in "
-            + "the settings file but is never read again.";
+            "The old \"accompanying tornadoes\" option was removed; its saved value is "
+            + "never read again.";
 
         // --- ④台風（Task 9: 巨大な回転雲） ---
         //
@@ -858,7 +897,7 @@ namespace DisasterPlus.Game
         public static string VolcanoTitle = "Volcano";
         public static string VolcanoButtonLabel = "Volcano";
         public static string VolcanoButtonTooltip =
-            "Place a volcano: click, then click the map (you still confirm before anything is destroyed)";
+            "Volcano: pick a size on the slider, then click the map (you confirm before anything is destroyed)";
         public static string VolcanoModelHeader = "Computed by Disaster +";
 
         // ★★ **この文に印の文字列そのものを書かないこと**（④の全体レビュー I5 と
@@ -876,8 +915,7 @@ namespace DisasterPlus.Game
         //   「うるさいから」と条件付きにしないこと —— 利用者は「不可逆でよい」と
         //   判断したが、それはプレイヤーに黙っていてよいという意味ではない。
         public static string VolcanoIrreversibleWarning =
-            "Building a volcano changes the terrain permanently. Neither the game nor "
-            + "Disaster + can undo it, and it is written into your save.";
+            "The terrain change is permanent: nothing can undo it and it is saved.";
 
         public static string VolcanoInactive = "No volcano right now.";
         public static string VolcanoWaiting = "Waiting for the first simulation update.";
@@ -905,6 +943,9 @@ namespace DisasterPlus.Game
         //
         // ★ **単位を名乗る文字列はメートルとゲーム内分だけ。** ⑤は m/s も度も
         //   カロリーも持っていない（設計書 §7.5）。
+        // ★ **退役した 2 件。** 火山を置くのは災害パネルの⑤タイルだけになり
+        //   （バニラの災害ボタンと同じ 3 手）、パネルの中の「設置」ボタンは撤去した。
+        //   **キーは消さない。別の意味で再利用してもいけない。**
         public static string VolcanoPlace = "Place a volcano";
         public static string VolcanoPlaceHint =
             "Click where the volcano should rise. Right-click to cancel.";
@@ -912,8 +953,16 @@ namespace DisasterPlus.Game
         public static string VolcanoConfirmHeader = "Build a volcano here?";
         public static string VolcanoConfirmYes = "Build the volcano here";
         public static string VolcanoConfirmNo = "Cancel";
-        public static string VolcanoBuildingsRow = "Buildings inside the footprint";
-        public static string VolcanoSegmentsRow = "Roads inside the footprint";
+        public static string VolcanoBuildingsRow = "buildings";
+        public static string VolcanoSegmentsRow = "roads";
+
+        /// <summary>
+        /// 確認の窓の「壊されるもの（概算）」。**「（概算）」の 3 文字が、
+        /// かつて 2 行あった言い訳の代わりである**（<c>VolcanoConfirmPanel</c> の
+        /// クラス doc の表）。数は調査した瞬間のもので、地面をならしている間も
+        /// 街は動き続けるので実際の数は前後する —— それは診断ダンプに書いてある。
+        /// </summary>
+        public static string VolcanoConfirmDestroyed = "Will be destroyed (approx.)";
 
         // ★ §7.2 の「概数であることも明示する」。実数をそのまま出すとプレイヤーは
         //   「ぴったりその数だけ壊れる」と読む（ClearanceEstimate のクラス doc）。
@@ -921,6 +970,11 @@ namespace DisasterPlus.Game
         // ★★ 全体レビュー I3。**丸めた数は [measured] の行から降りて、この注記に来た。**
         //   印の意味は「ゲームの配列から読んだだけの値」であり、丸めは本 MOD の計算である。
         //   上の 2 行は数えた実数、こちらが「およそ」を名乗る。
+        // ★ **退役した 2 件。** 概数の言い訳の 2 行は確認の窓から降ろし、
+        //   見出しの「（概算）」（VolcanoConfirmDestroyed）と診断ダンプへ移した
+        //   （所有者の指示「あれこれ説明は出さなくていい」）。
+        //   **キーは消さない**（LogChannelFireWhirl・*ResetButton と同じ扱い）。
+        //   **別の意味で再利用してもいけない。**
         public static string VolcanoEstimateApprox = "About this many will be removed";
         public static string VolcanoEstimateNote =
             "The two rows above are what the survey counted at that moment. The city keeps "
@@ -931,28 +985,25 @@ namespace DisasterPlus.Game
         //   ことも消すこともできない形で残る。同じ場所に置き直すと**その上に積み上がる**
         //   （VolcanoUplift は「今の地形」を元の高さとして控え直す）。
         public static string VolcanoSaveWarning =
-            "Do not save while a volcano is still being built. Disaster + does not store an "
-            + "unfinished volcano: after loading, the mountain stays exactly as far as it got "
-            + "- no crater, no eruption, no lava - and there is no way to finish or remove it. "
-            + "Placing a new volcano on the same spot piles a second mountain on top of it.";
+            "Do not save while it is being built: an unfinished volcano cannot be "
+            + "finished or removed.";
 
         // ★★ 全体レビュー I1。ポーズ中は着手できない。**黙って何もしないをやらない。**
-        public static string VolcanoPausedNote =
-            "The game is paused. Disaster + does not start destroying the city while the "
-            + "simulation is stopped. Unpause, then press the button.";
+        public static string VolcanoPausedNote = "The game is paused. Unpause to start.";
 
         // ★ 走査が 1 tick ぶんの上限で打ち切られたとき。**上の概数は下限になる。**
         //   これを黙っていると、概数どころか「実際より少ない数」を確定値のように見せる。
         public static string VolcanoSurveyCapped =
-            "The survey stopped at its per-tick limit, so the counts above are a lower "
-            + "bound: the outer edge of the footprint was not reached.";
+            "The survey hit its limit, so the counts are a lower bound.";
 
         public static string VolcanoSegmentsUnknown =
-            "Disaster + could not count the roads inside the footprint in this build of the "
-            + "game. They are still going to be destroyed.";
+            "(roads could not be counted, but they are destroyed too)";
 
         // ★ §1.2 そのもの。**「壊さずに地面を上げる」が選べない理由**を書く ——
         //   これが書いていないと、破壊は MOD の乱暴な選択に見える。
+        // ★ **退役 1 件。**「なぜ壊す必要があるのか」は設計の説明であって、
+        //   確認の場でする判断ではない。同じ内容は診断ダンプにある
+        //   （VolcanoFeature.WriteNotes）。キーは残すが再利用しないこと。
         public static string VolcanoClearingWarning =
             "The roads and buildings inside the footprint will be destroyed. Raising the "
             + "ground without clearing them first does not work: the game pins the terrain "
@@ -961,18 +1012,16 @@ namespace DisasterPlus.Game
 
         // ★ §7.3。**不具合ではないと明示する**（①の「なぜハザードマップが空か」と同じ扱い）。
         public static string VolcanoBuildabilityNote =
-            "The buildable ground and the water level do not follow the visible terrain "
-            + "straight away. They catch up at 2 m per 64 simulation frames. This is not a bug.";
+            "Buildable ground and the water level catch up slowly (2 m per 64 frames). "
+            + "Not a bug.";
 
         // ★ §C-10。天井に当たっても例外は出ず**無言で山頂が平らな台地になる**ので、
         //   黙って低い山を作らずに先に言う。
         public static string VolcanoHeightLimited =
-            "The terrain has a hard ceiling at 1024 m, so the volcano here is lower than the "
-            + "height you asked for.";
+            "The 1024 m terrain ceiling makes this volcano lower than asked.";
 
         public static string VolcanoSettingsChanged =
-            "The shape, radius or height changed after the survey, so Disaster + is surveying "
-            + "again before it starts.";
+            "The settings changed, so the area was surveyed again.";
 
         /// <summary>ゲーム内の分。**実在の物理単位ではない**ので m/s の類とは扱いが違う。</summary>
         public static string VolcanoMinutes = "in-game minutes";

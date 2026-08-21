@@ -20,14 +20,24 @@ namespace DisasterPlus.Game
     ///     <c>Strings.VolcanoModelNote</c>）
     ///   - <b>行ごとの印は付けない</b>（<see cref="AddRow(UIPanel,string,ref float)"/> /
     ///     <see cref="SetPlain"/>）
-    ///   - <b>唯一の例外</b>は、ゲームの配列から読んだだけで⑤が何も計算していない値、
-    ///     すなわち (a) 設置地点の地形高さ (b) 影響範囲の建物数 (c) 同じく道路
-    ///     セグメント数の 3 行。ここにだけ <c>Strings.SourceVanilla</c> を付ける
+    ///   - <b>唯一の例外</b>は、ゲームの配列から数えただけで⑤が何も計算していない値、
+    ///     すなわち<b>確認の窓の「壊されるもの」の 1 行</b>（建物数と道路セグメント数）。
+    ///     ここにだけ <c>Strings.SourceVanilla</c> を付ける
     ///     （<see cref="AddMeasuredRow"/> / <see cref="SetMeasured"/>）
     ///
-    /// <see cref="SetMeasured"/> を呼んでよいのは<b>上の 3 行だけ</b>である。
+    /// <see cref="SetMeasured"/> を呼んでよいのは<b>その 1 行だけ</b>である。
     /// 隆起の進捗も、溶岩の位置も、火口の深さも、**全部⑤が決めた数字**であって
     /// ゲームが計算したものではない。レビューは <c>SetMeasured</c> の呼び出し箇所を数える。
+    ///
+    /// ★ **かつては 3 行だった**（地形高さ・建物数・道路数）。確認の窓を
+    ///   「何が壊れるか（数）と、取り消せないこと」だけに絞ったとき
+    ///   （<see cref="VolcanoConfirmPanel"/> のクラス doc）、地形高さの行は
+    ///   診断ダンプへ移り、建物と道路は 1 行にまとまった。**数だけが変わっていて、
+    ///   規約は変わっていない。**
+    ///
+    /// ★ 道路が数えられなかったとき（<c>SegmentCount &lt; 0</c>）は
+    ///   <see cref="SetPlain"/> で出す。**読めなかった値をゲームの実測値として
+    ///   名乗らない。**
     ///
     /// ── 機械的に確認できる担保（grep 5 本）──────────────────────
     ///
@@ -56,9 +66,7 @@ namespace DisasterPlus.Game
     /// # 4. Strings.SourceModel は 1 度も現れない                            -> 0
     /// grep -rn --include=*.cs "Strings.SourceModel" $V | grep -v '///' | wc -l
     ///
-    /// # 5. SetMeasured の呼び出しは 3 行だけ（地形高さ・建物数・道路数）
-    /// #    T3（この型を入れたタスク）の時点では**まだ 0** —— 測った値を持つ行が
-    /// #    1 つも無いからである。T4 が確認の 3 行を入れて 3 になり、以後増えない。
+    /// # 5. SetMeasured の呼び出しは 1 行だけ（確認の窓の「壊されるもの」）  -> 1
     /// grep -rn --include=*.cs "VolcanoRows.SetMeasured(" $V | grep -v '///' | wc -l
     /// </code>
     ///
@@ -175,9 +183,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **ゲームの配列から読んだだけの値の行。** ⑤でこれを使ってよいのは
-        /// 設置地点の地形高さ・範囲内の建物数・範囲内の道路セグメント数の 3 行だけである
-        /// （クラス doc）。幾何としては <see cref="AddRow(UIPanel,string,ref float)"/> と
+        /// **ゲームの配列から数えただけの値の行。** ⑤でこれを使ってよいのは
+        /// 確認の窓の「壊されるもの」の 1 行だけである（クラス doc）。幾何としては <see cref="AddRow(UIPanel,string,ref float)"/> と
         /// 同じで、**呼び出し箇所を数えられるようにするために別の名前を持っている**。
         /// 中身は <see cref="SetMeasured"/> でしか書かないこと。
         /// </summary>

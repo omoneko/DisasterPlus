@@ -99,7 +99,27 @@ namespace DisasterPlus.Game
         /// </summary>
         private static bool _cursorPublishedValid;
 
+        /// <summary>左上。既定値は <see cref="InfoHub"/> が位置を決める前だけ使う。</summary>
+        private static Vector3 _origin = new Vector3(600f, 150f);
+
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
+
+        /// <summary>このパネルの幅。<see cref="InfoHub"/> がタブ帯の幅を合わせるために読む。</summary>
+        internal static float Width { get { return EarthquakeRows.PanelWidth; } }
+
+        /// <summary>
+        /// 左上を決める。**位置を決める主体は <see cref="InfoHub"/> 1 つだけである**
+        /// （<c>DisasterPanelBar</c> のクラス doc「位置を決める主体が複数ある限り、
+        /// この事故は形を変えて何度でも起きる」と同じ規律）。
+        /// ここで座標を発明しないこと。
+        /// </summary>
+        internal static void MoveTo(Vector3 origin)
+        {
+            _origin = origin;
+            if (_panel == null) return;
+            _panel.relativePosition = _origin;
+            ClampToView(_panel);
+        }
 
         public static void Show()
         {
@@ -119,11 +139,6 @@ namespace DisasterPlus.Game
             //    「何の量を見ているのか」を名乗るものが画面から消える
             //    （EarthquakeOverlay.Disable の doc）。
             EarthquakeOverlay.Disable();
-        }
-
-        public static void Toggle()
-        {
-            if (IsVisible) Hide(); else Show();
         }
 
         /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
@@ -243,10 +258,9 @@ namespace DisasterPlus.Game
             panel.width = EarthquakeRows.PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
-            // ①の予報パネル（x=200、幅 380）と重ならない位置。UIView の座標系は
-            // 高さ 1080 に正規化され、16:9 なら幅はおよそ 1920 になるので、
-            // x=600 は現実的な解像度で画面外に出ない。
-            panel.relativePosition = new Vector3(600f, 150f);
+            // 位置は InfoHub が決める（MoveTo）。ここには既定値しか無い ——
+            // パネルは同時に 1 枚しか出ないので、互いに避ける座標はもう要らない。
+            panel.relativePosition = _origin;
             panel.isVisible = false;
 
             float y = 8f;
@@ -255,17 +269,7 @@ namespace DisasterPlus.Game
                 EarthquakeRows.PanelWidth - 44f, 24f);
             _titleLabel.textScale = 1.1f;
 
-            var closeButton = (UIButton)panel.AddUIComponent(typeof(UIButton));
-            closeButton.name = FreeSlotFinder.SelfPrefix + "EarthquakeCloseButton";
-            closeButton.text = "X";
-            closeButton.width = 24f;
-            closeButton.height = 24f;
-            closeButton.relativePosition = new Vector3(EarthquakeRows.PanelWidth - 32f, y);
-            closeButton.normalBgSprite = "ButtonMenu";
-            closeButton.hoveredBgSprite = "ButtonMenuHovered";
-            closeButton.pressedBgSprite = "ButtonMenuPressed";
-            closeButton.eventClick += (c, e) => Hide();
-
+            // ★ 閉じるボタンはここには無い。**タブ帯の X が 1 つだけ持つ**（InfoHub）。
             y += 30f;
 
             // DLC が無い環境では地震そのものが存在しない。行を出さずに理由を書く。

@@ -10,11 +10,15 @@ namespace DisasterPlus.Game
     ///
     /// ── なぜ在るのか ─────────────────────────────────────
     ///
-    /// バニラの災害ボタンは「押す → カーソルが構わる → 地図をクリック → その地点に
-    /// 出現の遅れを置いて災害が起きる」である。④のタイルは以前パネルを開くだけで、
-    /// 発生はパネルの中のボタンだった（＝押した地点という概念が無かった）。
-    /// **バニラと同じ挙動にする**というのが所有者の依頼で、その地点を運ぶのが
-    /// このツールである（<see cref="TyphoonRequestData"/>）。
+    /// バニラの災害ボタンは「押す → **強度スライダーが出る** → 地図をクリック →
+    /// その地点に出現の遅れを置いて災害が起きる」である。④もこの 3 手に揃える ——
+    /// 入口は <see cref="Arm"/> で、地点と<b>そのとき選ばれていた強度</b>を
+    /// <see cref="TyphoonRequestData"/> が運ぶ。スライダーはバニラのものをそのまま
+    /// 借りる（<see cref="IntensitySlider"/>）。
+    ///
+    /// ★ **ここからパネルは開かない。** 起こすことと読むことは別で、
+    ///   ④の情報は左上のショートカットの側にある（所有者の指摘
+    ///   「あれこれ説明は出さなくていい」）。
     ///
     /// ── ⑤と違い、クリックは「起こす」である ──────────────────────
     ///
@@ -68,6 +72,35 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>
+        /// ★★ **災害パネルの④タイルの動作。バニラの災害ボタンと同じ 3 手である。**
+        ///
+        ///   1. タイルを押す      → カーソルが構わり、**強度スライダーが出る**
+        ///   2. スライダーを動かす → 台風の強度（バニラの <c>m_intensity</c> と同じ意味）
+        ///   3. 地図をクリック    → その地点で台風が始まる
+        ///
+        /// **説明のパネルはもう開かない。** 情報は左上のショートカットの側にある
+        /// （所有者の指摘「あれこれ説明は出さなくていい」）。ここで開くと
+        /// 「起こす」と「読む」が同じ操作に戻る。
+        ///
+        /// 起こせない環境（Natural Disasters 非所持）ではタイル自体が押せない
+        /// （<see cref="DisasterPanelBar"/> が無効化し、理由をツールチップに出す）。
+        /// それでも押せてしまう経路が将来足されたときのために、ここでも門を置く。
+        /// </summary>
+        public static void Arm()
+        {
+            if (!ModSettings.TyphoonEnabled.value) return;
+            if (!ModCompat.NaturalDisastersOwned) return;
+
+            Activate();
+            if (!IsActive) return;
+
+            // ★ 構えるたびに既定値を入れる。スライダーは 1 本しかないのに、
+            //   ④と⑤では数字の意味が違う（IntensitySlider のクラス doc）。
+            IntensitySlider.Seed(ModSettings.TyphoonIntensity.value);
+            IntensitySlider.Show();
+        }
+
         public static void Activate()
         {
             var controller = ToolsModifierControl.toolController;
@@ -88,6 +121,10 @@ namespace DisasterPlus.Game
             try
             {
                 if (!IsActive) return;
+
+                // ★ 強度スライダーを畳むのは**このツールが構えていたときだけ**。
+                //   無条件に畳むと、バニラの災害を構えている人のスライダーを横から消す。
+                IntensitySlider.Hide();
                 ToolsModifierControl.SetTool<DefaultTool>();
             }
             catch (System.Exception e)
@@ -115,16 +152,20 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            TyphoonHub.Request(new TyphoonRequestData(TyphoonRequest.Start, hit));
+            // ★ 強度は**クリックした瞬間のスライダーの値**である（バニラと同じ）。
+            //   読めない環境では設定画面の値へ落とす —— 読めなかったことを
+            //   0（＝いちばん弱い、という有効な値）で表さない。
+            int intensity = IntensitySlider.ReadOr(ModSettings.TyphoonIntensity.value);
+
+            TyphoonHub.Request(new TyphoonRequestData(TyphoonRequest.Start, hit, intensity));
 
             // 指したら用は済んでいる。押しっぱなしで 2 つ目を指させない
             // （sim 側も同時に 1 個しか作らないが、それは断り文が出るだけで
             //  「押しても何も起きない」に見える）。
+            //
+            // ★ **ここでパネルを開かない。** バニラの災害ボタンも、指したあとに
+            //   説明の窓を出したりしない。台風の状態は左上のショートカットから読む。
             Deactivate();
-
-            // 発生までには設計上 1 tick の遅れがある。パネルが開いていないと
-            // 「押したのに何も起きない」に見えるので、結果の出る場所を開く。
-            TyphoonPanel.Show();
         }
 
         private static bool TryPickGround(out Vec3 hit)

@@ -6,22 +6,30 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ①②④⑤のボタンを **バニラの災害パネルの中** にまとめて置く、唯一の持ち主。
+    /// **災害を起こすタイル（④台風 ⑤火山）を、バニラの災害パネルの中に置く
+    /// 唯一の持ち主。** ここに置いてよいのは「押すと何かが起きる」タイルだけである。
     ///
-    /// タイルは 2 種類ある（★ 足すときはどちらかを選ぶこと）
-    /// ------------------------------------------------
-    /// | 種別 | タイル | 押すと |
-    /// |---|---|---|
-    /// | 情報だけ | ①予報 ②地震 | パネルが開閉する（**出す物が無いので構えない**） |
-    /// | 災害を起こす | ④台風 ⑤火山 | **配置カーソルが構わる**＋パネルが開く |
+    /// | タイル | 押すと |
+    /// |---|---|
+    /// | ④台風 | **カーソルが構わり、強度スライダーが出る** |
+    /// | ⑤火山 | **カーソルが構わり、スライダーが出る**（大きさの倍率） |
     ///
-    /// 後者はバニラの災害ボタンと同じ約束である —— 押す、地図をクリックする、
-    /// 出現の遅れを置いてその地点で始まる。所有者の指摘
-    /// 「押してその場でしばらくしたら発生するオリジナルの挙動が達成されていない」
-    /// への回答がこの表で、入口は <c>TyphoonPanel.ArmPlacement</c> /
-    /// <c>VolcanoPanel.ArmPlacement</c>。**どちらもパネルを同時に開く**ので、
-    /// 説明と診断（断り文・上陸予測・確認の行）への経路は塞がらない。
-    /// カーソルだけを解くのは右クリック、パネルを閉じるのは X。
+    /// これはバニラの災害ボタンと**同じ 3 手**である ——
+    /// 押す、スケールを選ぶ、地図をクリックする。入口は
+    /// <c>TyphoonPlacementTool.Arm</c> / <c>VolcanoPlacementTool.Arm</c>、
+    /// スライダーはバニラのものをそのまま借りる（<c>IntensitySlider</c>）。
+    ///
+    /// ★★ **④⑤のタイルは説明のパネルを 1 枚も開かない。**（所有者の指摘
+    ///    「あれこれ説明は出さなくていいので、ほかの災害と同じように…」）
+    ///    起こすことと読むことは別で、①②④⑤の情報は左上のショートカット
+    ///    （<c>InfoShortcut</c>）の側にある。ここにパネルを開く行を戻さないこと。
+    ///
+    /// 起こせない環境（④＝ND DLC 非所持、⑤＝地形が書けない）ではタイルを
+    /// **押せなくし、理由をツールチップに出す**（<see cref="ApplyGate"/>）。
+    /// 「押せるが何も起きない」を作らないための門で、パネルが無くなったぶんの
+    /// 説明の行き場でもある。
+    ///
+    /// カーソルを解くのは右クリック。
     ///
     /// ③火災旋風のタイルは**無い**（自然発生しかしない。<c>FireWhirlFeature</c> の doc）。
     ///
@@ -108,11 +116,14 @@ namespace DisasterPlus.Game
     /// --------
     /// main スレッド専用。sim スレッドから呼んではいけない。
     /// </summary>
-    public static class DisasterPanelBar
+    public static partial class DisasterPanelBar
     {
         // 診断が機能ごとの設置状況を引くための識別子。表示文字列ではない。
-        public const string IdForecast = "forecast";
-        public const string IdEarthquake = "earthquake";
+        //
+        // ★ ①予報 ②地震の識別子はここには**無い**。あの 2 つのタイルは
+        //   災害パネルから撤去され（読むだけのものは InfoHub から開く）、
+        //   診断は InfoHub.IsInstalled / InfoHub.Placement を引くようになった。
+        //   使われない定数を「いつか使うかも」で残さない。
         public const string IdTyphoon = "typhoon";
         public const string IdVolcano = "volcano";
 
@@ -153,6 +164,22 @@ namespace DisasterPlus.Game
             public readonly Gate Wanted;
             public readonly Command Activate;
 
+            /// <summary>
+            /// この環境でこのタイルが**実際に何かを起こせる**か。false のあいだ
+            /// タイルは押せなくなり、ツールチップが理由を名乗る
+            /// （<see cref="Reason"/>）。null なら常に押せる。
+            ///
+            /// ★ 「押せるが何も起きない」を作らないための門である。以前は
+            ///   タイルを押すとパネルが開き、そこに理由が出ていた。タイルが
+            ///   起こす専用になった今、開くパネルはもう無い —— 理由の行き場は
+            ///   ツールチップだけである。**理由を画面に足さないこと**が要件で
+            ///   あって、理由を消すことではない。
+            /// </summary>
+            public readonly Gate Usable;
+
+            /// <summary>押せないときにツールチップへ出す理由。<see cref="Usable"/> と対。</summary>
+            public readonly TextSource Reason;
+
             /// <summary>ボタンが消えるときに閉じるパネル。無ければ null。</summary>
             public readonly Command HideBody;
 
@@ -160,7 +187,8 @@ namespace DisasterPlus.Game
             public MouseEventHandler Handler;
 
             public Entry(string id, TextSource label, TextSource tooltip,
-                         Gate wanted, Command activate, Command hideBody)
+                         Gate wanted, Command activate, Command hideBody,
+                         Gate usable, TextSource reason)
             {
                 Id = id;
                 ComponentName = FreeSlotFinder.SelfPrefix + id + "Button";
@@ -169,12 +197,21 @@ namespace DisasterPlus.Game
                 Wanted = wanted;
                 Activate = activate;
                 HideBody = hideBody;
+                Usable = usable;
+                Reason = reason;
             }
+
+            /// <summary>今このタイルを押してよいか。門が無ければ常に true。</summary>
+            public bool IsUsable() { return Usable == null || Usable(); }
         }
 
         /// <summary>
         /// **並ぶ順序はこの 1 本の並びだけが決める。** 追加するときはここに 1 行足す
-        /// （座標を発明しないこと）。番号順（①予報 ②地震 ④台風 ⑤火山）。
+        /// （座標を発明しないこと）。番号順（④台風 ⑤火山）。
+        ///
+        /// ★★ **ここに足してよいのは「押すと災害が起きる」タイルだけである。**
+        ///    読むだけのもの（①予報 ②地震、および④⑤の状態）は
+        ///    <see cref="InfoHub"/>（左上のショートカット）のタブになった。
         ///
         /// ★★ **③火災旋風のタイルはここに無い。**「火災旋風は意図的に起こせるもの
         ///    ではなく、大火事のときにだけ自然発生する」という所有者の決定により、
@@ -189,37 +226,52 @@ namespace DisasterPlus.Game
         /// </summary>
         private static readonly List<Entry> Entries = new List<Entry>
         {
-            new Entry(IdForecast,
-                      delegate { return Strings.ForecastTitle; },
-                      delegate { return Strings.ForecastTitle; },
-                      delegate { return ModSettings.ForecastEnabled.value; },
-                      ForecastPanel.Toggle,
-                      ForecastPanel.Hide),
-
-            new Entry(IdEarthquake,
-                      delegate { return Strings.EarthquakeTitle; },
-                      delegate { return Strings.EarthquakeTitle; },
-                      delegate { return ModSettings.EarthquakeEnabled.value; },
-                      EarthquakePanel.Toggle,
-                      EarthquakePanel.Hide),
-
-            // ★★ ④⑤は**災害を起こすタイル**なので、押すと配置カーソルが構わる
-            //    （バニラの災害ボタンと同じ約束）。①②は出すものが無いので従来どおり
-            //    パネルの開閉である。**この違いはツールチップで名乗ること。**
+            // ★★ ①予報 ②地震のタイルは**ここには無い。** 読むだけのものは
+            //    左上のショートカット（<c>InfoHub</c>）へ移した（所有者の依頼
+            //    「情報画面は…左上のショートカットボタンから開けるように」）。
+            //    **災害パネルに戻さないこと** —— タブは「起こす」ための場所である。
+            //
+            // ★★ ④⑤は**災害を起こすタイル**である。押すと配置カーソルが構わり、
+            //    **バニラの強度スライダーが出る**（IntensitySlider）。地図を
+            //    クリックすればその地点で起きる —— バニラの災害ボタンと同じ 3 手で、
+            //    **説明のパネルは 1 枚も開かない。**
             new Entry(IdTyphoon,
                       delegate { return Strings.TyphoonTitle; },
                       delegate { return Strings.TyphoonButtonTooltip; },
                       delegate { return ModSettings.TyphoonEnabled.value; },
-                      TyphoonPanel.ArmPlacement,
-                      TyphoonPanel.Hide),
+                      TyphoonPlacementTool.Arm,
+                      TyphoonPanel.Hide,
+                      delegate { return ModCompat.NaturalDisastersOwned; },
+                      delegate { return Strings.TyphoonNeedsDlc; }),
 
             new Entry(IdVolcano,
                       delegate { return Strings.VolcanoButtonLabel; },
                       delegate { return Strings.VolcanoButtonTooltip; },
                       delegate { return ModSettings.VolcanoEnabled.value; },
-                      VolcanoPanel.ArmPlacement,
-                      VolcanoPanel.Hide),
+                      VolcanoPlacementTool.Arm,
+                      VolcanoPanel.Hide,
+                      TerrainWritable,
+                      delegate { return Strings.VolcanoTerrainUnavailable; }),
         };
+
+        /// <summary>
+        /// ⑤が 1 メートルでも地面を上げられる環境か。**都市ごとに 1 回だけ調べて
+        /// 覚える** —— <c>VolcanoReader.ScanTerrainFacts</c> はリフレクションの走査で、
+        /// 保守パス（0.5 秒ごと）から毎回呼ぶものではない。
+        ///
+        /// 答えはゲームのビルドに対する事実なので都市の中では変わらないが、
+        /// <see cref="Remove"/> で捨てる（次の都市が必ず調べ直す）。
+        /// </summary>
+        private static bool _terrainWritableKnown;
+        private static bool _terrainWritable;
+
+        private static bool TerrainWritable()
+        {
+            if (_terrainWritableKnown) return _terrainWritable;
+            _terrainWritable = VolcanoReader.ScanTerrainFacts().Usable;
+            _terrainWritableKnown = true;
+            return _terrainWritable;
+        }
 
         private static UIScrollablePanel _row;
         private static UIPanel _fallbackBar;
@@ -333,6 +385,8 @@ namespace DisasterPlus.Game
             _fallbackOrigin = Vector2.zero;
             _fallbackFoundFreeSlot = false;
             _fallbackAnnounced = false;
+            _terrainWritableKnown = false;
+            _terrainWritable = false;
         }
 
         // ------------------------------------------------------------------
@@ -459,7 +513,7 @@ namespace DisasterPlus.Game
             b.textVerticalAlignment = UIVerticalAlignment.Middle;
             b.textPadding = new RectOffset(4, 4, 4, 4);
             b.text = e.Label();
-            b.tooltip = e.Tooltip();
+            ApplyGate(e, b);
 
             // ラムダを直接渡さずフィールドに持つ。作り替えを検出したときに
             // eventClick から外せる形でないと、バニラのタイルにこちらの動作が残る。
@@ -484,9 +538,28 @@ namespace DisasterPlus.Game
                 string label = e.Label();
                 if (e.Button.text != label) e.Button.text = label;
 
-                string tip = e.Tooltip();
-                if (e.Button.tooltip != tip) e.Button.tooltip = tip;
+                ApplyGate(e, e.Button);
             }
+        }
+
+        /// <summary>
+        /// 押せるかどうかと、ツールチップを合わせる。
+        ///
+        /// ★ **押せないタイルは押せないように見せる。** 押せてしまうと
+        ///   「押しても何も起きない」ができ、しかもタイルはもう説明のパネルを
+        ///   開かないので、理由がどこにも出ない。<c>isEnabled = false</c> の
+        ///   見た目は隣のバニラタイルから借りた <c>disabledBgSprite</c> が担い、
+        ///   理由はツールチップが担う。
+        /// </summary>
+        private static void ApplyGate(Entry e, UIButton b)
+        {
+            if (b == null) return;
+
+            bool usable = e.IsUsable();
+            if (b.isEnabled != usable) b.isEnabled = usable;
+
+            string tip = usable ? e.Tooltip() : (e.Reason != null ? e.Reason() : e.Tooltip());
+            if (b.tooltip != tip) b.tooltip = tip;
         }
 
         /// <summary>
@@ -575,6 +648,11 @@ namespace DisasterPlus.Game
                 //  全タイルの state を Normal に戻すだけ。IL 実測、例外にならない）。
                 if (p != null) p.Use();
                 ClearVanillaSelection();
+
+                // ★ 無効なタイルは押せないはずだが、入力経路を 1 つも信用しない。
+                //   ここを抜けると「押しても何も起きない」がそのまま通る。
+                if (!e.IsUsable()) return;
+
                 e.Activate();
             }
             catch (Exception ex)
@@ -655,120 +733,6 @@ namespace DisasterPlus.Game
         {
             return !string.IsNullOrEmpty(name)
                    && name.StartsWith(FreeSlotFinder.SelfPrefix, StringComparison.Ordinal);
-        }
-
-        // ------------------------------------------------------------------
-        // 退避先（バニラのパネルが見つからない環境）
-        // ------------------------------------------------------------------
-
-        /// <summary>
-        /// 災害パネルが見つからないまま <see cref="FallbackAfterAttempts"/> 回過ぎたら、
-        /// 画面に浮かぶ 1 本のバーへ退避する。**ボタンが 1 個も出ない方が悪い。**
-        ///
-        /// ここが <see cref="FreeSlotFinder"/> の唯一の呼び出し元である。呼ぶのは
-        /// **バー全体の起点 1 点** についてだけで、4 個ぶんの探索はしない ——
-        /// 中のボタンは起点からの相対位置に 1 回のループで並べる。実機テストで
-        /// 4 個が同じ点に積み上がったのは「5 つの主体がそれぞれ探した」からであって、
-        /// 探索そのものが誤りだったからではない。
-        /// </summary>
-        private static void EnsureFallbackBar()
-        {
-            if (_fallbackBar != null) return;
-
-            UIView view = UIView.GetAView();
-            if (view == null)
-            {
-                Log.Diag("panelBar", "no UIView yet; the fallback bar cannot be created");
-                return;
-            }
-
-            int wanted = 0;
-            for (int i = 0; i < Entries.Count; i++) if (Entries[i].Wanted()) wanted++;
-            if (wanted == 0) return;
-
-            const float w = 150f;
-            const float h = 28f;
-            const float gap = 4f;
-            const float pad = 4f;
-
-            Vector2 size = new Vector2(w + pad * 2f, wanted * h + (wanted - 1) * gap + pad * 2f);
-
-            bool foundFree;
-            // owner は null。バーはこの呼び出しの後に生成されるので、除外すべき
-            // 「自分自身」がまだ画面に存在しない（FreeSlotFinder.Find の doc）。
-            Vector2 origin = FreeSlotFinder.Find(new Vector2(8f, 50f), size, h + gap, 30, null, out foundFree);
-            _fallbackOrigin = origin;
-            _fallbackFoundFreeSlot = foundFree;
-
-            UIPanel bar = (UIPanel)view.AddUIComponent(typeof(UIPanel));
-            bar.name = FreeSlotFinder.SelfPrefix + "FallbackBar";
-            bar.size = size;
-            bar.relativePosition = new Vector3(origin.x, origin.y);
-            bar.backgroundSprite = "GenericPanel";
-            // 中は下のループが完全に決めきるので autolayout には任せない。
-            bar.autoLayout = false;
-            _fallbackBar = bar;
-
-            int placed = 0;
-            for (int i = 0; i < Entries.Count; i++)
-            {
-                Entry e = Entries[i];
-                if (!e.Wanted()) continue;
-
-                UIButton b = bar.AddUIComponent<UIButton>();
-                b.name = e.ComponentName;
-                b.size = new Vector2(w, h);
-                b.relativePosition = new Vector3(pad, pad + placed * (h + gap));
-                b.normalBgSprite = "ButtonMenu";
-                b.hoveredBgSprite = "ButtonMenuHovered";
-                b.pressedBgSprite = "ButtonMenuPressed";
-                b.text = e.Label();
-                b.tooltip = e.Tooltip();
-
-                Entry captured = e;
-                captured.Handler = delegate(UIComponent c, UIMouseEventParameter p) { OnClick(captured, p); };
-                b.eventClick += captured.Handler;
-
-                e.Button = b;
-                placed++;
-            }
-
-            // ★ 1 回だけ。設定を切り替えるたびにバーを作り直すので（RebuildFallbackBar）、
-            //   ここで無条件に Warn を出すと、スロットルの無い警告が繰り返し出る。
-            if (_fallbackAnnounced) return;
-            _fallbackAnnounced = true;
-            Log.Warn("the vanilla disasters panel was not found after " + _attempts
-                     + " attempts; the Disaster + buttons were placed on a floating bar at ("
-                     + origin.x + "," + origin.y + ") instead");
-        }
-
-        /// <summary>
-        /// 退避先のバーを作り直す。設定で機能を切った／入れたときに呼ばれる。
-        /// **バーごと作り直す**のは、行に置く場合と同じ理由 —— 足りない分だけ
-        /// 後ろに足すと、切り替えた順序で並び順が変わる。
-        /// </summary>
-        private static void RebuildFallbackBar()
-        {
-            for (int i = 0; i < Entries.Count; i++) Detach(Entries[i], true, !Entries[i].Wanted());
-
-            UnityEngine.Object.Destroy(_fallbackBar.gameObject);
-            _fallbackBar = null;
-
-            EnsureFallbackBar();
-        }
-
-        /// <summary>行が見つかったので浮遊バーを畳む。ボタンは同じ保守パスで行の側に作り直す。</summary>
-        private static void DismissFallbackBar()
-        {
-            for (int i = 0; i < Entries.Count; i++) Detach(Entries[i], true, false);
-
-            UnityEngine.Object.Destroy(_fallbackBar.gameObject);
-            _fallbackBar = null;
-            _fallbackOrigin = Vector2.zero;
-            _fallbackFoundFreeSlot = false;
-            _manualLayout = false;
-
-            Log.Info("the vanilla disasters panel appeared; moving the Disaster + buttons into it");
         }
     }
 }

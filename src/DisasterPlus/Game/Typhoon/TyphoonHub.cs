@@ -36,16 +36,34 @@ namespace DisasterPlus.Game
         /// <summary>クリックされたワールド座標（<c>Start</c> のときだけ意味を持つ）。</summary>
         public readonly Vec3 Point;
 
-        public TyphoonRequestData(TyphoonRequest kind, Vec3 point)
+        /// <summary>
+        /// クリックした瞬間に**バニラの強度スライダーが指していた生値**
+        /// （<c>Start</c> のときだけ意味を持つ）。バニラの
+        /// <c>DisasterData.m_intensity</c> と同じ意味・同じ尺度で、表示だけが /10 される。
+        ///
+        /// ★ ここに載せるのは「そのとき選ばれていた値」であって、設定画面の値では
+        ///   ない。設定画面の値は**スライダーが無い環境の落とし所**であり、
+        ///   sim 側で読み直すと「押した時と違う強度で始まる」ようになる。
+        /// </summary>
+        public readonly int Intensity;
+
+        public TyphoonRequestData(TyphoonRequest kind, Vec3 point, int intensity)
         {
             Kind = kind;
             Point = point;
+            Intensity = intensity;
+        }
+
+        /// <summary>地点も強度も要らない依頼（<c>Stop</c>）。</summary>
+        public static TyphoonRequestData Of(TyphoonRequest kind)
+        {
+            return new TyphoonRequestData(kind, new Vec3(0f, 0f, 0f), 0);
         }
 
         /// <summary>「依頼なし」。<c>default(TyphoonRequestData)</c> と同じだが、意図を名乗る。</summary>
         public static TyphoonRequestData None
         {
-            get { return new TyphoonRequestData(TyphoonRequest.None, new Vec3(0f, 0f, 0f)); }
+            get { return Of(TyphoonRequest.None); }
         }
     }
 
