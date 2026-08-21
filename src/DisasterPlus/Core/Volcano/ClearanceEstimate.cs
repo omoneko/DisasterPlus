@@ -3,7 +3,7 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 確認の行に出す「範囲の広さ」と「概数への丸め」。
+    /// 影響範囲の行に出す「範囲の広さ」と「概数への丸め」。
     ///
     /// ★★ <b>これは「壊れる数」ではない。</b> <see cref="RoundedEstimate"/> に渡すのは
     /// <b>調査した瞬間に範囲内にあった実数</b>で、返るのはそれを丸めた概数である。

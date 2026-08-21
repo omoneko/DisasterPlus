@@ -81,9 +81,9 @@ namespace DisasterPlus.Game
         /// <summary>
         /// 状態の 1 行。**「何も起きていない」と「起こせなかった」を見分けられるようにする。**
         ///
-        /// 優先順は「依頼を出した直後（次の sim tick を待っている）」＞「調査中」＞
-        /// 「確認待ち（行は下の確認の一式が出す）」＞「進行中」＞「理由つきで断られた」＞
-        /// 「ただ起きていない」。<see cref="VolcanoHub.PendingRequest"/> を見るのは
+        /// 優先順は「依頼を出した直後（次の sim tick を待っている）」＞「進行中」＞
+        /// 「理由つきで断られた」＞「ただ起きていない」。
+        /// <see cref="VolcanoHub.PendingRequest"/> を見るのは
         /// **押しても何も変わらないように見えて二度押しするのを防ぐため**で、
         /// 依頼から反映までには設計上 1 tick の遅れがある（<see cref="VolcanoHub"/> の doc）。
         /// </summary>
@@ -94,19 +94,13 @@ namespace DisasterPlus.Game
             if (VolcanoPlacementTool.IsActive) return Strings.VolcanoPlaceHint;
 
             VolcanoRequest pending = VolcanoHub.PendingRequest.Kind;
-            if (pending == VolcanoRequest.Survey) return Strings.VolcanoSurveying;
+            // ★ 依頼を積んでから sim が拾うまでの 1 tick。⑤はその 1 tick の中で
+            //   影響範囲を数えてから壊し始めるので、ここに出るのは「調べています」である。
+            if (pending == VolcanoRequest.Place) return Strings.VolcanoSurveying;
             if (pending != VolcanoRequest.None) return Strings.VolcanoWaiting;
 
             switch (s.Phase)
             {
-                case VolcanoPhase.Surveying:
-                    return Strings.VolcanoSurveying;
-
-                case VolcanoPhase.AwaitingConfirmation:
-                    // 確認の一式がこの下に出ているので、状態の行は空にする
-                    // （同じことを 2 度言わない）。
-                    return "";
-
                 case VolcanoPhase.Idle:
                 case VolcanoPhase.Done:
                 case VolcanoPhase.Refused:
@@ -128,13 +122,13 @@ namespace DisasterPlus.Game
         /// 公開契約で手で編集されうるので、生の設定値をそのまま画面に出さない）。
         ///
         /// **天井（§C-10）による切り下げはここでは掛けない** —— それは
-        /// 設置地点の地形高さが決まって初めて分かる量で、確認の窓
-        /// （<see cref="VolcanoConfirmPanel"/>）が名乗る。
+        /// 設置地点の地形高さが決まって初めて分かる量で、実際に置いたあとに
+        /// <see cref="VolcanoEffectRows"/> の調査の行が名乗る。
         ///
         /// ★ **スライダーの倍率もここでは掛けない。** 倍率が決まるのは地図を
         ///   クリックした瞬間で（<c>Core.Volcano.VolcanoSizeScale</c>）、この行は
         ///   「設定でいま選ばれている基準の大きさ」である。倍率を掛けた実寸は
-        ///   確認の窓が出す。
+        ///   置いたあとに <see cref="VolcanoEffectRows"/> が出す。
         /// </summary>
         private static void RefreshShapeRow()
         {

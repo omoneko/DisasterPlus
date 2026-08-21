@@ -64,7 +64,7 @@ namespace DisasterPlus.Game
             {
                 // ★ 機能を切ったら、積まれている依頼と位相を捨てる（計画 §4.1）。
                 //   捨てないと、切っている間に積まれた依頼が**入れ直した瞬間に発火**して、
-                //   プレイヤーが忘れた地点に確認が出る。
+                //   プレイヤーが忘れた地点に山が生えはじめる。
                 //   **既に変わった地形は戻らない。** 捨てるのは「これからの予定」だけである。
                 //   条件を付けているのは、切っている間ずっとロックを取り続けないため。
                 if (VolcanoState.Phase != VolcanoPhase.Idle
@@ -98,13 +98,12 @@ namespace DisasterPlus.Game
             }
 
             // ★★ **依頼の受け取りはポーズガードより上**（全体レビュー I1）。
-            //    調べる・取りやめる・止めるは建物も道路も地形も 1 つも変えないので、
-            //    ポーズ中でも答える。**答えないと「黙って何もしない」になる** ——
-            //    山を作る前にポーズしてから地面をクリックしたプレイヤーには、
-            //    確認が永久に出てこなかった。
-            //    着手（Start）だけはここでは通らず、断って理由を残す
-            //    （VolcanoState.HandleRequest）。**1 tick に 1 回だけ呼ぶこと。**
-            VolcanoState.HandleRequest(snapshot, deltaMinutes > 0f);
+            //    受け取り自体は建物も道路も地形も 1 つも変えない ——
+            //    設置の依頼は位相を Clearing にするだけで、実際に壊すのは
+            //    下の VolcanoState.Tick である。**答えないと「黙って何もしない」に
+            //    なる** —— 山を作る前にポーズしてから地面をクリックしたプレイヤーには、
+            //    何も起きなかった。**1 tick に 1 回だけ呼ぶこと。**
+            VolcanoState.HandleRequest(snapshot);
 
             // ★ ここから下は状態を進める。⑤が進めるのは**取り消せない地形**である。
             //    ポーズ中（deltaMinutes == 0）は絶対に通さない。
@@ -123,12 +122,9 @@ namespace DisasterPlus.Game
         public void OnMainThreadUpdate()
         {
             // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
+            // ★ ⑤が開く窓はこれ 1 枚だけである。確認の窓は 2026-08-21 に撤去した ——
+            //   タイル → スライダー → 地図をクリックで火山が起きる。
             VolcanoPanel.Tick();
-
-            // ★ 確認の窓は説明のパネルとは独立に出る。⑤のタイルは説明のパネルを
-            //   開かなくなったので（所有者の依頼）、確認だけがここから出る。
-            //   **パネルを閉じていても確認は必ず出る。**
-            VolcanoConfirmPanel.Tick();
 
             // ★ 噴火の描画は main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
             //   設定で切った瞬間に自分で畳む（切ったまま噴煙が残らないこと）。
@@ -179,7 +175,6 @@ namespace DisasterPlus.Game
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
             //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
             VolcanoPanel.Destroy();
-            VolcanoConfirmPanel.Destroy();
 
             // ★ 噴火の描画側の時計を戻す。
             VolcanoEruptionFx.Destroy();
@@ -203,7 +198,7 @@ namespace DisasterPlus.Game
             //    持ち越すと 2 つ目の都市で前の都市の事実を名乗ることになる。
             VolcanoReader.Reset();
             // ★ 位相と調査結果も持ち越さない。持ち越すと、次の都市で前の都市の
-            //    地点に確認が出る（そして押せてしまう）。
+            //    地点の火山がそのまま育ち続ける。
             VolcanoState.Reset();
         }
 
@@ -236,12 +231,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **確認の窓から降ろした説明の行き場。**
+        /// **画面から降ろした説明の行き場。**
         ///
-        /// 所有者の指示は「あれこれ説明は出さなくていい」だった。⑤の確認は残すが、
-        /// そこに出すのは「何が壊れるか（数）」と「取り消せないこと」だけにした
-        /// （<see cref="VolcanoConfirmPanel"/> のクラス doc の表）。
-        /// **落としたのは説明であって、情報ではない** —— 落とした 3 件はここにある。
+        /// 所有者の指示は「あれこれ説明は出さなくていい」「ほかの災害と同じように
+        /// クリックしたら起こるようにしてほしい」だった。⑤は確認の窓ごと撤去したので、
+        /// 説明はすべてここと火山タブにある。
+        /// **落としたのは説明の置き場所であって、情報ではない。**
         /// テスターと不具合報告が読むのはこのファイルであり、
         /// 山を建てようとしている人が読む場所ではない。
         ///
@@ -251,10 +246,15 @@ namespace DisasterPlus.Game
         private static void WriteNotes(DiagnosticBuilder b)
         {
             b.Line(1, "note: counts",
-                "the building and road counts in the confirmation are what the survey "
-                + "counted at that moment. The city keeps changing while the ground is "
-                + "cleared, so the real number will differ. That is why the heading says "
-                + "\"approx.\"");
+                "the building and road counts on the volcano tab are what the survey "
+                + "counted at the moment of the click. The city keeps changing while the "
+                + "ground is cleared, so the real number will differ. That is why the row "
+                + "says \"approx.\"");
+            b.Line(1, "note: no confirmation",
+                "clicking the map places the volcano straight away - there is no "
+                + "confirmation step. The terrain change is still permanent and is saved; "
+                + "the only way out after the click is the Stop button on the volcano tab, "
+                + "and that only cancels what has not happened yet");
             b.Line(1, "note: why clear first",
                 "raising the ground without destroying the roads and buildings first does "
                 + "not work: the game pins the terrain back to the height of every road and "
@@ -625,7 +625,6 @@ namespace DisasterPlus.Game
             b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdVolcano)
                 ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "panel body", VolcanoPanel.IsVisible ? "shown" : "hidden");
-            b.Line(1, "confirm window", VolcanoConfirmPanel.IsVisible ? "shown" : "hidden");
         }
 
         /// <summary>

@@ -79,7 +79,6 @@ namespace DisasterPlus.Game
                 return new VolcanoSnapshot(true, ResolveTerrainFacts(), frame, ReadGameMode(),
                                            VolcanoState.Phase, VolcanoState.Footprint,
                                            VolcanoState.ProgressUnit, VolcanoState.LastRefusal,
-                                           VolcanoState.SettingsChanged,
                                            VolcanoClearing.ClearedRadiusMetres,
                                            VolcanoClearing.Complete,
                                            VolcanoClearing.TotalBuildingsDestroyed,
