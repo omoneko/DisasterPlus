@@ -343,6 +343,19 @@ namespace DisasterPlus.Game
                      + VolcanoUplift.SummitMetres.ToString("F0")
                      + " m, crater " + (VolcanoUplift.CraterFormed ? "at full depth" : "SHALLOW")
                      + "; the eruption starts now");
+
+            // ★★ **山頂がゲームの高さの天井で削られたなら、そう言う。**
+            //    黙って平らな山頂を出すと、プレイヤーからは
+            //    「高さの設定が効いていない」にしか見えない。
+            //    天井は MOD からは上げられない（UpliftSchedule.CeilingClipped の doc）。
+            if (VolcanoUplift.CeilingClippedCells > 0)
+            {
+                Log.Info("volcano summit was clipped by the game's terrain ceiling ("
+                         + UpliftSchedule.CeilingMetres.ToString("F0")
+                         + " m) on " + VolcanoUplift.CeilingClippedCells
+                         + " cells; the top is flat there. The ceiling cannot be raised by a "
+                         + "mod - place the volcano on lower ground or reduce its height");
+            }
         }
 
         /// <summary>

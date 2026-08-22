@@ -95,11 +95,43 @@ namespace DisasterPlus.Game
         /// </summary>
         private const float TopRowY = 10f;
 
-        /// <summary>最上段の探索の開始 x。**左端から**（SIREN Alert と同じ）。</summary>
+        /// <summary>
+        /// 最上段の探索の下限 x。**既に居るボタンが 1 つも無いときだけ**ここからになる。
+        ///
+        /// ★★ <b>通常はここからは始めない。</b>（2026-08-22、所有者の実機報告
+        ///   「ボタンの位置がまだ左すぎます」）。左端から探すだけだと
+        ///   **先に置けた者がいちばん左を取る**ので、この MOD がたまたま 1 番に
+        ///   間に合うと画面の端に張り付いてしまう（実際にそうなった）。
+        ///   <c>FreeSlotFinder.RightEdgeOfBand</c> で**既に居る一団の右端**を求め、
+        ///   その右から探す。
+        /// </summary>
         private const float TopRowStartX = 8f;
 
+        /// <summary>隣のボタンとの隔て（px）。SIREN Alert の <c>Gap</c> と同じ値。</summary>
+        private const float TopRowGap = 8f;
+
+        /// <summary>
+        /// 最上段の帯の高さ（px）。この帯にかかっているものを「隣人」と見なす。
+        /// SIREN Alert の <c>bandBottom</c>（TopMargin 4 + Size 44 + Gap 8 = 56）と揃えてある ——
+        /// あちらの 44 px のボタンもこちらの 32 px のボタンもこの帯に入る。
+        /// </summary>
+        private const float TopRowBandBottom = 56f;
+
+        /// <summary>
+        /// 置いたあとに位置を見直すフレーム。
+        ///
+        /// **他 MOD のボタンはそれぞれ別のタイミングで現れる**ので、
+        /// 1 回決めて終わりにすると「その瞬間に居なかった者」を避けられない。
+        /// SIREN Alert も同じことをしている（<c>SirenButton.RecheckFrames</c>）。
+        ///
+        /// ★ <b>プレイヤーが一度でも自分で動かしたら、二度と見直さない</b>
+        ///   （<see cref="_userMoved"/>）。動かしたものを勝手に戻すのは、
+        ///   重なっているのと同じだけ壊れている。
+        /// </summary>
+        private static readonly int[] RecheckFrames = { 60, 180, 420, 900 };
+
         /// <summary>最上段の探索の 1 歩（px）。ボタン幅 ＋ 隙間。</summary>
-        private const float TopRowStepX = ButtonSize + 8f;
+        private const float TopRowStepX = ButtonSize + TopRowGap;
 
         /// <summary>最上段の探索の上限回数。画面の右端で <see cref="ScreenSlot"/> が先に止める。</summary>
         private const int TopRowTries = 64;
@@ -203,6 +235,29 @@ namespace DisasterPlus.Game
         /// <summary>ドラッグ追従で 1 度でも例外を出したか（毎フレーム鳴らさない）。</summary>
         private static bool _dragErrorLogged;
 
+        /// <summary>
+        /// プレイヤーが一度でも自分で窓を動かしたか。
+        /// 立ったら <see cref="RecheckFrames"/> の見直しは二度と走らない ——
+        /// 自分で置いた場所を勝手に戻されるのは壊れている。
+        /// </summary>
+        private static bool _userMoved;
+
+        /// <summary>ボタンを置いてからのフレーム数。-1 は「まだ置いていない」。</summary>
+        private static int _framesSinceCreate = -1;
+
+        /// <summary>次に見直す <see cref="RecheckFrames"/> の添字。</summary>
+        private static int _recheckIndex;
+
+        /// <summary>
+        /// 今帯を動かしているのは <see cref="RecheckPlacement"/> か。
+        ///
+        /// ★★ これが無いと、**自動の置き直しが自分を
+        ///   「プレイヤーが動かした」と誤認して、その場で以後の見直しを
+        ///   全部止めてしまう**（<c>_strip.relativePosition</c> への書き込みが
+        ///   <see cref="OnStripMoved"/> を呼ぶため）。
+        /// </summary>
+        private static bool _programmaticMove;
+
         /// <summary>いま選ばれているタブの <see cref="Tab.Id"/>。null なら未選択。</summary>
         private static string _activeId;
 
@@ -295,6 +350,26 @@ namespace DisasterPlus.Game
         {
             if (_dead) return;
 
+            // ★ 置いたあとの見直しは**間引かないフレーム数**で数える
+            //   （SIREN Alert の RecheckFrames と同じ尺度にするため）。
+            if (_button != null && _framesSinceCreate >= 0)
+            {
+                _framesSinceCreate++;
+                if (!_userMoved
+                    && _recheckIndex < RecheckFrames.Length
+                    && _framesSinceCreate >= RecheckFrames[_recheckIndex])
+                {
+                    _recheckIndex++;
+                    try { RecheckPlacement(); }
+                    catch (Exception e)
+                    {
+                        _recheckIndex = RecheckFrames.Length;   // 二度と試さない
+                        Log.Warn("re-checking the Disaster + button position failed: "
+                                 + e.GetType().Name);
+                    }
+                }
+            }
+
             int interval = _button != null ? MaintainIntervalFrames : SearchIntervalFrames;
             if (_frames++ < interval) return;
             _frames = 0;
@@ -320,6 +395,10 @@ namespace DisasterPlus.Game
             _grip = null;
             _syncingStrip = false;
             _dragErrorLogged = false;
+            _userMoved = false;
+            _programmaticMove = false;
+            _framesSinceCreate = -1;
+            _recheckIndex = 0;
             _button = null;
             _activeId = null;
             _shownId = null;
@@ -389,9 +468,7 @@ namespace DisasterPlus.Game
             //    （縦の列）の上に必ず載った** —— 所有者の実機報告そのものである。
             //    最上段を左から右へ探せば、CS:WARFRONT と SIREN Alert の隣に並ぶ。
             bool foundFree;
-            _origin = FreeSlotFinder.Find(new Vector2(TopRowStartX, TopRowY),
-                                          new Vector2(ButtonSize, ButtonSize),
-                                          TopRowStepX, 0f, TopRowTries, null, out foundFree);
+            _origin = SearchTopRow(null, out foundFree);
             _foundFreeSlot = foundFree;
 
             var b = (UIButton)view.AddUIComponent(typeof(UIButton));
@@ -410,9 +487,77 @@ namespace DisasterPlus.Game
             b.eventClick += OnButtonClick;
 
             _button = b;
+            _framesSinceCreate = 0;
+            _recheckIndex = 0;
             Log.Info("Disaster + info button installed at (" + _origin.x + "," + _origin.y + ")"
                      + (foundFree ? "" : " (no free slot found; it may overlap another mod)"));
             return true;
+        }
+
+        /// <summary>
+        /// 最上段の空きを探す。**既に居る一団の右から始める**。
+        ///
+        /// ★★ これが「ボタンの位置がまだ左すぎます」への答えである
+        ///   （2026-08-22）。左端から探すだけの頃は、この MOD が他 MOD より
+        ///   先に間に合った場合に**画面の左端を取ってしまっていた**。
+        ///
+        /// ★ <paramref name="owner"/> には**自分のボタン**を渡すこと（初回は null）。
+        ///   渡さないと、見直すたびに自分の右端で自分を押しやることになり、
+        ///   ボタンが右へ逃げ続ける。
+        /// </summary>
+        private static Vector2 SearchTopRow(UIComponent owner, out bool foundFree)
+        {
+            float right = FreeSlotFinder.RightEdgeOfBand(0f, TopRowBandBottom, owner);
+            float startX = right > 0f ? right + TopRowGap : TopRowStartX;
+            if (startX < TopRowStartX) startX = TopRowStartX;
+
+            return FreeSlotFinder.Find(new Vector2(startX, TopRowY),
+                                       new Vector2(ButtonSize, ButtonSize),
+                                       TopRowStepX, 0f, TopRowTries, owner, out foundFree);
+        }
+
+        /// <summary>
+        /// 他 MOD のボタンがあとから現れた場合に位置を取り直す
+        /// （<see cref="RecheckFrames"/>）。**プレイヤーが自分で動かしたあとは走らない。**
+        ///
+        /// 動かすのはボタン・タブ帯・開いているパネルの 3 つで、
+        /// 位置の主体は今も <see cref="_origin"/> ただ 1 つである。
+        /// </summary>
+        private static void RecheckPlacement()
+        {
+            if (_button == null) return;
+
+            bool foundFree;
+            Vector2 wanted = SearchTopRow(_button, out foundFree);
+
+            float dx = wanted.x - _origin.x;
+            float dy = wanted.y - _origin.y;
+            if (dx * dx + dy * dy < 1f) return;
+
+            _origin = wanted;
+            _foundFreeSlot = foundFree;
+
+            _programmaticMove = true;
+            try
+            {
+                _button.relativePosition = new Vector3(_origin.x, _origin.y);
+
+                // 帯を動かすと <see cref="OnStripMoved"/> が飛び、あそこがパネルを
+                // 連れていってくれる。<see cref="_programmaticMove"/> が立っているので
+                // 「人が動かした」とは数えられない。
+                if (_strip != null)
+                {
+                    _strip.relativePosition =
+                        new Vector3(_origin.x, _origin.y + ButtonSize + 2f);
+                }
+            }
+            finally
+            {
+                _programmaticMove = false;
+            }
+
+            Log.Info("Disaster + info button moved to (" + _origin.x + "," + _origin.y
+                     + ") after another mod's button appeared");
         }
 
         private static void OnButtonClick(UIComponent c, UIMouseEventParameter p)
@@ -541,6 +686,13 @@ namespace DisasterPlus.Game
                 y = ScreenSlot.ClampInto(y, ButtonSize + 2f + StripHeight, screen.y);
 
                 _origin = new Vector2(x, y);
+
+                // ★ プレイヤーが自分で動かしたので、以後自動で置き直さない。
+                //   **自動の置き直し（<see cref="RecheckPlacement"/>）もここを通る**ので、
+                //   そちらは <see cref="_programmaticMove"/> で除外する ——
+                //   除外しないと、最初の見直しが自分を「人が動かした」と誤認して
+                //   以後の見直しを全部止めてしまう。
+                if (!_programmaticMove) _userMoved = true;
 
                 Vector3 stripAt = new Vector3(x, y + ButtonSize + 2f);
                 if (_strip.relativePosition != stripAt) _strip.relativePosition = stripAt;

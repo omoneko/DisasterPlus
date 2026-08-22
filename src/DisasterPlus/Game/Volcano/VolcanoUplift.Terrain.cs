@@ -40,6 +40,7 @@ namespace DisasterPlus.Game
             float height = footprint.HeightMetres;
 
             int written = 0;
+            int clipped = 0;
             _dirtyValid = false;
             _dirtyMinX = 0;
             _dirtyMinZ = 0;
@@ -72,6 +73,12 @@ namespace DisasterPlus.Game
                     // 絶対目標なので progress は 1 を渡す（grown が既に「今の高さ」である）。
                     ushort target = UpliftSchedule.RawTargetAt(_baseRaw[cell], grown, 1f);
 
+                    // ★★ **ゲームの高さの天井（1023.98 m）に当たったかを数える。**
+                    //    当たれば山頂はそこで平らになる。**黙って平らな山を出さない** ——
+                    //    プレイヤーからは「高さの設定が効いていない」にしか見えない。
+                    //    天井を上げられない理由は <c>UpliftSchedule.CeilingClipped</c> の doc。
+                    if (UpliftSchedule.CeilingClipped(_baseRaw[cell], grown, 1f)) clipped++;
+
                     int index = rowRaw + x;
                     // ★ バニラの MakeCrater と同じ「変わったときだけ書く」（§C-8 IL_01E7）。
                     if (raw[index] == target) continue;
@@ -100,6 +107,7 @@ namespace DisasterPlus.Game
             }
 
             _cellsWrittenLastTick = written;
+            _ceilingClippedCells = clipped;
             return true;
         }
 

@@ -295,6 +295,13 @@ namespace DisasterPlus.Game
         private static float _summitMetres;
         private static int _cellsWrittenLastTick;
 
+        /// <summary>
+        /// 直近の tick で**ゲームの高さの天井（1024 m）に当たって削られた**セル数。
+        /// 0 でないなら山頂は平らになっている。
+        /// 天井を上げられない理由は <c>UpliftSchedule.CeilingClipped</c> の doc にある。
+        /// </summary>
+        private static int _ceilingClippedCells;
+
         private static bool _started;
         private static bool _complete;
 
@@ -326,6 +333,15 @@ namespace DisasterPlus.Game
 
         /// <summary>今の山頂の盛り上がり（m）。元の地形高さからの相対量である。</summary>
         public static float SummitMetres { get { return _summitMetres; } }
+
+        /// <summary>
+        /// 山頂が**ゲームの高さの天井で削られた**セルの数（直近の tick）。
+        /// **0 でないのは不具合ではないが、黙っていてもいけない** ——
+        /// 高い土地に大きな山を置くとここが増え、山頂が平らになる。
+        /// 天井は 1023.98 m で、**MOD からは上げられない**
+        /// （<c>UpliftSchedule.CeilingClipped</c> の doc に IL 実測と理由）。
+        /// </summary>
+        public static int CeilingClippedCells { get { return _ceilingClippedCells; } }
 
         /// <summary>
         /// 育っているセルが 1 tick で上がる量（m）。**山頂から外へ広がる隆起では
@@ -452,6 +468,7 @@ namespace DisasterPlus.Game
             _activeRadius = 0f;
             _summitMetres = 0f;
             _cellsWrittenLastTick = 0;
+            _ceilingClippedCells = 0;
             _started = false;
             _complete = false;
             _heightMetres = 0f;
@@ -754,6 +771,9 @@ namespace DisasterPlus.Game
                                             + (_dirtyMaxZ - _dirtyMinZ + 1) : "0")
                 + " tiles=" + _tileCount
                 + " crater=" + (CraterFormed ? "full" : "growing")
+                // ★ **0 のときも出す**。出さないと「削られていない」と
+                //   「削られたかどうか見ていない」がログ上で区別できない。
+                + " ceilingClipped=" + _ceilingClippedCells
                 + " floor=" + CraterFloorMetres.ToString("F1")
                 + (_complete ? " (complete)" : ""));
         }

@@ -151,6 +151,42 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
+        /// このセルは**ゲームの高さの天井に当たって削られたか**。
+        ///
+        /// ── 天井は 1024 m であり、MOD からは上げられない（IL 実測）──────
+        ///
+        /// | 実測したもの | 値 |
+        /// |---|---|
+        /// | <c>TerrainManager.m_rawHeights</c> の型 | <c>ushort[]</c>（最大 65535） |
+        /// | raw → メートルの換算 | <c>0.015625</c>（＝ 1/64）を**各呼び出し元に直書き** |
+        /// | <c>TerrainManager.TERRAIN_HEIGHT</c> | <c>const int = 1024</c> |
+        ///
+        /// つまり高さの上限は <c>65535 / 64 = 1023.98 m</c> である。
+        /// **これは MOD から拡張できない**:
+        ///
+        ///   1. 配列が <c>ushort[]</c> である以上、65535 を超える値を入れられない
+        ///   2. <c>TERRAIN_HEIGHT</c> は <c>const</c>（コンパイル時のリテラル）なので、
+        ///      <b>全ての使用箇所に焼き込まれている</b>。フィールドを書き換えても何も変わらない
+        ///   3. 描画側は高さを**テクスチャ**（<c>_TerrainHeight</c>）で受け取っており、
+        ///      縦の尺度はコンパイル済みシェーダの中にある。managed 側を全部
+        ///      書き換えたとしても、**地形は古い尺度で描かれる**
+        ///
+        /// だから⑤は天井を上げようとせず、**当たったことを名乗る**。
+        /// 黙って平らな山頂を出すのは、この MOD がいちばん避けている形である。
+        /// </summary>
+        public static bool CeilingClipped(ushort baseRaw, float profileMetres, float progress)
+        {
+            if (float.IsNaN(profileMetres) || float.IsNaN(progress)) return false;
+
+            float p = progress < 0f ? 0f : (progress > 1f ? 1f : progress);
+            int delta = (int)Math.Round((double)profileMetres * p * RawUnitsPerMetre);
+            return baseRaw + delta > MaxRaw;
+        }
+
+        /// <summary>天井の高さ（m）。<c>65535 / 64</c>。</summary>
+        public const float CeilingMetres = MaxRaw / RawUnitsPerMetre;
+
+        /// <summary>
         /// **⑤全体でいちばん重要な 1 行**（罠 1）。隆起してよい半径（m）。
         ///
         /// <paramref name="clearedRadiusMetres"/> に渡してよいのは

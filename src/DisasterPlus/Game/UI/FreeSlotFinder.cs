@@ -83,6 +83,18 @@ namespace DisasterPlus.Game
         private const int MaxAncestorDepth = 32;
 
         /// <summary>
+        /// これより小さいものは装飾であって障害物ではない（px）。
+        /// SIREN Alert の <c>SirenButton.MinWidgetSize</c> と同じ値に揃えてある。
+        /// </summary>
+        private const float MinWidgetSize = 8f;
+
+        /// <summary>
+        /// 画面のこの割合より広い／高いものは**入れ物の容器**として無視する。
+        /// 中身は個々に拾うので取りこぼさない。これも SIREN Alert と同じ値である。
+        /// </summary>
+        private const float ContainerRatio = 0.5f;
+
+        /// <summary>
         /// preferred から下方向へ stepY ずつずらし、可視要素と重ならない最初の位置を返す。
         /// 見つからなければ preferred を返し foundFree=false にする
         /// （隠れて見つからないより、見えて重なる方がマシ）。
@@ -275,6 +287,73 @@ namespace DisasterPlus.Game
             {
                 Log.Diag("freeSlot", "fixed view size unreadable: " + e.GetType().Name);
                 return new Vector2(0f, 0f);
+            }
+        }
+
+        /// <summary>
+        /// 画面最上段の帯 <c>[bandTop, bandBottom)</c> に居る可視要素のうち、
+        /// **いちばん右の端**（x + width）を返す。1 つも居なければ 0。
+        ///
+        /// ── なぜ要るのか（2026-08-22、所有者の実機報告）─────────────
+        ///
+        /// > ボタンの位置がまだ左すぎます
+        ///
+        /// 最上段を左から探すだけだと、**先に置けた者がいちばん左を取る**。
+        /// MOD のボタンはそれぞれ別のタイミングで現れるので、この MOD が
+        /// たまたま 1 番に間に合うと画面の端に張り付くことになる。
+        /// **既に居る一団の右へ回る**のが後から入る側の礼儀であり、
+        /// 見た目も一列に揃う。
+        ///
+        /// フィルタは SIREN Alert の <c>SirenButton.FindTopRowPosition</c> と揃えてある:
+        /// 小さすぎるもの（装飾）と、画面の半分を超えるもの（入れ物の容器）は
+        /// 障害物に数えない。容器の中身は個々に拾うので取りこぼさない。
+        ///
+        /// ★ <paramref name="owner"/>（とその子孫）は数えない。
+        ///   数えると、置き直すたびに**自分の右端で自分を押しやる**ことになり、
+        ///   ボタンがフレームごとに右へ逃げていく。
+        /// </summary>
+        public static float RightEdgeOfBand(float bandTop, float bandBottom, UIComponent owner)
+        {
+            try
+            {
+                var view = UIView.GetAView();
+                if (view == null) return 0f;
+
+                Vector2 screen = ReadScreenSize(view);
+
+                var all = view.GetComponentsInChildren<UIComponent>();
+                if (all == null) return 0f;
+
+                float right = 0f;
+                for (int i = 0; i < all.Length; i++)
+                {
+                    var c = all[i];
+                    if (c == null) continue;
+                    if (!c.isVisible) continue;
+                    if (IsOwnedBy(c, owner)) continue;
+
+                    Vector2 cs = c.size;
+                    if (cs.x < MinWidgetSize || cs.y < MinWidgetSize) continue;
+
+                    // 画面の半分を超えるものは入れ物の容器であって、場所を占有していない。
+                    if (ScreenSlot.IsUsableExtent(screen.x) && cs.x > screen.x * ContainerRatio) continue;
+                    if (ScreenSlot.IsUsableExtent(screen.y) && cs.y > screen.y * ContainerRatio) continue;
+
+                    Vector2 cp = c.absolutePosition;
+                    if (cp.y >= bandBottom) continue;          // 帯より下
+                    if (cp.y + cs.y <= bandTop) continue;      // 帯より上
+                    if (cp.x + cs.x <= 0f) continue;           // 左に外れている
+                    if (ScreenSlot.IsUsableExtent(screen.x) && cp.x >= screen.x) continue;
+
+                    float edge = cp.x + cs.x;
+                    if (edge > right) right = edge;
+                }
+                return right;
+            }
+            catch (System.Exception e)
+            {
+                Log.Diag("freeSlot", "top row scan failed: " + e.GetType().Name);
+                return 0f;
             }
         }
 
