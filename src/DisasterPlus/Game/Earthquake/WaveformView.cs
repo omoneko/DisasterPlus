@@ -99,6 +99,17 @@ namespace DisasterPlus.Game
         /// </summary>
         private static readonly Color32 ModelColor = new Color32(255, 158, 66, 255);
 
+        /// <summary>
+        /// **火山性微動の線**（第 3 層 <c>[Disaster + volcanic tremor]</c>）。青緑。
+        /// 橙（<see cref="ModelColor"/>）と取り違えないよう、色相を大きく離してある ——
+        /// 3 本が同時に出るのは「噴火中に地震が起きて、合成記象も ON」のときだけだが、
+        /// そのとき見分けが付かないのでは 3 本目を足した意味が無い。
+        ///
+        /// ★ これも<b>この MOD のモデル</b>の側である（バニラの式ではない）。
+        ///   <c>Game/Volcano/VolcanoTremorTrace</c> のクラス doc。
+        /// </summary>
+        private static readonly Color32 TremorColor = new Color32(96, 220, 200, 255);
+
         private static UITextureSprite _sprite;
         private static Texture2D _texture;
         private static Color32[] _pixels;
@@ -129,6 +140,8 @@ namespace DisasterPlus.Game
         /// 消したはずの線がそのまま残る。
         /// </summary>
         private static bool _drawnModel;
+        private static bool _drawnTremor;
+        private static bool _drawnQuake;
 
         /// <summary>
         /// テクスチャによる描画が使えるか。<see cref="Build"/> が一度でも呼ばれるまでは false。
@@ -227,7 +240,9 @@ namespace DisasterPlus.Game
                 && _drawnBuildingId == trace.BuildingId
                 && _drawnCount == trace.Count
                 && _drawnNewestFrame == trace.NewestFrame
-                && _drawnModel == trace.HasModel)
+                && _drawnModel == trace.HasModel
+                && _drawnTremor == trace.HasTremor
+                && _drawnQuake == trace.HasQuake)
             {
                 return;
             }
@@ -236,6 +251,8 @@ namespace DisasterPlus.Game
             _drawnCount = trace.Count;
             _drawnNewestFrame = trace.NewestFrame;
             _drawnModel = trace.HasModel;
+            _drawnTremor = trace.HasTremor;
+            _drawnQuake = trace.HasQuake;
             _drawnAnything = true;
 
             try
@@ -288,6 +305,8 @@ namespace DisasterPlus.Game
             _drawnCount = 0;
             _drawnNewestFrame = 0u;
             _drawnModel = false;
+            _drawnTremor = false;
+            _drawnQuake = false;
         }
 
         private static void Draw(SeismographTrace trace)
@@ -303,49 +322,75 @@ namespace DisasterPlus.Game
             // ここで自動縮尺にしても「大きさ」を偽ることにはならない。
             // 平ら（peak == 0）でも正の縮尺を渡す —— 0 を渡すと WaveformPlot が
             // 全列を「サンプル無し」にしてしまい、平らな波形が空の波形に化ける。
-            // ★ 縦の尺度は**2 本で共通**にする。線ごとに正規化すると、
-            //   「モデルのほうが大きい／小さい」という一番読みたい比較ができなくなる。
-            //   満目盛りは 2 本のうち大きいほうの最大振幅。
+            // ★ 縦の尺度は**全部の段で共通**にする。段ごとに正規化すると、
+            //   「どれが大きいか」という一番読みたい比較ができなくなる。
             float peak = trace.PeakAbsolute;
             if (trace.HasModel && trace.ModelPeakAbsolute > peak) peak = trace.ModelPeakAbsolute;
+            if (trace.HasTremor && trace.TremorPeakAbsolute > peak) peak = trace.TremorPeakAbsolute;
             float scale = peak > 0f ? 1f / peak : 1f;
 
             Fill(Background);
 
-            if (!trace.HasModel)
+            // ★★ **描く段を決める。** 重ねずに上下に分ける理由は元のままで、
+            //    512 フレームを 320 px に落とすと主成分が 6 px の縞になり、
+            //    重ねるとどの線を見ているのか区別できなくなる（オフライン描画で確認）。
+            //
+            //    ★ <b>バニラの地震が無いときは第 1 層の段を作らない</b>
+            //      （2026-08-22）。作ると、火山だけが揺れているあいだ
+            //      **平らな白い線が画面の半分を占め**、「バニラの地震も起きている
+            //      が揺れていない」という別の意味になる。第 1 層が意味を持つかは
+            //      <c>SeismographTrace.HasQuake</c> が名乗る。
+            int lanes = 0;
+            if (trace.HasQuake) lanes++;
+            if (trace.HasModel) lanes++;
+            if (trace.HasTremor) lanes++;
+
+            // どれも名乗らないとき（記録はあるのに出所が全部 false）は、
+            // **空欄にせず**第 1 層をそのまま描く。黙って消すより出したほうがよい。
+            bool fallbackToMeasured = lanes == 0;
+            if (fallbackToMeasured) lanes = 1;
+
+            int laneHeight = PlotHeight / lanes;
+            int laneIndex = 0;
+
+            if (trace.HasQuake || fallbackToMeasured)
             {
-                // 1 本だけのときは今日までと同じ絵（全面 1 段）。
-                DrawAxis(0, PlotHeight);
-                DrawTrace(WaveformPlot.Columns(trace.Frames, trace.Values, trace.Count,
-                                               from, newest, PlotWidth, PlotHeight - 1, scale),
-                          TraceColor, 0, PlotHeight);
-                _texture.SetPixels32(_pixels);
-                _texture.Apply(false);
-                return;
+                DrawLane(trace.Frames, trace.Values, trace.Count, from, newest, scale,
+                         TraceColor, laneIndex, laneHeight, lanes);
+                laneIndex++;
             }
 
-            // ★★ **2 本を重ねずに上下 2 段に分ける。** 512 フレームを 320 px に
-            //    落とすと 1 px が 1.6 フレームで、バニラの主成分（周期 ≒10 フレーム）は
-            //    6 px の縞になる。その上にモデルを重ねると、どちらの線を見ているのか
-            //    区別できない絵になった（オフライン描画で確認した）。
-            //    上段が第 1 層（白・バニラの式）、下段が第 2 層（橙・合成記象）で、
-            //    **縦の尺度は共通**なので高さはそのまま見比べられる。
-            const int lane = PlotHeight / 2;
+            if (trace.HasModel)
+            {
+                DrawLane(trace.Frames, trace.ModelValues, trace.Count, from, newest, scale,
+                         ModelColor, laneIndex, laneHeight, lanes);
+                laneIndex++;
+            }
 
-            DrawAxis(0, lane);
-            DrawAxis(lane, lane);
-            DrawSeparator(lane);
-
-            DrawTrace(WaveformPlot.Columns(trace.Frames, trace.Values, trace.Count,
-                                           from, newest, PlotWidth, lane - 1, scale),
-                      TraceColor, 0, lane);
-
-            DrawTrace(WaveformPlot.Columns(trace.Frames, trace.ModelValues, trace.Count,
-                                           from, newest, PlotWidth, lane - 1, scale),
-                      ModelColor, lane, lane);
+            if (trace.HasTremor)
+            {
+                DrawLane(trace.Frames, trace.TremorValues, trace.Count, from, newest, scale,
+                         TremorColor, laneIndex, laneHeight, lanes);
+                laneIndex++;
+            }
 
             _texture.SetPixels32(_pixels);
             _texture.Apply(false);
+        }
+
+        /// <summary>1 段ぶん（軸・仕切り・線）。段の高さは全段で同じである。</summary>
+        private static void DrawLane(uint[] frames, float[] values, int count,
+                                     uint from, uint newest, float scale,
+                                     Color32 color, int laneIndex, int laneHeight, int lanes)
+        {
+            int top = laneIndex * laneHeight;
+
+            DrawAxis(top, laneHeight);
+            if (laneIndex > 0) DrawSeparator(top);
+
+            DrawTrace(WaveformPlot.Columns(frames, values, count,
+                                           from, newest, PlotWidth, laneHeight - 1, scale),
+                      color, top, laneHeight);
         }
 
         /// <summary>

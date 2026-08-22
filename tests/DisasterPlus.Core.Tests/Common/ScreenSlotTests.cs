@@ -11,6 +11,7 @@ namespace DisasterPlus.Core.Tests.Common
         private const float ButtonSize = 32f;
         private const float StepY = ButtonSize + 4f;   // InfoHub と同じ
         private const float ViewHeight = 1080f;
+        private const float ViewWidth = 1920f;
         private const int MaxTries = 30;
 
         [Fact]
@@ -98,6 +99,73 @@ namespace DisasterPlus.Core.Tests.Common
             // 壊れた入力でも画面の中を指す。
             Assert.Equal(0f, ScreenSlot.ClampInto(float.NaN, ButtonSize, ViewHeight), 3);
             Assert.Equal(0f, ScreenSlot.ClampInto(float.NegativeInfinity, ButtonSize, ViewHeight), 3);
+        }
+
+        // ── 2 軸版（画面最上段へ横に並べるための探索）─────────────────────
+        //    所有者の依頼「CSWARFRONT ボタンや SIREN Alert ボタンと同じ高さで
+        //    並んで表示されるように」。縦にしか進めない探索ではあの列に並べない。
+
+        [Fact]
+        public void HorizontalSearchStopsAtTheRightEdgeOfTheScreen()
+        {
+            // 左端 8 から 40 px 刻みで右へ。32 px のボタンが 1920 幅に収まる回数。
+            int tries = ScreenSlot.CandidatesInside(8f, 10f, ButtonSize, ButtonSize,
+                                                    40f, 0f, ViewWidth, ViewHeight, 200);
+
+            // 最後に収まる x は 8 + 40k <= 1920 - 32 = 1888 → k <= 47.0 → 48 候補。
+            Assert.Equal(48, tries);
+
+            float lastX = 8f + 40f * (tries - 1);
+            Assert.True(ScreenSlot.FitsWithin(lastX, ButtonSize, ViewWidth),
+                        "the last candidate " + lastX + " must fit");
+            Assert.False(ScreenSlot.FitsWithin(lastX + 40f, ButtonSize, ViewWidth),
+                         "one step further must not fit");
+        }
+
+        [Fact]
+        public void HorizontalSearchNeverLeavesTheTopRow()
+        {
+            // stepY = 0 なので、何回試しても y は動かない。**下の段へ落ちない。**
+            int tries = ScreenSlot.CandidatesInside(8f, 10f, ButtonSize, ButtonSize,
+                                                    40f, 0f, ViewWidth, ViewHeight, 12);
+            Assert.Equal(12, tries);
+        }
+
+        [Fact]
+        public void TwoAxisSearchRefusesAStartThatIsAlreadyOffScreen()
+        {
+            // 横に外れている。
+            Assert.Equal(0, ScreenSlot.CandidatesInside(ViewWidth + 10f, 10f,
+                                                        ButtonSize, ButtonSize,
+                                                        40f, 0f, ViewWidth, ViewHeight, 30));
+            // 縦に外れている（以前の (8,1094) がこれである）。
+            Assert.Equal(0, ScreenSlot.CandidatesInside(8f, 1094f,
+                                                        ButtonSize, ButtonSize,
+                                                        40f, 0f, ViewWidth, ViewHeight, 30));
+        }
+
+        [Fact]
+        public void TwoAxisSearchWithNoStepTestsExactlyOneCandidate()
+        {
+            Assert.Equal(1, ScreenSlot.CandidatesInside(8f, 10f, ButtonSize, ButtonSize,
+                                                        0f, 0f, ViewWidth, ViewHeight, 30));
+        }
+
+        [Fact]
+        public void TwoAxisSearchAgreesWithTheVerticalOneWhenOnlyYMoves()
+        {
+            int oneAxis = ScreenSlot.CandidatesInside(50f, ButtonSize, 36f, ViewHeight, 30);
+            int twoAxis = ScreenSlot.CandidatesInside(8f, 50f, ButtonSize, ButtonSize,
+                                                      0f, 36f, ViewWidth, ViewHeight, 30);
+            Assert.Equal(oneAxis, twoAxis);
+        }
+
+        [Fact]
+        public void UnreadableScreenWidthDoesNotStopTheHorizontalSearch()
+        {
+            // 幅が読めない環境で「1 つも置けない」に倒れないこと。
+            Assert.Equal(30, ScreenSlot.CandidatesInside(8f, 10f, ButtonSize, ButtonSize,
+                                                         40f, 0f, 0f, ViewHeight, 30));
         }
 
         [Fact]

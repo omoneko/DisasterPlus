@@ -39,6 +39,33 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly float[] ModelValues;
 
+        /// <summary>
+        /// **火山性微動**（第 3 層、<c>Core/Volcano/VolcanicTremor</c>）の同じフレームでの値。
+        /// <see cref="Frames"/> と 1 対 1 で、有効なのは同じく先頭 <see cref="Count"/> 件。
+        ///
+        /// **null は「記録していない」であって「揺れていない」ではない**
+        /// （<see cref="ModelValues"/> とまったく同じ約束）。火山が揺れていない
+        /// あいだはここが null になり、表示側は第 3 層の線を 1 本も描かない。
+        ///
+        /// ★ これは<b>この MOD のモデル</b>であって、バニラの式ではない
+        ///   （<c>Game/Volcano/VolcanoTremorTrace</c> のクラス doc）。
+        ///   凡例も第 2 層と同じ側に置くこと。
+        /// </summary>
+        public readonly float[] TremorValues;
+
+        /// <summary>
+        /// <see cref="Values"/>（第 1 層）に**意味があるか** ——
+        /// バニラの地震が実際に進行しているか。
+        ///
+        /// **false のとき <see cref="Values"/> は全部 0 で、それは
+        /// 「バニラの地震が無い」という値である**（読めなかったのではない。
+        /// 火山だけが揺れている状態がこれで、そのとき第 1 層の線は描かない）。
+        /// </summary>
+        public readonly bool HasQuake;
+
+        /// <summary>この観測点から⑤の影響範囲の中心までの水平距離（m）。火山が無ければ 0。</summary>
+        public readonly float DistanceToVolcano;
+
         /// <summary><see cref="Frames"/> / <see cref="Values"/> の**有効な**件数。</summary>
         public readonly int Count;
 
@@ -48,9 +75,14 @@ namespace DisasterPlus.Game
         /// <summary>合成記象の側の最大振幅（絶対値）。記録していなければ 0。</summary>
         public readonly float ModelPeakAbsolute;
 
+        /// <summary>火山性微動の側の最大振幅（絶対値）。記録していなければ 0。</summary>
+        public readonly float TremorPeakAbsolute;
+
         public SeismographTrace(ushort buildingId, Vec3 position, float distanceToEpicentre,
                                 uint[] frames, float[] values, int count, float peakAbsolute,
-                                float[] modelValues, float modelPeakAbsolute)
+                                float[] modelValues, float modelPeakAbsolute,
+                                float[] tremorValues, float tremorPeakAbsolute,
+                                bool hasQuake, float distanceToVolcano)
         {
             BuildingId = buildingId;
             Position = position;
@@ -61,12 +93,22 @@ namespace DisasterPlus.Game
             PeakAbsolute = peakAbsolute;
             ModelValues = modelValues;
             ModelPeakAbsolute = modelPeakAbsolute;
+            TremorValues = tremorValues;
+            TremorPeakAbsolute = tremorPeakAbsolute;
+            HasQuake = hasQuake;
+            DistanceToVolcano = distanceToVolcano;
         }
 
         /// <summary>合成記象の線を描いてよいか（記録があり、件数と噛み合っている）。</summary>
         public bool HasModel
         {
             get { return ModelValues != null && ModelValues.Length >= Count && Count > 0; }
+        }
+
+        /// <summary>火山性微動の線を描いてよいか（記録があり、件数と噛み合っている）。</summary>
+        public bool HasTremor
+        {
+            get { return TremorValues != null && TremorValues.Length >= Count && Count > 0; }
         }
 
         /// <summary>最も新しいサンプルのフレーム。空なら 0。</summary>
@@ -170,6 +212,15 @@ namespace DisasterPlus.Game
             /// 設定が OFF のあいだは 1 件も入らない（<see cref="_modelRecorded"/>）。
             /// </summary>
             public readonly WaveformBuffer ModelBuffer = new WaveformBuffer(Capacity);
+
+            /// <summary>
+            /// 火山性微動（第 3 層）の側。**他の 2 本と同じフレームに同じ件数だけ**入れる。
+            /// 火山が揺れていないあいだは 1 件も入らない（<see cref="_tremorRecorded"/>）。
+            /// </summary>
+            public readonly WaveformBuffer TremorBuffer = new WaveformBuffer(Capacity);
+
+            /// <summary>この観測点から⑤の影響範囲の中心までの水平距離（m）。毎 tick 引き直す。</summary>
+            public float DistanceToVolcano;
         }
 
         private static readonly ObservationPoint[] _points = CreatePoints();
@@ -210,6 +261,15 @@ namespace DisasterPlus.Game
         /// </summary>
         private static bool _modelRecorded;
 
+        /// <summary>
+        /// 今のバッファに火山性微動（第 3 層）が入っているか。
+        /// <see cref="_modelRecorded"/> と同じ理由で要る —— 噴火が途中で始まると、
+        /// 他の 2 本には既に数百件入っているのにこちらは空なので、
+        /// そのまま並べると時間軸が食い違う。切り替わりを見たら**全部まとめて
+        /// 捨てて**、そこから揃えて貯め直す。
+        /// </summary>
+        private static bool _tremorRecorded;
+
         private static bool _scanErrorLogged;
 
         private static readonly IList<SeismographTrace> NoTraces =
@@ -240,9 +300,12 @@ namespace DisasterPlus.Game
                 _points[i].DistanceToEpicentre = 0f;
                 _points[i].Buffer.Clear();
                 _points[i].ModelBuffer.Clear();
+                _points[i].TremorBuffer.Clear();
+                _points[i].DistanceToVolcano = 0f;
             }
             _pointCount = 0;
             _modelRecorded = false;
+            _tremorRecorded = false;
             _quakeId = 0;
             _cached = null;
             _cachedAtFrame = 0u;
@@ -269,65 +332,92 @@ namespace DisasterPlus.Game
             // 順位付けは QuakeSelection に一本化してある（以前ここには
             // EarthquakeReader.SelectDamagingQuake と 1 バイトも違わない複製があった）。
             var quake = QuakeSelection.SelectDamaging(snapshot.Quakes);
-            if (quake == null)
+
+            // ★★ **バニラの地震が無くても、火山が揺れていれば記録する**
+            //    （2026-08-22、所有者の依頼「火山性地震は震度計に記録されていない」）。
+            //    以前はここが「地震が無い ⇒ 観測点ごと捨てる」だったので、
+            //    火山だけが揺れているあいだ地震計は空欄のままだった。
+            bool tremor = VolcanoTremorTrace.Active;
+
+            if (quake == null && !tremor)
             {
-                // 進行中の地震が無い。設計書 §3.5 のとおり、ここで捨てる。
+                // 揺らしている者が 1 つも無い。設計書 §3.5 のとおり、ここで捨てる。
                 if (_quakeId != 0 || _pointCount != 0) ClearAll();
                 return;
             }
 
-            if (quake.DisasterId != _quakeId)
+            if (quake != null && quake.DisasterId != _quakeId)
             {
                 ClearAll();
                 _quakeId = quake.DisasterId;
                 _lastRescanFrame = frame;
-                Rescan(quake);
+                Rescan(quake.Epicentre.ToVec2());
+            }
+            else if (quake == null && _quakeId != 0)
+            {
+                // ★ 地震だけが終わった。**観測点は捨てない** —— 火山はまだ揺れており、
+                //   ここで捨てると記象が 1 度途切れてから貯め直しになる。
+                //   第 1 層はこの先 0 になり、<c>HasQuake</c> が false を名乗る。
+                _quakeId = 0;
             }
 
             if (_pointCount == 0)
             {
                 // ★ 唯一の再走査経路（クラス doc）。地震計を 1 個も持たない都市で
-                //    地震が起きている間だけ走り、1 個でも見つかれば以後は走らない。
+                //    揺れが続いている間だけ走り、1 個でも見つかれば以後は走らない。
                 if (frame - _lastRescanFrame >= RescanIntervalFrames)
                 {
                     _lastRescanFrame = frame;
-                    Rescan(quake);
+                    Rescan(quake != null
+                           ? quake.Epicentre.ToVec2()
+                           : VolcanoTremorTrace.Centre.ToVec2());
                 }
                 if (_pointCount == 0) return;
             }
 
-            // m_activationFrame == 0 は「今」ではなく「未定」（§A-1 の罠）。
-            // 引き算に使うと途方も無い e になる。
-            if (!quake.ActivationScheduled) return;
+            // ★ ⑤の中心までの距離は**毎 tick 引き直す**。観測点は 4 個までなので
+            //   費用は無視できるし、地震で並べ直した観測点にも必ず入る。
+            if (tremor)
+            {
+                for (int i = 0; i < _pointCount; i++)
+                {
+                    _points[i].DistanceToVolcano =
+                        VolcanoTremorTrace.DistanceFromCentre(_points[i].Position);
+                }
+            }
 
-            // ★ m_activeDuration はプレハブ値で、まだ誰も実測していない（§A-0）。
-            //    読めていなければ揺れの窓が分からないので、**1 サンプルも取らない**。
-            //    ここでマグニチュードや持続時間を決め打ちすると、地震が終わった後も
-            //    伸び続ける波形になる。
-            if (!snapshot.Prefab.Resolved) return;
-            uint activeDuration = snapshot.Prefab.ActiveDuration;
-            if (activeDuration == 0u) return;
+            // ★ バニラの地震の側が「実際に評価できる」か。
+            //   m_activationFrame == 0 は「今」ではなく「未定」（§A-1 の罠）。
+            //   m_activeDuration はプレハブ値で、読めていなければ揺れの窓が分からない
+            //   （§A-0）—— そこを決め打つと、地震が終わった後も伸び続ける波形になる。
+            //   **どれか 1 つでも欠けたら第 1 層は評価しない。火山の側は止めない。**
+            uint activeDuration = 0u;
+            bool quakeUsable = false;
+            if (quake != null && quake.ActivationScheduled && snapshot.Prefab.Resolved)
+            {
+                activeDuration = snapshot.Prefab.ActiveDuration;
+                quakeUsable = activeDuration != 0u;
+            }
 
-            // ★ 1 tick に 1 サンプルでは足りない。m_currentFrameIndex は
-            //    FinalSimulationSpeed（1/3/9）ずつ飛ぶのに、揺れの主成分は
-            //    0.63 rad/frame（周期 ≒10 フレーム）なので、速度 3 では
-            //    周期 ≒92 フレームの**偽の長周期波**に折り返す。しかも §A-7 は
-            //    バニラに長周期成分が無いことを確定させているので、それは
-            //    第 1 層のグラフが第 2 層の現象を描いている状態になる。
-            //    DisplacementAt は e の閉じた式なので、飛んだフレームで評価するのは
-            //    1 回評価するのと同じだけ「実測」である（ShakeWaveform の doc）。
+            if (!quakeUsable && !tremor) return;
+
             // ★ 第 2 層の合成記象。**設定が OFF なら 1 件も貯めない**（既定 OFF）。
-            //   切り替わった瞬間は両方まとめて捨てる —— 片方だけ空のまま 2 本並べると、
-            //   時間軸の食い違った絵になる。
-            bool wantModel = ModSettings.EarthquakeSeismogram.value;
-            if (wantModel != _modelRecorded)
+            //   **バニラの地震が無いときも貯めない** —— あれは 1 回の断層破壊の
+            //   モデルであって、火山性微動はそこに載らない。
+            bool wantModel = ModSettings.EarthquakeSeismogram.value && quakeUsable;
+
+            // 3 本のうちどれかの「入れる／入れない」が変わったら、**まとめて捨てる**。
+            // 片方だけ空のまま並べると、時間軸の食い違った絵になる。
+            if (wantModel != _modelRecorded || tremor != _tremorRecorded)
             {
                 for (int i = 0; i < _points.Length; i++)
                 {
                     _points[i].Buffer.Clear();
                     _points[i].ModelBuffer.Clear();
+                    _points[i].TremorBuffer.Clear();
                 }
                 _modelRecorded = wantModel;
+                _tremorRecorded = tremor;
                 _cached = null;
                 _dirty = true;
                 _hasLastSample = false;
@@ -346,8 +436,22 @@ namespace DisasterPlus.Game
             bool wrote = false;
             for (uint f = first; f <= frame; f++)
             {
-                long e = (long)f - quake.ActivationFrame + ShakeWaveform.FrameOffset;
-                if (!ShakeWaveform.IsShaking(e, activeDuration)) continue;
+                // ★ 1 tick に 1 サンプルでは足りない。m_currentFrameIndex は
+                //    FinalSimulationSpeed（1/3/9）ずつ飛ぶのに、揺れの主成分は
+                //    0.63 rad/frame（周期 ≒10 フレーム）なので、速度 3 では
+                //    周期 ≒92 フレームの**偽の長周期波**に折り返す。
+                //    DisplacementAt は e の閉じた式なので、飛んだフレームで評価するのは
+                //    1 回評価するのと同じだけ「実測」である（ShakeWaveform の doc）。
+                long e = 0L;
+                bool quakeShaking = false;
+                if (quakeUsable)
+                {
+                    e = (long)f - quake.ActivationFrame + ShakeWaveform.FrameOffset;
+                    quakeShaking = ShakeWaveform.IsShaking(e, activeDuration);
+                }
+
+                // 誰も揺らしていないフレームは 1 件も入れない（3 本とも入れない）。
+                if (!quakeShaking && !_tremorRecorded) continue;
 
                 // t に m_referenceTimer は足さない。あれは main スレッドの描画補間用の
                 // 値で、sim スレッドから読むべきものではない（フレーム単位の整数で足りる）。
@@ -359,15 +463,27 @@ namespace DisasterPlus.Game
 
                     // ★ バニラ式の distance を「カメラから」→「震源から」に置き換えた版
                     //    （設計書 §3.5）。式・定数・窓はバニラのまま。
-                    float value = ShakeWaveform.DisplacementAt(point.DistanceToEpicentre, t);
+                    //    ★ 揺れていないフレームの 0 は**「バニラの地震が無い」という値**
+                    //      であって「読めなかった」ではない（<c>HasQuake</c> が名乗る）。
+                    float value = quakeShaking
+                        ? ShakeWaveform.DisplacementAt(point.DistanceToEpicentre, t)
+                        : 0f;
                     point.Buffer.Add(f, value);
 
-                    // ★ 合成記象は**同じフレーム・同じ観測点**で評価する。
-                    //   片方だけ間引くと 2 本の線の時間軸がずれる。
-                    if (wantModel)
+                    // ★ 3 本は**同じフレーム・同じ観測点**で評価する。
+                    //   1 本だけ間引くと線の時間軸がずれる。
+                    if (_modelRecorded)
                     {
                         point.ModelBuffer.Add(
-                            f, model.DisplacementAt(point.DistanceToEpicentre, t));
+                            f, quakeShaking
+                               ? model.DisplacementAt(point.DistanceToEpicentre, t)
+                               : 0f);
+                    }
+
+                    if (_tremorRecorded)
+                    {
+                        point.TremorBuffer.Add(
+                            f, VolcanoTremorTrace.DisplacementAt(point.DistanceToVolcano, f));
                     }
                 }
                 wrote = true;
@@ -419,11 +535,24 @@ namespace DisasterPlus.Game
                     modelPeak = point.ModelBuffer.PeakAbsolute;
                 }
 
+                // ★ 第 3 層も同じ約束（null は「記録していない」）。
+                float[] tremorValues = null;
+                float tremorPeak = 0f;
+                if (_tremorRecorded && point.TremorBuffer.Count == count)
+                {
+                    var tremorFrames = new uint[count];
+                    tremorValues = new float[count];
+                    point.TremorBuffer.CopyTo(tremorFrames, tremorValues);
+                    tremorPeak = point.TremorBuffer.PeakAbsolute;
+                }
+
                 traces.Add(new SeismographTrace(point.BuildingId, point.Position,
                                                 point.DistanceToEpicentre,
                                                 frames, values, written,
                                                 point.Buffer.PeakAbsolute,
-                                                modelValues, modelPeak));
+                                                modelValues, modelPeak,
+                                                tremorValues, tremorPeak,
+                                                _quakeId != 0, point.DistanceToVolcano));
             }
 
             _cached = traces.AsReadOnly();
@@ -448,8 +577,12 @@ namespace DisasterPlus.Game
             {
                 _points[i].Buffer.Clear();
                 _points[i].ModelBuffer.Clear();
+                _points[i].TremorBuffer.Clear();
+                _points[i].DistanceToVolcano = 0f;
             }
             _pointCount = 0;
+            _modelRecorded = false;
+            _tremorRecorded = false;
             _quakeId = 0;
             _cached = null;
             _cachedAtFrame = 0u;
@@ -469,7 +602,11 @@ namespace DisasterPlus.Game
         /// <c>ImmaterialResourceManager</c> の側であり、ここは「地震計という建物が
         /// どこに建っているか」を知るための走査である。
         /// </summary>
-        private static void Rescan(EarthquakeReading quake)
+        /// <param name="origin">
+        /// 近い順を決める起点。**バニラの地震があればその震央、無ければ⑤の
+        /// 影響範囲の中心**である（火山だけが揺れているときも観測点は要る）。
+        /// </param>
+        private static void Rescan(Vec2 origin)
         {
             _pointCount = 0;
 
@@ -481,7 +618,7 @@ namespace DisasterPlus.Game
                 var buildings = bm.m_buildings != null ? bm.m_buildings.m_buffer : null;
                 if (buildings == null) return;
 
-                Vec2 epicentre = quake.Epicentre.ToVec2();
+                Vec2 epicentre = origin;
                 int found = 0;
 
                 // 添字 0 は「無効」の予約枠なので 1 から回す。
@@ -515,9 +652,12 @@ namespace DisasterPlus.Game
                     point.Position = new Vec3(_scanPositions[i].x, _scanPositions[i].y,
                                               _scanPositions[i].z);
                     point.DistanceToEpicentre = _scanDistances[i];
+                    point.DistanceToVolcano = 0f;
                     // ClearAll() で既に空だが、観測点の入れ替えとバッファの中身が
                     // 食い違う経路を将来作らないための保険。
                     point.Buffer.Clear();
+                    point.ModelBuffer.Clear();
+                    point.TremorBuffer.Clear();
                 }
                 _pointCount = found;
             }

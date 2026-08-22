@@ -111,6 +111,31 @@ namespace DisasterPlus.Game
         public static Vector2 Find(Vector2 preferred, Vector2 size, float stepY,
                                    int maxTries, UIComponent owner, out bool foundFree)
         {
+            return Find(preferred, size, 0f, stepY, maxTries, owner, out foundFree);
+        }
+
+        /// <summary>
+        /// 上の 2 軸版。<paramref name="stepX"/> ／ <paramref name="stepY"/> のどちらか
+        /// （または両方）へ 1 歩ずつ進み、可視要素と重ならない最初の位置を返す。
+        ///
+        /// ── なぜ横向きが要るのか（2026-08-22、所有者の依頼）───────────────
+        ///
+        /// > D＋ボタンが左サイドメニューと重なる位置にあるので……
+        /// > CSWARFRONT ボタンや SIREN Alert ボタンと同じ高さで並んで表示されるように
+        ///
+        /// **バニラの左サイドメニューは縦の列である。** 縦にしか進めない探索は
+        /// その列を上から下までなぞることになり、空きが見つかっても
+        /// **列の一部を隠す位置**にしか置けない（実機で実際にそうなった）。
+        /// 他 MOD 2 本が居るのは画面最上段の**横**の列で、そこへ並べるには
+        /// <c>stepX &gt; 0, stepY = 0</c> で探す。
+        ///
+        /// **画面の外へは 1 歩も出ない**という上位の制約はそのままで、
+        /// 候補の数は <see cref="ScreenSlot.CandidatesInside(float,float,float,float,float,float,float,float,int)"/>
+        /// が両軸まとめて決める。
+        /// </summary>
+        public static Vector2 Find(Vector2 preferred, Vector2 size, float stepX, float stepY,
+                                   int maxTries, UIComponent owner, out bool foundFree)
+        {
             foundFree = false;
             try
             {
@@ -162,8 +187,9 @@ namespace DisasterPlus.Game
                 // 実態（同じ点を繰り返しただけ）と食い違う。
                 // 画面の下端も同じ理由で打ち切る —— そこから先の候補は、空いていても
                 // 押せない（クラス doc の (8,1094)）。
-                int effectiveTries = ScreenSlot.CandidatesInside(preferred.y, size.y, stepY,
-                                                                screen.y, maxTries);
+                int effectiveTries = ScreenSlot.CandidatesInside(
+                    preferred.x, preferred.y, size.x, size.y, stepX, stepY,
+                    screen.x, screen.y, maxTries);
                 if (effectiveTries <= 0)
                 {
                     // 最初の候補すら画面に入らない。下へ進めばもっと外れるので探索しない。
@@ -176,7 +202,8 @@ namespace DisasterPlus.Game
 
                 for (int attempt = 0; attempt < effectiveTries; attempt++)
                 {
-                    var candidate = new Vector2(preferred.x, preferred.y + stepY * attempt);
+                    var candidate = new Vector2(preferred.x + stepX * attempt,
+                                                preferred.y + stepY * attempt);
                     if (!OverlapsAny(all, candidate, size, owner))
                     {
                         foundFree = true;
@@ -210,6 +237,21 @@ namespace DisasterPlus.Game
         /// ここは配置のたびに 1 回しか通らないが、出しても打つ手が無い。
         /// <c>fixedHeight</c> は保険で、こちらは常に読める整数である。
         /// </summary>
+        /// <summary>
+        /// UI 座標系での画面の広さ。読めなければ <c>(0,0)</c> ——
+        /// <see cref="ScreenSlot"/> はそれを「制限しない」と解釈する。
+        ///
+        /// <see cref="InfoHub"/> がドラッグの丸めに使う。**ここを 2 番目の
+        /// 「置き場所を決める主体」にしないこと**（クラス doc）—— これは
+        /// 「画面の広さ」を答えるだけで、どこに置くかは答えない。
+        /// </summary>
+        public static Vector2 ScreenSize()
+        {
+            var view = UIView.GetAView();
+            if (view == null) return new Vector2(0f, 0f);
+            return ReadScreenSize(view);
+        }
+
         private static Vector2 ReadScreenSize(UIView view)
         {
             try

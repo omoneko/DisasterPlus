@@ -94,6 +94,12 @@ namespace DisasterPlus.Game
                     snapshot.Valid
                         ? "terrain=" + (snapshot.Terrain.Usable ? "usable" : "UNUSABLE")
                           + " raw=" + snapshot.Terrain.RawArrayLength
+                          // ★ 火山性地震の行。**揺れていないときも必ず出す** ——
+                          //   「機能が死んでいる」と「今は揺れない位相なのだ」が
+                          //   ログ上で区別できなくなる（③で実際に起きた形）。
+                          + " tremor=" + (VolcanoTremorTrace.Active
+                              ? VolcanoTremorTrace.ActivityUnit.ToString("F2")
+                              : "off")
                         : "snapshot invalid");
             }
 
@@ -113,6 +119,12 @@ namespace DisasterPlus.Game
 
             // T5〜T9 はこの中の位相分岐から呼ばれる。**ここに直接足さないこと。**
             VolcanoState.Tick(snapshot, frameIndex, deltaMinutes);
+
+            // ★ 位相が進んだ**あと**に、火山性地震の記録側を合わせる
+            //   （②の地震計がここから読む。<see cref="VolcanoTremorTrace"/>）。
+            //   前に置くと 1 tick 古い位相で記録することになる。
+            //   カメラの揺れ（main）とは別経路で、あちらは触らない。
+            VolcanoTremorTrace.Update(frameIndex);
         }
 
         /// <summary>

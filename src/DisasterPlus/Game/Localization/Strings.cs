@@ -63,6 +63,7 @@ namespace DisasterPlus.Game
         //   （32 px 四方のボタンに収まること）。
         public static string InfoButtonLabel = "D+";
         public static string InfoButtonTooltip = "Disaster + information";
+        public static string InfoDragTooltip = "Drag to move this window";
         public static string InfoTabDiagnostics = "Diagnostics";
 
         // --- 診断のタブ ---
@@ -460,6 +461,21 @@ namespace DisasterPlus.Game
         public static string EarthquakeWaveformModelNote =
             "White is the game's own shake formula; orange is Disaster +'s synthesized record. "
             + "Both lines share one vertical scale, so their heights can be compared directly.";
+        // ── 第 3 層＝火山性微動（2026-08-22、所有者の依頼）─────────────────
+        //    第 2 層とまったく同じ扱いにする。これも**この MOD のモデル**であって、
+        //    ゲームが計算している値でも、カメラが実際に足した変位でもない
+        //    （Game/Volcano/VolcanoTremorTrace のクラス doc）。
+        public static string EarthquakeWaveformTremor =
+            "Volcanic tremor (teal line)";
+        public static string EarthquakeWaveformTremorNote =
+            "Teal is Disaster +'s volcanic tremor model - the swarm and the harmonic tremor "
+            + "under the vent - evaluated at this seismograph. It is not measured by the game, "
+            + "and it is not a copy of the camera shake (that one runs on real time, this one "
+            + "on the plot's frame axis).";
+        // 火山だけが揺れているときの見出し。**震央からの距離ではない**ので、
+        // そう名乗らずに出すと「起きていない地震の記録」の顔になる。
+        public static string EarthquakeWaveformTremorSource = "volcano";
+
         // 初期微動継続時間。**震源距離とともに開く**のがこのモデルの看板であり、
         // 数値で出しておかないと「絵がそれらしい」だけになる。
         public static string EarthquakeWaveformSMinusP = "P-S interval";

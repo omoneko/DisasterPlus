@@ -222,6 +222,27 @@ namespace DisasterPlus.Game
         private static float _buildingPassFront;
         private static float _segmentPassFront;
 
+        // ★★ **走査の 2 本は別々に一周する。だから届いた半径も別々に憶える。**
+        //    （2026-08-22、実機で楯状 r=3000 m が永久に終わらなかった原因。）
+        //
+        //    以前はこの 2 つを持たず、<c>Sweep</c> が**そのパスの**建物側と道路側の
+        //    小さいほうを取って <see cref="_clearedRadius"/> へ入れていた。
+        //    ところが 1 周に要するパス数は 2 本で違う（道路側の矩形は
+        //    <c>VolcanoScan.SegmentGridMargin</c> ぶん広い）ので、
+        //    **前線が伸びていく途中で 2 本の周回位相がずれる。** ずれたあとは
+        //    「片方が一周し終えたパス」と「もう片方が一周し終えたパス」が
+        //    永久に別のパスになり、**同じパスで両方が前線に届くことが二度と無い。**
+        //    実機の log はその状態をそのまま記録している ——
+        //    <c>cleared=2816/3000</c> が 660 パス以上動かず、隆起は
+        //    <c>progress=1.000</c> のまま <c>Uplifting</c> で止まり、
+        //    火山性微動が鳴りやまなかった。
+        //
+        //    それぞれの側で単調に憶えて、**最後に小さいほうを取る**。
+        //    意味は変わらない（「両方が走査し終えた半径」）が、
+        //    2 本が同じパスで揃う必要が無くなる。
+        private static float _buildingReachedRadius;
+        private static float _segmentReachedRadius;
+
         private static bool _errorLogged;
 
         // ── 診断カウンタ 9 個（全て sim スレッドからのみ読み書きする）────────────
@@ -336,6 +357,8 @@ namespace DisasterPlus.Game
             _segmentCursor = 0;
             _buildingPassFront = 0f;
             _segmentPassFront = 0f;
+            _buildingReachedRadius = 0f;
+            _segmentReachedRadius = 0f;
             _passes = 0;
             _lastScanned = 0;
             _lastBuildingsDestroyed = 0;
@@ -467,6 +490,12 @@ namespace DisasterPlus.Game
         ///
         /// **届いた半径は 2 つの小さいほう**である。片方だけ前線まで届いても、
         /// もう片方が届いていなければそこはまだ「準備できた場所」ではない。
+        ///
+        /// ★★ <b>ただし「このパスの 2 つの小さいほう」ではない。</b>
+        /// 建物と道路は別々に一周しており、**1 周に要するパス数が違う**。
+        /// 直接比べると周回位相がずれたとたん永久に前線へ届かなくなるので、
+        /// それぞれを単調に憶えて（<c>_buildingReachedRadius</c> /
+        /// <c>_segmentReachedRadius</c>）から小さいほうを取る。
         /// </summary>
         private static void Sweep(VolcanoFootprint footprint)
         {
@@ -489,9 +518,23 @@ namespace DisasterPlus.Game
             int segmentsScanned = ClearSegments(footprint, out segmentsCapped,
                                                 out segmentsReached);
 
-            float reached = buildingsReached < segmentsReached
-                ? buildingsReached
-                : segmentsReached;
+            // ★★ **それぞれの側で単調に憶えてから、小さいほうを取る。**
+            //    このパスの 2 つを直接比べてはいけない —— 1 周に要するパス数が
+            //    2 本で違うので周回位相がずれ、**同じパスで両方が前線に届くことが
+            //    二度と無くなる**（<see cref="_buildingReachedRadius"/> の由来）。
+            //    意味は変わらない: 小さいほうは今も「両方が走査し終えた半径」である。
+            if (buildingsReached > _buildingReachedRadius)
+            {
+                _buildingReachedRadius = buildingsReached;
+            }
+            if (segmentsReached > _segmentReachedRadius)
+            {
+                _segmentReachedRadius = segmentsReached;
+            }
+
+            float reached = _buildingReachedRadius < _segmentReachedRadius
+                ? _buildingReachedRadius
+                : _segmentReachedRadius;
             if (reached > _clearedRadius) _clearedRadius = reached;
 
             _passes++;
@@ -601,6 +644,10 @@ namespace DisasterPlus.Game
                 + " front=" + _frontRadius.ToString("F0")
                 + " cleared=" + _clearedRadius.ToString("F0")
                 + "/" + _shapeRadius.ToString("F0")
+                // ★ 2 本を別々に出す。片方だけが止まっているのが、揃えた 1 つの数からは
+                //   読めなかった（上の _buildingReachedRadius の由来）。
+                + " reach b=" + _buildingReachedRadius.ToString("F0")
+                + " r=" + _segmentReachedRadius.ToString("F0")
                 + " scanned=" + _lastScanned
                 + " buildings=" + _lastBuildingsDestroyed + " (refused " + _lastBuildingsRefused + ")"
                 + " roads=" + _lastSegmentsDestroyed + " (refused " + _lastSegmentsRefused + ")"

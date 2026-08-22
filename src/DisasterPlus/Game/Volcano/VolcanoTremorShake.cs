@@ -57,13 +57,13 @@ namespace DisasterPlus.Game
         /// 地動の山は活動度 1 で 0.55 なので、火口の真下の実際の最大は
         /// <c>0.55 × 0.42 ≒ 0.23</c> ——**バニラの本震の 4 割弱**である。
         /// </summary>
-        private const float MaxDisplacement = 0.7f * ShakeWaveform.MaxDisplacement;
+        private const float MaxDisplacement = VolcanoTremorActivity.DisplacementGain;
 
         /// <summary>
         /// 揺れが届く距離（山の半径の何倍か）。**外はきっかり 0** ——
         /// 街の反対側まで揺らすと「地震が起きている」ではなく「画面が壊れている」に見える。
         /// </summary>
-        private const float ReachRadiusFactor = 4.5f;
+        private const float ReachRadiusFactor = VolcanoTremorActivity.ReachRadiusFactor;
 
         /// <summary>反対向きの成分に使う位相差（ラジアン）。水平 2 軸を独立に見せる。</summary>
         private const float CrossPhaseSeconds = 0.37f;
@@ -200,27 +200,12 @@ namespace DisasterPlus.Game
             if (!ModSettings.VolcanoEnabled.value) return 0f;
             if (!ModSettings.VolcanoQuake.value) return 0f;
 
-            switch (snapshot.Phase)
-            {
-                // 準備（破壊）と隆起 —— マグマが上がってきている段。**噴火の前から揺れる。**
-                case VolcanoPhase.Clearing:
-                case VolcanoPhase.Uplifting:
-                    return VolcanicTremor.ActivityUnit(snapshot.ProgressUnit, false, 0f,
-                                                       false, 0f);
-
-                case VolcanoPhase.Erupting:
-                    return VolcanicTremor.ActivityUnit(1f, true,
-                                                       snapshot.EruptionIntensityUnit, false, 0f);
-
-                // 噴火が終わってから溶岩が冷えきるまで、余韻が引いていく。
-                case VolcanoPhase.Flowing:
-                case VolcanoPhase.Cooling:
-                    return VolcanicTremor.ActivityUnit(1f, false, 0f, true,
-                                                       snapshot.LavaCoolUnit);
-
-                default:
-                    return 0f;
-            }
+            // ★ 対応表は <see cref="VolcanoTremorActivity"/> に 1 つだけある。
+            //   sim 側（地震計への記録）と**必ず同じ表を見る** ——
+            //   別に書くと「画面は揺れているのに記録に出ない」が起きる。
+            return VolcanoTremorActivity.For(snapshot.Phase, snapshot.ProgressUnit,
+                                             snapshot.EruptionIntensityUnit,
+                                             snapshot.LavaCoolUnit);
         }
 
         private static Camera ResolveCamera()

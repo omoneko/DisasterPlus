@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Earthquake;
+using DisasterPlus.Core.Volcano;
 using DisasterPlus.Tools;
 
 namespace DisasterPlus.Tools.WaveformPreview
@@ -54,6 +55,7 @@ namespace DisasterPlus.Tools.WaveformPreview
 
             Traces(outDir, log);
             PanelPixels(outDir, log);
+            TremorPanel(outDir, log);
             Aliasing(outDir, log);
             BandLimit(log);
             Clipping(log);
@@ -134,6 +136,111 @@ namespace DisasterPlus.Tools.WaveformPreview
                 {
                     if (synthesized) Set(rgb, width, f, r, 255, 158, 66);
                     else Set(rgb, width, f, r, 235, 235, 235);
+                }
+            }
+        }
+
+        // ── 2b. 火山性微動の段（第 3 層）────────────────────
+
+        /// <summary>
+        /// **地震計に記録される火山性地震**（2026-08-22）を、ゲームと同じ
+        /// 320x80 の格子で描いて確かめる。
+        ///
+        /// 値の作り方は <c>Game/Volcano/VolcanoTremorTrace.DisplacementAt</c> と同じである。
+        /// **Core の実物をそのまま呼んでいる**ので近似の書き直しではない
+        /// （倍率の定数だけは Game 側にあるので同じ式をここで書いている）。
+        /// </summary>
+        private static void TremorPanel(string dir, StringBuilder log)
+        {
+            const int pw = 320;
+            const int ph = 80;
+            const int zoom = 3;
+            const int gap = 8;
+            const int plotWindow = 512;
+
+            // 山の半径 1200 m -> 届く距離は 4.5 倍 = 5400 m。
+            const float reach = 1200f * 4.5f;
+            const float gain = 0.7f * ShakeWaveform.MaxDisplacement;
+            float[] distances = { 300f, 1500f, 4000f };
+            float[] activities = { 0.62f, 1.00f };
+
+            uint seed = DeterministicRandom.Hash(88u, 4294966898u);
+
+            int rows = distances.Length * activities.Length;
+            int width = pw * zoom;
+            int height = rows * (ph * zoom + gap);
+            var rgb = new byte[width * height * 3];
+            Fill(rgb, 30, 32, 38);
+
+            log.AppendLine("## volcanic tremor panel (320x80, 512 frames = 8.53 s at speed 1)");
+            log.AppendLine("  reach = " + reach + " m   gain = " + gain);
+            log.AppendLine("  distance m | activity | attenuation | peak | empty columns");
+
+            var frames = new uint[plotWindow];
+            var values = new float[plotWindow];
+            int row = 0;
+
+            foreach (float a in activities)
+            {
+                foreach (float d in distances)
+                {
+                    float attenuation = VolcanicTremor.AttenuationAt(d, reach);
+                    float peak = 0f;
+                    for (int i = 0; i < plotWindow; i++)
+                    {
+                        frames[i] = (uint)i;
+                        values[i] = VolcanicTremor.DisplacementAt(seed, i / 60f, a)
+                                    * attenuation * gain;
+                        peak = Math.Max(peak, Math.Abs(values[i]));
+                    }
+
+                    float scale = peak > 0f ? 1f / peak : 1f;
+                    int[] columns = WaveformPlot.Columns(frames, values, plotWindow,
+                                                         0u, (uint)(plotWindow - 1),
+                                                         pw, ph - 1, scale);
+
+                    int empty = 0;
+                    for (int x = 0; x < pw; x++) if (columns[x] == WaveformPlot.Empty) empty++;
+
+                    log.AppendLine("  " + Pad(d, 10) + " | " + Pad(a, 8) + " | "
+                                   + Pad(attenuation, 11) + " | " + Pad(peak, 4)
+                                   + " | " + empty + "/" + pw);
+
+                    TremorLane(rgb, width, row * (ph * zoom + gap), pw, ph, zoom, columns);
+                    row++;
+                }
+            }
+
+            log.AppendLine();
+            Png.Write(Path.Combine(dir, "waveform-tremor-panel.png"), width, height, rgb);
+        }
+
+        /// <summary>1 段だけ。色は <c>WaveformView.TremorColor</c>（青緑）と同じ。</summary>
+        private static void TremorLane(byte[] rgb, int width, int top, int pw, int ph, int zoom,
+                                       int[] columns)
+        {
+            int middle = (ph - 1) / 2;
+            for (int x = 0; x < pw; x++)
+            {
+                Block(rgb, width, x, middle, top, zoom, 70, 76, 90);
+
+                int v = columns[x];
+                if (v == WaveformPlot.Empty) continue;
+
+                int lo = Math.Min(v, middle);
+                int hi = Math.Max(v, middle);
+                for (int y = lo; y <= hi; y++) Block(rgb, width, x, y, top, zoom, 96, 220, 200);
+            }
+        }
+
+        private static void Block(byte[] rgb, int width, int x, int y, int top, int zoom,
+                                  byte r, byte g, byte b)
+        {
+            for (int dy = 0; dy < zoom; dy++)
+            {
+                for (int dx = 0; dx < zoom; dx++)
+                {
+                    Set(rgb, width, x * zoom + dx, top + y * zoom + dy, r, g, b);
                 }
             }
         }

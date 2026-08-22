@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ColossalFramework.UI;
+using DisasterPlus.Core.Common;
 using UnityEngine;
 
 namespace DisasterPlus.Game
@@ -71,6 +72,48 @@ namespace DisasterPlus.Game
 
         private const float ButtonSize = 32f;
         private const float StripHeight = 34f;
+
+        /// <summary>
+        /// ボタンを置く**画面最上段の y**。所有者の依頼（2026-08-22）:
+        ///
+        /// > D＋ボタンが左サイドメニューと重なる位置にあるので、バニラのサイドメニューを
+        /// > 操作する際に邪魔になります。CSWARFRONT ボタンや SIREN Alert ボタンと
+        /// > 同じ高さで並んで表示されるようにしてください（それぞれのボタンは一スクリプトを参照）
+        ///
+        /// 実際に 2 本のスクリプトを読んで合わせた値である:
+        ///
+        /// | MOD | 置き方 | 大きさ | y | 中心の y |
+        /// |---|---|---|---|---|
+        /// | CS:WARFRONT (`MilitaryBuildPanel`) | 固定 `new Vector3(150f, 10f)` | 36 | 10 | 28 |
+        /// | SIREN Alert (`SirenButton`) | 最上段を左から走査 | 44 | 4 | 26 |
+        /// | ⑤これ | 最上段を左から走査 | 32 | **10** | 26 |
+        ///
+        /// ★ **x は固定しない。** CS:WARFRONT は 150 に決め打っているが、それは
+        ///   「他の MOD が居ない」を仮定している。こちらは SIREN Alert と同じく
+        ///   左から空きを探す —— 先に居る者を避けるので、3 本が同時に入っていても
+        ///   並ぶ（<see cref="FreeSlotFinder"/>）。
+        /// </summary>
+        private const float TopRowY = 10f;
+
+        /// <summary>最上段の探索の開始 x。**左端から**（SIREN Alert と同じ）。</summary>
+        private const float TopRowStartX = 8f;
+
+        /// <summary>最上段の探索の 1 歩（px）。ボタン幅 ＋ 隙間。</summary>
+        private const float TopRowStepX = ButtonSize + 8f;
+
+        /// <summary>最上段の探索の上限回数。画面の右端で <see cref="ScreenSlot"/> が先に止める。</summary>
+        private const int TopRowTries = 64;
+
+        /// <summary>
+        /// タブ帯の左端の**掴む場所**の幅（px）。
+        ///
+        /// 所有者の依頼（2026-08-22）:「タブの位置も移動できないことから非常に
+        /// 操作性が悪い」。帯の全面を <c>UIDragHandle</c> で覆うと、その下のタブと X が
+        /// 押せなくなる（CS:WARFRONT が実機で踏んだ不具合。あちらの
+        /// <c>MilitaryBuildPanel</c> のコメントに残っている）ので、
+        /// **左端のこの幅だけ**を掴む場所にして、タブはその右から並べる。
+        /// </summary>
+        private const float GripWidth = 16f;
         private const float TabHeight = 26f;
         private const float TabGap = 2f;
         private const float StripPad = 4f;
@@ -147,6 +190,18 @@ namespace DisasterPlus.Game
         private static UIButton _button;
         private static UIPanel _strip;
         private static UIButton _closeButton;
+        private static UIDragHandle _grip;
+
+        /// <summary>
+        /// いま <see cref="OnStripMoved"/> の中に居るか。ドラッグで動いた帯を
+        /// 画面内へ丸め直すとき、その書き込みで同じイベントがもう一度飛ぶ。
+        /// **再入を 1 段で止める**（無限再帰にはならないが、1 フレームに
+        /// 何度も追従の計算をする意味が無い）。
+        /// </summary>
+        private static bool _syncingStrip;
+
+        /// <summary>ドラッグ追従で 1 度でも例外を出したか（毎フレーム鳴らさない）。</summary>
+        private static bool _dragErrorLogged;
 
         /// <summary>いま選ばれているタブの <see cref="Tab.Id"/>。null なら未選択。</summary>
         private static string _activeId;
@@ -262,6 +317,9 @@ namespace DisasterPlus.Game
 
             _strip = null;
             _closeButton = null;
+            _grip = null;
+            _syncingStrip = false;
+            _dragErrorLogged = false;
             _button = null;
             _activeId = null;
             _shownId = null;
@@ -325,10 +383,15 @@ namespace DisasterPlus.Game
 
             // ★★ FreeSlotFinder を呼ぶのはこの 1 行だけである（クラス doc）。
             //    タブ帯とパネルの位置はここからの相対で決まる。
+            //
+            // ★★ **横に探す。下へは 1 歩も降りない**（<see cref="TopRowY"/>）。
+            //    以前は (8,50) から下へ降りていたので、**バニラの左サイドメニュー
+            //    （縦の列）の上に必ず載った** —— 所有者の実機報告そのものである。
+            //    最上段を左から右へ探せば、CS:WARFRONT と SIREN Alert の隣に並ぶ。
             bool foundFree;
-            _origin = FreeSlotFinder.Find(new Vector2(8f, 50f),
+            _origin = FreeSlotFinder.Find(new Vector2(TopRowStartX, TopRowY),
                                           new Vector2(ButtonSize, ButtonSize),
-                                          ButtonSize + 4f, 30, null, out foundFree);
+                                          TopRowStepX, 0f, TopRowTries, null, out foundFree);
             _foundFreeSlot = foundFree;
 
             var b = (UIButton)view.AddUIComponent(typeof(UIButton));
@@ -438,6 +501,71 @@ namespace DisasterPlus.Game
             MoveActivePanel(active, new Vector3(_origin.x, _origin.y + ButtonSize + 2f + StripHeight));
             active.Show();
             _shownId = active.Id;
+
+            // ★ 出したあとにもう一度前へ。**閉じる X を持っているのは帯だけ**なので、
+            //   パネルが帯より手前に来ると閉じられなくなる（パネル側の
+            //   <c>ClampToView</c> が帯より上に出ないようになったので重なること自体
+            //   まず無いが、押せなくなる側に倒さない）。
+            _strip.BringToFront();
+        }
+
+        /// <summary>
+        /// 帯がドラッグで動いた。**ボタンと開いているパネルを連れていく。**
+        ///
+        /// 位置の主体は今も <see cref="_origin"/> ただ 1 つで、ここはそれを
+        /// 帯の実際の位置から読み直しているだけである（<see cref="FreeSlotFinder"/> を
+        /// 2 回目に呼ぶ経路をここに作らないこと）。
+        ///
+        /// **画面の外へは出さない。** 出ると (8,1094) と同じ壊れ方
+        /// （見えないから使えない）になる。丸めの書き戻しで同じイベントが
+        /// もう一度飛ぶので <see cref="_syncingStrip"/> で 1 段だけ止める。
+        /// </summary>
+        private static void OnStripMoved(UIComponent component, Vector2 value)
+        {
+            if (_syncingStrip || _strip == null) return;
+
+            _syncingStrip = true;
+            try
+            {
+                Vector3 pos = _strip.relativePosition;
+                float x = pos.x;
+                float y = pos.y - (ButtonSize + 2f);
+
+                Vector2 screen = FreeSlotFinder.ScreenSize();
+
+                // 横はいちばん広いもの（帯）で、縦はボタン＋帯の高さで丸める。
+                // **パネルの高さは入れない** —— 入れると背の高いパネルのときに
+                // 帯が画面の上のほうへ張り付いて、掴んでも動かなくなる。
+                float widest = _strip.width > ButtonSize ? _strip.width : ButtonSize;
+                x = ScreenSlot.ClampInto(x, widest, screen.x);
+                y = ScreenSlot.ClampInto(y, ButtonSize + 2f + StripHeight, screen.y);
+
+                _origin = new Vector2(x, y);
+
+                Vector3 stripAt = new Vector3(x, y + ButtonSize + 2f);
+                if (_strip.relativePosition != stripAt) _strip.relativePosition = stripAt;
+                if (_button != null) _button.relativePosition = new Vector3(x, y);
+
+                Tab active = FindTab(_activeId);
+                if (active != null && _shownId == active.Id)
+                {
+                    MoveActivePanel(active,
+                                    new Vector3(x, y + ButtonSize + 2f + StripHeight));
+                }
+            }
+            catch (Exception e)
+            {
+                // 毎フレーム走りうる経路。1 回だけ大きく鳴らして以後は黙る。
+                if (!_dragErrorLogged)
+                {
+                    _dragErrorLogged = true;
+                    Log.Error("moving the Disaster + info window failed", e);
+                }
+            }
+            finally
+            {
+                _syncingStrip = false;
+            }
         }
 
         /// <summary>
@@ -479,6 +607,35 @@ namespace DisasterPlus.Game
                 strip.height = StripHeight;
                 strip.relativePosition = new Vector3(_origin.x, _origin.y + ButtonSize + 2f);
                 _strip = strip;
+
+                // ★ 掴む場所。**左端のこの幅だけ**（<see cref="GripWidth"/> の doc）。
+                //   帯の全面を覆うとタブと X が押せなくなる。
+                _grip = (UIDragHandle)strip.AddUIComponent(typeof(UIDragHandle));
+                _grip.name = FreeSlotFinder.SelfPrefix + "InfoGrip";
+                _grip.target = strip;
+                _grip.width = GripWidth;
+                _grip.height = TabHeight;
+                _grip.relativePosition = new Vector3(StripPad * 0.5f, StripPad);
+                _grip.tooltip = Strings.InfoDragTooltip;
+
+                var gripMark = (UILabel)_grip.AddUIComponent(typeof(UILabel));
+                gripMark.name = FreeSlotFinder.SelfPrefix + "InfoGripMark";
+                // ★ **罫線素片を使わない**。CS の UI フォントに
+                //   ある保証が無い（①の <c>HazardLevel.FilledChar</c> を ASCII に固定したのと
+                //   同じ規律）。見えない文字にすると「掴む場所がある」自体が伝わらない。
+                gripMark.text = "::";
+                gripMark.textScale = 0.9f;
+                gripMark.autoSize = false;
+                gripMark.width = GripWidth;
+                gripMark.height = TabHeight;
+                gripMark.textAlignment = UIHorizontalAlignment.Center;
+                gripMark.verticalAlignment = UIVerticalAlignment.Middle;
+                // ★ ラベルがクリックを飲むと掴めなくなる。
+                gripMark.isInteractive = false;
+
+                // ★ 帯が動いたらボタンとパネルを連れていく。**位置の主体は今も
+                //   <see cref="_origin"/> 1 つだけ**で、ここはそれを帯から読み直す。
+                strip.eventPositionChanged += OnStripMoved;
 
                 _closeButton = (UIButton)strip.AddUIComponent(typeof(UIButton));
                 _closeButton.name = FreeSlotFinder.SelfPrefix + "InfoCloseButton";
@@ -541,7 +698,9 @@ namespace DisasterPlus.Game
 
             if (n <= 0) return;
 
-            float available = width - StripPad * 2f - CloseWidth - StripPad;
+            // ★ 左端の掴む場所ぶんだけ、タブの並びを右へずらす（<see cref="GripWidth"/>）。
+            float tabsLeft = StripPad * 0.5f + GripWidth + StripPad * 0.5f;
+            float available = width - tabsLeft - StripPad - CloseWidth - StripPad;
             float tabWidth = (available - TabGap * (n - 1)) / n;
             if (tabWidth < 20f) tabWidth = 20f;
 
@@ -552,7 +711,7 @@ namespace DisasterPlus.Game
                 if (b == null) continue;
 
                 b.width = tabWidth;
-                b.relativePosition = new Vector3(StripPad + placed * (tabWidth + TabGap), StripPad);
+                b.relativePosition = new Vector3(tabsLeft + placed * (tabWidth + TabGap), StripPad);
                 placed++;
             }
         }

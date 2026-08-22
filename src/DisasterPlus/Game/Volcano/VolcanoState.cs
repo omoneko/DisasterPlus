@@ -152,6 +152,9 @@ namespace DisasterPlus.Game
             // ★ 溶岩の軌跡も返す（8 本 × 128 点で 8 KB）。**焦げた地面と燃えた建物は
             //   戻らない** —— 捨てるのは「これからの予定」だけである。
             VolcanoLava.Reset();
+            // ★ 地震計へ記録している火山性地震も畳む。**次の都市／次の火山へ
+            //   前の揺れを持ち越さない。**
+            VolcanoTremorTrace.Reset();
         }
 
         /// <summary>
@@ -440,6 +443,7 @@ namespace DisasterPlus.Game
             // ★ 溶岩の軌跡も返す（8 本 × 128 点で 8 KB）。**焦げた地面と燃えた建物は
             //   戻らない** —— 捨てるのは「これからの予定」だけである。
             VolcanoLava.Reset();
+            VolcanoTremorTrace.Reset();
             _lastRefusal = "stopped by the player; the terrain that already changed stays changed";
         }
 

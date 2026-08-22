@@ -61,6 +61,69 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
+        /// <paramref name="startX"/> / <paramref name="startY"/> から
+        /// <c>(stepX, stepY)</c> ずつ進むとき、**両軸とも画面に収まったまま検査できる
+        /// 候補の数**。<see cref="CandidatesInside(float,float,float,float,int)"/> の
+        /// 2 軸版で、あちらは <c>stepX = 0</c> の場合にあたる。
+        ///
+        /// ── なぜ横向きが要るのか（2026-08-22、所有者の依頼）───────────────
+        ///
+        /// > D＋ボタンが左サイドメニューと重なる位置にあるので、バニラのサイドメニューを
+        /// > 操作する際に邪魔になります。CSWARFRONT ボタンや SIREN Alert ボタンと
+        /// > 同じ高さで並んで表示されるようにしてください
+        ///
+        /// あの 2 つは**画面最上段の横 1 列**に居る。縦にしか進めない探索では
+        /// その列に並べない —— 1 歩目で塞がっていたら、次の候補はもう下の段である。
+        ///
+        /// 両軸のどちらかが 0 以下でも、もう一方が正なら探索は進む。
+        /// **両方 0 以下なら候補は 1 つ**（同じ点を検査し続けても探索にならない）。
+        /// </summary>
+        public static int CandidatesInside(float startX, float startY,
+                                           float sizeX, float sizeY,
+                                           float stepX, float stepY,
+                                           float extentX, float extentY,
+                                           int maxTries)
+        {
+            if (maxTries <= 0) return 0;
+            if (!FitsWithin(startX, sizeX, extentX)) return 0;
+            if (!FitsWithin(startY, sizeY, extentY)) return 0;
+
+            bool movesX = stepX > 0f;
+            bool movesY = stepY > 0f;
+            if (!movesX && !movesY) return 1;
+
+            int alongX = movesX
+                ? StepsInside(startX, sizeX, stepX, extentX, maxTries)
+                : maxTries;
+            int alongY = movesY
+                ? StepsInside(startY, sizeY, stepY, extentY, maxTries)
+                : maxTries;
+
+            int count = alongX < alongY ? alongX : alongY;
+            return count >= maxTries ? maxTries : count;
+        }
+
+        /// <summary>
+        /// 1 軸ぶん。<paramref name="extent"/> が読めなければ <paramref name="maxTries"/>
+        /// （＝この軸は制限しない）。
+        /// </summary>
+        private static int StepsInside(float start, float size, float step,
+                                       float extent, int maxTries)
+        {
+            if (!IsUsableExtent(extent)) return maxTries;
+
+            float last = extent - (size > 0f ? size : 0f);
+            float room = last - start;
+            if (room < 0f) return 0;
+
+            long steps = (long)(room / step);
+            if (steps < 0L) return 0;
+
+            long count = steps + 1L;
+            return count >= maxTries ? maxTries : (int)count;
+        }
+
+        /// <summary>
         /// <paramref name="startY"/> から <paramref name="stepY"/> ずつ下へ進むとき、
         /// **画面に収まったまま検査できる候補の数**。
         ///

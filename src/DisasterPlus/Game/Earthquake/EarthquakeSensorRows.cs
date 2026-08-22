@@ -22,6 +22,7 @@ namespace DisasterPlus.Game
         private static UILabel _sensorCursorLabel;
         private static UILabel _waveformLabel;
         private static UILabel _waveformModelLabel;
+        private static UILabel _waveformTremorLabel;
         private static UILabel _waveformUnavailableLabel;
         private static UILabel _waveformNoteLabel;
 
@@ -69,6 +70,15 @@ namespace DisasterPlus.Game
             //    うっかり実測として出すことはできない（あちらのクラス doc の担保）。
             _waveformModelLabel = EarthquakeRows.AddLayer2Row(p, "WaveformModel", ref y, 40f);
 
+            // ★★ **第 3 層＝火山性微動の行**（2026-08-22、所有者の依頼
+            //    「火山性地震は震度計に記録されていないのも修正して」）。
+            //    第 2 層とまったく同じ扱いにする —— これも<b>この MOD のモデル</b>で
+            //    あって、ゲームが計算している値ではない
+            //    （<c>Game/Volcano/VolcanoTremorTrace</c> のクラス doc）。
+            //    <c>AddLayer2Row</c> を使うのはそのためで、接頭辞と色が
+            //    「実測ではない」を毎回名乗る。
+            _waveformTremorLabel = EarthquakeRows.AddLayer2Row(p, "WaveformTremor", ref y, 40f);
+
             // ★ 黙って空欄にしない。最大振幅の行（_waveformLabel）は出したうえで、
             //    グラフが出ない理由を名乗る。劣化であって嘘ではない。
             //
@@ -95,6 +105,7 @@ namespace DisasterPlus.Game
             _sensorCursorLabel = null;
             _waveformLabel = null;
             _waveformModelLabel = null;
+            _waveformTremorLabel = null;
             _waveformUnavailableLabel = null;
             _waveformNoteLabel = null;
         }
@@ -214,6 +225,7 @@ namespace DisasterPlus.Game
         {
             EarthquakeRows.SetPlain(_waveformLabel, "");
             EarthquakeRows.SetPlain(_waveformModelLabel, "");
+            EarthquakeRows.SetPlain(_waveformTremorLabel, "");
             EarthquakeRows.SetPlain(_waveformNoteLabel, "");
             RefreshWaveformAvailability();
             WaveformView.Render(null);
@@ -271,9 +283,15 @@ namespace DisasterPlus.Game
         /// </summary>
         internal static void RefreshWaveform(EarthquakeSnapshot snapshot)
         {
-            // 進行中（Emerging|Active）の地震が 1 つも無い。揺れの式自体が動かない
-            // 区間なので、波形について言えることは何も無い。
-            if (snapshot.WaveformQuakeId == 0)
+            // 進行中（Emerging|Active）の地震が 1 つも無く、**火山も揺れていない**。
+            // 揺れの式自体が動かない区間なので、波形について言えることは何も無い。
+            //
+            // ★★ <b>「地震が無い」だけで畳まないこと</b>（2026-08-22）。
+            //    以前はここが <c>WaveformQuakeId == 0</c> だけを見ていたので、
+            //    **火山だけが揺れているあいだグラフごと消えていた** ——
+            //    「火山性地震が震度計に記録されない」の、表示側の半分である。
+            //    記録の側が生きていれば <c>Traces</c> に観測点が入っている。
+            if (snapshot.WaveformQuakeId == 0 && snapshot.Traces.Count == 0)
             {
                 ClearWaveform();
                 return;
@@ -288,6 +306,7 @@ namespace DisasterPlus.Game
                 //    見られない」への回答なので、地震計に紐づかない波形は意味が違う。
                 EarthquakeRows.SetPlain(_waveformLabel, Strings.EarthquakeWaveformNeedsSensor);
                 EarthquakeRows.SetPlain(_waveformModelLabel, "");
+                EarthquakeRows.SetPlain(_waveformTremorLabel, "");
                 EarthquakeRows.SetPlain(_waveformNoteLabel, "");
                 WaveformView.Render(null);
                 return;
@@ -303,15 +322,30 @@ namespace DisasterPlus.Game
             //    地震が 2 個同時に進んでいると、上の 6 行が指す地震
             //    （SelectPrimary）と、この絵の地震（QuakeSelection.SelectDamaging）は
             //    一致しないことがある。
-            string header = Strings.EarthquakeWaveform + ": #" + trace.BuildingId
-                            + "   " + trace.DistanceToEpicentre.ToString("F0") + " m"
-                            + "   (#" + snapshot.WaveformQuakeId + ")";
+            // ★★ **出所を取り違えない。** バニラの地震が無いのに震央からの距離と
+            //    地震の番号を出すと、**起きていない地震の記録**という顔になる
+            //    （<c>SeismographTrace.HasQuake</c> がその区別を持っている）。
+            //    火山だけが揺れているときは、⑤の中心からの距離を、そう名乗って出す。
+            string header = Strings.EarthquakeWaveform + ": #" + trace.BuildingId;
+            if (trace.HasQuake)
+            {
+                header += "   " + trace.DistanceToEpicentre.ToString("F0") + " m"
+                          + "   (#" + snapshot.WaveformQuakeId + ")";
+            }
+            else
+            {
+                header += "   " + Strings.EarthquakeWaveformTremorSource
+                          + " " + trace.DistanceToVolcano.ToString("F0") + " m";
+            }
             if (traces.Count > 1)
             {
                 header += "   (" + Strings.EarthquakeSensorSection + ": " + traces.Count + ")";
             }
 
-            if (trace.Count > 0)
+            // ★★ 火山だけが揺らしているときは、ここに**第 1 層の最大振幅 0.00 を
+            //    出さない** —— 0 が「揺れていない地震が起きている」に化ける。
+            //    揺れの大きさは下の第 3 層の行が名乗る。
+            if (trace.Count > 0 && trace.HasQuake)
             {
                 // 縦軸は最大振幅で正規化して描くので、その最大振幅を数値でも名乗る。
                 // これが無いと、グラフの高さだけを見て地震の強さを比べてしまう。
@@ -327,7 +361,7 @@ namespace DisasterPlus.Game
                           + "  [" + SeismicScale.BarOf(
                               ShakeWaveform.NormalisedDisplacement(peak)) + "]";
             }
-            else
+            else if (trace.Count <= 0)
             {
                 // 観測点はある。まだ揺れの窓（§A-7 の e > 0）が開いていないだけ。
                 // 「サンプルが無い」と「サンプルが全部 0」は別のことなので、
@@ -337,6 +371,7 @@ namespace DisasterPlus.Game
 
             EarthquakeRows.SetLayer1(_waveformLabel, header);
             RefreshWaveformModelRow(snapshot, trace);
+            RefreshWaveformTremorRow(trace);
 
             // 注記はグラフ（あるいは最大振幅の行）が出ているときだけ添える。
             EarthquakeRows.SetPlain(_waveformNoteLabel, Strings.EarthquakeWaveformNote);
@@ -392,6 +427,37 @@ namespace DisasterPlus.Game
 
             text += "\n" + Strings.EarthquakeWaveformModelNote;
             EarthquakeRows.SetLayer2(_waveformModelLabel, text);
+        }
+
+        /// <summary>
+        /// **第 3 層＝火山性微動の行**（2026-08-22、所有者の依頼）。
+        ///
+        /// ★★ ここに出る線は<b>ゲームが計算している値ではないし、カメラが実際に
+        /// 足した変位でもない</b>。<c>Core/Volcano/VolcanicTremor</c> という
+        /// この MOD のモデルを、地震計の位置と**記象の時間軸（sim フレーム）**で
+        /// 評価したものである（カメラは実時間で評価する。
+        /// <c>Game/Volcano/VolcanoTremorTrace</c> のクラス doc に両者の違いがある）。
+        /// 第 2 層とまったく同じ扱いにしてあるのはそのためで、
+        /// <c>SetLayer2</c> の接頭辞と色が毎回それを名乗る。
+        /// </summary>
+        private static void RefreshWaveformTremorRow(SeismographTrace trace)
+        {
+            if (!trace.HasTremor)
+            {
+                EarthquakeRows.SetPlain(_waveformTremorLabel, "");
+                return;
+            }
+
+            float peak = trace.TremorPeakAbsolute;
+            string text = Strings.EarthquakeWaveformTremor + ": "
+                          + peak.ToString("F2")
+                          + " / " + ShakeWaveform.MaxDisplacement.ToString("F2")
+                          + "  [" + SeismicScale.BarOf(
+                              ShakeWaveform.NormalisedDisplacement(peak)) + "]"
+                          + "   " + trace.DistanceToVolcano.ToString("F0") + " m";
+
+            text += "\n" + Strings.EarthquakeWaveformTremorNote;
+            EarthquakeRows.SetLayer2(_waveformTremorLabel, text);
         }
 
         /// <summary>

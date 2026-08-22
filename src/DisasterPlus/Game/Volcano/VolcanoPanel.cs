@@ -284,6 +284,13 @@ namespace DisasterPlus.Game
                              + panel.height.ToString("F0") + " > " + viewHeight.ToString("F0")
                              + "); the bottom rows will be off-screen");
                 }
+                // ★★ **上へは <c>InfoHub</c> が指定した位置（＝タブ帯の真下）より上に出さない。**
+                //    （2026-08-22、実機報告「天気タブ・地震タブの中に X で閉じられない
+                //    タブがあり」の正体。）上の 2 つの寄せは下端を画面に収めるためだけに
+                //    パネルを上へ上げるので、背の高いパネルは**タブ帯をまるごと覆い隠して
+                //    いた** —— 閉じる手段そのものが押せなくなる。収まらないぶんは下へはみ出すが、
+                //    帯の左端を掴めば一緒に動かせる（<c>InfoHub</c> のドラッググリップ）。
+                if (top < _origin.y) top = _origin.y;
                 panel.relativePosition = new Vector3(pos.x, top);
             }
             catch (System.Exception e)

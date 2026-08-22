@@ -16,6 +16,16 @@ window (m_activeDuration) = 1024 frames   [EarthquakeAI field initialiser, IL fa
   5000.000 m: shared full scale    0.100   empty columns 0/320
   10000.000 m: shared full scale    0.053   empty columns 0/320
 
+## volcanic tremor panel (320x80, 512 frames = 8.53 s at speed 1)
+  reach = 5400 m   gain = 0.42000002
+  distance m | activity | attenuation | peak | empty columns
+     300.000 |    0.620 |       0.970 | 0.123 | 0/320
+    1500.000 |    0.620 |       0.545 | 0.069 | 0/320
+    4000.000 |    0.620 |       0.076 | 0.010 | 0/320
+     300.000 |    1.000 |       0.970 | 0.199 | 0/320
+    1500.000 |    1.000 |       0.545 | 0.112 | 0/320
+    4000.000 |    1.000 |       0.076 | 0.016 | 0/320
+
 ## aliasing at 2000 m (rows: vanilla 1f, vanilla 9f, model 1f, model 9f)
   zero crossings per 1024 frames (a drop means the trace folded to a slower apparent wave)
   vanilla 1/frame : 186
