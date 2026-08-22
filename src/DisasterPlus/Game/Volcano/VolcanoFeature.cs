@@ -166,6 +166,12 @@ namespace DisasterPlus.Game
             //   （T9 の独立性の実体。VolcanoLavaFx のクラス doc の grep）。
             if (ModSettings.VolcanoLavaRender.value) VolcanoLavaFx.Update(VolcanoHub.Latest);
             else VolcanoLavaFx.Destroy();
+
+            // ★ 火山性地震の揺れ。**②の設定を 1 つも見ない**（VolcanoTremorShake の
+            //   クラス doc）。切った瞬間に足すのをやめれば、次のフレームで消える
+            //   （CameraController.LateUpdate が毎フレーム 0 に戻す）。
+            if (ModSettings.VolcanoQuake.value) VolcanoTremorShake.Update(VolcanoHub.Latest);
+            else VolcanoTremorShake.Reset();
         }
 
         public void OnLevelUnloading()
@@ -202,6 +208,8 @@ namespace DisasterPlus.Game
             // ★ 溶岩の Mesh / Material / Texture2D も自分で Object.Destroy する
             //   （どれも Component ではないので GameObject の道連れにならない）。
             VolcanoLavaFx.Destroy();
+            // ★ 火山性地震の時計とカメラの参照も持ち越さない。
+            VolcanoTremorShake.Reset();
 
             VolcanoHub.Clear();
             // ★ 地形の実測（RawHeights の長さ）を都市をまたいで持ち越さない。

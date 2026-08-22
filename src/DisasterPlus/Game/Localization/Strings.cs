@@ -1230,6 +1230,12 @@ namespace DisasterPlus.Game
         //
         // ★ T9 は他のどのタスクからも依存されない。**この 3 キーと設定 1 個と
         //   VolcanoFeature の 4 行を消せば、T9 を丸ごと落としても T1〜T8 は動く。**
+        // ★★ 火山性地震。**②の設定とは無関係に効く**（VolcanoTremorShake のクラス doc）。
+        //    「建物は壊さない」を必ず書く —— 地震と名の付くものが被害を出さないのは
+        //    プレイヤーの予想と違うので、設定画面で先に言っておかないと不具合に見える。
+        public static string VolcanoQuakeSetting = "Volcanic earthquakes (shaking only)";
+        public static string VolcanoQuakeRow = "Volcanic earthquakes";
+
         public static string VolcanoLavaRenderSetting = "Draw the lava surface";
         public static string VolcanoLavaRenderRow = "Lava surface";
 

@@ -120,6 +120,22 @@ grid = 16 m (the game's own terrain grid)
   weak      : range 126 .. 1201 m (mean 611), 0 % land beyond the foot, longest flight 22.9 s
               : 0 of 216 blocks pass through the ground (deepest 0 m)
 
+## volcanic tremor (swarm + harmonic tremor)
+  sampled at 60 fps (the rate the camera shake runs at)
+  activity | peak | rms  | quiet windows of 1 s (must be 0)
+     0.18  | 0.09 | 0.03 | 0
+     0.45  | 0.24 | 0.07 | 0
+     0.75  | 0.39 | 0.11 | 0
+     1.00  | 0.52 | 0.15 | 0
+  attenuation (reach = 4.5 R; outside it is exactly 0):
+        0 m -> 1.00
+      900 m -> 0.78
+     1800 m -> 0.44
+     2700 m -> 0.23
+     3600 m -> 0.11
+     4500 m -> 0.04
+     5400 m -> 0.00
+
 ## uplift pacing (strato, R = 1200 m, H = 600 m, 30 in-game minutes)
   in-game duration is UNCHANGED: 30 in-game minutes = 1365 sim frames
   (1 in-game minute = 45.51 sim frames; wall clock depends on the game speed and the fixed-update rate)
