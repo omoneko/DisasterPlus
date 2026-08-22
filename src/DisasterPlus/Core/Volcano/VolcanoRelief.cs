@@ -14,9 +14,24 @@ namespace DisasterPlus.Core.Volcano
     ///
     ///   1. **放射谷（バランコ）** —— 斜面を上から下へ走る溝。方位方向にほぼ等間隔で、
     ///      **山頂側は浅く、裾へ向かって深くなる**。成層火山の見た目そのものである
+    ///   1b. **細谷（リル）** —— 主谷のあいだの尾根を刻む、細くて浅くて短い溝。
+    ///      主谷の 2.2 倍の本数で、**裾のほうにしか存在しない**（後述の格子の床）
     ///   2. **円でない裾** —— 低周波の方位変化。footprint が真円でなくなる
-    ///   3. **一般の粗さ** —— 波長 100〜200 m 程度のうねり
+    ///   3. **一般の粗さ** —— 波長 64〜380 m の 4 オクターブのうねり
     ///   4. **非対称** —— 片側の裾が長い / 急である（1 次の方位成分が担う）
+    ///
+    /// ── 谷は 1 段ではなく階層である（2026-08-22、所有者の指摘）──────────────
+    ///
+    /// > 各タイプの火山の細かいディテールも、もっと自然の火山っぽく凹凸をつけてほしい
+    /// > （いまは太い谷の筋だけですが、細かい谷も作ってほしい）
+    ///
+    /// 主谷（<see cref="GullyCount"/> 本）だけだと、尾根がそのぶん広く平らに残る
+    /// （零交差を谷にしている以上、これは避けられない）。実際の成層火山では、
+    /// その尾根を**もっと細かい溝**が刻んでいて、しかも
+    /// **上流ほど疎、下流ほど密**という階層になっている。
+    /// そこで同じ仕掛け（方位の帯 × 零交差）を**もう 1 段、高い次数で**重ねる。
+    /// 細谷は主谷の中では浅くし（<see cref="RillRidgeFloor"/>）、
+    /// **尾根の上でいちばん深くなる** —— それが「主谷のあいだを刻む」の実体である。
     ///
     /// ── 2 つの硬い制約を「掛け算だけ」で構造的に守る ───────────────
     ///
@@ -67,11 +82,27 @@ namespace DisasterPlus.Core.Volcano
     ///
     /// ── 16 m 格子 ───────────────────────────────────────
     ///
-    /// <c>RawHeights</c> のセルは 16 m である。**波長 64 m を下回る成分は起伏ではなく
-    /// ノイズに化ける**ので、いちばん細かい成分でも 100 m（6 セル強）より短くしない
-    /// （<see cref="MinWavelengthMetres"/>）。方位方向の波長は円周を谷の本数で割った値で、
-    /// **山頂に近いほど短くなる**ので、そちらは <see cref="MinAzimuthWavelengthMetres"/> が
-    /// 別に見張る —— 見張らないと山頂まわりが市松模様になる（実測で確認した）。
+    /// <c>RawHeights</c> のセルは 16 m である。**「もっと細かく」には床がある。**
+    /// 床は 2 つあり、どちらも <c>tools/VolcanoPreview</c> の
+    /// <c>## grid limit</c> 節が数えた**極値密度**（1 セル進むごとに斜面の向きが
+    /// 反転する頻度）で決めた。滑らかな斜面なら 1 波長に 2 個、
+    /// 市松模様なら 1 セルに 1 個（＝ 0.5）になる指標である。
+    ///
+    ///   - **半径方向**（値ノイズ）: <see cref="MinWavelengthMetres"/> ＝ **64 m（4 セル）**。
+    ///     実測で 64 m は極値密度 0.19、48 m（3 セル）で 0.28、32 m（2 セル）で 0.42 ——
+    ///     0.5 が市松模様そのものなので、**3 セルはもう起伏ではない。**
+    ///     4 セルは補間が 4 点に効くいちばん細かい格子で、ここが正直な床である。
+    ///   - **方位方向**: <see cref="MinAzimuthWavelengthMetres"/> ＝ **96 m（6 セル）**。
+    ///     方位の波長は円周 ÷ 次数なので**山頂に近いほど短くなる** ——
+    ///     半径方向と違って場所ごとに変わるので、床ではなく
+    ///     「そこを割ったら消す」フェードとして働く（<see cref="ProfileAt"/>）。
+    ///     6 セルなのは、円周方向の 1 波は 16 m 格子の上では斜めに走る階段になり、
+    ///     4 セルでは階段の段が波と同じ大きさになるからである（実測で確認した）。
+    ///
+    /// ★★ この 2 つが、細谷（リル）が**裾にしか出ない**理由でもある。
+    ///   主谷の 2.2 倍の次数で回すと、成層火山（R = 1200 m）では 0.28R より内側で
+    ///   方位の波長が 96 m を割って消え、0.56R より外でだけ深さいっぱいになる。
+    ///   **これは制限ではなく、実際の火山の見え方（上流ほど疎）と一致する。**
     ///
     /// ── 費用 ────────────────────────────────────────────
     ///
@@ -86,8 +117,11 @@ namespace DisasterPlus.Core.Volcano
         /// <summary>設定から受け取る強さの上限。1 が形態ごとの既定値そのもの。</summary>
         public const float MaxStrengthUnit = 1.5f;
 
-        /// <summary>いちばん細かい成分の波長の下限（m）。16 m 格子で 6 セル強。</summary>
-        public const float MinWavelengthMetres = 100f;
+        /// <summary>
+        /// 半径方向のいちばん細かい成分の波長の下限（m）。**16 m 格子で 4 セル。**
+        /// 100 m（6 セル強）から下げた根拠は極値密度の実測（クラス doc の「16 m 格子」）。
+        /// </summary>
+        public const float MinWavelengthMetres = 64f;
 
         /// <summary>
         /// 方位方向の谷が成立する最小の波長（m）。**山頂に近づくほど方位の波長は
@@ -102,6 +136,48 @@ namespace DisasterPlus.Core.Volcano
 
         /// <summary>谷に使う方位の高調波の本数（k = n-2 .. n+2）。側帯が等間隔を崩す。</summary>
         private const int GullyHarmonics = 5;
+
+        /// <summary>細谷（リル）に使う方位の高調波の本数。主谷と同じ 5 本の帯。</summary>
+        private const int RillHarmonics = 5;
+
+        /// <summary>
+        /// 細谷の次数を主谷の何倍にするか。
+        ///
+        /// **2.2 倍**は 2 つの条件のあいだで決まっている:
+        ///   - 整数倍にしない —— 主谷と位相が噛み合って「1 本置きに深い谷」に見える
+        ///   - 上げすぎない —— 谷の弧の幅は次数に反比例するので、
+        ///     2.5 倍だと成層火山の中腹で 2.2 セルまで痩せて、
+        ///     溝ではなく**破線**に見える（オフラインの絵で確認した）
+        /// </summary>
+        private const float RillHarmonicRatio = 2.2f;
+
+        /// <summary>細谷の深さ（主谷に対する比）。**主谷より浅い**のが階層の要点。</summary>
+        private const float RillDepthRatio = 0.45f;
+
+        /// <summary>
+        /// 細谷の幅（方位系列の <c>|A|</c> の閾値）。主谷より**広く**取る。
+        ///
+        /// 谷の弧の幅は <c>2 d W / n</c> で、次数 n が 2.2 倍になると同じ W では
+        /// 幅も 1/2.2 になる。成層火山（n₂ = 20）で d = 900 m のとき、
+        /// W = 0.30 なら 27 m ＝ **1.7 セル**しかなく、格子の上では溝ではなく破線に見える
+        /// （オフラインの絵で実際にそうなった）。W = 0.55 なら 50 m（3.1 セル）、
+        /// 裾（d = 1200 m）で 66 m（4.1 セル）。
+        /// **これが「細かくできる限界」の実体である。**
+        /// </summary>
+        private const float RillChannelWidth = 0.55f;
+
+        /// <summary>細谷が出はじめる山頂からの距離（実効半径に対する比）。主谷より外。</summary>
+        private const float RillStartFraction = 0.34f;
+
+        /// <summary>細谷が深さいっぱいになるまでの距離（同上）。</summary>
+        private const float RillRampFraction = 0.26f;
+
+        /// <summary>
+        /// 主谷の底に居るときの細谷の深さ（尾根の上を 1 とする比）。
+        /// **0 にしない** —— 主谷の中だけ細谷が消えると、そこに不自然な帯が残る。
+        /// この比が「細谷は主谷のあいだの尾根を刻む」を作っている唯一の式である。
+        /// </summary>
+        private const float RillRidgeFloor = 0.30f;
 
         /// <summary>谷が出はじめる山頂からの距離（実効半径に対する比）の最小値。</summary>
         private const float GullyStartFraction = 0.16f;
@@ -151,6 +227,12 @@ namespace DisasterPlus.Core.Volcano
         /// <summary>いちばん長い粗さの成分の波長（<c>coarse</c> に対する比）。裾のうねり。</summary>
         private const float BroadOctaveRatio = 2.2f;
 
+        /// <summary>
+        /// いちばん細かい粗さの成分の波長（<c>fine</c> に対する比）。
+        /// 結果は必ず <see cref="MinWavelengthMetres"/> で床を打つ。
+        /// </summary>
+        private const float MicroOctaveRatio = 0.58f;
+
         /// <summary>谷の深さが方位ごとにばらつく下限（1 なら全部同じ深さ）。</summary>
         private const float GullyDepthFloor = 0.40f;
 
@@ -163,25 +245,40 @@ namespace DisasterPlus.Core.Volcano
         private readonly float[] _gullySin;
         private readonly float[] _gullyVarCos;
         private readonly float[] _gullyVarSin;
+        private readonly float[] _rillCos;
+        private readonly float[] _rillSin;
 
         /// <summary>谷の系列がはじまる高調波の番号（= 本数 n − 2）。</summary>
         private readonly int _gullyFirst;
 
-        /// <summary>ループを回す最大の高調波（= n + 2）。</summary>
+        /// <summary>細谷の系列がはじまる高調波の番号（= 本数 n₂ − 2）。</summary>
+        private readonly int _rillFirst;
+
+        /// <summary>主谷の帯の上端（= n + 2）。方位の折り返し判定に使う。</summary>
+        private readonly int _gullyMaxHarmonic;
+
+        /// <summary>ループを回す最大の高調波（= 主谷と細谷の帯の上端のうち大きいほう）。</summary>
         private readonly int _maxHarmonic;
+
+        /// <summary>細谷の帯の上端（= n₂ + 2）。**方位の折り返し判定は主谷と別に行う。**</summary>
+        private readonly int _rillMaxHarmonic;
 
         private readonly float _shapeNorm;
         private readonly float _gullyNorm;
+        private readonly float _rillNorm;
 
         private readonly float _shrink;
         private readonly float _gullyAmplitude;
+        private readonly float _rillAmplitude;
         private readonly float _roughAmplitude;
         private readonly float _wavelengthBroad;
         private readonly float _wavelengthCoarse;
         private readonly float _wavelengthFine;
+        private readonly float _wavelengthMicro;
         private readonly uint _seedBroad;
         private readonly uint _seedCoarse;
         private readonly uint _seedFine;
+        private readonly uint _seedMicro;
         private readonly uint _seedWarp;
 
         /// <summary>この起伏の強さ（0 = 今日の滑らかな円錐そのもの）。</summary>
@@ -196,8 +293,32 @@ namespace DisasterPlus.Core.Volcano
         /// <summary>放射谷の本数（診断とテスト用）。方位系列の零交差の数である。</summary>
         public int GullyCount { get { return (_gullyFirst + 2) * 2; } }
 
-        /// <summary>いちばん細かい成分の波長（m。診断とテスト用）。</summary>
+        /// <summary>
+        /// 細谷（リル）の本数（診断とテスト用）。**裾でしか成立しない本数**であり、
+        /// 山頂側では <see cref="MinAzimuthWavelengthMetres"/> のフェードが消している。
+        /// </summary>
+        public int RillCount { get { return (_rillFirst + 2) * 2; } }
+
+        /// <summary>
+        /// 細谷が深さいっぱいで出はじめる最小の半径（m）。
+        /// **これより内側に細谷は 1 本も無い**（16 m 格子で方位の波長が足りない）。
+        /// </summary>
+        public float RillOnsetRadiusMetres
+        {
+            get
+            {
+                return MinAzimuthWavelengthMetres * 2f * _rillMaxHarmonic / 6.2831853f;
+            }
+        }
+
+        /// <summary>粗さの 3 番目のオクターブの波長（m。診断とテスト用）。</summary>
         public float FineWavelengthMetres { get { return _wavelengthFine; } }
+
+        /// <summary>
+        /// いちばん細かい成分の波長（m。診断とテスト用）。
+        /// **<see cref="MinWavelengthMetres"/> を下回らない。**
+        /// </summary>
+        public float MicroWavelengthMetres { get { return _wavelengthMicro; } }
 
         /// <summary>
         /// 起伏を 1 個作る。<paramref name="seed"/> は火山の地点から出した種
@@ -247,25 +368,40 @@ namespace DisasterPlus.Core.Volcano
 
             _shrink = Clamp(shrink * s, 0f, MaxShrink);
             _gullyAmplitude = Clamp(gully * s, 0f, MaxCarveAmplitude);
+            _rillAmplitude = Clamp(gully * RillDepthRatio * s, 0f, MaxCarveAmplitude);
             _roughAmplitude = Clamp(rough * s, 0f, MaxCarveAmplitude);
 
             // ★ 16 m 格子。MinWavelengthMetres を下回る波長はノイズに化ける。
             _wavelengthCoarse = coarse < MinWavelengthMetres ? MinWavelengthMetres : coarse;
             _wavelengthFine = fine < MinWavelengthMetres ? MinWavelengthMetres : fine;
             _wavelengthBroad = _wavelengthCoarse * BroadOctaveRatio;
+            float micro = _wavelengthFine * MicroOctaveRatio;
+            _wavelengthMicro = micro < MinWavelengthMetres ? MinWavelengthMetres : micro;
 
             _gullyFirst = harmonic - 2;
-            _maxHarmonic = harmonic + 2;
+            _gullyMaxHarmonic = harmonic + 2;
+
+            // 細谷の中心次数。**整数倍を避ける**（RillHarmonicRatio の doc）。
+            int rillHarmonic = (int)(harmonic * RillHarmonicRatio + 0.5f);
+            if (rillHarmonic < harmonic + 3) rillHarmonic = harmonic + 3;
+            _rillFirst = rillHarmonic - 2;
+            _rillMaxHarmonic = rillHarmonic + 2;
+
+            _maxHarmonic = _rillMaxHarmonic > _gullyMaxHarmonic
+                         ? _rillMaxHarmonic : _gullyMaxHarmonic;
 
             _seedBroad = DeterministicRandom.Hash(seed, 0x5EEDB40Du);
             _seedCoarse = DeterministicRandom.Hash(seed, 0x5EEDC0DEu);
             _seedFine = DeterministicRandom.Hash(seed, 0x5EEDF14Eu);
+            _seedMicro = DeterministicRandom.Hash(seed, 0x5EEDBEEFu);
             _seedWarp = DeterministicRandom.Hash(seed, 0x5EED1A2Bu);
 
             // 裾の輪郭。1 次を最大にしてあるのが「片側の裾が長い」の実体である。
             float[] shapeWeights = { 1.00f, 0.55f, 0.35f, 0.22f };
             // 谷。中央（k = n）を最大に、側帯 n±1 / n±2 が等間隔と深さを崩す。
             float[] gullyWeights = { 0.55f, 0.80f, 1.00f, 0.80f, 0.55f };
+            // 細谷。主谷より側帯を重くして、本数と深さをもっとばらつかせる。
+            float[] rillWeights = { 0.70f, 0.88f, 1.00f, 0.88f, 0.70f };
 
             _shapeCos = new float[ShapeHarmonics];
             _shapeSin = new float[ShapeHarmonics];
@@ -273,6 +409,8 @@ namespace DisasterPlus.Core.Volcano
             _gullySin = new float[GullyHarmonics];
             _gullyVarCos = new float[GullyHarmonics];
             _gullyVarSin = new float[GullyHarmonics];
+            _rillCos = new float[RillHarmonics];
+            _rillSin = new float[RillHarmonics];
 
             for (int i = 0; i < ShapeHarmonics; i++)
             {
@@ -294,8 +432,16 @@ namespace DisasterPlus.Core.Volcano
                 _gullyVarSin[i] = gullyWeights[i] * (float)Math.Sin(varPhase);
             }
 
+            for (int i = 0; i < RillHarmonics; i++)
+            {
+                double phase = 2.0 * Math.PI * DeterministicRandom.Unit(seed, (uint)(0x400 + i));
+                _rillCos[i] = rillWeights[i] * (float)Math.Cos(phase);
+                _rillSin[i] = rillWeights[i] * (float)Math.Sin(phase);
+            }
+
             _shapeNorm = NormOf(shapeWeights);
             _gullyNorm = NormOf(gullyWeights);
+            _rillNorm = NormOf(rillWeights);
         }
 
         /// <summary>
@@ -365,6 +511,7 @@ namespace DisasterPlus.Core.Volcano
 
             float gullyAz = 0f;
             float gullyVarAz = 0f;
+            float rillAz = 0f;
             cr = wx;
             ci = wz;
             for (int k = 1; k <= _maxHarmonic; k++)
@@ -376,12 +523,22 @@ namespace DisasterPlus.Core.Volcano
                     gullyVarAz += _gullyVarCos[g] * cr + _gullyVarSin[g] * ci;
                 }
 
+                // ★ 細谷は**同じ累乗の梯子**から拾う（三角関数も 2 本目の梯子も要らない）。
+                //   同じ蛇行（warp）に乗っているので、主谷と一緒に曲がる ——
+                //   それが「主谷へ流れ込む支谷」の見え方である。
+                int rl = k - _rillFirst;
+                if (rl >= 0 && rl < RillHarmonics)
+                {
+                    rillAz += _rillCos[rl] * cr + _rillSin[rl] * ci;
+                }
+
                 float nr = cr * wx - ci * wz;
                 ci = cr * wz + ci * wx;
                 cr = nr;
             }
             gullyAz = Clamp(gullyAz * _gullyNorm, -1f, 1f);
             gullyVarAz = Clamp(gullyVarAz * _gullyNorm, -1f, 1f);
+            rillAz = Clamp(rillAz * _rillNorm, -1f, 1f);
 
             //   谷ごとに出はじめる高さが違う。**これが無いと全部の谷が山頂の 1 点へ集まり、
             //   山ではなく放射状の縞模様に見える。**
@@ -391,7 +548,7 @@ namespace DisasterPlus.Core.Volcano
             //   ★★ **山頂に近いほど方位の波長は短い。** 円周を谷の本数で割った波長が
             //   16 m 格子に対して短くなりすぎるところでは谷を消す ——
             //   消さないと山頂まわりが起伏ではなく市松模様になる（実測で確認した）。
-            float azWavelength = 6.2831853f * d / _maxHarmonic;
+            float azWavelength = 6.2831853f * d / _gullyMaxHarmonic;
             depth *= SmoothStep(MinAzimuthWavelengthMetres, MinAzimuthWavelengthMetres * 2f,
                                 azWavelength);
 
@@ -406,10 +563,35 @@ namespace DisasterPlus.Core.Volcano
 
             float carve = 1f - _gullyAmplitude * depth * channel * depthScale;
 
-            // ── 3. 一般の粗さ。3 オクターブ（裾のうねり / 中間 / 細かい肌）──
-            float rough = 0.42f * broad
-                        + 0.35f * ValueNoise(dx / _wavelengthCoarse, dz / _wavelengthCoarse, _seedCoarse)
-                        + 0.23f * ValueNoise(dx / _wavelengthFine, dz / _wavelengthFine, _seedFine);
+            // ── 1b. 細谷（リル）。**主谷のあいだの尾根を刻む** ────────────────
+            //   仕掛けは主谷と同じ（零交差を底にする）が、
+            //     * 次数が 2.2 倍 → 本数が 2.2 倍、弧の幅が 1/2.2（W で取り戻す）
+            //     * 出はじめが外 → 短い
+            //     * 主谷の中では浅い（RillRidgeFloor）→ 尾根を刻んでいるように見える
+            //   ★ 方位の折り返し判定は**細谷自身の次数**で行う。主谷の次数で見ると、
+            //     細谷が 16 m 格子を割っている内側まで生き残って市松模様になる。
+            float rillDepth = SmoothStep(RillStartFraction,
+                                         RillStartFraction + RillRampFraction, t);
+            float rillAzWavelength = 6.2831853f * d / _rillMaxHarmonic;
+            rillDepth *= SmoothStep(MinAzimuthWavelengthMetres, MinAzimuthWavelengthMetres * 2f,
+                                    rillAzWavelength);
+
+            if (rillDepth > 0f && _rillAmplitude > 0f)
+            {
+                float rillAbs = rillAz < 0f ? -rillAz : rillAz;
+                float rillChannel = 1f - SmoothStep(0f, RillChannelWidth, rillAbs);
+                // 主谷の底（channel = 1）では浅く、尾根（channel = 0）でいちばん深い。
+                float ridgeGate = RillRidgeFloor + (1f - RillRidgeFloor) * (1f - channel);
+                carve *= 1f - _rillAmplitude * rillDepth * rillChannel * ridgeGate;
+            }
+
+            // ── 3. 一般の粗さ。4 オクターブ（裾のうねり / 中間 / 肌 / いちばん細かい肌）──
+            //   ★ 4 本目は 16 m 格子の床（MinWavelengthMetres = 4 セル）に張り付く。
+            //     **これ以上細かい成分を足さないこと**（クラス doc の実測）。
+            float rough = 0.36f * broad
+                        + 0.30f * ValueNoise(dx / _wavelengthCoarse, dz / _wavelengthCoarse, _seedCoarse)
+                        + 0.21f * ValueNoise(dx / _wavelengthFine, dz / _wavelengthFine, _seedFine)
+                        + 0.13f * ValueNoise(dx / _wavelengthMicro, dz / _wavelengthMicro, _seedMicro);
             carve *= 1f - _roughAmplitude * SmoothStep(RoughStartFraction, RoughFullFraction, t)
                                           * 0.5f * (1f - rough);
 
@@ -438,8 +620,13 @@ namespace DisasterPlus.Core.Volcano
         /// ハッシュそのもので、補間は 3t²−2t³ である。
         /// **<c>Mathf.PerlinNoise</c> を使わない** —— Core は engine-free で、
         /// net35 と net8.0 で同じ値を出さなければならない。
+        ///
+        /// ★ <c>internal</c> なのは <c>tools/VolcanoPreview</c> が
+        ///   <see cref="MinWavelengthMetres"/> の床を実測するためである
+        ///   （道具は Core のソースを直接コンパイルするので同一アセンブリになる）。
+        ///   **書き直した近似で床を決めない**、というこのプロジェクトの決まりのため。
         /// </summary>
-        private static float ValueNoise(float x, float z, uint seed)
+        internal static float ValueNoise(float x, float z, uint seed)
         {
             int ix = FloorToInt(x);
             int iz = FloorToInt(z);

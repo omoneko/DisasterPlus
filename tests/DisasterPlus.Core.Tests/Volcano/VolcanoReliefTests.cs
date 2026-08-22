@@ -237,7 +237,69 @@ namespace DisasterPlus.Core.Tests.Volcano
                     AllForms[i] + " uses " + relief.FineWavelengthMetres + " m");
                 Assert.True(relief.FineWavelengthMetres
                             >= 4f * VolcanoShape.RawCellSizeMetres);
+
+                // ★ 4 オクターブ目（いちばん細かい肌）も同じ床を割らないこと。
+                Assert.True(relief.MicroWavelengthMetres >= VolcanoRelief.MinWavelengthMetres,
+                    AllForms[i] + " micro octave uses " + relief.MicroWavelengthMetres + " m");
+                Assert.True(relief.MicroWavelengthMetres
+                            >= 4f * VolcanoShape.RawCellSizeMetres);
             }
+        }
+
+        [Fact]
+        public void TheLowerFlankCarriesMoreChannelsThanTheMainGulliesAlone()
+        {
+            // 「太い谷の筋だけ」への答え。裾の円周を回って谷の数を数えると、
+            // 主谷の本数より**多く**なければ細谷は 1 本も効いていない。
+            const float r = 1200f, h = 600f;
+            var relief = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
+
+            Assert.True(TroughsAround(relief, r, h, 0.85f) > relief.GullyCount,
+                "the lower flank has no finer channels than the main gullies");
+        }
+
+        [Fact]
+        public void SmallConesGetNoRillsAtAll()
+        {
+            // 溶岩ドーム（既定 R = 350 m）では方位の波長がどこでも足りない。
+            // **「無い」を黙って「在る」ことにしない。**
+            var relief = VolcanoRelief.For(VolcanoForm.Dome, Seed, 1f);
+            Assert.True(relief.RillOnsetRadiusMetres
+                        > VolcanoShape.DefaultRadiusOf(VolcanoForm.Dome),
+                "the lava dome claims rills the 16 m grid cannot carry");
+
+            // ★ 出はじめの半径は方位の床（96 m）と細谷の次数だけで決まる。
+            //   16 m 格子が担げるところより内側へ勝手に降りてこないこと。
+            Assert.True(relief.RillOnsetRadiusMetres
+                        >= VolcanoRelief.MinAzimuthWavelengthMetres * relief.RillCount
+                           / 6.2831853f,
+                "the onset radius is closer to the summit than the azimuthal floor allows");
+        }
+
+        /// <summary>半径 <paramref name="fraction"/>R の円周に沿った谷の数（極小の数）。</summary>
+        private static int TroughsAround(VolcanoRelief relief, float r, float h, float fraction)
+        {
+            float ring = fraction * r;
+            int reversals = 0;
+            int sign = 0;
+            float previous = 0f;
+
+            for (int a = 0; a < 1440; a++)
+            {
+                double th = 2.0 * Math.PI * a / 1440.0;
+                float v = relief.ProfileAt((float)(Math.Cos(th) * ring),
+                                           (float)(Math.Sin(th) * ring), r, h);
+                if (a > 0)
+                {
+                    float delta = v - previous;
+                    int next = delta > 0f ? 1 : (delta < 0f ? -1 : sign);
+                    if (sign != 0 && next != 0 && next != sign) reversals++;
+                    sign = next;
+                }
+                previous = v;
+            }
+
+            return reversals / 2;
         }
 
         [Fact]
