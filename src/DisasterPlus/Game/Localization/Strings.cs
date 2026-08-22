@@ -1139,6 +1139,13 @@ namespace DisasterPlus.Game
         public static string VolcanoUpliftMinutes = "Time the uplift takes (in-game minutes)";
         public static string VolcanoReliefStrength = "Relief on the mountain's flanks (%, 0 = a smooth cone)";
 
+        // ★★ ⑤を構えているあいだの強度スライダーの説明。**言葉はここ 1 行だけ**で、
+        //    ラベルには数字（倍率と実寸）しか出さない（VolcanoSizeReadout のクラス doc）。
+        //    スライダーは 2026-08-21 から既に大きさのつまみだったが、画面のどこにも
+        //    そう書いていなかった —— それが 2026-08-22 の指摘④である。
+        public static string VolcanoSizeSliderTooltip =
+            "Volcano size: the slider scales the radius and height set in the options.";
+
         // ★ 設計書 §7.3 の見積り。**不具合ではない**ことは VolcanoBuildabilityNote が
         //   既に言っているので、ここは数字の見出しだけを持つ。
         public static string VolcanoCatchUpRow = "Buildable ground catches up in";

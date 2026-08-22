@@ -304,6 +304,7 @@ VolcanoActiveRadiusRow = Active radius (as far as the clearing has reached)
 VolcanoTilesRow = Terrain updates per step
 VolcanoUpliftMinutes = Time the uplift takes (in-game minutes)
 VolcanoReliefStrength = Relief on the mountain's flanks (%, 0 = a smooth cone)
+VolcanoSizeSliderTooltip = Volcano size: the slider scales the radius and height set in the options.
 VolcanoCatchUpRow = Buildable ground catches up in
 VolcanoFrames = simulation frames
 VolcanoCraterFormed = The summit crater has reached its full depth.

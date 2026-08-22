@@ -126,6 +126,11 @@ namespace DisasterPlus.Game
             //   タイル → スライダー → 地図をクリックで火山が起きる。
             VolcanoPanel.Tick();
 
+            // ★ ⑤を構えているあいだだけ、強度スライダーのラベルを「山の大きさ」に
+            //   読み替える（VolcanoSizeReadout のクラス doc）。構えていないフレームは
+            //   バニラの表示へ書き戻して何もしない。
+            VolcanoSizeReadout.Update();
+
             // ★ 噴火の描画は main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
             //   設定で切った瞬間に自分で畳む（切ったまま噴煙が残らないこと）。
             //   描いているのは**ゲーム自身の粒子エフェクト**である（VolcanoEruptionFx）。
@@ -175,6 +180,11 @@ namespace DisasterPlus.Game
             //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
             //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
             VolcanoPanel.Destroy();
+
+            // ★ スライダーのラベルは**触らずに参照だけ手放す**（もう破棄されている）。
+            //   ツールを降りたときの書き戻しは VolcanoPlacementTool.Deactivate の側で
+            //   既に済んでいる（上の 1 行がそれを呼ぶ）。
+            VolcanoSizeReadout.Reset();
 
             // ★ 噴火の描画側の時計を戻す。
             VolcanoEruptionFx.Destroy();
