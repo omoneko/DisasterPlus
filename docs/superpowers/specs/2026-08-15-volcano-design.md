@@ -437,7 +437,9 @@ grown(d, p) = max(0, profile(d) − H·(1 − p))
 | 噴煙柱 | `Factory Smoke` | する | 暗い灰褐色・寿命 4-9s・初速 3-11・可視 10 km・粒径 36 |
 | 噴煙の傘 | `Factory Smoke` | **もう 1 個**する | 淡い灰・寿命 18-34s・初速 5-13・放出角 55-95°・粒径 95 |
 | 炎 | `Fire Particles` | **しない** | **1 バイトも変えない**（建物火災と共有。変えると街じゅうの火災が道連れ） |
-| 噴石 | `Medium Explosion Particles` | する | 重力を **+1.6**（元は −1 ＝ 上向きの爆炎）・粒径 6・寿命 2.4–4.2s |
+| 噴出口の噴水 | `Medium Explosion Particles` | する | 重力を **+1.6**（元は −1 ＝ 上向きの爆炎）・粒径 6・寿命 2.4–4.2s |
+| **爆発（一発もの）** | `Medium Explosion Particles` | **しない** | **1 バイトも変えない**（`DispatchEffect` に渡すので後述） |
+| **飛ぶ噴石** | `Medium Explosion Particles` | する | 初速 1.5–7・粒径 9・寿命 0.35–0.95s・重力 0.35 |
 | 火砕流「もどき」 | `Collapse Particles` | する | 放出角 70–95°・寿命 4.5–9s・粒径 28・可視 10 km |
 
 数値表は `Core/Volcano/EruptionAshProfile` にある（Unity の API ではなく⑤の演出値なので、`tools/VolcanoPreview` が**同じ数字で噴煙柱を描ける**）。
@@ -448,8 +450,10 @@ grown(d, p) = max(0, profile(d) − H·(1 − p))
 - 引き方は `EffectManager.instance.m_EffectsWrapper.GetBuiltinEffect(name)`。
   `EffectCollection.FindEffect` は保険（`Factory Smoke` はそちらに**登録されていない**）
 - 呼び方は `ParticleEffect.RenderEffect(..., timeOffset = -1f, ...)` の**継続モード**を毎フレーム。
-  `DispatchEffect` は使わない —— あれは予定をキューに積んで**あとで**実行するので、
-  レベルアンロードで複製を破棄したあとにバニラの中から触られうる
+  **複製に対して `DispatchEffect` は使わない** —— あれは予定をキューに積んで**あとで**実行するので、
+  レベルアンロードで複製を破棄したあとにバニラの中から触られうる。
+  **一発ものの爆発（2026-08-22 追加）だけは例外で、そこは複製ではなく
+  <u>ゲーム自身のプレハブ</u>を積む** —— あれは⑤が消すことが決して無い
 - `magnitude` は**粒子密度であってサイズではない**。大きさは `SpawnArea` の半径で決める。
   その写像は `Core/Volcano/EruptionEffectPlan`（engine-free・テスト付き）に置く
 - 時間差は `SimulationManager.m_simulationTimeDelta`。**`Time.deltaTime` ではない** ——
@@ -459,6 +463,38 @@ grown(d, p) = max(0, profile(d) − H·(1 − p))
   必要条件ではない。この設計のおかげで `Assumptions` の述語（「名前で引けたか」）が
   **描画側の門と一致する**
 - 引けなかったら**その 1 つを出さないだけ**。例外は投げず、ログは 1 行、噴火は続く
+
+#### 爆発と噴石（2026-08-22 の依頼③）
+
+所有者の指示:
+
+> 噴火の際に爆発＋噴石のアニメーションも実装してほしいです。
+
+それまで「噴石」と呼んでいたのは**火口の上で粒子を湧かせ続ける噴水**で、
+弾ける瞬間も飛んで落ちる岩も無かった。噴水はそのまま残し、2 つを足す（`VolcanoBlastFx`）。
+
+**爆発。** `EffectManager.DispatchEffect(Medium Explosion Particles, 火口, …)` を
+**0.1 秒ずつずらして 3 発**。1 発だと「ポン」で終わるが、3 発ずれると「ドドン」に見える。
+ずらしは `startFrame`（＝ `SimulationManager.m_referenceFrameIndex` からの**絶対**フレーム。
+`EffectManager.RenderEvent` が `m_startFrame > m_referenceFrameIndex` のあいだ待つ。IL 実測）。
+`Medium Explosion Particles` は `m_renderDuration` が 1.0 秒あるので、
+**1 回積むだけで `m_intensityCurve` に沿って減衰して消える**。一発ものはこれが正解。
+
+**噴石。** 弾道は `Core/Volcano/EjectaBallistics`（engine-free・テスト付き）。
+
+- 重力 9.81 は本物。放出角 42–65° も実際の噴石に近い
+- **飛距離は初速からではなく先に決める**（半径に対する比 0.25–0.90）。
+  そうしないと山の大きさに追従せず、半径 350 m の溶岩ドームから 2 km 岩が飛ぶ。
+  初速は `v = sqrt(range·g / sin 2φ)` で逆算する
+- **大きい岩ほど遠い**（依頼どおり）。空気抵抗は入れない —— 入れると実測できない数が 3 つ増える
+- 着弾は**火口を含んだ山肌**（`VolcanoCrater` の天井で切った円錐）との交点。
+  ★ 火口を入れ忘れると `d = 0` の地面が山頂 `H` になり、
+  **噴石が 1 個も飛ばない**（実際にそうなり、テストが捕まえた）
+- 実測（成層 R = 1200 m）: 着弾 **255〜1642 m（平均 876 m）**、
+  2 割が裾の外、いちばん長い滞空 **27 秒**、地面を突き抜けた岩 **0 / 384**
+- 描画は枠 48 個の固定配列（1 回の噴出 16 個 × 3 回ぶん）。
+  1 回ぶんだと**次の噴出のたびに前の岩が空中で消える**（最長の弾道 27 秒 > 最短の間隔 1.6 秒）
+- **絵**: `docs/images/volcano/ejecta-plan.png`（上から）と `ejecta-section.png`（横から）
 
 #### 噴煙は「柱」である（2026-08-22、実機の指摘③）
 

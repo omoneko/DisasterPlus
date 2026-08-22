@@ -6,7 +6,9 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 火口の見た目 —— <b>噴煙・炎・噴石</b>。**main スレッド専用、毎フレーム。**
+    /// 火口の見た目 —— <b>噴煙・炎・噴出口の噴水</b>と、
+    /// <b>爆発＋飛ぶ噴石</b>（そちらの実体は <see cref="VolcanoBlastFx"/>。
+    /// **時計はこの型が 1 本だけ持ち、あちらへ渡す**）。**main スレッド専用、毎フレーム。**
     ///
     /// ── ★★ 自前のポリゴンはもう 1 枚も出さない ────────────────────────
     ///
@@ -156,7 +158,14 @@ namespace DisasterPlus.Game
         /// **診断（sim スレッド）から読まれるので <c>bool</c> のまま持つ** ——
         /// ここで Unity の参照を <c>== null</c> と比べてはいけない。
         /// </summary>
-        public static bool Drawing { get { return _plumeDrawn || _flameDrawn || _ejectaDrawn; } }
+        public static bool Drawing
+        {
+            get
+            {
+                return _plumeDrawn || _flameDrawn || _ejectaDrawn
+                       || VolcanoBlastFx.BlocksDrawn > 0;
+            }
+        }
 
         /// <summary>今フレームに湧かせた噴煙柱の段数（診断用）。</summary>
         public static int PlumeSegments { get { return _plumeSegments; } }
@@ -206,6 +215,7 @@ namespace DisasterPlus.Game
         /// </summary>
         public static void Destroy()
         {
+            VolcanoBlastFx.Reset();
             _clockSeconds = 0f;
             _plumeDrawn = false;
             _flameDrawn = false;
@@ -228,6 +238,8 @@ namespace DisasterPlus.Game
                 //   「0 段しか出ていないのに 1450 m の柱」という読めない行を出し続ける。
                 _clockSeconds = 0f;
                 _plumeHeightMetres = 0f;
+                // ★ 飛んでいる岩も捨てる。残すと**噴火が終わった空に岩が落ち続ける。**
+                VolcanoBlastFx.Reset();
                 return;
             }
 
@@ -276,6 +288,11 @@ namespace DisasterPlus.Game
                                        snapshot.Footprint.Centre, craterRadius, unit, dt);
             _flameDrawn = RenderFlames(flames, camera, vent, craterRadius, unit, dt);
             _ejectaDrawn = RenderEjecta(ejecta, camera, vent, craterRadius, unit, dt);
+
+            // ★ 爆発と噴石（飛ぶ岩）。**時計はこの型のものを渡す** ——
+            //   あちらに 2 本目を持たせると、弾ける瞬間と噴出口の噴水がずれる。
+            VolcanoBlastFx.Update(camera, vent, snapshot.Footprint.Centre, snapshot.Footprint,
+                                  craterRadius, unit, _clockSeconds, dt);
         }
 
         /// <summary>

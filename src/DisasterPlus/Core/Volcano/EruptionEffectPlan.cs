@@ -77,6 +77,87 @@ namespace DisasterPlus.Core.Volcano
         /// <summary>噴石を湧かす円の半径（火口半径に対する比）。</summary>
         public const float EjectaRadiusRatio = 0.22f;
 
+        // ── 爆発と噴石の着弾（2026-08-22、所有者の依頼「爆発＋噴石」）────────
+
+        /// <summary>
+        /// 1 回の爆発の密度の下限。**<c>DispatchEffect</c> の一発もの**なので、
+        /// 継続モードの噴煙のような 2 桁は要らない
+        /// （<c>Medium Explosion Particles</c> は <c>m_renderDuration</c> が 1.0 秒で、
+        /// 1 回積むだけで <c>m_intensityCurve</c> に沿って減衰して消える）。
+        /// </summary>
+        public const float BlastMagnitudeMin = 1.4f;
+
+        /// <summary>1 回の爆発の密度の上限。</summary>
+        public const float BlastMagnitudeMax = 5.5f;
+
+        /// <summary>爆発を湧かす円の半径（火口半径に対する比）の下限。</summary>
+        public const float BlastRadiusFloorRatio = 0.35f;
+
+        /// <summary>強さで足される爆発の半径（同上）。</summary>
+        public const float BlastRadiusGainRatio = 0.45f;
+
+        /// <summary>飛んでいる岩 1 個に付ける尾の密度（大きい岩でこの値）。</summary>
+        public const float BlockTrailMagnitudeMax = 1.2f;
+
+        /// <summary>同上の下限（いちばん小さい岩）。</summary>
+        public const float BlockTrailMagnitudeMin = 0.4f;
+
+        /// <summary>飛んでいる岩を湧かす円の半径（m）。**岩 1 個ぶんの大きさ。**</summary>
+        public const float BlockTrailRadiusMetres = 9f;
+
+        /// <summary>着弾の土煙が出ている時間（秒）。</summary>
+        public const float ImpactSeconds = 0.9f;
+
+        /// <summary>着弾の土煙の密度（大きい岩でこの値）。</summary>
+        public const float ImpactMagnitudeMax = 2.6f;
+
+        /// <summary>着弾の土煙の広がり（m、大きい岩で）。</summary>
+        public const float ImpactRadiusMetresMax = 34f;
+
+        /// <summary>爆発の密度。</summary>
+        public static float BlastMagnitude(float unit)
+        {
+            return Lerp(BlastMagnitudeMin, BlastMagnitudeMax, Clamp01(unit));
+        }
+
+        /// <summary>爆発を湧かす円の半径（m）。</summary>
+        public static float BlastRadiusMetres(float craterRadiusMetres, float unit)
+        {
+            return RadiusFrom(craterRadiusMetres, BlastRadiusFloorRatio,
+                              BlastRadiusGainRatio, unit);
+        }
+
+        /// <summary>飛んでいる岩の尾の密度。<paramref name="sizeUnit"/> は岩の大きさ。</summary>
+        public static float BlockTrailMagnitude(float sizeUnit)
+        {
+            return Lerp(BlockTrailMagnitudeMin, BlockTrailMagnitudeMax, Clamp01(sizeUnit));
+        }
+
+        /// <summary>
+        /// 着弾の土煙の密度。<paramref name="ageSeconds"/> が
+        /// <see cref="ImpactSeconds"/> を超えたら <b>0</b> を返すので、
+        /// 呼び出し側は <c>&gt; 0</c> のときだけ描けばよい。
+        /// </summary>
+        public static float ImpactMagnitude(float sizeUnit, float ageSeconds)
+        {
+            if (IsBad(ageSeconds) || ageSeconds < 0f) return 0f;
+            if (ageSeconds >= ImpactSeconds) return 0f;
+
+            // 立ち上がりは速く、消えるのはゆっくり（土煙の見え方）。
+            float w = ageSeconds / ImpactSeconds;
+            float shape = w < 0.15f ? w / 0.15f : (1f - w) / 0.85f;
+            if (shape < 0f) shape = 0f;
+
+            return ImpactMagnitudeMax * (0.4f + 0.6f * Clamp01(sizeUnit)) * shape;
+        }
+
+        /// <summary>着弾の土煙の広がり（m）。大きい岩ほど広い。</summary>
+        public static float ImpactRadiusMetres(float sizeUnit)
+        {
+            float r = ImpactRadiusMetresMax * (0.35f + 0.65f * Clamp01(sizeUnit));
+            return r < MinRadiusMetres ? MinRadiusMetres : r;
+        }
+
         /// <summary>
         /// 半径がこれ未満なら「火口が読めていない」とみなして使わない（m）。
         /// 0 を渡されても <c>max(100, PI r^2)</c> のおかげで粒子は湧くので、

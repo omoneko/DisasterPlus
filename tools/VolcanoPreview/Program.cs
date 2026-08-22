@@ -72,6 +72,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             Plume.Report(outDir, log);
             Lava.Report(outDir, log);
             Surge.Report(outDir, log);
+            Ballistics.Report(outDir, log);
             Pacing.Report(outDir, log);
 
             File.WriteAllText(Path.Combine(outDir, "measurements.txt"), log.ToString());

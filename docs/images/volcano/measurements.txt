@@ -112,6 +112,14 @@ grid = 16 m (the game's own terrain grid)
   the fan covers   : 4.309 km2  (12.6x the lava)
   of that, on lava : 8 %   (the rest is flank the lava never touched)
 
+## ejecta (strato, R=1200 m, H=600 m, vent 540 m above the base)
+  blocks per blast: 5 (weakest) .. 16 (strongest)
+  bands           : range 0.2 .. 0.9 R, elevation 42 .. 65 deg
+  strongest : range 255 .. 1642 m (mean 876), 22 % land beyond the foot, longest flight 27.0 s
+              : 0 of 384 blocks pass through the ground (deepest 0 m)
+  weak      : range 126 .. 1201 m (mean 611), 0 % land beyond the foot, longest flight 22.9 s
+              : 0 of 216 blocks pass through the ground (deepest 0 m)
+
 ## uplift pacing (strato, R = 1200 m, H = 600 m, 30 in-game minutes)
   in-game duration is UNCHANGED: 30 in-game minutes = 1365 sim frames
   (1 in-game minute = 45.51 sim frames; wall clock depends on the game speed and the fixed-update rate)
