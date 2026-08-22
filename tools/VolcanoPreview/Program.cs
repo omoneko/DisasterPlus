@@ -361,6 +361,17 @@ namespace DisasterPlus.Tools.VolcanoPreview
                            + F1(shallow - smooth) + " m)");
             log.AppendLine("    ridge-to-valley   : " + F1(shallow - deep) + " m");
             RingSpread(log, on.Relief, r, h, 0.85f);
+            Relief.Continuity(log, "continuity", on.Relief, form, r, h);
+            Relief.Continuity(log, "continuity(off)", off.Relief, form, r, h);
+            // ★★ 溝が「線」として続いているかは**本数で割った指標でしか測れない。**
+            //    最初に使った「陰影を半径方向に歩いて明暗の反転を数える」指標は、
+            //    対照実験（谷を 18→36 本に増やしただけの単層の山）でも同じ値を返した ——
+            //    数えていたのは途切れではなく本数だった。GroovePersistence の doc 参照。
+            log.AppendLine("    groove persistence (1.0 = every trough continues into the next"
+                           + " 16 m ring = a solid line; master's single tier scores 0.856):");
+            log.AppendLine("      relief=1  inner 0.15-0.50R "
+                           + F3(GroovePersistence(on, 0.15f, 0.50f))
+                           + " | outer 0.50-0.98R " + F3(GroovePersistence(on, 0.50f, 0.98f)));
 
             // 半径方向の傾斜（平均、度）。
             log.AppendLine("    mean slope        : " + F1(Deg(Math.Atan(h / r))) + " deg (smooth cone)");
@@ -425,6 +436,103 @@ namespace DisasterPlus.Tools.VolcanoPreview
             log.AppendLine("    ring @" + F2(fraction) + "R      : "
                            + (reversals / 2) + " troughs around the circle, "
                            + F1(hi - lo) + " m ridge-to-valley");
+        }
+
+        /// <summary>
+        /// **溝が「線」として続いているか（本数に依らない指標）。**
+        ///
+        /// ★★ 2026-08-22。最初に使った「破線度」（陰影を半径方向に歩いて明暗の反転を
+        ///   数える）は<b>役に立たなかった</b> —— 対照実験で、谷を 18 本から 36 本へ
+        ///   増やしただけの<u>単層</u>の山でも同じ 0.28 を返したからである。
+        ///   あれが数えていたのは「溝が途切れているか」ではなく
+        ///   **「溝が何本あるか」**で、階段状に歩く自分の足跡を測っていた。
+        ///
+        /// こちらは<b>本数で割ってある</b>。16 m の環を 1 本ずつ外へ進みながら、
+        /// ある環で見つけた谷が**次の環にも同じ方位で在るか**を数える:
+        ///
+        /// <code>
+        /// 1.0 に近い = どの谷も次の環へ続いている ＝ 実線
+        /// 低い       = 谷が現れては消える        ＝ 点線
+        /// </code>
+        ///
+        /// 谷は蛇行する（<c>WarpRadians</c>）ので、許容は 1 環あたり弧 2 セルぶん。
+        /// </summary>
+        private static float GroovePersistence(Field f, float fromFraction, float toFraction)
+        {
+            int matched = 0;
+            int total = 0;
+
+            var previous = new System.Collections.Generic.List<double>();
+            var current = new System.Collections.Generic.List<double>();
+
+            for (float d = fromFraction * f.RadiusMetres;
+                 d <= toFraction * f.RadiusMetres; d += Cell)
+            {
+                current.Clear();
+                TroughAzimuths(f, d, current);
+
+                if (previous.Count > 0 && current.Count > 0)
+                {
+                    // 蛇行と 1 セルの丸めを許す（弧 2 セルぶんの角度）。
+                    double tolerance = 2.0 * Cell / d;
+
+                    for (int i = 0; i < previous.Count; i++)
+                    {
+                        total++;
+                        for (int j = 0; j < current.Count; j++)
+                        {
+                            double delta = Math.Abs(previous[i] - current[j]);
+                            if (delta > Math.PI) delta = 2.0 * Math.PI - delta;
+                            if (delta <= tolerance) { matched++; break; }
+                        }
+                    }
+                }
+
+                previous.Clear();
+                previous.AddRange(current);
+            }
+
+            return total > 0 ? matched / (float)total : 0f;
+        }
+
+        /// <summary>
+        /// 半径 <paramref name="d"/> の環を**格子のセルで**読み、谷（極小）の方位を集める。
+        /// 解析値ではなく格子に焼いた高さを読むのが要点である
+        /// （破線は「溝」と「動かせない 16 m 格子」が噛み合って初めて現れる）。
+        /// </summary>
+        private static void TroughAzimuths(Field f, float d,
+                                           System.Collections.Generic.List<double> into)
+        {
+            int n = f.Size;
+            int half = (n - 1) / 2;
+
+            int steps = (int)(2.0 * Math.PI * d / Cell);
+            if (steps < 24) return;
+
+            for (int a = 0; a < steps; a++)
+            {
+                double th = 2.0 * Math.PI * a / steps;
+                double thPrev = 2.0 * Math.PI * (a - 1 + steps) % (2.0 * Math.PI * steps) / steps;
+                thPrev = 2.0 * Math.PI * ((a - 1 + steps) % steps) / steps;
+                double thNext = 2.0 * Math.PI * ((a + 1) % steps) / steps;
+
+                float here = SampleCell(f, half, d, th);
+                float before = SampleCell(f, half, d, thPrev);
+                float after = SampleCell(f, half, d, thNext);
+                if (here <= 0f) continue;
+
+                // 極小で、かつ両隣より 0.3 m 以上低いものだけを谷と数える
+                // （量子化の 1 段や float の丸めを谷にしない）。
+                if (before - here >= 0.3f && after - here >= 0.3f) into.Add(th);
+            }
+        }
+
+        private static float SampleCell(Field f, int half, float d, double th)
+        {
+            int x = half + (int)Math.Round(Math.Cos(th) * d / Cell);
+            int z = half + (int)Math.Round(Math.Sin(th) * d / Cell);
+            if (x < 0 || z < 0 || x >= f.Size || z >= f.Size) return 0f;
+            return f.At(x, z);
         }
 
         private static float MinReach(Field f, float r, float h)
@@ -729,11 +837,11 @@ namespace DisasterPlus.Tools.VolcanoPreview
         {
             float onset = r.RillOnsetRadiusMetres;
             float spacing = (float)(2.0 * Math.PI * 0.85 * radius / r.RillCount);
-            if (onset >= radius)
+            if (!r.RillsFitOn(radius))
             {
-                return r.RillCount + " would need r >= "
+                return r.RillCount + " would only fit outside "
                        + onset.ToString("F0", CultureInfo.InvariantCulture)
-                       + " m, so NONE fit on this cone (16 m grid)";
+                       + " m, too thin a ring, so NONE are drawn (16 m grid)";
             }
             return r.RillCount + " rills, ~" + spacing.ToString("F0", CultureInfo.InvariantCulture)
                    + " m apart at 0.85R, full depth only beyond "

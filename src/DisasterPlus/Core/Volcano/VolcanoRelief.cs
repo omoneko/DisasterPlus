@@ -15,7 +15,7 @@ namespace DisasterPlus.Core.Volcano
     ///   1. **放射谷（バランコ）** —— 斜面を上から下へ走る溝。方位方向にほぼ等間隔で、
     ///      **山頂側は浅く、裾へ向かって深くなる**。成層火山の見た目そのものである
     ///   1b. **細谷（リル）** —— 主谷のあいだの尾根を刻む、細くて浅くて短い溝。
-    ///      主谷の 2.2 倍の本数で、**裾のほうにしか存在しない**（後述の格子の床）
+    ///      主谷より 3 次高い帯で、**裾のほうにしか存在しない**（後述の格子の床）
     ///   2. **円でない裾** —— 低周波の方位変化。footprint が真円でなくなる
     ///   3. **一般の粗さ** —— 波長 64〜380 m の 4 オクターブのうねり
     ///   4. **非対称** —— 片側の裾が長い / 急である（1 次の方位成分が担う）
@@ -100,8 +100,8 @@ namespace DisasterPlus.Core.Volcano
     ///     4 セルでは階段の段が波と同じ大きさになるからである（実測で確認した）。
     ///
     /// ★★ この 2 つが、細谷（リル）が**裾にしか出ない**理由でもある。
-    ///   主谷の 2.2 倍の次数で回すと、成層火山（R = 1200 m）では 0.28R より内側で
-    ///   方位の波長が 96 m を割って消え、0.56R より外でだけ深さいっぱいになる。
+    ///   主谷より 3 次高い帯で回すと、成層火山（R = 1200 m）では 0.24R より内側で
+    ///   方位の波長が 96 m を割って消え、0.36R より外でだけ深さいっぱいになる。
     ///   **これは制限ではなく、実際の火山の見え方（上流ほど疎）と一致する。**
     ///
     /// ── 費用 ────────────────────────────────────────────
@@ -141,30 +141,51 @@ namespace DisasterPlus.Core.Volcano
         private const int RillHarmonics = 5;
 
         /// <summary>
-        /// 細谷の次数を主谷の何倍にするか。
+        /// 細谷の次数を主谷より<b>いくつ上げるか</b>。**倍率ではなく差である。**
         ///
-        /// **2.2 倍**は 2 つの条件のあいだで決まっている:
-        ///   - 整数倍にしない —— 主谷と位相が噛み合って「1 本置きに深い谷」に見える
-        ///   - 上げすぎない —— 谷の弧の幅は次数に反比例するので、
-        ///     2.5 倍だと成層火山の中腹で 2.2 セルまで痩せて、
-        ///     溝ではなく**破線**に見える（オフラインの絵で確認した）
+        /// ── ★★ ここは 2026-08-22 のレビューで 1 度差し戻されている ────────────
+        ///
+        /// 最初は「主谷の 2.2 倍」（成層で 40 本）にしていた。**実機の絵では
+        /// 裾の細谷がまるごと点線に見えた。** 差し戻しを受けて計測をやり直した結果:
+        ///
+        /// | 細谷の本数 | 半深での弧の幅（0.85R） | 見え方 |
+        /// |---|---|---|
+        /// | 40（2.2 倍） | 1.8 セル | **点線。使えない** |
+        /// | 28（+5）     | 4.0 セル | まだ帯が 2〜3 本点線になる |
+        /// | **24（+3）** | **4.7 セル** | **実線。主谷と同じ連続性**（出荷値） |
+        ///
+        /// **効いていたのは幅でも深さでもなく本数だった。** 幅（0.55→0.95）も
+        /// 深さ（0.25→0.80）も尾根での抑制の有無も、どれを動かしても
+        /// 溝 1 本あたりの連続性は 0.83 前後から動かなかった（下の計測の話）。
+        /// 動いたのは**画面に出る溝の総本数**で、それが多いほど
+        /// 「どの溝も 15 % は途切れる」という格子の性質が目に付くようになる。
         /// </summary>
-        private const float RillHarmonicRatio = 2.2f;
+        private const int RillHarmonicOffset = 3;
 
         /// <summary>細谷の深さ（主谷に対する比）。**主谷より浅い**のが階層の要点。</summary>
-        private const float RillDepthRatio = 0.45f;
+        private const float RillDepthRatio = 0.60f;
 
         /// <summary>
         /// 細谷の幅（方位系列の <c>|A|</c> の閾値）。主谷より**広く**取る。
         ///
-        /// 谷の弧の幅は <c>2 d W / n</c> で、次数 n が 2.2 倍になると同じ W では
-        /// 幅も 1/2.2 になる。成層火山（n₂ = 20）で d = 900 m のとき、
-        /// W = 0.30 なら 27 m ＝ **1.7 セル**しかなく、格子の上では溝ではなく破線に見える
-        /// （オフラインの絵で実際にそうなった）。W = 0.55 なら 50 m（3.1 セル）、
-        /// 裾（d = 1200 m）で 66 m（4.1 セル）。
-        /// **これが「細かくできる限界」の実体である。**
+        /// ★ 効く幅は <c>|A| &lt; W</c> の全幅ではなく、<b>半分の深さになるところの幅</b>
+        ///   <c>2 d·asin(W/2) / n₂</c> である。全幅で見積もると倍近く見えるので、
+        ///   「3 セルある」と言いながら実際は 1.6 セルしかない、という間違いをやる
+        ///   （最初の版がまさにそれだった）。
+        ///   出荷値（n₂ = 12、W = 0.85）で 0.85R の半深幅は **4.7 セル**である。
         /// </summary>
-        private const float RillChannelWidth = 0.55f;
+        private const float RillChannelWidth = 0.85f;
+
+        /// <summary>
+        /// 細谷を出すのに最低限必要な斜面（実効半径に対する比）。
+        ///
+        /// ★ 方位の床（<see cref="MinAzimuthWavelengthMetres"/>）のせいで、細谷は
+        ///   小さい山ほど外側の細い環にしか residence しない。**環が細すぎると
+        ///   溝ではなく「裾に並んだ窪みの輪」に見える**ので、
+        ///   斜面の外側 3 割を取れないなら<b>1 本も出さない</b>。
+        ///   ⑤は大きさをプレイヤーが選べる機能なので、小さくした山でも破綻しないこと。
+        /// </summary>
+        private const float RillMinFlankFraction = 0.70f;
 
         /// <summary>細谷が出はじめる山頂からの距離（実効半径に対する比）。主谷より外。</summary>
         private const float RillStartFraction = 0.34f;
@@ -300,6 +321,16 @@ namespace DisasterPlus.Core.Volcano
         public int RillCount { get { return (_rillFirst + 2) * 2; } }
 
         /// <summary>
+        /// この半径の山に細谷を出せるか。**出せないなら 1 本も出さない**
+        /// （<see cref="RillMinFlankFraction"/>）。
+        /// </summary>
+        public bool RillsFitOn(float radiusMetres)
+        {
+            if (float.IsNaN(radiusMetres) || radiusMetres <= 0f) return false;
+            return RillOnsetRadiusMetres <= RillMinFlankFraction * radiusMetres;
+        }
+
+        /// <summary>
         /// 細谷が深さいっぱいで出はじめる最小の半径（m）。
         /// **これより内側に細谷は 1 本も無い**（16 m 格子で方位の波長が足りない）。
         /// </summary>
@@ -381,9 +412,8 @@ namespace DisasterPlus.Core.Volcano
             _gullyFirst = harmonic - 2;
             _gullyMaxHarmonic = harmonic + 2;
 
-            // 細谷の中心次数。**整数倍を避ける**（RillHarmonicRatio の doc）。
-            int rillHarmonic = (int)(harmonic * RillHarmonicRatio + 0.5f);
-            if (rillHarmonic < harmonic + 3) rillHarmonic = harmonic + 3;
+            // 細谷の中心次数（RillHarmonicOffset の doc に計測の経緯がある）。
+            int rillHarmonic = harmonic + RillHarmonicOffset;
             _rillFirst = rillHarmonic - 2;
             _rillMaxHarmonic = rillHarmonic + 2;
 
@@ -565,7 +595,7 @@ namespace DisasterPlus.Core.Volcano
 
             // ── 1b. 細谷（リル）。**主谷のあいだの尾根を刻む** ────────────────
             //   仕掛けは主谷と同じ（零交差を底にする）が、
-            //     * 次数が 2.2 倍 → 本数が 2.2 倍、弧の幅が 1/2.2（W で取り戻す）
+            //     * 次数が 3 つ上 → 本数が 6 本多い、弧の幅はやや狭い（W で取り戻す）
             //     * 出はじめが外 → 短い
             //     * 主谷の中では浅い（RillRidgeFloor）→ 尾根を刻んでいるように見える
             //   ★ 方位の折り返し判定は**細谷自身の次数**で行う。主谷の次数で見ると、
@@ -576,7 +606,8 @@ namespace DisasterPlus.Core.Volcano
             rillDepth *= SmoothStep(MinAzimuthWavelengthMetres, MinAzimuthWavelengthMetres * 2f,
                                     rillAzWavelength);
 
-            if (rillDepth > 0f && _rillAmplitude > 0f)
+            // ★ 細い環にしか入らない山では**1 本も出さない**（RillMinFlankFraction）。
+            if (rillDepth > 0f && _rillAmplitude > 0f && RillsFitOn(effectiveRadius))
             {
                 float rillAbs = rillAz < 0f ? -rillAz : rillAz;
                 float rillChannel = 1f - SmoothStep(0f, RillChannelWidth, rillAbs);

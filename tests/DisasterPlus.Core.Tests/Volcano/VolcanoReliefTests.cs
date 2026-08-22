@@ -264,9 +264,13 @@ namespace DisasterPlus.Core.Tests.Volcano
             // 溶岩ドーム（既定 R = 350 m）では方位の波長がどこでも足りない。
             // **「無い」を黙って「在る」ことにしない。**
             var relief = VolcanoRelief.For(VolcanoForm.Dome, Seed, 1f);
-            Assert.True(relief.RillOnsetRadiusMetres
-                        > VolcanoShape.DefaultRadiusOf(VolcanoForm.Dome),
-                "the lava dome claims rills the 16 m grid cannot carry");
+            float r = VolcanoShape.DefaultRadiusOf(VolcanoForm.Dome);
+
+            // ★ 方位の床のせいで、細谷は小さい山ほど外側の細い環にしか入らない。
+            //   環が細すぎると溝ではなく「裾に並んだ窪みの輪」に見えるので、
+            //   斜面の外側 3 割を取れないなら 1 本も出さない。
+            Assert.False(relief.RillsFitOn(r),
+                "the lava dome claims rills the 16 m grid cannot carry as lines");
 
             // ★ 出はじめの半径は方位の床（96 m）と細谷の次数だけで決まる。
             //   16 m 格子が担げるところより内側へ勝手に降りてこないこと。
@@ -274,6 +278,11 @@ namespace DisasterPlus.Core.Tests.Volcano
                         >= VolcanoRelief.MinAzimuthWavelengthMetres * relief.RillCount
                            / 6.2831853f,
                 "the onset radius is closer to the summit than the azimuthal floor allows");
+
+            // 成層火山（既定 R = 1200 m）なら入る。「どの山にも出ない」ではない。
+            var strato = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
+            Assert.True(strato.RillsFitOn(VolcanoShape.DefaultRadiusOf(VolcanoForm.Strato)),
+                "the stratovolcano cannot carry rills either, so the tier is pointless");
         }
 
         /// <summary>半径 <paramref name="fraction"/>R の円周に沿った谷の数（極小の数）。</summary>
