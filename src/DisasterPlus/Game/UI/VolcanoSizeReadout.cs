@@ -131,14 +131,19 @@ namespace DisasterPlus.Game
             VolcanoForm form = VolcanoShape.FormOf(ModSettings.VolcanoShapeSetting.value);
 
             float r = VolcanoShape.RadiusFor(
-                form, VolcanoSizeScale.Apply(ModSettings.VolcanoRadius.value, scale));
+                form, VolcanoSizeScale.Apply(VolcanoShape.DefaultRadiusOf(form), scale));
 
             // ★ 地形の天井は引けない（地点が決まっていない）。クラス doc の注記のとおり、
             //   0 m 起点＝帯のクランプだけを掛けた値である。
             float h = VolcanoShape.HeightFor(
-                form, VolcanoSizeScale.Apply(ModSettings.VolcanoHeight.value, scale), 0f);
+                form, VolcanoSizeScale.Apply(VolcanoShape.DefaultHeightOf(form), scale), 0f);
 
-            return scale.ToString("F2") + "x  r" + r.ToString("F0")
+            // ★★ **バニラと同じ数字を先頭に出す**（生値 ÷ 10 を "F1"）。
+            //    以前は "1.00x" という**この MOD だけの単位**を出しており、
+            //    他の災害のスライダーと見比べられなかった
+            //    （所有者の指摘「バニラ同様 1.0-10.0(25.5) にしてほしい」）。
+            //    実寸はそのあとに添える —— 形態ごとの帯でクランプした後の値である。
+            return (raw / 10f).ToString("F1") + "  r" + r.ToString("F0")
                    + "  h" + h.ToString("F0") + " m";
         }
 

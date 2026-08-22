@@ -507,7 +507,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static Vector2 SearchTopRow(UIComponent owner, out bool foundFree)
         {
-            float right = FreeSlotFinder.RightEdgeOfBand(0f, TopRowBandBottom, owner);
+            float right = FreeSlotFinder.ClusterRightEdge(0f, TopRowBandBottom, owner);
             float startX = right > 0f ? right + TopRowGap : TopRowStartX;
             if (startX < TopRowStartX) startX = TopRowStartX;
 

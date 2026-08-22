@@ -134,9 +134,12 @@ namespace DisasterPlus.Game
         private static void RefreshShapeRow()
         {
             VolcanoForm form = CurrentForm();
-            float radius = VolcanoShape.RadiusFor(form, ModSettings.VolcanoRadius.value);
+            // ★★ 基準は**形態ごとの推奨値**である（2026-08-22）。
+            //    設定画面の半径・最終高のスライダーは撤去した
+            //    （<c>Core.Volcano.VolcanoSizeScale</c> のクラス doc に経緯）。
+            float radius = VolcanoShape.RadiusFor(form, VolcanoShape.DefaultRadiusOf(form));
             // 高さは形態の帯だけでクランプする（天井は地点が決まってから）。
-            float height = ClampHeightToForm(form, ModSettings.VolcanoHeight.value);
+            float height = ClampHeightToForm(form, VolcanoShape.DefaultHeightOf(form));
 
             VolcanoRows.SetPlain(_shapeLabel,
                 Strings.VolcanoFormRow + ": " + FormLabel(form)

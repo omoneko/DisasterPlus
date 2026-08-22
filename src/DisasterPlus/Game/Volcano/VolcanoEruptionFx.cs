@@ -113,6 +113,25 @@ namespace DisasterPlus.Game
         /// <summary>噴煙柱の足元を噴出口からどれだけ上げるか（m）。</summary>
         private const float PlumeLiftMetres = 8f;
 
+        /// <summary>
+        /// 火口の底から縁までの高さを、**火口の半径から**見積もる比。
+        ///
+        /// <c>VolcanoShape.CraterDepthOf</c> は山の高さから深さを出すが、
+        /// ここに届いているのは**火口の半径**だけである（スナップショットが運んでいるのは
+        /// 影響範囲の半径と最終高で、形態ごとの比はどちらも 0.12 で揃えてある）。
+        /// 半径と深さが同じ比なので、縁の高さは半径に比例するとしてよい。
+        /// **多めに見積もる** —— 足りないと煙が碗に戻るが、
+        /// 多すぎても「少し上から出ている」にしかならない。
+        /// </summary>
+        private const float CraterRimLiftRatio = 0.55f;
+
+        /// <summary>火口の底から縁まで（m）。</summary>
+        private static float CraterRimLiftMetres(float craterRadiusMetres)
+        {
+            if (float.IsNaN(craterRadiusMetres) || craterRadiusMetres <= 0f) return 0f;
+            return craterRadiusMetres * CraterRimLiftRatio;
+        }
+
         /// <summary>炎を噴出口からどれだけ上げるか（m）。</summary>
         private const float FlameLiftMetres = 3f;
 
@@ -284,8 +303,10 @@ namespace DisasterPlus.Game
             //   継続モードの粒子数は timeDelta に比例するので、渡しても 0 になる。
             if (dt <= 0f) return;
 
-            _plumeDrawn = RenderColumn(ash, umbrella, camera, vent,
-                                       snapshot.Footprint.Centre, craterRadius, unit, dt);
+            // ★ 柱の形は 1 回だけ作る。噴煙も雷も**同じ形**を見る。
+            EruptionColumn plume = BuildColumn(snapshot.Footprint.Centre, craterRadius, unit);
+
+            _plumeDrawn = RenderColumn(ash, umbrella, camera, vent, plume, craterRadius, dt);
             _flameDrawn = RenderFlames(flames, camera, vent, craterRadius, unit, dt);
             _ejectaDrawn = RenderEjecta(ejecta, camera, vent, craterRadius, unit, dt);
 
@@ -293,6 +314,12 @@ namespace DisasterPlus.Game
             //   あちらに 2 本目を持たせると、弾ける瞬間と噴出口の噴水がずれる。
             VolcanoBlastFx.Update(camera, vent, snapshot.Footprint.Centre, snapshot.Footprint,
                                   craterRadius, unit, _clockSeconds, dt);
+
+            // ★★ 火口のマグマだまり・噴煙への光・噴煙の中の雷。
+            //    **粒子では出せない**ので自前の <c>DrawMesh</c> である
+            //    （<see cref="VolcanoCraterFx"/> のクラス doc）。
+            //    柱の形を渡すのは、雷が**噴煙の中を**走るためである。
+            VolcanoCraterFx.Update(snapshot, camera, plume.HeightMetres, plume);
         }
 
         /// <summary>
@@ -307,12 +334,14 @@ namespace DisasterPlus.Game
         ///   **同じ山なら毎回同じ向きに倒れる**。<c>SwayAt</c> の 1 本の正弦だけが
         ///   ゆっくり左右へ振る（37 秒周期）。フレーム番号は 1 度も混ぜない。
         /// </summary>
-        private static bool RenderColumn(ParticleEffect column, ParticleEffect umbrella,
-                                         RenderManager.CameraInfo camera, Vec3 vent,
-                                         Vec3 centre, float craterRadius, float unit, float dt)
+        /// <summary>
+        /// 今のフレームの柱の形。**描画の前に 1 回だけ作る** ——
+        /// 以前は <see cref="RenderColumn"/> の中で作っていたが、
+        /// 雷（<see cref="VolcanoCraterFx"/>）も**同じ形**を見なければならない
+        /// （別に作ると、雷だけが別の太さの柱の中を走る）。
+        /// </summary>
+        private static EruptionColumn BuildColumn(Vec3 centre, float craterRadius, float unit)
         {
-            if (column == null && umbrella == null) return false;
-
             uint seed = DeterministicRandom.Hash(
                 unchecked((uint)Mathf.RoundToInt(centre.X)),
                 unchecked((uint)Mathf.RoundToInt(centre.Z)));
@@ -323,12 +352,29 @@ namespace DisasterPlus.Game
                               + (WindSpeedMaxMetresPerSecond - WindSpeedMinMetresPerSecond)
                                 * DeterministicRandom.Unit(seed, WindSpeedSalt);
 
-            var plume = new EruptionColumn(craterRadius, unit,
-                                           Mathf.Cos(bearing), Mathf.Sin(bearing), windSpeed);
+            return new EruptionColumn(craterRadius, unit,
+                                      Mathf.Cos(bearing), Mathf.Sin(bearing), windSpeed);
+        }
+
+        private static bool RenderColumn(ParticleEffect column, ParticleEffect umbrella,
+                                         RenderManager.CameraInfo camera, Vec3 vent,
+                                         EruptionColumn plume, float craterRadius, float dt)
+        {
+            if (column == null && umbrella == null) return false;
+
             _plumeHeightMetres = plume.HeightMetres;
 
             float baseX = vent.X;
-            float baseY = vent.Y + PlumeLiftMetres;
+            // ★★ **火口の底ではなく縁から立ち上げる**（2026-08-22、所有者の依頼
+            //    「噴火口に滞留する煙を消して、立ち上る噴煙のみに」）。
+            //
+            //    <c>VentWorld.Y</c> は**火口の底**である（炎が浮いて見えるのを直したときに
+            //    そう揃えた）。そこから 8 m だけ上で煙を湧かせていたので、煙は
+            //    **火口の碗の中に溜まって上へ抜けにくかった** ——
+            //    見た目は「立ち上る柱」ではなく「火口に溜まった煙」になる。
+            //    縁の高さまで持ち上げれば、湧いた煙は必ず外へ出る。
+            //    碗の中に見えるのは、これからはマグマだまり（<see cref="VolcanoCraterFx"/>）である。
+            float baseY = vent.Y + CraterRimLiftMetres(craterRadius) + PlumeLiftMetres;
             float baseZ = vent.Z;
 
             int drawn = 0;

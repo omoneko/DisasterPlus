@@ -1069,8 +1069,6 @@ namespace DisasterPlus.Game
         public static string VolcanoHours = "in-game hours";
 
         public static string VolcanoShapeSetting = "Volcano shape";
-        public static string VolcanoRadiusSetting = "Volcano radius (m)";
-        public static string VolcanoHeightSetting = "Volcano final height (m)";
 
         // --- ⑤火山（Task 5: 準備 — 道路と建物の段階的破壊） ---
         //
@@ -1200,6 +1198,9 @@ namespace DisasterPlus.Game
         public static string VolcanoQuakeSetting = "Volcanic earthquakes (shaking only)";
         public static string VolcanoQuakeRow = "Volcanic earthquakes";
 
+        // 火山雷（2026-08-22）。噴煙の描画とは別に切れる。
+        public static string VolcanoLightningSetting =
+            "Lightning inside the ash plume";
         public static string VolcanoLavaRenderSetting = "Draw the lava surface";
 
         // ★ 見えないことを黙らない。**流れも焦げも着火も変わらない**ことを同時に言う。

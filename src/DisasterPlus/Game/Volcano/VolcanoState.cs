@@ -402,8 +402,11 @@ namespace DisasterPlus.Game
 
             if (!VolcanoSurvey.Run(
                     point, form,
-                    VolcanoSizeScale.Apply(ModSettings.VolcanoRadius.value, sizeScale),
-                    VolcanoSizeScale.Apply(ModSettings.VolcanoHeight.value, sizeScale),
+                    // ★★ 基準は**形態ごとの推奨値**である（2026-08-22）。
+                    //    設定画面の半径・最終高のスライダーは撤去した ——
+                    //    同じ量を 2 つのつまみで決めさせていた（<c>VolcanoSizeScale</c>）。
+                    VolcanoSizeScale.Apply(VolcanoShape.DefaultRadiusOf(form), sizeScale),
+                    VolcanoSizeScale.Apply(VolcanoShape.DefaultHeightOf(form), sizeScale),
                     out footprint))
             {
                 RefuseAndForget(VolcanoSurvey.LastFailure

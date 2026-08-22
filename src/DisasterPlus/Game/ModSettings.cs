@@ -143,11 +143,21 @@ namespace DisasterPlus.Game
         /// </summary>
         public static SavedInt VolcanoShapeSetting;
 
-        /// <summary>火山の半径（m）。範囲は形態ごとに違うので使う側でクランプする。</summary>
-        public static SavedInt VolcanoRadius;
-
-        /// <summary>火山の最終高（m）。同上。</summary>
-        public static SavedInt VolcanoHeight;
+        // ── ★★ 退役したキーの覚書（2026-08-22）───────────────────
+        //
+        //   volcanoRadius / volcanoHeight … 火山の半径と最終高（m）。
+        //
+        // 所有者の指摘「これだとスケール調整が意味なくなるので、
+        // 推奨設定でここは固定してほしい」により、**同じ量を 2 つのつまみで
+        // 決めさせるのをやめた**。大きさは災害パネルの強度スライダー 1 本だけが決め、
+        // 基準は形態ごとの推奨値（<c>VolcanoShape.DefaultRadiusOf</c> /
+        // <c>DefaultHeightOf</c>）である（<c>VolcanoSizeScale</c> のクラス doc）。
+        //
+        // ★★ <b>この 2 つのキーを別の意味で使い回さないこと。</b>
+        //   .cgs には既にプレイヤーが選んだメートル値が入っており、
+        //   同じ名前を別の量に割り当てると**古い値が新しい意味で読まれる**
+        //   （設定の保存値は公開契約である。この MOD が一度踏んだ形）。
+        //   読まなくなっただけなので、.cgs から消す必要も無い。
 
         /// <summary>
         /// 準備（破壊）の前線が隆起の前線より何メートル先を走るか（m）。
@@ -178,6 +188,14 @@ namespace DisasterPlus.Game
         /// 噴火の描画は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
         /// </summary>
         public static SavedBool VolcanoEruptionFx;
+
+        /// <summary>
+        /// 噴煙の中の雷（火山雷）を描くか。**噴煙の描画とは別に切れる** ——
+        /// 閃光が苦手な人が居るので、噴煙ごと切らせるのは乱暴である。
+        /// <c>VolcanoEruptionFx</c> が切ってあれば、こちらが true でも何も描かない
+        /// （雷は噴煙の中にしか無い。<c>VolcanoCraterFx</c>）。
+        /// </summary>
+        public static SavedBool VolcanoLightningFx;
 
         /// <summary>
         /// 噴火の音を鳴らすか。**切っても隆起も溶岩も噴煙もそのまま動く** ——
@@ -380,12 +398,6 @@ namespace DisasterPlus.Game
             // ★ 保存値は公開契約。0=盾状 / 1=成層 / 2=溶岩ドーム の番号を詰め直さない。
             //    範囲外の値は VolcanoShape.FormOf が既定（成層）へ落とす。
             VolcanoShapeSetting = new SavedInt("volcanoShape", FileName, VolcanoShapeStrato, true);
-            // 単位はメートル。範囲は形態ごとに違うので、スライダーの範囲ではなく
-            // VolcanoShape.RadiusFor / HeightFor が使う側でクランプする
-            // （.cgs は手で編集されうる）。
-            VolcanoRadius = new SavedInt("volcanoRadius", FileName, 1200, true);
-            VolcanoHeight = new SavedInt("volcanoHeight", FileName, 600, true);
-
             // 準備の前線が隆起の前線より何メートル先を走るか。0 にすると
             // 「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
             VolcanoClearingLeadMetres = new SavedInt("volcanoClearLead", FileName, 96, true);
@@ -401,6 +413,8 @@ namespace DisasterPlus.Game
 
             // 噴煙を描くか。切っても隆起は止まらない（描画は main スレッドだけの機能）。
             VolcanoEruptionFx = new SavedBool("volcanoEruptionFx", FileName, true, true);
+            // 火山雷。既定 ON（噴煙の中で光るのは噴火の見どころである）。
+            VolcanoLightningFx = new SavedBool("volcanoLightningFx", FileName, true, true);
 
             // 斜面を下る土煙の帯を出すか。既定 ON。
             // ★ **新しいキーである。既存のキーの名前も既定値も 1 つも変えていない**

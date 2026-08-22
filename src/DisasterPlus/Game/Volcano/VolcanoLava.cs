@@ -232,6 +232,15 @@ namespace DisasterPlus.Game
         /// </summary>
         private static float _terrainRiseMetres;
 
+        /// <summary>
+        /// 1 本が歩いてよい歩数。**規模で決まる**
+        /// （<c>LavaVolume.StepBudget</c>。必ず <c>LavaPath.MaxSteps</c> 以下）。
+        /// <see cref="Reset"/> で <c>LavaPath.MaxSteps</c> に戻す ——
+        /// 0 に戻すと、何かの拍子で <c>Start</c> を通らずに進んだとき
+        /// **流れが 1 歩も進まない**。
+        /// </summary>
+        private static int _stepBudget = LavaPath.MaxSteps;
+
         private static bool _slopeSignVerified;
         private static bool _slopeSignWarned;
         private static string _lastFailure;
@@ -371,6 +380,7 @@ namespace DisasterPlus.Game
             _outsidePurchasedArea = false;
             _slopeSignVerified = false;
             _terrainRiseMetres = 0f;
+            _stepBudget = LavaPath.MaxSteps;
             _lastFailure = null;
 
             _trailPoints = new Vec2[0];
@@ -473,9 +483,19 @@ namespace DisasterPlus.Game
             _centre = footprint.Centre;
             _treesAvailable = ReadTreesAvailable();
 
-            int flows = ModSettings.VolcanoLavaFlows.value;
-            if (flows < 0) flows = 0;
-            if (flows > MaxFlows) flows = MaxFlows;
+            // ★★ **噴火の規模で本数を変える**（2026-08-22、所有者の依頼
+            //    「噴火の規模によって流れ出るマグマの量も変えてください」）。
+            //
+            //    規模に使うのは**山の半径**である（<c>LavaVolume</c> のクラス doc）。
+            //    噴出の強さ（<c>EruptionIntensityUnit</c>）ではない —— あれは噴火中に
+            //    ゆらぐので、それで本数を決めると**既に流れているものを消す**ことになる。
+            //    半径は置いた瞬間に決まって二度と動かない。
+            int flows = LavaVolume.FlowCount(ModSettings.VolcanoLavaFlows.value, MaxFlows,
+                                             footprint.RadiusMetres);
+
+            // ★ 長さの上限も規模で変える。**配列の長さを決めている
+            //   <c>LavaPath.MaxSteps</c> を超えない**（<c>LavaVolume.StepBudget</c> が担保）。
+            _stepBudget = LavaVolume.StepBudget(LavaPath.MaxSteps, footprint.RadiusMetres);
 
             if (flows == 0)
             {
@@ -594,7 +614,7 @@ namespace DisasterPlus.Game
             Ignite(next, travelled);
 
             var moved = new LavaFlow(true, next, travelled, steps, StopNone);
-            if (steps >= LavaPath.MaxSteps) return Stop(moved, StopSteps);
+            if (steps >= _stepBudget) return Stop(moved, StopSteps);
             return moved;
         }
 

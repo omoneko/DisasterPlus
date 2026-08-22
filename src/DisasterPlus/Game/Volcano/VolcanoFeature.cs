@@ -147,8 +147,17 @@ namespace DisasterPlus.Game
             //   設定で切った瞬間に自分で畳む（切ったまま噴煙が残らないこと）。
             //   描いているのは**ゲーム自身の粒子エフェクト**である（VolcanoEruptionFx）。
             bool eruptionFx = ModSettings.VolcanoEruptionFx.value;
-            if (eruptionFx) VolcanoEruptionFx.Update(VolcanoHub.Latest);
-            else VolcanoEruptionFx.Destroy();
+            if (eruptionFx)
+            {
+                VolcanoEruptionFx.Update(VolcanoHub.Latest);
+            }
+            else
+            {
+                VolcanoEruptionFx.Destroy();
+                // ★ 火口のマグマだまり・光・雷は噴煙の描画の中から呼ばれるので、
+                //   噴煙を切ったらこちらも自分で畳む（抱えたままにしない）。
+                VolcanoCraterFx.Destroy();
+            }
 
             // ★ 火砕流「もどき」の土煙。**別の設定で独立に切れる** ——
             //   帯 1 本あたり粒子数が大きく、切りたい人が居る見た目である。
@@ -206,6 +215,9 @@ namespace DisasterPlus.Game
 
             // ★ 噴火の描画側の時計を戻す。
             VolcanoEruptionFx.Destroy();
+            // ★ 火口の Mesh / Material / Texture2D も自分で Object.Destroy する
+            //   （どれも Component ではないので GameObject の道連れにならない）。
+            VolcanoCraterFx.Destroy();
             VolcanoPyroclasticFx.Destroy();
 
             // ★★ 借り物の複製（GameObject と、その内側に出来る粒子系）は自分で消す。
@@ -538,6 +550,15 @@ namespace DisasterPlus.Game
                 ? VolcanoVanillaFx.AshName + " (no DLC needed)" : "NOT resolved");
             // ★ 噴煙は 1 回ではなく「柱の段」で出す（Core/Volcano/EruptionColumn）。
             //   0 段なら柱は 1 本も立っていない ——「引けている」と「出ている」は別である。
+            // ★ 火口のマグマだまり・噴煙への光・火山雷（2026-08-22）。
+            //   **描いていないときも出す** ——「切ってある」「シェーダが引けない」
+            //   「今は光っていない」が、出さないとログ上で区別できない。
+            b.Line(3, "crater glow", VolcanoCraterFx.MaterialResolved
+                ? (VolcanoCraterFx.Drawing ? "drawing" : "idle (not erupting this frame)")
+                : "NO MATERIAL - the magma pool, the light and the lightning are not drawn");
+            b.Line(3, "volcanic lightning", ModSettings.VolcanoLightningFx.value
+                ? VolcanoCraterFx.BoltsDrawn + " bolt(s) lit this frame"
+                : "off (setting)");
             b.Line(3, "eruption column", VolcanoEruptionFx.PlumeSegments + " of "
                 + EruptionColumn.MaxSegments + " segment(s) this frame, "
                 + VolcanoEruptionFx.PlumeHeightMetres.ToString("F0") + " m tall");

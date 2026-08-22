@@ -10,11 +10,20 @@ namespace DisasterPlus.Core.Volcano
     /// 「強度」に相当する量が無い —— ⑤が持っているのは<b>形態・半径・最終高</b>で、
     /// それは設定画面にある。そこでスライダーを<b>設定のサイズに対する倍率</b>として読む。
     ///
-    ///   - <see cref="AnchorRaw"/>（55、ゲーム自身の既定値）＝ <b>設定どおりのサイズ</b>
+    ///   - <see cref="AnchorRaw"/>（55、表示 5.5。ゲーム自身の既定値）＝ <b>推奨サイズ</b>
     ///   - 生値が 2 倍なら山も 2 倍（半径も最終高も同じ倍率で伸びる）
     ///
-    /// **設定画面の半径・最終高が死んだつまみにならない**のが要点である。
-    /// スライダーはそこからの伸び縮みしか決めない。実際に何メートルになるかは
+    /// ── ★★ 基準は**形態ごとの推奨値**である（2026-08-22）──────────
+    ///
+    /// 以前は設定画面の「半径」「最終高」のスライダーが基準だった。所有者の指摘:
+    ///
+    /// > Option 画面で噴火半径と高さを変えられるようにしていますが、
+    /// > これだとスケール調整が意味なくなるので、推奨設定でここは固定してほしい
+    ///
+    /// そのとおりで、**同じ量を 2 つのつまみで決めさせていた**。今の基準は
+    /// <c>VolcanoShape.DefaultRadiusOf</c> / <c>DefaultHeightOf</c>（形態ごとの推奨値）で、
+    /// 大きさを決めるつまみは<b>スライダー 1 本だけ</b>である。
+    /// 実際に何メートルになるかは
     /// 形態ごとの帯（<see cref="VolcanoShape.RadiusFor"/> /
     /// <see cref="VolcanoShape.HeightFor"/>）が最後にクランプし、
     /// **クランプ後の実寸は火山タブの影響範囲の行と診断ダンプが名乗る**
@@ -32,11 +41,35 @@ namespace DisasterPlus.Core.Volcano
         /// <summary>倍率 1.0 に対応する生値。ゲーム自身の災害の既定強度と同じ 55。</summary>
         public const int AnchorRaw = 55;
 
-        /// <summary>いちばん小さくしたときの倍率。0 倍（＝何も起きない）にはしない。</summary>
-        public const float MinScale = 0.2f;
+        /// <summary>
+        /// バニラのスライダーの**下端の生値**（表示 1.0）。
+        /// バニラの災害パネルはここより小さい値を選べない。
+        /// </summary>
+        public const int MinRaw = 10;
 
-        /// <summary>いちばん大きくしたときの倍率。形態ごとの帯がさらに切る。</summary>
-        public const float MaxScale = 4f;
+        /// <summary>
+        /// 解放後の**上端の生値**（表示 25.5）。
+        /// <c>IntensityUnlock</c> が 100 → 255 へ上げている（強度は byte）。
+        /// </summary>
+        public const int MaxRaw = 255;
+
+        /// <summary>
+        /// いちばん小さくしたときの倍率。**スライダーの下端そのもの**である
+        /// （<see cref="MinRaw"/> / <see cref="AnchorRaw"/> ≒ 0.18）。
+        /// 0 倍（＝何も起きない）にはしない。
+        /// </summary>
+        public const float MinScale = MinRaw / (float)AnchorRaw;
+
+        /// <summary>
+        /// いちばん大きくしたときの倍率。**スライダーの上端そのもの**である
+        /// （<see cref="MaxRaw"/> / <see cref="AnchorRaw"/> ≒ 4.64）。
+        ///
+        /// ★★ <b>ここを 4 で切っていた頃は、スライダーの 22.0 以上が死んでいた</b>
+        ///   （2026-08-22 に直した）。形態ごとの帯（<c>VolcanoShape</c>）がどうせ切るので、
+        ///   ここで先に切る意味は無い —— 切ると「スライダーを動かしても何も変わらない帯」
+        ///   ができるだけである。
+        /// </summary>
+        public const float MaxScale = MaxRaw / (float)AnchorRaw;
 
         /// <summary>
         /// 生値から倍率へ。範囲外・負の値は帯へクランプする

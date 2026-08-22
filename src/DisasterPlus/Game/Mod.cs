@@ -268,15 +268,12 @@ namespace DisasterPlus.Game
             volcano.AddDropdown(Strings.VolcanoShapeSetting, volcanoShapes, currentShape,
                 v => ModSettings.VolcanoShapeSetting.value = v);
 
-            // ★ スライダーの範囲は 3 形態を合わせた外枠にしてある。**形態ごとの帯へ
-            //    絞るのは使う側（VolcanoShape.RadiusFor / HeightFor）の仕事**で、
-            //    .cgs は公開契約なので範囲外の値が入っていても読み捨てない。
-            volcano.AddSlider(Strings.VolcanoRadiusSetting, 250f, 3000f, 50f,
-                ModSettings.VolcanoRadius.value,
-                v => ModSettings.VolcanoRadius.value = (int)v);
-            volcano.AddSlider(Strings.VolcanoHeightSetting, 50f, 700f, 10f,
-                ModSettings.VolcanoHeight.value,
-                v => ModSettings.VolcanoHeight.value = (int)v);
+            // ★★ **半径と最終高のスライダーは撤去した**（2026-08-22）。
+            //    大きさを決めるつまみは**災害パネルの強度スライダー 1 本だけ**である。
+            //    基準は形態ごとの推奨値（<c>VolcanoShape.DefaultRadiusOf</c> /
+            //    <c>DefaultHeightOf</c>）。経緯は <c>VolcanoSizeScale</c> のクラス doc。
+            //    .cgs の volcanoRadius / volcanoHeight は**退役**であり、
+            //    別の意味で使い回さないこと（<c>ModSettings</c> の退役の覚書）。
 
             // ★ 準備が隆起より先行する距離（T5）。**下限は 0 ではなく 16 m** ——
             //    0 だと「何も壊さない → 何も上がらない → 進捗が動かない」の輪から
@@ -307,6 +304,11 @@ namespace DisasterPlus.Game
             //    切っても隆起は同じように進む（実機チェックリストの項目でもある）。
             volcano.AddCheckbox(Strings.VolcanoEruptionFx, ModSettings.VolcanoEruptionFx.value,
                 v => ModSettings.VolcanoEruptionFx.value = v);
+            // ★ 火山雷。噴煙の中でしか光らないので、噴煙を切ればこれも出ない。
+            //   別の設定にしてあるのは、閃光が苦手な人に噴煙ごと切らせないためである。
+            volcano.AddCheckbox(Strings.VolcanoLightningSetting,
+                ModSettings.VolcanoLightningFx.value,
+                v => ModSettings.VolcanoLightningFx.value = v);
 
             // ★ 斜面を下る土煙の帯（「火砕流」の代用）。**切っても噴火も溶岩も変わらない**
             //   —— この帯は何も壊さないし、ゲームに火砕流のエフェクトは 1 つも無い
