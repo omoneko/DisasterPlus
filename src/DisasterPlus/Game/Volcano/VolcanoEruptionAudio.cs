@@ -178,6 +178,24 @@ namespace DisasterPlus.Game
         private const float MinVolumeUnit = 0.35f;
 
         /// <summary>
+        /// 読み込んだ波形に掛ける倍率（2026-08-22、所有者の依頼
+        /// 「噴火の音が小さいです。もう倍くらいの音量にしてください」）。
+        ///
+        /// ★★ **<c>AddEvent</c> に渡す <c>volume</c> を上げては届かない。**
+        ///   あちらは既に噴出の強さで 1.0 まで使い切っており、
+        ///   1 を超えた値を <c>AudioSource.volume</c> が受け付けるかは
+        ///   Unity の native 側の実装に依り、**IL に出てこないのでこの MOD からは
+        ///   実測できない**。確かめられないものに 2 倍を賭けない。
+        ///   波形そのものを大きくすれば、効果音スライダーもミュートも
+        ///   距離減衰も今までどおり効いたままで、上がるのは大きさだけである。
+        ///
+        /// 単純に 2 倍すると割れる（素材のピークは既に 0.837）ので、
+        /// <see cref="LoudnessBoost"/> が小さい音だけを厳密に 2 倍にし、
+        /// ピークを 1 へ漸近させる（あちらのクラス doc に実測値）。
+        /// </summary>
+        private const float LoudnessGain = 2f;
+
+        /// <summary>
         /// <c>AudioInfo.m_fadeLength</c>（秒）。<c>PlayerData.m_fadeSpeed = 1 / これ</c>
         /// なので、**0 にしてはいけない**（除算が ∞ になり、フェードが消える）。
         /// 止めたときにこの秒数でフェードアウトして解放される。
@@ -466,6 +484,10 @@ namespace DisasterPlus.Game
             float[] samples = LoopSlice.Build(pcm.Samples, pcm.Channels, pcm.SampleRate,
                                               LoopStartSeconds, LoopLengthSeconds,
                                               LoopFadeSeconds);
+            // ★ 切り出しとクロスフェードの**あと**で掛ける。先に掛けると
+            //   フェードの乗算が膣の中で行われ、継ぎ目が滑らかでなくなる。
+            float boostedPeak = LoudnessBoost.Apply(samples, LoudnessGain);
+
             int frames = samples.Length / pcm.Channels;
             if (frames <= 0)
             {
@@ -516,10 +538,15 @@ namespace DisasterPlus.Game
             _clip = clip;
             _info = info;
 
+            // ★ 掛けた倍率と**実際に出たピーク**を出す。
+            //   1.00 に張り付いていたら素材が差し替わって膣を踏み抜いている
+            //   （<see cref="LoudnessBoost"/> は割らせないが、潰れていることは知らせる）。
             _detail = "loaded " + pcm.SampleRate + " Hz, " + pcm.Channels + " ch, "
                       + pcm.BitsPerSample + " bit, "
                       + pcm.LengthSeconds.ToString("F1") + " s source -> "
-                      + (frames / (float)pcm.SampleRate).ToString("F1") + " s loop";
+                      + (frames / (float)pcm.SampleRate).ToString("F1") + " s loop, "
+                      + "gain x" + LoudnessGain.ToString("F1")
+                      + " (peak " + boostedPeak.ToString("F2") + ")";
             Log.Info("volcano eruption sound: " + _detail);
         }
 
