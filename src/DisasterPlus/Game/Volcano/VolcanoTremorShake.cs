@@ -157,10 +157,15 @@ namespace DisasterPlus.Game
             CameraController controller = ResolveController();
             if (controller == null) return;
 
-            Vec3 vent = snapshot.VentWorld;
+            // ★★ **火口ではなく影響範囲の中心から測る。** <c>VolcanoSnapshot.VentWorld</c> は
+            //    噴火（正確には隆起）が始まるまで <c>(0,0,0)</c> のままである
+            //    （<c>VolcanoEruption.Tick</c> が呼ばれて初めて埋まる）。
+            //    そちらで測ると**準備の段の揺れが原点からの距離で減衰して消える** ——
+            //    「噴火の前から揺れている」がまるごと出なくなる。
+            Vec3 centre = snapshot.Footprint.Centre;
             Vector3 eye = cam.transform.position;
-            float dx = eye.x - vent.X;
-            float dz = eye.z - vent.Z;
+            float dx = eye.x - centre.X;
+            float dz = eye.z - centre.Z;
             float distance = Mathf.Sqrt(dx * dx + dz * dz);
 
             float reach = snapshot.Footprint.RadiusMetres * ReachRadiusFactor;
@@ -168,8 +173,8 @@ namespace DisasterPlus.Game
             if (!(attenuation > 0f)) return;
 
             uint seed = DeterministicRandom.Hash(
-                unchecked((uint)Mathf.RoundToInt(snapshot.Footprint.Centre.X)),
-                unchecked((uint)Mathf.RoundToInt(snapshot.Footprint.Centre.Z)));
+                unchecked((uint)Mathf.RoundToInt(centre.X)),
+                unchecked((uint)Mathf.RoundToInt(centre.Z)));
 
             float a = VolcanicTremor.DisplacementAt(seed, _clockSeconds, activity);
             float b = VolcanicTremor.DisplacementAt(seed, _clockSeconds + CrossPhaseSeconds,
