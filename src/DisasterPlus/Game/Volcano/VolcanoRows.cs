@@ -16,8 +16,8 @@ namespace DisasterPlus.Game
     /// 1 件も無い（IL 事実文書 §B-5）。つまり⑤が出す数値は**原則すべて本 MOD のもの**で、
     /// 全部が同じ出所なら行ごとの印は情報を持たない。
     ///
-    ///   - 出所は<b>見出しで一度だけ</b>言う（<c>Strings.VolcanoModelHeader</c> と
-    ///     <c>Strings.VolcanoModelNote</c>）
+    ///   - 出所を名乗る見出しは**パネルから外した**（2026-08-22）。
+    ///     今名乗っているのは下の「唯一の例外」の印と、診断ダンプである
     ///   - <b>行ごとの印は付けない</b>（<see cref="AddRow(UIPanel,string,ref float)"/> /
     ///     <see cref="SetPlain"/>）
     ///   - <b>唯一の例外</b>は、ゲームの配列から数えただけで⑤が何も計算していない値、
@@ -142,13 +142,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>節の見出し。中身は構築時に決まるのでここで入れてしまう。</summary>
-        internal static UILabel AddSectionHeader(UIPanel p, string suffix, ref float y, string text)
-        {
-            var label = AddLabel(p, suffix, RowLeft, y, RowWidth, RowHeight);
-            SetSectionHeader(label, text);
-            y += 26f;
-            return label;
-        }
 
         /// <summary>
         /// 節の見出しの飾り（<c>-- ... --</c>）を付けて入れる。
@@ -211,26 +204,5 @@ namespace DisasterPlus.Game
             SetPlain(label, Strings.SourceVanilla + " " + body);
         }
 
-        /// <summary>
-        /// パネル見出しの説明文を組み立てて入れる。
-        ///
-        /// ★★ **印は必ずここで挟む**（④の全体レビュー I5 と同じ罠）。翻訳文が印の
-        /// 文字列を直接持つと、<c>ja.txt</c> の <c>SourceVanilla</c> が「[実測]」なのに
-        /// 本文だけが英語の <c>[measured]</c> を案内する、という形で壊れる ——
-        /// **プレイヤーは画面に一度も出ない印を探すことになる。**
-        /// 翻訳文には印そのものではなく <c>Strings.MeasuredToken</c> を書き、
-        /// ここで <c>Strings.SourceVanilla</c> へ差し替える。翻訳がどう変わっても
-        /// 両者はずれない。トークンが無い翻訳文はそのまま出る（落ちない） ——
-        /// その取りこぼしは <c>tools\CheckLocales.ps1</c> が捕まえる。
-        ///
-        /// 呼び出し側（<see cref="VolcanoPanel"/>）に <c>Strings.SourceVanilla</c> を
-        /// 触らせないのは <see cref="SetMeasured"/> と同じ理由である
-        /// （印の出所を 1 ファイルに閉じる。クラス doc の grep 3）。
-        /// </summary>
-        internal static void SetModelNote(UILabel label)
-        {
-            SetPlain(label,
-                Strings.VolcanoModelNote.Replace(Strings.MeasuredToken, Strings.SourceVanilla));
-        }
     }
 }

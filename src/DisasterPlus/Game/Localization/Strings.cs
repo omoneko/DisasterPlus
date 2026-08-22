@@ -926,7 +926,6 @@ namespace DisasterPlus.Game
         public static string VolcanoButtonLabel = "Volcano";
         public static string VolcanoButtonTooltip =
             "Volcano: pick a size on the slider, then click the map. The terrain change is permanent.";
-        public static string VolcanoModelHeader = "Computed by Disaster +";
 
         // ★★ **この文に印の文字列そのものを書かないこと**（④の全体レビュー I5 と
         //    同じ罠）。ja.txt の SourceVanilla は「[実測]」なので、本文に英語の
@@ -934,10 +933,6 @@ namespace DisasterPlus.Game
         //    文字列を探すことになる**。翻訳文には MeasuredToken を置き、
         //    表示の直前に VolcanoRows.SetModelNote が SourceVanilla へ差し替える。
         //    tools\CheckLocales.ps1 がこのキーにトークンが在ることを検査する。
-        public static string VolcanoModelNote =
-            "The numbers on this panel come from Disaster +'s own model. The game does not "
-            + "compute a volcano, an uplift or a lava flow of its own. Only the rows marked "
-            + "{measured} are values read straight from the game.";
 
         // ★ **常設の警告**（設計書 §7.1）。火山が無いときも出す。
         //   「うるさいから」と条件付きにしないこと —— 利用者は「不可逆でよい」と
@@ -1027,9 +1022,6 @@ namespace DisasterPlus.Game
         //   途中で保存して読み直すと、火口も噴火も溶岩も無い切り株の山が、完成させる
         //   ことも消すこともできない形で残る。同じ場所に置き直すと**その上に積み上がる**
         //   （VolcanoUplift は「今の地形」を元の高さとして控え直す）。
-        public static string VolcanoSaveWarning =
-            "Do not save while it is being built: an unfinished volcano cannot be "
-            + "finished or removed.";
 
         // ★★ **退役（2026-08-21）。** 確認の窓と一緒に消えた。ポーズ中でも地図を
         //    クリックすれば火山は確定し、**解除した瞬間から動き出す**（バニラの災害と
@@ -1038,8 +1030,6 @@ namespace DisasterPlus.Game
 
         // ★ 走査が 1 tick ぶんの上限で打ち切られたとき。**影響範囲の概数は下限になる。**
         //   これを黙っていると、概数どころか「実際より少ない数」を確定値のように見せる。
-        public static string VolcanoSurveyCapped =
-            "The survey hit its limit, so the counts are a lower bound.";
 
         public static string VolcanoSegmentsUnknown =
             "(roads could not be counted, but they are destroyed too)";
@@ -1056,9 +1046,6 @@ namespace DisasterPlus.Game
             + "mountain would end up full of flat trenches and bowls.";
 
         // ★ §7.3。**不具合ではないと明示する**（①の「なぜハザードマップが空か」と同じ扱い）。
-        public static string VolcanoBuildabilityNote =
-            "Buildable ground and the water level catch up slowly (2 m per 64 frames). "
-            + "Not a bug.";
 
         // ★ §C-10。天井に当たっても例外は出ず**無言で山頂が平らな台地になる**ので、
         //   火山タブの影響範囲の行に添えて名乗る（確認の窓が無くなったので、
@@ -1074,7 +1061,6 @@ namespace DisasterPlus.Game
             "The settings changed, so the area was surveyed again.";
 
         /// <summary>ゲーム内の分。**実在の物理単位ではない**ので m/s の類とは扱いが違う。</summary>
-        public static string VolcanoMinutes = "in-game minutes";
 
         /// <summary>
         /// ゲーム内の時間。**「建てられる地面」の遅れはこちらで出す**（全体レビュー M13）——
@@ -1093,8 +1079,6 @@ namespace DisasterPlus.Game
         //   （設計書 §7.4。確認の 3 行だけが例外で、それは T4 の節にある）。
         public static string VolcanoClearingRow = "Clearing";
         public static string VolcanoClearedRadius = "Radius swept";
-        public static string VolcanoBuildingsDestroyed = "Buildings destroyed";
-        public static string VolcanoSegmentsDestroyed = "Roads destroyed";
 
         // ★ 計画の文言から**内容を変えてある**。計画は「シェルター・地下保管庫・ダムは
         //   壊せません」と書いていたが、それは④が demolish:false のときの挙動しか
@@ -1103,11 +1087,6 @@ namespace DisasterPlus.Game
         //   TsunamiBuoyAI の 5 つとも **demolish:true は受け付ける**
         //   （VolcanoClearing のクラス doc の 4）。名指しすると嘘になるので、
         //   「断られたものがあれば」という条件つきの一般形にしてある。
-        public static string VolcanoClearingRefusedRow = "Could not be removed";
-        public static string VolcanoClearingRefusedNote =
-            "Some of these the game itself refuses to remove. The ground under those stays at "
-            + "its original height while the rest of the mountain rises around them, and that "
-            + "is the game refusing rather than Disaster + failing.";
 
         // ★ 設計書 §1.2 そのもの。**「道路だけ諦めて隆起する」を選ばない**理由を書く。
         //
@@ -1128,10 +1107,6 @@ namespace DisasterPlus.Game
         //   **止まるのは「これからの破壊と隆起」だけ**で、既に変わったものは戻らない。
         //   それを言わずに [止める] だけ出すと「元に戻せる」と読まれる。
         public static string VolcanoStopButton = "Stop this volcano";
-        public static string VolcanoStopNote =
-            "Stopping only cancels what has not happened yet. The terrain that already rose, "
-            + "the roads and buildings that are already gone and the ground that is already "
-            + "scorched all stay as they are.";
 
         // --- ⑤火山（Task 6: 隆起） ---
         //
@@ -1144,14 +1119,11 @@ namespace DisasterPlus.Game
         public static string VolcanoUpliftRow = "Uplift";
         public static string VolcanoUpliftProgress = "Progress";
         public static string VolcanoSummitRow = "Summit";
-        public static string VolcanoActiveRadiusRow =
-            "Active radius (as far as the clearing has reached)";
         // ★ 2026-08-20 に意味が変わった行（実機の指摘⑤）。以前は「フットプリントを
         //   覆うタイルのうち何枚目か」だったが、⑤は今、**その tick に実際に変わった
         //   範囲だけ**を流す。プレイヤーにとって意味があるのは「変わった分が画面に
         //   出るまでに地形更新が何回要るか」で、1 なら同じ tick で全部出ている
         //   ＝ いちばん滑らかな状態である（VolcanoUplift のクラス doc）。
-        public static string VolcanoTilesRow = "Terrain updates per step";
         public static string VolcanoUpliftMinutes = "Time the uplift takes (in-game minutes)";
         public static string VolcanoReliefStrength = "Relief on the mountain's flanks (%, 0 = a smooth cone)";
 
@@ -1164,10 +1136,7 @@ namespace DisasterPlus.Game
 
         // ★ 設計書 §7.3 の見積り。**不具合ではない**ことは VolcanoBuildabilityNote が
         //   既に言っているので、ここは数字の見出しだけを持つ。
-        public static string VolcanoCatchUpRow = "Buildable ground catches up in";
-        public static string VolcanoFrames = "simulation frames";
 
-        public static string VolcanoCraterFormed = "The summit crater has reached its full depth.";
 
         // --- ⑤火山（Task 7: 噴火） ---
         //
@@ -1191,12 +1160,6 @@ namespace DisasterPlus.Game
         //    音源を同梱してバニラの効果音グループへ流し込むようになった。
         //    **ここは実測に合わせて直すこと** —— 出るものを「出ない」と書き続けるのは、
         //    出ないものを「出る」と書くのと同じ害である。
-        public static string VolcanoEruptionBorrowedNote =
-            "The ash plume, the flames and the flying debris are all the game's own particle "
-            + "effects, borrowed and placed at the crater - no DLC is needed for any of them. "
-            + "The game has no lava or magma effect of any kind, so the glowing lava surface "
-            + "is still Disaster +'s own. The sound is Disaster +'s own file, played through "
-            + "the game's effect audio group, so your effect volume and mute apply to it.";
 
         // --- ⑤火山（火砕流の代用）---
         //
@@ -1206,13 +1169,6 @@ namespace DisasterPlus.Game
         public static string VolcanoPyroclasticSetting =
             "Show a dust surge fanning out down the slopes";
 
-        public static string VolcanoPyroclasticNote =
-            "The game has no pyroclastic flow effect - not in the base game and not in any "
-            + "DLC. What runs down the slopes is the game's own building-collapse dust, sent "
-            + "out in lobes that fan across the flanks and widen as they descend, only partly "
-            + "drawn toward the valleys the lava found. It looks like grey dust clouds "
-            + "sweeping down the mountain, and it damages nothing: only the lava sets "
-            + "anything on fire.";
 
         // ★ バニラのエフェクトが 1 つも引けなかったときの断り。**噴火は続く。**
         public static string VolcanoEffectsMissing =
@@ -1228,19 +1184,11 @@ namespace DisasterPlus.Game
         public static string VolcanoLavaFlowsSetting = "Number of lava flows (0 = off)";
         public static string VolcanoLavaFireSetting = "Lava sets fire to what it touches";
         public static string VolcanoLavaLongest = "Longest flow";
-        public static string VolcanoLavaIgnited = "Set on fire";
 
         // ★ **短くしないこと。** 「木が燃えない」を「不具合」と読まれないための
         //   唯一の説明であり、ND DLC 非所持が正常であることを名乗る場所である（§B-7c）。
-        public static string VolcanoTreesNeedDlc =
-            "Trees do not catch fire without the Natural Disasters DLC. The game refuses to "
-            + "burn them, so Disaster + leaves them standing rather than pretending. The "
-            + "ground still scorches and buildings still catch fire.";
 
         // ★ 道路が燃えないのは⑤の手抜きではなく、ゲームに API が無いためである（§B-7d）。
-        public static string VolcanoLavaRoadsNote =
-            "Roads do not burn - the game has no API for it at all. Only the roads inside the "
-            + "volcano's own footprint are removed, and that happens during the clearing phase.";
 
         // --- ⑤火山（Task 9: 溶岩の描画） ---
         //
@@ -1253,7 +1201,6 @@ namespace DisasterPlus.Game
         public static string VolcanoQuakeRow = "Volcanic earthquakes";
 
         public static string VolcanoLavaRenderSetting = "Draw the lava surface";
-        public static string VolcanoLavaRenderRow = "Lava surface";
 
         // ★ 見えないことを黙らない。**流れも焦げも着火も変わらない**ことを同時に言う。
         public static string VolcanoLavaNoMaterial =

@@ -12,13 +12,15 @@ namespace DisasterPlus.Game
     ///
     /// ── ここが守っている 4 つの約束（設計書 §7）───────────────────────
     ///
-    /// 1. **行ごとの出所の印は付けない。** ⑤の数値は原則すべて本 MOD のもので、
-    ///    それはパネルの見出し（<c>VolcanoModelNote</c>）が一度だけ名乗る。
+    /// 1. **行ごとの出所の印は付けない。** ⑤の数値は原則すべて本 MOD のものである
+    ///    （見出しの 2 行は 2026-08-22 に外した。<see cref="VolcanoPanel"/> の doc）。
     ///    <b>このファイルに <c>SetMeasured</c> の呼び出しは 1 つも無い</b> ——
     ///    形態も半径も最終高も、⑤が設定から決めた数字である。
-    /// 2. **不可逆の警告は常に出す。** 火山が無いときも出す（設計書 §7.1）。
-    ///    利用者は「地形は不可逆でよい」と判断したが、**それはプレイヤーに黙って
-    ///    いてよいという意味ではない。** この行を条件付きにしないこと。
+    /// 2. **不可逆の警告はこのタブから外した**（2026-08-22、所有者の依頼
+    ///    「細かい説明やデバッグはゲーム内では表示不要」）。
+    ///    同じ文は**オプション画面の見出し**に残してあり
+    ///    （<c>Mod.cs</c> の <c>Strings.VolcanoIrreversibleWarning</c>）、診断ダンプにもある。
+    ///    **黙ってはいない** —— 読む場所を遊んでいる画面から外しただけである。
     /// 3. **読めない値は数字にしない。** スナップショットがまだ無いときは
     ///    <c>VolcanoWaiting</c>、読めなかったときは <c>VolcanoUnavailable</c>。
     ///    「まだ読んでいない」と「読めない」を同じ文言にしない（①②が確立した規律）。
@@ -35,7 +37,6 @@ namespace DisasterPlus.Game
     {
         private static UILabel _stateLabel;
         private static UILabel _shapeLabel;
-        private static UILabel _irreversibleLabel;
 
         /// <summary>パネル構築時に 1 回。行は常に作り、中身の有無で出し分ける。</summary>
         internal static void Build(UIPanel p, ref float y)
@@ -47,10 +48,10 @@ namespace DisasterPlus.Game
 
             _shapeLabel = VolcanoRows.AddRow(p, "Shape", ref y);
 
-            // ★★ 常設の不可逆警告（クラス doc の約束 2 / 設計書 §7.1）。
-            //    火山が無いときも出るよう、構築時に一度入れて以後触らない。
-            _irreversibleLabel = VolcanoRows.AddRow(p, "Irreversible", ref y, 40f);
-            VolcanoRows.SetPlain(_irreversibleLabel, Strings.VolcanoIrreversibleWarning);
+            // ★★ **常設の不可逆警告は外した**（2026-08-22、所有者の依頼
+            //    「細かい説明やデバッグはゲーム内では表示不要」）。
+            //    内容は診断ダンプ（note: unfinished volcano ほか）と
+            //    オプション画面に残っている。
         }
 
         /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
@@ -191,7 +192,6 @@ namespace DisasterPlus.Game
         {
             _stateLabel = null;
             _shapeLabel = null;
-            _irreversibleLabel = null;
         }
     }
 }

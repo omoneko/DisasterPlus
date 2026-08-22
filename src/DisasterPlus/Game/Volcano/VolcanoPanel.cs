@@ -12,14 +12,17 @@ namespace DisasterPlus.Game
     /// <c>backgroundSprite = "MenuPanel2"</c>、本体を組まない <see cref="_bodyBuilt"/>、
     /// <c>Tick()</c> の先頭で設定を見るガード）。
     ///
-    /// ── ⑤が名乗る 2 つのこと ────────────────────────────────
+    /// ── ★★ 出所の見出しと常設の不可逆警告は外した（2026-08-22）──────
     ///
-    /// 1. **出所の見出し。** ⑤の数値は原則すべて本 MOD のもので、行ごとの印は付けない
-    ///    （設計書 §7.4）。代わりに<b>見出しで一度だけ</b>名乗る ——
-    ///    <c>Strings.VolcanoModelHeader</c> と <c>Strings.VolcanoModelNote</c> の 2 行。
-    /// 2. **地形の変更は取り消せない。** これは<b>火山が無いときも常に出す</b>
-    ///    （設計書 §7.1、<see cref="VolcanoStatusRows"/>）。「うるさいから」と
-    ///    条件付きにしないこと。
+    /// 所有者の依頼「D＋タブ内の火山の細かい説明やデバッグは
+    /// ゲーム内では表示不要」による。代わりに:
+    ///
+    ///   - 出所 … 影響範囲の行に付く <c>[実測]</c> の印（<b>印の仕組みは
+    ///     1 バイトも変えていない</b>）と、診断ダンプ・オプション画面
+    ///   - 不可逆 … オプション画面の見出し（<c>Strings.VolcanoIrreversibleWarning</c>）
+    ///     と診断ダンプ
+    ///
+    /// **行ごとの印を付けない規律そのものは生きている。**
     ///
     /// 担保の実体は <see cref="VolcanoRows"/> に置いてある。
     /// **このファイルには <c>UILabel</c> の生成も <c>.text</c> への代入も 1 つも無い。**
@@ -212,13 +215,10 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ ⑤の表示規約を名乗る 2 行。**行ごとの印を付けない代わりに、
-            //     ここで一度だけ全部の出所を言う**（クラス doc / 設計書 §7.4）。
-            VolcanoRows.AddSectionHeader(panel, "ModelHeader", ref y, Strings.VolcanoModelHeader);
-            var note = VolcanoRows.AddRow(panel, "ModelNote", ref y, 56f);
-            // ★ 印（[measured] / [実測]）を挟むのは VolcanoRows の仕事である。
-            //   ここで文を組み立てない（あちらの SetModelNote の doc）。
-            VolcanoRows.SetModelNote(note);
+            // ★★ **出所を名乗る 2 行も外した**（2026-08-22）。
+            //    ⑤の数値がゲームの実測ではないことは、影響範囲の行に付く
+            //    [実測] の印と、診断ダンプとオプション画面が引き続き名乗る。
+            //    印の仕組みそのもの（<c>VolcanoRows</c>）は 1 バイトも変えていない。
 
             // ★★ **火山を設置するボタンはここには無い。** 置くのは災害パネルの
             //    ⑤タイル（バニラの災害ボタンと同じ 3 手）だけである。このパネルは

@@ -44,14 +44,29 @@ namespace DisasterPlus.Game
     /// 止まるのは「これからの破壊と隆起」だけである（<c>Strings.VolcanoStopNote</c>）。
     ///
     /// ★ 確認の窓が無くなった今、**[止める] が唯一の「やめる」経路である。**
+    ///
+    /// ★★ **ここに置くのは「今何が起きているか」だけである**（2026-08-22）。
+    ///
+    /// 所有者の依頼: 「D＋タブ内の火山の細かい説明やデバッグは
+    /// ゲーム内では表示不要かと思われます」。
+    ///
+    /// 以前は 24 行あった。その大半は**普通に動いているときの振る舞いの説明**
+    /// （木に火が付かない理由、道路が燃えない理由、建てられる地面の遅れ、
+    /// 火砕流の代用の断り……）と**進行中のカウンタ**（壊した数、有効半径、
+    /// タイル数、描いた点の数……）で、どちらも遊んでいる最中に読むものではない。
+    ///
+    /// ★ <b>捨ててはいない。</b> 全部 <c>VolcanoFeature.WriteDiagnostics</c> の
+    ///   診断ダンプに入っており、診断タブのボタン 1 つで書き出せる。
+    ///   この MOD が禁じているのは「黙って何もしない」であって、
+    ///   「遊んでいる画面に全部出す」ではない。
+    ///
+    /// ★ <b>残したのは 2 種類だけ</b>: 今の段の状態と、**失敗を名乗る行**である。
+    ///   後者は実際に壊れているときしか出ないので、普段は 1 行も場所を取らない。
     /// </summary>
     internal static class VolcanoEffectRows
     {
         /// <summary>説明文の行の高さ（3 行ぶん折り返す想定）。</summary>
         private const float NoteHeight = 52f;
-
-        /// <summary>追随の遅れの行の高さ（数字 ＋ 説明文で 4 行ぶん）。</summary>
-        private const float CatchUpHeight = 72f;
 
         /// <summary>長い注記の行の高さ（道路の断りと噴火の注記。4〜5 行ぶん）。</summary>
         private const float LongNoteHeight = 72f;
@@ -62,31 +77,17 @@ namespace DisasterPlus.Game
         private const float StopButtonHeight = 28f;
 
         private static UILabel _footprintLabel;
-        private static UILabel _footprintNoteLabel;
         private static UILabel _clearingLabel;
-        private static UILabel _clearingCountsLabel;
-        private static UILabel _clearingRefusedNoteLabel;
-        private static UILabel _clearingCappedLabel;
         private static UILabel _upliftLabel;
-        private static UILabel _upliftRadiusLabel;
-        private static UILabel _catchUpLabel;
-        private static UILabel _craterLabel;
         private static UILabel _quakeLabel;
         private static UILabel _eruptionLabel;
-        private static UILabel _eruptionNoteLabel;
-        private static UILabel _eruptionMissingLabel;
-        private static UILabel _pyroclasticNoteLabel;
         private static UILabel _lavaLabel;
-        private static UILabel _lavaIgnitedLabel;
-        private static UILabel _lavaTreesNoteLabel;
-        private static UILabel _lavaRoadsNoteLabel;
-        private static UILabel _lavaSurfaceLabel;
+
+        // 失敗を名乗る 3 行。**実際に壊れているときしか出ない。**
+        private static UILabel _eruptionMissingLabel;
         private static UILabel _lavaNoMaterialLabel;
         private static UILabel _clearingPathLabel;
 
-        // ── 進行中の火山を止める一式（全体レビュー I5）────────────────────
-        private static UILabel _saveWarningLabel;
-        private static UILabel _stopNoteLabel;
         private static UIButton _stopButton;
 
         private static float _blockTop;
@@ -107,64 +108,32 @@ namespace DisasterPlus.Game
         {
             _blockTop = y;
 
-            // ★★ 撤去した確認の窓から降りてきた 2 行（2026-08-21）。
-            //    調査がゲームの配列から数えた実数なので、⑤で唯一 [実測] が付く行である
-            //    （VolcanoRows のクラス doc の grep 5）。
+            // ★★ **今何が起きているかだけ**（クラス doc）。
+            //    説明とカウンタは診断ダンプにある。
+
+            // 影響範囲。調査がゲームの配列から数えた実数なので、
+            // ⑤で唯一 [実測] が付く行である（<c>VolcanoRows</c> の grep 5）。
             _footprintLabel = VolcanoRows.AddMeasuredRow(p, "EffectFootprint", ref y);
-            _footprintNoteLabel = VolcanoRows.AddRow(p, "EffectFootprintNote", ref y, NoteHeight);
 
             _clearingLabel = VolcanoRows.AddRow(p, "EffectClearing", ref y);
-            _clearingCountsLabel = VolcanoRows.AddRow(p, "EffectClearingCounts", ref y);
-            _clearingRefusedNoteLabel =
-                VolcanoRows.AddRow(p, "EffectClearingRefused", ref y, NoteHeight);
-            _clearingCappedLabel = VolcanoRows.AddRow(p, "EffectClearingCapped", ref y, NoteHeight);
-
-            // ── 隆起（T6）────────────────────────────────────
             _upliftLabel = VolcanoRows.AddRow(p, "EffectUplift", ref y);
-            _upliftRadiusLabel = VolcanoRows.AddRow(p, "EffectUpliftRadius", ref y);
-            // 追随の遅れの行は数字と説明を両方持つので、注記より 1 行ぶん高くする。
-            _catchUpLabel = VolcanoRows.AddRow(p, "EffectCatchUp", ref y, CatchUpHeight);
-            _craterLabel = VolcanoRows.AddRow(p, "EffectCrater", ref y);
 
-            // ── 噴火（T7）────────────────────────────────────
             // ★ 火山性地震は**噴火の前（隆起）から後（冷却）まで**続くので、
             //   噴火の行より上に置く（時間の順に並べる）。
             _quakeLabel = VolcanoRows.AddRow(p, "EffectQuake", ref y);
-
             _eruptionLabel = VolcanoRows.AddRow(p, "EffectEruption", ref y);
-            // ★ 「ゲームに溶岩も噴火も無い」を名乗る注記。4 行ぶん折り返す。
-            _eruptionNoteLabel =
-                VolcanoRows.AddRow(p, "EffectEruptionNote", ref y, LongNoteHeight);
-            // ★ バニラのエフェクトが 1 つも引けなかったときだけ出す断り。
+            _lavaLabel = VolcanoRows.AddRow(p, "EffectLava", ref y);
+
+            // ── 失敗を名乗る 3 行。**壊れているときしか場所を取らない** ─────
+            //    この 3 つを消すと、この MOD がいちばん避けている
+            //    「黙って何もしない」になる。説明を減らすのとは別の話である。
             _eruptionMissingLabel =
                 VolcanoRows.AddRow(p, "EffectEruptionMissing", ref y, NoteHeight);
-            // ★★ 「火砕流」と名乗るものが火砕流ではないことを名乗る唯一の行。
-            _pyroclasticNoteLabel =
-                VolcanoRows.AddRow(p, "EffectPyroclastic", ref y, LongNoteHeight);
-
-            // ── 溶岩（T8）────────────────────────────────────
-            _lavaLabel = VolcanoRows.AddRow(p, "EffectLava", ref y);
-            _lavaIgnitedLabel = VolcanoRows.AddRow(p, "EffectLavaIgnited", ref y);
-            // ★ ND 非所持で木が燃えないことの説明。**不具合ではない**（§B-7c）。
-            _lavaTreesNoteLabel = VolcanoRows.AddRow(p, "EffectLavaTrees", ref y, NoteHeight);
-            // ★ 道路が燃えないことの説明。ゲームに API が無い（§B-7d）。
-            _lavaRoadsNoteLabel = VolcanoRows.AddRow(p, "EffectLavaRoads", ref y, NoteHeight);
-
-            // ── 溶岩の描画（T9）──────────────────────────────
-            // ★ このファイルで溶岩の描画側を参照するのはこの 2 行だけである
-            //   （T9 の独立性。あちらのクラス doc の grep）。
-            _lavaSurfaceLabel = VolcanoRows.AddRow(p, "EffectLavaSurface", ref y);
-            _lavaNoMaterialLabel = VolcanoRows.AddRow(p, "EffectLavaNoMaterial", ref y, NoteHeight);
-
-            // ★ **道路と建物を取り除けない環境の断り**。これだけは位相に関係なく出す
-            //    （設計書 §1.2）。黙って火山を作らないのがいちばん悪い。
+            _lavaNoMaterialLabel = VolcanoRows.AddRow(p, "EffectLavaNoMaterial", ref y,
+                                                      NoteHeight);
             _clearingPathLabel = VolcanoRows.AddRow(p, "EffectClearingPath", ref y,
                                                     LongNoteHeight);
 
-            // ★★ 進行中だけ出す一式（全体レビュー I5 / I6）。
-            //    セーブの警告を**進行中にも**出すのは、そこが実際に押される瞬間だからである。
-            _saveWarningLabel = VolcanoRows.AddRow(p, "EffectSaveWarning", ref y, LongNoteHeight);
-            _stopNoteLabel = VolcanoRows.AddRow(p, "EffectStopNote", ref y, NoteHeight);
             _stopButton = AddStopButton(p, y);
             y += StopButtonHeight + 10f;
 
@@ -216,19 +185,6 @@ namespace DisasterPlus.Game
                     + " / " + s.Footprint.RadiusMetres.ToString("F0") + " "
                     + Strings.VolcanoMetres);
 
-                y = ReflowRow(y, _clearingCountsLabel,
-                    Strings.VolcanoBuildingsDestroyed + ": " + s.BuildingsDestroyed
-                    + "    " + Strings.VolcanoSegmentsDestroyed + ": " + s.SegmentsDestroyed
-                    + "    " + Strings.VolcanoClearingRefusedRow + ": " + s.BuildingsRefused);
-
-                // ★ 0 のときは注記を出さない。**断られたものが在るときだけ**説明する
-                //   （常に出すと「必ず何か残る」と読める）。
-                y = ReflowNote(y, _clearingRefusedNoteLabel,
-                    s.BuildingsRefused > 0 ? Strings.VolcanoClearingRefusedNote : "");
-
-                y = ReflowNote(y, _clearingCappedLabel,
-                    s.ClearingCapped ? Strings.VolcanoSurveyCapped : "");
-
                 y = RefreshUplift(y, s);
                 y = RefreshQuake(y, s);
                 y = RefreshEruption(y, s);
@@ -237,22 +193,12 @@ namespace DisasterPlus.Game
             else
             {
                 y = ReflowMeasured(y, _footprintLabel, "");
-                y = ReflowNote(y, _footprintNoteLabel, "");
                 y = ReflowRow(y, _clearingLabel, "");
-                y = ReflowRow(y, _clearingCountsLabel, "");
-                y = ReflowNote(y, _clearingRefusedNoteLabel, "");
-                y = ReflowNote(y, _clearingCappedLabel, "");
                 y = ReflowRow(y, _upliftLabel, "");
-                y = ReflowRow(y, _upliftRadiusLabel, "");
-                y = Reflow(y, _catchUpLabel, "", CatchUpHeight, CatchUpHeight + 4f);
-                y = ReflowRow(y, _craterLabel, "");
+                y = ReflowRow(y, _quakeLabel, "");
                 y = ReflowRow(y, _eruptionLabel, "");
-                y = Reflow(y, _eruptionNoteLabel, "", LongNoteHeight, LongNoteHeight + 4f);
+                y = ReflowNote(y, _eruptionMissingLabel, "");
                 y = ReflowRow(y, _lavaLabel, "");
-                y = ReflowRow(y, _lavaIgnitedLabel, "");
-                y = ReflowNote(y, _lavaTreesNoteLabel, "");
-                y = ReflowNote(y, _lavaRoadsNoteLabel, "");
-                y = ReflowRow(y, _lavaSurfaceLabel, "");
                 y = ReflowNote(y, _lavaNoMaterialLabel, "");
             }
 
@@ -278,20 +224,6 @@ namespace DisasterPlus.Game
         {
             bool stoppable = InProgress(s.Phase)
                              && VolcanoHub.PendingRequest.Kind == VolcanoRequest.None;
-
-            // ★ セーブの警告は**山がまだ出来上がっていない間だけ**出す（全体レビュー I6）。
-            //   噴火と溶岩まで来ていれば地形はもう最終形なので、そこで保存しても
-            //   残るのは「噴火と溶岩を見損ねた完成した山」であって、
-            //   火口の無い切り株ではない。噴火・溶岩の段はここに長い注記が 2 つ出るので、
-            //   条件を絞ることでパネルが画面より高くなるのも避けている。
-            bool halfBuilt = s.Phase == VolcanoPhase.Clearing
-                             || s.Phase == VolcanoPhase.Uplifting;
-
-            y = Reflow(y, _saveWarningLabel,
-                halfBuilt ? Strings.VolcanoSaveWarning : "",
-                LongNoteHeight, LongNoteHeight + 4f);
-
-            y = ReflowNote(y, _stopNoteLabel, stoppable ? Strings.VolcanoStopNote : "");
 
             if (_stopButton == null) return y;
 
@@ -344,11 +276,7 @@ namespace DisasterPlus.Game
         private static float RefreshFootprint(float y, VolcanoSnapshot s)
         {
             VolcanoFootprint f = s.Footprint;
-            if (!f.Valid)
-            {
-                y = ReflowMeasured(y, _footprintLabel, "");
-                return ReflowNote(y, _footprintNoteLabel, "");
-            }
+            if (!f.Valid) return ReflowMeasured(y, _footprintLabel, "");
 
             string body = Strings.VolcanoFootprintRow + ": "
                           + FormLabel(f.Form)
@@ -359,6 +287,13 @@ namespace DisasterPlus.Game
                           + "    " + Strings.VolcanoBuildingsRow + " " + f.BuildingCount
                           + " / " + Strings.VolcanoSegmentsRow + " "
                           + (f.SegmentCount < 0 ? "?" : f.SegmentCount.ToString());
+
+            // ★★ **ゲームの高さの天井（1024 m）で山頂が削られたときだけ、行に足す。**
+            //    これは「普通の振る舞いの説明」ではなく、**設定した高さが
+            //    そのままは届かない**という結果の違いである（クラス doc の「失敗を名乗る行」側）。
+            //    天井を MOD から上げられない理由は <c>UpliftSchedule.CeilingClipped</c> の doc。
+            //    行を増やさず末尾に付ける。
+            if (f.HeightLimitedByCeiling) body += "   " + Strings.VolcanoHeightLimited;
 
             if (f.SegmentCount < 0)
             {
@@ -371,15 +306,7 @@ namespace DisasterPlus.Game
                 y = ReflowMeasured(y, _footprintLabel, body);
             }
 
-            string note = "";
-            if (f.Capped) note = Strings.VolcanoSurveyCapped;
-            if (f.HeightLimitedByCeiling)
-            {
-                note = note.Length == 0
-                    ? Strings.VolcanoHeightLimited
-                    : note + " " + Strings.VolcanoHeightLimited;
-            }
-            return ReflowNote(y, _footprintNoteLabel, note);
+            return y;
         }
 
         /// <summary>
@@ -409,14 +336,7 @@ namespace DisasterPlus.Game
         private static float RefreshUplift(float y, VolcanoSnapshot s)
         {
             bool uplifting = s.Phase != VolcanoPhase.Clearing;
-            if (!uplifting)
-            {
-                y = ReflowRow(y, _upliftLabel, "");
-                y = ReflowRow(y, _upliftRadiusLabel, "");
-                y = Reflow(y, _catchUpLabel, "", CatchUpHeight, CatchUpHeight + 4f);
-                y = ReflowRow(y, _craterLabel, "");
-                return y;
-            }
+            if (!uplifting) return ReflowRow(y, _upliftLabel, "");
 
             y = ReflowRow(y, _upliftLabel,
                 Strings.VolcanoUpliftRow + ": " + Strings.VolcanoUpliftProgress + " "
@@ -426,16 +346,6 @@ namespace DisasterPlus.Game
                 + " / " + s.Footprint.HeightMetres.ToString("F0") + " "
                 + Strings.VolcanoMetres);
 
-            y = ReflowRow(y, _upliftRadiusLabel,
-                Strings.VolcanoActiveRadiusRow + ": "
-                + s.ActiveRadiusMetres.ToString("F0") + " " + Strings.VolcanoMetres
-                // ★ 1 なら「その tick に変わった分が同じ tick で画面に出た」。
-                //   2 以上なら分割して順番に流しており、目に見える 1 段はその
-                //   回数ぶんの上昇量になる（VolcanoUplift のクラス doc）。
-                + "    " + Strings.VolcanoTilesRow + ": " + s.UpliftTileCount);
-
-            y = Reflow(y, _catchUpLabel, CatchUpText(s), CatchUpHeight, CatchUpHeight + 4f);
-            y = ReflowRow(y, _craterLabel, s.CraterFormed ? Strings.VolcanoCraterFormed : "");
             return y;
         }
 
@@ -486,10 +396,7 @@ namespace DisasterPlus.Game
             if (!erupting)
             {
                 y = ReflowRow(y, _eruptionLabel, "");
-                y = Reflow(y, _eruptionNoteLabel, "", LongNoteHeight, LongNoteHeight + 4f);
-                y = ReflowNote(y, _eruptionMissingLabel, "");
-                y = Reflow(y, _pyroclasticNoteLabel, "", LongNoteHeight, LongNoteHeight + 4f);
-                return y;
+                return ReflowNote(y, _eruptionMissingLabel, "");
             }
 
             // 0〜10 の段階。0.0 でも「1 段」と言わないよう、素直に四捨五入する。
@@ -497,9 +404,6 @@ namespace DisasterPlus.Game
 
             y = ReflowRow(y, _eruptionLabel,
                 Strings.VolcanoEruptionRow + ": " + stage.ToString("F1") + " / 10");
-
-            y = Reflow(y, _eruptionNoteLabel, Strings.VolcanoEruptionBorrowedNote,
-                       LongNoteHeight, LongNoteHeight + 4f);
 
             // ★ 引けなかったときだけ断る。**引けている環境で毎回読ませない。**
             //   設定で切っているだけのときも出さない（「切ってある」と
@@ -509,10 +413,6 @@ namespace DisasterPlus.Game
                 fxOn && !VolcanoEruptionFx.Facts.EruptionUsable
                     ? Strings.VolcanoEffectsMissing : "");
 
-            // ★★ 火砕流の代用であることを名乗る。**出しているあいだだけ。**
-            y = Reflow(y, _pyroclasticNoteLabel,
-                ModSettings.VolcanoPyroclasticFx.value ? Strings.VolcanoPyroclasticNote : "",
-                LongNoteHeight, LongNoteHeight + 4f);
             return y;
         }
 
@@ -531,12 +431,7 @@ namespace DisasterPlus.Game
             if (!flowing || s.LavaFlowCount <= 0)
             {
                 y = ReflowRow(y, _lavaLabel, "");
-                y = ReflowRow(y, _lavaIgnitedLabel, "");
-                y = ReflowNote(y, _lavaTreesNoteLabel, "");
-                y = ReflowNote(y, _lavaRoadsNoteLabel, "");
-                y = ReflowRow(y, _lavaSurfaceLabel, "");
-                y = ReflowNote(y, _lavaNoMaterialLabel, "");
-                return y;
+                return ReflowNote(y, _lavaNoMaterialLabel, "");
             }
 
             y = ReflowRow(y, _lavaLabel,
@@ -544,53 +439,16 @@ namespace DisasterPlus.Game
                 + "    " + Strings.VolcanoLavaLongest + ": "
                 + s.LavaLongestMetres.ToString("F0") + " " + Strings.VolcanoMetres);
 
-            y = ReflowRow(y, _lavaIgnitedLabel,
-                Strings.VolcanoLavaIgnited + ": " + s.LavaBuildingsIgnited + " / "
-                + s.LavaTreesIgnited);
-
-            y = ReflowNote(y, _lavaTreesNoteLabel,
-                s.LavaTreesAvailable ? "" : Strings.VolcanoTreesNeedDlc);
-
-            y = ReflowNote(y, _lavaRoadsNoteLabel, Strings.VolcanoLavaRoadsNote);
-
-            // ★ 溶岩の描画（T9）。**設定で切っているときは行ごと出さない** ——
-            //   「描いていない」と「切ってある」を混ぜない。
-            bool renderOn = ModSettings.VolcanoLavaRender.value;
-            y = ReflowRow(y, _lavaSurfaceLabel, renderOn
-                ? Strings.VolcanoLavaRenderRow + ": " + VolcanoLavaFx.PointsDrawn
-                : "");
-
             // マテリアルを作れなかったときだけ説明する。**流れも焦げも着火も
             //   変わらない**ことを同時に言う（Strings.VolcanoLavaNoMaterial）。
+            //   設定で描画を切っているときは出さない ——
+            //   「切ってある」と「この環境では出せない」を混ぜない。
             y = ReflowNote(y, _lavaNoMaterialLabel,
-                renderOn && !VolcanoLavaFx.MaterialResolved
+                ModSettings.VolcanoLavaRender.value && !VolcanoLavaFx.MaterialResolved
                     ? Strings.VolcanoLavaNoMaterial : "");
             return y;
         }
 
-        /// <summary>
-        /// 「建てられる地面」と水位の遅れ（設計書 §7.3、§A-2 / §A-4）。**不具合ではない。**
-        ///
-        /// ★ 換算は <c>FeatureHost.FramesPerMinute</c> から出す。**定数を直書きしない**
-        ///   （③でこれを直書きして 4 倍ずれた前科がある）。読めないときは
-        ///   **フレーム数だけを出す** —— 出せない値を 0 として出さない。
-        /// </summary>
-        private static string CatchUpText(VolcanoSnapshot s)
-        {
-            int frames = s.Footprint.BlockHeightCatchUpFrames;
-            if (frames <= 0) return "";
-
-            string text = Strings.VolcanoCatchUpRow + ": " + frames + " " + Strings.VolcanoFrames;
-
-            float framesPerMinute = FeatureHost.FramesPerMinute;
-            if (framesPerMinute > 0f)
-            {
-                text += " (" + (frames / framesPerMinute).ToString("F0") + " "
-                        + Strings.VolcanoMinutes + ")";
-            }
-
-            return text + "  " + Strings.VolcanoBuildabilityNote;
-        }
 
         /// <summary>「進行中」の位相か。**壊し始めてからの 5 つ**である。</summary>
         private static bool InProgress(VolcanoPhase phase)
@@ -662,27 +520,14 @@ namespace DisasterPlus.Game
         {
             _showing = visible;
             SetLabelVisible(_footprintLabel, visible);
-            SetLabelVisible(_footprintNoteLabel, visible);
             SetLabelVisible(_clearingLabel, visible);
-            SetLabelVisible(_clearingCountsLabel, visible);
-            SetLabelVisible(_clearingRefusedNoteLabel, visible);
-            SetLabelVisible(_clearingCappedLabel, visible);
             SetLabelVisible(_upliftLabel, visible);
-            SetLabelVisible(_upliftRadiusLabel, visible);
-            SetLabelVisible(_catchUpLabel, visible);
-            SetLabelVisible(_craterLabel, visible);
             SetLabelVisible(_quakeLabel, visible);
             SetLabelVisible(_eruptionLabel, visible);
-            SetLabelVisible(_eruptionNoteLabel, visible);
+            SetLabelVisible(_eruptionMissingLabel, visible);
             SetLabelVisible(_lavaLabel, visible);
-            SetLabelVisible(_lavaIgnitedLabel, visible);
-            SetLabelVisible(_lavaTreesNoteLabel, visible);
-            SetLabelVisible(_lavaRoadsNoteLabel, visible);
-            SetLabelVisible(_lavaSurfaceLabel, visible);
             SetLabelVisible(_lavaNoMaterialLabel, visible);
             SetLabelVisible(_clearingPathLabel, visible);
-            SetLabelVisible(_saveWarningLabel, visible);
-            SetLabelVisible(_stopNoteLabel, visible);
 
             // ★ 見えないボタンがクリックを拾える経路を残さない
             //   （見えないボタンがクリックを拾える経路を残さない）。
@@ -706,27 +551,14 @@ namespace DisasterPlus.Game
         internal static void Destroy()
         {
             _footprintLabel = null;
-            _footprintNoteLabel = null;
             _clearingLabel = null;
-            _clearingCountsLabel = null;
-            _clearingRefusedNoteLabel = null;
-            _clearingCappedLabel = null;
             _upliftLabel = null;
-            _upliftRadiusLabel = null;
-            _catchUpLabel = null;
-            _craterLabel = null;
             _quakeLabel = null;
             _eruptionLabel = null;
-            _eruptionNoteLabel = null;
+            _eruptionMissingLabel = null;
             _lavaLabel = null;
-            _lavaIgnitedLabel = null;
-            _lavaTreesNoteLabel = null;
-            _lavaRoadsNoteLabel = null;
-            _lavaSurfaceLabel = null;
             _lavaNoMaterialLabel = null;
             _clearingPathLabel = null;
-            _saveWarningLabel = null;
-            _stopNoteLabel = null;
             _stopButton = null;
             _blockTop = 0f;
             _blockBottom = 0f;
