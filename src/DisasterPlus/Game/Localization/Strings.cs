@@ -1139,6 +1139,13 @@ namespace DisasterPlus.Game
         public static string VolcanoUpliftMinutes = "Time the uplift takes (in-game minutes)";
         public static string VolcanoReliefStrength = "Relief on the mountain's flanks (%, 0 = a smooth cone)";
 
+        // ★★ ⑤を構えているあいだの強度スライダーの説明。**言葉はここ 1 行だけ**で、
+        //    ラベルには数字（倍率と実寸）しか出さない（VolcanoSizeReadout のクラス doc）。
+        //    スライダーは 2026-08-21 から既に大きさのつまみだったが、画面のどこにも
+        //    そう書いていなかった —— それが 2026-08-22 の指摘④である。
+        public static string VolcanoSizeSliderTooltip =
+            "Volcano size: the slider scales the radius and height set in the options.";
+
         // ★ 設計書 §7.3 の見積り。**不具合ではない**ことは VolcanoBuildabilityNote が
         //   既に言っているので、ここは数字の見出しだけを持つ。
         public static string VolcanoCatchUpRow = "Buildable ground catches up in";
@@ -1223,6 +1230,12 @@ namespace DisasterPlus.Game
         //
         // ★ T9 は他のどのタスクからも依存されない。**この 3 キーと設定 1 個と
         //   VolcanoFeature の 4 行を消せば、T9 を丸ごと落としても T1〜T8 は動く。**
+        // ★★ 火山性地震。**②の設定とは無関係に効く**（VolcanoTremorShake のクラス doc）。
+        //    「建物は壊さない」を必ず書く —— 地震と名の付くものが被害を出さないのは
+        //    プレイヤーの予想と違うので、設定画面で先に言っておかないと不具合に見える。
+        public static string VolcanoQuakeSetting = "Volcanic earthquakes (shaking only)";
+        public static string VolcanoQuakeRow = "Volcanic earthquakes";
+
         public static string VolcanoLavaRenderSetting = "Draw the lava surface";
         public static string VolcanoLavaRenderRow = "Lava surface";
 

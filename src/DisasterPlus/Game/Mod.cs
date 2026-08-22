@@ -342,6 +342,13 @@ namespace DisasterPlus.Game
                 ModSettings.VolcanoLavaRender.value,
                 v => ModSettings.VolcanoLavaRender.value = v);
 
+            // ★ 火山性地震。②の設定とは無関係に効く（VolcanoTremorShake のクラス doc）。
+            //   ラベルに「揺れるだけ」と畳んである —— 説明の 1 行より、選ぶ対象の
+            //   名前に書いてあるほうが短くて確実である（このメソッドの doc の規律）。
+            volcano.AddCheckbox(Strings.VolcanoQuakeSetting,
+                ModSettings.VolcanoQuake.value,
+                v => ModSettings.VolcanoQuake.value = v);
+
             // ★★ 設定画面でも不可逆であることを名乗る（設計書 §7.1）。
             //    パネルの警告はパネルを開いた人しか読まない。
             helper.AddGroup(Strings.VolcanoIrreversibleWarning);

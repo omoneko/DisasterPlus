@@ -215,6 +215,19 @@ namespace DisasterPlus.Game
         /// </summary>
         public static SavedBool VolcanoPyroclasticFx;
 
+        /// <summary>
+        /// 火山性地震（群発 ＋ 微動）でカメラを揺らすか。**既定 ON。**
+        ///
+        /// ★ 既定 ON にできる理由は②の <c>EarthquakeShakeBoost</c> と違う。
+        ///   あちらは<b>バニラの地震のカメラ揺れを差し替える</b>ので、既定を変えると
+        ///   MOD を入れた人のバニラ体験が変わる。⑤の火山は
+        ///   **プレイヤーが自分で起こした⑤自身の現象**で、揺れないほうが不自然である。
+        ///
+        /// ★ 切ると揺れが止まるだけ。**建物は元から 1 棟も壊していない**
+        ///   （<c>VolcanoTremorShake</c> のクラス doc）。
+        /// </summary>
+        public static SavedBool VolcanoQuake;
+
         /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
         public const int VolcanoShapeShield = 0;
         public const int VolcanoShapeStrato = 1;
@@ -406,6 +419,11 @@ namespace DisasterPlus.Game
             VolcanoLavaFire = new SavedBool("volcanoLavaFire", FileName, true, true);
             // 溶岩の面を描くか。切っても溶岩は流れる（描画は main スレッドだけの機能）。
             VolcanoLavaRender = new SavedBool("volcanoLavaRender", FileName, true, true);
+
+            // 火山性地震（群発＋微動）でカメラを揺らすか。既定 ON。
+            // ★ **新しいキーである。既存のキーの名前も既定値も 1 つも変えていない**
+            //   （.cgs は公開契約で、番号も文字列も詰め直さない）。
+            VolcanoQuake = new SavedBool("volcanoQuake", FileName, true, true);
 
             _ready = true;
         }

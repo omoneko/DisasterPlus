@@ -71,6 +71,7 @@ namespace DisasterPlus.Game
         private static UILabel _upliftRadiusLabel;
         private static UILabel _catchUpLabel;
         private static UILabel _craterLabel;
+        private static UILabel _quakeLabel;
         private static UILabel _eruptionLabel;
         private static UILabel _eruptionNoteLabel;
         private static UILabel _eruptionMissingLabel;
@@ -126,6 +127,10 @@ namespace DisasterPlus.Game
             _craterLabel = VolcanoRows.AddRow(p, "EffectCrater", ref y);
 
             // ── 噴火（T7）────────────────────────────────────
+            // ★ 火山性地震は**噴火の前（隆起）から後（冷却）まで**続くので、
+            //   噴火の行より上に置く（時間の順に並べる）。
+            _quakeLabel = VolcanoRows.AddRow(p, "EffectQuake", ref y);
+
             _eruptionLabel = VolcanoRows.AddRow(p, "EffectEruption", ref y);
             // ★ 「ゲームに溶岩も噴火も無い」を名乗る注記。4 行ぶん折り返す。
             _eruptionNoteLabel =
@@ -225,6 +230,7 @@ namespace DisasterPlus.Game
                     s.ClearingCapped ? Strings.VolcanoSurveyCapped : "");
 
                 y = RefreshUplift(y, s);
+                y = RefreshQuake(y, s);
                 y = RefreshEruption(y, s);
                 y = RefreshLava(y, s);
             }
@@ -444,6 +450,33 @@ namespace DisasterPlus.Game
         /// ★ 注記は**噴火の段のあいだだけ**出す。常に出すと、山を作っている間ずっと
         ///   「ゲームに溶岩は無い」と言い続けることになる。
         /// </summary>
+        /// <summary>
+        /// 火山性地震の 1 行。**揺れの強さ 0〜10** で、実在の震度でもマグニチュードでもない
+        /// （⑤が決めた量である。設計書 §7.4 の規律）。
+        ///
+        /// ★ 読むのは <c>VolcanoTremorShake</c> が main スレッドで書いた値で、
+        ///   このパネルも main スレッドである（<c>VolcanoPanel.Tick</c>）。
+        ///
+        /// ★ 設定で切っているあいだは**行ごと出さない** ——
+        ///   「0 / 10」は「揺れていない」であって「切ってある」ではない。
+        /// </summary>
+        private static float RefreshQuake(float y, VolcanoSnapshot s)
+        {
+            if (!ModSettings.VolcanoQuake.value)
+            {
+                return ReflowRow(y, _quakeLabel, "");
+            }
+
+            float activity = VolcanoTremorShake.ActivityUnit;
+            if (!(activity > 0f))
+            {
+                return ReflowRow(y, _quakeLabel, "");
+            }
+
+            return ReflowRow(y, _quakeLabel,
+                Strings.VolcanoQuakeRow + ": " + (activity * 10f).ToString("F1") + " / 10");
+        }
+
         private static float RefreshEruption(float y, VolcanoSnapshot s)
         {
             // ★ T8 で位相を絞った。噴火の段のあいだだけ出す —— 溶岩が流れている間は
@@ -638,6 +671,7 @@ namespace DisasterPlus.Game
             SetLabelVisible(_upliftRadiusLabel, visible);
             SetLabelVisible(_catchUpLabel, visible);
             SetLabelVisible(_craterLabel, visible);
+            SetLabelVisible(_quakeLabel, visible);
             SetLabelVisible(_eruptionLabel, visible);
             SetLabelVisible(_eruptionNoteLabel, visible);
             SetLabelVisible(_lavaLabel, visible);
@@ -681,6 +715,7 @@ namespace DisasterPlus.Game
             _upliftRadiusLabel = null;
             _catchUpLabel = null;
             _craterLabel = null;
+            _quakeLabel = null;
             _eruptionLabel = null;
             _eruptionNoteLabel = null;
             _lavaLabel = null;

@@ -5,55 +5,90 @@ grid = 16 m (the game's own terrain grid)
 
 ## shield  R=2000 m  H=200 m
   gullies             : 8 channels, ~864 m apart at 0.55R
-  finest wavelength   : 170 m (11 cells)
-  max height relief=1 : 198.8792 m   (ceiling H = 200)
+  rills               : 14 rills, ~763 m apart at 0.85R, full depth only beyond 275 m (0.14R)
+  finest wavelength   : 99 m (6.2 cells)
+  extrema density     : 0.021 / 0.007   (relief=1 / relief=0; 0.5 = checkerboard)
+  max height relief=1 : 198.8759 m   (ceiling H = 200)
   max height relief=0 : 200.0000 m
   max height beyond R : 0.0000 m   (must be 0)
   relief=0 vs today   : max |diff| = 0 m   (must be 0)
   cross-section @0.55R = 1100 m:
     smooth cone       : 162.8 m
-    deepest gully     : 141.1 m  (-21.7 m, azimuth 180 deg)
-    highest interfluve: 157.6 m  (-5.1 m)
-    ridge-to-valley   : 16.5 m
+    deepest gully     : 140.0 m  (-22.8 m, azimuth 323 deg)
+    highest interfluve: 157.1 m  (-5.6 m)
+    ridge-to-valley   : 17.1 m
+    ring @0.85R      : 17 troughs around the circle, 14.3 m ridge-to-valley
+  continuity        : along-groove 0.000 (0 = a solid groove, 0.5 = dots), troughs @0.85R 12, @0.70R 19
+  continuity(off)   : along-groove 0.000 (0 = a solid groove, 0.5 = dots), troughs @0.85R 0, @0.70R 0
+    groove persistence (1.0 = every trough continues into the next 16 m ring = a solid line; master's single tier scores 0.856):
+      relief=1  inner 0.15-0.50R 0.776 | outer 0.50-0.98R 0.873
     mean slope        : 5.7 deg (smooth cone)
     footprint radius  : min 1890 m / max 2000 m  (R = 2000)
 
 ## strato  R=1200 m  H=600 m
   gullies             : 18 channels, ~230 m apart at 0.55R
-  finest wavelength   : 110 m (7 cells)
-  max height relief=1 : 594.9014 m   (ceiling H = 600)
+  rills               : 24 rills, ~267 m apart at 0.85R, full depth only beyond 428 m (0.36R)
+  finest wavelength   : 64 m (4.0 cells)
+  extrema density     : 0.086 / 0.012   (relief=1 / relief=0; 0.5 = checkerboard)
+  max height relief=1 : 595.2767 m   (ceiling H = 600)
   max height relief=0 : 600.0000 m
   max height beyond R : 0.0000 m   (must be 0)
   relief=0 vs today   : max |diff| = 0 m   (must be 0)
   cross-section @0.55R = 660 m:
     smooth cone       : 306.8 m
-    deepest gully     : 195.7 m  (-111.2 m, azimuth 342 deg)
-    highest interfluve: 283.1 m  (-23.7 m)
-    ridge-to-valley   : 87.4 m
+    deepest gully     : 191.5 m  (-115.3 m, azimuth 25 deg)
+    highest interfluve: 281.3 m  (-25.5 m)
+    ridge-to-valley   : 89.8 m
+    ring @0.85R      : 30 troughs around the circle, 64.6 m ridge-to-valley
+  continuity        : along-groove 0.002 (0 = a solid groove, 0.5 = dots), troughs @0.85R 28, @0.70R 34
+  continuity(off)   : along-groove 0.000 (0 = a solid groove, 0.5 = dots), troughs @0.85R 0, @0.70R 0
+    groove persistence (1.0 = every trough continues into the next 16 m ring = a solid line; master's single tier scores 0.856):
+      relief=1  inner 0.15-0.50R 0.897 | outer 0.50-0.98R 0.832
     mean slope        : 26.6 deg (smooth cone)
     footprint radius  : min 1080 m / max 1200 m  (R = 1200)
 
 ## dome  R=350 m  H=300 m
   gullies             : 10 channels, ~121 m apart at 0.55R
-  finest wavelength   : 110 m (7 cells)
+  rills               : 16 would only fit outside 306 m, too thin a ring, so NONE are drawn (16 m grid)
+  finest wavelength   : 64 m (4.0 cells)
+  extrema density     : 0.056 / 0.042   (relief=1 / relief=0; 0.5 = checkerboard)
   max height relief=1 : 290.8618 m   (ceiling H = 300)
   max height relief=0 : 298.5903 m
   max height beyond R : 0.0000 m   (must be 0)
   relief=0 vs today   : max |diff| = 0 m   (must be 0)
   cross-section @0.55R = 192 m:
     smooth cone       : 150.2 m
-    deepest gully     : 86.1 m  (-64.1 m, azimuth 78 deg)
+    deepest gully     : 84.8 m  (-65.4 m, azimuth 73 deg)
     highest interfluve: 130.8 m  (-19.5 m)
-    ridge-to-valley   : 44.6 m
+    ridge-to-valley   : 46.0 m
+    ring @0.85R      : 8 troughs around the circle, 20.9 m ridge-to-valley
+  continuity        : along-groove 0.000 (0 = a solid groove, 0.5 = dots), troughs @0.85R 5, @0.70R 6
+  continuity(off)   : along-groove 0.000 (0 = a solid groove, 0.5 = dots), troughs @0.85R 0, @0.70R 0
+    groove persistence (1.0 = every trough continues into the next 16 m ring = a solid line; master's single tier scores 0.856):
+      relief=1  inner 0.15-0.50R 0.950 | outer 0.50-0.98R 0.834
     mean slope        : 40.6 deg (smooth cone)
     footprint radius  : min 298 m / max 350 m  (R = 350)
 
+## grid limit (how fine the 16 m terrain grid honestly carries)
+  extrema density = slope reversals per cell along a 4 km line
+  0.5 = a reversal at every cell = a checkerboard, not relief
+  wavelength m | cells | extrema density | verdict
+           32  |   2.0 |           0.380 | REFUSED (below MinWavelengthMetres)
+           48  |   3.0 |           0.267 | REFUSED (below MinWavelengthMetres)
+           64  |   4.0 |           0.196 | the floor we ship
+           80  |   5.0 |           0.157 | usable
+          110  |   6.9 |           0.125 | usable
+          170  |  10.6 |           0.086 | usable
+
+  azimuthal floor = 96 m (6.0 cells); it fades, it is not a hard floor, because the
+  azimuthal wavelength shrinks towards the summit (2 pi d / order)
+
 ## growth (strato, summit-outward)
   progress | summit m | front m (first cell that reaches 0) | raised cells
-     0.12   |   72.0  |  218   |  526
-     0.30   |   180.0  |  403   |  1654
-     0.50   |   300.0  |  626   |  3929
-     0.72   |   432.0  |  882   |  8063
+     0.12   |   72.0  |  218   |  530
+     0.30   |   180.0  |  401   |  1652
+     0.50   |   300.0  |  625   |  3702
+     0.72   |   432.0  |  875   |  7635
      1.00   |   600.0  |  1199   |  15730
 
 ## crater (strato, part of the profile from the first tick)
@@ -85,9 +120,33 @@ grid = 16 m (the game's own terrain grid)
 
 ## pyroclastic fan (strato, intensity 1.0, 4 lava flows)
   lobes            : 6
-  lava covers      : 0.338 km2
-  the fan covers   : 4.242 km2  (12.5x the lava)
-  of that, on lava : 7 %   (the rest is flank the lava never touched)
+  lava covers      : 0.335 km2
+  the fan covers   : 4.303 km2  (12.9x the lava)
+  of that, on lava : 8 %   (the rest is flank the lava never touched)
+
+## ejecta (strato, R=1200 m, H=600 m, vent 540 m above the base)
+  blocks per blast: 5 (weakest) .. 16 (strongest)
+  bands           : range 0.2 .. 0.9 R, elevation 42 .. 65 deg
+  strongest : range 255 .. 1642 m (mean 876), 22 % land beyond the foot, longest flight 27.0 s
+              : 0 of 384 blocks pass through the ground (deepest 0 m)
+  weak      : range 126 .. 1201 m (mean 611), 0 % land beyond the foot, longest flight 22.9 s
+              : 0 of 216 blocks pass through the ground (deepest 0 m)
+
+## volcanic tremor (swarm + harmonic tremor)
+  sampled at 60 fps (the rate the camera shake runs at)
+  activity | peak | rms  | quiet windows of 1 s (must be 0)
+     0.18  | 0.09 | 0.03 | 0
+     0.45  | 0.24 | 0.07 | 0
+     0.75  | 0.39 | 0.11 | 0
+     1.00  | 0.52 | 0.15 | 0
+  attenuation (reach = 4.5 R; outside it is exactly 0):
+        0 m -> 1.00
+      900 m -> 0.78
+     1800 m -> 0.44
+     2700 m -> 0.23
+     3600 m -> 0.11
+     4500 m -> 0.04
+     5400 m -> 0.00
 
 ## uplift pacing (strato, R = 1200 m, H = 600 m, 30 in-game minutes)
   in-game duration is UNCHANGED: 30 in-game minutes = 1365 sim frames
@@ -99,16 +158,16 @@ grid = 16 m (the game's own terrain grid)
   rise per tick (m)     |   7.06 |   1.76
   VISIBLE step, summit  |  28.25 |   7.05   <- the complaint
   VISIBLE step, flank   |  28.23 |   7.05
-  visible updates, summit|     22 |    263
-  visible updates, flank |      8 |     50
-  UpdateArea calls      |     94 |    341
-  flushed cells / frame | 442.96 | 850.16
+  visible updates, summit|     22 |    266
+  visible updates, flank |      8 |     51
+  UpdateArea calls      |     94 |    343
+  flushed cells / frame | 442.96 | 853.74
   biggest single flush  |   9801 |   9801   (cap 10000, side cap 128)
 
   interval | ticks | rise/tick m | VISIBLE step m | flushed cells/frame
-      16 |     85 |   7.06 |  28.23 | 225.87
-       8 |    170 |   3.53 |  14.12 | 427.47
-       4 |    341 |   1.76 |   7.05 | 850.16
-       2 |    682 |   0.88 |   3.53 | 1693.59
-       1 |   1365 |   0.44 |   1.77 | 3395.06
+      16 |     85 |   7.06 |  28.25 | 213.63
+       8 |    170 |   3.53 |  14.12 | 421.64
+       4 |    341 |   1.76 |   7.05 | 853.74
+       2 |    682 |   0.88 |   3.53 | 1698.68
+       1 |   1365 |   0.44 |   1.77 | 3389.09
 

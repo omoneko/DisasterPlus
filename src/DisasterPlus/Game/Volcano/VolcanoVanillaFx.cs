@@ -540,7 +540,8 @@ namespace DisasterPlus.Game
                             : (_umbrellaCloneRefused ? "shares the column clone" : "not yet"))
                        + ", flames=" + (_flameOk ? "shared" : "MISSING")
                        + ", ejecta=" + State(_ejectaOk, _ejectaCloned, _ejectaCloneRefused)
-                       + ", dust=" + State(_dustOk, _dustCloned, _dustCloneRefused);
+                       + ", dust=" + State(_dustOk, _dustCloned, _dustCloneRefused)
+                       + ", " + BlastDetail;
             }
         }
 
@@ -609,6 +610,9 @@ namespace DisasterPlus.Game
             ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
             ReleaseAndDestroy(ref _ejectaObject, ref _ejectaClone);
             ReleaseAndDestroy(ref _dustObject, ref _dustClone);
+
+            // ★ 爆発と噴石（VolcanoVanillaFx.Blast.cs）の後始末。
+            DestroyBlast();
 
             // ★ 炎は**借りているだけ**なので Release も Destroy もしない
             //   （こちらが初期化していないものを解放すると、ゲームの建物火災を止める）。
