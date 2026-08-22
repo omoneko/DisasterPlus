@@ -46,21 +46,84 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>MOD の配置フォルダ。Workshop 版とローカル版の両方に対応する。</summary>
+        /// <summary>
+        /// 一度引けた MOD フォルダ。**セッション中は変わらない**（Workshop の
+        /// フォルダもローカルのフォルダもゲームの起動中に移動しない）ので控えておく。
+        /// **null は控えない** —— まだ <c>PluginManager</c> が出来ていないだけかもしれず、
+        /// 控えると「一度早く呼んだせいで以後ずっと無い」を作ることになる。
+        /// </summary>
+        private static string _modPath;
+
+        /// <summary>
+        /// MOD の配置フォルダ。Workshop 版とローカル版の両方に対応する。
+        /// 引けなければ null（呼び出し側は次の機会に引き直してよい）。
+        ///
+        /// ── ★★ <c>GetInstances&lt;Mod&gt;()</c> は**必ず空を返す**（IL 実測）────────
+        ///
+        /// 2026-08-22 まで、ここは <c>p.GetInstances&lt;Mod&gt;()</c> が 1 個でも返した
+        /// プラグインの <c>modPath</c> を採っていた。**1 度も返らない。**
+        /// <c>PluginManager.PluginInfo.GetInstances&lt;T&gt;()</c> の中身は
+        ///
+        /// <code>
+        /// foreach (Type t in assembly.GetExportedTypes())
+        ///     if (!t.IsClass || t.IsAbstract) continue;
+        ///     Type[] ifaces = t.GetInterfaces();
+        ///     if (!ifaces.Contains(typeof(T))) continue;          ★ ここ
+        ///     if (ifaces.Contains(PluginManager.userModType))
+        ///         list.Add(this.userModInstance as T);
+        ///     else list.Add(CreateInstance&lt;T&gt;(t.GetConstructor(Type.EmptyTypes)));
+        /// </code>
+        ///
+        /// で、<b><c>T</c> は「その型が実装している<u>インタフェース</u>」の中から
+        /// 探される</b>。<see cref="Mod"/> は <c>class</c> なので、どの型の
+        /// <c>GetInterfaces()</c> にも入っていない ⇒ 常に空配列 ⇒ 常に null が返っていた。
+        ///
+        /// 目に見えた影響は 2 つ:
+        ///   - <c>Locales\ja.txt</c> が**一度も読まれていなかった**（英語の既定値のまま）
+        ///   - <c>Audio\erupting-volcano.wav</c> が見つからず、噴火が無音だった
+        ///     （実機ログ「the mod folder could not be resolved」）
+        ///
+        /// ★ 直し方は <c>GetInstances&lt;IUserMod&gt;()</c> ではなく
+        ///   <c>PluginInfo.ContainsAssembly(Assembly)</c> にした。あちらは
+        ///   <c>m_Assemblies</c> の**参照比較**だけで（IL 実測）、型の走査も
+        ///   インスタンス生成も起こさない。**この DLL が入っているプラグインを
+        ///   直接指す**ので、インタフェースの実装状況にも <c>isEnabled</c> にも依らない。
+        ///
+        /// ★ <c>Assembly.Location</c> は使えない。<c>PluginManager.LoadPlugin</c> が
+        ///   <c>Assembly.Load(File.ReadAllBytes(path))</c> でバイト列から読むので
+        ///   （IL 実測）、MOD のアセンブリの <c>Location</c> は**空文字**である。
+        ///
+        /// ★ <c>isEnabled</c> は見ない。このコードが動いている時点でこの MOD は
+        ///   有効であり、しかも <c>get_isEnabled</c> は <c>SavedBool</c> を作って
+        ///   設定ファイルを読む（IL 実測）——**判定に要らない I/O** である。
+        /// </summary>
         public static string ModDirectoryPath()
         {
-            foreach (var p in PluginManager.instance.GetPluginsInfo())
+            if (_modPath != null) return _modPath;
+
+            try
             {
-                if (p == null || !p.isEnabled) continue;
-                try
+                if (!PluginManager.exists) return null;
+
+                Assembly self = typeof(LocaleLoader).Assembly;
+                foreach (var p in PluginManager.instance.GetPluginsInfo())
                 {
-                    foreach (var inst in p.GetInstances<Mod>())
-                    {
-                        if (inst != null) return p.modPath;
-                    }
+                    if (p == null) continue;
+
+                    bool mine;
+                    try { mine = p.ContainsAssembly(self); }
+                    catch { continue; /* 壊れた MOD の列挙で落ちない */ }
+                    if (!mine) continue;
+
+                    string path = p.modPath;
+                    if (string.IsNullOrEmpty(path)) continue;
+
+                    _modPath = path;
+                    return _modPath;
                 }
-                catch { /* 壊れた MOD の列挙で落ちない */ }
             }
+            catch { /* PluginManager がまだ出来ていない等。次の機会に引き直す */ }
+
             return null;
         }
 
