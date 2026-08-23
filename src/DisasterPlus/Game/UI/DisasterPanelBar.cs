@@ -506,13 +506,24 @@ namespace DisasterPlus.Game
             b.focusedBgSprite = sample.focusedBgSprite;
             b.disabledBgSprite = sample.disabledBgSprite;
 
-            // **前景スプライトは 1 つも指定しない**（クラス doc）。見分けは文字で付ける。
+            // **バニラの前景スプライトは 1 つも指定しない**（クラス doc）。
+            // 名前を当てにいくと「見えないタイル」になり得るし、④と⑤は
+            // バニラに存在しない災害なので、当てにいく絵がそもそも無い。
             b.textScale = 0.7f;
             b.wordWrap = true;
             b.textHorizontalAlignment = UIHorizontalAlignment.Center;
             b.textVerticalAlignment = UIVerticalAlignment.Middle;
             b.textPadding = new RectOffset(4, 4, 4, 4);
             b.text = e.Label();
+
+            // ★★ **絵を載せる**（2026-08-22、所有者の依頼「タブアイコンの火山と
+            //    台風をイラストにしてほしい」）。絵は自前で描いたもので
+            //    （<c>Core/Common/DisasterIconArt</c>）、貼るのは <c>UITextureSprite</c>。
+            //
+            //    ★ 載らなかったら**文字のまま**にする。上で先に <c>text</c> を
+            //      入れてあるのはそのためで、黙って空のタイルにはしない。
+            if (AttachIcon(e, b)) b.text = "";
+
             ApplyGate(e, b);
 
             // ラムダを直接渡さずフィールドに持つ。作り替えを検出したときに
@@ -522,6 +533,45 @@ namespace DisasterPlus.Game
             b.eventClick += captured.Handler;
 
             e.Button = b;
+        }
+
+        /// <summary>
+        /// タイルに自前の絵を貼る。貼れたら true。
+        ///
+        /// ★ <c>UITextureSprite</c> は**クリックを飲まない**ようにする
+        ///   （<c>isInteractive = false</c>）。飲むと、絵の上を押しても
+        ///   タイルが反応しない —— サイレン MOD が同じ場所で同じことをしている。
+        ///
+        /// ★ 大きさはタイルの 7 割。文字の余白（<c>textPadding</c>）と同じ考え方で、
+        ///   バニラのタイルの絵もタイルいっぱいには描かれていない。
+        /// </summary>
+        private static bool AttachIcon(Entry e, UIButton button)
+        {
+            try
+            {
+                Texture2D tex = null;
+                if (e.Id == IdVolcano) tex = DisasterTileIcons.Volcano;
+                else if (e.Id == IdTyphoon) tex = DisasterTileIcons.Typhoon;
+
+                if (tex == null) return false;
+
+                var icon = button.AddUIComponent<UITextureSprite>();
+                icon.name = e.ComponentName + "Icon";
+                icon.texture = tex;
+                icon.isInteractive = false;
+
+                float side = Mathf.Min(button.size.x, button.size.y) * 0.70f;
+                icon.size = new Vector2(side, side);
+                icon.relativePosition = new Vector3((button.size.x - side) * 0.5f,
+                                                    (button.size.y - side) * 0.5f);
+                return true;
+            }
+            catch (System.Exception ex)
+            {
+                Log.Warn("the disaster tile icon could not be attached ("
+                         + ex.GetType().Name + "); the tile keeps its text label");
+                return false;
+            }
         }
 
         /// <summary>
@@ -535,7 +585,11 @@ namespace DisasterPlus.Game
                 Entry e = Entries[i];
                 if (e.Button == null) continue;
 
-                string label = e.Label();
+                // ★ 絵が載っているタイルに文字を戻さない。**両方出ると重なる。**
+                //   ツールチップ（下の ApplyGate と Tooltip）は言語に追従する。
+                bool hasIcon = e.Button.Find<UIComponent>(e.ComponentName + "Icon") != null;
+
+                string label = hasIcon ? "" : e.Label();
                 if (e.Button.text != label) e.Button.text = label;
 
                 ApplyGate(e, e.Button);

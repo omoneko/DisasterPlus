@@ -245,6 +245,10 @@ namespace DisasterPlus.Game
             // 機能の解体が済んでから撤去する。次の都市が必ず「1 個ずつ・重複なし」で
             // 始まるようにするのはここ 1 か所の責任。
             DisasterPanelBar.Remove();
+            // ★ タイルの絵（Texture2D 2 枚）も自分で消す。Component では無いので
+            //   GameObject の道連れにならない —— 飛ばすと都市を出入りする
+            //   たびに 128 KB ずつ残る。
+            DisasterTileIcons.Destroy();
             InfoHub.Remove();
             DiagnosticsPanel.Destroy();
             Log.Reset();
