@@ -660,7 +660,15 @@ namespace DisasterPlus.Game
                 TyphoonProfile.StormRadiusOf(100, prefab.StormRadius).ToString("F0")
                 + " m at intensity 100  [Disaster + model]");
 
-            b.Line(2, "derived travel speed", TravelSpeedText(prefab.ActiveDuration));
+            // ★ 速度は**④の寿命**（宿主の持続時間 × LifetimeMultiplier）で割って出す。
+            //   プレハブの持続時間で割ると、実際より 4 倍速い数を名乗ることになる
+            //   （2026-08-22 に寿命を延ばしたとき、ここを直し忘れかけた）。
+            b.Line(2, "derived travel speed",
+                   TravelSpeedText(TyphoonTrack.LifetimeFramesFor(prefab.ActiveDuration)));
+            b.Line(2, "lifetime", TyphoonTrack.LifetimeFramesFor(prefab.ActiveDuration)
+                   + " frames (host m_activeDuration " + prefab.ActiveDuration + " x "
+                   + TyphoonTrack.LifetimeMultiplier
+                   + "; the host is kept alive by TyphoonSlot.KeepAlive)");
         }
 
         /// <summary>

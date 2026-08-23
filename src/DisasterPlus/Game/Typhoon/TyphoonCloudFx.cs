@@ -140,7 +140,7 @@ namespace DisasterPlus.Game
 
         /// <summary>渦の外周半径の上限（m）。マップ半辺は 8640 m なので、
         /// 直径 12 km ＝ マップの 7 割に収まる。</summary>
-        private const float MaxVortexRadiusMetres = 6000f;
+        private const float MaxVortexRadiusMetres = 8640f;
 
         /// <summary>同下限（m）。これより小さいと眼が粒 1 個で埋まる。</summary>
         private const float MinVortexRadiusMetres = 900f;

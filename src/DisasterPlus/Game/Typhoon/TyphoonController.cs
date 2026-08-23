@@ -287,7 +287,13 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            float speed = TyphoonTrack.SpeedFor(prefab.ActiveDuration);
+            // ★★ **寿命は宿主の嵐の持続時間の <c>LifetimeMultiplier</c> 倍である**
+            //    （2026-08-22、実機報告「エフェクトがすぐに消えてしまいます／
+            //    ゆっくりと移動する様子を再現してください」）。
+            //    宿主は <c>TyphoonSlot.KeepAlive</c> が生かし続ける。
+            //    速度はこの寿命で経路長を割るので、**寿命を延ばすと自動的に遅くなる**。
+            uint lifetime = TyphoonTrack.LifetimeFramesFor(prefab.ActiveDuration);
+            float speed = TyphoonTrack.SpeedFor(lifetime);
             if (speed <= 0f)
             {
                 _lastRefusal = "travel speed is unknown (m_activeDuration is 0)";
@@ -310,7 +316,7 @@ namespace DisasterPlus.Game
             //   設定画面の値はスライダーが読めない環境の落とし所で、その差し替えは
             //   配置ツール側で済んでいる（TyphoonPlacementTool.OnToolUpdate）。
             _peakIntensity = ClampIntensity(requestedIntensity);
-            _totalFrames = prefab.ActiveDuration;
+            _totalFrames = lifetime;
             _prefabRadius = prefab.StormRadius;
             _elapsedFrames = 0u;
             _lastFrame = frame;

@@ -64,6 +64,13 @@ namespace DisasterPlus.Game
     /// </summary>
     internal static class TyphoonSlot
     {
+        /// <summary>
+        /// 残りがこれを切ったら活性化フレームを進め直す（フレーム）。
+        /// **0 にしない** —— 0 だと「切れた次の tick で書き直す」ことになり、
+        /// その 1 tick のあいだ宿主が死ぬ。
+        /// </summary>
+        private const uint KeepAliveMarginFrames = 512u;
+
         private static ushort _id;
         private static uint _activationFrame;
 
@@ -232,6 +239,47 @@ namespace DisasterPlus.Game
 
             _activationFrame = activation;
             return true;
+        }
+
+        /// <summary>
+        /// 宿主の嵐を**生かし続ける**。**sim スレッド。**
+        ///
+        /// ── なぜ要るのか（2026-08-22、実機報告「エフェクトがすぐに消えてしまいます」）──
+        ///
+        /// <c>ThunderStormAI.IsStillActive</c> は
+        /// <c>(currentFrame - m_activationFrame) &lt; m_activeDuration</c> である（IL 実測）。
+        /// 死ぬのは<b>活性化フレームからの経過</b>が上限に届いたときなので、
+        /// <c>m_activationFrame</c> を<b>「今」へ進め直せば残り時間は満タンに戻る</b>。
+        ///
+        /// ★★ <b>「今」ちょうどに置くこと。</b>
+        ///   - <c>IsStillActive</c> … <c>0 &lt; m_activeDuration</c> で true
+        ///   - <c>IsStillEmerging</c> … <c>now &lt; now</c> は false（**Emerging に戻らない**）
+        ///   - <c>ThunderStormAI.GetFireSpreadProbability</c> の
+        ///     <c>1500 / (8 + (num &gt;&gt; 10))</c> … <c>num = 0</c> で割る数は 8。
+        ///     **0 除算にならない**（負へ引き戻すと 0 になる。実機で 1 度出した）
+        ///
+        /// ★ <see cref="_activationFrame"/> も同じ値へ更新する。あれは
+        ///   「スロットが誰かに再利用されていないか」を見分ける鍵なので
+        ///   （<see cref="TryGetBuffer"/>）、片方だけ書くと**次の tick で自分の台風を
+        ///   「他人に取られた」と誤判定して手放す**。
+        ///
+        /// ★ 毎 tick は書かない。残りが <see cref="KeepAliveMarginFrames"/> を切ったときだけ。
+        /// </summary>
+        internal static void KeepAlive(uint currentFrame, uint activeDuration)
+        {
+            if (_id == 0 || activeDuration == 0u) return;
+
+            DisasterData[] buffer;
+            string lost;
+            if (!TryGetBuffer(out buffer, out lost)) return;
+
+            uint elapsed = currentFrame - _activationFrame;
+
+            // まだ余裕がある。**書かない。**
+            if (elapsed + KeepAliveMarginFrames < activeDuration) return;
+
+            buffer[_id].m_activationFrame = currentFrame;
+            _activationFrame = currentFrame;
         }
 
         /// <summary>

@@ -43,7 +43,10 @@ namespace DisasterPlus.Tools.TyphoonPreview
         /// <summary>実機の <c>TyphoonCloudFx.VortexRadiusMetres</c> と同じ規則。</summary>
         internal const float VortexRadiusFactor = 1.35f;
 
-        internal const float MaxVortexRadiusMetres = 6000f;
+        // ★ ゲーム側（TyphoonCloudFx.MaxVortexRadiusMetres）と同じ値にしておくこと。
+        //   2026-08-22 に 6000 → 8640（マップ半辺）へ上げた ——
+        //   6000 で切っていた頃は、強度 111 より上で雲が大きくならなかった。
+        internal const float MaxVortexRadiusMetres = 8640f;
 
         internal const float MinVortexRadiusMetres = 900f;
 

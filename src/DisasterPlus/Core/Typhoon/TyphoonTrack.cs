@@ -84,6 +84,57 @@ namespace DisasterPlus.Core.Typhoon
         /// </summary>
         public const float NominalPathLength = MapHalfExtent;
 
+        /// <summary>
+        /// ④の寿命が宿主の嵐の <c>m_activeDuration</c> の何倍か。
+        ///
+        /// ── ★★ なぜ倍にできるのか（2026-08-22、実機報告）────────────────────
+        ///
+        /// &gt; 台風についてはエフェクトがすぐに消えてしまいます。
+        /// &gt; 台風がゆっくりと移動する様子を再現してください。
+        ///
+        /// 以前の doc は「宿主の嵐は 8192 フレームより長生きできない」と書いていた。
+        /// **それは正しいが、条件を読み違えていた。** IL を読み直すと:
+        ///
+        /// <code>
+        /// ThunderStormAI.IsStillActive :
+        ///     (currentFrame - m_activationFrame) &lt; m_activeDuration
+        /// ThunderStormAI.IsStillEmerging :
+        ///     m_activationFrame == 0        → true（恒久）
+        ///     currentFrame &lt; m_activationFrame → true
+        ///     それ以外                       → false
+        /// </code>
+        ///
+        /// 死ぬのは<b>活性化フレームからの経過</b>が上限に届いたときであって、
+        /// 開始からの経過ではない。だから <c>m_activationFrame</c> を
+        /// <b>「今」へ進め直せば、残り時間はそのつど満タンに戻る</b>
+        /// （<c>TyphoonSlot.KeepAlive</c>）。
+        ///
+        /// ★ 「今」ちょうどに置くこと。
+        ///   - <c>IsStillActive</c> … <c>0 &lt; 8192</c> で true
+        ///   - <c>IsStillEmerging</c> … <c>now &lt; now</c> は false（Emerging に戻らない）
+        ///   - <c>GetFireSpreadProbability</c> の <c>1500 / (8 + (num &gt;&gt; 10))</c> …
+        ///     <c>num = 0</c> なので割る数は 8。**0 除算にならない**
+        ///     （負へ引き戻すと 0 除算になる。実機で 1 度出した）
+        ///
+        /// 4 倍は「速度 1 でおよそ 9 分」——マップの半分を渡るのにそれだけかける。
+        /// 実測の <c>m_activeDuration</c> = 8192 に対して 32768 フレームで、
+        /// 速度は <c>8640 / 32768 = 0.264 m/frame</c>（以前の 4 分の 1）である。
+        /// </summary>
+        public const uint LifetimeMultiplier = 4u;
+
+        /// <summary>
+        /// ④の寿命（フレーム）。<paramref name="activeDuration"/> は宿主の嵐の
+        /// <c>m_activeDuration</c>。**0 なら 0**（呼び出し側は台風を起こさない）。
+        /// </summary>
+        public static uint LifetimeFramesFor(uint activeDuration)
+        {
+            if (activeDuration == 0u) return 0u;
+
+            // 桁あふれを塞ぐ（.cgs もプレハブも手で変えられうる）。
+            if (activeDuration > uint.MaxValue / LifetimeMultiplier) return activeDuration;
+            return activeDuration * LifetimeMultiplier;
+        }
+
         public const float MinSpeedMetresPerFrame = 0.25f;
         public const float MaxSpeedMetresPerFrame = 6f;
 
