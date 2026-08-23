@@ -73,10 +73,28 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>火口を出た直後の流れの幅（半径 m）。</summary>
-        public const float SpreadBaseMetres = 20f;
+        public const float SpreadBaseMetres = 28f;
 
         /// <summary>どれだけ流れても超えない幅（半径 m）。</summary>
-        public const float SpreadMaxMetres = 60f;
+        public const float SpreadMaxMetres = 78f;
+
+        /// <summary>
+        /// 倍率を掛けたあとでも**絶対に超えない**広がり（m）。
+        ///
+        /// ★★ これは演出値ではなく<b>着火の走査が数え切れる上限</b>である
+        ///   （2026-08-22）。<c>VolcanoLava.Ignite</c> は 1 歩ごとに
+        ///   <c>p ± radius</c> の矩形を行優先で舐めるので、半径が大きくなると
+        ///   セル数が 1 歩あたりの上限（<c>MaxBuildingCellsPerStep</c> /
+        ///   <c>MaxTreeCellsPerStep</c>）を超えて**黙って打ち切られる** ——
+        ///   そうなると「光っている溶岩の下の建物が燃えない」が起きる。
+        ///
+        ///   96 m のとき:
+        ///     建物グリッド（64 m 角）… 192 m を跨ぐので高々 4×4 ＝ 16 セル（上限 25）
+        ///     樹木グリッド（32 m 角）… 192 m を跨ぐので高々 7×7 ＝ 49 セル（上限 64）
+        ///
+        ///   **ここを上げるなら、必ず両方の上限も上げ直すこと。**
+        /// </summary>
+        public const float SpreadHardMaxMetres = 96f;
 
         /// <summary>1 km 進むごとに広がる量（m）。</summary>
         public const float SpreadPerKilometre = 25f;
@@ -132,10 +150,39 @@ namespace DisasterPlus.Core.Volcano
         /// </summary>
         public static float SpreadRadiusFor(float travelledMetres)
         {
-            if (IsBad(travelledMetres) || travelledMetres < 0f) return SpreadBaseMetres;
+            return SpreadRadiusFor(travelledMetres, 1f);
+        }
+
+        /// <summary>
+        /// 上と同じだが、<paramref name="widthFactor"/> のぶん太らせる
+        /// （<c>LavaVolume.WidthFactor</c>。2026-08-22、所有者の依頼
+        /// 「溶岩流の太さを、もう少し太くしてほしいです（噴火規模に合わせて）」）。
+        ///
+        /// ★★ <b>この 1 本が見た目と被害の両方を決める。</b>
+        ///   <c>VolcanoLavaFx</c> の帯の幅も <c>VolcanoLava.Ignite</c> の着火半径も
+        ///   ここから出ている。**片方だけ太らせない** —— 描いた溶岩が、
+        ///   その下の建物に火を付けないのは嘘である。
+        ///
+        /// 結果は必ず <see cref="SpreadHardMaxMetres"/> 以下（あちらの doc の理由）。
+        /// </summary>
+        public static float SpreadRadiusFor(float travelledMetres, float widthFactor)
+        {
+            float f = IsBad(widthFactor) || widthFactor <= 0f ? 1f : widthFactor;
+
+            if (IsBad(travelledMetres) || travelledMetres < 0f)
+            {
+                return Cap(SpreadBaseMetres * f);
+            }
 
             float r = SpreadBaseMetres + travelledMetres / 1000f * SpreadPerKilometre;
-            return r > SpreadMaxMetres ? SpreadMaxMetres : r;
+            if (r > SpreadMaxMetres) r = SpreadMaxMetres;
+            return Cap(r * f);
+        }
+
+        private static float Cap(float r)
+        {
+            if (r < 0f) return 0f;
+            return r > SpreadHardMaxMetres ? SpreadHardMaxMetres : r;
         }
 
         private static bool IsBad(float v)

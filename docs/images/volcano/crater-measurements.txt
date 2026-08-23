@@ -21,5 +21,13 @@
        0.6 |              52 |           1587 | 0.318
        1.0 |              52 |           1662 | 0.530
 
+## lava band width (diameter = 2 x spread radius)
+  volcano r | factor | at vent m | at 1 km m | at the cap m
+        400 |   0.66 |        37 |        70 |          103
+       1200 |   1.00 |        56 |       106 |          156
+       2000 |   1.21 |        68 |       128 |          189
+       3000 |   1.41 |        79 |       149 |          192
+  (before 2026-08-22: 40 m at the vent, 120 m at the cap, no scaling)
+
 ## scene: crater r=144 m, column h=1800 m, pool r=115 m, 6 bolts drawn
 

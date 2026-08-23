@@ -342,6 +342,11 @@ namespace DisasterPlus.Game
             Vec2[] points = snapshot.LavaTrailPoints;
             int[] counts = snapshot.LavaTrailCounts;
 
+            // ★ 太さの倍率は**純関数なのでこちらでも同じ値が出る**。
+            //   sim 側（着火）と同じ <c>LavaVolume.WidthFactor</c> を見るので、
+            //   描いた帯と火を付ける範囲がずれる経路が無い。
+            float widthFactor = LavaVolume.WidthFactor(snapshot.Footprint.RadiusMetres);
+
             int totalVertices = 0;
             int totalIndices = 0;
             int cursor = 0;
@@ -377,7 +382,8 @@ namespace DisasterPlus.Game
 
                 if (c >= 2)
                 {
-                    AppendRibbon(points, cursor, c, vertices, uvs, triangles, ref vOut, ref tOut);
+                    AppendRibbon(points, cursor, c, widthFactor,
+                                 vertices, uvs, triangles, ref vOut, ref tOut);
                     _pointsDrawn += c;
                 }
 
@@ -411,7 +417,7 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>1 本ぶんのリボンを詰め合わせ先へ足す。</summary>
-        private static void AppendRibbon(Vec2[] points, int start, int count,
+        private static void AppendRibbon(Vec2[] points, int start, int count, float widthFactor,
                                          Vector3[] vertices, Vector2[] uvs, int[] triangles,
                                          ref int vOut, ref int tOut)
         {
@@ -431,7 +437,7 @@ namespace DisasterPlus.Game
                     travelled += (float)Math.Sqrt(dx * dx + dz * dz);
                 }
                 // 幅は半径の 2 倍。
-                widths[i] = LavaPath.SpreadRadiusFor(travelled) * 2f;
+                widths[i] = LavaPath.SpreadRadiusFor(travelled, widthFactor) * 2f;
             }
 
             Vec3[] built;

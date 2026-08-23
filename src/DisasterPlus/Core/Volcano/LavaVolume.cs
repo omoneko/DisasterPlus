@@ -110,6 +110,33 @@ namespace DisasterPlus.Core.Volcano
             return factor;
         }
 
+        /// <summary>流れの太さの倍率の下限。</summary>
+        public const float MinWidthFactor = 0.60f;
+
+        /// <summary>流れの太さの倍率の上限。</summary>
+        public const float MaxWidthFactor = 1.55f;
+
+        /// <summary>
+        /// 流れの**太さ**に掛ける倍率（2026-08-22、所有者の依頼
+        /// 「溶岩流の太さを、もう少し太くしてほしいです（噴火規模に合わせて）」）。
+        ///
+        /// 長さ（<see cref="LengthFactor"/>）より**効き方を弱く**してある。
+        /// 太さは面積として目に入るので、長さと同じ比で振ると
+        /// 大きい火山の溶岩が山より太くなる。<c>Unit^0.75</c> で 1 へ寄せる。
+        ///
+        /// ★ 基準の半径で**ちょうど 1**。既定の設定で既定のスライダー位置なら、
+        ///   太さの基準値（<c>LavaPath.SpreadBaseMetres</c>）がそのまま出る。
+        /// </summary>
+        public static float WidthFactor(float radiusMetres)
+        {
+            float factor = (float)Math.Pow(Unit(radiusMetres), 0.75);
+
+            if (IsBad(factor)) return 1f;
+            if (factor < MinWidthFactor) return MinWidthFactor;
+            if (factor > MaxWidthFactor) return MaxWidthFactor;
+            return factor;
+        }
+
         /// <summary>
         /// 1 本が歩いてよい歩数。<paramref name="baseSteps"/> は実装の上限
         /// （<c>LavaPath.MaxSteps</c>）で、**それを超えない**（配列の長さがそれで決まる）。

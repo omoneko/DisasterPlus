@@ -44,6 +44,7 @@ namespace DisasterPlus.Tools.CraterPreview
             Strobe(log);
             Reach(log);
             Bolts(log);
+            LavaWidth(log);
             Scene(outDir, log);
 
             File.WriteAllText(Path.Combine(outDir, "crater-measurements.txt"), log.ToString());
@@ -133,6 +134,27 @@ namespace DisasterPlus.Tools.CraterPreview
                                + " | " + lit.ToString().PadLeft(14) + " | "
                                + (flashes > 0 ? (peakSum / flashes).ToString("F3") : "-"));
             }
+            log.AppendLine();
+        }
+
+        // ── 3b. 溢岩流の太さ ──────────────────────────────
+
+        private static void LavaWidth(StringBuilder log)
+        {
+            log.AppendLine("## lava band width (diameter = 2 x spread radius)");
+            log.AppendLine("  volcano r | factor | at vent m | at 1 km m | at the cap m");
+
+            foreach (float r in new[] { 400f, 1200f, 2000f, 3000f })
+            {
+                float f = LavaVolume.WidthFactor(r);
+                log.AppendLine("  " + r.ToString("F0").PadLeft(9)
+                               + " | " + f.ToString("F2").PadLeft(6)
+                               + " | " + (LavaPath.SpreadRadiusFor(0f, f) * 2f).ToString("F0").PadLeft(9)
+                               + " | " + (LavaPath.SpreadRadiusFor(1000f, f) * 2f).ToString("F0").PadLeft(9)
+                               + " | " + (LavaPath.SpreadRadiusFor(100000f, f) * 2f).ToString("F0").PadLeft(12));
+            }
+
+            log.AppendLine("  (before 2026-08-22: 40 m at the vent, 120 m at the cap, no scaling)");
             log.AppendLine();
         }
 

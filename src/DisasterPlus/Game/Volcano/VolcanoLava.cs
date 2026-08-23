@@ -133,9 +133,10 @@ namespace DisasterPlus.Game
     /// ②④と T5 は <c>OutwardCellOrder</c> で中心から外へ走査している。あれは
     /// **上限で打ち切られる大きな矩形**を扱うためで、打ち切られたときに
     /// 「どこまで確実に終わったか」を半径で言えることが要件だった。
-    /// こちらの矩形は <c>SpreadRadiusFor</c> が最大 60 m なので、
-    /// **建物グリッドで高々 3×3、樹木グリッドで高々 5×5 セル**である。
-    /// 上限（25 / 49）で切り捨てられる余地が構造的に無いので、行優先で足りる。
+    /// こちらの矩形は <c>SpreadRadiusFor</c> が最大 <c>SpreadHardMaxMetres</c> ＝ 96 m
+    /// なので、**建物グリッドで高々 4×4、樹木グリッドで高々 7×7 セル**である
+    /// （2026-08-22 に太さを規模で変えたときに 60 m から上げた）。
+    /// 上限（25 / 64）で切り捨てられる余地が構造的に無いので、行優先で足りる。
     /// **知らずに②の指摘を破ったのではない。**
     ///
     /// ── 溶岩は地形を変えない ─────────────────────────────────
@@ -240,6 +241,13 @@ namespace DisasterPlus.Game
         /// **流れが 1 歩も進まない**。
         /// </summary>
         private static int _stepBudget = LavaPath.MaxSteps;
+
+        /// <summary>
+        /// 流れの太さの倍率。**規模で決まる**（<c>LavaVolume.WidthFactor</c>）。
+        /// <see cref="Reset"/> で 1 に戻す —— 0 に戻すと、<c>Start</c> を通らずに
+        /// 進んだ拍子に**幅 0 の溶岩**になる。
+        /// </summary>
+        private static float _widthFactor = 1f;
 
         private static bool _slopeSignVerified;
         private static bool _slopeSignWarned;
@@ -381,6 +389,7 @@ namespace DisasterPlus.Game
             _slopeSignVerified = false;
             _terrainRiseMetres = 0f;
             _stepBudget = LavaPath.MaxSteps;
+            _widthFactor = 1f;
             _lastFailure = null;
 
             _trailPoints = new Vec2[0];
@@ -496,6 +505,10 @@ namespace DisasterPlus.Game
             // ★ 長さの上限も規模で変える。**配列の長さを決めている
             //   <c>LavaPath.MaxSteps</c> を超えない**（<c>LavaVolume.StepBudget</c> が担保）。
             _stepBudget = LavaVolume.StepBudget(LavaPath.MaxSteps, footprint.RadiusMetres);
+
+            // ★ 太さも規模で決まる。**描く側は同じ純関数を自分で呼ぶ**ので、
+            //   ここで持つのは着火（sim 側）のためだけである。
+            _widthFactor = LavaVolume.WidthFactor(footprint.RadiusMetres);
 
             if (flows == 0)
             {

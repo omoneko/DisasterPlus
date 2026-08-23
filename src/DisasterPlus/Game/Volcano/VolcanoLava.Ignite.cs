@@ -85,7 +85,7 @@ namespace DisasterPlus.Game
         private const int TreeChainGuard = 262144;
 
         /// <summary>1 歩で見る樹木グリッドのセル数の上限（半径 60 m なら実際は高々 5×5）。</summary>
-        private const int MaxTreeCellsPerStep = 49;
+        private const int MaxTreeCellsPerStep = 64;
 
         /// <summary>
         /// 1 歩で <c>BurnTree</c> を呼ぶ回数の上限（建物側と同じ理由。全体レビュー M17）。
@@ -206,7 +206,10 @@ namespace DisasterPlus.Game
         {
             if (!ModSettings.VolcanoLavaFire.value) return;
 
-            float radius = LavaPath.SpreadRadiusFor(travelledMetres);
+            // ★ 太さは噴火の規模で変わる（<c>LavaVolume.WidthFactor</c>）。
+            //   **描く帯と同じ半径**でなければならない —— 光っている溶岩の下の
+            //   建物が燃えないのは嘘である（<c>LavaPath.SpreadRadiusFor</c> の doc）。
+            float radius = LavaPath.SpreadRadiusFor(travelledMetres, _widthFactor);
 
             BurnGround(p, radius);
             IgniteBuildings(p, radius);
