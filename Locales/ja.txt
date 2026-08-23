@@ -269,7 +269,6 @@ VolcanoClearingRow = 準備
 VolcanoClearedRadius = 走査した半径
 VolcanoClearingPathUnavailable = このゲームのビルドでは範囲内の道路と建物を取り除く方法が見つからなかったため、火山は作りません。先に取り除かずに地面を上げることはできません —— ゲームが更新のたびに地形を道路と建物の高さへ押し戻すため、山の中に平らな溝とすり鉢が残ります。
 VolcanoClearingLead = 準備が隆起より先行する距離 (m)
-VolcanoStopButton = この火山を止める
 VolcanoUpliftRow = 隆起
 VolcanoUpliftProgress = 進捗
 VolcanoSummitRow = 山頂

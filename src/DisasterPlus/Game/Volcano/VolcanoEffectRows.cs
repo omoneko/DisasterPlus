@@ -32,18 +32,22 @@ namespace DisasterPlus.Game
     /// 空文字を入れるだけでは「何か出るはずの場所が空いている」ように見えるので、
     /// <c>Reflow</c> で毎回積み直す。
     ///
-    /// ── ★★ [止める] ボタン（全体レビュー I5）─────────────────────
+    /// ── ★★ [止める] ボタンは撤去した（2026-08-22）─────────────────
     ///
-    /// <c>VolcanoRequest.Stop</c> には完全な受け口（<c>VolcanoState.HandleStop</c>）が
-    /// 最初から在ったのに、**それを積む場所が 1 つも無かった。** つまり着手した
-    /// あとの唯一の抜け道は設定の「火山を有効にする」を切ることで、あれは
-    /// <c>VolcanoFeature</c> の入口で位相ごと捨てたうえに**ボタンとパネルも同時に
-    /// 消す**ので、半分削れて半分盛り上がった山だけが残り、画面には何の説明も出ない。
-    /// **自分の都市が壊されているのを見ている人には、止める手段が要る。**
+    /// 所有者の判断:
     ///
-    /// 止まるのは「これからの破壊と隆起」だけである（<c>Strings.VolcanoStopNote</c>）。
+    /// &gt; 止めるボタンは不要です。だって実際に噴火を止めることなんて
+    /// &gt; 現実じゃできないでしょう？
     ///
-    /// ★ 確認の窓が無くなった今、**[止める] が唯一の「やめる」経路である。**
+    /// そのとおりで、**⑤は起こしたら最後まで走る災害である**（バニラの災害と同じ）。
+    /// 途中で畳める災害はゲームに 1 つも無い。
+    ///
+    /// ★ 以前ここには「自分の都市が壊されているのを見ている人には止める手段が要る」
+    ///   と書いてあった（全体レビュー I5）。**その前提が否定された**ので、
+    ///   受け口（<c>VolcanoRequest.Stop</c> / <c>VolcanoState.HandleStop</c>）も
+    ///   まとめて消した —— 誰も積めない依頼を受け口だけ残さない。
+    ///   どうしても止めたいときは設定の「火山を有効にする」を切る
+    ///   （半分削れた山が残るが、それは「取り消し」ではない）。
     ///
     /// ★★ **ここに置くのは「今何が起きているか」だけである**（2026-08-22）。
     ///
@@ -71,11 +75,6 @@ namespace DisasterPlus.Game
         /// <summary>長い注記の行の高さ（道路の断りと噴火の注記。4〜5 行ぶん）。</summary>
         private const float LongNoteHeight = 72f;
 
-        /// <summary>[止める] ボタンの大きさ。</summary>
-        private const float StopButtonWidth = 240f;
-
-        private const float StopButtonHeight = 28f;
-
         private static UILabel _footprintLabel;
         private static UILabel _clearingLabel;
         private static UILabel _upliftLabel;
@@ -87,8 +86,6 @@ namespace DisasterPlus.Game
         private static UILabel _eruptionMissingLabel;
         private static UILabel _lavaNoMaterialLabel;
         private static UILabel _clearingPathLabel;
-
-        private static UIButton _stopButton;
 
         private static float _blockTop;
         private static float _blockBottom;
@@ -133,9 +130,6 @@ namespace DisasterPlus.Game
                                                       NoteHeight);
             _clearingPathLabel = VolcanoRows.AddRow(p, "EffectClearingPath", ref y,
                                                     LongNoteHeight);
-
-            _stopButton = AddStopButton(p, y);
-            y += StopButtonHeight + 10f;
 
             _blockBottom = _blockTop;
 
@@ -206,56 +200,7 @@ namespace DisasterPlus.Game
                 clearingPathBroken ? Strings.VolcanoClearingPathUnavailable : "",
                 LongNoteHeight, LongNoteHeight + 4f);
 
-            y = RefreshStop(y, s);
-
             _blockBottom = y;
-        }
-
-        /// <summary>
-        /// 進行中のあいだだけ出す [止める] の一式（全体レビュー I5 / I6）。
-        ///
-        /// ★ **終わった火山には出さない。** <see cref="Refresh"/> は隆起が終わった
-        ///   火山の実績を出したままにするので（あちらの doc）、位相そのものを見る。
-        /// ★ 押した直後の 1 フレームはまだ位相が変わらない（設計上 1 tick の遅れ）。
-        ///   依頼が積まれている間はボタンを畳む —— **押しても何も変わらない
-        ///   ボタンは二度押される。**
-        /// </summary>
-        private static float RefreshStop(float y, VolcanoSnapshot s)
-        {
-            bool stoppable = InProgress(s.Phase)
-                             && VolcanoHub.PendingRequest.Kind == VolcanoRequest.None;
-
-            if (_stopButton == null) return y;
-
-            _stopButton.isVisible = stoppable;
-            _stopButton.isEnabled = stoppable;
-            if (!stoppable) return y;
-
-            _stopButton.relativePosition = new Vector3(VolcanoRows.RowLeft, y);
-            return y + StopButtonHeight + 10f;
-        }
-
-        /// <summary>
-        /// [止める]。**main スレッドからゲームのバッファに触らない** —— 依頼を積むだけで、
-        /// 実際に畳むのは sim スレッドの <c>VolcanoState.HandleStop</c> である。
-        /// 座標は運ばない（sim 側が持っている調査結果を使う）。
-        /// </summary>
-        private static UIButton AddStopButton(UIPanel panel, float y)
-        {
-            var button = (UIButton)panel.AddUIComponent(typeof(UIButton));
-            button.name = FreeSlotFinder.SelfPrefix + "VolcanoStopButton";
-            button.text = Strings.VolcanoStopButton;
-            button.width = StopButtonWidth;
-            button.height = StopButtonHeight;
-            button.relativePosition = new Vector3(VolcanoRows.RowLeft, y);
-            button.normalBgSprite = "ButtonMenu";
-            button.hoveredBgSprite = "ButtonMenuHovered";
-            button.pressedBgSprite = "ButtonMenuPressed";
-            button.isVisible = false;
-            button.isEnabled = false;
-            button.eventClick += (c, e) =>
-                VolcanoHub.Request(VolcanoRequestData.Of(VolcanoRequest.Stop));
-            return button;
         }
 
         /// <summary>
@@ -537,14 +482,6 @@ namespace DisasterPlus.Game
             SetLabelVisible(_lavaLabel, visible);
             SetLabelVisible(_lavaNoMaterialLabel, visible);
             SetLabelVisible(_clearingPathLabel, visible);
-
-            // ★ 見えないボタンがクリックを拾える経路を残さない
-            //   （見えないボタンがクリックを拾える経路を残さない）。
-            if (_stopButton != null)
-            {
-                _stopButton.isVisible = visible;
-                _stopButton.isEnabled = visible;
-            }
         }
 
         private static void SetLabelVisible(UILabel label, bool visible)
@@ -568,7 +505,6 @@ namespace DisasterPlus.Game
             _lavaLabel = null;
             _lavaNoMaterialLabel = null;
             _clearingPathLabel = null;
-            _stopButton = null;
             _blockTop = 0f;
             _blockBottom = 0f;
             _showing = false;

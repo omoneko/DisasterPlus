@@ -105,7 +105,13 @@ namespace DisasterPlus.Game
     /// ── 同時に 1 つだけ ─────────────────────────────────
     ///
     /// 進行中（<see cref="VolcanoPhase.Clearing"/> 以降）なら <c>Place</c> は無視し、
-    /// 理由を <see cref="LastRefusal"/> に残す。止めたいときは <c>Stop</c> である。
+    /// 理由を <see cref="LastRefusal"/> に残す。
+    ///
+    /// ★★ <b>途中で止める手段は無い（2026-08-22 に撤去）。</b> 所有者の判断:
+    /// 「止めるボタンは不要です。だって実際に噴火を止めることなんて現実じゃ
+    /// できないでしょう？」——⑤は起こしたら最後まで走る災害である
+    /// （バニラの災害と同じ）。どうしても畳みたいときは設定の
+    /// 「火山を有効にする」を切る。**半分削れた山は残る。取り消しではない。**
     ///
     /// **黙って何もしないをやらない。** 断ったときは必ず <see cref="LastRefusal"/> に
     /// 英語 1 文を残す（④の <c>TyphoonSnapshot.Refusal</c> と同じ扱い）。
@@ -243,15 +249,13 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            switch (request.Kind)
+            // ★ 依頼は Place 1 種類だけである（Stop は撤去した。
+            //   <c>VolcanoRequest</c> の注記）。switch にしない ——
+            //   到達しない case を並べておくと、消したはずの経路が
+            //   生きているように読める。
+            if (request.Kind == VolcanoRequest.Place)
             {
-                case VolcanoRequest.Place:
-                    HandlePlace(request.Point, request.SizeScale, request.SizeRaw);
-                    break;
-
-                case VolcanoRequest.Stop:
-                    HandleStop();
-                    break;
+                HandlePlace(request.Point, request.SizeScale, request.SizeRaw);
             }
         }
 
@@ -611,43 +615,6 @@ namespace DisasterPlus.Game
                                 .ToString("F0")
                           + " m"
                         : ""));
-        }
-
-        /// <summary>
-        /// 進行中の火山を止める。**既に変わった地形は戻らない**（設計書 §7.1 / §E-13）。
-        /// 止まるのは「これからの破壊と隆起」だけである。
-        ///
-        /// ★ 依頼を積むのは <see cref="VolcanoEffectRows"/> の [止める] ボタン 1 箇所だけで、
-        ///   そのボタンは進行中の位相のときしか出ない（全体レビュー I5）。
-        ///   それでも位相を見るのは、押した直後の 1 tick に位相が変わりうるからである。
-        /// </summary>
-        private static void HandleStop()
-        {
-            if (!InProgress())
-            {
-                Refuse("no volcano is in progress (phase=" + _phase
-                       + "); the stop request was ignored");
-                return;
-            }
-
-            _phase = VolcanoPhase.Idle;
-            _footprint = VolcanoFootprint.None;
-            _super = false;
-            // ★ 準備の実績も畳む。**既に壊した建物と道路は戻らない**（不可逆）。
-            //   畳まないと、次に開いたパネルが前の火山の破壊数を名乗る。
-            VolcanoClearing.Reset();
-            // ★ 隆起の退避配列も返す（半径 3 km で 279 KB）。**地形は戻らない。**
-            VolcanoUplift.Reset();
-            // ★ 噴火の予定も畳む。**描画側（main）の後始末はここではしない** ——
-            //   Unity オブジェクトの破棄は main スレッドの仕事で、
-            //   VolcanoEruptionFx がスナップショットを見て自分で畳む
-            //   （レベルアンロードでは VolcanoFeature が Destroy を呼ぶ）。
-            VolcanoEruption.Reset();
-            // ★ 溶岩の軌跡も返す（8 本 × 128 点で 8 KB）。**焦げた地面と燃えた建物は
-            //   戻らない** —— 捨てるのは「これからの予定」だけである。
-            VolcanoLava.Reset();
-            VolcanoTremorTrace.Reset();
-            _lastRefusal = "stopped by the player; the terrain that already changed stays changed";
         }
 
         /// <summary>

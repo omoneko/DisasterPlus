@@ -11,8 +11,8 @@ namespace DisasterPlus.Game
     ///
     /// ★★ <b>確認の窓（<c>Start</c> / <c>Cancel</c>）は 2026-08-21 に撤去した。</b>
     /// 所有者の指示は「ほかの災害と同じように、タイル → スライダー → 地図をクリックで
-    /// 起きる」である。したがって main が積む依頼は
-    /// <see cref="Place"/> と <see cref="Stop"/> の 2 つしか無い。
+    /// 起きる」である。したがって main が積む依頼は <see cref="Place"/> 1 つだけである
+    /// （[止める] も 2026-08-22 に撤去した。下の注記）。
     /// **「はい」を待つ依頼を足し直さないこと。**
     /// </summary>
     public enum VolcanoRequest
@@ -29,8 +29,12 @@ namespace DisasterPlus.Game
         /// </summary>
         Place,
 
-        /// <summary>進行中の火山を止める。**既に変わった地形は戻らない。** T4。</summary>
-        Stop,
+        // ★ Stop は 2026-08-22 に撤去した。所有者の判断:
+        //   「止めるボタンは不要です。だって実際に噴火を止めることなんて
+        //     現実じゃできないでしょう？」
+        //   ⑤は起こしたら最後まで走る（バニラの災害と同じ）。
+        //   **受け口だけ残さない** —— 誰も積めない依頼は、次に読む人に
+        //   「押す場所が抜けている」と誤読される。
     }
 
     /// <summary>
@@ -74,17 +78,15 @@ namespace DisasterPlus.Game
             SizeRaw = sizeRaw;
         }
 
-        /// <summary>地点も倍率も要らない依頼（<see cref="VolcanoRequest.Stop"/>）。</summary>
-        public static VolcanoRequestData Of(VolcanoRequest kind)
-        {
-            return new VolcanoRequestData(kind, new Vec3(0f, 0f, 0f), 1f,
-                                          DisasterPlus.Core.Volcano.VolcanoSizeScale.AnchorRaw);
-        }
-
         /// <summary>「依頼なし」。<c>default(VolcanoRequestData)</c> と同じだが、意図を名乗る。</summary>
         public static VolcanoRequestData None
         {
-            get { return Of(VolcanoRequest.None); }
+            get
+            {
+                return new VolcanoRequestData(
+                    VolcanoRequest.None, new Vec3(0f, 0f, 0f), 1f,
+                    DisasterPlus.Core.Volcano.VolcanoSizeScale.AnchorRaw);
+            }
         }
     }
 

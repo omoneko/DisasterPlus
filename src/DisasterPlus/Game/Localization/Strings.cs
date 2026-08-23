@@ -1039,10 +1039,9 @@ namespace DisasterPlus.Game
         public static string VolcanoClearingLead =
             "How far the clearing runs ahead of the uplift (m)";
 
-        // ★★ 全体レビュー I5。進行中の火山を止める唯一の口（VolcanoEffectRows）。
-        //   **止まるのは「これからの破壊と隆起」だけ**で、既に変わったものは戻らない。
-        //   それを言わずに [止める] だけ出すと「元に戻せる」と読まれる。
-        public static string VolcanoStopButton = "Stop this volcano";
+        // ★ VolcanoStopButton は 2026-08-22 に退役した（キーごと削除）。
+        //   所有者の判断「止めるボタンは不要です。だって実際に噴火を止めることなんて
+        //   現実じゃできないでしょう？」。**同じキーを別の意味で使い回さないこと。**
 
         // --- ⑤火山（Task 6: 隆起） ---
         //

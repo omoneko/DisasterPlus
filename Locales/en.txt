@@ -270,7 +270,6 @@ VolcanoClearingRow = Clearing
 VolcanoClearedRadius = Radius swept
 VolcanoClearingPathUnavailable = Disaster + could not find a usable way to remove the roads and buildings inside the footprint in this build of the game, so it will not build a volcano at all. Raising the ground without removing them first does not work - the game pins the terrain back to the height of every road and building on every update, and the mountain would come out full of flat trenches and bowls.
 VolcanoClearingLead = How far the clearing runs ahead of the uplift (m)
-VolcanoStopButton = Stop this volcano
 VolcanoUpliftRow = Uplift
 VolcanoUpliftProgress = Progress
 VolcanoSummitRow = Summit
