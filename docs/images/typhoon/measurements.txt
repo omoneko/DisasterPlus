@@ -43,3 +43,9 @@ particles drawn = 7953 (the live cap the game enforces: 8000)
 
 driving rain particles drawn = 2994 (cap 3000, spread 411 m at 260 m camera height, drift 46 m/s)
 
+## owned white-cloud puffs (2026-08-22 rebuild)
+  puffs placed per frame = 640 (was: thousands of borrowed particles, drifting; the first attempt placed only 88)
+  texture opacity at the puff core = 1.000  (steam, the borrowed material: 0.43)
+  puff radius = 169 .. 544 m  (vortex radius 6000 m)
+  puff area / vortex area = 2.15  (below 1.0 would leave holes)
+

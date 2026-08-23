@@ -303,9 +303,21 @@ namespace DisasterPlus.Game
             switch (TyphoonCloud.State)
             {
                 case TyphoonCloudState.Puffs:
-                    return "cloud puffs (" + TyphoonCloudFx.LastRenderCalls
+                    // ★ 自前の白い雲（既定）と、借り物の粒子（退避）を
+                    //   **名前で区別する**。どちらで描いているのかが
+                    //   分からないと、「まだ煙に見える」の切り分けができない。
+                    if (TyphoonVortexPuffFx.Drawing)
+                    {
+                        return "own white cloud (" + TyphoonVortexPuffFx.PuffsPlaced
+                               + " puffs placed/frame, radius "
+                               + TyphoonCloud.LastRadiusMetres.ToString("F0") + " m; "
+                               + (CloudParticleAssets.Detail ?? "material not described") + ")";
+                    }
+
+                    return "BORROWED vanilla particles (" + TyphoonCloudFx.LastRenderCalls
                            + " RenderEffect/frame, radius "
-                           + TyphoonCloud.LastRadiusMetres.ToString("F0") + " m)";
+                           + TyphoonCloud.LastRadiusMetres.ToString("F0") + " m) - the own "
+                           + "white cloud could not be built, so this falls back to steam";
 
                 case TyphoonCloudState.Drawing:
                     return "fallback spiral mesh (" + TyphoonCloud.LastDrawCalls

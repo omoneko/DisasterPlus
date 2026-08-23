@@ -16,8 +16,14 @@ namespace DisasterPlus.Game
         /// <summary>台風が居ないので出していない。**不具合ではない。**</summary>
         Idle,
 
-        /// <summary>毎フレーム粒を出している。</summary>
+        /// <summary>毎フレーム粒を出している（**借り物の粒子**）。</summary>
         Emitting,
+
+        /// <summary>
+        /// **自前の白い雲の粒**で描いている（<see cref="TyphoonVortexPuffFx"/>）。
+        /// 2026-08-22 以降はこれが既定で、<see cref="Emitting"/> は退避の側である。
+        /// </summary>
+        OwnPuffs,
 
         /// <summary>例外で落ちた。**メッシュへ退避する。**</summary>
         Failed,
@@ -271,6 +277,7 @@ namespace DisasterPlus.Game
 
                 // 壊れたクローンを抱えたまま毎フレーム投げ続けない。
                 DestroyClones();
+                TyphoonVortexPuffFx.Destroy();
                 return false;
             }
         }
@@ -279,6 +286,10 @@ namespace DisasterPlus.Game
         {
             if (snapshot == null || !snapshot.Valid || !snapshot.Active)
             {
+                // ★ 台風が居ないのに雲だけ空に残らないよう、自前の粒は畳む。
+                //   （借り物のクローンは湧かせるのをやめれば自然に消える。）
+                TyphoonVortexPuffFx.Destroy();
+
                 if (AnyClone()) _state = TyphoonCloudFxState.Idle;
                 _lastRenderCalls = 0;
                 return false;
@@ -290,6 +301,36 @@ namespace DisasterPlus.Game
                 _lastRenderCalls = 0;
                 return false;
             }
+
+            // ★★ **まず自前の白い雲で描く**（2026-08-22、所有者の指摘
+            //    「まだ煙のようなものが見えるんですが」）。
+            //
+            //    借り物の粒子は素材の選択自体は成功していた（実機ログの
+            //    <c>resolved: Large Pool Steam</c>）が、**湯気の絵は薄すぎて
+            //    雲にならない** —— 不透明度 0.34-0.41 で背景が透ける
+            //    （<see cref="CloudParticleAssets"/> のクラス doc に計測）。
+            //    しかも撒いた粒はバニラのシミュレーションのもので漂うため、
+            //    渦の形を持ち続けられない。
+            //
+            //    <see cref="TyphoonVortexPuffFx"/> は同じ <see cref="VortexPuffLayout"/> の
+            //    表を使って、**芯が不透明な白い雲の粒を毎フレーム置き直す**。
+            float altitudeMetres = snapshot.Centre.Y + MinClearanceMetres;
+            if (altitudeMetres < BaseAltitudeMetres) altitudeMetres = BaseAltitudeMetres;
+
+            if (TyphoonVortexPuffFx.Update(snapshot, radius, spinDegrees,
+                                           altitudeMetres, ThicknessMetres))
+            {
+                _state = TyphoonCloudFxState.OwnPuffs;
+                _lastRenderCalls = 0;
+
+                // ★ 借り物を抱えたままにしない。両方出すと**二重の雲**になる。
+                if (AnyClone()) DestroyClones();
+                return true;
+            }
+
+            // ★ ここから下は退避である。アルファブレンドのシェーダが引けない環境で
+            //   しか通らない（実機では <c>Custom/Particles/Alpha Blended</c> が
+            //   読み込み済みマテリアルから引けている）。
 
             // ★ 参照そのものを毎フレーム見る。破棄済みなら fake-null で null と
             //   等価になり、ここで作り直される（2 つ目の都市の自己修復）。
@@ -395,6 +436,11 @@ namespace DisasterPlus.Game
         public static void Destroy()
         {
             DestroyClones();
+            // ★ 自前の白い雲の GameObject と、その素材（Material / Texture2D）も
+            //   自分で消す。どれも Component では無いので、飛ばすと
+            //   都市を出入りするたびに 1 組ずつ残る。
+            TyphoonVortexPuffFx.Destroy();
+            CloudParticleAssets.Destroy();
             _lookupMissCount = 0;
             _lastRenderCalls = 0;
             _state = TyphoonCloudFxState.Off;

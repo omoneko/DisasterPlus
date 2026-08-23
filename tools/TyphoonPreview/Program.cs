@@ -103,9 +103,174 @@ namespace DisasterPlus.Tools.TyphoonPreview
             log.AppendLine();
             Write(outDir, "squall-elevation.png", SquallElevation(spray));
 
+            // ★★ **自前の白い雲で組んだ渦**（2026-08-22 の作り直し）。
+            //    借り物の粒子との違いを数字と絵で残す。
+            OwnedPuffs(outDir, log);
+
             File.WriteAllText(Path.Combine(outDir, "measurements.txt"), log.ToString());
             Console.WriteLine("wrote " + Path.Combine(outDir, "measurements.txt"));
             return 0;
+        }
+
+        /// <summary>
+        /// **自前の白い雲の粒で置いた渦**（<c>TyphoonVortexPuffFx</c>）を、
+        /// 真上と俯角 35 度から描く。借り物の粒子と何が違うのかを数字でも出す。
+        /// </summary>
+        private static void OwnedPuffs(string dir, StringBuilder log)
+        {
+            OwnedVortex.Puff[] puffs = OwnedVortex.Build(Radius, 0f);
+
+            log.AppendLine("## owned white-cloud puffs (2026-08-22 rebuild)");
+            log.AppendLine("  puffs placed per frame = " + puffs.Length
+                           + " (was: thousands of borrowed particles, drifting;"
+                           + " the first attempt placed only " + VortexPuffLayout.PuffCount + ")");
+            log.AppendLine("  texture opacity at the puff core = "
+                           + OwnedVortex.CoreOpacity().ToString("F3")
+                           + "  (steam, the borrowed material: 0.43)");
+
+            float smallest = float.MaxValue;
+            float largest = 0f;
+            foreach (OwnedVortex.Puff q in puffs)
+            {
+                if (q.Radius < smallest) smallest = q.Radius;
+                if (q.Radius > largest) largest = q.Radius;
+            }
+            log.AppendLine("  puff radius = " + F(smallest) + " .. " + F(largest)
+                           + " m  (vortex radius " + F(Radius) + " m)");
+
+            // 粒がどれだけ重なっているか。**隙間が空いていないこと**を数で見る。
+            float area = 0f;
+            foreach (OwnedVortex.Puff q in puffs) area += 3.14159265f * q.Radius * q.Radius;
+            log.AppendLine("  puff area / vortex area = "
+                           + (area / (3.14159265f * Radius * Radius)).ToString("F2")
+                           + "  (below 1.0 would leave holes)");
+            log.AppendLine();
+
+            Write(dir, "vortex-owned-plan.png", OwnedPlan(puffs));
+            Write(dir, "vortex-owned-oblique.png", OwnedOblique(puffs));
+        }
+
+        /// <summary>真上から。腕と眼が読めるか。</summary>
+        private static byte[] OwnedPlan(OwnedVortex.Puff[] puffs)
+        {
+            var cover = new float[Pixels * Pixels];
+            var colour = new float[Pixels * Pixels * 3];
+            float scale = Pixels * Fill * 0.5f / Radius;
+            float half = Pixels * 0.5f;
+
+            // 高いものが上に来る（真上から見るので）。
+            Array.Sort(puffs, delegate(OwnedVortex.Puff a, OwnedVortex.Puff b)
+            {
+                return a.Y.CompareTo(b.Y);
+            });
+
+            foreach (OwnedVortex.Puff q in puffs)
+            {
+                Blob(cover, colour, half + q.X * scale, half + q.Z * scale,
+                     q.Radius * scale, q.Alpha, q.Shade);
+            }
+
+            return ComposeOwned(cover, colour, false);
+        }
+
+        /// <summary>俯角 35 度。実機に近い見え方。</summary>
+        private static byte[] OwnedOblique(OwnedVortex.Puff[] puffs)
+        {
+            var cover = new float[Pixels * Pixels];
+            var colour = new float[Pixels * Pixels * 3];
+            float scale = Pixels * Fill * 0.5f / Radius;
+            float half = Pixels * 0.5f;
+
+            double pitch = ObliquePitchDegrees * Math.PI / 180.0;
+            float cos = (float)Math.Cos(pitch);
+            float sin = (float)Math.Sin(pitch);
+
+            // 奥のものから描く。
+            Array.Sort(puffs, delegate(OwnedVortex.Puff a, OwnedVortex.Puff b)
+            {
+                float da = a.Z * sin - a.Y * cos;
+                float db = b.Z * sin - b.Y * cos;
+                return db.CompareTo(da);
+            });
+
+            foreach (OwnedVortex.Puff q in puffs)
+            {
+                float sy = q.Z * sin - q.Y * cos;
+                Blob(cover, colour, half + q.X * scale, half * 1.25f + sy * scale,
+                     q.Radius * scale, q.Alpha, q.Shade);
+            }
+
+            return ComposeOwned(cover, colour, true);
+        }
+
+        /// <summary>
+        /// 粒 1 個。**テクスチャの式そのもの**で塗る（<c>OwnedVortex.TextureAlpha</c>）。
+        /// アルファ合成なので、重ねるほど背景が隠れる。
+        /// </summary>
+        private static void Blob(float[] cover, float[] colour, float cx, float cy, float r,
+                                 float alpha, float shade)
+        {
+            if (!(r > 0f)) return;
+
+            int x0 = (int)Math.Floor(cx - r), x1 = (int)Math.Ceiling(cx + r);
+            int y0 = (int)Math.Floor(cy - r), y1 = (int)Math.Ceiling(cy + r);
+
+            // 日向の白と底面の灰（TyphoonVortexPuffFx と同じ 2 色）。
+            float rr = (242f + (150f - 242f) * shade) / 255f;
+            float gg = (244f + (156f - 244f) * shade) / 255f;
+            float bb = (248f + (170f - 248f) * shade) / 255f;
+
+            for (int y = y0; y <= y1; y++)
+            {
+                if (y < 0 || y >= Pixels) continue;
+                for (int x = x0; x <= x1; x++)
+                {
+                    if (x < 0 || x >= Pixels) continue;
+
+                    float dx = (x - cx) / r;
+                    float dy = (y - cy) / r;
+                    float d = (float)Math.Sqrt(dx * dx + dy * dy);
+                    if (d > 1f) continue;
+
+                    float a = OwnedVortex.TextureAlpha(d, (float)Math.Atan2(dy, dx)) * alpha;
+                    if (a <= 0f) continue;
+
+                    int i = y * Pixels + x;
+                    // 手前が奥を隠す（over 合成）。
+                    float keep = 1f - a;
+                    colour[i * 3] = colour[i * 3] * keep + rr * a;
+                    colour[i * 3 + 1] = colour[i * 3 + 1] * keep + gg * a;
+                    colour[i * 3 + 2] = colour[i * 3 + 2] * keep + bb * a;
+                    cover[i] = cover[i] * keep + a;
+                }
+            }
+        }
+
+        /// <summary>雲を空（と地面）の上に載せる。</summary>
+        private static byte[] ComposeOwned(float[] cover, float[] colour, bool horizon)
+        {
+            var rgb = new byte[Pixels * Pixels * 3];
+
+            for (int y = 0; y < Pixels; y++)
+            {
+                for (int x = 0; x < Pixels; x++)
+                {
+                    int i = y * Pixels + x;
+                    float[] back = horizon && y > Pixels * 0.78f ? Ground : Sky;
+
+                    float a = cover[i];
+                    if (a > 1f) a = 1f;
+
+                    for (int c = 0; c < 3; c++)
+                    {
+                        float v = back[c] * (1f - a) + colour[i * 3 + c];
+                        if (v > 1f) v = 1f;
+                        rgb[i * 3 + c] = (byte)(255f * v);
+                    }
+                }
+            }
+
+            return rgb;
         }
 
         private static void Write(string dir, string name, byte[] rgb)
