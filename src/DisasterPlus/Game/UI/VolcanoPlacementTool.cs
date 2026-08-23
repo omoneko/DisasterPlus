@@ -167,6 +167,30 @@ namespace DisasterPlus.Game
             //   断られた理由）は火山タブと診断ダンプが名乗る。
         }
 
+        /// <summary>
+        /// **バニラと同じ的（まと）を出す**（2026-08-22、所有者の依頼
+        /// 「ほかの災害と同様のターゲティングマークを使いたいです」）。
+        ///
+        /// 描き直してはいない —— <c>DisasterTool.RenderOverlay</c> をそのまま呼ぶ
+        /// （<see cref="PlacementMarker"/> のクラス doc に IL 実測）。
+        ///
+        /// ★ 地面を指していないフレームは何も描かない。**前の位置に置き去りにしない。**
+        /// </summary>
+        public override void RenderOverlay(RenderManager.CameraInfo cameraInfo)
+        {
+            base.RenderOverlay(cameraInfo);
+
+            if (UIView.IsInsideUI()) return;
+
+            Vec3 hit;
+            if (!TryPickGround(out hit)) return;
+
+            // ★ 色はバニラの災害ツールと同じ作り方。警告でも異常でも
+            //   ないので両方 false ＝ 通常色である。
+            PlacementMarker.Render(cameraInfo, new Vector3(hit.X, hit.Y, hit.Z),
+                                   GetToolColor(false, false));
+        }
+
         private static bool TryPickGround(out Vec3 hit)
         {
             hit = new Vec3(0f, 0f, 0f);

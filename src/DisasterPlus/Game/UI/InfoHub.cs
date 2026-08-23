@@ -118,34 +118,33 @@ namespace DisasterPlus.Game
         private const float TopRowBandBottom = 56f;
 
         /// <summary>
-        /// 置いたあとに位置を見直すフレーム。
+        /// ★★ <b>置き場所は 1 度きりで、以後は動かさない。</b>（2026-08-22、実機報告
+        /// 「D＋ボタンが押すと移動していく現象が起きています。CW ボタン等の仕組みを
+        /// そのまま流用して、仕様をそろえてください」。）
         ///
-        /// **他 MOD のボタンはそれぞれ別のタイミングで現れる**ので、
-        /// 1 回決めて終わりにすると「その瞬間に居なかった者」を避けられない。
-        /// SIREN Alert も同じことをしている（<c>SirenButton.RecheckFrames</c>）。
+        /// ── 何が起きていたか ────────────────────────────────
         ///
-        /// ★ <b>プレイヤーが一度でも自分で動かしたら、二度と見直さない</b>
-        ///   （<see cref="_userMoved"/>）。動かしたものを勝手に戻すのは、
-        ///   重なっているのと同じだけ壊れている。
+        /// 他 MOD のボタンが遅れて現れるのを避けるため、置いたあと 60/180/420/900
+        /// フレームで位置を見直していた。ところが<b>タブ帯（幅 640）は最上段の帯の
+        /// 中に入る</b>（y = 44、帯の下端は 56）。だから:
+        ///
+        ///   押す → タブ帯が開く → 次の見直しが**自分のタブ帯を「隣人」と数える**
+        ///        → その右へ逃げる → また押す → また逃げる
+        ///
+        /// CS:WARFRONT のボタンは <c>new Vector3(150f, 10f)</c> を 1 度入れるだけで
+        /// 二度と動かさない。**その仕様に揃える。** ドラッグの取っ手も外した
+        /// （あちらも「ドラッグの当たり判定がクリックを奪う」ので付けていない）。
+        ///
+        /// 遅れて現れた他 MOD と重なる可能性は残るが、**動き回るボタンよりましである。**
+        /// 位置が気に入らなければ、他 MOD より先に読み込まれない限り並びは安定する。
         /// </summary>
-        private static readonly int[] RecheckFrames = { 60, 180, 420, 900 };
+        private const bool PlaceOnce = true;
 
         /// <summary>最上段の探索の 1 歩（px）。ボタン幅 ＋ 隙間。</summary>
         private const float TopRowStepX = ButtonSize + TopRowGap;
 
         /// <summary>最上段の探索の上限回数。画面の右端で <see cref="ScreenSlot"/> が先に止める。</summary>
         private const int TopRowTries = 64;
-
-        /// <summary>
-        /// タブ帯の左端の**掴む場所**の幅（px）。
-        ///
-        /// 所有者の依頼（2026-08-22）:「タブの位置も移動できないことから非常に
-        /// 操作性が悪い」。帯の全面を <c>UIDragHandle</c> で覆うと、その下のタブと X が
-        /// 押せなくなる（CS:WARFRONT が実機で踏んだ不具合。あちらの
-        /// <c>MilitaryBuildPanel</c> のコメントに残っている）ので、
-        /// **左端のこの幅だけ**を掴む場所にして、タブはその右から並べる。
-        /// </summary>
-        private const float GripWidth = 16f;
         private const float TabHeight = 26f;
         private const float TabGap = 2f;
         private const float StripPad = 4f;
@@ -199,64 +198,28 @@ namespace DisasterPlus.Game
                     EarthquakePanel.Show, EarthquakePanel.Hide,
                     delegate { return EarthquakePanel.Width; }),
 
-            new Tab("typhoon",
-                    delegate { return Strings.TyphoonTitle; },
-                    delegate { return ModSettings.TyphoonEnabled.value; },
-                    TyphoonPanel.Show, TyphoonPanel.Hide,
-                    delegate { return TyphoonPanel.Width; }),
-
-            new Tab("volcano",
-                    delegate { return Strings.VolcanoTitle; },
-                    delegate { return ModSettings.VolcanoEnabled.value; },
-                    VolcanoPanel.Show, VolcanoPanel.Hide,
-                    delegate { return VolcanoPanel.Width; }),
-
-            // 診断はいつでも出す。**機能を全部切っても、切れていることを読む場所は要る。**
-            new Tab("diagnostics",
-                    delegate { return Strings.InfoTabDiagnostics; },
-                    delegate { return true; },
-                    DiagnosticsPanel.Show, DiagnosticsPanel.Hide,
-                    delegate { return DiagnosticsPanel.Width; }),
+            // ★★ **④台風・⑤火山・診断のタブは外した**（2026-08-22、所有者の依頼
+            //    「D＋ボタンで開けるのは天気予報と地震予想・震度（波形）グラフのみで
+            //    いいです。他は蛇足です」「デバッグ（F11）の部分は削除してください」）。
+            //
+            //    ★ 診断ダンプそのものは残っている —— **F11 のホットキーで書ける**。
+            //      消したのは「タブ 1 枚」であって、状態を読む手段ではない。
+            //
+            //    ★★ <b>⑤の [止める] ボタンも一緒に消えた。</b> 進行中の火山を
+            //      止める経路は、いまは「設定で⑤を切る」しか無い。
+            //      置き場所の希望があれば言ってほしい（災害パネルのタイルへ
+            //      移すのがいちばん自然である）。
         };
 
         private static UIButton _button;
         private static UIPanel _strip;
         private static UIButton _closeButton;
-        private static UIDragHandle _grip;
 
-        /// <summary>
-        /// いま <see cref="OnStripMoved"/> の中に居るか。ドラッグで動いた帯を
-        /// 画面内へ丸め直すとき、その書き込みで同じイベントがもう一度飛ぶ。
-        /// **再入を 1 段で止める**（無限再帰にはならないが、1 フレームに
-        /// 何度も追従の計算をする意味が無い）。
-        /// </summary>
-        private static bool _syncingStrip;
-
-        /// <summary>ドラッグ追従で 1 度でも例外を出したか（毎フレーム鳴らさない）。</summary>
-        private static bool _dragErrorLogged;
-
-        /// <summary>
-        /// プレイヤーが一度でも自分で窓を動かしたか。
-        /// 立ったら <see cref="RecheckFrames"/> の見直しは二度と走らない ——
-        /// 自分で置いた場所を勝手に戻されるのは壊れている。
-        /// </summary>
-        private static bool _userMoved;
 
         /// <summary>ボタンを置いてからのフレーム数。-1 は「まだ置いていない」。</summary>
-        private static int _framesSinceCreate = -1;
 
         /// <summary>次に見直す <see cref="RecheckFrames"/> の添字。</summary>
-        private static int _recheckIndex;
 
-        /// <summary>
-        /// 今帯を動かしているのは <see cref="RecheckPlacement"/> か。
-        ///
-        /// ★★ これが無いと、**自動の置き直しが自分を
-        ///   「プレイヤーが動かした」と誤認して、その場で以後の見直しを
-        ///   全部止めてしまう**（<c>_strip.relativePosition</c> への書き込みが
-        ///   <see cref="OnStripMoved"/> を呼ぶため）。
-        /// </summary>
-        private static bool _programmaticMove;
 
         /// <summary>いま選ばれているタブの <see cref="Tab.Id"/>。null なら未選択。</summary>
         private static string _activeId;
@@ -350,26 +313,6 @@ namespace DisasterPlus.Game
         {
             if (_dead) return;
 
-            // ★ 置いたあとの見直しは**間引かないフレーム数**で数える
-            //   （SIREN Alert の RecheckFrames と同じ尺度にするため）。
-            if (_button != null && _framesSinceCreate >= 0)
-            {
-                _framesSinceCreate++;
-                if (!_userMoved
-                    && _recheckIndex < RecheckFrames.Length
-                    && _framesSinceCreate >= RecheckFrames[_recheckIndex])
-                {
-                    _recheckIndex++;
-                    try { RecheckPlacement(); }
-                    catch (Exception e)
-                    {
-                        _recheckIndex = RecheckFrames.Length;   // 二度と試さない
-                        Log.Warn("re-checking the Disaster + button position failed: "
-                                 + e.GetType().Name);
-                    }
-                }
-            }
-
             int interval = _button != null ? MaintainIntervalFrames : SearchIntervalFrames;
             if (_frames++ < interval) return;
             _frames = 0;
@@ -392,13 +335,6 @@ namespace DisasterPlus.Game
 
             _strip = null;
             _closeButton = null;
-            _grip = null;
-            _syncingStrip = false;
-            _dragErrorLogged = false;
-            _userMoved = false;
-            _programmaticMove = false;
-            _framesSinceCreate = -1;
-            _recheckIndex = 0;
             _button = null;
             _activeId = null;
             _shownId = null;
@@ -487,8 +423,6 @@ namespace DisasterPlus.Game
             b.eventClick += OnButtonClick;
 
             _button = b;
-            _framesSinceCreate = 0;
-            _recheckIndex = 0;
             Log.Info("Disaster + info button installed at (" + _origin.x + "," + _origin.y + ")"
                      + (foundFree ? "" : " (no free slot found; it may overlap another mod)"));
             return true;
@@ -514,50 +448,6 @@ namespace DisasterPlus.Game
             return FreeSlotFinder.Find(new Vector2(startX, TopRowY),
                                        new Vector2(ButtonSize, ButtonSize),
                                        TopRowStepX, 0f, TopRowTries, owner, out foundFree);
-        }
-
-        /// <summary>
-        /// 他 MOD のボタンがあとから現れた場合に位置を取り直す
-        /// （<see cref="RecheckFrames"/>）。**プレイヤーが自分で動かしたあとは走らない。**
-        ///
-        /// 動かすのはボタン・タブ帯・開いているパネルの 3 つで、
-        /// 位置の主体は今も <see cref="_origin"/> ただ 1 つである。
-        /// </summary>
-        private static void RecheckPlacement()
-        {
-            if (_button == null) return;
-
-            bool foundFree;
-            Vector2 wanted = SearchTopRow(_button, out foundFree);
-
-            float dx = wanted.x - _origin.x;
-            float dy = wanted.y - _origin.y;
-            if (dx * dx + dy * dy < 1f) return;
-
-            _origin = wanted;
-            _foundFreeSlot = foundFree;
-
-            _programmaticMove = true;
-            try
-            {
-                _button.relativePosition = new Vector3(_origin.x, _origin.y);
-
-                // 帯を動かすと <see cref="OnStripMoved"/> が飛び、あそこがパネルを
-                // 連れていってくれる。<see cref="_programmaticMove"/> が立っているので
-                // 「人が動かした」とは数えられない。
-                if (_strip != null)
-                {
-                    _strip.relativePosition =
-                        new Vector3(_origin.x, _origin.y + ButtonSize + 2f);
-                }
-            }
-            finally
-            {
-                _programmaticMove = false;
-            }
-
-            Log.Info("Disaster + info button moved to (" + _origin.x + "," + _origin.y
-                     + ") after another mod's button appeared");
         }
 
         private static void OnButtonClick(UIComponent c, UIMouseEventParameter p)
@@ -655,72 +545,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 帯がドラッグで動いた。**ボタンと開いているパネルを連れていく。**
-        ///
-        /// 位置の主体は今も <see cref="_origin"/> ただ 1 つで、ここはそれを
-        /// 帯の実際の位置から読み直しているだけである（<see cref="FreeSlotFinder"/> を
-        /// 2 回目に呼ぶ経路をここに作らないこと）。
-        ///
-        /// **画面の外へは出さない。** 出ると (8,1094) と同じ壊れ方
-        /// （見えないから使えない）になる。丸めの書き戻しで同じイベントが
-        /// もう一度飛ぶので <see cref="_syncingStrip"/> で 1 段だけ止める。
-        /// </summary>
-        private static void OnStripMoved(UIComponent component, Vector2 value)
-        {
-            if (_syncingStrip || _strip == null) return;
-
-            _syncingStrip = true;
-            try
-            {
-                Vector3 pos = _strip.relativePosition;
-                float x = pos.x;
-                float y = pos.y - (ButtonSize + 2f);
-
-                Vector2 screen = FreeSlotFinder.ScreenSize();
-
-                // 横はいちばん広いもの（帯）で、縦はボタン＋帯の高さで丸める。
-                // **パネルの高さは入れない** —— 入れると背の高いパネルのときに
-                // 帯が画面の上のほうへ張り付いて、掴んでも動かなくなる。
-                float widest = _strip.width > ButtonSize ? _strip.width : ButtonSize;
-                x = ScreenSlot.ClampInto(x, widest, screen.x);
-                y = ScreenSlot.ClampInto(y, ButtonSize + 2f + StripHeight, screen.y);
-
-                _origin = new Vector2(x, y);
-
-                // ★ プレイヤーが自分で動かしたので、以後自動で置き直さない。
-                //   **自動の置き直し（<see cref="RecheckPlacement"/>）もここを通る**ので、
-                //   そちらは <see cref="_programmaticMove"/> で除外する ——
-                //   除外しないと、最初の見直しが自分を「人が動かした」と誤認して
-                //   以後の見直しを全部止めてしまう。
-                if (!_programmaticMove) _userMoved = true;
-
-                Vector3 stripAt = new Vector3(x, y + ButtonSize + 2f);
-                if (_strip.relativePosition != stripAt) _strip.relativePosition = stripAt;
-                if (_button != null) _button.relativePosition = new Vector3(x, y);
-
-                Tab active = FindTab(_activeId);
-                if (active != null && _shownId == active.Id)
-                {
-                    MoveActivePanel(active,
-                                    new Vector3(x, y + ButtonSize + 2f + StripHeight));
-                }
-            }
-            catch (Exception e)
-            {
-                // 毎フレーム走りうる経路。1 回だけ大きく鳴らして以後は黙る。
-                if (!_dragErrorLogged)
-                {
-                    _dragErrorLogged = true;
-                    Log.Error("moving the Disaster + info window failed", e);
-                }
-            }
-            finally
-            {
-                _syncingStrip = false;
-            }
-        }
-
-        /// <summary>
         /// 出すパネルの左上を決める。<c>MoveTo</c> は <c>Show</c> より先に呼ぶ ——
         /// 逆にすると、既定の位置に 1 フレームだけ出てから飛ぶ。
         /// </summary>
@@ -730,9 +554,6 @@ namespace DisasterPlus.Game
             {
                 case "forecast": ForecastPanel.MoveTo(origin); break;
                 case "earthquake": EarthquakePanel.MoveTo(origin); break;
-                case "typhoon": TyphoonPanel.MoveTo(origin); break;
-                case "volcano": VolcanoPanel.MoveTo(origin); break;
-                case "diagnostics": DiagnosticsPanel.MoveTo(origin); break;
             }
         }
 
@@ -759,35 +580,6 @@ namespace DisasterPlus.Game
                 strip.height = StripHeight;
                 strip.relativePosition = new Vector3(_origin.x, _origin.y + ButtonSize + 2f);
                 _strip = strip;
-
-                // ★ 掴む場所。**左端のこの幅だけ**（<see cref="GripWidth"/> の doc）。
-                //   帯の全面を覆うとタブと X が押せなくなる。
-                _grip = (UIDragHandle)strip.AddUIComponent(typeof(UIDragHandle));
-                _grip.name = FreeSlotFinder.SelfPrefix + "InfoGrip";
-                _grip.target = strip;
-                _grip.width = GripWidth;
-                _grip.height = TabHeight;
-                _grip.relativePosition = new Vector3(StripPad * 0.5f, StripPad);
-                _grip.tooltip = Strings.InfoDragTooltip;
-
-                var gripMark = (UILabel)_grip.AddUIComponent(typeof(UILabel));
-                gripMark.name = FreeSlotFinder.SelfPrefix + "InfoGripMark";
-                // ★ **罫線素片を使わない**。CS の UI フォントに
-                //   ある保証が無い（①の <c>HazardLevel.FilledChar</c> を ASCII に固定したのと
-                //   同じ規律）。見えない文字にすると「掴む場所がある」自体が伝わらない。
-                gripMark.text = "::";
-                gripMark.textScale = 0.9f;
-                gripMark.autoSize = false;
-                gripMark.width = GripWidth;
-                gripMark.height = TabHeight;
-                gripMark.textAlignment = UIHorizontalAlignment.Center;
-                gripMark.verticalAlignment = UIVerticalAlignment.Middle;
-                // ★ ラベルがクリックを飲むと掴めなくなる。
-                gripMark.isInteractive = false;
-
-                // ★ 帯が動いたらボタンとパネルを連れていく。**位置の主体は今も
-                //   <see cref="_origin"/> 1 つだけ**で、ここはそれを帯から読み直す。
-                strip.eventPositionChanged += OnStripMoved;
 
                 _closeButton = (UIButton)strip.AddUIComponent(typeof(UIButton));
                 _closeButton.name = FreeSlotFinder.SelfPrefix + "InfoCloseButton";
@@ -850,8 +642,7 @@ namespace DisasterPlus.Game
 
             if (n <= 0) return;
 
-            // ★ 左端の掴む場所ぶんだけ、タブの並びを右へずらす（<see cref="GripWidth"/>）。
-            float tabsLeft = StripPad * 0.5f + GripWidth + StripPad * 0.5f;
+            float tabsLeft = StripPad;
             float available = width - tabsLeft - StripPad - CloseWidth - StripPad;
             float tabWidth = (available - TabGap * (n - 1)) / n;
             if (tabWidth < 20f) tabWidth = 20f;

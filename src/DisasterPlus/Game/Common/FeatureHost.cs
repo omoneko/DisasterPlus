@@ -249,6 +249,8 @@ namespace DisasterPlus.Game
             //   GameObject の道連れにならない —— 飛ばすと都市を出入りする
             //   たびに 128 KB ずつ残る。
             DisasterTileIcons.Destroy();
+            // ★ 的に使う DisasterInfo の参照も持ち越さない。
+            PlacementMarker.Reset();
             InfoHub.Remove();
             DiagnosticsPanel.Destroy();
             Log.Reset();
