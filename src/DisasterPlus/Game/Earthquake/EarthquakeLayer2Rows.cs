@@ -73,7 +73,6 @@ namespace DisasterPlus.Game
         private static UILabel _tsunamiLabel;
         private static UILabel _tsunamiNoteLabel;
         private static UILabel _longPeriodLabel;
-        private static UILabel _longPeriodNoteLabel;
         private static UILabel _timeLabel;
         private static UILabel _timeNoteLabel;
 
@@ -136,9 +135,6 @@ namespace DisasterPlus.Game
 
             // **常設の注記。** これが無いと「高層ほど倒れる」がゲームの仕様に見える。
             before = t;
-            _longPeriodNoteLabel = EarthquakeRows.AddPlainRow(root, "LongPeriodNote", ref t,
-                Strings.EarthquakeLongPeriodNote, 40f);
-            Record(_longPeriodNoteLabel, BlockLongPeriod, t - before);
 
             // 時間帯係数（Task 11）。**独立した設定は作らない** —— 掛かる先は
             // 長周期の追加被害だけなので、長周期と同じブロックに置いて一緒に出入りさせる。
@@ -177,7 +173,6 @@ namespace DisasterPlus.Game
             _tsunamiLabel = null;
             _tsunamiNoteLabel = null;
             _longPeriodLabel = null;
-            _longPeriodNoteLabel = null;
             _timeLabel = null;
             _timeNoteLabel = null;
             _built = false;

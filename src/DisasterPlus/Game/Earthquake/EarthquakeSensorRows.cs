@@ -24,7 +24,6 @@ namespace DisasterPlus.Game
         private static UILabel _waveformModelLabel;
         private static UILabel _waveformTremorLabel;
         private static UILabel _waveformUnavailableLabel;
-        private static UILabel _waveformNoteLabel;
 
         internal static void Build(UIPanel p, ref float y)
         {
@@ -94,7 +93,6 @@ namespace DisasterPlus.Game
 
             // グラフが何の絵なのかを、グラフのすぐ下で毎回言う。
             // 内容はグラフを出しているときだけ入れる（Refresh 側で設定する）。
-            _waveformNoteLabel = EarthquakeRows.AddPlainRow(p, "WaveformNote", ref y, "", 38f);
         }
 
         /// <summary>レベルアンロード時。参照を捨てるだけ（実体はパネルごと消える）。</summary>
@@ -107,7 +105,6 @@ namespace DisasterPlus.Game
             _waveformModelLabel = null;
             _waveformTremorLabel = null;
             _waveformUnavailableLabel = null;
-            _waveformNoteLabel = null;
         }
 
         /// <summary>
@@ -226,7 +223,6 @@ namespace DisasterPlus.Game
             EarthquakeRows.SetPlain(_waveformLabel, "");
             EarthquakeRows.SetPlain(_waveformModelLabel, "");
             EarthquakeRows.SetPlain(_waveformTremorLabel, "");
-            EarthquakeRows.SetPlain(_waveformNoteLabel, "");
             RefreshWaveformAvailability();
             WaveformView.Render(null);
         }
@@ -307,7 +303,6 @@ namespace DisasterPlus.Game
                 EarthquakeRows.SetPlain(_waveformLabel, Strings.EarthquakeWaveformNeedsSensor);
                 EarthquakeRows.SetPlain(_waveformModelLabel, "");
                 EarthquakeRows.SetPlain(_waveformTremorLabel, "");
-                EarthquakeRows.SetPlain(_waveformNoteLabel, "");
                 WaveformView.Render(null);
                 return;
             }
@@ -374,7 +369,6 @@ namespace DisasterPlus.Game
             RefreshWaveformTremorRow(trace);
 
             // 注記はグラフ（あるいは最大振幅の行）が出ているときだけ添える。
-            EarthquakeRows.SetPlain(_waveformNoteLabel, Strings.EarthquakeWaveformNote);
             WaveformView.Render(trace);
         }
 
@@ -425,7 +419,6 @@ namespace DisasterPlus.Game
                 }
             }
 
-            text += "\n" + Strings.EarthquakeWaveformModelNote;
             EarthquakeRows.SetLayer2(_waveformModelLabel, text);
         }
 
@@ -456,7 +449,6 @@ namespace DisasterPlus.Game
                               ShakeWaveform.NormalisedDisplacement(peak)) + "]"
                           + "   " + trace.DistanceToVolcano.ToString("F0") + " m";
 
-            text += "\n" + Strings.EarthquakeWaveformTremorNote;
             EarthquakeRows.SetLayer2(_waveformTremorLabel, text);
         }
 

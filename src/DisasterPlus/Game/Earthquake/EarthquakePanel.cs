@@ -75,7 +75,6 @@ namespace DisasterPlus.Game
         private static UILabel _timeLabel;
         private static UILabel _cursorLabel;
         private static UILabel _shakeLabel;
-        private static UILabel _shakeNoteLabel;
 
         /// <summary>
         /// 地震の行を構築したか。Natural Disasters DLC が無い環境では構築せず、
@@ -203,7 +202,6 @@ namespace DisasterPlus.Game
             _timeLabel = null;
             _cursorLabel = null;
             _shakeLabel = null;
-            _shakeNoteLabel = null;
             _bodyBuilt = false;
             _cursorPublishedValid = false;
             // 次の都市が前の都市のカーソル地点を 1 回でも返さないようにする。
@@ -330,6 +328,10 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void BuildQuakePage(UIPanel p, ref float y)
         {
+            // ★★ **常設の説明は外した**（2026-08-22、所有者の依頼
+            //    「ゲーム性にかかわるところ以外は不要です」）。
+            //    内容は <c>EarthquakeFeature.WriteDiagnostics</c> の診断ダンプにある。
+
             EarthquakeRows.AddSectionHeader(p, "Layer1Header", ref y, Strings.EarthquakeLayer1Header);
 
             _countLabel = EarthquakeRows.AddLayer1Row(p, "Count", ref y);
@@ -345,8 +347,6 @@ namespace DisasterPlus.Game
             //    非ゼロの変位を書き続けている。3 つの部品が同じ物理量について
             //    食い違う主張をしていたので、揺れは揺れとして別行で出す。
             _shakeLabel = EarthquakeRows.AddLayer1Row(p, "ShakeAtCursor", ref y);
-            _shakeNoteLabel = EarthquakeRows.AddPlainRow(p, "ShakeNote", ref y,
-                Strings.EarthquakeShakeNote, 32f);
 
             EarthquakeMapRows.Build(p, ref y);
         }
@@ -491,7 +491,6 @@ namespace DisasterPlus.Game
             EarthquakeRows.SetPlain(_cursorLabel, "");
             EarthquakeRows.SetPlain(_shakeLabel, "");
             // 注記は行が出ているときだけ（RefreshShakeRow が入れ直す）。
-            EarthquakeRows.SetPlain(_shakeNoteLabel, "");
         }
 
         /// <summary>
@@ -667,7 +666,6 @@ namespace DisasterPlus.Game
         {
             // 「半径による打ち切りが無い」ことは、数値が出ていない状態でこそ
             // 誤解されうる（上の倒壊ランプが「圏外」と言っている隣なので）。
-            EarthquakeRows.SetPlain(_shakeNoteLabel, Strings.EarthquakeShakeNote);
 
             if (!haveCursor)
             {
@@ -764,6 +762,5 @@ namespace DisasterPlus.Game
         // 接頭辞の下に置くと、ゲームがその判断をしていることになってしまう。
         // SeismicScale.BandOf と Strings.EarthquakeBand* は、第 2 層が
         // 自分の名前として名乗るときのために残してある。
-
     }
 }

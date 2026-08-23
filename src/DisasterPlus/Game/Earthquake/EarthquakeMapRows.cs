@@ -25,7 +25,6 @@ namespace DisasterPlus.Game
     internal static class EarthquakeMapRows
     {
         private static UILabel _hazardLabel;
-        private static UILabel _cursorModelsNoteLabel;
 
         internal static void Build(UIPanel p, ref float y)
         {
@@ -56,8 +55,6 @@ namespace DisasterPlus.Game
             //    上は震央からの線形ランプ（R = 2000+20i）、こちらはバニラのハザード
             //    グリッド（亀裂**線分**までの距離・2 次減衰・Rmax = 2000+20i+400、§A-6）。
             //    どちらも実測なのに一致しないので、一致しない理由を画面で名乗る。
-            _cursorModelsNoteLabel = EarthquakeRows.AddPlainRow(p, "CursorModelsNote", ref y,
-                Strings.EarthquakeCursorModelsNote, 54f);
 
             // ── 震度分布の地図オーバーレイ ──────────────────────────
             // 上の「マップに表示」（バニラのハザードビュー）の**すぐ下**に置く。
@@ -70,7 +67,6 @@ namespace DisasterPlus.Game
         internal static void Destroy()
         {
             _hazardLabel = null;
-            _cursorModelsNoteLabel = null;
             EarthquakeOverlayRows.Destroy();
         }
 

@@ -232,9 +232,6 @@ namespace DisasterPlus.Game
         // バニラ自身の揺れの振幅（§A-7 IL_0069 の amp、包絡線を掛ける前）。
         // 倒壊ランプとは別の量なので別の行にする。
         public static string EarthquakeShakeAtCursor = "Ground shaking at cursor";
-        public static string EarthquakeShakeNote =
-            "Vanilla's shaking has no radius limit at all: it only falls off with distance, and "
-            + "it ignores intensity. The destruction radius above is a different quantity.";
         // 揺れの窓（Emerging|Active かつ e が m_activeDuration の内側）が開いていない。
         public static string EarthquakeNotShaking = "not shaking right now";
 
@@ -245,18 +242,10 @@ namespace DisasterPlus.Game
 
         // カーソル位置には 2 つの別のモデルの値が並ぶ。違う数字が出るのが正常なので、
         // なぜ違うのかを画面で名乗る（全体レビュー M3）。
-        public static string EarthquakeCursorModelsNote =
-            "The destruction factor above and this hazard value are different quantities: a linear "
-            + "ramp from the epicentre, versus the game's own map (distance to the crack segment, "
-            + "squared falloff, radius 400 m larger, and only for a located quake). Both are read "
-            + "from the game. The map overlay below draws the first one.";
 
         public static string EarthquakeFaultBand = "Fault zone";
         public static string EarthquakeFaultInside = "inside";
         public static string EarthquakeFaultOutside = "outside";
-        public static string EarthquakeFaultBandNote =
-            "The four rupture patches move every step, so this zone is where they can land, "
-            + "not where they will.";
 
         // ★ 「マップに表示」から改名した（震度分布オーバーレイの追加に伴う）。
         //    ボタンが 2 つ並ぶようになり、片方が「マップに表示」のままだと
@@ -424,9 +413,6 @@ namespace DisasterPlus.Game
         public static string EarthquakeWaveformNeedsSensor =
             "Build an Earthquake Sensor to record ground motion. The game itself keeps no "
             + "ground-motion history at all, so Disaster + samples it at the sensor.";
-        public static string EarthquakeWaveformNote =
-            "This is the game's own shake formula, evaluated at the sensor using the distance "
-            + "from the epicentre instead of the distance from the camera.";
         public static string EarthquakeWaveformUnavailable =
             "Waveform drawing is unavailable on this build; showing the peak amplitude instead.";
         // 構築には成功したが、描画中に落ちて以後描かなくなった状態。以前はこの行が
@@ -458,20 +444,12 @@ namespace DisasterPlus.Game
             + "anything the game computes, so it is off by default.";
         public static string EarthquakeWaveformModel =
             "Synthesized seismogram (orange line)";
-        public static string EarthquakeWaveformModelNote =
-            "White is the game's own shake formula; orange is Disaster +'s synthesized record. "
-            + "Both lines share one vertical scale, so their heights can be compared directly.";
         // ── 第 3 層＝火山性微動（2026-08-22、所有者の依頼）─────────────────
         //    第 2 層とまったく同じ扱いにする。これも**この MOD のモデル**であって、
         //    ゲームが計算している値でも、カメラが実際に足した変位でもない
         //    （Game/Volcano/VolcanoTremorTrace のクラス doc）。
         public static string EarthquakeWaveformTremor =
             "Volcanic tremor (teal line)";
-        public static string EarthquakeWaveformTremorNote =
-            "Teal is Disaster +'s volcanic tremor model - the swarm and the harmonic tremor "
-            + "under the vent - evaluated at this seismograph. It is not measured by the game, "
-            + "and it is not a copy of the camera shake (that one runs on real time, this one "
-            + "on the plot's frame axis).";
         // 火山だけが揺れているときの見出し。**震央からの距離ではない**ので、
         // そう名乗らずに出すと「起きていない地震の記録」の顔になる。
         public static string EarthquakeWaveformTremorSource = "volcano";
@@ -524,11 +502,7 @@ namespace DisasterPlus.Game
         // 違いそのものを説明する行）、同じ内容を 2 箇所に書くと縦が足りなくなる。
         // 代わりにあちらの末尾に「下のオーバーレイが描いているのは前者だ」を足した。
         public static string EarthquakeOverlayLegend =
-            "Legend. Blue-green: the destruction factor s, in the same 10 steps as the bar above "
-            + "(densest at the epicentre, zero at the rim). Magenta: the fault zone, drawn at a flat "
-            + "density because its patches destroy with probability 1, not along a ramp. White: the "
-            + "epicentre and the fault strike. Shaking has no radius limit, so the ground moves "
-            + "outside the disc too.";
+            "Legend - blue-green: the destruction factor, densest at the epicentre. Magenta: the fault zone. White: the epicentre and the fault strike";
 
         // --- ②地震（Task 9: 海中震源からの津波連鎖 ＝ 第 2 層の 1 つ目） ---
         //
@@ -579,9 +553,6 @@ namespace DisasterPlus.Game
         public static string EarthquakeLongPeriodEnabled =
             "Enable long-period ground motion (adds damage vanilla never does)";
         public static string EarthquakeLongPeriodStrength = "Long-period strength (0 = off)";
-        public static string EarthquakeLongPeriodNote =
-            "Vanilla ignores building height entirely, both in the shaking and in the damage. "
-            + "This is a model Disaster + invented, not something the game computes.";
         public static string EarthquakeLongPeriodNoHeight =
             "This building's height could not be read, so no long-period damage is applied to it. "
             + "The mod never guesses a height.";

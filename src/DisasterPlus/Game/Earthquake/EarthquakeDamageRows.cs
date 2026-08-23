@@ -18,7 +18,6 @@ namespace DisasterPlus.Game
     internal static class EarthquakeDamageRows
     {
         private static UILabel _faultLabel;
-        private static UILabel _faultNoteLabel;
         private static UILabel _marginBuildingLabel;
         private static UILabel _marginVerdictLabel;
         private static UILabel _marginBurnLabel;
@@ -32,8 +31,6 @@ namespace DisasterPlus.Game
             // 断層帯の行には**常に**この注記が付く（計画の共通規則）。
             // 4 円盤の位置は毎ステップ振り直されるので、帯は「当たりうる範囲」であって
             // 「当たる場所」ではない。テキストは固定なのでここで一度だけ入れる。
-            _faultNoteLabel = EarthquakeRows.AddPlainRow(p, "FaultBandNote", ref y,
-                Strings.EarthquakeFaultBandNote, 28f);
 
             _marginBuildingLabel = EarthquakeRows.AddLayer1Row(p, "MarginBuilding", ref y);
             _marginVerdictLabel = EarthquakeRows.AddLayer1Row(p, "MarginVerdict", ref y);
@@ -74,7 +71,6 @@ namespace DisasterPlus.Game
         internal static void Clear()
         {
             EarthquakeRows.SetPlain(_faultLabel, "");
-            EarthquakeRows.SetPlain(_faultNoteLabel, "");
             EarthquakeRows.SetPlain(_marginBuildingLabel, "");
             EarthquakeRows.SetPlain(_marginVerdictLabel, "");
             EarthquakeRows.SetPlain(_marginBurnLabel, "");
@@ -85,7 +81,6 @@ namespace DisasterPlus.Game
         internal static void Destroy()
         {
             _faultLabel = null;
-            _faultNoteLabel = null;
             _marginBuildingLabel = null;
             _marginVerdictLabel = null;
             _marginBurnLabel = null;
@@ -101,7 +96,6 @@ namespace DisasterPlus.Game
         private static void RefreshFaultRow(EarthquakeReading primary, bool haveCursor, Vec3 cursor)
         {
             EarthquakeRows.SetPlain(_faultLabel, "");
-            EarthquakeRows.SetPlain(_faultNoteLabel, "");
 
             if (!haveCursor) return;
 
@@ -119,7 +113,6 @@ namespace DisasterPlus.Game
                     : Strings.EarthquakeFaultOutside));
             // この注記は必ず併記する（計画の共通規則）。帯は「当たりうる範囲」であって
             // 「当たる場所」ではない。
-            EarthquakeRows.SetPlain(_faultNoteLabel, Strings.EarthquakeFaultBandNote);
         }
 
         /// <summary>
