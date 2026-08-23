@@ -671,7 +671,6 @@ namespace DisasterPlus.Game
         // ゲームの倒壊確率に掛ける係数であって実在の風速ではない。②が気象庁震度階級を
         // 名乗らなかったのと同じ理由で、単位を名乗ると実在の意味があると誤解させる。
         public static string TyphoonTitle = "Typhoon";
-        public static string TyphoonModelHeader = "Computed by Disaster +";
 
         // ★★ **この文に印の文字列そのものを書かないこと**（全体レビュー I5）。
         //    以前 TyphoonModelNote は英語の "[measured]" を本文に埋め込んでおり、
@@ -692,10 +691,6 @@ namespace DisasterPlus.Game
         //    トークンを String.Replace で差し替えるのは落ちない ——
         //    翻訳がトークンを落としても、その文だけが印に触れなくなるだけで、
         //    それは build.ps1 の locale 検査が捕まえる。
-        public static string TyphoonModelNote =
-            "The numbers on this panel come from Disaster +'s own model. The game does not "
-            + "compute a typhoon, wind damage, a positioned cloud or a flood of its own. "
-            + "Only the rows marked {measured} are values read straight from the game.";
         // ★ ④のタイルもこのボタンも、押すと**配置カーソルが構わる**（バニラの災害
         //   ボタンと同じ約束）。文言を「起こす」から「地点を指す」へ改めてあるのは、
         //   押した瞬間には何も起きないからである —— 起きると書いてあるのに起きないと、
@@ -741,17 +736,11 @@ namespace DisasterPlus.Game
         //   持っているからである。①の天気予報パネルは乱数で発生を判定しているので
         //   同じことを出せない。**その違いをパネルに書く**のがこの 1 行の役目で、
         //   これが無いと「ゲームが予測している」と読まれる。
-        public static string TyphoonLandfallNote =
-            "This is not a probability. Disaster + owns the track, so the arrival time is a "
-            + "fixed value - unlike the forecast panel, where the game rolls dice.";
 
         // 「0 分」と混ぜないための文言。海上を通り抜ける経路では、上陸しないのが正常。
         public static string TyphoonNoLandfall = "stays over water on its current track";
         public static string TyphoonRainRow = "Rain";
         public static string TyphoonCloudRow = "Cloud";
-        public static string TyphoonWindDirectionNote =
-            "The wind direction follows the storm only slowly. The game limits how fast it "
-            + "can turn, and Disaster + does not overwrite it directly.";
 
         // --- ④台風（Task 6: 落雷） ---
         //
@@ -764,9 +753,6 @@ namespace DisasterPlus.Game
         public static string TyphoonEffectsHeader = "What the typhoon brings";
         public static string TyphoonLightningRow =
             "Lightning (in flight / total / left to the host storm / dropped)";
-        public static string TyphoonLightningNote =
-            "The game can only hold 20 lightning strikes at once. Disaster + keeps its own "
-            + "share below that so the host storm's strikes are not thrown away.";
 
         // ★ 全体レビュー I4。強度 170 以上では宿主の嵐の取り分だけで 20 発の枠を
         //   使い切るため、④は落雷を 1 発も積まなくなる（LightningBudget の
@@ -791,12 +777,6 @@ namespace DisasterPlus.Game
         public static string TyphoonWindEnabled =
             "Wind damage (buildings vanilla would never collapse)";
         public static string TyphoonWindStrength = "Wind damage strength (0 = off)";
-        public static string TyphoonWindNote =
-            "The game has no wind damage of any kind, and no field that makes the wind "
-            + "stronger. This is a model Disaster + invented. The numbers are not wind speeds.";
-        public static string TyphoonWindShelterNote =
-            "Shelters, vaults and dams do not collapse in a typhoon. That is the game "
-            + "refusing, and it is the right answer.";
         public static string TyphoonWindCapped =
             "sweep truncated this pass; the outer edge has not been rolled yet";
 
@@ -828,9 +808,6 @@ namespace DisasterPlus.Game
             + "Nothing is wrong - the game has no flood disaster of its own, and Disaster + "
             + "only raises water sources the map already has.";
         public static string TyphoonFloodRaised = "raised";
-        public static string TyphoonFloodNote =
-            "The water level is restored when the typhoon ends, when you leave the city and "
-            + "before every save. A river must never stay flooded after you remove the mod.";
 
         // --- ④台風（竜巻並みの局所被害。随伴竜巻の後継） ---
         //
@@ -853,11 +830,6 @@ namespace DisasterPlus.Game
             "Tornado-strength damage patches (no tornado is spawned)";
         public static string TyphoonGustStrength =
             "Tornado-strength damage (0 = off)";
-        public static string TyphoonGustNote =
-            "Several small patches under the storm are hit as hard as a tornado would hit "
-            + "them. No tornado, no funnel and no second disaster is created - there is "
-            + "nothing to see coming, only the damage. Each patch is a few dozen metres "
-            + "across, lives for a short while and then stops. They all end with the storm.";
         public static string TyphoonTornadoRetiredNote =
             "The old \"accompanying tornadoes\" option was removed; its saved value is "
             + "never read again.";
@@ -881,11 +853,6 @@ namespace DisasterPlus.Game
         //   建物・道路・樹木には一切触れない（風害のつまみとは別である）。
         public static string TyphoonStormFx = "Show the storm at ground level";
         public static string TyphoonStormSound = "Play the storm's wind sound";
-        public static string TyphoonStormFxNote =
-            "Wind-driven spray around the camera while it is inside the storm, and a gust "
-            + "that pushes citizens and vehicles four times as often as before. Nothing here "
-            + "damages buildings, roads or trees - that is the wind damage option above. "
-            + "The storm also thickens the air as it closes in, so visibility drops.";
 
         // --- ⑤火山（Task 2: 骨格・地形 API の解決・前提検証） ---
         //

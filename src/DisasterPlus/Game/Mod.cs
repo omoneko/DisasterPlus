@@ -193,7 +193,7 @@ namespace DisasterPlus.Game
                 ModSettings.TyphoonSouthernHemisphere.value,
                 v => ModSettings.TyphoonSouthernHemisphere.value = v);
             // ★ 河川氾濫も既定 ON。**セーブに焼き付く状態を触る唯一の機能**なので、
-            //    復元が 3 箇所から掛かることを TyphoonFloodNote が名乗る。
+            //    水位は台風の終了時・都市を出るとき・保存のたびに元へ戻す。
             typhoon.AddCheckbox(Strings.TyphoonFloodEnabled,
                 ModSettings.TyphoonFloodEnabled.value,
                 v => ModSettings.TyphoonFloodEnabled.value = v);

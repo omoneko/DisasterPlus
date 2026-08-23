@@ -15,7 +15,7 @@ namespace DisasterPlus.Game
     ///
     /// この節に出る数字は、④が自分で数えている台帳と、バニラの式から見積もった上限で
     /// ある。**どれも「ゲームが計算して公開している値」ではない。** 出所はパネルの
-    /// 見出し（<c>Strings.TyphoonModelNote</c>）が一度だけ名乗っているので、
+    /// 出所は影響のある行に付く <c>[実測]</c> の印が名乗るので、
     /// ここでは <see cref="TyphoonRows.AddRow(UIPanel,string,ref float)"/> と
     /// <see cref="TyphoonRows.SetPlain"/> しか使わない。
     /// **<see cref="TyphoonRows.SetMeasured"/> をこのファイルから呼ばないこと。**
@@ -30,32 +30,27 @@ namespace DisasterPlus.Game
     internal static class TyphoonEffectRows
     {
         private static UILabel _lightningLabel;
-        private static UILabel _lightningNoteLabel;
 
         /// <summary>宿主の嵐に枠を全部譲っている間だけ出す行（全体レビュー I4）。</summary>
         private static UILabel _lightningYieldedLabel;
         private static UILabel _windLabel;
-        private static UILabel _windNoteLabel;
-        private static UILabel _windShelterNoteLabel;
         private static UILabel _floodLabel;
         private static UILabel _floodReasonLabel;
-        private static UILabel _floodNoteLabel;
         private static UILabel _gustLabel;
-        private static UILabel _gustNoteLabel;
         private static UILabel _cloudNoteLabel;
-        private static UILabel _stormFxNoteLabel;
 
         /// <summary>パネル構築時に 1 回。</summary>
         internal static void Build(UIPanel p, ref float y)
         {
+            // ★★ **常設の説明は外した**（2026-08-22、所有者の依頼
+            //    「台風タブのたくさんの説明も不要だと思います」）。
+            //    内容は <c>TyphoonFeature.WriteDiagnostics</c> の診断ダンプにある。
+            //    残してあるのは**今の状態**と**「なぜ起きていないか」の行**だけで、
+            //    後者は実際に起きていないときしか場所を取らない。
+
             TyphoonRows.AddSectionHeader(p, "EffectsHeader", ref y, Strings.TyphoonEffectsHeader);
 
             _lightningLabel = TyphoonRows.AddRow(p, "Lightning", ref y);
-
-            // 上限 20 発の説明。**常設**にする —— 「宿主の嵐に譲っている数」が
-            // 何のことか、この 1 行が無いと分からない。
-            _lightningNoteLabel = TyphoonRows.AddRow(p, "LightningNote", ref y, 40f);
-            TyphoonRows.SetPlain(_lightningNoteLabel, Strings.TyphoonLightningNote);
 
             // ★ 「④の落雷が 1 発も出ていない」を出す行。**中身は Refresh が
             //    出し入れする** —— 常設にすると、譲っていない普通の強度でも
@@ -64,43 +59,18 @@ namespace DisasterPlus.Game
 
             _windLabel = TyphoonRows.AddRow(p, "Wind", ref y);
 
-            // **常設**にする。「バニラには風害が存在しない」ことと「数値は風速ではない」
-            // ことは、風害が動いていない瞬間にこそ読まれるべき説明である。
-            _windNoteLabel = TyphoonRows.AddRow(p, "WindNote", ref y, 40f);
-            TyphoonRows.SetPlain(_windNoteLabel, Strings.TyphoonWindNote);
-
-            // 「壊れていない」と「壊せない」を取り違えさせない（§F-2）。
-            _windShelterNoteLabel = TyphoonRows.AddRow(p, "WindShelterNote", ref y, 40f);
-            TyphoonRows.SetPlain(_windShelterNoteLabel, Strings.TyphoonWindShelterNote);
-
             _floodLabel = TyphoonRows.AddRow(p, "Flood", ref y);
 
             // 「なぜ氾濫しなかったか」の行。**中身は状態によって出し入れする**
             // （設計書 §7.4）。高さは説明文が 3 行に折り返すぶんを確保する。
             _floodReasonLabel = TyphoonRows.AddRow(p, "FloodReason", ref y, 56f);
 
-            // 復元が 3 箇所から掛かることを**常設**で名乗る。氾濫の唯一の怖さは
-            // 「MOD を外したら川が溢れたままだった」なので、そこを先に打ち消す。
-            _floodNoteLabel = TyphoonRows.AddRow(p, "FloodNote", ref y, 40f);
-            TyphoonRows.SetPlain(_floodNoteLabel, Strings.TyphoonFloodNote);
-
             _gustLabel = TyphoonRows.AddRow(p, "Gust", ref y);
-
-            // **常設**にする。「竜巻の姿は出ないのに竜巻並みに壊れる」は、
-            // 説明が無ければ不具合にしか見えない。高さは 3 行ぶん。
-            _gustNoteLabel = TyphoonRows.AddRow(p, "GustNote", ref y, 56f);
-            TyphoonRows.SetPlain(_gustNoteLabel, Strings.TyphoonGustNote);
 
             // ★ 雲は行を持たない（画面を見れば出ているかどうか分かる）。**出ない理由**
             //    だけを出す —— バニラ空の雲の設定がこの環境に無いのは正当な状態で
             //    （§C-2、PARTIAL）、それを黙っていると「④の雲が壊れている」と読まれる。
             _cloudNoteLabel = TyphoonRows.AddRow(p, "CloudNote", ref y, 40f);
-
-            // ★ 暴風雨の演出。**常設**にする —— 「飛沫が舞って市民が飛ばされるのに
-            //    建物は壊れない」は、説明が無ければ不具合にしか見えない
-            //    （風害のつまみと取り違えられる）。高さは 4 行ぶん。
-            _stormFxNoteLabel = TyphoonRows.AddRow(p, "StormFxNote", ref y, 72f);
-            TyphoonRows.SetPlain(_stormFxNoteLabel, Strings.TyphoonStormFxNote);
         }
 
         /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
@@ -274,18 +244,12 @@ namespace DisasterPlus.Game
         internal static void Destroy()
         {
             _lightningLabel = null;
-            _lightningNoteLabel = null;
             _lightningYieldedLabel = null;
             _windLabel = null;
-            _windNoteLabel = null;
-            _windShelterNoteLabel = null;
             _floodLabel = null;
             _floodReasonLabel = null;
-            _floodNoteLabel = null;
             _gustLabel = null;
-            _gustNoteLabel = null;
             _cloudNoteLabel = null;
-            _stormFxNoteLabel = null;
         }
     }
 }

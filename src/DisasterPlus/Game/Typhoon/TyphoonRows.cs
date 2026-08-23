@@ -16,8 +16,9 @@ namespace DisasterPlus.Game
     /// ④が出す数値は**原則すべて本 MOD のもの**であり、全部が同じ出所なら行ごとの印は
     /// 情報を持たない。
     ///
-    ///   - 出所は<b>見出しで一度だけ</b>言う（<c>Strings.TyphoonModelHeader</c> と
-    ///     <c>Strings.TyphoonModelNote</c>）
+    ///   - 出所を名乗る見出しは**パネルから外した**（2026-08-22、所有者の依頼
+    ///     「台風タブのたくさんの説明も不要」）。今名乗っているのは下の
+    ///     「唯一の例外」の印と、診断ダンプである
     ///   - <b>行ごとの印は付けない</b>（<see cref="AddRow(UIPanel,string,ref float)"/> /
     ///     <see cref="SetPlain"/>）
     ///   - <b>唯一の例外</b>は <c>WeatherManager</c> から読んだ雨量・雲量。これは①と同じ
@@ -188,28 +189,6 @@ namespace DisasterPlus.Game
         internal static void SetMeasured(UILabel label, string body)
         {
             SetPlain(label, Strings.SourceVanilla + " " + body);
-        }
-
-        /// <summary>
-        /// パネル見出しの説明文を組み立てて入れる。
-        ///
-        /// ★★ **印は必ずここで挟む**（全体レビュー I5）。以前この文は翻訳文の中に
-        /// 印の文字列を直接持っており、日本語の文だけが英語の <c>[measured]</c> を
-        /// 案内していた —— 画面には <c>[実測]</c> しか出ないので、
-        /// **プレイヤーは存在しない印を探すことになる。**
-        /// 翻訳文には印そのものではなく <c>Strings.MeasuredToken</c> を書き、
-        /// ここで <c>Strings.SourceVanilla</c> へ差し替える。翻訳がどう変わっても
-        /// 両者はずれない。トークンが無い翻訳文はそのまま出る（落ちない） ——
-        /// その取りこぼしは <c>build.ps1</c> の locale 検査が捕まえる。
-        ///
-        /// 呼び出し側（<c>TyphoonPanel</c>）に <c>Strings.SourceVanilla</c> を
-        /// 触らせないのは <see cref="SetMeasured"/> と同じ理由である
-        /// （印の出所を 1 ファイルに閉じる。クラス doc の grep 3）。
-        /// </summary>
-        internal static void SetModelNote(UILabel label)
-        {
-            SetPlain(label,
-                Strings.TyphoonModelNote.Replace(Strings.MeasuredToken, Strings.SourceVanilla));
         }
     }
 }

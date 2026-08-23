@@ -212,11 +212,10 @@ namespace DisasterPlus.Game
 
             // ★★ ④の表示規約を名乗る 2 行。**行ごとの印を付けない代わりに、
             //     ここで一度だけ全部の出所を言う**（クラス doc / 設計書 §7-1）。
-            TyphoonRows.AddSectionHeader(panel, "ModelHeader", ref y, Strings.TyphoonModelHeader);
-            var note = TyphoonRows.AddRow(panel, "ModelNote", ref y, 56f);
-            // ★ 印（[measured] / [実測]）を挟むのは TyphoonRows の仕事である。
-            //   ここで文を組み立てない（全体レビュー I5。あちらの SetModelNote の doc）。
-            TyphoonRows.SetModelNote(note);
+            // ★★ **出所を名乗る 2 行は外した**（2026-08-22）。
+            //    ④の数値がゲームの実測ではないことは、雨量と雲量の 2 行に付く
+            //    [実測] の印と、診断ダンプが引き続き名乗る。
+            //    印の仕組みそのもの（<c>TyphoonRows</c>）は 1 バイトも変えていない。
 
             AddActionButtons(panel, ref y);
 

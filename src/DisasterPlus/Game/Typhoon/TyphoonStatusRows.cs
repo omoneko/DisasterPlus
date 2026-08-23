@@ -13,7 +13,7 @@ namespace DisasterPlus.Game
     /// ── ここが守っている 4 つの約束（設計書 §7）───────────────────────
     ///
     /// 1. **行ごとの出所の印は付けない。** ④の数値は原則すべて本 MOD のもので、
-    ///    それはパネルの見出し（<c>TyphoonModelNote</c>）が一度だけ名乗る。
+    ///    見出しの 2 行は 2026-08-22 に外した（<see cref="TyphoonPanel"/> の doc）。
     ///    <b>唯一の例外</b>が雨量・雲量の 2 行で、そこだけ
     ///    <see cref="TyphoonRows.SetMeasured"/> を通す。**このファイルの
     ///    <c>SetMeasured</c> の呼び出しは 2 箇所しか無い。**
@@ -41,10 +41,8 @@ namespace DisasterPlus.Game
         private static UILabel _radiusLabel;
         private static UILabel _phaseLabel;
         private static UILabel _landfallLabel;
-        private static UILabel _landfallNoteLabel;
         private static UILabel _rainLabel;
         private static UILabel _cloudLabel;
-        private static UILabel _windNoteLabel;
 
         /// <summary>パネル構築時に 1 回。行は常に作り、中身の有無で出し分ける。</summary>
         internal static void Build(UIPanel p, ref float y)
@@ -52,6 +50,12 @@ namespace DisasterPlus.Game
             // 「台風が居ない」「まだ読んでいない」「読めない」「起こせなかった理由」を
             // 全部ここに出す。**折り返す高さを取る** —— refusal は英語の 1 文なので、
             // 折り返さない行に入れると途中で切れて理由が消える。
+            // ★★ **常設の説明は外した**（2026-08-22、所有者の依頼
+            //    「台風タブのたくさんの説明も不要だと思います」）。
+            //    内容は <c>TyphoonFeature.WriteDiagnostics</c> の診断ダンプにある。
+            //    残してあるのは**今の状態**と**「なぜ起きていないか」の行**だけで、
+            //    後者は実際に起きていないときしか場所を取らない。
+
             _stateLabel = TyphoonRows.AddRow(p, "State", ref y, 40f);
 
             _centreLabel = TyphoonRows.AddRow(p, "Centre", ref y);
@@ -60,18 +64,9 @@ namespace DisasterPlus.Game
             _phaseLabel = TyphoonRows.AddRow(p, "Phase", ref y);
             _landfallLabel = TyphoonRows.AddRow(p, "Landfall", ref y);
 
-            // ★ 上陸予測の根拠。**予測の隣から離してはいけない**（設計書 §7-2）。
-            _landfallNoteLabel = TyphoonRows.AddRow(p, "LandfallNote", ref y, 40f);
-
             // ★ ここから 2 行だけがバニラの実測値である。
             _rainLabel = TyphoonRows.AddMeasuredRow(p, "Rain", ref y);
             _cloudLabel = TyphoonRows.AddMeasuredRow(p, "Cloud", ref y);
-
-            // 風向がゆっくりしか変わらないのはゲームの制約であって不具合ではない
-            // （IL 事実文書 §A-4、m_directionSpeed は +0.001/step ずつしか上がらない）。
-            // 常設で出す。
-            _windNoteLabel = TyphoonRows.AddRow(p, "WindNote", ref y, 40f);
-            TyphoonRows.SetPlain(_windNoteLabel, Strings.TyphoonWindDirectionNote);
         }
 
         /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
@@ -201,11 +196,6 @@ namespace DisasterPlus.Game
             else body = Strings.TyphoonNoLandfall;
 
             TyphoonRows.SetPlain(_landfallLabel, Strings.TyphoonLandfall + ": " + body);
-
-            // 注記は「あと何分」を出しているときだけ。上陸済み・上陸しないときに
-            // 「到達時刻は確定値です」と書くと、存在しない予測の根拠を説明することになる。
-            TyphoonRows.SetPlain(_landfallNoteLabel,
-                !s.OverLand && s.LandfallKnown ? Strings.TyphoonLandfallNote : "");
         }
 
         /// <summary>
@@ -260,7 +250,6 @@ namespace DisasterPlus.Game
             TyphoonRows.SetPlain(_radiusLabel, "");
             TyphoonRows.SetPlain(_phaseLabel, "");
             TyphoonRows.SetPlain(_landfallLabel, "");
-            TyphoonRows.SetPlain(_landfallNoteLabel, "");
         }
 
         private static void ClearWeatherRows()
@@ -281,10 +270,8 @@ namespace DisasterPlus.Game
             _radiusLabel = null;
             _phaseLabel = null;
             _landfallLabel = null;
-            _landfallNoteLabel = null;
             _rainLabel = null;
             _cloudLabel = null;
-            _windNoteLabel = null;
         }
     }
 }
