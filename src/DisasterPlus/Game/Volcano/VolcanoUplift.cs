@@ -216,6 +216,36 @@ namespace DisasterPlus.Game
     /// 分割で、**規律はこのクラス doc が全部持っている**
     /// （<c>VolcanoClearing.Sweep.cs</c> / <c>VolcanoLava.Ignite.cs</c> と同じ形）。
     /// </summary>
+    /// <summary>
+    /// <see cref="VolcanoUplift"/> が今どの形を書いているか。
+    ///
+    /// ── 破局噴火のために足した（2026-08-22、所有者の依頼）────────────────────
+    ///
+    /// &gt; 地下のマグマ上昇による火山の形成 → 数万年かけた巨大なマグマだまりの成長
+    /// &gt; → 内圧限界による破局噴火（大爆発） → 地面の自重による大陥没とカルデラ形成
+    ///
+    /// 地形を書く仕組みは<b>1 本しか作らない</b>。矩形の取り方・退避・フラッシュ・
+    /// 天井の数え方は 3 つとも同じで、違うのは<b>矩形の半径と、焼くプロファイルと、
+    /// 進み方の規則</b>だけである。だから同じ型に段を持たせる。
+    /// </summary>
+    public enum UpliftStage
+    {
+        /// <summary>円錐を立てる（今までの唯一の形）。**山頂から外へ広がる。**</summary>
+        Cone = 0,
+
+        /// <summary>
+        /// マグマだまりの膨らみ。**裾よりずっと広く、ごく低い**ドームを一様に持ち上げる
+        /// （<c>SuperEruption.InflationAt</c>）。
+        /// </summary>
+        Inflation = 1,
+
+        /// <summary>
+        /// カルデラの陥没。**平底の窪地**を一様に掘り下げる
+        /// （<c>SuperEruption.BowlProfileAt</c>。プロファイルは負）。
+        /// </summary>
+        Collapse = 2,
+    }
+
     public static partial class VolcanoUplift
     {
         /// <summary>
@@ -305,6 +335,9 @@ namespace DisasterPlus.Game
         private static bool _started;
         private static bool _complete;
 
+        /// <summary>今どの形を書いているか。<see cref="StartStage"/> だけが入れる。</summary>
+        private static UpliftStage _stage = UpliftStage.Cone;
+
         /// <summary>この山の最終高（m）。**火口の深さと底の高さを出すのに使う。**</summary>
         private static float _heightMetres;
 
@@ -374,6 +407,9 @@ namespace DisasterPlus.Game
 
         /// <summary>隆起が終わったか。</summary>
         public static bool Complete { get { return _complete; } }
+
+        /// <summary>今書いている形。診断と、状態機械が段を見分けるのに使う。</summary>
+        public static UpliftStage Stage { get { return _stage; } }
 
         /// <summary>
         /// 山頂の窪みが満杯の深さに達したか。**「彫ったか」ではない** ——
@@ -471,6 +507,7 @@ namespace DisasterPlus.Game
             _ceilingClippedCells = 0;
             _started = false;
             _complete = false;
+            _stage = UpliftStage.Cone;
             _heightMetres = 0f;
             _summitScale = 1f;
             _centre = new Vec3(0f, 0f, 0f);
@@ -514,7 +551,9 @@ namespace DisasterPlus.Game
 
             if (!_started || !SamePoint(_centre, footprint.Centre))
             {
-                if (!Start(footprint)) return;
+                // ★ 自分から始まるのは**円錐だけ**である。膨らみとカルデラは
+                //   VolcanoState が StartStage で明示的に始める。
+                if (!StartStage(footprint, UpliftStage.Cone)) return;
             }
 
             if (_complete) return;
@@ -542,8 +581,12 @@ namespace DisasterPlus.Game
 
             _progress = UpliftSchedule.ProgressAt(_tick, _totalTicks);
             // 山頂のプロファイルは H なので、山頂の盛り上がりは今も H×progress である。
-            _summitMetres = UpliftSchedule.GrowthMetresAt(
-                footprint.HeightMetres, footprint.HeightMetres, _progress);
+            // ★★ **カルデラでは山頂ではなく「床がどれだけ落ちたか」である。**
+            //    ここで正の値を入れると、火山タブが陥没を「+400 m の山頂」と名乗る。
+            _summitMetres = _stage == UpliftStage.Collapse
+                ? -footprint.HeightMetres * _progress
+                : UpliftSchedule.GrowthMetresAt(
+                      footprint.HeightMetres, footprint.HeightMetres, _progress);
 
             if (!WriteHeights(footprint)) return;
             FlushPending();
@@ -580,7 +623,9 @@ namespace DisasterPlus.Game
 
             // ★ 火口はここで彫らない。**最初の tick から形の一部として在る**（クラス doc）。
             _progress = 1f;
-            _summitMetres = footprint.HeightMetres;
+            _summitMetres = _stage == UpliftStage.Collapse
+                ? -footprint.HeightMetres
+                : footprint.HeightMetres;
             _complete = true;
 
             // もう使わない。メモリを返す（クラス doc の実費表）。
@@ -589,13 +634,32 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 影響矩形を決めて「元の高さ」を控える。**開始時に 1 回だけ**（クラス doc）。
-        /// 失敗したら <see cref="_lastFailure"/> を残して false を返す。
+        /// <paramref name="stage"/> の形を書きはじめる。**円錐以外もここを通る**
+        /// （<see cref="UpliftStage"/>）。矩形・退避・フラッシュ・天井の数え方は
+        /// 3 段とも同じで、違うのは焼くプロファイルと進み方だけである。
+        ///
+        /// <paramref name="footprint"/> は<b>その段ぶんに広げたもの</b>を渡すこと
+        /// （<c>VolcanoFootprint.Resized</c>）。半径をここで広げないのは、
+        /// 準備（<c>VolcanoClearing</c>）と同じ半径を見ていないと
+        /// 道路の下だけ地面が押し戻されるからである（設計書 §1.2 / 罠 1）。
+        ///
+        /// ★★ <b><see cref="Reset"/> より後に段を入れる。</b> Reset を挟んで
+        ///   段を持ち回すと、前の火山のカルデラ段が次の火山の円錐に化ける。
         /// </summary>
-        private static bool Start(VolcanoFootprint footprint)
+        internal static bool StartStage(VolcanoFootprint footprint, UpliftStage stage)
         {
             Reset();
+            _stage = stage;
+            return StartCore(footprint);
+        }
 
+        /// <summary>
+        /// 影響矩形を決めて「元の高さ」を控える。**開始時に 1 回だけ**（クラス doc）。
+        /// 失敗したら <see cref="_lastFailure"/> を残して false を返す。
+        /// **<see cref="Reset"/> はここでは呼ばない**（<see cref="StartStage"/> が済ませている）。
+        /// </summary>
+        private static bool StartCore(VolcanoFootprint footprint)
+        {
             ushort[] raw = ReadRawHeights();
             if (raw == null) return false;
 
@@ -621,13 +685,17 @@ namespace DisasterPlus.Game
 
             // ★ 火口の分だけ円錐を立て直す倍率。**準備の前線もこれを見る**（_summitScale の doc）。
             _heightMetres = footprint.HeightMetres;
-            _summitScale = VolcanoCrater.SummitScale(footprint.Form, footprint.RadiusMetres);
+            // ★ 火口のぶんの立て直しは**円錐にしか要らない**。膨らみもカルデラも
+            //   山頂を彫らないので、1 のままでよい（掛けると前線が実際より先へ出る）。
+            _summitScale = _stage == UpliftStage.Cone
+                ? VolcanoCrater.SummitScale(footprint.Form, footprint.RadiusMetres)
+                : 1f;
 
             // ★ 山頂が毎 tick 1 raw 単位以上動くよう切り詰める（罠 2）。
             //   換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。
             float framesPerMinute = FeatureHost.FramesPerMinute;
             int requestedTicks = framesPerMinute > 0f
-                ? (int)(ModSettings.VolcanoUpliftMinutes.value * framesPerMinute / IntervalFrames)
+                ? (int)(StageMinutes() * framesPerMinute / IntervalFrames)
                 : 1;
             _totalTicks = UpliftSchedule.TotalTicksFor(footprint.HeightMetres, requestedTicks);
 
@@ -697,7 +765,7 @@ namespace DisasterPlus.Game
                     //    火口は min だけで働くので、どちらも構造的に守られている
                     //    （VolcanoRelief / VolcanoCrater のクラス doc）。
                     //    **山頂の窪みはここで入る。あとから彫らない。**
-                    _profile[row + x] = VolcanoCrater.ProfileAt(relief, dx, dz, radius, metres);
+                    _profile[row + x] = ProfileFor(relief, dx, dz, radius, metres);
                 }
             }
         }
@@ -709,6 +777,52 @@ namespace DisasterPlus.Game
         ///
         /// <c>Singleton&lt;T&gt;.exists</c> を先に見る（<c>instance</c> は main スレッド専用 API）。
         /// </summary>
+        /// <summary>
+        /// 今の段にかける時間（ゲーム内分）。
+        ///
+        /// ★ 陥没は**速い**。屋根が抜けて落ちるのに数万年はかからない ——
+        ///   数万年かかるのは<b>その前のマグマだまりの成長</b>のほうである。
+        ///   膨らみは逆にゆっくりで、隆起より長くかける。
+        /// </summary>
+        private static float StageMinutes()
+        {
+            float baseMinutes = ModSettings.VolcanoUpliftMinutes.value;
+
+            switch (_stage)
+            {
+                case UpliftStage.Inflation: return baseMinutes * 1.5f;
+                case UpliftStage.Collapse: return baseMinutes * 0.35f;
+                default: return baseMinutes;
+            }
+        }
+
+        /// <summary>
+        /// 1 セルぶんのプロファイル（m）。**カルデラだけ負を返す。**
+        ///
+        /// ★ <paramref name="radius"/> と <paramref name="metres"/> は
+        ///   <b>その段ぶんに広げた影響範囲そのもの</b>である（<c>VolcanoState</c> が
+        ///   <c>VolcanoFootprint.Resized</c> で作って渡す）。ここで倍率を掛け直さない ——
+        ///   掛けると準備（<c>VolcanoClearing</c>）と隆起の見ている半径がずれて、
+        ///   道路の下の地面だけ押し戻される（設計書 §1.2 / 罠 1）。
+        /// </summary>
+        private static float ProfileFor(VolcanoRelief relief, float dx, float dz,
+                                        float radius, float metres)
+        {
+            switch (_stage)
+            {
+                case UpliftStage.Inflation:
+                    return SuperEruption.InflationAt(
+                        (float)Math.Sqrt(dx * dx + dz * dz), radius, metres);
+
+                case UpliftStage.Collapse:
+                    return SuperEruption.BowlProfileAt(
+                        (float)Math.Sqrt(dx * dx + dz * dz), radius, metres);
+
+                default:
+                    return VolcanoCrater.ProfileAt(relief, dx, dz, radius, metres);
+            }
+        }
+
         private static ushort[] ReadRawHeights()
         {
             if (!Singleton<TerrainManager>.exists)

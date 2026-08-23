@@ -341,7 +341,10 @@ namespace DisasterPlus.Game
             y = ReflowRow(y, _upliftLabel,
                 Strings.VolcanoUpliftRow + ": " + Strings.VolcanoUpliftProgress + " "
                 + (s.ProgressUnit * 100f).ToString("F0") + "%"
-                + "    " + Strings.VolcanoSummitRow + ": +"
+                // ★ 符号は数のほうに任せる。決め打ちで "+" を書いていた頃は、
+                //   カルデラの陥没が「+-900 m」と表示された。
+                + "    " + Strings.VolcanoSummitRow + ": "
+                + (s.SummitMetres >= 0f ? "+" : "")
                 + s.SummitMetres.ToString("F0") + " " + Strings.VolcanoMetres
                 + " / " + s.Footprint.HeightMetres.ToString("F0") + " "
                 + Strings.VolcanoMetres);
@@ -450,11 +453,17 @@ namespace DisasterPlus.Game
         }
 
 
-        /// <summary>「進行中」の位相か。**壊し始めてからの 5 つ**である。</summary>
+        /// <summary>
+        /// 「進行中」の位相か。**壊し始めてからの 7 つ**である。
+        /// <c>VolcanoState.InProgress</c> と同じ集合にしておくこと ——
+        /// ずれると、進行中の火山を画面が「終わっている」と名乗る。
+        /// </summary>
         private static bool InProgress(VolcanoPhase phase)
         {
             return phase == VolcanoPhase.Clearing
                    || phase == VolcanoPhase.Uplifting
+                   || phase == VolcanoPhase.Inflating
+                   || phase == VolcanoPhase.Collapsing
                    || phase == VolcanoPhase.Erupting
                    || phase == VolcanoPhase.Flowing
                    || phase == VolcanoPhase.Cooling;

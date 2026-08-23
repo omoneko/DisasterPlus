@@ -56,17 +56,29 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly float SizeScale;
 
-        public VolcanoRequestData(VolcanoRequest kind, Vec3 point, float sizeScale)
+        /// <summary>
+        /// クリックした瞬間のスライダーの**生値**（0〜255。表示はこの 1/10）。
+        ///
+        /// ★★ <b><see cref="SizeScale"/> から割り戻さないこと。</b> あちらは
+        ///   <c>VolcanoSizeScale</c> が帯へクランプした後の値なので、上端では
+        ///   複数の生値が同じ倍率に潰れている。**「スライダーがいちばん上か」は
+        ///   生値でしか判定できない**（<c>SuperEruption.IsSuper</c>）。
+        /// </summary>
+        public readonly int SizeRaw;
+
+        public VolcanoRequestData(VolcanoRequest kind, Vec3 point, float sizeScale, int sizeRaw)
         {
             Kind = kind;
             Point = point;
             SizeScale = sizeScale;
+            SizeRaw = sizeRaw;
         }
 
         /// <summary>地点も倍率も要らない依頼（<see cref="VolcanoRequest.Stop"/>）。</summary>
         public static VolcanoRequestData Of(VolcanoRequest kind)
         {
-            return new VolcanoRequestData(kind, new Vec3(0f, 0f, 0f), 1f);
+            return new VolcanoRequestData(kind, new Vec3(0f, 0f, 0f), 1f,
+                                          DisasterPlus.Core.Volcano.VolcanoSizeScale.AnchorRaw);
         }
 
         /// <summary>「依頼なし」。<c>default(VolcanoRequestData)</c> と同じだが、意図を名乗る。</summary>

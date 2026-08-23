@@ -68,7 +68,15 @@ namespace DisasterPlus.Game
 
                     // ★★ **山頂から外へ広がる**（UpliftSchedule.GrowthMetresAt の doc）。
                     //    profile × progress ではない —— あれは山全体が一様に膨らむ。
-                    float grown = UpliftSchedule.GrowthMetresAt(_profile[cell], height, _progress);
+                    //
+                    // ★★ <b>その規則は円錐にしか当てはまらない。</b>（2026-08-22）
+                    //    <c>GrowthMetresAt</c> は <c>profileMetres &lt;= 0</c> で 0 を返すので、
+                    //    **カルデラ（負のプロファイル）はこれでは 1 mm も掘れない。**
+                    //    膨らみと陥没は「全体が一様に」動くのが正しい姿でもあるので、
+                    //    素直に <c>profile × progress</c> で書く。
+                    float grown = _stage == UpliftStage.Cone
+                        ? UpliftSchedule.GrowthMetresAt(_profile[cell], height, _progress)
+                        : _profile[cell] * _progress;
 
                     // 絶対目標なので progress は 1 を渡す（grown が既に「今の高さ」である）。
                     ushort target = UpliftSchedule.RawTargetAt(_baseRaw[cell], grown, 1f);

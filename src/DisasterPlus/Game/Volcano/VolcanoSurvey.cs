@@ -75,6 +75,27 @@ namespace DisasterPlus.Game
             Capped = capped;
         }
 
+        /// <summary>
+        /// 同じ地点・同じ調査結果のまま、**半径と高さだけ差し替えた**1 個を作る。
+        ///
+        /// 破局噴火の段（膨らみ／カルデラ）が使う。あちらは山より広い範囲を動かすので、
+        /// <c>VolcanoUplift</c> にも <c>VolcanoClearing</c> にも
+        /// <b>その段ぶんの半径をそのまま見せる</b>必要がある ——
+        /// 片方だけ広げると、道路の下の地面だけが押し戻されて
+        /// 平らな溝が残る（設計書 §1.2 / 罠 1）。
+        ///
+        /// ★ 建物・道路の数（<see cref="BuildingCount"/> / <see cref="SegmentCount"/>）は
+        ///   **元の調査のまま**である。広げた範囲を数え直してはいない ——
+        ///   数えていない数を名乗らないために、ここは触らない。
+        /// </summary>
+        public VolcanoFootprint Resized(float radiusMetres, float heightMetres)
+        {
+            return new VolcanoFootprint(Valid, Centre, GroundHeightMetres, Form,
+                                        radiusMetres, heightMetres, HeightLimitedByCeiling,
+                                        BuildingCount, SegmentCount, TileCount,
+                                        BlockHeightCatchUpFrames, Capped);
+        }
+
         /// <summary>「調べていない」1 個。**0 を並べた「それらしい」値を作らない。**</summary>
         public static VolcanoFootprint None
         {

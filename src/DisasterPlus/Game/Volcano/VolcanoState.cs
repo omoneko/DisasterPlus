@@ -44,6 +44,19 @@ namespace DisasterPlus.Game
 
         /// <summary>断った。理由は <see cref="VolcanoState.LastRefusal"/>。</summary>
         Refused = 9,
+
+        /// <summary>
+        /// **破局噴火だけ。** 巨大なマグマだまりが育って、山より広い地面が
+        /// ドーム状に膨らむ（<c>SuperEruption.InflationAt</c>）。
+        /// スライダーが上端（表示 25.5）のときにだけ通る。
+        /// </summary>
+        Inflating = 10,
+
+        /// <summary>
+        /// **破局噴火だけ。** 空になったマグマだまりの屋根が自重で抜け、
+        /// 平底のカルデラが落ちる（<c>SuperEruption.BowlProfileAt</c>）。
+        /// </summary>
+        Collapsing = 11,
     }
 
     /// <summary>
@@ -110,8 +123,46 @@ namespace DisasterPlus.Game
         private static VolcanoFootprint _footprint = VolcanoFootprint.None;
         private static string _lastRefusal;
 
+        /// <summary>
+        /// この火山が破局噴火か（スライダーが上端だったか）。
+        /// **置いた瞬間に 1 度だけ決まる** —— 途中でスライダーを動かされても
+        /// 進行中の火山の筋書きは変わらない。
+        /// </summary>
+        private static bool _super;
+
         /// <summary>今の位相。</summary>
         public static VolcanoPhase Phase { get { return _phase; } }
+
+        /// <summary>
+        /// 進行中の火山が破局噴火か。表示と診断が「なぜ地面がこんなに動くのか」を
+        /// 名乗るのに使う。
+        /// </summary>
+        public static bool IsSupereruption { get { return _super; } }
+
+        /// <summary>
+        /// 膨らみの段の影響範囲（山より広い）。破局噴火でなければ
+        /// <see cref="Footprint"/> と同じ。
+        /// </summary>
+        private static VolcanoFootprint InflationFootprint
+        {
+            get
+            {
+                return _footprint.Resized(
+                    SuperEruption.InflationRadiusMetres(_footprint.RadiusMetres),
+                    SuperEruption.InflationHeightMetres(_footprint.HeightMetres));
+            }
+        }
+
+        /// <summary>カルデラの段の影響範囲（山より広く、**深さは正の値**で入る）。</summary>
+        private static VolcanoFootprint CalderaFootprint
+        {
+            get
+            {
+                return _footprint.Resized(
+                    SuperEruption.CalderaRadiusMetres(_footprint.RadiusMetres),
+                    SuperEruption.CalderaDepthMetres(_footprint.HeightMetres));
+            }
+        }
 
         /// <summary>直近の調査結果。<c>Valid == false</c> なら「まだ調べていない」。</summary>
         public static VolcanoFootprint Footprint { get { return _footprint; } }
@@ -139,6 +190,7 @@ namespace DisasterPlus.Game
             _phase = VolcanoPhase.Idle;
             _footprint = VolcanoFootprint.None;
             _lastRefusal = null;
+            _super = false;
             // 準備の実績も持ち越さない。**進行中の火山は保存しない**ので、
             // 都市を出入りすると準備は 0 からになる（地形はそのままの形で残る）。
             VolcanoClearing.Reset();
@@ -194,7 +246,7 @@ namespace DisasterPlus.Game
             switch (request.Kind)
             {
                 case VolcanoRequest.Place:
-                    HandlePlace(request.Point, request.SizeScale);
+                    HandlePlace(request.Point, request.SizeScale, request.SizeRaw);
                     break;
 
                 case VolcanoRequest.Stop:
@@ -251,6 +303,47 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            if (_phase == VolcanoPhase.Inflating)
+            {
+                // ★★ **数万年かけたマグマだまりの成長**（所有者の依頼）。
+                //    山より広い地面が、山よりずっと低くドーム状に膨らむ。
+                //    ここではまだ噴火していない —— 噴煙も溶岩も出さない。
+                VolcanoFootprint bulge = InflationFootprint;
+                VolcanoClearing.Tick(bulge, VolcanoUplift.GrowthFrontUnit, deltaMinutes);
+                VolcanoUplift.Tick(bulge, frame, deltaMinutes);
+
+                if (!VolcanoUplift.Complete) return;
+
+                _phase = VolcanoPhase.Erupting;
+                Log.Info("supereruption: the magma chamber finished inflating (+"
+                         + bulge.HeightMetres.ToString("F0") + " m over "
+                         + bulge.RadiusMetres.ToString("F0")
+                         + " m); the chamber is now at its pressure limit and erupts");
+                return;
+            }
+
+            if (_phase == VolcanoPhase.Collapsing)
+            {
+                // ★★ **地面の自重による大陥没**（所有者の依頼）。空になった
+                //    マグマだまりの屋根が落ちる。<b>唯一、地面を下げる段である。</b>
+                VolcanoFootprint caldera = CalderaFootprint;
+                VolcanoClearing.Tick(caldera, VolcanoUplift.GrowthFrontUnit, deltaMinutes);
+                VolcanoUplift.Tick(caldera, frame, deltaMinutes);
+
+                // 溶岩は陥没のあいだも流れ続ける（止めるとここだけ絵が凍る）。
+                VolcanoLava.Tick(_footprint, frame, deltaMinutes,
+                                 VolcanoUplift.RiseMetresPerFrame);
+
+                if (!VolcanoUplift.Complete) return;
+
+                _phase = VolcanoPhase.Flowing;
+                Log.Info("supereruption: the caldera finished collapsing (-"
+                         + caldera.HeightMetres.ToString("F0") + " m over "
+                         + caldera.RadiusMetres.ToString("F0")
+                         + " m); the terrain stays as it is (this is irreversible)");
+                return;
+            }
+
             if (_phase == VolcanoPhase.Erupting)
             {
                 // T7。**噴出の予定を決めるだけ**で、地形も建物も 1 つも変えない。
@@ -265,6 +358,30 @@ namespace DisasterPlus.Game
                                  VolcanoUplift.RiseMetresPerFrame);
 
                 if (!VolcanoEruption.Finished) return;
+
+                // ★★ **破局噴火だけ、噴火のあとに陥没がある**（所有者の依頼の 4 段目）。
+                //    ここで StartStage を明示的に呼ぶ —— VolcanoUplift が自分から
+                //    始めるのは円錐だけで、あれは今 Complete のまま止まっている。
+                if (_super)
+                {
+                    VolcanoFootprint caldera = CalderaFootprint;
+                    if (VolcanoUplift.StartStage(caldera, UpliftStage.Collapse))
+                    {
+                        _phase = VolcanoPhase.Collapsing;
+                        Log.Info("supereruption: the eruption emptied the chamber after "
+                                 + VolcanoEruption.BurstsSoFar
+                                 + " bursts; the roof now collapses into a caldera of r="
+                                 + caldera.RadiusMetres.ToString("F0") + " m, depth "
+                                 + caldera.HeightMetres.ToString("F0") + " m");
+                        return;
+                    }
+
+                    // ★ **黙って飛ばさない。** 掘れなかった理由を残して、
+                    //   ふつうの噴火と同じ終わり方へ落とす。
+                    Refuse("the caldera collapse could not start ("
+                           + (VolcanoUplift.LastFailure ?? "unknown reason")
+                           + "); the volcano finishes without one");
+                }
 
                 // ★ T8 がここを <c>Done</c> から <c>Flowing</c> に差し替えた。
                 //   位相が進行中のまま止まらないことは、溶岩の側の 2 つの有限性が
@@ -337,8 +454,28 @@ namespace DisasterPlus.Game
             // ★ T7 がここを <c>Done</c> から <c>Erupting</c> に差し替えた。位相が
             //   進行中のまま止まらないことは <c>VolcanoEruption.Finished</c> が担保する
             //   （噴火は必ず有限のゲーム内時間で終わり、例外が出た場合も終わる）。
-            _phase = VolcanoPhase.Erupting;
             _lastRefusal = null;
+
+            // ★★ **破局噴火だけ、山ができたあとにマグマだまりが育つ**
+            //    （所有者の依頼の 2 段目）。ふつうの噴火はそのまま Erupting へ。
+            if (_super && VolcanoUplift.Stage == UpliftStage.Cone)
+            {
+                VolcanoFootprint bulge = InflationFootprint;
+                if (VolcanoUplift.StartStage(bulge, UpliftStage.Inflation))
+                {
+                    _phase = VolcanoPhase.Inflating;
+                    Log.Info("supereruption: the cone is up; a magma chamber now inflates the "
+                             + "ground over r=" + bulge.RadiusMetres.ToString("F0") + " m by "
+                             + bulge.HeightMetres.ToString("F0") + " m");
+                    return;
+                }
+
+                Refuse("the magma chamber inflation could not start ("
+                       + (VolcanoUplift.LastFailure ?? "unknown reason")
+                       + "); the volcano erupts without one");
+            }
+
+            _phase = VolcanoPhase.Erupting;
             Log.Info("volcano uplift complete (the eruption has been running since it started): summit +"
                      + VolcanoUplift.SummitMetres.ToString("F0")
                      + " m, crater " + (VolcanoUplift.CraterFormed ? "at full depth" : "SHALLOW")
@@ -369,7 +506,7 @@ namespace DisasterPlus.Game
         /// 断る順序は「進行中 → 破壊経路が無い → 調査が失敗」で、
         /// **どれも 1 つも壊す前に返る**。理由は必ず <see cref="LastRefusal"/> に残す。
         /// </summary>
-        private static void HandlePlace(Vec3 point, float sizeScale)
+        private static void HandlePlace(Vec3 point, float sizeScale, int sizeRaw)
         {
             if (InProgress())
             {
@@ -400,12 +537,48 @@ namespace DisasterPlus.Game
             VolcanoForm form = CurrentForm();
             VolcanoFootprint footprint;
 
+            // ★★ **スライダーが上端のときだけ破局噴火**（所有者の依頼）。
+            //    生値で判定する —— 倍率は帯でクランプされたあとの値なので、
+            //    上端かどうかがもう分からない。
+            //    **調査より先に決める**（下で半径の読み方が変わる）。
+            _super = SuperEruption.IsSuper(sizeRaw);
+
+            // ★★ **破局噴火では、頼まれた大きさは「カルデラ」の大きさである。**
+            //
+            //    そうしないと絵にならない。カルデラは円錐の 1.9 倍なので、
+            //    円錐を頼まれた半径いっぱい（成層火山なら 5564 m）で立てると
+            //    カルデラは 10.6 km を要求し、実費の上限（6 km）で切られて
+            //    **山とほぼ同じ大きさの穴**になる —— 陥没が見えない。
+            //
+            //    実際の超巨大火山（Yellowstone・Toba）にも**大きな円錐は無い**。
+            //    在るのはカルデラである。だから 25.5 では、頼まれた半径を
+            //    カルデラの半径として読み、円錐はそこから割り戻す:
+            //
+            //      円錐 = R / 1.9 → 膨らみ = 円錐 × 2.4 → カルデラ = 円錐 × 1.9 = R
+            //
+            //    ★ 高さは割り戻さない。低い山が落ちても陥没に見えないので、
+            //      円錐は頼まれた高さのまま立てる。
+            float requestedRadius =
+                VolcanoSizeScale.Apply(VolcanoShape.DefaultRadiusOf(form), sizeScale);
+            //
+            //    ★ 上限も割り戻す。<c>SuperEruption.MaxRadiusMetres</c> で頭を
+            //      押さえているのは**カルデラ**なので、円錐をそれより大きく立てると
+            //      カルデラだけが天井に当たって、また「山と同じ大きさの穴」に戻る
+            //      （楯状火山は推奨半径が 2 km あるので、ここが無いと必ずそうなる）。
+            if (_super)
+            {
+                float coneCeiling =
+                    SuperEruption.MaxRadiusMetres / SuperEruption.CalderaRadiusFactor;
+                requestedRadius /= SuperEruption.CalderaRadiusFactor;
+                if (requestedRadius > coneCeiling) requestedRadius = coneCeiling;
+            }
+
             if (!VolcanoSurvey.Run(
                     point, form,
                     // ★★ 基準は**形態ごとの推奨値**である（2026-08-22）。
                     //    設定画面の半径・最終高のスライダーは撤去した ——
                     //    同じ量を 2 つのつまみで決めさせていた（<c>VolcanoSizeScale</c>）。
-                    VolcanoSizeScale.Apply(VolcanoShape.DefaultRadiusOf(form), sizeScale),
+                    requestedRadius,
                     VolcanoSizeScale.Apply(VolcanoShape.DefaultHeightOf(form), sizeScale),
                     out footprint))
             {
@@ -424,7 +597,20 @@ namespace DisasterPlus.Game
                      + _footprint.Centre.Z.ToString("F0") + "): " + _footprint.Form
                      + " r=" + _footprint.RadiusMetres.ToString("F0")
                      + " m h=" + _footprint.HeightMetres.ToString("F0")
-                     + " m; clearing starts now");
+                     + " m; clearing starts now"
+                     + (_super
+                        ? ". THIS IS A SUPERERUPTION (the slider is at its top). The cone is "
+                          + "deliberately SMALLER than at lower settings - at 25.5 the size you "
+                          + "picked is the size of the CALDERA, not of the mountain (real "
+                          + "supervolcanoes have no big cone). It will grow, then a magma "
+                          + "chamber will inflate the ground over r="
+                          + SuperEruption.InflationRadiusMetres(_footprint.RadiusMetres)
+                                .ToString("F0")
+                          + " m, then it erupts and collapses into a caldera of r="
+                          + SuperEruption.CalderaRadiusMetres(_footprint.RadiusMetres)
+                                .ToString("F0")
+                          + " m"
+                        : ""));
         }
 
         /// <summary>
@@ -446,6 +632,7 @@ namespace DisasterPlus.Game
 
             _phase = VolcanoPhase.Idle;
             _footprint = VolcanoFootprint.None;
+            _super = false;
             // ★ 準備の実績も畳む。**既に壊した建物と道路は戻らない**（不可逆）。
             //   畳まないと、次に開いたパネルが前の火山の破壊数を名乗る。
             VolcanoClearing.Reset();
@@ -470,6 +657,8 @@ namespace DisasterPlus.Game
         {
             return _phase == VolcanoPhase.Clearing
                    || _phase == VolcanoPhase.Uplifting
+                   || _phase == VolcanoPhase.Inflating
+                   || _phase == VolcanoPhase.Collapsing
                    || _phase == VolcanoPhase.Erupting
                    || _phase == VolcanoPhase.Flowing
                    || _phase == VolcanoPhase.Cooling;
@@ -489,6 +678,8 @@ namespace DisasterPlus.Game
         private static void RefuseAndForget(string reason)
         {
             _footprint = VolcanoFootprint.None;
+            // ★ 作らなかった火山の筋書きを持ち越さない。
+            _super = false;
             _phase = VolcanoPhase.Refused;
             Refuse(reason);
         }

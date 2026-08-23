@@ -152,13 +152,13 @@ namespace DisasterPlus.Game
 
             // ★ 大きさは**クリックした瞬間のスライダーの値**である（バニラと同じ）。
             //   読めない環境では倍率 1.0 ＝ 設定どおりのサイズへ落とす。
-            float scale = VolcanoSizeScale.ScaleFor(
-                IntensitySlider.ReadOr(VolcanoSizeScale.AnchorRaw));
+            int raw = IntensitySlider.ReadOr(VolcanoSizeScale.AnchorRaw);
+            float scale = VolcanoSizeScale.ScaleFor(raw);
 
             // ★ 積むのは「ここに作ってくれ」1 件（クラス doc）。実際に調べて壊し始める
             //   のは sim スレッドの VolcanoState.HandlePlace である ——
             //   **main スレッドから建物・道路・地形のバッファに触らない。**
-            VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Place, hit, scale));
+            VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Place, hit, scale, raw));
 
             // 指したら用は済んでいる。押しっぱなしで 2 つ目を指させない。
             Deactivate();

@@ -128,16 +128,45 @@ namespace DisasterPlus.Core.Volcano
             }
         }
 
-        /// <summary>形態ごとの最大半径（m）。</summary>
+        /// <summary>
+        /// 形態ごとの最大半径（m）。
+        ///
+        /// ── ★★ スライダーの上端まで効くようにした（2026-08-22）─────────
+        ///
+        /// 実機報告:
+        ///
+        /// &gt; 火山の 25.5 スケールが小さすぎるように思います
+        ///
+        /// そのとおりで、**帯がスライダーより先に頭打ちになっていた。**
+        /// 倍率の上端は <c>VolcanoSizeScale.MaxScale</c>（255/55 ≒ 4.64）なので、
+        /// 成層火山なら 1200 × 4.64 = 5568 m を要求される。それを 2000 m で
+        /// 切っていたため、<b>表示 9.2 より上はスライダーを動かしても
+        /// 半径が 1 m も変わらなかった</b>。
+        ///
+        /// 今の上限は「推奨値 × 上端の倍率」を丸めた値である。ただし
+        /// <see cref="AbsoluteMaxRadiusMetres"/> で頭を押さえる ——
+        /// 隆起は影響矩形ぶんの <c>ushort[]</c> を 2 枚持つので（面積に比例）、
+        /// マップ半辺（8640 m）まで許すと 1 個の火山で数十 MB になる。
+        /// </summary>
         public static float MaxRadiusOf(VolcanoForm form)
         {
             switch (form)
             {
-                case VolcanoForm.Shield: return 3000f;
-                case VolcanoForm.Dome: return 800f;
-                default: return 2000f;
+                // 推奨 2000 × 4.64 = 9280 → 実費の上限で 6000 に押さえる。
+                case VolcanoForm.Shield: return AbsoluteMaxRadiusMetres;
+                // 推奨 350 × 4.64 = 1624。
+                case VolcanoForm.Dome: return 1650f;
+                // 推奨 1200 × 4.64 = 5568。
+                default: return 5600f;
             }
         }
+
+        /// <summary>
+        /// どの形態でも越えない半径（m）。**実費の上限であって形の話ではない。**
+        /// 隆起の退避配列は半径 3 km で 279 KB（面積に比例）なので、
+        /// 6 km で約 1.1 MB。ここを上げるならその表も直すこと。
+        /// </summary>
+        public const float AbsoluteMaxRadiusMetres = 6000f;
 
         /// <summary>形態ごとの既定高さ（m）。</summary>
         public static float DefaultHeightOf(VolcanoForm form)
@@ -160,16 +189,37 @@ namespace DisasterPlus.Core.Volcano
             }
         }
 
-        /// <summary>形態ごとの最大高さ（m）。</summary>
+        /// <summary>
+        /// 形態ごとの最大高さ（m）。<see cref="MaxRadiusOf"/> と同じ理由で
+        /// 「推奨値 × 上端の倍率」まで上げた（2026-08-22）。
+        ///
+        /// ★★ <b>ゲームの地形の天井は 1024 m である</b>
+        ///   （<c>UpliftSchedule.CeilingMetres</c>。<c>ushort</c> × 0.015625 m）。
+        ///   これは<b>海抜</b>の天井なので、標高 400 m の土地に 700 m の山を
+        ///   立てれば山頂は削られる —— そのときは <c>VolcanoState</c> が
+        ///   「天井で削った」と必ず言う。**MOD からは上げられない。**
+        ///   だからここを 1024 より上にしても意味が無い。
+        /// </summary>
         public static float MaxHeightOf(VolcanoForm form)
         {
             switch (form)
             {
-                case VolcanoForm.Shield: return 300f;
-                case VolcanoForm.Dome: return 400f;
-                default: return 700f;
+                // 推奨 200 × 4.64 = 928。楯状火山は「広く低い」ままである
+                // （半径のほうが 6 km まで伸びるので、比は崩れない）。
+                case VolcanoForm.Shield: return 930f;
+                // 推奨 300 × 4.64 = 1392 → 天井で押さえる。
+                case VolcanoForm.Dome: return AbsoluteMaxHeightMetres;
+                // 推奨 600 × 4.64 = 2784 → 天井で押さえる。
+                default: return AbsoluteMaxHeightMetres;
             }
         }
+
+        /// <summary>
+        /// どの形態でも越えない高さ（m）。ゲームの地形の天井（1024 m）より
+        /// 少し下に置く —— ちょうどに置くと、海抜 0 m の土地でも山頂の
+        /// 1 raw 単位が天井に触れて「削られた」と報告されることになる。
+        /// </summary>
+        public const float AbsoluteMaxHeightMetres = 1000f;
 
         /// <summary>
         /// 要求半径を形態の帯へクランプする。NaN は既定値。
