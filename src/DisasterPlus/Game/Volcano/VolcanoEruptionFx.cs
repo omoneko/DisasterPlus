@@ -237,6 +237,9 @@ namespace DisasterPlus.Game
 
         private static bool _puffsDrawn;
 
+        /// <summary>塊が描けなくて灰の柱へ戻したことを 1 度だけ言う。</summary>
+        private static bool _puffFallbackLogged;
+
         public static void Destroy()
         {
             VolcanoBlastFx.Reset();
@@ -269,6 +272,16 @@ namespace DisasterPlus.Game
                 _plumeHeightMetres = 0f;
                 // ★ 飛んでいる岩も捨てる。残すと**噴火が終わった空に岩が落ち続ける。**
                 VolcanoBlastFx.Reset();
+
+                // ★★ **塊の群れも畳む**（2026-08-22、実機報告
+                //    「中央の煙が残ったままになるバグ」）。
+                //
+                //    こちらの ParticleSystem は<b>描画係</b>で、粒の寿命を毎フレーム
+                //    1000 秒へ戻している（あちらのクラス doc）。つまり
+                //    <b>置きっぱなしにすると永久に消えない</b> ——
+                //    ゲーム粒子と違って自然に死んでくれない。
+                //    ここを飛ばすと、噴火が終わった火口に煙が貼り付いたまま残る。
+                VolcanoPlumePuffFx.Destroy();
                 return;
             }
 
@@ -327,7 +340,30 @@ namespace DisasterPlus.Game
                 vent, craterRadius, plume.HeightMetres, unit, _clockSeconds,
                 windX, windZ, plumeSeed);
 
-            _plumeDrawn = RenderColumn(ash, umbrella, camera, vent, plume, craterRadius, dt);
+            if (!_puffsDrawn && !_puffFallbackLogged)
+            {
+                _puffFallbackLogged = true;
+                Log.Info("volcano plume: the cloud puffs are not drawing ("
+                         + (VolcanoPlumePuffFx.LastFailure ?? "no reason given")
+                         + "); falling back to the game's own ash particles");
+            }
+
+            // ★★ **灰色のゲーム粒子の噴煙はもう出さない**（2026-08-22、所有者の指示）。
+            //
+            //    > 白色の噴煙のエフェクトが優れているので、既存の灰色の煙の
+            //    > エフェクトはオミットでお願いします。
+            //
+            //    白い塊の群れ（VolcanoPlumePuffFx）と重ねると、塊の隙間から
+            //    細かい灰の粒が見えて**2 つの噴煙が重なっている**ように見えた。
+            //    灰色の分は塊そのものの色へ移してある（あちらの AshColor）。
+            //
+            //    ★ RenderColumn と AshPlume/AshUmbrella の複製は**残してある**。
+            //      柱の形（EruptionColumn）は噴煙の高さと雷の通り道に今も要るし、
+            //      塊が 1 個も描けない環境（マテリアルが引けない）では
+            //      こちらへ戻すのが唯一の逃げ道だからである。
+            _plumeDrawn = _puffsDrawn
+                ? false
+                : RenderColumn(ash, umbrella, camera, vent, plume, craterRadius, dt);
             _flameDrawn = RenderFlames(flames, camera, vent, craterRadius, unit, dt);
             _ejectaDrawn = RenderEjecta(ejecta, camera, vent, craterRadius, unit, dt);
 

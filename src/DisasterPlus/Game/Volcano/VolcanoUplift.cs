@@ -338,6 +338,12 @@ namespace DisasterPlus.Game
         /// <summary>今どの形を書いているか。<see cref="StartStage"/> だけが入れる。</summary>
         private static UpliftStage _stage = UpliftStage.Cone;
 
+        /// <summary>山体の半径（m）。カルデラの段だけが読む。</summary>
+        private static float _coneRadiusMetres;
+
+        /// <summary>カルデラの床のでこぼこの種。<see cref="BakeProfile"/> が入れる。</summary>
+        private static uint _floorSeed;
+
         /// <summary>この山の最終高（m）。**火口の深さと底の高さを出すのに使う。**</summary>
         private static float _heightMetres;
 
@@ -508,6 +514,8 @@ namespace DisasterPlus.Game
             _started = false;
             _complete = false;
             _stage = UpliftStage.Cone;
+            _coneRadiusMetres = 0f;
+            _floorSeed = 0u;
             _heightMetres = 0f;
             _summitScale = 1f;
             _centre = new Vec3(0f, 0f, 0f);
@@ -648,8 +656,20 @@ namespace DisasterPlus.Game
         /// </summary>
         internal static bool StartStage(VolcanoFootprint footprint, UpliftStage stage)
         {
+            return StartStage(footprint, stage, 0f);
+        }
+
+        /// <summary>
+        /// 同上。<paramref name="coneRadiusMetres"/> は**山体の半径**（m）で、
+        /// カルデラの段だけが読む —— そこより外は元の地形がそのまま残っているので、
+        /// 床を落とす基準をそちらへ寄せる（<see cref="ReferenceGroundFor"/>）。
+        /// </summary>
+        internal static bool StartStage(VolcanoFootprint footprint, UpliftStage stage,
+                                        float coneRadiusMetres)
+        {
             Reset();
             _stage = stage;
+            _coneRadiusMetres = coneRadiusMetres;
             return StartCore(footprint);
         }
 
@@ -750,6 +770,9 @@ namespace DisasterPlus.Game
             var relief = VolcanoRelief.For(footprint.Form, seed,
                                            ModSettings.VolcanoReliefStrength.value / 100f);
 
+            // ★ 床のでこぼこも同じ種から出す。**同じ場所に作り直せば同じ床**になる。
+            _floorSeed = seed;
+
             float centreX = footprint.Centre.X;
             float centreZ = footprint.Centre.Z;
             float radius = footprint.RadiusMetres;
@@ -836,6 +859,19 @@ namespace DisasterPlus.Game
 
                 case UpliftStage.Collapse:
                 {
+                    // ★★ **元の地形を塗り潰さない。**（2026-08-22、所有者の指摘
+                    //    「元の地形や火山の山体の残骸も加味してリアルに寄せて」）
+                    //
+                    //    以前は中心 1 点の地面（groundMetres）を基準に落としていたので、
+                    //    カルデラの中の谷も丘も消えて**まっ平らな床**になった。
+                    //
+                    //    山体の外では、そのセルの<b>今の地面がそのまま元の地形</b>である
+                    //    （円錐はそこまで届いていない）。だから基準をそちらへ寄せる。
+                    //    山体の内側だけは本物が円錐に埋もれているので、中心の高さで代用する。
+                    //    継ぎ目が出ないよう、円錐の縁の外側 1 セル幅ぶんで混ぜる。
+                    float distance = (float)Math.Sqrt(dx * dx + dz * dz);
+                    float reference = ReferenceGroundFor(distance, baseMetres, groundMetres);
+
                     // ★★ **陥没は「山から一定量を引く」ではない。**（2026-08-22、所有者の指摘）
                     //
                     //    > カルデラ形成時は、山体が大きく落ち込んで大爆発する
@@ -850,14 +886,39 @@ namespace DisasterPlus.Game
                     //    床は**元の地面より下の 1 つの高さで平ら**になり、
                     //    山体は跡形も無くなる。だから目標は絶対の高さで置き、
                     //    プロファイルは「そこまで落ちる量」＝ 目標 − 今 とする。
-                    float bowl = SuperEruption.BowlProfileAt(
-                        (float)Math.Sqrt(dx * dx + dz * dz), radius, metres);
-                    return SuperEruption.FounderDropAt(bowl, baseMetres, groundMetres);
+                    // ★ 床は鉢だけではない —— 崩れた岩塊と中央火口丘が乗る
+                    //   （SuperEruption.CalderaFloorOffsetAt）。
+                    float offset = SuperEruption.CalderaFloorOffsetAt(
+                        dx, dz, radius, metres, _floorSeed);
+
+                    return SuperEruption.FounderDropAt(offset, baseMetres, reference);
                 }
 
                 default:
                     return VolcanoCrater.ProfileAt(relief, dx, dz, radius, metres);
             }
+        }
+
+        /// <summary>
+        /// カルデラの床を落とす基準の高さ（m）。
+        ///
+        /// 山体の外（<see cref="_coneRadiusMetres"/> より外）では**そのセルの
+        /// 本物の地面**、内側では中心の地面。あいだは混ぜる（継ぎ目を出さない）。
+        /// </summary>
+        private static float ReferenceGroundFor(float distance, float baseMetres,
+                                                float groundMetres)
+        {
+            float cone = _coneRadiusMetres;
+            if (!(cone > 0f)) return baseMetres;
+
+            // 混ぜる帯。円錐の縁のすぐ外側で、代用 → 本物へ移る。
+            float band = cone * 0.25f;
+            if (distance <= cone) return groundMetres;
+            if (distance >= cone + band) return baseMetres;
+
+            float t = (distance - cone) / band;
+            float k = t * t * (3f - 2f * t);      // smoothstep
+            return groundMetres + (baseMetres - groundMetres) * k;
         }
 
         /// <summary>

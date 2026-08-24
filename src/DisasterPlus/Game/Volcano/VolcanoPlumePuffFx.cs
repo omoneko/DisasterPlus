@@ -30,13 +30,23 @@ namespace DisasterPlus.Game
     /// ★★ <b>形は借りない。</b> 位置は <see cref="PlumeParcels"/> ——
     ///   核の単発の泡ではなく、供給が続く火山の噴煙柱である。
     ///
-    /// ── これは灰の柱を「置き換えない」──────────────────────────────
+    /// ── ★★ これが噴煙の<b>唯一</b>の描き手になった（2026-08-22）────────────
     ///
-    /// <c>VolcanoEruptionFx</c> のゲーム粒子（<see cref="EruptionColumn"/> の 9 段）は
-    /// <b>そのまま残す</b>。所有者の依頼が「煙のエフェクトに<b>加えて</b>」だからであり、
-    /// 実際にも役割が違う —— あちらは細かい灰の霞、こちらは大きな塊である。
-    /// 2 つの表現が同じ太さを名乗るよう、<see cref="PlumeParcels.ColumnRadiusAt"/> は
-    /// <see cref="EruptionColumn"/> の定数をそのまま使っている。
+    /// はじめはゲーム粒子の灰の柱（<see cref="EruptionColumn"/> の 9 段）と
+    /// 重ねて出していた。所有者の指示でそれをやめた:
+    ///
+    /// &gt; 白色の噴煙のエフェクトが優れているので、既存の灰色の煙のエフェクトは
+    /// &gt; オミットでお願いします。その代わり白色の噴煙に少し灰色も足してください。
+    ///
+    /// 重ねると、塊の隙間から細かい灰の粒が見えて<b>2 つの噴煙が重なっている</b>
+    /// ように見えた。灰色ぶんはこちらの色（<c>AshColor</c> と <c>AshMixSpread</c>）へ移した。
+    ///
+    /// ★ <c>VolcanoEruptionFx.RenderColumn</c> と灰の複製は**消していない**。
+    ///   柱の形（<see cref="EruptionColumn"/>）は噴煙の高さと雷の通り道に今も要るし、
+    ///   <b>塊が 1 個も描けない環境</b>（マテリアルが引けない）では
+    ///   そちらへ戻すのが唯一の逃げ道だからである。
+    ///   2 つの表現が同じ太さを名乗るよう、<see cref="PlumeParcels.ColumnRadiusAt"/> は
+    ///   <see cref="EruptionColumn"/> の定数をそのまま使っている。
     ///
     /// ── 落ちたら畳む ───────────────────────────────────────
     ///
@@ -47,11 +57,29 @@ namespace DisasterPlus.Game
     {
         /// <summary>
         /// 噴出口の近くの色。**灰は黒い。** 真っ白にすると水蒸気に見える。
+        ///
+        /// ★ 2026-08-22 に少し明るくした。ゲーム粒子の灰色の噴煙を止めたので
+        ///   （所有者の指示）、<b>灰色ぶんはこちらが受け持つ</b>ことになった。
+        ///   真っ黒のままだと、根元が煤の塊に見える。
         /// </summary>
-        private static readonly Color32 AshColor = new Color32(74, 68, 64, 255);
+        private static readonly Color32 AshColor = new Color32(96, 91, 88, 255);
 
         /// <summary>傘の色。日を受けた灰白。**真っ白にしない**（光って見える）。</summary>
         private static readonly Color32 SunlitColor = new Color32(226, 226, 230, 255);
+
+        /// <summary>
+        /// 塊ごとの灰色の混ざり方の幅。
+        ///
+        /// ── ★★ なぜ塊ごとに変えるのか（2026-08-22、所有者の指示）─────────────
+        ///
+        /// &gt; 白色の噴煙のエフェクトが優れているので、既存の灰色の煙のエフェクトは
+        /// &gt; オミットでお願いします。その代わり白色の噴煙に少し灰色も足してください。
+        ///
+        /// 高さだけで白 → 灰を決めると、**同じ高さの塊が全部同じ色**になり、
+        /// きれいな縞に見える（＝また「幾何的」に戻る）。塊ごとに ±この幅で
+        /// 灰色寄りへずらすと、白い雲の中に灰の濃い塊が混じる、本物の噴煙の色になる。
+        /// </summary>
+        private const float AshMixSpread = 0.34f;
 
         /// <summary>
         /// 画面に対する粒の大きさの上限（<c>ParticleSystemRenderer.maxParticleSize</c>）。
@@ -162,7 +190,14 @@ namespace DisasterPlus.Game
 
                 // ★ 強さは濃さにも効く。弱い噴火の噴煙は透ける。
                 float alpha = p.Alpha * (0.45f + 0.55f * unit);
-                _buffer[i].startColor = Blend(SunlitColor, AshColor, p.Brightness, alpha);
+
+                // ★ 明るさは高さで決まる（下が灰、上が白）が、そこへ塊ごとの
+                //   ばらつきを足す。足さないと同じ高さが全部同じ色になる。
+                float mix = p.Brightness
+                            - AshMixSpread * 0.5f
+                            + AshMixSpread * DeterministicRandom.Unit(seed, (uint)i * 13u + 5u);
+
+                _buffer[i].startColor = Blend(SunlitColor, AshColor, mix, alpha);
 
                 // ★ 毎フレーム上限へ戻す。**シミュレーションに歳を取らせない**
                 //   （クラス doc の「描画係としてだけ使う」の実体である）。

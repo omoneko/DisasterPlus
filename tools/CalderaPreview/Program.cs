@@ -30,8 +30,13 @@ namespace DisasterPlus.Tools.CalderaPreview
         /// <summary>横に見る範囲（m、片側）。カルデラの外まで入れる。</summary>
         private const float ViewHalfWidth = 7000f;
 
+        private const uint Seed = 20260822u;
+
+        /// <summary>海面（m）。<c>WaterSimulation.DEFAULT_SEA_LEVEL</c> の実測値。</summary>
+        private const float SeaLevel = 40f;
+
         private static readonly VolcanoRelief Flat =
-            VolcanoRelief.For(VolcanoForm.Strato, 20260822u, 0f);
+            VolcanoRelief.For(VolcanoForm.Strato, Seed, 0f);
 
         private static int Main(string[] args)
         {
@@ -49,7 +54,16 @@ namespace DisasterPlus.Tools.CalderaPreview
                               + " +" + bulgeH.ToString("F0"));
             Console.WriteLine("caldera  r=" + calderaR.ToString("F0")
                               + " floor=" + (Ground - depth).ToString("F0")
-                              + " (ground was " + Ground.ToString("F0") + ")");
+                              + " (ground was " + Ground.ToString("F0")
+                              + ", sea level " + SeaLevel.ToString("F0") + ")");
+
+            // ★ 床が海面より上か下かを**必ず名乗る**。以前は必ず下だった
+            //   （所有者の問い「必ず海抜より低くなる理由は何ですか？」）。
+            float floor = Ground - depth;
+            Console.WriteLine(floor >= SeaLevel
+                ? "         the caldera floor stays ABOVE sea level (dry caldera)"
+                : "         the caldera floor is " + (SeaLevel - floor).ToString("F0")
+                  + " m below sea level (it will flood, like Santorini)");
 
             string path = Path.Combine(dir, "caldera-cross-section.png");
             Png.Write(path, Width, Height, Render(calderaR, depth, bulgeR, bulgeH));
@@ -75,8 +89,27 @@ namespace DisasterPlus.Tools.CalderaPreview
         {
             // ★ 陥没は「膨らんだあとの地面」から落ちる（実機と同じ順序）。
             float baseMetres = Stage2Bulge(d, bulgeR, bulgeH);
-            float bowl = SuperEruption.BowlProfileAt(d, calderaR, depth);
-            return baseMetres + SuperEruption.FounderDropAt(bowl, baseMetres, Ground);
+
+            // ★ 床は鉢だけではない —— 崩れた岩塊と中央火口丘が乗る。
+            float offset = SuperEruption.CalderaFloorOffsetAt(d, 0f, calderaR, depth, Seed);
+
+            // ★ 山体の外では**そのセルの本物の地面**が基準（元の地形を残す）。
+            //   実機の VolcanoUplift.ReferenceGroundFor と同じ規則。
+            float reference = ReferenceGround(d, baseMetres);
+
+            return baseMetres + SuperEruption.FounderDropAt(offset, baseMetres, reference);
+        }
+
+        /// <summary>実機の <c>VolcanoUplift.ReferenceGroundFor</c> と同じ規則。</summary>
+        private static float ReferenceGround(float distance, float baseMetres)
+        {
+            float band = ConeRadius * 0.25f;
+            if (distance <= ConeRadius) return Ground;
+            if (distance >= ConeRadius + band) return baseMetres;
+
+            float t = (distance - ConeRadius) / band;
+            float k = t * t * (3f - 2f * t);
+            return Ground + (baseMetres - Ground) * k;
         }
 
         private static void PrintProfile(float calderaR, float depth,

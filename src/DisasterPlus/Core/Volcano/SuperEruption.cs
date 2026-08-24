@@ -77,10 +77,30 @@ namespace DisasterPlus.Core.Volcano
         public const float CalderaRadiusFactor = 1.9f;
 
         /// <summary>
-        /// カルデラの深さが山の高さの何倍か。1 より大きい ——
-        /// **山が消えるだけでなく、元の地面より下まで落ちる。**
+        /// カルデラの床が、元の地面より<b>山の高さの何倍ぶん下</b>に来るか。
+        ///
+        /// ── ★★ 1.35 は大きすぎた（2026-08-22、所有者の問い）──────────────
+        ///
+        /// &gt; カルデラ内部の標高が必ず海抜より低くなる理由は何ですか？
+        ///
+        /// <b>この係数がそのまま原因である。</b> 1.35・上限 900 m だったので:
+        ///
+        /// <code>
+        ///   山 1000 m → 深さ 1350 m → 上限で 900 m
+        ///   地面 120 m − 900 m = **−780 m**
+        ///   ゲームの海面は 40 m（WaterSimulation.DEFAULT_SEA_LEVEL、IL 実測）
+        ///   → 海面より 820 m 下。**どこに置いても必ず水没する。**
+        /// </code>
+        ///
+        /// 実際のカルデラの床は<b>まわりの地面より数百 m 下</b>までである。
+        /// 落ちるのは<b>山体</b>であって、まわりの大地ごと 900 m 沈むわけではない
+        /// （イエローストーンの床はまわりの台地とほぼ同じ高さで、穴ですらない）。
+        ///
+        /// 0.35・上限 400 m なら、<b>高い土地では乾いたカルデラ、海に近い土地では
+        /// 水没したカルデラ</b>になる —— サントリーニやクラカタウのように
+        /// 水没するのは正しい姿だが、<b>「必ず」水没するのは間違い</b>だった。
         /// </summary>
-        public const float CalderaDepthFactor = 1.35f;
+        public const float CalderaDepthFactor = 0.35f;
 
         /// <summary>
         /// カルデラの底が全体に占める割合（ここまでは平ら）。残りが壁である。
@@ -101,7 +121,35 @@ namespace DisasterPlus.Core.Volcano
         public const float MinDepthMetres = 120f;
 
         /// <summary>カルデラの深さの上限（m）。</summary>
-        public const float MaxDepthMetres = 900f;
+        public const float MaxDepthMetres = 400f;
+
+        /// <summary>
+        /// カルデラの床のでこぼこの大きさ（深さに対する比）。
+        ///
+        /// ★★ **床は平らではない。**（2026-08-22、所有者の指摘
+        ///   「カルデラ内部が平地になるのはおかしい」）落ちた屋根は 1 枚の板のまま
+        ///   無傷で着地するのではなく、**割れて崩れた岩塊の山**（崩壊角礫岩）になる。
+        ///   そのうえに火砕流が溜まる。
+        /// </summary>
+        public const float FloorRoughFraction = 0.22f;
+
+        /// <summary>床のでこぼこの間隔（m）。岩塊 1 つぶんの大きさである。</summary>
+        public const float RoughWavelengthMetres = 340f;
+
+        /// <summary>細かいほうのでこぼこの間隔（m）。</summary>
+        public const float FineRoughWavelengthMetres = 110f;
+
+        /// <summary>
+        /// 中央火口丘（resurgent dome）の半径（カルデラ半径に対する比）。
+        ///
+        /// ★ 実在の大カルデラ（イエローストーン・トバ・阿蘇）には、陥没のあとに
+        ///   下からまた押し上げられた<b>中央の高まり</b>が必ずある。
+        ///   これが無いと「まっさらな鉢」に見える。
+        /// </summary>
+        public const float ResurgentRadiusFraction = 0.34f;
+
+        /// <summary>中央火口丘の高さ（深さに対する比）。**床より上、縁より下。**</summary>
+        public const float ResurgentHeightFraction = 0.42f;
 
         /// <summary>カルデラの半径の上限（m）。マップは一辺 17,280 m しかない。</summary>
         public const float MaxRadiusMetres = 6000f;
@@ -209,6 +257,75 @@ namespace DisasterPlus.Core.Volcano
             if (w > 1f) w = 1f;
             float k = 1f - w * w * (3f - 2f * w);
             return -depthMetres * k;
+        }
+
+        /// <summary>
+        /// カルデラの床の形（m、**0 か負**）。1 セルぶん。
+        /// <see cref="BowlProfileAt"/> の滑らかな鉢に、<b>中央火口丘</b>と
+        /// <b>崩れた岩塊のでこぼこ</b>を足したものである。
+        ///
+        /// ── なぜ鉢だけではだめなのか（2026-08-22、所有者の指摘）─────────────
+        ///
+        /// &gt; カルデラ内部が平地になるのはおかしい（元の地形や火山の山体の残骸も
+        /// &gt; 加味してリアルに寄せてください）
+        ///
+        /// そのとおりで、<see cref="BowlProfileAt"/> は<b>まっ平らな床</b>を返す。
+        /// 実際には落ちた屋根が割れて岩塊の山になり（崩壊角礫岩）、
+        /// そのうえに火砕流が溜まり、やがて中央が再び押し上げられる。
+        ///
+        /// ★ <b>元の地形</b>のほうは呼び出し側が受け持つ ——
+        ///   <c>VolcanoUplift.ProfileFor</c> が、山体の外では
+        ///   <b>そのセルの本物の地面</b>を基準に落とす（中心 1 点の高さで
+        ///   塗り潰さない）。ここが返すのは「その基準からどれだけ下か」である。
+        /// </summary>
+        /// <param name="dx">中心からの距離（m、X 方向）。でこぼこの位相に使う。</param>
+        /// <param name="dz">同上（Z 方向）。</param>
+        /// <param name="seed">この火山の種。同じ場所なら同じ床になる。</param>
+        public static float CalderaFloorOffsetAt(float dx, float dz,
+                                                 float calderaRadiusMetres, float depthMetres,
+                                                 uint seed)
+        {
+            if (IsBad(dx) || IsBad(dz)) return 0f;
+
+            float distance = (float)Math.Sqrt(dx * dx + dz * dz);
+            float bowl = BowlProfileAt(distance, calderaRadiusMetres, depthMetres);
+            if (!(bowl < 0f)) return 0f;
+
+            // ★ でこぼこも中央火口丘も、**縁へ向かって消す**。消さないと、
+            //   カルデラの外の平地に岩塊がぽつぽつ残る。
+            float rim = calderaRadiusMetres > 0f ? distance / calderaRadiusMetres : 1f;
+            if (rim > 1f) rim = 1f;
+            float inside = 1f - rim * rim;
+
+            // ── 崩れた岩塊（2 つの間隔を重ねる）────────────────────────
+            float rough =
+                VolcanoRelief.ValueNoise(dx / RoughWavelengthMetres,
+                                         dz / RoughWavelengthMetres, seed) * 0.7f
+                + VolcanoRelief.ValueNoise(dx / FineRoughWavelengthMetres,
+                                           dz / FineRoughWavelengthMetres, seed + 7717u) * 0.3f;
+            // ★★ <c>ValueNoise</c> は<b>すでに [-1,1]</b> である（あちらの doc）。
+            //    ここで (n*2-1) と書いていたとき、実際の範囲は [-3,1] になり、
+            //    床が深さの 1.4 倍まで抜けた（-505 m / 深さ 350 m）。
+            //    **[0,1] を [-1,1] へ直す型の書き癖をそのまま持ち込まないこと。**
+            rough *= FloorRoughFraction * depthMetres * inside;
+
+            // ── 中央火口丘 ────────────────────────────────────────
+            float dome = 0f;
+            float domeRadius = calderaRadiusMetres * ResurgentRadiusFraction;
+            if (domeRadius > 0f && distance < domeRadius)
+            {
+                float k = distance / domeRadius;
+                // 余弦の山。縁で高さも傾きも 0 になる（＝継ぎ目が出ない）。
+                dome = depthMetres * ResurgentHeightFraction
+                       * 0.5f * (1f + (float)Math.Cos(Math.PI * k));
+            }
+
+            float offset = bowl + rough + dome;
+
+            // ★★ **床は元の地面より上には来ない。** 上がると、陥没したはずの
+            //   カルデラの中に元の高さの島が残る。
+            if (offset > 0f) return 0f;
+            return offset;
         }
 
         /// <summary>

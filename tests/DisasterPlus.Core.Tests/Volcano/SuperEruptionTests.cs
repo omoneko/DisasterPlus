@@ -58,8 +58,21 @@ namespace DisasterPlus.Core.Tests.Volcano
             float depth = SuperEruption.CalderaDepthMetres(Height);
 
             Assert.True(cr > Radius, "the caldera " + cr + " is smaller than the cone " + Radius);
-            Assert.True(depth > Height,
-                        "the caldera floor (" + depth + ") does not get below the original ground");
+
+            // ★★ <b>「山の高さより深い」は要求ではない。</b>（2026-08-22 に直した）
+            //
+            //    ここは以前 depth &gt; Height を要求していた。その要求のせいで
+            //    <c>CalderaDepthFactor</c> が 1.35（上限 900 m）になり、
+            //    <b>床が必ず海面（40 m）より 800 m 下へ落ちた</b> ——
+            //    所有者の問い「カルデラ内部の標高が必ず海抜より低くなる理由は
+            //    何ですか？」の原因そのものである。
+            //
+            //    落ちるのは<b>山体</b>であって、まわりの大地ごと沈むのではない。
+            //    要求は「まわりの地面より確かに下」と「深すぎない」の 2 つだけである。
+            Assert.True(depth > 0f, "the caldera does not go below the original ground at all");
+            Assert.True(depth < Height,
+                        "the caldera floor drops " + depth + " m for a " + Height
+                        + " m mountain; that sinks the whole landscape, not the edifice");
         }
 
         [Fact]

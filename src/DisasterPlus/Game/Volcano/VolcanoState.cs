@@ -403,7 +403,10 @@ namespace DisasterPlus.Game
                     && VolcanoEruption.ReadyForCollapse)
                 {
                     VolcanoFootprint caldera = CalderaFootprint;
-                    if (VolcanoUplift.StartStage(caldera, UpliftStage.Collapse))
+                    // ★ 山体の半径も渡す。カルデラの床は**山体の外では
+                    //   そのセルの本物の地面**を基準に落ちる（元の地形を残す）。
+                    if (VolcanoUplift.StartStage(caldera, UpliftStage.Collapse,
+                                                 _footprint.RadiusMetres))
                     {
                         VolcanoEruption.BeginClimax();
                         _phase = VolcanoPhase.Collapsing;
