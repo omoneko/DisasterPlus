@@ -159,6 +159,23 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>
+        /// 環状火口列の半径（m）。**破局噴火の陥没中だけ 0 でない。**
+        ///
+        /// カルデラ形成期の噴火は中央火口ではなく、陥没する屋根のふちの
+        /// 環状断層に沿って噴き上がる。爆発（<c>Core.Volcano.BlastCluster</c>）が
+        /// これを見て、発の何割かを環へ配る。
+        /// </summary>
+        public static float RingFissureRadiusMetres
+        {
+            get
+            {
+                if (!_super || _phase != VolcanoPhase.Collapsing) return 0f;
+                if (!_footprint.Valid) return 0f;
+                return SuperEruption.CalderaRadiusMetres(_footprint.RadiusMetres);
+            }
+        }
+
         /// <summary>カルデラの段の影響範囲（山より広く、**深さは正の値**で入る）。</summary>
         private static VolcanoFootprint CalderaFootprint
         {

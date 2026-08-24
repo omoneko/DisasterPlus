@@ -59,14 +59,16 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class VolcanoBlastFx
     {
-        /// <summary>1 回の爆発を何発に割るか。**1 だと「ポン」で終わる。**</summary>
-        private const int BlastPulses = 3;
-
-        /// <summary>発と発のあいだ（シミュレーションフレーム）。60 fps でおよそ 0.1 秒。</summary>
-        private const uint BlastPulseFrames = 6u;
-
-        /// <summary>発ごとに半径を細らせる比（2 発目以降）。</summary>
-        private const float BlastPulseShrink = 0.72f;
+        // ★★ BlastPulses / BlastPulseFrames / BlastPulseShrink は 2026-08-22 に退役した。
+        //
+        //    「同じ場所へ 3 発、6 フレームずつずらして、細らせながら積む」だった。
+        //    ずらす先が**同じ場所**なので、濃くはなったが広がらない ——
+        //    実機報告「爆発のエフェクトがスケール通りではない、特に破局噴火の時の
+        //    爆発がしょぼすぎます」の一因である。
+        //
+        //    今は <c>Core.Volcano.BlastCluster</c> が**場所も大きさも遅れも**決め、
+        //    数そのものを山の大きさと大爆発かどうかで変える。
+        //    定数は残さない —— 残すと「まだ 3 発なのか」と読まれる。
 
         /// <summary>爆発と岩を火口の底からどれだけ上げるか（m）。</summary>
         private const float LaunchLiftMetres = 4f;
@@ -100,6 +102,12 @@ namespace DisasterPlus.Game
         private static int _drawnLastFrame;
         private static bool _dispatchFailedLogged;
 
+        /// <summary>直近の 1 回の爆発を何発に割ったか（診断用）。</summary>
+        private static int _burstsLastBlast;
+
+        /// <summary>同上（外から読む口）。</summary>
+        public static int BurstsLastBlast { get { return _burstsLastBlast; } }
+
         /// <summary>これまでに弾けた回数（診断用）。</summary>
         public static int BlastsSoFar { get { return _blastsSoFar; } }
 
@@ -128,9 +136,16 @@ namespace DisasterPlus.Game
         /// <paramref name="clockSeconds"/> は⑤の効果時計（一時停止で止まり、
         /// ゲーム速度に追随する。<see cref="VolcanoEruptionFx"/> が持っている）。
         /// </summary>
+        /// <param name="climax">
+        /// カルデラ形成期の大爆発か（<c>VolcanoEruption.InClimax</c>）。
+        /// </param>
+        /// <param name="ringRadiusMetres">
+        /// 環状火口列の半径（m）。**0 なら中央火口だけ**。破局噴火のときだけ意味を持つ。
+        /// </param>
         public static void Update(RenderManager.CameraInfo camera, Vec3 vent, Vec3 centre,
                                   VolcanoFootprint footprint, float craterRadiusMetres,
-                                  float unit, float clockSeconds, float dt)
+                                  float unit, float clockSeconds, float dt,
+                                  bool climax, float ringRadiusMetres)
         {
             _drawnLastFrame = 0;
             if (camera == null || dt <= 0f) return;
@@ -149,7 +164,7 @@ namespace DisasterPlus.Game
                     _lastBlastIndex = blastIndex;
                     _blastsSoFar++;
                     Detonate(seed, blastIndex, vent, footprint, craterRadiusMetres,
-                             unit, clockSeconds);
+                             unit, clockSeconds, climax, ringRadiusMetres);
                 }
             }
 
@@ -162,9 +177,11 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void Detonate(uint seed, int blastIndex, Vec3 vent,
                                      VolcanoFootprint footprint, float craterRadiusMetres,
-                                     float unit, float clockSeconds)
+                                     float unit, float clockSeconds,
+                                     bool climax, float ringRadiusMetres)
         {
-            DispatchBlast(vent, craterRadiusMetres, unit);
+            DispatchBlast(seed + (uint)blastIndex * 977u, vent, footprint,
+                          craterRadiusMetres, unit, climax, ringRadiusMetres);
 
             // ★ 火口の底が地面（山を置いた地点）から何 m 上か。
             //   VolcanoFootprint.GroundHeightMetres は調査時の地形高さである。
@@ -214,7 +231,9 @@ namespace DisasterPlus.Game
         /// ゲーム自身の爆発を <c>DispatchEffect</c> で積む。
         /// **引けなければ 1 行だけ残して何もしない**（岩は飛ぶ）。
         /// </summary>
-        private static void DispatchBlast(Vec3 vent, float craterRadiusMetres, float unit)
+        private static void DispatchBlast(uint seed, Vec3 vent, VolcanoFootprint footprint,
+                                          float craterRadiusMetres, float unit,
+                                          bool climax, float ringRadiusMetres)
         {
             ParticleEffect blast = VolcanoVanillaFx.BlastOneShot();
             if (blast == null) return;
@@ -230,22 +249,37 @@ namespace DisasterPlus.Game
                     startFrame = Singleton<SimulationManager>.instance.m_referenceFrameIndex;
                 }
 
-                float radius = EruptionEffectPlan.BlastRadiusMetres(craterRadiusMetres, unit);
-                float magnitude = EruptionEffectPlan.BlastMagnitude(unit);
-                var position = new Vector3(vent.X, vent.Y + LaunchLiftMetres, vent.Z);
+                // ★★ **1 発では大きくならない**（<see cref="BlastCluster"/> のクラス doc）。
+                //    <c>SpawnArea</c> の半径を広げても粒は大きくならず、同じ大きさの粒が
+                //    薄く散るだけである。数を増やしてずらして重ねるのが唯一の手で、
+                //    その数は<b>山の大きさ</b>と<b>大爆発かどうか</b>で決まる。
+                float sizeUnit = BlastCluster.SizeUnitOf(
+                    footprint.RadiusMetres,
+                    VolcanoShape.DefaultRadiusOf(footprint.Form),
+                    VolcanoShape.MaxRadiusOf(footprint.Form));
 
-                for (int p = 0; p < BlastPulses; p++)
+                int count = BlastCluster.CountFor(unit, sizeUnit, climax);
+                _burstsLastBlast = count;
+
+                var origin = new Vector3(vent.X, vent.Y + LaunchLiftMetres, vent.Z);
+
+                for (int i = 0; i < count; i++)
                 {
-                    var area = new EffectInfo.SpawnArea(position, Vector3.up, radius);
+                    BlastBurst burst = BlastCluster.For(i, count, unit, sizeUnit, climax,
+                                                        craterRadiusMetres, ringRadiusMetres,
+                                                        seed);
+
+                    var position = new Vector3(origin.x + burst.OffsetX,
+                                               origin.y + burst.OffsetY,
+                                               origin.z + burst.OffsetZ);
+                    var area = new EffectInfo.SpawnArea(position, Vector3.up,
+                                                        burst.RadiusMetres);
 
                     // ★ audioGroup は null でよい。ParticleEffect は RequirePlay() が
                     //   false なので、音のキューには 1 件も積まれない（IL 事実 §C）。
                     effects.DispatchEffect(blast, default(InstanceID), area,
-                                           Vector3.zero, 0f, magnitude, null,
-                                           startFrame + (uint)p * BlastPulseFrames, false);
-
-                    radius *= BlastPulseShrink;
-                    magnitude *= BlastPulseShrink;
+                                           Vector3.zero, 0f, burst.Magnitude, null,
+                                           startFrame + (uint)burst.DelayFrames, false);
                 }
             }
             catch (System.Exception e)

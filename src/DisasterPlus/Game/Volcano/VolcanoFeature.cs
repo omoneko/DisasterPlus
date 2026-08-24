@@ -536,8 +536,31 @@ namespace DisasterPlus.Game
                                   + snapshot.EruptionIntensityUnit.ToString("F2")
                                   + ", " + VolcanoEruption.BurstsSoFar + " bursts"
                                   + (VolcanoEruption.Building
-                                     ? ", still building the mountain" : "") + ")");
+                                     ? ", still building the mountain" : "")
+                                  + (VolcanoEruption.InClimax
+                                     ? ", THE CALDERA IS COLLAPSING (climactic blast)" : "")
+                                  + ")");
             var facts = VolcanoEruptionFx.Facts;
+
+            // ★★ **噴煙の塊の群れ**（所有者の依頼「カオスな煙」）。
+            //    ゲーム粒子の灰の柱とは別物なので、別の行で名乗る ——
+            //    まとめると「噴煙は出ている」で塊が消えているのが隠れる。
+            b.Line(2, "plume puffs", VolcanoPlumePuffFx.Drawing
+                ? VolcanoPlumePuffFx.PuffsPlaced + " cloud puffs (own ParticleSystem, "
+                  + "the MissileDisaster mushroom-cloud technique)"
+                : "not drawing"
+                  + (VolcanoPlumePuffFx.LastFailure != null
+                     ? " (" + VolcanoPlumePuffFx.LastFailure + ")" : ""));
+
+            // ★ 爆発は「1 回」ではなく「何発に割ったか」で大きさが決まる
+            //   （Core.Volcano.BlastCluster）。**数を出さないと、しょぼい理由が分からない。**
+            b.Line(2, "blast bursts", VolcanoBlastFx.BurstsLastBlast > 0
+                ? VolcanoBlastFx.BurstsLastBlast + " per blast"
+                  + (snapshot.RingFissureRadiusMetres > 0f
+                     ? " (some along the ring fissure at r="
+                       + snapshot.RingFissureRadiusMetres.ToString("F0") + " m)"
+                     : "")
+                : "none yet");
 
             b.Line(2, "crater effects", VolcanoEruptionFx.Drawing
                 ? "drawing (the game's own particle effects)"

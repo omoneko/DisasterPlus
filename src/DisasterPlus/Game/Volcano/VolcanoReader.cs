@@ -95,6 +95,10 @@ namespace DisasterPlus.Game
                                            VolcanoEruption.Active,
                                            VolcanoEruption.IntensityUnit,
                                            VolcanoEruption.VentWorld,
+                                           VolcanoEruption.InClimax,
+                                           // ★ 環状火口列はカルデラのふちそのものである。
+                                           //   陥没していない噴火では 0（＝環は無い）。
+                                           VolcanoState.RingFissureRadiusMetres,
                                            VolcanoLava.FlowCount,
                                            VolcanoLava.AliveCount,
                                            VolcanoLava.LongestMetres,

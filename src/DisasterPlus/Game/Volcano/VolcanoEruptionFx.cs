@@ -232,9 +232,18 @@ namespace DisasterPlus.Game
         /// 借りているエフェクトそのものは <see cref="VolcanoVanillaFx"/> が持っているので、
         /// ここで畳むのは⑤自身の時計だけである。冪等。
         /// </summary>
+        /// <summary>直近のフレームで塊の群れを描いたか（診断用）。</summary>
+        public static bool PuffsDrawn { get { return _puffsDrawn; } }
+
+        private static bool _puffsDrawn;
+
         public static void Destroy()
         {
             VolcanoBlastFx.Reset();
+            // ★ 塊の群れは**こちらが作った GameObject** なので、ここで消す
+            //   （借り物のエフェクトと違う）。
+            VolcanoPlumePuffFx.Destroy();
+            _puffsDrawn = false;
             _clockSeconds = 0f;
             _plumeDrawn = false;
             _flameDrawn = false;
@@ -245,6 +254,7 @@ namespace DisasterPlus.Game
 
         private static void Step(VolcanoSnapshot snapshot)
         {
+            _puffsDrawn = false;
             _plumeDrawn = false;
             _flameDrawn = false;
             _ejectaDrawn = false;
@@ -303,8 +313,19 @@ namespace DisasterPlus.Game
             //   継続モードの粒子数は timeDelta に比例するので、渡しても 0 になる。
             if (dt <= 0f) return;
 
-            // ★ 柱の形は 1 回だけ作る。噴煙も雷も**同じ形**を見る。
-            EruptionColumn plume = BuildColumn(snapshot.Footprint.Centre, craterRadius, unit);
+            // ★ 柱の形は 1 回だけ作る。噴煙も雷も塊の群れも**同じ形**を見る。
+            float windX, windZ;
+            uint plumeSeed;
+            EruptionColumn plume = BuildColumn(snapshot.Footprint.Centre, craterRadius, unit,
+                                               out windX, out windZ, out plumeSeed);
+
+            // ★★ **雲の塊の群れ**（所有者の依頼「幾何的なものではなくカオスな煙」）。
+            //    ゲーム粒子の灰の柱を**置き換えない** —— 依頼は「煙のエフェクトに
+            //    加えて」であり、役割も違う（あちらは細かい霞、こちらは大きな塊）。
+            //    描けなくても噴火は続く（今までの絵になるだけ）。
+            _puffsDrawn = VolcanoPlumePuffFx.Update(
+                vent, craterRadius, plume.HeightMetres, unit, _clockSeconds,
+                windX, windZ, plumeSeed);
 
             _plumeDrawn = RenderColumn(ash, umbrella, camera, vent, plume, craterRadius, dt);
             _flameDrawn = RenderFlames(flames, camera, vent, craterRadius, unit, dt);
@@ -313,7 +334,8 @@ namespace DisasterPlus.Game
             // ★ 爆発と噴石（飛ぶ岩）。**時計はこの型のものを渡す** ——
             //   あちらに 2 本目を持たせると、弾ける瞬間と噴出口の噴水がずれる。
             VolcanoBlastFx.Update(camera, vent, snapshot.Footprint.Centre, snapshot.Footprint,
-                                  craterRadius, unit, _clockSeconds, dt);
+                                  craterRadius, unit, _clockSeconds, dt,
+                                  snapshot.SupereruptionClimax, snapshot.RingFissureRadiusMetres);
 
             // ★★ 火口のマグマだまり・噴煙への光・噴煙の中の雷。
             //    **粒子では出せない**ので自前の <c>DrawMesh</c> である
@@ -342,7 +364,21 @@ namespace DisasterPlus.Game
         /// </summary>
         private static EruptionColumn BuildColumn(Vec3 centre, float craterRadius, float unit)
         {
-            uint seed = DeterministicRandom.Hash(
+            float windX, windZ;
+            uint seed;
+            return BuildColumn(centre, craterRadius, unit, out windX, out windZ, out seed);
+        }
+
+        /// <summary>
+        /// 同上。**風と種も返す** —— <see cref="VolcanoPlumePuffFx"/> が
+        /// 同じ風・同じ種で塊を動かすためである。別に引き直すと、
+        /// <b>灰の柱と塊の群れが違う方向へ倒れる。</b>
+        /// </summary>
+        private static EruptionColumn BuildColumn(Vec3 centre, float craterRadius, float unit,
+                                                  out float windX, out float windZ,
+                                                  out uint seed)
+        {
+            seed = DeterministicRandom.Hash(
                 unchecked((uint)Mathf.RoundToInt(centre.X)),
                 unchecked((uint)Mathf.RoundToInt(centre.Z)));
 
@@ -351,6 +387,9 @@ namespace DisasterPlus.Game
             float windSpeed = WindSpeedMinMetresPerSecond
                               + (WindSpeedMaxMetresPerSecond - WindSpeedMinMetresPerSecond)
                                 * DeterministicRandom.Unit(seed, WindSpeedSalt);
+
+            windX = Mathf.Cos(bearing) * windSpeed;
+            windZ = Mathf.Sin(bearing) * windSpeed;
 
             return new EruptionColumn(craterRadius, unit,
                                       Mathf.Cos(bearing), Mathf.Sin(bearing), windSpeed);

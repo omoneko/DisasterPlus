@@ -239,6 +239,22 @@ namespace DisasterPlus.Game
         /// </summary>
         public readonly Vec3 VentWorld;
 
+        /// <summary>
+        /// **カルデラ形成期の大爆発の最中か**（<c>VolcanoEruption.InClimax</c>）。
+        /// 破局噴火（スライダー上端）でしか true にならない。
+        /// </summary>
+        public readonly bool SupereruptionClimax;
+
+        /// <summary>
+        /// 環状火口列の半径（m）。**0 なら「環は無い」**（中央火口だけ）。
+        ///
+        /// カルデラ形成期の噴火は中央火口ではなく<b>陥没する屋根のふちの
+        /// 環状断層に沿って</b>噴き上がる。爆発の何割かをこの環へ配らないと、
+        /// 半径 5 km のカルデラのどこにも爆発が見えない
+        /// （<c>Core.Volcano.BlastCluster</c> のクラス doc）。
+        /// </summary>
+        public readonly float RingFissureRadiusMetres;
+
         // ── T8（溶岩）が足した 9 つ ───────────────────────────────
 
         /// <summary>火口から出した流れの本数（設定の値。0 なら完全に無効）。</summary>
@@ -291,6 +307,7 @@ namespace DisasterPlus.Game
                                int upliftTileCount, int upliftTileCursor,
                                bool eruptionActive, float eruptionIntensityUnit,
                                Vec3 ventWorld,
+                               bool supereruptionClimax, float ringFissureRadiusMetres,
                                int lavaFlowCount, int lavaAliveCount, float lavaLongestMetres,
                                int lavaBuildingsIgnited, int lavaTreesIgnited,
                                bool lavaTreesAvailable, Vec2[] lavaTrailPoints,
@@ -320,6 +337,8 @@ namespace DisasterPlus.Game
             EruptionActive = eruptionActive;
             EruptionIntensityUnit = eruptionIntensityUnit;
             VentWorld = ventWorld;
+            SupereruptionClimax = supereruptionClimax;
+            RingFissureRadiusMetres = ringFissureRadiusMetres;
             LavaFlowCount = lavaFlowCount;
             LavaAliveCount = lavaAliveCount;
             LavaLongestMetres = lavaLongestMetres;
@@ -346,6 +365,7 @@ namespace DisasterPlus.Game
                                        0f, false, 0, 0, 0, false, true,
                                        0f, 0f, false, false, 0, 0,
                                        false, 0f, new Vec3(0f, 0f, 0f),
+                                       false, 0f,
                                        0, 0, 0f, 0, 0, false,
                                        new Vec2[0], new int[0], 0f);
         }
