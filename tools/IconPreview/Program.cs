@@ -40,8 +40,9 @@ namespace DisasterPlus.Tools.IconPreview
             string outDir = args.Length > 0 ? args[0] : "docs/images/ui";
             Directory.CreateDirectory(outDir);
 
-            Sheet(outDir, "icon-volcano.png", true);
-            Sheet(outDir, "icon-typhoon.png", false);
+            Sheet(outDir, "icon-volcano.png", Kind.Volcano);
+            Sheet(outDir, "icon-typhoon.png", Kind.Typhoon);
+            Sheet(outDir, "icon-trench.png", Kind.TrenchQuake);
 
             Console.WriteLine("actual size on the tile: " + ActualSize + " px"
                               + "   texture: " + TextureSize + " px");
@@ -49,7 +50,10 @@ namespace DisasterPlus.Tools.IconPreview
         }
 
         /// <summary>実寸・2 倍・6 倍を、明るい背景と暗い背景で並べた 1 枚。</summary>
-        private static void Sheet(string dir, string name, bool volcano)
+        /// <summary>どの絵を焼くか。**bool 2 値では 3 つ目が足せない。**</summary>
+        private enum Kind { Volcano, Typhoon, TrenchQuake }
+
+        private static void Sheet(string dir, string name, Kind kind)
         {
             const int Pad = 12;
 
@@ -81,7 +85,7 @@ namespace DisasterPlus.Tools.IconPreview
                 int left = Pad;
                 foreach (int z in Zooms)
                 {
-                    Draw(rgb, width, height, left, top + Pad, ActualSize * z, volcano);
+                    Draw(rgb, width, height, left, top + Pad, ActualSize * z, kind);
                     left += ActualSize * z + Pad;
                 }
             }
@@ -96,7 +100,7 @@ namespace DisasterPlus.Tools.IconPreview
         /// 縮める（実機も 128 px のテクスチャを 70 px の枠に貼る）。
         /// </summary>
         private static void Draw(byte[] rgb, int width, int height, int left, int top,
-                                 int size, bool volcano)
+                                 int size, Kind kind)
         {
             for (int y = 0; y < size; y++)
             {
@@ -113,9 +117,16 @@ namespace DisasterPlus.Tools.IconPreview
                             float u = (x + (sx + 0.5f) / samples) / size;
                             float v = 1f - (y + (sy + 0.5f) / samples) / size;
 
-                            IconPixel p = volcano
-                                ? DisasterIconArt.Volcano(u, v)
-                                : DisasterIconArt.Typhoon(u, v);
+                            IconPixel p;
+                            switch (kind)
+                            {
+                                case Kind.Volcano:
+                                    p = DisasterIconArt.Volcano(u, v); break;
+                                case Kind.Typhoon:
+                                    p = DisasterIconArt.Typhoon(u, v); break;
+                                default:
+                                    p = DisasterIconArt.TrenchQuake(u, v); break;
+                            }
 
                             float pa = p.A / 255f;
                             r += p.R * pa;

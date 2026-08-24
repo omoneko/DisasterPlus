@@ -17,6 +17,24 @@ namespace DisasterPlus.Game
         public static string GroupGeneral = "General";
 
         public static string FireWhirlEnabled = "Enable fire whirls";
+        // ★★ 海溝型地震（2026-08-22、所有者の依頼「海溝型地震を追加したいです…
+        //   アイコンも新規で…左クリックした場所に一番近い海で発生に」）。
+        //
+        //   ★ ラベルは**押した場所では起きない**ことを名乗る。名乗らないと、
+        //     指した山の上で地震が起きなかったのを不具合と読まれる。
+        public static string TrenchQuakeEnabled =
+            "Show the trench earthquake tile (the only quake that brings a tsunami)";
+
+        public static string TrenchQuakeButtonLabel = "Trench quake";
+
+        public static string TrenchQuakeButtonTooltip =
+            "Raise a megathrust earthquake at the sea nearest to the point you click. "
+            + "This is the only earthquake that brings a tsunami - the game's own "
+            + "(fault) earthquakes no longer do.";
+
+        public static string TrenchQuakeNeedsDlc =
+            "The Natural Disasters DLC is required for the trench earthquake.";
+
         // ★ 火災旋風のバニラ竜巻抑止（2026-08-22、所有者の指示
         //   「バニラの竜巻は発生しないようにしてください」）。
         public static string NoVanillaTornado =

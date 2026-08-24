@@ -37,8 +37,12 @@ namespace DisasterPlus.Game
         /// <summary>一辺（px）。タイルは 109×100 なので、これで足りる。</summary>
         private const int Size = 128;
 
+        /// <summary>どの絵を焼くか。**bool 2 値では 3 つ目が足せない。**</summary>
+        private enum IconKind { Volcano, Typhoon, TrenchQuake }
+
         private static Texture2D _volcano;
         private static Texture2D _typhoon;
+        private static Texture2D _trenchQuake;
         private static bool _failed;
 
         /// <summary>火山の絵。**引けなければ null**（呼び出し側は文字のままにする）。</summary>
@@ -49,7 +53,7 @@ namespace DisasterPlus.Game
                 if (_volcano != null) return _volcano;
                 if (_failed) return null;
 
-                _volcano = Build(true, "DisasterPlus_IconVolcano");
+                _volcano = Build(IconKind.Volcano, "DisasterPlus_IconVolcano");
                 return _volcano;
             }
         }
@@ -62,8 +66,21 @@ namespace DisasterPlus.Game
                 if (_typhoon != null) return _typhoon;
                 if (_failed) return null;
 
-                _typhoon = Build(false, "DisasterPlus_IconTyphoon");
+                _typhoon = Build(IconKind.Typhoon, "DisasterPlus_IconTyphoon");
                 return _typhoon;
+            }
+        }
+
+        /// <summary>海溝型地震の絵。同上。</summary>
+        public static Texture2D TrenchQuake
+        {
+            get
+            {
+                if (_trenchQuake != null) return _trenchQuake;
+                if (_failed) return null;
+
+                _trenchQuake = Build(IconKind.TrenchQuake, "DisasterPlus_IconTrenchQuake");
+                return _trenchQuake;
             }
         }
 
@@ -72,13 +89,15 @@ namespace DisasterPlus.Game
         {
             if (_volcano != null) UnityEngine.Object.Destroy(_volcano);
             if (_typhoon != null) UnityEngine.Object.Destroy(_typhoon);
+            if (_trenchQuake != null) UnityEngine.Object.Destroy(_trenchQuake);
 
             _volcano = null;
             _typhoon = null;
+            _trenchQuake = null;
             // _failed は戻さない（ゲームのビルドに対する事実である）。
         }
 
-        private static Texture2D Build(bool volcano, string name)
+        private static Texture2D Build(IconKind kind, string name)
         {
             try
             {
@@ -98,9 +117,13 @@ namespace DisasterPlus.Game
                     {
                         float u = (x + 0.5f) / Size;
 
-                        IconPixel p = volcano
-                            ? DisasterIconArt.Volcano(u, v)
-                            : DisasterIconArt.Typhoon(u, v);
+                        IconPixel p;
+                        switch (kind)
+                        {
+                            case IconKind.Volcano: p = DisasterIconArt.Volcano(u, v); break;
+                            case IconKind.Typhoon: p = DisasterIconArt.Typhoon(u, v); break;
+                            default: p = DisasterIconArt.TrenchQuake(u, v); break;
+                        }
 
                         pixels[y * Size + x] = new Color32(p.R, p.G, p.B, p.A);
                     }

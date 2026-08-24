@@ -254,6 +254,86 @@ namespace DisasterPlus.Core.Common
             return Sea;
         }
 
+        // ── 海溝型地震 ──────────────────────────────────────
+
+        /// <summary>海底。</summary>
+        private static readonly IconPixel SeaBed = new IconPixel(64, 58, 52, 255);
+
+        /// <summary>断層の破断面。**ここだけが光る。**</summary>
+        private static readonly IconPixel Rupture = new IconPixel(255, 196, 72, 255);
+
+        /// <summary>波の芯。</summary>
+        private static readonly IconPixel Foam = new IconPixel(238, 244, 250, 255);
+
+        /// <summary>海面より上の空。</summary>
+        private static readonly IconPixel Sky = new IconPixel(96, 124, 156, 255);
+
+        /// <summary>
+        /// 海溝型地震のアイコン（2026-08-22、所有者の依頼「アイコンも新規で」）。
+        /// <paramref name="v"/> は<b>0 が下（海底）、1 が上（空）</b>。
+        ///
+        /// ── 70 px で何が読めるか ────────────────────────────────
+        ///
+        /// タイルは 109×100 px なので、絵は 70 px 角ほどにしか見えない。
+        /// **3 つより多い要素は読めない。** 入れるのは
+        ///
+        ///   1. <b>海</b>（この災害が海のものだと一目で分かる）
+        ///   2. <b>津波の波</b>（これが目的である）
+        ///   3. <b>海底の V 字の海溝と、そこで光る破断</b>（原因である）
+        ///
+        /// ★ 火山アイコンで学んだこと（あちらの doc）と同じで、
+        ///   <b>直線は自然物に見えない</b>。波の背は正弦、海溝は
+        ///   丸めた V 字にしてある。
+        /// </summary>
+        public static IconPixel TrenchQuake(float u, float v)
+        {
+            if (IsBad(u) || IsBad(v)) return IconPixel.None;
+
+            float x = u * 2f - 1f;
+
+            // ── 丸い枠（ほかの 2 つと同じ作り）──────────────────────
+            float y = v * 2f - 1f;
+            float r = (float)Math.Sqrt(x * x + y * y);
+            if (r > 0.97f) return IconPixel.None;
+            if (r > 0.90f) return Outline;
+
+            // ── 海底（下から 0〜0.36）。中央に V 字の海溝 ─────────────
+            //   谷は釣鐘状に丸める（尖った V は「割れ目」に見えて海溝に見えない）。
+            float trench = 0.36f - 0.21f / (1f + 22f * x * x);
+            if (v < trench)
+            {
+                // ★★ **破断は谷の底から下へ伸びる 1 本の裂け目である。**
+                //
+                //   はじめ「谷の面から一定の深さの帯」で描いていたが、
+                //   それは<b>谷の形をなぞる</b>ので、70 px では
+                //   **黄色い角が 2 本生えているようにしか見えなかった**
+                //   （tools/IconPreview の 1 版目）。
+                //   谷底の 1 点から真下へ、下ほど広がる楔にする。
+                float depth = trench - v;
+                float halfWidth = 0.055f + 0.55f * depth;
+                if (x > -halfWidth && x < halfWidth) return Rupture;
+
+                return SeaBed;
+            }
+
+            // ── 海面。津波の背が右上がりに崩れる ────────────────────
+            //   正弦 1 本ではなく 2 本重ねて、峰の左右を非対称にする
+            //   （対称な波は「波」ではなく「山」に見える）。
+            float crest = 0.62f
+                          + 0.17f * (float)Math.Sin(2.1f * x + 0.6f)
+                          + 0.05f * (float)Math.Sin(5.3f * x + 1.9f);
+
+            if (v > crest + 0.05f) return Sky;
+
+            // 峰の縁を白く。**厚みを持たせないと「線」に見える。**
+            if (v > crest - 0.10f) return Foam;
+
+            // 水中。峰の直下だけ明るくして、波が立ち上がって見えるようにする。
+            float lift = crest - 0.10f - v;
+            if (lift < 0.16f) return CloudShade;
+            return Sea;
+        }
+
         private static bool IsBad(float value)
         {
             return float.IsNaN(value) || float.IsInfinity(value);

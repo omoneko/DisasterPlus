@@ -30,6 +30,13 @@ namespace DisasterPlus.Game
         public static SavedInt DetectCount;
 
         /// <summary>
+        /// 海溝型地震のタイルを出すか。**既定 ON。**
+        /// これを切ると、津波を連れてくる地震を起こす手段が無くなる
+        /// （バニラの地震には津波が付かない —— <c>TsunamiChain</c>）。
+        /// </summary>
+        public static SavedBool TrenchQuakeEnabled;
+
+        /// <summary>
         /// バニラ（ND DLC）の竜巻をランダム発生から外すか。**既定 ON。**
         /// 火災旋風の渦には影響しない（<c>VanillaTornadoSuppressor</c>）。
         /// </summary>
@@ -287,6 +294,10 @@ namespace DisasterPlus.Game
             //    火災旋風そのものは CreateDisaster を直に呼ぶので影響を受けない
             //    （VanillaTornadoSuppressor のクラス doc）。
             NoVanillaTornado      = new SavedBool("fwNoVanillaTornado", FileName, true, true);
+
+            // ★★ 海溝型地震（2026-08-22、所有者の依頼）。**津波を連れてくるのは
+            //    この地震だけ**で、バニラの断層型地震には付かない。
+            TrenchQuakeEnabled    = new SavedBool("eqTrenchQuake", FileName, true, true);
             MaxLifetimeMinutes    = new SavedInt("fwMaxLifetime", FileName, 10, true);
             SpreadStrength        = new SavedInt("fwSpreadStrength", FileName, 3, true);
             MinSeparation         = new SavedInt("fwMinSeparation", FileName, 300, true);

@@ -32,7 +32,16 @@ namespace DisasterPlus.Game
             SeismographRecorder.Reset();
             // ★ 予約は都市をまたいで残らない（第 2 層はセッション状態で、セーブにも入れない）。
             TsunamiChain.Reset();
+            // ★★ 海溝型地震の災害 ID も持ち越さない。持ち越すと、次の都市で
+            //    同じ番号を取ったバニラの地震が「海溝型」と誤認され、津波が付く。
+            TrenchQuakeSlot.Reset();
             LongPeriodDamage.Reset();
+
+            // ★★ **ToolController は都市ごとに作り直される**ので、毎レベルロードで
+            //    登録し直す。忘れると「タイルは押せるのにカーソルが変わらない」
+            //    という、例外の出ない壊れ方をする
+            //    （<c>TrenchQuakePlacementTool</c> / ⑤のクラス doc）。
+            ToolRegistration.Register<TrenchQuakePlacementTool>();
 
             // 震度分布オーバーレイ。**main スレッド。** 登録は
             // RenderManager の静的リストへの追加で、外す API が存在しない
@@ -132,6 +141,9 @@ namespace DisasterPlus.Game
             //    これを忘れると、都市を出た直後の数フレームに前の都市の
             //    震央が地図に描かれる。
             EarthquakeOverlay.Reset();
+            // ★ 海溝型地震の災害 ID を持ち越さない。持ち越すと、次の都市で
+            //   同じ番号を取ったバニラの地震が「海溝型」と誤認され、津波が付く。
+            TrenchQuakeSlot.Reset();
             // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
             // EarthquakePanel.Destroy() が波形テクスチャ（Texture2D）も破棄する
             // —— GameObject と違って Unity は勝手に回収しないので、これを
@@ -147,6 +159,24 @@ namespace DisasterPlus.Game
         public void WriteDiagnostics(DiagnosticBuilder b)
         {
             b.Line(1, "enabled", ModSettings.EarthquakeEnabled.value ? "yes" : "no");
+
+            // ★★ **津波が付くのは海溝型だけ**であることを診断で名乗る。
+            //    名乗らないと「地震を起こしたのに津波が来ない」を不具合と読まれる。
+            b.Line(1, "trench quake", ModSettings.TrenchQuakeEnabled.value
+                ? (TrenchQuakeSlot.LastId != 0
+                    ? "last raised as disaster " + TrenchQuakeSlot.LastId + " at ("
+                      + TrenchQuakeSlot.Epicentre.X.ToString("F0") + ","
+                      + TrenchQuakeSlot.Epicentre.Z.ToString("F0") + "), "
+                      + TrenchQuakeSlot.SearchDistanceMetres.ToString("F0")
+                      + " m from the point that was clicked"
+                    : "tile shown; none raised yet")
+                  + (TrenchQuakeSlot.Detail != null
+                     ? "  (last refusal: " + TrenchQuakeSlot.Detail + ")" : "")
+                : "off (setting)");
+
+            b.Line(2, "note: tsunami",
+                   "ONLY a trench quake brings a tsunami. The game's own (fault) "
+                   + "earthquakes never do - that is deliberate, not a fault");
 
             var snapshot = EarthquakeHub.Latest;
             b.Line(1, "snapshot", snapshot == null ? "none yet" : (snapshot.Valid ? "valid" : "INVALID"));

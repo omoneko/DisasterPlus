@@ -143,6 +143,13 @@ namespace DisasterPlus.Game
             // （§B-5）、この設定は何も制御しない死んだチェックボックスになる。
             if (ModCompat.NaturalDisastersOwned)
             {
+                // ★★ 海溝型地震のタイル（2026-08-22、所有者の依頼）。
+                //    **津波が付くのはこの地震だけ**なので、下の「津波」の
+                //    チェックより先に置く —— 順序が説明になっている。
+                earthquake.AddCheckbox(Strings.TrenchQuakeEnabled,
+                    ModSettings.TrenchQuakeEnabled.value,
+                    v => ModSettings.TrenchQuakeEnabled.value = v);
+
                 earthquake.AddCheckbox(Strings.EarthquakeTsunamiChain,
                     ModSettings.EarthquakeTsunamiChain.value,
                     v => ModSettings.EarthquakeTsunamiChain.value = v);

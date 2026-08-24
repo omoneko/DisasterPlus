@@ -127,6 +127,9 @@ namespace DisasterPlus.Game
         public const string IdTyphoon = "typhoon";
         public const string IdVolcano = "volcano";
 
+        /// <summary>海溝型地震（②の第 2 層。**津波を連れてくる唯一の地震**）。</summary>
+        public const string IdTrenchQuake = "trenchQuake";
+
         /// <summary>行が見つかるまでの再試行間隔（main スレッド更新の回数）。</summary>
         private const int SearchIntervalFrames = 120;
 
@@ -252,6 +255,20 @@ namespace DisasterPlus.Game
                       VolcanoPanel.Hide,
                       TerrainWritable,
                       delegate { return Strings.VolcanoTerrainUnavailable; }),
+
+            // ★★ 海溝型地震（2026-08-22、所有者の依頼）。
+            //    **押した場所ではなく、そこにいちばん近い海で起きる**
+            //    （TrenchQuakePlacementTool のクラス doc）。
+            //    バニラの地震には津波が付かないので、津波を見たいときの
+            //    唯一の口がこのタイルである。
+            new Entry(IdTrenchQuake,
+                      delegate { return Strings.TrenchQuakeButtonLabel; },
+                      delegate { return Strings.TrenchQuakeButtonTooltip; },
+                      delegate { return ModSettings.TrenchQuakeEnabled.value; },
+                      TrenchQuakePlacementTool.Arm,
+                      null,
+                      delegate { return ModCompat.NaturalDisastersOwned; },
+                      delegate { return Strings.TrenchQuakeNeedsDlc; }),
         };
 
         /// <summary>
@@ -552,6 +569,7 @@ namespace DisasterPlus.Game
                 Texture2D tex = null;
                 if (e.Id == IdVolcano) tex = DisasterTileIcons.Volcano;
                 else if (e.Id == IdTyphoon) tex = DisasterTileIcons.Typhoon;
+                else if (e.Id == IdTrenchQuake) tex = DisasterTileIcons.TrenchQuake;
 
                 if (tex == null) return false;
 

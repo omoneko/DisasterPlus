@@ -276,7 +276,20 @@ namespace DisasterPlus.Game
             var quakes = snapshot.Quakes;
             for (int i = 0; i < quakes.Count; i++)
             {
-                if (quakes[i].Phase == EarthquakePhase.Emerging) return quakes[i];
+                if (quakes[i].Phase != EarthquakePhase.Emerging) continue;
+
+                // ★★ **津波が付くのは海溝型地震だけである**（2026-08-22、所有者の指示）。
+                //
+                //    > バニラの地震では津波は発生させず、新たに新設する海溝型地震
+                //    > （アイコンも新規で）でのみ発生するようにしてください。
+                //
+                //    見分けは<b>災害 ID</b>で行う（<c>TrenchQuakeSlot.IsTrenchQuake</c>）。
+                //    ★ **震源が海の上かどうかで判定しない。** プレイヤーがバニラの
+                //      災害パネルから海に地震を置くこともでき、それは断層型のつもりで
+                //      置いたものである。位置で見るとそこにも津波が付いてしまう。
+                if (!TrenchQuakeSlot.IsTrenchQuake(quakes[i].DisasterId)) continue;
+
+                return quakes[i];
             }
             return null;
         }
