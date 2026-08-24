@@ -69,6 +69,31 @@ namespace DisasterPlus.Game
         /// </summary>
         private const float VentLiftMetres = 6f;
 
+        // ── 破局噴火の「大爆発」（2026-08-22、所有者の指摘）────────────────
+        //
+        // > カルデラ形成時は、山体が大きく落ち込んで大爆発するんじゃないでしょうか…？
+        //
+        // そのとおりで、以前は「噴火が終わってから、静かに山が沈む」順序だった。
+        // **実際のカルデラ形成では、屋根が落ちること自体が大爆発を起こす** ——
+        // 空になりかけたマグマだまりに山体が 1 枚の板として落ち込み、
+        // ピストンのように残りのマグマを押し出す。噴火史でいちばん激しい瞬間は
+        // 陥没の**最中**であって、その後ではない。
+        //
+        // だから⑤では、陥没のあいだ包絡線を<b>持続の天井に固定し</b>、
+        // 区切り（＝爆発）の間隔を詰める。陥没が終わってから衰退が始まる。
+
+        /// <summary>
+        /// 陥没を始めてよくなる経過の割合。持続に入ってしばらく吐き出した頃
+        /// （＝マグマだまりが空きはじめた頃）である。**演出値。**
+        /// </summary>
+        private const float ClimaxFraction = 0.40f;
+
+        /// <summary>大爆発のあいだ、区切りをどれだけ詰めるか。</summary>
+        private const float ClimaxBurstScale = 0.4f;
+
+        /// <summary>大爆発のあいだの強さのゆらぎの下限（ほぼ振り切ったままにする）。</summary>
+        private const float ClimaxJitterFloor = 0.9f;
+
         // ── sim 側の状態 ──────────────────────────────────────
 
         private static bool _started;
@@ -88,6 +113,9 @@ namespace DisasterPlus.Game
 
         /// <summary>山がまだ育っているか（＝隆起と同時に噴いている）。</summary>
         private static bool _building;
+
+        /// <summary>陥没と同時に起きている大爆発の最中か（<see cref="BeginClimax"/>）。</summary>
+        private static bool _climax;
         private static float _intensity;
         private static int _burstIndex;
         private static int _bursts;
@@ -120,6 +148,38 @@ namespace DisasterPlus.Game
 
         /// <summary>これまでに強さを引き直した回数（診断用）。</summary>
         public static int BurstsSoFar { get { return _bursts; } }
+
+        /// <summary>
+        /// マグマだまりが空きはじめ、**屋根が落ちてよい頃合いか**
+        /// （<see cref="ClimaxFraction"/>）。破局噴火の <c>VolcanoState</c> だけが読む。
+        /// </summary>
+        public static bool ReadyForCollapse
+        {
+            get { return _active && !_building && !_finished
+                         && _elapsedMinutes >= ClimaxFraction * TotalMinutes; }
+        }
+
+        /// <summary>大爆発の最中か。表示と診断が使う。</summary>
+        public static bool InClimax { get { return _climax; } }
+
+        /// <summary>
+        /// **山体が落ち込みはじめた。** 包絡線を持続の天井で止め、区切りを詰める。
+        /// 陥没が終わるまで<b>噴火は終わらない</b> ——
+        /// 終わってしまうと、いちばん激しいはずの瞬間に噴煙が消える。
+        /// </summary>
+        public static void BeginClimax()
+        {
+            _climax = true;
+        }
+
+        /// <summary>
+        /// **落ち切った。** 包絡線を解いて衰退へ向かわせる。
+        /// ここから <see cref="TotalMinutes"/> までの残りが噴火の終わりである。
+        /// </summary>
+        public static void EndClimax()
+        {
+            _climax = false;
+        }
 
         /// <summary>直近の失敗（**英語・診断用**）。無ければ null。</summary>
         public static string LastFailure { get { return _lastFailure; } }
@@ -189,6 +249,15 @@ namespace DisasterPlus.Game
                 if (_elapsedMinutes > sustainStart) _elapsedMinutes = sustainStart;
             }
 
+            // ★★ **大爆発のあいだも同じように止める**（<see cref="BeginClimax"/>）。
+            //    陥没は準備の走査を待つので、噴火（24 分）より長くなりうる。
+            //    止めないと、<b>山が落ちている最中に噴煙だけ消える</b>。
+            if (_climax)
+            {
+                float decayStart = DecayFraction * TotalMinutes;
+                if (_elapsedMinutes > decayStart) _elapsedMinutes = decayStart;
+            }
+
             if (_elapsedMinutes >= TotalMinutes)
             {
                 _active = false;
@@ -204,7 +273,9 @@ namespace DisasterPlus.Game
 
             // ★ 区切りは経過ゲーム内時間から出す。**frameIndex % N で組まない**
             //   （DAYTIME_FRAMES = 65536、1 ゲーム内分 ≒ 45.51 フレーム。火災旋風 付録 A-4）。
-            int burst = (int)(_clockMinutes / BurstMinutes);
+            // ★ 大爆発のあいだは区切りを詰める（＝爆発が立て続けに起きる）。
+            float burstMinutes = _climax ? BurstMinutes * ClimaxBurstScale : BurstMinutes;
+            int burst = (int)(_clockMinutes / burstMinutes);
             if (burst != _burstIndex)
             {
                 _burstIndex = burst;
@@ -213,8 +284,9 @@ namespace DisasterPlus.Game
 
             // ★ 乱数にフレーム番号を混ぜない（計画「2 つの乱数生成器」）。混ぜると
             //   同じ噴火が tick ごとに抽選し直され、強さが毎フレーム跳ねる。
-            float jitter = JitterFloor
-                           + (1f - JitterFloor)
+            float floor = _climax ? ClimaxJitterFloor : JitterFloor;
+            float jitter = floor
+                           + (1f - floor)
                              * DeterministicRandom.Unit(_seed, (uint)_burstIndex);
 
             float envelope = Envelope(_elapsedMinutes / TotalMinutes);
@@ -297,6 +369,7 @@ namespace DisasterPlus.Game
         /// </summary>
         public static void Reset()
         {
+            _climax = false;
             _started = false;
             _active = false;
             _finished = false;

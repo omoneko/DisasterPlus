@@ -328,9 +328,18 @@ namespace DisasterPlus.Game
 
             if (_phase == VolcanoPhase.Collapsing)
             {
-                // ★★ **地面の自重による大陥没**（所有者の依頼）。空になった
-                //    マグマだまりの屋根が落ちる。<b>唯一、地面を下げる段である。</b>
+                // ★★ **山体が落ち込みながら爆発している**（2026-08-22、所有者の指摘）。
+                //
+                //    > カルデラ形成時は、山体が大きく落ち込んで大爆発する
+                //    > んじゃないでしょうか…？
+                //
+                //    そのとおりで、この 3 つは**同時に走らせる**のが正しい。
+                //    以前は「噴火が終わってから静かに沈む」順序で、
+                //    いちばん激しいはずの瞬間に噴煙が消えていた。
+                //    噴火は VolcanoEruption.BeginClimax で持続の天井に固定してあるので、
+                //    **落ち切るまで終わらない**。
                 VolcanoFootprint caldera = CalderaFootprint;
+                VolcanoEruption.Tick(_footprint, frame, deltaMinutes, 1f);
                 VolcanoClearing.Tick(caldera, VolcanoUplift.GrowthFrontUnit, deltaMinutes);
                 VolcanoUplift.Tick(caldera, frame, deltaMinutes);
 
@@ -340,11 +349,15 @@ namespace DisasterPlus.Game
 
                 if (!VolcanoUplift.Complete) return;
 
-                _phase = VolcanoPhase.Flowing;
-                Log.Info("supereruption: the caldera finished collapsing (-"
-                         + caldera.HeightMetres.ToString("F0") + " m over "
+                // ★ 落ち切った。ここでようやく噴火が衰退へ向かう。
+                VolcanoEruption.EndClimax();
+                _phase = VolcanoPhase.Erupting;
+                Log.Info("supereruption: the edifice foundered ("
+                         + VolcanoUplift.SummitMetres.ToString("F0") + " m at the deepest, over r="
                          + caldera.RadiusMetres.ToString("F0")
-                         + " m); the terrain stays as it is (this is irreversible)");
+                         + " m) after " + VolcanoEruption.BurstsSoFar
+                         + " bursts; the eruption now wanes. The terrain stays as it is "
+                         + "(this is irreversible)");
                 return;
             }
 
@@ -361,31 +374,40 @@ namespace DisasterPlus.Game
                 VolcanoLava.Tick(_footprint, frame, deltaMinutes,
                                  VolcanoUplift.RiseMetresPerFrame);
 
-                if (!VolcanoEruption.Finished) return;
-
-                // ★★ **破局噴火だけ、噴火のあとに陥没がある**（所有者の依頼の 4 段目）。
-                //    ここで StartStage を明示的に呼ぶ —— VolcanoUplift が自分から
-                //    始めるのは円錐だけで、あれは今 Complete のまま止まっている。
-                if (_super)
+                // ★★ **陥没は噴火の「あと」ではなく「途中」で始まる**
+                //    （2026-08-22、所有者の指摘）。噴き出してマグマだまりが空きはじめた
+                //    ところで屋根が落ち、その落下そのものが大爆発を起こす。
+                //    頃合いは VolcanoEruption.ReadyForCollapse が持っている。
+                //
+                //    ★ 段が Collapse でないことを見るのが「まだ落ちていない」の判定である
+                //      —— 落ち切ったあとこの位相へ戻ってくるので、見ないと無限に落ち続ける。
+                if (_super
+                    && VolcanoUplift.Stage != UpliftStage.Collapse
+                    && VolcanoEruption.ReadyForCollapse)
                 {
                     VolcanoFootprint caldera = CalderaFootprint;
                     if (VolcanoUplift.StartStage(caldera, UpliftStage.Collapse))
                     {
+                        VolcanoEruption.BeginClimax();
                         _phase = VolcanoPhase.Collapsing;
-                        Log.Info("supereruption: the eruption emptied the chamber after "
+                        Log.Info("supereruption: the chamber has emptied enough after "
                                  + VolcanoEruption.BurstsSoFar
-                                 + " bursts; the roof now collapses into a caldera of r="
-                                 + caldera.RadiusMetres.ToString("F0") + " m, depth "
-                                 + caldera.HeightMetres.ToString("F0") + " m");
+                                 + " bursts; THE EDIFICE IS NOW FOUNDERING into a caldera of r="
+                                 + caldera.RadiusMetres.ToString("F0") + " m, floor "
+                                 + caldera.HeightMetres.ToString("F0")
+                                 + " m below the original ground - the eruption is pinned at its "
+                                 + "peak and will not end until it has fallen");
                         return;
                     }
 
-                    // ★ **黙って飛ばさない。** 掘れなかった理由を残して、
+                    // ★ **黙って飛ばさない。** 落とせなかった理由を残して、
                     //   ふつうの噴火と同じ終わり方へ落とす。
                     Refuse("the caldera collapse could not start ("
                            + (VolcanoUplift.LastFailure ?? "unknown reason")
                            + "); the volcano finishes without one");
                 }
+
+                if (!VolcanoEruption.Finished) return;
 
                 // ★ T8 がここを <c>Done</c> から <c>Flowing</c> に差し替えた。
                 //   位相が進行中のまま止まらないことは、溶岩の側の 2 つの有限性が

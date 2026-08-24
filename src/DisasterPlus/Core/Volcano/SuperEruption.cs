@@ -82,8 +82,17 @@ namespace DisasterPlus.Core.Volcano
         /// </summary>
         public const float CalderaDepthFactor = 1.35f;
 
-        /// <summary>カルデラの底が全体に占める割合（ここまでは平ら）。</summary>
-        public const float FloorFraction = 0.55f;
+        /// <summary>
+        /// カルデラの底が全体に占める割合（ここまでは平ら）。残りが壁である。
+        ///
+        /// ★★ <b>0.55 では壁が緩すぎた</b>（2026-08-22、断面を描いて気づいた）。
+        ///   半径 5563 m・深さ 900 m のとき、壁が水平に 2500 m もかかって
+        ///   <b>約 20 度</b>——「カルデラ」ではなく「浅い盆地」に見える。
+        ///   実際のカルデラは環状断層でほぼ垂直に落ち、崩れた岩屑が積もって
+        ///   30〜45 度の急崖になる。0.78 なら水平 1220 m で 900 m 落ちて
+        ///   <b>約 36 度</b>で、その帯に入る。
+        /// </summary>
+        public const float FloorFraction = 0.78f;
 
         /// <summary>壁の外側で地形に戻りきる割合。ここから外は 1 m も動かない。</summary>
         public const float RimFraction = 1.0f;
@@ -200,6 +209,46 @@ namespace DisasterPlus.Core.Volcano
             if (w > 1f) w = 1f;
             float k = 1f - w * w * (3f - 2f * w);
             return -depthMetres * k;
+        }
+
+        /// <summary>
+        /// **山体が落ち込む量**（m、**0 か負**）。1 セルぶん。
+        ///
+        /// ── なぜ「引き算」ではないのか（2026-08-22、所有者の指摘）───────────
+        ///
+        /// &gt; カルデラ形成時は、山体が大きく落ち込んで大爆発するんじゃないでしょうか…？
+        ///
+        /// はじめ⑤は<b>今の地面から深さぶんを引いて</b>いた。円錐が +1000 m、深さが
+        /// 900 m だったので、<b>山頂に 100 m の切り株が残り</b>、そのまわりだけ
+        /// 900 m 掘れた —— 「山が落ちた」ではなく「山のまわりに溝を掘った」絵である。
+        ///
+        /// 実際のカルデラは<b>屋根が 1 枚の板として落ちる</b>ので、床は
+        /// <b>元の地面より下の 1 つの高さで平ら</b>になり、山体は跡形も無くなる。
+        /// だから目標は絶対の高さ（<c>元の地面 + bowl</c>）で置き、
+        /// 動かす量はそこまでの差分にする。
+        ///
+        /// <code>
+        ///   山頂  base=+1000  目標 = 0 - 900 = -900   → -1900 落ちる
+        ///   中腹  base= +400  目標 = 0 - 900 = -900   → -1300 落ちる
+        ///   縁    base=    0  目標 = 0 -   0 =    0   →     0（動かない）
+        /// </code>
+        ///
+        /// ★★ <b>陥没は地面を上げない。</b> <paramref name="groundMetres"/> は火山の
+        ///   中心の地面の高さ 1 点なので、傾いた土地では外縁で目標が今の地面より
+        ///   高くなりうる。そこを持ち上げると<b>落ちるはずの縁が盛り上がる</b>ので、
+        ///   正の差分は 0 に切る。
+        /// </summary>
+        /// <param name="bowlMetres">
+        /// <see cref="BowlProfileAt"/> の値（0 か負）。窪地の形そのもの。
+        /// </param>
+        /// <param name="baseMetres">このセルの**今の**地面の高さ（m。円錐を含む）。</param>
+        /// <param name="groundMetres">火山を置く前の地面の高さ（m）。</param>
+        public static float FounderDropAt(float bowlMetres, float baseMetres, float groundMetres)
+        {
+            if (IsBad(bowlMetres) || IsBad(baseMetres) || IsBad(groundMetres)) return 0f;
+
+            float drop = (groundMetres + bowlMetres) - baseMetres;
+            return drop < 0f ? drop : 0f;
         }
 
         private static bool IsBad(float v)

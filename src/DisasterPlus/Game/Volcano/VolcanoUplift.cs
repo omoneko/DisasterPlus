@@ -584,7 +584,7 @@ namespace DisasterPlus.Game
             // ★★ **カルデラでは山頂ではなく「床がどれだけ落ちたか」である。**
             //    ここで正の値を入れると、火山タブが陥没を「+400 m の山頂」と名乗る。
             _summitMetres = _stage == UpliftStage.Collapse
-                ? -footprint.HeightMetres * _progress
+                ? -_riseMetresPerTick * _totalTicks * _progress
                 : UpliftSchedule.GrowthMetresAt(
                       footprint.HeightMetres, footprint.HeightMetres, _progress);
 
@@ -624,7 +624,7 @@ namespace DisasterPlus.Game
             // ★ 火口はここで彫らない。**最初の tick から形の一部として在る**（クラス doc）。
             _progress = 1f;
             _summitMetres = _stage == UpliftStage.Collapse
-                ? -footprint.HeightMetres
+                ? -_riseMetresPerTick * _totalTicks
                 : footprint.HeightMetres;
             _complete = true;
 
@@ -691,20 +691,31 @@ namespace DisasterPlus.Game
                 ? VolcanoCrater.SummitScale(footprint.Form, footprint.RadiusMetres)
                 : 1f;
 
+            // ★★ **プロファイルを先に焼く。** カルデラは「元の地面 − 深さ」という
+            //    絶対の目標へ落ちるので、山頂のセルが実際に動く量は
+            //    「深さ ＋ 山の高さ」であり、**焼いてみるまで分からない**
+            //    （<see cref="DeepestDropMetres"/>）。刻みの数をその実測から
+            //    出さないと、1 tick の落差が大きくなりすぎて崖のような段が付く。
+            BakeProfile(footprint, height);
+
+            float travelMetres = _stage == UpliftStage.Collapse
+                ? DeepestDropMetres()
+                : footprint.HeightMetres;
+            // 焼いた結果が 0（＝落ちるセルが 1 つも無い）なら、頼まれた深さで数える。
+            if (!(travelMetres > 0f)) travelMetres = footprint.HeightMetres;
+
             // ★ 山頂が毎 tick 1 raw 単位以上動くよう切り詰める（罠 2）。
             //   換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。
             float framesPerMinute = FeatureHost.FramesPerMinute;
             int requestedTicks = framesPerMinute > 0f
                 ? (int)(StageMinutes() * framesPerMinute / IntervalFrames)
                 : 1;
-            _totalTicks = UpliftSchedule.TotalTicksFor(footprint.HeightMetres, requestedTicks);
+            _totalTicks = UpliftSchedule.TotalTicksFor(travelMetres, requestedTicks);
 
             // ★ 育っているセルはどれも同じ速さで上がる（GrowthMetresAt の doc）。
             //   TotalTicksFor が totalTicks を H×64 で切り詰めているので、
             //   これは必ず 1 raw 単位（1/64 m）以上である。
-            _riseMetresPerTick = footprint.HeightMetres / _totalTicks;
-
-            BakeProfile(footprint, height);
+            _riseMetresPerTick = travelMetres / _totalTicks;
 
             _centre = footprint.Centre;
             _started = true;
@@ -765,7 +776,10 @@ namespace DisasterPlus.Game
                     //    火口は min だけで働くので、どちらも構造的に守られている
                     //    （VolcanoRelief / VolcanoCrater のクラス doc）。
                     //    **山頂の窪みはここで入る。あとから彫らない。**
-                    _profile[row + x] = ProfileFor(relief, dx, dz, radius, metres);
+                    _profile[row + x] = ProfileFor(
+                        relief, dx, dz, radius, metres,
+                        _baseRaw[row + x] * VolcanoShape.MetresPerRawUnit,
+                        footprint.GroundHeightMetres);
                 }
             }
         }
@@ -805,8 +819,14 @@ namespace DisasterPlus.Game
         ///   掛けると準備（<c>VolcanoClearing</c>）と隆起の見ている半径がずれて、
         ///   道路の下の地面だけ押し戻される（設計書 §1.2 / 罠 1）。
         /// </summary>
+        /// <param name="baseMetres">このセルの**今の**地面の高さ（m）。カルデラだけが読む。</param>
+        /// <param name="groundMetres">
+        /// 火山を置く前の地面の高さ（m。<c>VolcanoFootprint.GroundHeightMetres</c>）。
+        /// カルデラだけが読む。
+        /// </param>
         private static float ProfileFor(VolcanoRelief relief, float dx, float dz,
-                                        float radius, float metres)
+                                        float radius, float metres,
+                                        float baseMetres, float groundMetres)
         {
             switch (_stage)
             {
@@ -815,12 +835,45 @@ namespace DisasterPlus.Game
                         (float)Math.Sqrt(dx * dx + dz * dz), radius, metres);
 
                 case UpliftStage.Collapse:
-                    return SuperEruption.BowlProfileAt(
+                {
+                    // ★★ **陥没は「山から一定量を引く」ではない。**（2026-08-22、所有者の指摘）
+                    //
+                    //    > カルデラ形成時は、山体が大きく落ち込んで大爆発する
+                    //    > んじゃないでしょうか…？
+                    //
+                    //    そのとおりで、以前ここは今の地面から深さぶんを引いていた。
+                    //    円錐は +1000 m、深さは 900 m なので、**山頂に 100 m の
+                    //    切り株が残り**、そのまわりだけ 900 m 掘れていた ——
+                    //    「山が落ちた」ではなく「山のまわりに溝を掘った」絵である。
+                    //
+                    //    実際のカルデラは<b>屋根そのものが 1 枚の板として落ちる</b>ので、
+                    //    床は**元の地面より下の 1 つの高さで平ら**になり、
+                    //    山体は跡形も無くなる。だから目標は絶対の高さで置き、
+                    //    プロファイルは「そこまで落ちる量」＝ 目標 − 今 とする。
+                    float bowl = SuperEruption.BowlProfileAt(
                         (float)Math.Sqrt(dx * dx + dz * dz), radius, metres);
+                    return SuperEruption.FounderDropAt(bowl, baseMetres, groundMetres);
+                }
 
                 default:
                     return VolcanoCrater.ProfileAt(relief, dx, dz, radius, metres);
             }
+        }
+
+        /// <summary>
+        /// いちばん深く落ちるセルの落差（m、**正**）。カルデラの刻みを決めるのに使う。
+        /// <see cref="BakeProfile"/> のあとにしか呼べない（まだなら 0）。
+        /// </summary>
+        private static float DeepestDropMetres()
+        {
+            if (_profile == null) return 0f;
+
+            float deepest = 0f;
+            for (int i = 0; i < _profile.Length; i++)
+            {
+                if (_profile[i] < deepest) deepest = _profile[i];
+            }
+            return -deepest;
         }
 
         private static ushort[] ReadRawHeights()
