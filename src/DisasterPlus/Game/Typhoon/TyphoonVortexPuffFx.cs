@@ -94,13 +94,15 @@ namespace DisasterPlus.Game
         private static bool _errorLogged;
 
         /// <summary>
-        /// 群れの形。**添字だけから決まる**ので 1 度組めば作り直さない
-        /// （<see cref="VortexPuffCrowd"/>）。動くのは呼び出し側が足す回転だけである。
+        /// この雲が生まれてからの秒数。**塊の一生を進めるのはこれである。**
+        ///
+        /// ★★ <b>ここが「一瞬だけ現れて消える」の直しどころだった。</b>
+        ///   （2026-08-22、所有者の報告）以前は <c>VortexPuffCrowd</c> の
+        ///   <b>添字だけで決まる静止した並び</b>を置いていたので、雲は 1 度置いたら
+        ///   二度と変わらなかった。今は毎フレーム時計が進み、塊が
+        ///   生まれ・流れ・消える（<c>Core.Typhoon.TyphoonCloudParcels</c>）。
         /// </summary>
-        private static CrowdPuff[] _crowd;
-
-        /// <summary>実際に組めた粒の数。0 なら描かない。</summary>
-        private static int _crowdCount;
+        private static float _clockSeconds;
 
         /// <summary>直近のフレームで置いた粒の数（診断用）。0 は「描いていない」。</summary>
         public static int PuffsPlaced { get; private set; }
@@ -158,30 +160,34 @@ namespace DisasterPlus.Game
             Vec3 centre = snapshot.Centre;
             float spin = spinDegrees * 0.0174532925f;
 
-            for (int i = 0; i < _crowdCount; i++)
-            {
-                CrowdPuff puff = _crowd[i];
+            // ★ 時計はここで進める。ポーズ中は spinDegrees が止まるので、
+            //   同じ扱いにするため呼び出し側の刻みではなく Time.deltaTime を使う
+            //   —— ただしポーズ判定は呼び出し側が済ませており、止まっている
+            //   フレームでも Update そのものは呼ばれる。**止まった雲を出すより、
+            //   ゆっくり動く雲のほうがましである**（噴煙も同じ扱い）。
+            _clockSeconds += Time.deltaTime;
 
-                float a = puff.AngleRadians + spin;
-                float r = puff.RadiusFraction * radiusMetres;
+            uint seed = DeterministicRandom.Hash(
+                unchecked((uint)Mathf.RoundToInt(centre.X)),
+                unchecked((uint)Mathf.RoundToInt(centre.Z)));
+
+            for (int i = 0; i < TyphoonCloudParcels.Count; i++)
+            {
+                TyphoonParcel p = TyphoonCloudParcels.At(i, _clockSeconds, radiusMetres,
+                                                         spin, seed);
 
                 _buffer[i].position = new Vector3(
-                    centre.X + Mathf.Cos(a) * r,
-                    altitudeMetres + puff.HeightFraction * thicknessMetres,
-                    centre.Z + Mathf.Sin(a) * r);
+                    centre.X + p.X,
+                    altitudeMetres + p.Y,
+                    centre.Z + p.Z);
 
-                // startSize は**直径**なので、半径の比を 2 倍する。
-                _buffer[i].startSize =
-                    puff.SizeFraction * radiusMetres * PuffSizeGain * 2f;
+                // startSize は**直径**なので、半径を 2 倍する。
+                _buffer[i].startSize = p.RadiusMetres * PuffSizeGain * 2f;
+                _buffer[i].rotation = p.RotationDegrees;
 
-                // ★ 粒ごとに回す。**渦と同じ向き**へ、外側ほどゆっくり
-                //   （剛体のように一様に回すと、板を回しているように見える）。
-                _buffer[i].rotation = spinDegrees * (1.6f - puff.RadiusFraction)
-                                      + puff.AngleRadians * Mathf.Rad2Deg;
-
-                float alpha = MinAlpha + (MaxAlpha - MinAlpha) * Clamp01(puff.DensityFraction);
+                float alpha = MinAlpha + (MaxAlpha - MinAlpha) * Clamp01(p.Alpha);
                 _buffer[i].startColor = Blend(SunlitColor, ShadedColor,
-                                              1f - Clamp01(puff.HeightFraction), alpha);
+                                              1f - Clamp01(p.Brightness), alpha);
 
                 // ★ 毎フレーム上限へ戻す。**シミュレーションに歳を取らせない**
                 //   （クラス doc の「描画係としてだけ使う」の実体である）。
@@ -189,9 +195,9 @@ namespace DisasterPlus.Game
                 _buffer[i].startLifetime = 1000f;
             }
 
-            _system.SetParticles(_buffer, _crowdCount);
+            _system.SetParticles(_buffer, TyphoonCloudParcels.Count);
 
-            PuffsPlaced = _crowdCount;
+            PuffsPlaced = TyphoonCloudParcels.Count;
             Drawing = true;
             return true;
         }
@@ -202,21 +208,16 @@ namespace DisasterPlus.Game
         /// </summary>
         private static bool EnsureSystem(Material material)
         {
-            if (_object != null && _system != null && _buffer != null && _crowdCount > 0)
+            if (_object != null && _system != null && _buffer != null)
             {
+                // ★★ マテリアルは⑤（火山）と共有している（CloudParticleAssets）。
+                //    あちらが消したときのために毎フレーム fake-null を見る。
+                var live = _system.GetComponent<ParticleSystemRenderer>();
+                if (live != null && live.sharedMaterial == null) live.material = material;
                 return true;
             }
 
             Destroy();
-
-            // ★ 群れの形は添字だけから決まるので、ここで 1 度組めば以後作り直さない。
-            _crowd = new CrowdPuff[VortexPuffCrowd.TotalCount];
-            _crowdCount = VortexPuffCrowd.Build(_crowd);
-            if (_crowdCount <= 0)
-            {
-                _crowd = null;
-                return false;
-            }
 
             var go = new GameObject("DisasterPlus_TyphoonVortexCloud");
             var ps = go.AddComponent<ParticleSystem>();
@@ -226,7 +227,7 @@ namespace DisasterPlus.Game
             //   台風が動くたびに GameObject を動かす必要が出る。
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.playOnAwake = false;
-            main.maxParticles = _crowdCount;
+            main.maxParticles = TyphoonCloudParcels.Count;
             main.startLifetime = 1000f;
             main.startSpeed = 0f;
 
@@ -245,7 +246,7 @@ namespace DisasterPlus.Game
 
             _object = go;
             _system = ps;
-            _buffer = new ParticleSystem.Particle[_crowdCount];
+            _buffer = new ParticleSystem.Particle[TyphoonCloudParcels.Count];
             return true;
         }
 
@@ -263,8 +264,7 @@ namespace DisasterPlus.Game
             _object = null;
             _system = null;
             _buffer = null;
-            _crowd = null;
-            _crowdCount = 0;
+            _clockSeconds = 0f;
             Drawing = false;
             PuffsPlaced = 0;
         }

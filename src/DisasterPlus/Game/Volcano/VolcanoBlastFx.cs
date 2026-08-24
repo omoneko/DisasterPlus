@@ -272,8 +272,13 @@ namespace DisasterPlus.Game
                     var position = new Vector3(origin.x + burst.OffsetX,
                                                origin.y + burst.OffsetY,
                                                origin.z + burst.OffsetZ);
+                    // ★★ **4 引数のほうを使う。**（2026-08-22、所有者の指摘
+                    //    「エフェクトが平面的」）3 引数の SpawnArea は
+                    //    m_halfHeight = 0 を書き込む（IL_006F-0075 で確認）ので、
+                    //    粒が**厚みゼロの円盤**にしか湧かない。
                     var area = new EffectInfo.SpawnArea(position, Vector3.up,
-                                                        burst.RadiusMetres);
+                                                        burst.RadiusMetres,
+                                                        burst.HalfHeightMetres);
 
                     // ★ audioGroup は null でよい。ParticleEffect は RequirePlay() が
                     //   false なので、音のキューには 1 件も積まれない（IL 事実 §C）。

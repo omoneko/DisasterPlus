@@ -18,6 +18,19 @@ namespace DisasterPlus.Core.Volcano
         /// <summary><c>SpawnArea</c> の半径（m）。</summary>
         public readonly float RadiusMetres;
 
+        /// <summary>
+        /// <c>SpawnArea</c> の<b>縦の伸び</b>（m）。
+        ///
+        /// ★★ <b>0 にしてはいけない。</b>（2026-08-22、所有者の指摘
+        ///   「エフェクトが平面的」）3 引数の
+        ///   <c>SpawnArea(position, direction, radius)</c> は
+        ///   <c>m_halfHeight = 0</c> を書き込む（IL_006F-0075 で確認）。
+        ///   粒は「円盤 ＋ 上×[0, halfHeight)」に湧くので、0 だと
+        ///   <b>厚みゼロの円盤</b>にしか湧かない —— それが「平面的」の正体である。
+        ///   4 引数のほうを使って、ここを渡すこと。
+        /// </summary>
+        public readonly float HalfHeightMetres;
+
         /// <summary><c>DispatchEffect</c> の <c>magnitude</c>（＝粒子密度）。</summary>
         public readonly float Magnitude;
 
@@ -28,12 +41,14 @@ namespace DisasterPlus.Core.Volcano
         public readonly int DelayFrames;
 
         public BlastBurst(float offsetX, float offsetY, float offsetZ,
-                          float radiusMetres, float magnitude, int delayFrames)
+                          float radiusMetres, float halfHeightMetres,
+                          float magnitude, int delayFrames)
         {
             OffsetX = offsetX;
             OffsetY = offsetY;
             OffsetZ = offsetZ;
             RadiusMetres = radiusMetres;
+            HalfHeightMetres = halfHeightMetres;
             Magnitude = magnitude;
             DelayFrames = delayFrames;
         }
@@ -95,11 +110,30 @@ namespace DisasterPlus.Core.Volcano
         /// <summary>大爆発で 1 発ぶんの密度が何倍になるか。</summary>
         public const float ClimaxMagnitudeGain = 1.8f;
 
-        /// <summary>塊が散らばる範囲（火口半径に対する比）。</summary>
-        public const float SpreadRatio = 1.15f;
+        /// <summary>
+        /// 塊が散らばる範囲（火口半径に対する比）。
+        ///
+        /// ★★ <b>1.15 は広すぎた</b>（2026-08-22、所有者の指摘「場所が少しずれて
+        ///   見えます」）。火口半径 351 m の火山で最大 404 m —— つまり
+        ///   <b>火口の外側まで爆発が散っていた</b>。1 つの大きい爆発ではなく、
+        ///   火口のまわりでばらばらに弾けているように見える。
+        ///   火口の中に収める。
+        /// </summary>
+        public const float SpreadRatio = 0.55f;
 
-        /// <summary>塊が積み上がる高さ（火口半径に対する比）。**横だけに散らさない。**</summary>
-        public const float RiseRatio = 1.9f;
+        /// <summary>
+        /// 塊が積み上がる高さ（火口半径に対する比）。**横だけに散らさない。**
+        ///
+        /// ★★ 同上。1.9 では火口半径 351 m のとき<b>噴出口の 667 m 上</b>にまで
+        ///   爆発が浮いていた。噴煙柱ならその高さでよいが、爆発は火口で起きる。
+        /// </summary>
+        public const float RiseRatio = 0.7f;
+
+        /// <summary>
+        /// 1 発ぶんの縦の伸び（その発の半径に対する比）。
+        /// **1 に近いほど球に見える。** 0 は円盤である（<c>BlastBurst.HalfHeightMetres</c>）。
+        /// </summary>
+        public const float HalfHeightRatio = 1.25f;
 
         /// <summary>1 発ぶんの <c>SpawnArea</c> 半径（火口半径に対する比）の下限。</summary>
         public const float BurstRadiusMinRatio = 0.22f;
@@ -207,7 +241,8 @@ namespace DisasterPlus.Core.Volcano
             if (delay < 0) delay = 0;
             if (delay > SpreadFrames) delay = SpreadFrames;
 
-            return new BlastBurst(offsetX, offsetY, offsetZ, radius, magnitude, delay);
+            return new BlastBurst(offsetX, offsetY, offsetZ, radius,
+                                  radius * HalfHeightRatio, magnitude, delay);
         }
 
         /// <summary>
