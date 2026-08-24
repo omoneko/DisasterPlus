@@ -4,8 +4,24 @@ using HarmonyLib;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// Harmony パッチはこの MOD で 1 箇所だけ（VortexAI.SimulationStep の Postfix）。
-    /// 他の機能は読み取りと自前 AI で済ませ、パッチ面を意図的に最小に保つ。
+    /// Harmony パッチの入れ物。**他の機能は読み取りと自前 AI で済ませ、
+    /// パッチ面を意図的に最小に保つ。**
+    ///
+    /// 今あるのは 3 つだけ:
+    ///
+    /// <list type="number">
+    /// <item>③ <c>VortexAI.SimulationStep</c> の Postfix（渦をその場に留める）</item>
+    /// <item>② <c>EarthquakeAI.SimulationStep</c> の Prefix/Postfix
+    ///   （海溝型のあいだだけ旗を立てる）</item>
+    /// <item>② <c>DisasterHelpers.MakeCrack</c> の Prefix
+    ///   （海溝型では地面を割らない。<c>TrenchQuakeStepPatch</c> のクラス doc）</item>
+    /// </list>
+    ///
+    /// ★★ <b>この型は③の持ち物ではない。</b> ファイルが <c>FireWhirl/</c> に在るのは
+    ///   最初のパッチが③のものだったからで、**②もここに依存している** ——
+    ///   <see cref="Install"/> は③と②の両方の <c>OnLevelLoaded</c> から呼ぶ
+    ///   （冪等）。片方だけにすると、その機能を外した日に
+    ///   <b>もう片方のパッチが黙って効かなくなる</b>。
     /// </summary>
     public static class HarmonyBootstrap
     {

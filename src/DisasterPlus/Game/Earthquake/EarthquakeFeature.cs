@@ -43,6 +43,12 @@ namespace DisasterPlus.Game
             //    （<c>TrenchQuakePlacementTool</c> / ⑤のクラス doc）。
             ToolRegistration.Register<TrenchQuakePlacementTool>();
 
+            // ★★ 海溝型地震は Harmony パッチに依存している
+            //    （<c>TrenchQuakeNoCrackPatch</c>: 地面を割らない）。
+            //    <c>Install</c> は冪等なので、③と重ねて呼んでよい ——
+            //    **③を外した日に②が黙って壊れないように、ここでも呼ぶ。**
+            HarmonyBootstrap.Install();
+
             // 震度分布オーバーレイ。**main スレッド。** 登録は
             // RenderManager の静的リストへの追加で、外す API が存在しない
             // （OverlayRenderable のクラス doc）ので、この呼び出しは
@@ -173,6 +179,14 @@ namespace DisasterPlus.Game
                   + (TrenchQuakeSlot.Detail != null
                      ? "  (last refusal: " + TrenchQuakeSlot.Detail + ")" : "")
                 : "off (setting)");
+
+            // ★ 地面を割らないのは**意図**である。名乗らないと「断層が出ない」を
+            //   不具合と読まれる（逆に、出てしまったときはここが 0 のままになる）。
+            b.Line(2, "terrain crack", HarmonyBootstrap.Installed
+                ? "suppressed for trench quakes (" + TrenchQuakeStepPatch.SuppressedCracks
+                  + " skipped so far); the game's own earthquakes still crack normally"
+                : "NOT SUPPRESSED - Harmony is not installed, so a trench quake will "
+                  + "open a fissure like a fault quake");
 
             b.Line(2, "note: tsunami",
                    "ONLY a trench quake brings a tsunami. The game's own (fault) "
