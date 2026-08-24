@@ -75,11 +75,20 @@ namespace DisasterPlus.Game
                 fw.AddCheckbox(Strings.FireWhirlEnabled, ModSettings.FireWhirlEnabled.value,
                     v => ModSettings.FireWhirlEnabled.value = v);
 
-                fw.AddSlider(Strings.DetectRadius, 50f, 400f, 10f, ModSettings.DetectRadius.value,
+                // ★★ **帯を広げた（2026-08-22）。** 既定を 450 m / 108 棟へ上げたのに
+                //    スライダーが 400 / 40 で止まっていると、**触った瞬間に既定より
+                //    小さい値へ落ちる**（しかも下がったことは画面に出ない）。
+                //    設定の既定値を変えたら、必ずその値を含む帯にすること。
+                fw.AddSlider(Strings.DetectRadius, 50f, 900f, 25f, ModSettings.DetectRadius.value,
                     v => ModSettings.DetectRadius.value = (int)v);
 
-                fw.AddSlider(Strings.DetectCount, 4f, 40f, 1f, ModSettings.DetectCount.value,
+                fw.AddSlider(Strings.DetectCount, 4f, 200f, 4f, ModSettings.DetectCount.value,
                     v => ModSettings.DetectCount.value = (int)v);
+
+                // ★ バニラ（DLC）の竜巻を止める。火災旋風の渦には影響しない
+                //   （VanillaTornadoSuppressor のクラス doc）。
+                fw.AddCheckbox(Strings.NoVanillaTornado, ModSettings.NoVanillaTornado.value,
+                    v => ModSettings.NoVanillaTornado.value = v);
 
                 fw.AddSlider(Strings.MaxLifetime, 1f, 60f, 1f, ModSettings.MaxLifetimeMinutes.value,
                     v => ModSettings.MaxLifetimeMinutes.value = (int)v);

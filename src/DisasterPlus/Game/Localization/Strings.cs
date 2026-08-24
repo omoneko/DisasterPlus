@@ -17,6 +17,11 @@ namespace DisasterPlus.Game
         public static string GroupGeneral = "General";
 
         public static string FireWhirlEnabled = "Enable fire whirls";
+        // ★ 火災旋風のバニラ竜巻抑止（2026-08-22、所有者の指示
+        //   「バニラの竜巻は発生しないようにしてください」）。
+        public static string NoVanillaTornado =
+            "Stop the game from spawning its own tornadoes";
+
         public static string DetectRadius = "Detection radius (m)";
         public static string DetectCount = "Buildings required";
         public static string MaxLifetime = "Maximum lifetime (in-game minutes)";

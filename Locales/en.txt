@@ -4,6 +4,7 @@ ModDescription = Adds realistic disaster phenomena: fire whirls, typhoons, volca
 GroupFireWhirl = Fire whirl
 GroupGeneral = General
 FireWhirlEnabled = Enable fire whirls
+NoVanillaTornado = Stop the game from spawning its own tornadoes
 DetectRadius = Detection radius (m)
 DetectCount = Buildings required
 MaxLifetime = Maximum lifetime (in-game minutes)

@@ -41,7 +41,34 @@ namespace DisasterPlus.Game
         private readonly BurningBuildingScanner _scanner = new BurningBuildingScanner();
 
         /// <summary>強度は byte。竜巻としては中程度の 60 から始める（表示 6.0）。</summary>
-        private const byte SpawnIntensityBase = 60;
+        /// <summary>
+        /// 渦を作るときの災害強度。
+        ///
+        /// ── ★★ 3 倍にした（2026-08-22、所有者の指示「火災旋風の竜巻を 3 倍に」）──
+        ///
+        /// <b>渦の見かけの大きさは強度そのものである。</b> IL 実測
+        /// （<c>VortexAI.RenderExtraStuff</c>、IL_00C0〜00C6）:
+        ///
+        /// <code>
+        ///   scale = DisasterData.m_intensity * 0.01454545      // = 強度 / 68.75
+        ///   ... Mathf.Max(m_destructionRadiusMax, m_upgradeRadiusMax) と組み合わせる
+        /// </code>
+        ///
+        /// 60 では 0.87 倍にしかならなかった。180 なら 2.62 倍で、**ちょうど 3 倍**である。
+        ///
+        /// ★ <b>壊す範囲は 3 倍にならない。</b> 破壊半径はプレハブ側の
+        ///   <c>m_destructionRadiusMin/Max</c> で頭打ちなので、大きくなるのは見た目だけ
+        ///   （火災旋風自身の被害は <c>FireWhirlDamage</c> が別に決めている）。
+        ///
+        /// ★ 生成位置は <c>targetPosition</c> から <c>強度×10 + 400</c> ＝ 2200 m
+        ///   離れた点である（<c>TornadoAI.ActivateDisaster</c>）。
+        ///   <c>FireWhirlPinner.MaxAttachDistance</c>（3000 m）の内側に収まっている ——
+        ///   <b>ここを上げるときは必ずあちらも確かめること。</b>超えると渦が
+        ///   永久に紐づかず、追跡不能なドリフト竜巻になる。
+        ///
+        /// ★ 255 を超えないこと（<c>m_intensity</c> は byte）。
+        /// </summary>
+        private const byte SpawnIntensityBase = 180;
 
         /// <summary>終了処理が終わらない旋風を一度でも報告したか。ログを 1 回に留めるため。</summary>
         private bool _endingStallLogged;
@@ -76,6 +103,12 @@ namespace DisasterPlus.Game
             // Natural Disasters DLC が無いと竜巻の DisasterInfo が存在しない。
             // FindTornadoInfo はその都度警告を出すので、DLC 無しの都市では毎 tick 呼ばない。
             if (!ModCompat.NaturalDisastersOwned) { _prospectFresh = false; return; }
+
+            // ★★ **バニラの竜巻をランダム抽選から外す**（所有者の指示）。
+            //    冪等で、状態が変わったときしか何も書かない。プレハブが読み込まれる
+            //    のはレベルロードのあとなので、OnLevelLoaded ではなくここで呼ぶ ——
+            //    ロード直後は LoadedCount が 0 のことがある。
+            VanillaTornadoSuppressor.Apply(ModSettings.NoVanillaTornado.value);
 
             // 保守処理（紐づけ・解体済みの回収・クールダウン）は設定に関係なく必ず回す。
             // ここを設定で止めると、機能を OFF にした瞬間にレジストリだけが残り、
@@ -276,6 +309,9 @@ namespace DisasterPlus.Game
             FireWhirlRegistry.Clear();
             FireWhirlFlameFx.Clear();
             HarmonyBootstrap.Uninstall();
+            // ★ 控えを捨てるだけ。値は書き戻さない —— 次のロードで
+            //   DisasterManager.InitializeProperties が計算し直す（あちらの doc）。
+            VanillaTornadoSuppressor.Forget();
             // ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
             _endingStallLogged = false;
         }
@@ -286,6 +322,17 @@ namespace DisasterPlus.Game
             // ★ ③に災害パネルのタイルは無い。プレイヤーが起こす経路が無いことを
             //   診断でも名乗る（「ボタンが出ていない＝壊れている」と読まれないため）。
             b.Line(1, "trigger", "natural only - a fire whirl cannot be placed by hand");
+
+            // ★ バニラの竜巻を止めているかを必ず名乗る。**「竜巻が起きない」は
+            //   壊れているのか設定なのか、これが無いと区別できない。**
+            b.Line(1, "vanilla tornado", ModSettings.NoVanillaTornado.value
+                ? (VanillaTornadoSuppressor.Suppressing
+                    ? "suppressed (" + VanillaTornadoSuppressor.SuppressedCount
+                      + " prefab(s) removed from the random draw)"
+                    : "NOT suppressed yet"
+                      + (VanillaTornadoSuppressor.Detail != null
+                         ? " (" + VanillaTornadoSuppressor.Detail + ")" : ""))
+                : "allowed (setting)");
             b.Line(1, "scan", _scanner.DiagnosticSummary());
             WriteConditionDiagnostics(b);
 

@@ -28,6 +28,12 @@ namespace DisasterPlus.Game
         public static SavedBool FireWhirlEnabled;
         public static SavedInt DetectRadius;
         public static SavedInt DetectCount;
+
+        /// <summary>
+        /// バニラ（ND DLC）の竜巻をランダム発生から外すか。**既定 ON。**
+        /// 火災旋風の渦には影響しない（<c>VanillaTornadoSuppressor</c>）。
+        /// </summary>
+        public static SavedBool NoVanillaTornado;
         public static SavedInt MaxLifetimeMinutes;
         public static SavedInt SpreadStrength;
         public static SavedInt MinSeparation;
@@ -261,8 +267,26 @@ namespace DisasterPlus.Game
             }
 
             FireWhirlEnabled      = new SavedBool("fireWhirlEnabled", FileName, true, true);
-            DetectRadius          = new SavedInt("fwDetectRadius", FileName, 150, true);
-            DetectCount           = new SavedInt("fwDetectCount", FileName, 12, true);
+            // ★★ **キーを打ち直した（2026-08-22）。** 実機報告「火災旋風の発生が
+            //    多すぎます。発生トリガーになる範囲を 3*3 倍にして」。
+            //
+            //    既定値を書き換えるだけでは<b>既に遊んでいる人には何も起きない</b> ——
+            //    SavedInt の既定値はキーが .cgs に無いときしか効かないので、
+            //    150/12 が保存済みのプレイヤーは古い（出すぎる）ままになる。
+            //    だからキーごと新しくする。旧キーは下で退役として宣言だけ残す。
+            //
+            //    半径 3 倍・棟数 9 倍 ＝ **面積あたりの密度は同じまま、必要な
+            //    火事の規模だけが 9 倍**になる。実際の火災旋風も、都市規模の
+            //    大火災でしか立たない。
+            DetectRadius          = new SavedInt("fwDetectRadius2", FileName, 450, true);
+            DetectCount           = new SavedInt("fwDetectCount2", FileName, 108, true);
+
+            // ★★ バニラ（DLC）の竜巻を止める。実機報告
+            //    「DLC の竜巻が発生して消えないバグが発生しています。
+            //      バニラの竜巻は発生しないようにしてください」。
+            //    火災旋風そのものは CreateDisaster を直に呼ぶので影響を受けない
+            //    （VanillaTornadoSuppressor のクラス doc）。
+            NoVanillaTornado      = new SavedBool("fwNoVanillaTornado", FileName, true, true);
             MaxLifetimeMinutes    = new SavedInt("fwMaxLifetime", FileName, 10, true);
             SpreadStrength        = new SavedInt("fwSpreadStrength", FileName, 3, true);
             MinSeparation         = new SavedInt("fwMinSeparation", FileName, 300, true);
@@ -287,6 +311,12 @@ namespace DisasterPlus.Game
             ForecastButtonY  = new SavedInt("forecastButtonY", FileName, -1, true);
 
             EarthquakeEnabled = new SavedBool("earthquakeEnabled", FileName, true, true);
+            // ★★ **退役キー 2 本（2026-08-22）。** 火災旋風の発生条件は
+            //    fwDetectRadius2 / fwDetectCount2 へ移した（上の doc）。
+            //    **同じキーを別の意味で使い回さないこと。**
+            new SavedInt("fwDetectRadius", FileName, 150, true);
+            new SavedInt("fwDetectCount", FileName, 12, true);
+
             // ★ 退役キー。ForecastButtonX/Y と全く同じ扱い（同 doc）。
             EarthquakeButtonX = new SavedInt("earthquakeButtonX", FileName, -1, true);
             EarthquakeButtonY = new SavedInt("earthquakeButtonY", FileName, -1, true);

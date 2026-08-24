@@ -3,6 +3,7 @@ ModDescription = 火災旋風・台風・火山などのリアルな災害現象
 GroupFireWhirl = 火災旋風
 GroupGeneral = 全般
 FireWhirlEnabled = 火災旋風を有効にする
+NoVanillaTornado = ゲーム自身の竜巻を発生させない
 DetectRadius = 発生判定の半径 (m)
 DetectCount = 発生に必要な延焼棟数
 MaxLifetime = 最大持続時間 (ゲーム内分)
