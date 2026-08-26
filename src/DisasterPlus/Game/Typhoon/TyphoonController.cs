@@ -381,7 +381,10 @@ namespace DisasterPlus.Game
 
             // 経路は elapsedFrames の閉じた関数。積算しない（Core の doc）。
             _centre = TyphoonTrack.CentreAt(_origin, _seed, _elapsedFrames, _speed);
-            _heading = TyphoonTrack.HeadingAt(_seed, _elapsedFrames, _speed);
+            // ★ 出発点を渡す。**マップを横切る向きを選ぶため**
+            //   （TyphoonTrack.BearingFrom のクラス doc）。渡さないと、端を
+            //   指されたとき台風が数百 m でマップを出て消える。
+            _heading = TyphoonTrack.HeadingAt(_origin, _seed, _elapsedFrames, _speed);
 
             bool inside = TyphoonTrack.IsInsideMap(_centre);
             if (inside) _wasInsideMap = true;

@@ -483,6 +483,24 @@ namespace DisasterPlus.Game
                 + " / refused " + snapshot.WindLastRefused
                 + " / strength " + strength);
 
+            // ★★ プロップ（看板など）は建物とは別の走査である。**行を分ける** ——
+            //    まとめると「風害は出ている」で、看板が 1 つも飛んでいないのが隠れる。
+            b.Line(3, "props blown away",
+                TyphoonPropDamage.ScannedLastTick > 0
+                    ? TyphoonPropDamage.TakenLastTick + " this pass (total "
+                      + TyphoonPropDamage.TakenTotal + "), "
+                      + TyphoonPropDamage.ScannedLastTick + " grid cells swept"
+                    : "not sweeping"
+                      + (TyphoonPropDamage.LastFailure != null
+                         ? " (" + TyphoonPropDamage.LastFailure + ")"
+                         : " this frame (the sweep runs every 64 frames)"));
+
+            b.Line(4, "note: props",
+                   "signs, bins and parasols go first; anything over "
+                   + DisasterPlus.Core.Typhoon.PropGaleModel.SturdySizeMetres.ToString("F0")
+                   + " m is never taken. Trees are NOT included - they belong to "
+                   + "TreeManager, not PropManager. Released props do not come back");
+
             // ★★ 危険半円がどちら側か。**左右が逆でもプレイヤーには気付けない**ので、
             //    向きと上乗せの大きさをここで名乗る。数字は TrackBias が持っている
             //    定数そのもので、ここに写した別の値ではない。

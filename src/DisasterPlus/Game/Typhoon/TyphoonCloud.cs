@@ -114,7 +114,16 @@ namespace DisasterPlus.Game
     public static class TyphoonCloud
     {
         /// <summary>ゆっくり回す（度／秒）。6 度/秒 ＝ 1 回転 60 秒。**④が決めた演出値。**</summary>
-        private const float SpinDegreesPerSecond = 6f;
+        /// <summary>
+        /// 渦が回る速さ（度／秒）。
+        ///
+        /// ★★ 2026-08-22 に 6 → 2.2 へ落とした（所有者の指示「もっと低速で回転でいい」）。
+        ///   6 度/秒は 1 周 60 秒で、**実物の台風の 100 倍以上速い** ——
+        ///   衛星画像で渦が回って見えるのは何時間もの早回しである。
+        ///   2.2 なら 1 周 164 秒で、ゲームの時間の流れではまだ速いが、
+        ///   「ゆっくり渦を巻いている」と読める範囲に入る。
+        /// </summary>
+        private const float SpinDegreesPerSecond = 2.2f;
 
         /// <summary>雲の高度（m）。スカイドームは無限遠なので必ずその手前に出る（§C-2）。</summary>
         private const float CloudAltitudeMetres = 900f;

@@ -251,7 +251,16 @@ namespace DisasterPlus.Core.Typhoon
         /// </summary>
         public static float HeadingAt(uint seed, uint elapsedFrames, float speed)
         {
-            float theta = BearingOf(seed);
+            return HeadingAt(new Vec2(0f, 0f), seed, elapsedFrames, speed);
+        }
+
+        /// <summary>
+        /// 同上。**出発点を見て、マップを横切る向きを選ぶ。**
+        /// <see cref="BearingFrom"/> のクラス doc に理由がある。
+        /// </summary>
+        public static float HeadingAt(Vec2 origin, uint seed, uint elapsedFrames, float speed)
+        {
+            float theta = BearingFrom(origin, seed);
             if (speed <= 0f) return theta;
 
             theta += CurvatureOf(seed) * elapsedFrames;
@@ -279,9 +288,65 @@ namespace DisasterPlus.Core.Typhoon
         /// </summary>
         public static Vec2 CentreAt(Vec2 origin, uint seed, uint elapsedFrames, float speed)
         {
-            return ArcPosition(origin, BearingOf(seed), CurvatureOf(seed),
+            return ArcPosition(origin, BearingFrom(origin, seed), CurvatureOf(seed),
                                elapsedFrames, speed);
         }
+
+        /// <summary>
+        /// 進入方位の広がり（ラジアン、片側）。0 にすると必ず中心をまっすぐ通る。
+        /// </summary>
+        public const float BearingSpreadRadians = 0.62f;
+
+        /// <summary>
+        /// 出発点がここより中心に近ければ、向きは種だけで決める（m）。
+        /// 中心そのものを指されたら「中心へ向かう向き」が定義できない。
+        /// </summary>
+        public const float CentreDeadZoneMetres = 900f;
+
+        /// <summary>
+        /// <paramref name="origin"/> から出発する台風の進入方位（rad）。
+        ///
+        /// ── ★★ なぜ種だけで決めてはいけないのか（2026-08-22、実機報告）──────────
+        ///
+        /// &gt; 台風の雲のエフェクトは一瞬だけ現れて消えてしまいます
+        /// &gt; …可能な限り上空を巨大な台風雲がゆっくりと回転して通過しながら…
+        ///
+        /// 以前はここが <see cref="BearingOf"/>（種だけ）だった。方位が
+        /// <b>出発点と無関係</b>なので、マップの端の近くを指して外向きの目が出ると、
+        /// 台風は数百 m でマップを出て <c>TyphoonController.Stop()</c> に掛かる ——
+        /// <b>雲が一瞬出て消える</b>のはこれである。バニラの雷雨（宿主）は
+        /// 別の寿命で動いているので、そちらだけが残って「ただの雷雨」になる。
+        ///
+        /// いまは<b>中心へ向かう向きを基準に、種で ±<see cref="BearingSpreadRadians"/>
+        /// だけ振る</b>。どこを指しても台風はマップを横切るので、
+        /// 街の上を通過する時間がいちばん長くなる。
+        ///
+        /// ★ 中心のすぐ近く（<see cref="CentreDeadZoneMetres"/> の内側）を指された
+        ///   ときは「中心へ向かう向き」が定義できないので、種だけで決める ——
+        ///   そこから出るなら**どちらへ行ってもマップを横切る**ので、それでよい。
+        /// </summary>
+        public static float BearingFrom(Vec2 origin, uint seed)
+        {
+            float distance = (float)Math.Sqrt(origin.X * origin.X + origin.Z * origin.Z);
+            if (distance < CentreDeadZoneMetres) return BearingOf(seed);
+
+            // 中心（0,0）へ向かう向き。
+            float toCentre = (float)Math.Atan2(-origin.Z, -origin.X);
+
+            // 種で ±spread だけ振る。**同じ地点・同じ種なら同じ経路**である。
+            float offset = (DeterministicRandom.Unit(seed, BearingSpreadSalt) * 2f - 1f)
+                           * BearingSpreadRadians;
+
+            const float twoPi = 6.28318531f;
+            float theta = toCentre + offset;
+            theta = (float)(theta - Math.Floor(theta / twoPi) * twoPi);
+            if (theta < 0f) theta = 0f;
+            if (theta >= twoPi) theta = 0f;
+            return theta;
+        }
+
+        /// <summary>方位の振れ幅を引くときの塩。**ほかと重ねないこと。**</summary>
+        private const uint BearingSpreadSalt = 0x42454152u;
 
         /// <summary>マップの矩形の中か。**終了判定はクランプ前の中心で行うこと。**</summary>
         public static bool IsInsideMap(Vec2 centre)

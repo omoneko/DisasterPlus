@@ -104,6 +104,12 @@ namespace DisasterPlus.Game
         /// </summary>
         private static float _clockSeconds;
 
+        /// <summary>
+        /// この台風の種。<b>1 つの台風のあいだ変わらないこと</b>が要点である
+        /// （<see cref="Step"/> の doc）。
+        /// </summary>
+        private static uint _seed;
+
         /// <summary>直近のフレームで置いた粒の数（診断用）。0 は「描いていない」。</summary>
         public static int PuffsPlaced { get; private set; }
 
@@ -167,9 +173,25 @@ namespace DisasterPlus.Game
             //   ゆっくり動く雲のほうがましである**（噴煙も同じ扱い）。
             _clockSeconds += Time.deltaTime;
 
-            uint seed = DeterministicRandom.Hash(
-                unchecked((uint)Mathf.RoundToInt(centre.X)),
-                unchecked((uint)Mathf.RoundToInt(centre.Z)));
+            // ★ 種は台風ごとに 1 度だけ決める。スロット番号が変わったら別の台風である。
+            uint slotSeed = DeterministicRandom.Hash(snapshot.TyphoonId, 0x54595048u);
+            if (slotSeed != _seed)
+            {
+                _seed = slotSeed;
+                _clockSeconds = 0f;
+            }
+
+            // ★★ **種は動かしてはいけない。**（2026-08-22、実機報告
+            //    「高速回転する台風雲が一瞬現れる」）
+            //
+            //    ここは中心の座標からハッシュを取っていた。**台風は動く**ので
+            //    毎フレーム種が変わり、<b>900 個の塊が毎フレーム別の場所へ飛んだ</b>。
+            //    渦が高速で回っているように見えたのはそれである
+            //    （⑤の噴煙は動かないので、同じ書き方でも表に出なかった）。
+            //
+            //    掴んでいる災害スロットの番号を種にする。**1 つの台風のあいだ
+            //    変わらず、次の台風では変わる**という、ちょうど要る性質がある。
+            uint seed = _seed;
 
             for (int i = 0; i < TyphoonCloudParcels.Count; i++)
             {
@@ -265,6 +287,7 @@ namespace DisasterPlus.Game
             _system = null;
             _buffer = null;
             _clockSeconds = 0f;
+            _seed = 0u;
             Drawing = false;
             PuffsPlaced = 0;
         }

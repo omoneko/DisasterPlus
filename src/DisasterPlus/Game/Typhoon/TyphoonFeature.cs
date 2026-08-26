@@ -80,6 +80,9 @@ namespace DisasterPlus.Game
                 //   壊している」と読める**（局所被害と同じ理由）。Reset は冪等で、
                 //   台帳を持たないので毎 tick 通ってよい。
                 TyphoonWind.Reset();
+            // ★ 飛ばしたプロップは戻らない。ここで畳むのは走査のカーソルと
+            //   診断の数だけである。
+            TyphoonPropDamage.Reset();
                 return;
             }
 
@@ -122,6 +125,13 @@ namespace DisasterPlus.Game
                 if (ModSettings.TyphoonWindDamage.value)
                 {
                     TyphoonWind.Apply(snapshot, deltaMinutes);
+
+                    // ★★ **看板などのプロップも飛ばす**（2026-08-22、所有者の依頼
+                    //    「看板プロップの破壊」）。風害と同じ設定に載せる ——
+                    //    「風で壊れるもの」を 2 つのつまみに割らない。
+                    //    ★ ReleaseProp は取り消せないので、しきい値は渋め
+                    //      （PropGaleModel のクラス doc）。
+                    TyphoonPropDamage.Tick(snapshot, frameIndex);
                 }
 
                 // ★ 竜巻並みの局所被害（既定 ON。強さ 0 でも完全に無効）。
