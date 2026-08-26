@@ -207,6 +207,21 @@ namespace DisasterPlus.Game
 
             _system.SetParticles(_buffer, count);
 
+            // ★★ **GameObject を粒のところへ動かす。**（2026-08-22、実機報告
+            //    「雷が発生した瞬間消えてしまいます」）
+            //
+            //    粒はワールド座標で置いているが（simulationSpace = World）、
+            //    <b>GameObject はずっと原点(0,0,0)に置きっぱなしだった</b>。
+            //    Unity は <c>ParticleSystemRenderer</c> を<b>transform を基準にした
+            //    境界</b>で視錐台カリングするので、**原点が画面から外れた瞬間に
+            //    システムごと消える**。
+            //
+            //    ④で見つかった（あちらは雷でカメラが寄ると消えていた）。⑤は
+            //    火口を見ていることが多いので表に出にくいだけで、**同じ穴である**。
+            //
+            //    ★ 例外が出る経路ではないので try で包まない。
+            _object.transform.position = new Vector3(vent.X, vent.Y, vent.Z);
+
             PuffsPlaced = count;
             Drawing = true;
             LastFailure = null;

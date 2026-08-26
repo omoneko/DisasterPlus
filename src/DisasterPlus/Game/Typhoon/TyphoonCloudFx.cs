@@ -154,10 +154,21 @@ namespace DisasterPlus.Game
 
         /// <summary>雲底の基準高度（m）。**旧実装（900 m）より低い** ——
         /// 入道雲は下面が低く、そこから上へ伸びる。</summary>
-        private const float BaseAltitudeMetres = 560f;
+        /// <summary>
+        /// 雲底の下限（m）。
+        ///
+        /// ★★ 2026-08-22 に 560 → 1200 へ上げた（実機報告「雲の発生位置が雷よりも
+        ///   低いので違和感があります。もっと高くできませんか？」）。
+        ///   バニラの落雷は空から地面へ走るので、雲がその下に在ると
+        ///   <b>雷が雲を突き抜けて上から降ってくる</b>ように見える。
+        /// </summary>
+        private const float BaseAltitudeMetres = 1200f;
 
         /// <summary>山岳マップで山に埋まらないための、中心の地形高からの最低クリアランス（m）。</summary>
-        private const float MinClearanceMetres = 300f;
+        /// <summary>
+        /// 地面（台風の中心の地形高さ）からの最低の浮き（m）。同上で 300 → 900。
+        /// </summary>
+        private const float MinClearanceMetres = 900f;
 
         /// <summary>雲の厚み（m）。<c>HeightFraction</c> がこの中のどこに置くかを決める。
         /// **旧実装の 320 m から 2200 m へ上げた** —— 積乱雲の鉛直の伸びが指摘の中心である。

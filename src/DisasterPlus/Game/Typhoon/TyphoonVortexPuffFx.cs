@@ -219,6 +219,22 @@ namespace DisasterPlus.Game
 
             _system.SetParticles(_buffer, TyphoonCloudParcels.Count);
 
+            // ★★ **GameObject を粒のところへ動かす。**（2026-08-22、実機報告
+            //    「雷が発生した瞬間消えてしまいます」）
+            //
+            //    粒はワールド座標で置いているが（simulationSpace = World）、
+            //    <b>GameObject はずっと原点(0,0,0)に置きっぱなしだった</b>。
+            //    Unity は <c>ParticleSystemRenderer</c> を<b>transform を基準にした
+            //    境界</b>で視錐台カリングするので、**原点が画面から外れた瞬間に
+            //    システムごと消える**。
+            //
+            //    雷が落ちるとカメラがそちらへ寄る（ゲームが災害へフォーカスする）。
+            //    そのとき原点が視界から外れて雲が丸ごと消えていた ——
+            //    「雷が発生した瞬間」という条件がそのまま手がかりだった。
+            //
+            //    ★ 例外が出る経路ではないので try で包まない。
+            _object.transform.position = new Vector3(centre.X, altitudeMetres, centre.Z);
+
             PuffsPlaced = TyphoonCloudParcels.Count;
             Drawing = true;
             return true;
