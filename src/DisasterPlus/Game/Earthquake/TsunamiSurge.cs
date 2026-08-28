@@ -69,7 +69,7 @@ namespace DisasterPlus.Game
         ///   <c>PlateauEdgeMetres</c> まで海を持ち上げるので、**泉もそこまで
         ///   置かないと、台地の外側だけが上がらない**。
         /// </summary>
-        private const float ReachMetres = TsunamiWaveTrain.PlateauEdgeMetres;
+        private const float ReachMetres = TsunamiWaveTrain.ReachEdgeMetres;
 
         /// <summary>
         /// 置く泉の数の上限。**水シミュの負荷はここで決まる。**
@@ -126,23 +126,44 @@ namespace DisasterPlus.Game
         //   （IL_099A-09C3）。**外周リング専用の TYPE_TSUNAMI と違い、どこにでも置ける。**
         //   これが「震源を中心に」を満たす唯一のバニラ経路である。
 
-        /// <summary>波の壁を撃つ間隔（フレーム）。</summary>
-        private const int SplashIntervalFrames = 64;
+        /// <summary>
+        /// 波の壁を撃つ間隔（フレーム）。
+        ///
+        /// ★★ 64 -> 20（2026-08-29、実機報告「求めているのは水の壁が同心円状に
+        ///   生成される挙動」）。64 フレームおきだと、45 m/s の前線は
+        ///   <b>1 発ごとに 48 m しか進まない</b>——のではなく、実際には
+        ///   飛び飛びに現れて<b>輪が途切れる</b>。20 フレームなら前線の動きに追随する。
+        /// </summary>
+        private const int SplashIntervalFrames = 20;
 
-        /// <summary>1 発の波の壁の半径（m）。</summary>
-        private const float SplashRadiusMetres = 1400f;
+        /// <summary>1 発の波の壁の半径（m）。**壁の厚み**である。</summary>
+        private const float SplashRadiusMetres = 700f;
 
         /// <summary>波の壁の高さ（そのときの持ち上がりに対する比）。</summary>
-        private const float SplashDepthFraction = 0.55f;
+        private const float SplashDepthFraction = 0.85f;
 
-        /// <summary>1 回に撃つ数（前線に沿って円周上へ配る）。</summary>
-        private const int SplashesPerPulse = 8;
+        /// <summary>
+        /// 隣り合う発の重なり。1 未満で**必ず重ねる** ——
+        /// 1 以上にすると隣との間に切れ目ができ、<b>輪ではなく点線</b>になる。
+        /// </summary>
+        private const float SplashOverlap = 0.72f;
+
+        /// <summary>1 回に撃つ数の上限。**円周が伸びても際限なく増やさない。**</summary>
+        private const int MaxSplashesPerPulse = 40;
+
+        /// <summary>同じく下限（前線が小さいうちでも輪に見えるように）。</summary>
+        private const int MinSplashesPerPulse = 8;
 
         private static uint _lastSplashFrame;
         private static int _splashPulses;
 
         /// <summary>撃った波の壁の回数（診断用）。</summary>
         public static int SplashPulses { get { return _splashPulses; } }
+
+        private static int _splashesLastPulse;
+
+        /// <summary>直近の 1 回で輪に並べた発の数（診断用）。**8 のままなら輪が細い。**</summary>
+        public static int SplashesLastPulse { get { return _splashesLastPulse; } }
 
         /// <summary>置いた泉 1 つぶん。</summary>
         private struct Spring
@@ -293,6 +314,7 @@ namespace DisasterPlus.Game
             _centre = epicentre;
             _lastSplashFrame = frame;
             _splashPulses = 0;
+            _splashesLastPulse = 0;
             _startFrame = frame;
             _lastFrame = frame;
             _drainFromFrame = 0u;
@@ -405,18 +427,35 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void Splash(float seconds)
         {
-            float front = TsunamiWaveTrain.SpeedMetresPerSecond * seconds;
+            // ★★ **壁は「波列のいちばん外の山」の位置にある。**
+            //    ここを LeadingFront にしておかないと、内側の山にも壁が立って
+            //    <b>輪が何重にも重なって見える</b>。
+            float front = TsunamiWaveTrain.LeadingFrontAt(seconds);
             if (front <= SplashRadiusMetres) front = SplashRadiusMetres;
-            if (front > TsunamiWaveTrain.PlateauEdgeMetres) return;   // もう外へ出た
+            if (front > TsunamiWaveTrain.ReachEdgeMetres) return;   // もう外へ出た
 
             float rise = TsunamiWaveTrain.RiseAt(front, seconds, _amplitude);
             if (!(rise > 0.5f)) return;
 
             float depth = rise * SplashDepthFraction;
 
-            for (int i = 0; i < SplashesPerPulse; i++)
+            // ★★ **数は円周で決める。**（2026-08-29）
+            //    固定 8 発だと、半径 4 km（円周 25 km）では 3 km ごとに
+            //    1 発しか置けず、**輪ではなく点が 8 個**にしかならなかった。
+            //    隣どうしが重なる数を計算する。
+            float step = SplashRadiusMetres * 2f * SplashOverlap;
+            int count = Mathf.CeilToInt(6.2831853f * front / step);
+            if (count < MinSplashesPerPulse) count = MinSplashesPerPulse;
+            if (count > MaxSplashesPerPulse) count = MaxSplashesPerPulse;
+
+            // ★ 発の並びを毎回わずかに回す。回さないと、同じ方位に穴が残り続けて
+            //   <b>輪に切れ目の筋</b>が見える。
+            float spin = _splashPulses * 0.37f;
+
+            int placed = 0;
+            for (int i = 0; i < count; i++)
             {
-                float a = 6.2831853f * i / SplashesPerPulse;
+                float a = 6.2831853f * i / count + spin;
                 var at = new Vector2(_centre.X + Mathf.Cos(a) * front,
                                      _centre.Z + Mathf.Sin(a) * front);
 
@@ -426,8 +465,10 @@ namespace DisasterPlus.Game
                 if (at.y < -MapHalfExtent || at.y > MapHalfExtent) continue;
 
                 DisasterHelpers.SplashWater(at, SplashRadiusMetres, depth);
+                placed++;
             }
 
+            _splashesLastPulse = placed;
             _splashPulses++;
         }
 

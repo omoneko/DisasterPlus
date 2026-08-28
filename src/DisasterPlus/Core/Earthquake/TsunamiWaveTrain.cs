@@ -57,32 +57,39 @@ namespace DisasterPlus.Core.Earthquake
         /// <summary>波の本数。所有者の指示の「2-3 個」。</summary>
         public const int CrestCount = 3;
 
-        // ── ★★ 「持ち上がったまま」の土台（2026-08-29）──────────────────────
+        // ── ★★ 求められているのは「同心円状に広がる水の壁」（2026-08-29）──────
         //
         // 実機報告:
         //
-        //   > 波は減衰していくので、水源をすぐに除去してしまうとただの高潮に
-        //   > なってしまっています。やはりバニラの津波のように海面全体が
-        //   > 持ち上がるレベルじゃないと津波っぽさは出ない
+        //   > イメージと違います。求めているのは、震源地から水の壁が
+        //   > 同心円状に生成される挙動です。
         //
-        // 3 本の細い山だけでは、通り過ぎたあとに水位が戻ってしまう。
-        // **本物の津波は「海面が持ち上がったまましばらく戻らない」**（波長が
-        // 数十 km あるので、岸では 1 本の波が何分も居座る）。
+        // 1 つ前の版は<b>台地</b>（震源のまわりの海がまるごと一様に持ち上がる）
+        // だった。**それは逆である。** 一様に上がった海には「壁」も「輪」も無く、
+        // ただ潮位が高いだけに見える。
         //
-        // そこで<b>山の下に台地を敷く</b>。震源のまわりの海がまるごと上がり、
-        // その上を 3 本の山が走る。台地はゆっくりしか下がらない。
+        // 正しいのは
+        //
+        //     前線の外側 … 平常の海面（まだ何も来ていない）
+        //     前線       … **壁**（狭くて高い）
+        //     前線の内側 … 通り過ぎたあとの、少し高いだけの海（wake）
+        //
+        // という<b>輪</b>である。輪が外へ広がるので「同心円状」に見える。
 
-        /// <summary>台地の高さ（いちばん高い波に対する比）。</summary>
-        public const float PlateauFraction = 0.62f;
+        /// <summary>
+        /// 前線の内側に残る水位（いちばん高い波に対する比）。
+        ///
+        /// ★ 0 にはしない —— 壁が通り過ぎた瞬間に平常へ戻ると、
+        ///   <b>壁の内側だけ海が凹んで見える</b>。実際の津波でも前線の背後は
+        ///   しばらく高いままである。**ただし小さく保つ**（大きくすると台地に戻る）。
+        /// </summary>
+        public const float WakeFraction = 0.22f;
 
-        /// <summary>台地が全高で乗る半径（m）。ここまではまるごと持ち上がる。</summary>
-        public const float PlateauRadiusMetres = 4200f;
+        /// <summary>前線の内側で水位が落ち着くまでの距離（m）。</summary>
+        public const float WakeFalloffMetres = 2200f;
 
-        /// <summary>台地が 0 まで落ちる半径（m）。ここから外は上がらない。</summary>
-        public const float PlateauEdgeMetres = 8200f;
-
-        /// <summary>台地が立ち上がるまで（秒）。**一瞬で上げない**（水が壁になる）。</summary>
-        public const float PlateauRampSeconds = 45f;
+        /// <summary>波が届く限界（m）。ここから外へは水源も置かない。</summary>
+        public const float ReachEdgeMetres = 8200f;
 
         /// <summary>
         /// 波が進む速さ（m/秒、ゲーム内時間）。
@@ -100,7 +107,8 @@ namespace DisasterPlus.Core.Earthquake
 
         /// <summary>波と波の間隔（秒）。</summary>
         /// <remarks>★ 波を遅くしたぶん、間隔も広げる（55 -> 90）。</remarks>
-        public const float CrestGapSeconds = 90f;
+        /// <remarks>★ 壁が細くなったので間隔も詰める（90 -> 60）。</remarks>
+        public const float CrestGapSeconds = 60f;
 
         /// <summary>1 本の波の幅（m）。**狭いと海岸を素通りする。**</summary>
         /// <remarks>
@@ -108,7 +116,13 @@ namespace DisasterPlus.Core.Earthquake
         ///   なり、水シミュが追いつかない。津波の波長は実際にも数十 km あり、
         ///   <b>岸では「潮位が上がったまましばらく戻らない」</b>という見え方になる。
         /// </remarks>
-        public const float CrestWidthMetres = 1800f;
+        /// <remarks>
+        /// ★★ 1800 -> 800（2026-08-29、実機報告「求めているのは水の壁」）。
+        ///   1800 m は<b>うねり</b>であって壁ではない。狭くすると水シミュが
+        ///   追いつかない問題は、<c>DisasterHelpers.SplashWater</c> の
+        ///   衝撃波を前線に重ねることで別に解いてある（<c>TsunamiSurge</c>）。
+        /// </remarks>
+        public const float CrestWidthMetres = 800f;
 
         /// <summary>
         /// 波ごとの高さの比。**第 2 波がいちばん高い** ——
@@ -189,9 +203,9 @@ namespace DisasterPlus.Core.Earthquake
                 sum += CrestWeights[k] * Bell(offset, CrestWidthMetres);
             }
 
-            // ★★ **台地を足す。** 山が通り過ぎても海面は上がったまま残る
-            //    （上の doc）。これが無いと、ただの高潮に見える。
-            sum += PlateauShapeAt(distanceMetres, elapsedSeconds);
+            // ★★ **前線の内側に残る水位。** 壁が通り過ぎたあとの海であって、
+            //    はじめから一様に上がっている「台地」ではない（上の doc）。
+            sum += WakeShapeAt(distanceMetres, elapsedSeconds);
 
             if (sum <= 0f) return 0f;
             return amplitudeMetres * envelope * sum;
@@ -223,37 +237,42 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 台地の形（いちばん高い波に対する比）。<b>震源のまわりの海がまるごと
-        /// 持ち上がったまま居座る</b>ぶんである。
-        ///
-        /// ★ 立ち上がりは <see cref="PlateauRampSeconds"/> かけて。
-        ///   一瞬で上げると水が壁になって岸へ倒れ込む（それは津波ではなく決壊である）。
-        /// ★ 下がるのは全体の包絡線に任せる（<see cref="RiseAt"/> が掛ける）ので、
-        ///   ここでは下げない —— **2 か所で下げると、どちらが効いたのか分からなくなる。**
+        /// **いちばん外の壁が今いる半径**（m）。ここより外はまだ平常の海である。
         /// </summary>
-        public static float PlateauShapeAt(float distanceMetres, float elapsedSeconds)
+        public static float LeadingFrontAt(float elapsedSeconds)
+        {
+            if (IsBad(elapsedSeconds) || elapsedSeconds <= 0f) return 0f;
+            return elapsedSeconds * SpeedMetresPerSecond;
+        }
+
+        /// <summary>
+        /// <b>前線の内側に残る水位</b>（いちばん高い波に対する比）。
+        ///
+        /// ★★ **前線より外では必ず 0 である。** ここが 0 でないと、
+        ///   波が着く前から海が上がっていることになり、
+        ///   <b>輪（同心円）に見えなくなる</b>。
+        ///
+        /// ★ 内側は <see cref="WakeFalloffMetres"/> かけて <see cref="WakeFraction"/> へ
+        ///   落ち着く。壁のすぐ後ろが急に平らだと、壁が板に見える。
+        /// </summary>
+        public static float WakeShapeAt(float distanceMetres, float elapsedSeconds)
         {
             if (IsBad(distanceMetres) || distanceMetres < 0f) return 0f;
             if (IsBad(elapsedSeconds) || elapsedSeconds <= 0f) return 0f;
+            if (distanceMetres >= ReachEdgeMetres) return 0f;
 
-            // ── 立ち上がり ────────────────────────────────────
-            float ramp = elapsedSeconds / PlateauRampSeconds;
-            if (ramp > 1f) ramp = 1f;
-            // なめらかに（線形だと立ち上がりに折れ目が出る）。
-            ramp = ramp * ramp * (3f - 2f * ramp);
+            float front = LeadingFrontAt(elapsedSeconds);
 
-            // ── 広がり ──────────────────────────────────────
-            if (distanceMetres >= PlateauEdgeMetres) return 0f;
+            // ★★ **まだ壁が来ていない。** ここを 0 で返すのが「同心円」の要である。
+            if (distanceMetres >= front) return 0f;
 
-            float reach = 1f;
-            if (distanceMetres > PlateauRadiusMetres)
-            {
-                float t = (distanceMetres - PlateauRadiusMetres)
-                          / (PlateauEdgeMetres - PlateauRadiusMetres);
-                reach = 0.5f * (1f + (float)Math.Cos(Math.PI * t));
-            }
+            // 壁の内側。前線からの距離で立ち上がる。
+            float behind = front - distanceMetres;
+            float k = behind / WakeFalloffMetres;
+            if (k > 1f) k = 1f;
+            k = k * k * (3f - 2f * k);   // なめらかに
 
-            return PlateauFraction * ramp * reach;
+            return WakeFraction * k;
         }
 
         /// <summary>釣鐘。<paramref name="offset"/> が 0 で 1、幅の外で 0。</summary>
