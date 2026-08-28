@@ -114,6 +114,14 @@ namespace DisasterPlus.Game
     public static class TsunamiChain
     {
         /// <summary>
+        /// 海溝型地震のあと津波が来るまで（ゲーム内分）。
+        ///
+        /// ★ 設定の <c>eqTsunamiDelay</c> がこれより長ければ、海溝型に限って
+        ///   こちらまで縮める。**短く設定している人の値は尊重する**（縮めるだけ）。
+        /// </summary>
+        private const int TrenchDelayMinutes = 3;
+
+        /// <summary>
         /// 強度の下限。強度 0 の津波は波高が 0 になり（<c>m_delta = m_height * 1024 * i / 55</c>、
         /// §B-3）、「起こしたのに何も起きない」という原因の分からない状態になる。
         /// </summary>
@@ -322,7 +330,18 @@ namespace DisasterPlus.Game
             // 巨大なフレーム数になり、予約が事実上永久に満了しなくなる。
             // 範囲はスライダーが 5〜120 に縛っているものの、手で編集された
             // 設定ファイルに対してもここが破綻しないようにする。
+            // ★★ **海溝型地震の津波は「すぐ」である。**（2026-08-25、所有者の指示）
+            //
+            //    <c>eqTsunamiDelay</c> の既定は 30 ゲーム内分だった。あれは
+            //    「遠地津波が届くまで」の感覚で置いた値だが、海溝型は<b>沖合すぐ</b>
+            //    で起きるので、実際にも数分で第一波が来る。
+            //    設定を触っていない人には <see cref="TrenchDelayMinutes"/> を使う。
             int minutes = ModSettings.EarthquakeTsunamiDelayMinutes.value;
+            if (TrenchQuakeSlot.IsTrenchQuake(quake.DisasterId)
+                && minutes > TrenchDelayMinutes)
+            {
+                minutes = TrenchDelayMinutes;
+            }
             if (minutes < 0) minutes = 0;
 
             uint delay = (uint)(minutes * framesPerMinute);

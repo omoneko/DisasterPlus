@@ -74,6 +74,16 @@ namespace DisasterPlus.Game
         private static ushort _id;
         private static uint _activationFrame;
 
+        /// <summary>
+        /// 掴んだ災害の <c>m_randomSeed</c>。**スロットの所有を見分ける鍵である**
+        /// （<see cref="TryGetBuffer"/> の doc）。<c>DisasterManager.CreateDisaster</c> が
+        /// 入れた値で、**AI は 1 つも書き換えない。**
+        /// </summary>
+        private static ulong _randomSeed;
+
+        /// <summary>同上の <c>m_infoIndex</c>。種と合わせて 2 つで見る。</summary>
+        private static ushort _infoIndex;
+
         /// <summary>例外を 1 回だけ <c>Log.Error</c> で出したか。<see cref="Forget"/> で戻さない
         /// （ゲームのビルドに対する事実であって都市ごとの状態ではない）。</summary>
         private static bool _errorLogged;
@@ -127,6 +137,15 @@ namespace DisasterPlus.Game
 
             _id = id;
             _activationFrame = 0u;
+
+            // ★★ **所有の鍵をここで控える**（<see cref="TryGetBuffer"/> の doc）。
+            //    <c>CreateDisaster</c> が入れた直後の値でなければならない ——
+            //    あとから読むと、既にスロットが誰かに取られていた場合に
+            //    「取った相手の鍵」を自分のものとして覚えてしまう。
+            DisasterData[] created = Singleton<DisasterManager>.instance.m_disasters.m_buffer;
+            _randomSeed = created[id].m_randomSeed;
+            _infoIndex = created[id].m_infoIndex;
+
             return true;
         }
 
@@ -312,8 +331,33 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // 再利用されたスロットを見分ける最も安いキー。開始時に控えた値と一致するか。
-            if (candidate[_id].m_activationFrame != _activationFrame)
+            // ★★ **所有の鍵は m_randomSeed である。**（2026-08-25、実機ログで判明）
+            //
+            //    ここは長らく <c>m_activationFrame</c> を鍵にしていた。
+            //    **あれはゲーム自身が書き換える。** 全メソッドの IL を走査した結果
+            //    （<c>docs/tools/findwriters.ps1</c>）:
+            //
+            //        WRITE  DisasterAI::ActivateDisaster          <- ★ これ
+            //        WRITE  ThunderStormAI::StartDisaster
+            //        WRITE  EarthquakeAI / SinkholeAI / TornadoAI::StartDisaster
+            //        WRITE  Data::Deserialize
+            //
+            //    つまり<b>嵐が Emerging から Active になった瞬間に値が変わり</b>、
+            //    ④は自分の災害を「他人に取られた」と誤判定して手放していた。
+            //    実機ログの
+            //        DIAG TyLost: the disaster slot was reused by something else
+            //    がそれで、**雲が一瞬出て雷雨だけが残る**という一連の報告は
+            //    ぜんぶこの 1 行から出ていた（雲の作りも種もカリングも無関係だった）。
+            //
+            //    <c>m_randomSeed</c> を書くのは <c>DisasterManager.CreateDisaster</c> と
+            //    セーブの読み込みだけで、**AI は 1 つも触らない**（同じ走査）。
+            //    64 bit あり、スロットが再利用されれば必ず変わる ——
+            //    これが「同じ災害か」の正しい鍵である。
+            //
+            //    ★ <c>m_infoIndex</c> も一緒に見る。種が偶然一致しても、
+            //      別の災害種別になっていたら他人のものである。
+            if (candidate[_id].m_randomSeed != _randomSeed
+                || candidate[_id].m_infoIndex != _infoIndex)
             {
                 lostReason = "the disaster slot was reused by something else";
                 return false;
@@ -411,6 +455,8 @@ namespace DisasterPlus.Game
         {
             _id = 0;
             _activationFrame = 0u;
+            _randomSeed = 0ul;
+            _infoIndex = 0;
         }
 
         /// <summary>

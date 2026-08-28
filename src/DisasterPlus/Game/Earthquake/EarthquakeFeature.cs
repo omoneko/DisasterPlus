@@ -101,7 +101,22 @@ namespace DisasterPlus.Game
             // ★ 第 2 層。**既定 OFF**（ModSettings.EarthquakeTsunamiChain の doc）。
             //    設定を見てから呼ぶことで、OFF のときは TsunamiChain の状態が
             //    Idle のまま一切進まない＝パネルにも節が出ない。
-            if (ModSettings.EarthquakeTsunamiChain.value)
+            // ★★ **海溝型地震は設定に関係なく必ず連鎖させる。**（2026-08-25、実機報告
+            //    「海溝型地震の後に津波がすぐに発生してほしいのですが発生しません」）
+            //
+            //    <c>eqTsunamiChain</c> は<b>既定 OFF</b> である。あれは
+            //    「バニラの地震にも津波を付けるか」という設定だった頃のもので、
+            //    そのままにしていたので**新設した海溝型地震まで黙って止めていた。**
+            //
+            //    海溝型地震は<b>津波を起こすためだけに在る災害</b>である。
+            //    そこに「既定でオフのスイッチ」を挟んだら、タイルを押しても
+            //    何も起きないのが既定の挙動になる —— それは設計として壊れている。
+            //
+            //    ★ 旧設定は**バニラの地震には今も効かない**（TsunamiChain の
+            //      PickCandidate が海溝型しか採らない）。残してあるのは
+            //      「海溝型でも津波を切りたい」人のための口としてである。
+            if (ModSettings.EarthquakeTsunamiChain.value
+                || TrenchQuakeSlot.LastId != 0)
             {
                 TsunamiChain.Tick(snapshot, frameIndex);
             }
