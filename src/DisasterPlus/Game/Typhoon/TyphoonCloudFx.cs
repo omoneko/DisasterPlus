@@ -136,14 +136,23 @@ namespace DisasterPlus.Game
         ///   <see cref="MaxVortexRadiusMetres"/> で頭打ちにする。**マップに収まって
         ///   はじめて渦は渦に見える。**
         /// </summary>
-        private const float VortexRadiusFactor = 1.35f;
+        /// <remarks>
+        /// ★★ 1.35 -> 2.70（2026-08-29、所有者の指示「台風の雲の大きさを
+        ///   2x2 の 4 倍サイズにしてください」）。
+        ///   <b>面積 4 倍 ＝ 半径 2 倍</b>である（2x2 は縦横それぞれ 2 倍という意味）。
+        ///
+        /// ★ 上限（<see cref="MaxVortexRadiusMetres"/> ＝ マップ半辺）はそのまま。
+        ///   そこへ当たった時点で「マップに収まる」という別の制約が勝つ。
+        /// </remarks>
+        private const float VortexRadiusFactor = 2.70f;
 
         /// <summary>渦の外周半径の上限（m）。マップ半辺は 8640 m なので、
         /// 直径 12 km ＝ マップの 7 割に収まる。</summary>
         private const float MaxVortexRadiusMetres = 8640f;
 
         /// <summary>同下限（m）。これより小さいと眼が粒 1 個で埋まる。</summary>
-        private const float MinVortexRadiusMetres = 900f;
+        /// <remarks>★ 下限も同じく 2 倍（900 -> 1800）。弱い台風でも 4 倍にする。</remarks>
+        private const float MinVortexRadiusMetres = 1800f;
 
         /// <summary>粒径の下限（m）。小さすぎると点にしか見えない。
         /// **いちばん小さい渦でだけ効き、そこでも眼は埋まらない**（クラス doc の検算）。</summary>

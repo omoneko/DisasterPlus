@@ -228,9 +228,10 @@ namespace DisasterPlus.Game
                    "ONLY a trench quake brings a tsunami. The game's own (fault) "
                    + "earthquakes never do - that is deliberate, not a fault. "
                    + "The DLC TsunamiAI is NOT used: it can only start a wave from the "
-                   + "map edge, never from an offshore epicentre. The wave here is "
-                   + TsunamiWaveTrain.CrestCount + " crests spreading outward from the "
-                   + "epicentre, raised with TYPE_NATURAL water sources");
+                   + "map edge, never from an offshore epicentre. The wave here is a "
+                   + "bulge that spreads into a plateau, hollows out into a ring, then "
+                   + "spreads outward WITHOUT decaying, raised with TYPE_NATURAL "
+                   + "water sources plus SplashWater impact waves on the ring");
 
             var snapshot = EarthquakeHub.Latest;
             b.Line(1, "snapshot", snapshot == null ? "none yet" : (snapshot.Valid ? "valid" : "INVALID"));

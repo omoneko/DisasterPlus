@@ -38,11 +38,31 @@ namespace DisasterPlus.Game
         /// まだ車両 ID が分かっていない旋風に、渦車両を紐づける。
         /// 車両は ActivateDisaster が作るので、CreateDisaster の直後には存在しない。
         /// </summary>
+        /// <summary>
+        /// この ID は<b>こちらが合成したもの</b>か（＝バニラの災害ではない）。
+        ///
+        /// ★★ 2026-08-29 以降、火災旋風は竜巻災害を 1 つも作らない
+        ///   （<c>FireWhirlSpawner.TrySpawn</c> のクラス doc）。したがって
+        ///   <b>この型の仕事はもう無い</b>。**消さずに残してあるのは、
+        ///   ここに書いてある IL 実測（渦車両の探し方・両スロットの目標・
+        ///   DeactivateNow の条件）が、再び渦を借りる日に要るからである。**
+        /// </summary>
+        internal static bool IsSynthetic(ushort disasterId)
+        {
+            return disasterId >= FireWhirlSpawner.SyntheticIdBase;
+        }
+
         public static void AttachVehicles()
         {
             var views = FireWhirlRegistry.Snapshot();
             for (int i = 0; i < views.Count; i++)
             {
+                // ★★ **合成 ID には車両が存在しない。** 探しに行くと、
+                //    <c>InstanceManager.GetAllGroupInstances</c> が
+                //    <b>その番号を災害 ID として扱う</b>ので、
+                //    無関係な災害の車両を拾いうる。
+                if (IsSynthetic(views[i].DisasterId)) continue;
+
                 if (views[i].VehicleId != 0) continue;
 
                 ushort found = FindVortexVehicle(views[i].DisasterId, views[i].Center);
@@ -120,6 +140,15 @@ namespace DisasterPlus.Game
         /// </summary>
         public static void BeginEnding(FireWhirlView v)
         {
+            // ★★ **合成 ID はその場で畳む。** 借り物の災害も渦車両も無いので、
+            //    バニラの解体を待つ理由がまったく無い。
+            //    （待っていたのが実機ログの「deferring teardown」の山である。）
+            if (IsSynthetic(v.DisasterId))
+            {
+                FireWhirlRegistry.Remove(v.DisasterId, ModSettings.MaxLifetimeMinutes.value);
+                return;
+            }
+
             if (v.VehicleId == 0)
             {
                 // 車両が付く前に寿命が尽きた。レジストリから外すだけだと、バニラの災害は
@@ -202,6 +231,12 @@ namespace DisasterPlus.Game
             for (int i = 0; i < views.Count; i++)
             {
                 ushort d = views[i].DisasterId;
+
+                // ★★ **合成 ID は災害バッファの添字ではない。** 見に行くと
+                //    範囲外か、他人の災害を読むことになる。畳むのは
+                //    <see cref="BeginEnding"/> と寿命の側の仕事である。
+                if (IsSynthetic(d)) continue;
+
                 if (d >= disasters.Length) { FireWhirlRegistry.Remove(d, cooldown); continue; }
 
                 if ((disasters[d].m_flags & DisasterData.Flags.Created) == DisasterData.Flags.None)

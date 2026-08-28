@@ -324,9 +324,7 @@ namespace DisasterPlus.Game
                      + epicentre.Z.ToString("F0") + "): " + _sources.Count
                      + " water sources over the sea, peak wave "
                      + _amplitude.ToString("F1") + " m, "
-                     + TsunamiWaveTrain.CrestCount + " crests "
-                     + TsunamiWaveTrain.CrestGapSeconds.ToString("F0")
-                     + " s apart travelling outward at "
+                     + "a ring wall spreading outward at "
                      + TsunamiWaveTrain.SpeedMetresPerSecond.ToString("F0")
                      + " m/s over " + TsunamiWaveTrain.TotalSeconds.ToString("F0")
                      + " s. Sea level here is " + _seaLevel.ToString("F0") + " m. "
@@ -430,9 +428,13 @@ namespace DisasterPlus.Game
             // ★★ **壁は「波列のいちばん外の山」の位置にある。**
             //    ここを LeadingFront にしておかないと、内側の山にも壁が立って
             //    <b>輪が何重にも重なって見える</b>。
-            float front = TsunamiWaveTrain.LeadingFrontAt(seconds);
+            float front = TsunamiWaveTrain.RingRadiusAt(seconds);
             if (front <= SplashRadiusMetres) front = SplashRadiusMetres;
             if (front > TsunamiWaveTrain.ReachEdgeMetres) return;   // もう外へ出た
+
+            // ★★ **壁が立つ前は撃たない。** ①②（隆起と台地）のあいだは
+            //    まだ「壁」ではないので、衝撃波を重ねると輪が 2 本に見える。
+            if (seconds < TsunamiWaveTrain.SpreadSeconds) return;
 
             float rise = TsunamiWaveTrain.RiseAt(front, seconds, _amplitude);
             if (!(rise > 0.5f)) return;

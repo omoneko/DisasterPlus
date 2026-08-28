@@ -29,7 +29,8 @@ namespace DisasterPlus.Tools.TsunamiPreview
             string dir = args.Length > 0 ? args[0] : ".";
             Directory.CreateDirectory(dir);
 
-            foreach (float t in new[] { 40f, 100f, 160f })
+            // ★ 4 つの段が 1 枚ずつ見えるように選ぶ（隆起・台地・ドーナツ・伝播）。
+            foreach (float t in new[] { 10f, 40f, 78f, 160f, 300f })
             {
                 string path = Path.Combine(dir, "tsunami-t" + ((int)t) + ".png");
                 Png.Write(path, Size, Size, Render(t));
@@ -47,24 +48,29 @@ namespace DisasterPlus.Tools.TsunamiPreview
         private static void Measure()
         {
             Console.WriteLine();
-            Console.WriteLine("    t | front(m) | at front | inside | outside | wall/wake");
+            Console.WriteLine("    t | stage      | ring(m) | at ring | centre | outside");
 
-            foreach (float t in new[] { 40f, 70f, 100f, 130f, 160f })
+            foreach (float t in new[] { 6f, 12f, 25f, 40f, 60f, 78f, 120f, 200f, 300f })
             {
-                float front = TsunamiWaveTrain.LeadingFrontAt(t);
+                float ring = TsunamiWaveTrain.RingRadiusAt(t);
 
-                float atFront = Peak(t, front - 400f, front + 400f);
-                float inside = TsunamiWaveTrain.RiseAt(
-                    Math.Max(front - 3000f, 0f), t, Amplitude);
-                float outside = TsunamiWaveTrain.RiseAt(front + 1500f, t, Amplitude);
+                string stage;
+                if (t <= TsunamiWaveTrain.BulgeSeconds) stage = "1 bulge  ";
+                else if (t <= TsunamiWaveTrain.SpreadSeconds) stage = "2 plateau";
+                else if (t <= TsunamiWaveTrain.CollapseSeconds) stage = "3 hollow ";
+                else stage = "4 ring   ";
+
+                float atRing = Peak(t, Math.Max(ring - 300f, 0f), ring + 300f);
+                float centre = TsunamiWaveTrain.RiseAt(0f, t, Amplitude);
+                float outside = TsunamiWaveTrain.RiseAt(
+                    ring + TsunamiWaveTrain.RingWidthMetres + 300f, t, Amplitude);
 
                 Console.WriteLine(t.ToString("F0").PadLeft(5)
-                    + " |" + front.ToString("F0").PadLeft(9)
-                    + " |" + atFront.ToString("F1").PadLeft(9)
-                    + " |" + inside.ToString("F1").PadLeft(7)
-                    + " |" + outside.ToString("F1").PadLeft(8)
-                    + " |" + (inside > 0.01f ? (atFront / inside).ToString("F1") : "inf")
-                        .PadLeft(10));
+                    + " | " + stage
+                    + " |" + ring.ToString("F0").PadLeft(8)
+                    + " |" + atRing.ToString("F1").PadLeft(8)
+                    + " |" + centre.ToString("F1").PadLeft(7)
+                    + " |" + outside.ToString("F1").PadLeft(8));
             }
         }
 

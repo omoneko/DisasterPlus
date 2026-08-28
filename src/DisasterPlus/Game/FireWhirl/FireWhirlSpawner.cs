@@ -104,11 +104,80 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 指定地点に竜巻災害を作り、その渦車両の ID を返す。
-        /// 渦車両は ActivateDisaster が作るので、生成直後にはまだ存在しない。
-        /// vehicleId は 0 で返り、Task 11 の追従処理が後から埋める。
+        /// 火災旋風を 1 つ起こす。
+        ///
+        /// ── ★★ もうバニラの竜巻災害は作らない（2026-08-29、所有者の指示）──────
+        ///
+        /// &gt; 火災旋風が発生した後、別の火災旋風が発生した際に竜巻も発生する
+        /// &gt; バグを確認しました。火災旋風と竜巻は別物で考えて、
+        /// &gt; 完全に原因を除去してください。
+        ///
+        /// **原因は「竜巻災害を借りていたこと」そのものだった。** 実機ログ:
+        ///
+        /// <code>
+        ///   fire whirl 2 is not active yet; deferring teardown   （何度も）
+        ///   fire whirl 2 attached to vortex vehicle 7917         （ようやく付く）
+        ///   fire whirl 2 ending; both target slots moved ...
+        ///   fire whirl 2 has been ending for 32.4 in-game minutes;
+        ///       vanilla teardown never completed
+        /// </code>
+        ///
+        /// 渦車両を作るのは <c>TornadoAI.ActivateDisaster</c> で、それが走るのは
+        /// 災害が Emerging を抜けたときである。つまり
+        ///
+        /// <list type="number">
+        /// <item><b>生成から紐づけまでのあいだ、渦は誰にも固定されていない</b>
+        ///   ——その間それは<b>ただのバニラ竜巻</b>で、街を勝手に横切る</item>
+        /// <item>紐づく前に旋風の寿命が尽きると、<c>DeactivateNow</c> は
+        ///   Active でない災害に何もしないので、上のログのように延々と待つ</item>
+        /// <item>そのまま「解体が完了しない」竜巻が残る</item>
+        /// </list>
+        ///
+        /// 固定の精度を上げても<b>1 番は消えない</b>（渦が生まれる瞬間はこちらの
+        /// 手の届かないところにある）。**借りるのをやめるのが唯一の根治である。**
+        ///
+        /// いまの火災旋風は<b>完全に自前</b>である:
+        ///
+        /// <list type="bullet">
+        /// <item>見た目 … <c>FireWhirlFlameFx</c>（自前の炎の渦）</item>
+        /// <item>被害 … <c>FireWhirlDamage</c>（自前の延焼）</item>
+        /// <item>竜巻 … <b>作らない。1 台も生まない。</b></item>
+        /// </list>
+        ///
+        /// ★ 返す ID は<b>合成した番号</b>である（<see cref="SyntheticIdBase"/>）。
+        ///   災害バッファは 256 までなので、この帯とは絶対にぶつからない ——
+        ///   <c>FireWhirlPinner</c> がそれを見て「これは災害ではない」と判断する。
         /// </summary>
         public static bool TrySpawn(Vec3 center, byte intensity, out ushort disasterId)
+        {
+            disasterId = NextSyntheticId();
+            Log.Info("fire whirl " + disasterId + " created (no vanilla tornado disaster is "
+                     + "involved; the fire whirl draws its own vortex)");
+            return true;
+        }
+
+        /// <summary>
+        /// 合成 ID の下限。**災害バッファは 256 までなので絶対にぶつからない。**
+        /// <c>FireWhirlPinner.IsSynthetic</c> がこの境で見分ける。
+        /// </summary>
+        internal const ushort SyntheticIdBase = 40000;
+
+        private static ushort _nextSynthetic = SyntheticIdBase;
+
+        private static ushort NextSyntheticId()
+        {
+            if (_nextSynthetic >= 65000) _nextSynthetic = SyntheticIdBase;
+            return _nextSynthetic++;
+        }
+
+        /// <summary>
+        /// **退役。** かつて竜巻災害を作っていた本体（上の doc）。
+        /// 呼び出し元はもう 1 つも無い。**消さずに残してあるのは、
+        /// ここに書いてある IL 実測（SelfTrigger / Significant / Emerging）が
+        /// 再び要る日に、あの調査からやり直すことになるからである。**
+        /// </summary>
+        private static bool RetiredCreateTornadoDisaster(Vec3 center, byte intensity,
+                                                         out ushort disasterId)
         {
             disasterId = 0;
 

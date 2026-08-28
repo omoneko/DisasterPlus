@@ -4,221 +4,241 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// 所有者の指示（2026-08-25）「震源地を中心に２-3 個の連続する山状：
-    /// 実際の津波メカニズムで」。
+    /// 所有者の指示（2026-08-29）:
     ///
-    /// ★★ いちばん大事なのは<b>終わりに 0 へ戻ること</b>である。
-    ///    戻らないと、呼び出し側が水位を下げる合図を受け取れず、
-    ///    <b>持ち上げた海がセーブに残る</b>。
+    /// &gt; 地震→すぐに震源地に海面の巨大な隆起が生成→隆起が台地状に拡大→
+    /// &gt; ある程度大きくなったら中央は緩やかに沈下して元の海面に（ドーナツ状）→
+    /// &gt; 同心円状の水の壁が、減衰することなく拡散する
+    ///
+    /// ★★ ここが固定するのは<b>その 4 段が順番どおりに起きること</b>と、
+    ///    <b>最後には必ず 0 へ戻ること</b>である。0 に戻らないと呼び出し側が
+    ///    水位を下げる合図を受け取れず、<b>持ち上げた海がセーブに残る</b>。
     /// </summary>
     public class TsunamiWaveTrainTests
     {
         private const float Amplitude = 6f;
 
-        [Fact]
-        public void TheWaveTravelsOutwardFromTheEpicentre()
+        private static float Rise(float d, float t)
         {
-            // ★★ **いちばん高い点を追ってはいけない。**（テストを 1 度書き直した）
-            //    第 2 波のほうが高いので、それが生まれた瞬間に「最大の山」は
-            //    <b>内側へ跳ぶ</b>。それはモデルが正しい証拠であって、
-            //    波が戻っているわけではない。
-            //
-            //    外へ広がることを見るなら<b>いちばん外の波がどこまで届いたか</b>で
-            //    見る。こちらは単調でなければならない。
-            float early = OuterEdgeAt(TsunamiWaveTrain.TotalSeconds * 0.05f);
-            float late = OuterEdgeAt(TsunamiWaveTrain.TotalSeconds * 0.15f);
-            float later = OuterEdgeAt(TsunamiWaveTrain.TotalSeconds * 0.30f);
+            return TsunamiWaveTrain.RiseAt(d, t, Amplitude);
+        }
 
-            Assert.True(late > early, "the front did not move outward: " + early + " -> " + late);
-            Assert.True(later > late, "the front stalled: " + late + " -> " + later);
+        // ── ① 隆起 ─────────────────────────────────────────────
+
+        [Fact]
+        public void TheBulgeAppearsAtTheEpicentreImmediately()
+        {
+            // 「すぐに震源地に海面の巨大な隆起が生成」。
+            float t = TsunamiWaveTrain.BulgeSeconds * 0.5f;
+
+            Assert.True(Rise(0f, t) > Amplitude * 0.5f,
+                        "there is no bulge at the epicentre at t=" + t);
+
+            // まだ小さい。台地の広さには育っていない。
+            Assert.Equal(0f, Rise(TsunamiWaveTrain.PlateauRadiusMetres, t), 3);
+        }
+
+        // ── ② 台地 ─────────────────────────────────────────────
+
+        [Fact]
+        public void TheBulgeGrowsIntoAPlateau()
+        {
+            // 「隆起が台地状に拡大」。縁が外へ動き、天面は平らなまま。
+            float early = TsunamiWaveTrain.RingRadiusAt(TsunamiWaveTrain.BulgeSeconds);
+            float late = TsunamiWaveTrain.RingRadiusAt(TsunamiWaveTrain.SpreadSeconds);
+
+            Assert.True(late > early * 2f, early + " -> " + late);
+            Assert.Equal(TsunamiWaveTrain.PlateauRadiusMetres, late, 1);
+
+            // 天面が平ら ＝ 中心と、縁の少し内側が同じ高さ。
+            float t = TsunamiWaveTrain.SpreadSeconds;
+            float centre = Rise(0f, t);
+            float mid = Rise(TsunamiWaveTrain.PlateauRadiusMetres * 0.4f, t);
+
+            Assert.Equal(centre, mid, 2);
+            Assert.True(centre > Amplitude * 0.9f);
+        }
+
+        // ── ③ ドーナツ ──────────────────────────────────────────
+
+        [Fact]
+        public void TheCentreSinksBackToSeaLevelLeavingARing()
+        {
+            // 「中央は緩やかに沈下して元の海面に（ドーナツ状）」。
+            float t = TsunamiWaveTrain.CollapseSeconds;
+
+            Assert.Equal(0f, Rise(0f, t), 3);
+
+            float ring = TsunamiWaveTrain.RingRadiusAt(t);
+            Assert.True(Rise(ring, t) > Amplitude,
+                        "the ring is not standing at " + ring + " m");
         }
 
         [Fact]
-        public void TheBiggestCrestIsNotTheFirstOneToArrive()
+        public void TheCentreSinksGraduallyRatherThanDropping()
         {
-            // 第 1 波が最大とは限らない（実際の津波でも、避難を解いた人が
-            // 第 2 波にさらわれるのが典型的な被害である）。
-            //
-            // ★★ **「山のある場所」で比べてはいけない。**（テストを 2 度書き直した）
-            //    k 本目がこの地点に届くのは <c>k×gap + d/speed</c> なので、
-            //    サンプル時刻を gap の倍数で取ると<b>どの波の前線も同じ距離</b>に来る。
-            //    比べるべきは位置ではなく<b>その地点が実際に何 m 上がるか</b>である。
-            const float Distance = 2400f;
-            float travel = Distance / TsunamiWaveTrain.SpeedMetresPerSecond;
+            // 「緩やかに沈下」。段差で落ちないこと。
+            float a = Rise(0f, TsunamiWaveTrain.SpreadSeconds + 1f);
+            float b = Rise(0f, (TsunamiWaveTrain.SpreadSeconds
+                                + TsunamiWaveTrain.CollapseSeconds) * 0.5f);
+            float c = Rise(0f, TsunamiWaveTrain.CollapseSeconds - 1f);
 
-            float first = TsunamiWaveTrain.RiseAt(Distance, travel, Amplitude);
-            float second = TsunamiWaveTrain.RiseAt(
-                Distance, TsunamiWaveTrain.CrestGapSeconds + travel, Amplitude);
-
-            Assert.True(second > first,
-                        "the second crest is not the bigger one; that is not how a "
-                        + "tsunami behaves (" + first + " m -> " + second + " m)");
+            Assert.True(a > b && b > c, a + " " + b + " " + c);
+            Assert.True(b > Amplitude * 0.2f && b < Amplitude * 0.9f,
+                        "the centre jumped straight down instead of sinking (" + b + ")");
         }
 
         [Fact]
-        public void ThereAreSeveralCrestsNotOne()
+        public void TheRingIsTallerThanTheBulgeItCameFrom()
         {
-            // ★★ 「2-3 個の連続する山状」。ある地点で、時間とともに山が複数回来ること。
-            const float Distance = 2500f;
+            // 中央の水が環へ寄せられるので、環は元の隆起より高くなる。
+            float bulge = Rise(0f, TsunamiWaveTrain.BulgeSeconds);
 
-            int peaks = 0;
-            float previous = 0f;
-            bool rising = false;
+            float t = TsunamiWaveTrain.CollapseSeconds;
+            float ring = Rise(TsunamiWaveTrain.RingRadiusAt(t), t);
 
-            for (int i = 0; i <= 800; i++)
+            Assert.True(ring > bulge, bulge + " -> " + ring);
+        }
+
+        // ── ④ 減衰しない拡散 ─────────────────────────────────────
+
+        [Fact]
+        public void TheRingSpreadsWithoutDecaying()
+        {
+            // ★★ 「同心円状の水の壁が、**減衰することなく**拡散する」。
+            //    これが今回いちばん大事な要求である。
+            float first = 0f;
+
+            for (float t = TsunamiWaveTrain.CollapseSeconds + 10f;
+                 t < TsunamiWaveTrain.TotalSeconds * TsunamiWaveTrain.FadeFromFraction;
+                 t += 20f)
             {
-                float t = TsunamiWaveTrain.TotalSeconds * i / 800f;
-                float r = TsunamiWaveTrain.RiseAt(Distance, t, Amplitude);
+                float ring = TsunamiWaveTrain.RingRadiusAt(t);
+                if (ring > TsunamiWaveTrain.ReachEdgeMetres) break;
 
-                if (r > previous + 1e-4f) rising = true;
-                else if (rising && r < previous - 1e-4f) { peaks++; rising = false; }
+                float h = Rise(ring, t);
+                if (first <= 0f) { first = h; continue; }
 
-                previous = r;
+                Assert.Equal(first, h, 2);
             }
 
-            Assert.InRange(peaks, 2, TsunamiWaveTrain.CrestCount);
+            Assert.True(first > Amplitude, "the ring never even reached the amplitude");
         }
 
         [Fact]
-        public void TheSecondCrestIsTheBiggest()
+        public void TheRingKeepsMovingOutward()
         {
-            // 実際の津波でも第 1 波が最大とは限らない。
-            Assert.True(TsunamiWaveTrain.CrestWeights[1] > TsunamiWaveTrain.CrestWeights[0],
-                        "the first crest is the biggest; that is not how a tsunami behaves");
-            Assert.True(TsunamiWaveTrain.CrestWeights[1] > TsunamiWaveTrain.CrestWeights[2]);
+            float a = TsunamiWaveTrain.RingRadiusAt(TsunamiWaveTrain.CollapseSeconds + 20f);
+            float b = TsunamiWaveTrain.RingRadiusAt(TsunamiWaveTrain.CollapseSeconds + 80f);
+            float c = TsunamiWaveTrain.RingRadiusAt(TsunamiWaveTrain.CollapseSeconds + 160f);
+
+            Assert.True(b > a && c > b, a + " " + b + " " + c);
         }
+
+        [Fact]
+        public void NothingIsRaisedAheadOfTheRing()
+        {
+            // ★★ **これが「同心円」の要である。** 前線より外がわずかでも
+            //    上がっていると、輪ではなく「一様に持ち上がった海」に見える。
+            for (float t = 5f; t < TsunamiWaveTrain.TotalSeconds * 0.5f; t += 15f)
+            {
+                float ring = TsunamiWaveTrain.RingRadiusAt(t);
+                float ahead = ring + TsunamiWaveTrain.RingWidthMetres + 100f;
+                if (ahead >= TsunamiWaveTrain.ReachEdgeMetres) continue;
+
+                Assert.Equal(0f, Rise(ahead, t), 4);
+            }
+        }
+
+        [Fact]
+        public void NothingIsRaisedInsideTheRingOnceItHasHollowedOut()
+        {
+            // ★★ 「現在のような海面全体の隆起は不要です」。
+            //    環の内側は<b>平常の海</b>でなければならない。
+            for (float t = TsunamiWaveTrain.CollapseSeconds + 30f;
+                 t < TsunamiWaveTrain.TotalSeconds * 0.6f; t += 30f)
+            {
+                float ring = TsunamiWaveTrain.RingRadiusAt(t);
+                float inside = ring - TsunamiWaveTrain.RingWidthMetres * 1.5f;
+                if (inside < 100f) continue;
+
+                Assert.True(Rise(inside, t) < Amplitude * 0.05f,
+                            "the sea inside the ring is still up by " + Rise(inside, t)
+                            + " m at t=" + t);
+            }
+        }
+
+        // ── 後始末 ─────────────────────────────────────────────
 
         [Fact]
         public void TheSeaAlwaysGoesBackDown()
         {
-            // ★★ **ここが破れると海が戻らない。**
-            for (float d = 0f; d <= 6000f; d += 250f)
+            // ★★ **ここが破れると海が戻らず、水源がセーブに残る。**
+            for (float d = 0f; d <= TsunamiWaveTrain.ReachEdgeMetres; d += 250f)
             {
-                Assert.Equal(0f, TsunamiWaveTrain.RiseAt(d, TsunamiWaveTrain.TotalSeconds,
-                                                         Amplitude), 4);
-                Assert.Equal(0f, TsunamiWaveTrain.RiseAt(d, TsunamiWaveTrain.TotalSeconds + 60f,
-                                                         Amplitude), 4);
+                Assert.Equal(0f, Rise(d, TsunamiWaveTrain.TotalSeconds), 4);
+                Assert.Equal(0f, Rise(d, TsunamiWaveTrain.TotalSeconds + 120f), 4);
             }
 
             Assert.Equal(0f, TsunamiWaveTrain.EnvelopeAt(TsunamiWaveTrain.TotalSeconds), 4);
         }
 
         [Fact]
-        public void TheEnvelopeFadesRatherThanStopping()
+        public void TheEnvelopeHoldsAtOneUntilTheVeryEnd()
         {
-            // 急に 0 になると水面が段差で落ちる。終わりに向かってなだらかに下がること。
-            float a = TsunamiWaveTrain.EnvelopeAt(TsunamiWaveTrain.TotalSeconds * 0.80f);
-            float b = TsunamiWaveTrain.EnvelopeAt(TsunamiWaveTrain.TotalSeconds * 0.90f);
-            float c = TsunamiWaveTrain.EnvelopeAt(TsunamiWaveTrain.TotalSeconds * 0.99f);
+            // 「減衰することなく」なので、包絡線は最後まで 1 のままであること。
+            Assert.Equal(1f, TsunamiWaveTrain.EnvelopeAt(TsunamiWaveTrain.TotalSeconds * 0.5f), 4);
+            Assert.Equal(1f, TsunamiWaveTrain.EnvelopeAt(
+                TsunamiWaveTrain.TotalSeconds * TsunamiWaveTrain.FadeFromFraction), 4);
 
-            Assert.True(a > b && b > c, a + " " + b + " " + c);
-            Assert.True(c < 0.1f);
+            Assert.True(TsunamiWaveTrain.EnvelopeAt(TsunamiWaveTrain.TotalSeconds * 0.99f) < 0.1f);
         }
 
         [Fact]
-        public void TheRiseNeverExceedsTheAmplitudeAndTheWakeTogether()
+        public void TheStagesAreInOrder()
         {
-            // 山と wake が重なった高さより上には行かないこと。
-            //
-            // ★★ **上限は定数から出す。**（テストを 2 度直した）1.35 と直書きして
-            //    いたので、土台を足した瞬間に嘘になった。上限は
-            //    「いちばん高い山（1.0）＋ wake」そのものである。
-            float ceiling = Amplitude * (1f + TsunamiWaveTrain.WakeFraction) * 1.02f;
+            Assert.True(TsunamiWaveTrain.BulgeSeconds < TsunamiWaveTrain.SpreadSeconds);
+            Assert.True(TsunamiWaveTrain.SpreadSeconds < TsunamiWaveTrain.CollapseSeconds);
+            Assert.True(TsunamiWaveTrain.CollapseSeconds < TsunamiWaveTrain.TotalSeconds);
+        }
 
-            float worst = 0f;
-            for (float t = 0f; t < TsunamiWaveTrain.TotalSeconds; t += 3f)
+        [Fact]
+        public void TheRiseIsNeverNegativeAndNeverRunsAway()
+        {
+            float ceiling = Amplitude * TsunamiWaveTrain.RingPeakFactor * 1.02f;
+
+            for (float t = 0f; t < TsunamiWaveTrain.TotalSeconds; t += 5f)
             {
                 for (float d = 0f; d <= 10000f; d += 100f)
                 {
-                    float r = TsunamiWaveTrain.RiseAt(d, t, Amplitude);
-                    if (r > worst) worst = r;
+                    float r = Rise(d, t);
+                    Assert.True(r >= 0f, "negative rise at d=" + d + " t=" + t);
+                    Assert.True(r <= ceiling,
+                                "the sea reached " + r + " m for a " + Amplitude + " m wave");
                 }
             }
-
-            Assert.True(worst <= ceiling,
-                        "the crests stacked to " + worst + " m for a " + Amplitude
-                        + " m wave (ceiling " + ceiling + ")");
-            Assert.True(worst > Amplitude * 0.9f,
-                        "the wave never even reached its own amplitude (" + worst + ")");
         }
 
         [Fact]
-        public void NothingIsRaisedAheadOfTheAdvancingWall()
+        public void AStrongerQuakeMakesAHigherWave()
         {
-            // ★★ **これが「同心円状の水の壁」の要である。**（2026-08-29、所有者の指摘
-            //    「求めているのは、震源地から水の壁が同心円状に生成される挙動です」）
-            //
-            //    前線より外がわずかでも上がっていると、波が着く前から海が高く、
-            //    <b>輪ではなく「一様に持ち上がった海」に見える</b>。
-            //    1 つ前の版（台地）はまさにそれで、指摘のとおり別物だった。
-            for (float t = 20f; t < TsunamiWaveTrain.TotalSeconds * 0.6f; t += 20f)
-            {
-                float front = TsunamiWaveTrain.LeadingFrontAt(t);
-
-                // 前線より先（山の幅ぶんは余裕を見る）。
-                float ahead = front + TsunamiWaveTrain.CrestWidthMetres + 200f;
-                if (ahead >= TsunamiWaveTrain.ReachEdgeMetres) continue;
-
-                Assert.Equal(0f, TsunamiWaveTrain.RiseAt(ahead, t, Amplitude), 4);
-            }
+            Assert.True(TsunamiWaveTrain.AmplitudeOf(255) > TsunamiWaveTrain.AmplitudeOf(100));
+            Assert.InRange(TsunamiWaveTrain.AmplitudeOf(255),
+                           TsunamiWaveTrain.MinAmplitudeMetres,
+                           TsunamiWaveTrain.MaxAmplitudeMetres);
+            Assert.True(TsunamiWaveTrain.AmplitudeOf(1) >= TsunamiWaveTrain.MinAmplitudeMetres);
         }
 
         [Fact]
-        public void TheWallIsTallerThanTheWaterItLeavesBehind()
+        public void BrokenInputRaisesNoWater()
         {
-            // 壁が背後の海より低かったら、それは壁ではない。
-            for (float t = 60f; t < TsunamiWaveTrain.TotalSeconds * 0.5f; t += 30f)
-            {
-                float front = TsunamiWaveTrain.LeadingFrontAt(t);
-                if (front < 1500f || front > TsunamiWaveTrain.ReachEdgeMetres - 1500f) continue;
-
-                float atWall = TsunamiWaveTrain.RiseAt(front, t, Amplitude);
-
-                // 背後の、どの山からも離れたところ。
-                float behind = front - TsunamiWaveTrain.CrestWidthMetres * 1.6f;
-                if (behind < 200f) continue;
-                float atWake = TsunamiWaveTrain.RiseAt(behind, t, Amplitude);
-
-                Assert.True(atWall > atWake,
-                            "at t=" + t + " the wall (" + atWall
-                            + " m) is not above its wake (" + atWake + " m)");
-            }
+            Assert.Equal(0f, TsunamiWaveTrain.RiseAt(float.NaN, 10f, Amplitude), 4);
+            Assert.Equal(0f, TsunamiWaveTrain.RiseAt(100f, float.NaN, Amplitude), 4);
+            Assert.Equal(0f, TsunamiWaveTrain.RiseAt(100f, 10f, float.NaN), 4);
+            Assert.Equal(0f, TsunamiWaveTrain.RiseAt(-100f, 10f, Amplitude), 4);
+            Assert.Equal(0f, TsunamiWaveTrain.RiseAt(100f, -10f, Amplitude), 4);
+            Assert.Equal(0f, TsunamiWaveTrain.RiseAt(100f, 10f, 0f), 4);
+            Assert.Equal(0f, TsunamiWaveTrain.RingRadiusAt(float.NaN), 4);
         }
-
-        [Fact]
-        public void TheWakeFollowsTheWallRatherThanCoveringEverythingFromTheStart()
-        {
-            // 内側だけが上がっていること。**はじめから全部上がっていたら台地である。**
-            float early = 30f;
-            float front = TsunamiWaveTrain.LeadingFrontAt(early);
-
-            Assert.True(TsunamiWaveTrain.WakeShapeAt(front * 0.3f, early) > 0f,
-                        "the water behind the wall is not raised at all");
-            Assert.Equal(0f, TsunamiWaveTrain.WakeShapeAt(front + 100f, early), 4);
-            Assert.Equal(0f, TsunamiWaveTrain.WakeShapeAt(
-                TsunamiWaveTrain.ReachEdgeMetres, early), 4);
-        }
-
-        [Fact]
-        public void TheWallKeepsMovingOutward()
-        {
-            float a = TsunamiWaveTrain.LeadingFrontAt(30f);
-            float b = TsunamiWaveTrain.LeadingFrontAt(90f);
-            float c = TsunamiWaveTrain.LeadingFrontAt(150f);
-
-            Assert.True(b > a && c > b, a + " " + b + " " + c);
-        }
-
-        /// <summary>その時刻に波が届いているいちばん外の距離（m）。</summary>
-        private static float OuterEdgeAt(float seconds)
-        {
-            float edge = 0f;
-            for (float d = 0f; d <= 20000f; d += 25f)
-            {
-                if (TsunamiWaveTrain.RiseAt(d, seconds, Amplitude) > 0.05f) edge = d;
-            }
-            return edge;
-        }
-
     }
 }
