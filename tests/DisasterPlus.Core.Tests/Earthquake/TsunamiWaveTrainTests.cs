@@ -25,9 +25,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
             //
             //    外へ広がることを見るなら<b>いちばん外の波がどこまで届いたか</b>で
             //    見る。こちらは単調でなければならない。
-            float early = OuterEdgeAt(30f);
-            float late = OuterEdgeAt(80f);
-            float later = OuterEdgeAt(140f);
+            float early = OuterEdgeAt(TsunamiWaveTrain.TotalSeconds * 0.05f);
+            float late = OuterEdgeAt(TsunamiWaveTrain.TotalSeconds * 0.15f);
+            float later = OuterEdgeAt(TsunamiWaveTrain.TotalSeconds * 0.30f);
 
             Assert.True(late > early, "the front did not move outward: " + early + " -> " + late);
             Assert.True(later > late, "the front stalled: " + late + " -> " + later);
@@ -38,12 +38,21 @@ namespace DisasterPlus.Core.Tests.Earthquake
         {
             // 第 1 波が最大とは限らない（実際の津波でも、避難を解いた人が
             // 第 2 波にさらわれるのが典型的な被害である）。
-            float first = PeakDistanceAt(30f);
-            float second = PeakDistanceAt(80f);
+            //
+            // ★★ **「山のある場所」で比べてはいけない。**（テストを 2 度書き直した）
+            //    k 本目がこの地点に届くのは <c>k×gap + d/speed</c> なので、
+            //    サンプル時刻を gap の倍数で取ると<b>どの波の前線も同じ距離</b>に来る。
+            //    比べるべきは位置ではなく<b>その地点が実際に何 m 上がるか</b>である。
+            const float Distance = 2400f;
+            float travel = Distance / TsunamiWaveTrain.SpeedMetresPerSecond;
 
-            Assert.True(second < first,
+            float first = TsunamiWaveTrain.RiseAt(Distance, travel, Amplitude);
+            float second = TsunamiWaveTrain.RiseAt(
+                Distance, TsunamiWaveTrain.CrestGapSeconds + travel, Amplitude);
+
+            Assert.True(second > first,
                         "the second crest is not the bigger one; that is not how a "
-                        + "tsunami behaves (" + first + " -> " + second + ")");
+                        + "tsunami behaves (" + first + " m -> " + second + " m)");
         }
 
         [Fact]
@@ -182,19 +191,5 @@ namespace DisasterPlus.Core.Tests.Earthquake
             return edge;
         }
 
-        /// <summary>その時刻でいちばん高く持ち上がっている距離（m）。</summary>
-        private static float PeakDistanceAt(float seconds)
-        {
-            float best = 0f;
-            float at = 0f;
-
-            for (float d = 0f; d <= 9000f; d += 25f)
-            {
-                float r = TsunamiWaveTrain.RiseAt(d, seconds, Amplitude);
-                if (r > best) { best = r; at = d; }
-            }
-
-            return at;
-        }
     }
 }

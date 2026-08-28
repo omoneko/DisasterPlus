@@ -62,13 +62,26 @@ namespace DisasterPlus.Core.Earthquake
         /// **実際の津波（外洋で 200 m/s）ではない** —— そのままだとマップを
         /// 数十秒で通り抜けて何も起きない。ここは<b>この MOD が決めた演出値</b>である。
         /// </summary>
-        public const float SpeedMetresPerSecond = 140f;
+        /// <remarks>
+        /// ★★ 140 -> 45 に落とした（2026-08-29、実機ログ）。140 m/s では
+        ///   水源を置いた範囲（半径 3 km 前後）を<b>21 秒で通り抜ける</b>。
+        ///   ゲームの水シミュは目標水位に向かって<b>徐々に</b>水を動かすので、
+        ///   その間に水位が上がりきらない —— **波が来た形跡すら残らない。**
+        ///   45 m/s なら 1 本が通るのに 67 秒かかり、水が乗る時間ができる。
+        /// </remarks>
+        public const float SpeedMetresPerSecond = 45f;
 
         /// <summary>波と波の間隔（秒）。</summary>
-        public const float CrestGapSeconds = 55f;
+        /// <remarks>★ 波を遅くしたぶん、間隔も広げる（55 -> 90）。</remarks>
+        public const float CrestGapSeconds = 90f;
 
         /// <summary>1 本の波の幅（m）。**狭いと海岸を素通りする。**</summary>
-        public const float CrestWidthMetres = 900f;
+        /// <remarks>
+        /// ★★ 900 -> 1800（同上）。狭い波は「一瞬水位が上がってすぐ下がる」に
+        ///   なり、水シミュが追いつかない。津波の波長は実際にも数十 km あり、
+        ///   <b>岸では「潮位が上がったまましばらく戻らない」</b>という見え方になる。
+        /// </remarks>
+        public const float CrestWidthMetres = 1800f;
 
         /// <summary>
         /// 波ごとの高さの比。**第 2 波がいちばん高い** ——
@@ -78,16 +91,30 @@ namespace DisasterPlus.Core.Earthquake
         public static readonly float[] CrestWeights = { 0.72f, 1f, 0.55f };
 
         /// <summary>波列ぜんぶが通り過ぎるまで（秒）。これを過ぎたら 0 を返す。</summary>
-        public const float TotalSeconds = 420f;
+        /// <remarks>
+        /// ★★ 420 -> 1080（2026-08-29、実機報告「水源の消失が速すぎる」）。
+        ///   所有者の依頼は「<b>一定時間持続的な</b>海面上昇」である。
+        ///   420 秒（ゲーム内 7 分）は速度 1 でも実時間 20 秒ほどで、
+        ///   カメラを寄せる前に終わっていた。
+        /// </remarks>
+        public const float TotalSeconds = 1080f;
 
         /// <summary>包絡線が落ちはじめる時刻（<see cref="TotalSeconds"/> に対する比）。</summary>
         public const float FadeFromFraction = 0.72f;
 
         /// <summary>いちばん高い波の高さ（m）の上限。</summary>
-        public const float MaxAmplitudeMetres = 9f;
+        /// <remarks>
+        /// ★★ 9 -> 22（2026-08-29、実機報告「波の高さが低すぎる」）。
+        ///   実機ログの <c>peak wave 1.9 m</c> がそれで、しかもそのマップの
+        ///   海面は <b>207 m</b> だった —— 207 m の海に 1.9 m 足しても
+        ///   <b>何も起きていないようにしか見えない。</b>
+        ///   22 m は実際の巨大津波の遡上高（10〜40 m）の範囲に入る。
+        /// </remarks>
+        public const float MaxAmplitudeMetres = 22f;
 
         /// <summary>同じく下限（強度が低くても、これ未満なら津波と呼べない）。</summary>
-        public const float MinAmplitudeMetres = 1.5f;
+        /// <remarks>★ 1.5 -> 5（同上）。これ未満は「津波」と呼べない。</remarks>
+        public const float MinAmplitudeMetres = 5f;
 
         /// <summary>
         /// 地震の強度（0〜255）から、いちばん高い波の高さ（m）を出す。

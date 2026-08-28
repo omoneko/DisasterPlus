@@ -68,10 +68,19 @@ namespace DisasterPlus.Game
         /// 置く泉の数の上限。**水シミュの負荷はここで決まる。**
         /// 増やす前に実機で測ること。
         /// </summary>
-        private const int MaxSources = 96;
+        private const int MaxSources = 160;
 
-        /// <summary>注ぐ／吸う速さ。**この MOD が決めた値**（プレハブ由来ではない）。</summary>
-        private const uint Rate = 60000u;
+        /// <summary>
+        /// 注ぐ／吸う速さ。**この MOD が決めた値**（プレハブ由来ではない）。
+        ///
+        /// ★★ 60000 -> 250000（2026-08-29）。津波は<b>半径 3 km の海を 20 m 上げる</b>
+        ///   —— 川の氾濫とは桁が違う体積である。遅いと目標水位に届く前に
+        ///   波が通り過ぎてしまい、**何も起きていないように見える。**
+        ///
+        /// ★ この単位の意味はゲーム側の水シミュにしか無く、**IL からは読めなかった。**
+        ///   ここは実機で見ながら決める数字であって、物理量ではない。
+        /// </summary>
+        private const uint Rate = 250000u;
 
         /// <summary>目標を海面へ戻してから解放するまで待つフレーム数。</summary>
         private const int DrainFrames = 900;
@@ -176,11 +185,19 @@ namespace DisasterPlus.Game
             _peakRise = 0f;
 
             // ── 震源のまわりの海に格子状に置く ────────────────────────
+            //
+            // ★★ **近い順に選ぶ。**（2026-08-29、ログを読んで気づいた）
+            //    以前は格子を <c>gz</c> の小さいほうから走査し、
+            //    <see cref="MaxSources"/> に達したところで打ち切っていた。
+            //    候補は 300 個以上あるので、**採れるのは南側の数列だけ**になり、
+            //    <b>震源の片側にしか波が立たなかった</b>。
+            //    いったん候補を集めて距離で並べ替え、近いものから採る。
             int steps = (int)(ReachMetres / SpacingMetres);
+            var candidates = new List<Vector3>();   // x, z, distance
 
-            for (int gz = -steps; gz <= steps && _sources.Count < MaxSources; gz++)
+            for (int gz = -steps; gz <= steps; gz++)
             {
-                for (int gx = -steps; gx <= steps && _sources.Count < MaxSources; gx++)
+                for (int gx = -steps; gx <= steps; gx++)
                 {
                     float ox = gx * SpacingMetres;
                     float oz = gz * SpacingMetres;
@@ -192,14 +209,23 @@ namespace DisasterPlus.Game
 
                     // ★ 海の上にだけ置く。陸に置くと、そこから水が湧いて
                     //   「津波」ではなく「泉」になる。
-                    var xz = new Vector2(x, z);
-                    if (!terrain.HasWater(xz)) continue;
+                    if (!terrain.HasWater(new Vector2(x, z))) continue;
 
-                    ushort handle;
-                    if (!TryCreate(terrain, x, z, out handle)) continue;
-
-                    _sources.Add(new Spring(handle, d));
+                    candidates.Add(new Vector3(x, d, z));
                 }
+            }
+
+            candidates.Sort(delegate(Vector3 a, Vector3 b)
+            {
+                return a.y.CompareTo(b.y);
+            });
+
+            for (int i = 0; i < candidates.Count && _sources.Count < MaxSources; i++)
+            {
+                ushort handle;
+                if (!TryCreate(terrain, candidates[i].x, candidates[i].z, out handle)) continue;
+
+                _sources.Add(new Spring(handle, candidates[i].y));
             }
 
             if (_sources.Count == 0)
@@ -222,7 +248,9 @@ namespace DisasterPlus.Game
                      + TsunamiWaveTrain.CrestCount + " crests "
                      + TsunamiWaveTrain.CrestGapSeconds.ToString("F0")
                      + " s apart travelling outward at "
-                     + TsunamiWaveTrain.SpeedMetresPerSecond.ToString("F0") + " m/s. "
+                     + TsunamiWaveTrain.SpeedMetresPerSecond.ToString("F0")
+                     + " m/s over " + TsunamiWaveTrain.TotalSeconds.ToString("F0")
+                     + " s. Sea level here is " + _seaLevel.ToString("F0") + " m. "
                      + "The DLC TsunamiAI is NOT used (it can only start from the map edge)");
             return true;
         }
