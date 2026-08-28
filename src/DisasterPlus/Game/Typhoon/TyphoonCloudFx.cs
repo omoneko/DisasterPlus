@@ -328,6 +328,12 @@ namespace DisasterPlus.Game
             float altitudeMetres = snapshot.Centre.Y + MinClearanceMetres;
             if (altitudeMetres < BaseAltitudeMetres) altitudeMetres = BaseAltitudeMetres;
 
+            // ★★ **雲の中の稲妻。** 雲と<b>同じ半径・高さ・厚み</b>を渡すこと ——
+            //    ずれると雷が雲の外で光る（それが直そうとしている症状そのものである）。
+            //    雲が描けなくても雷は描く（借り物の粒へ退避した絵でも空は光ってよい）。
+            TyphoonBoltFx.Update(snapshot, VanillaParticles.CameraInfo(),
+                                 radius, altitudeMetres, ThicknessMetres);
+
             if (TyphoonVortexPuffFx.Update(snapshot, radius, spinDegrees,
                                            altitudeMetres, ThicknessMetres))
             {
@@ -451,6 +457,8 @@ namespace DisasterPlus.Game
             //   自分で消す。どれも Component では無いので、飛ばすと
             //   都市を出入りするたびに 1 組ずつ残る。
             TyphoonVortexPuffFx.Destroy();
+            // ★ 稲妻のメッシュ・マテリアル・テクスチャも自前なので、自分で消す。
+            TyphoonBoltFx.Destroy();
             CloudParticleAssets.Destroy();
             _lookupMissCount = 0;
             _lastRenderCalls = 0;

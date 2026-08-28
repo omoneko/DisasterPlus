@@ -35,6 +35,10 @@ namespace DisasterPlus.Game
             // ★★ 海溝型地震の災害 ID も持ち越さない。持ち越すと、次の都市で
             //    同じ番号を取ったバニラの地震が「海溝型」と誤認され、津波が付く。
             TrenchQuakeSlot.Reset();
+            // ★★ **置いた水源を必ず解放する。** 水源は WaterSimulation.Data.Serialize で
+            //    セーブに焼き付くので、残すと MOD を外しても都市に残り続ける
+            //    （TsunamiSurge のクラス doc）。
+            TsunamiSurge.Reset();
             LongPeriodDamage.Reset();
 
             // ★★ **ToolController は都市ごとに作り直される**ので、毎レベルロードで
@@ -121,6 +125,12 @@ namespace DisasterPlus.Game
                 TsunamiChain.Tick(snapshot, frameIndex);
             }
 
+            // ★★ **波を進めるのは設定に関係なく必ず呼ぶ。**
+            //    途中で設定を切られたときにここが呼ばれなくなると、
+            //    <b>持ち上げた海が下がらないまま泉が残る</b>（セーブに焼き付く）。
+            //    走っていなければ即 return するので、ただの空振りである。
+            TsunamiSurge.Tick(frameIndex, FeatureHost.FramesPerMinute);
+
             // ★ 第 2 層その 2。**既定 OFF**（ModSettings.EarthquakeLongPeriod の doc）。
             //    これは津波と違い、**バニラなら倒れなかった建物を実際に倒す**。
             //    設定を見てから呼ぶので、OFF のときは走査そのものが 1 回も走らない。
@@ -165,6 +175,8 @@ namespace DisasterPlus.Game
             // ★ 海溝型地震の災害 ID を持ち越さない。持ち越すと、次の都市で
             //   同じ番号を取ったバニラの地震が「海溝型」と誤認され、津波が付く。
             TrenchQuakeSlot.Reset();
+            // ★★ **ここが最後の砦である。** 置いた水源を解放しないとセーブに残る。
+            TsunamiSurge.Reset();
             // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
             // EarthquakePanel.Destroy() が波形テクスチャ（Texture2D）も破棄する
             // —— GameObject と違って Unity は勝手に回収しないので、これを
@@ -203,9 +215,22 @@ namespace DisasterPlus.Game
                 : "NOT SUPPRESSED - Harmony is not installed, so a trench quake will "
                   + "open a fissure like a fault quake");
 
+            // ★★ 津波は DLC の TsunamiAI ではなく自前の海面上昇である。
+            //    **どちらが動いているか**を名乗らないと、調査のしようがない。
+            b.Line(2, "tsunami surge", TsunamiSurge.Running
+                ? TsunamiSurge.SourceCount + " water sources over the sea, peak rise "
+                  + TsunamiSurge.PeakRiseMetres.ToString("F1") + " m"
+                : "not running"
+                  + (TsunamiSurge.Detail != null
+                     ? " (" + TsunamiSurge.Detail + ")" : ""));
+
             b.Line(2, "note: tsunami",
                    "ONLY a trench quake brings a tsunami. The game's own (fault) "
-                   + "earthquakes never do - that is deliberate, not a fault");
+                   + "earthquakes never do - that is deliberate, not a fault. "
+                   + "The DLC TsunamiAI is NOT used: it can only start a wave from the "
+                   + "map edge, never from an offshore epicentre. The wave here is "
+                   + TsunamiWaveTrain.CrestCount + " crests spreading outward from the "
+                   + "epicentre, raised with TYPE_NATURAL water sources");
 
             var snapshot = EarthquakeHub.Latest;
             b.Line(1, "snapshot", snapshot == null ? "none yet" : (snapshot.Valid ? "valid" : "INVALID"));

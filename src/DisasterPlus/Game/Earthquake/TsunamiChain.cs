@@ -383,70 +383,38 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void Raise(EarthquakeReading quake)
         {
-            var info = FindTsunamiInfo();
-            if (info == null)
+            // ★★ **DLC の津波（TsunamiAI）はもう使わない。**（2026-08-25、所有者の指示）
+            //
+            //    > DLC の津波を使うのをやめましょう。代わりに海溝型地震の震源地付近を
+            //    > 中心とした領域で一定時間持続的な海面上昇（震源地を中心に
+            //    > ２-3 個の連続する山状：実際の津波メカニズムで）を発生させてください。
+            //
+            //    <c>TsunamiAI</c> は<b>震源から波を出せない</b> —— <c>FindSea</c> が
+            //    候補にするのはマップ外周のセルだけで、<c>m_targetPosition</c> は
+            //    開始時に原点セルの座標で上書きされる（§B-3、IL_03D3-0426）。
+            //    つまり「沖合の震源から同心円状に広がる波」は原理的に作れなかった。
+            //
+            //    いまは <c>TsunamiSurge</c> が震源のまわりの海に
+            //    <c>TYPE_NATURAL</c> の水源を格子状に置き、
+            //    <c>Core.Earthquake.TsunamiWaveTrain</c> の式で目標水位を
+            //    毎 tick 書き換える。**波は震源から外へ広がる。**
+            uint frame = 0u;
+            if (Singleton<SimulationManager>.exists)
             {
-                // 予約してから DLC が消えることは無いが、実行直前の権威は必ずここで取る。
-                _state = TsunamiChainState.NoDlc;
-                return;
+                frame = Singleton<SimulationManager>.instance.m_currentFrameIndex;
             }
 
-            if (!Singleton<DisasterManager>.exists)
+            if (!TsunamiSurge.Begin(quake.Epicentre, quake.Intensity, frame))
             {
-                _state = TsunamiChainState.Failed;
-                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiNoMgr",
-                    "DisasterManager is not available");
-                return;
-            }
-
-            var manager = Singleton<DisasterManager>.instance;
-
-            ushort id;
-            // ★ 罠 2: 戻り値を必ず見る。false のとき id = 0 になり、
-            //    そのまま書き込むと**他人の災害スロットを書き潰す**（§E-1）。
-            if (!manager.CreateDisaster(out id, info))
-            {
-                _state = TsunamiChainState.Failed;
-                Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiFull",
-                    "CreateDisaster returned false (disaster buffer full?)");
-                return;
-            }
-
-            var buffer = manager.m_disasters.m_buffer;
-            var ai = info.m_disasterAI;
-
-            var pos = new Vector3(quake.Epicentre.X, quake.Epicentre.Y, quake.Epicentre.Z);
-            ai.ClampDisasterTarget(ref pos);          // public（IL 確認済み）
-
-            // ★ これは「波の原点」ではなく「どの外周区間を選ぶか」のヒントである。
-            //    FindSea が成功すれば原点セルの座標で上書きされる（§B-3）。
-            buffer[id].m_targetPosition = pos;
-            // どうせ上書きされる。失敗したときの位相計算にだけ効く（クラス doc）。
-            buffer[id].m_angle = 0f;
-            buffer[id].m_intensity = quake.Intensity < MinIntensity ? MinIntensity : quake.Intensity;
-            // ★ 罠 1: これが無いと StartDisaster は波を 1 つも作らずに return する（§B-2）。
-            buffer[id].m_flags |= DisasterData.Flags.SelfTrigger;
-
-            // StartDisaster は protected なので公開ラッパーを使う。CreateDisaster 直後の
-            // m_flags は Created(1) だけなので、StartNow の & 60 の門は必ず通る（IL 確認済み）。
-            ai.StartNow(id, ref buffer[id]);
-
-            // ★ 波が本当に立ったか。FindSea が海側区間（連続 10 セル以上・深さ 8 以上）を
-            //    見つけられなければ m_waveIndex は 0 のままである（§B-2 / §B-3）。
-            if (buffer[id].m_waveIndex == 0)
-            {
-                // **失敗ではない。** 内陸マップでは正常な結果である。
-                // 後始末はしない（クラス doc の「FindSea が失敗したときの後始末」）。
+                // ★ 海が無い／水シミュが読めない。**失敗ではない場合がある**ので、
+                //   理由をそのまま持ち帰る（TsunamiSurge.Detail）。
                 _state = TsunamiChainState.NoSea;
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiNoSea",
-                    "no sea run of 10+ cells on the map border; no wave was created "
-                    + "(normal on an inland map)");
+                    TsunamiSurge.Detail ?? "the tsunami could not be raised");
                 return;
             }
 
             _state = TsunamiChainState.Raised;
-            Log.Info("tsunami chained from quake #" + quake.DisasterId
-                     + " -> disaster #" + id + " intensity=" + buffer[id].m_intensity);
         }
 
         /// <summary>

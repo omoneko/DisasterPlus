@@ -1,0 +1,396 @@
+using System.Collections.Generic;
+using ColossalFramework;
+using DisasterPlus.Core.Common;
+using DisasterPlus.Core.Earthquake;
+using UnityEngine;
+
+namespace DisasterPlus.Game
+{
+    /// <summary>
+    /// <b>海溝型地震の津波。</b>震源を中心に 2〜3 本の波が続けて外へ広がる。
+    /// **sim スレッド専用。**
+    ///
+    /// ── 所有者の指示（2026-08-25）─────────────────────────────────
+    ///
+    /// &gt; DLC の津波を使うのをやめましょう。代わりに海溝型地震の震源地付近を
+    /// &gt; 中心とした領域で一定時間持続的な海面上昇（震源地を中心に２-3 個の
+    /// &gt; 連続する山状：実際の津波メカニズムで）を発生させてください。
+    ///
+    /// 波の形は <see cref="TsunamiWaveTrain"/>（Core・テスト付き）が持つ。
+    /// ここは<b>それをゲームの水面に写すだけ</b>である。
+    ///
+    /// ── どうやって海面を上げるのか ───────────────────────────────
+    ///
+    /// <c>m_currentSeaLevel</c> は<b>全マップ一律</b>なので局所的な波にならない
+    /// （④の <c>TyphoonFlood</c> のクラス doc に同じ調査がある）。
+    /// 使えるのは <c>TYPE_NATURAL</c> の水源で、あれは
+    /// <b>目標水位 <c>m_target</c> まで注ぎ、超えたら吸い戻す自己調整の泉</b>である。
+    ///
+    /// 震源のまわりの海に格子状に水源を置き、**1 つ 1 つの目標水位を
+    /// 波の式で毎 tick 書き換える**。波が来れば目標が上がって水が乗り、
+    /// 波が過ぎれば目標が下がって<b>同じ泉が水を吸い戻す</b>。
+    ///
+    /// ★★ <b>これが <c>CreateWaterSource</c> を使ってよい理由である。</b>
+    ///   ④の <c>TyphoonFlood</c> のクラス doc は「新しい泉を置くな」と書いている ——
+    ///   あれは<b>注ぐだけの泉</b>を想定した警告で、止めたあとに残った水を
+    ///   引かせる手段が無くなることを心配していた。<c>TYPE_NATURAL</c> は
+    ///   <b>吸い戻す側も同じ泉が持っている</b>ので、目標を海面へ戻してから
+    ///   解放すれば水は残らない。
+    ///
+    /// ── ★★ 絶対に守ること: 水源はセーブに焼き付く ──────────────────────
+    ///
+    /// <c>WaterSimulation.Data.Serialize</c> は水源をセーブに書く（§D-4）。
+    /// **解放し忘れた泉は、MOD を外しても都市に残り続ける。**
+    /// だから
+    ///
+    /// <list type="bullet">
+    /// <item><see cref="Reset"/> は<b>問答無用で全部解放する</b>（レベルアンロード）</item>
+    /// <item>波列が終わったら<b>目標を海面へ戻し</b>、<see cref="DrainFrames"/> だけ
+    ///   待ってから解放する（吸い戻す時間を与える）</item>
+    /// <item>台帳（<see cref="_sources"/>）以外の場所に泉の番号を持たない</item>
+    /// </list>
+    /// </summary>
+    public static class TsunamiSurge
+    {
+        /// <summary><c>WaterSource.m_type</c> の <c>TYPE_NATURAL</c>（④の調査と同じ）。</summary>
+        private const ushort TypeNatural = 1;
+
+        /// <summary><c>m_target</c> の 1 m ぶん（④の <c>FloodTarget.UnitsPerMetre</c> と同じ）。</summary>
+        private const int UnitsPerMetre = 64;
+
+        /// <summary>泉を置く格子の間隔（m）。**波の幅より細かくする**（跨がれない）。</summary>
+        private const float SpacingMetres = 420f;
+
+        /// <summary>震源からこの距離までに泉を置く（m）。</summary>
+        private const float ReachMetres = 4200f;
+
+        /// <summary>
+        /// 置く泉の数の上限。**水シミュの負荷はここで決まる。**
+        /// 増やす前に実機で測ること。
+        /// </summary>
+        private const int MaxSources = 96;
+
+        /// <summary>注ぐ／吸う速さ。**この MOD が決めた値**（プレハブ由来ではない）。</summary>
+        private const uint Rate = 60000u;
+
+        /// <summary>目標を海面へ戻してから解放するまで待つフレーム数。</summary>
+        private const int DrainFrames = 900;
+
+        /// <summary>海面が読めないときの既定（m）。<c>WaterSimulation.DEFAULT_SEA_LEVEL</c>。</summary>
+        private const float DefaultSeaLevelMetres = 40f;
+
+        /// <summary>更新の間隔（フレーム）。毎フレームは要らない。</summary>
+        private const int IntervalFrames = 16;
+
+        /// <summary>置いた泉 1 つぶん。</summary>
+        private struct Spring
+        {
+            public readonly ushort Handle;
+
+            /// <summary>震源からの距離（m）。波の式に渡す。</summary>
+            public readonly float DistanceMetres;
+
+            public Spring(ushort handle, float distanceMetres)
+            {
+                Handle = handle;
+                DistanceMetres = distanceMetres;
+            }
+        }
+
+        private static readonly List<Spring> _sources = new List<Spring>();
+
+        private static bool _running;
+        private static uint _startFrame;
+        private static uint _lastFrame;
+        private static uint _drainFromFrame;
+        private static float _amplitude;
+        private static float _seaLevel;
+        private static float _peakRise;
+        private static bool _errorLogged;
+
+        /// <summary>今 津波が動いているか（診断・表示用）。</summary>
+        public static bool Running { get { return _running; } }
+
+        /// <summary>置いている泉の数（診断用）。</summary>
+        public static int SourceCount { get { return _sources.Count; } }
+
+        /// <summary>これまでに観測したいちばん高い持ち上がり（m、診断用）。</summary>
+        public static float PeakRiseMetres { get { return _peakRise; } }
+
+        /// <summary>直近の顛末（**英語・診断用**）。断ったときは必ず入る。</summary>
+        public static string Detail { get; private set; }
+
+        /// <summary>
+        /// **レベルのロード／アンロードで必ず呼ぶ。** 置いた泉を<b>問答無用で解放する</b>。
+        /// 呼び忘れるとセーブに残る（クラス doc）。
+        /// </summary>
+        public static void Reset()
+        {
+            ReleaseAll();
+
+            _running = false;
+            _startFrame = 0u;
+            _lastFrame = 0u;
+            _drainFromFrame = 0u;
+            _amplitude = 0f;
+            _peakRise = 0f;
+            Detail = null;
+        }
+
+        /// <summary>
+        /// **sim スレッド。** 震源 <paramref name="epicentre"/> で津波を起こす。
+        /// 既に動いていれば何もしない（同時に 1 本だけ）。
+        /// </summary>
+        public static bool Begin(Vec3 epicentre, byte intensity, uint frame)
+        {
+            if (_running) return false;
+
+            try
+            {
+                return BeginCore(epicentre, intensity, frame);
+            }
+            catch (System.Exception e)
+            {
+                Detail = "starting the tsunami threw " + e.GetType().Name;
+                Log.Error("tsunami surge failed to start", e);
+                // ★ 途中まで置いた泉を残さない。
+                ReleaseAll();
+                return false;
+            }
+        }
+
+        private static bool BeginCore(Vec3 epicentre, byte intensity, uint frame)
+        {
+            TerrainManager terrain = Singleton<TerrainManager>.instance;
+            if (terrain == null || terrain.WaterSimulation == null)
+            {
+                Detail = "the water simulation is not reachable; no tsunami";
+                return false;
+            }
+
+            _seaLevel = terrain.WaterSimulation.m_currentSeaLevel;
+            if (float.IsNaN(_seaLevel) || _seaLevel <= 0f) _seaLevel = DefaultSeaLevelMetres;
+
+            _amplitude = TsunamiWaveTrain.AmplitudeOf(intensity);
+            _sources.Clear();
+            _peakRise = 0f;
+
+            // ── 震源のまわりの海に格子状に置く ────────────────────────
+            int steps = (int)(ReachMetres / SpacingMetres);
+
+            for (int gz = -steps; gz <= steps && _sources.Count < MaxSources; gz++)
+            {
+                for (int gx = -steps; gx <= steps && _sources.Count < MaxSources; gx++)
+                {
+                    float ox = gx * SpacingMetres;
+                    float oz = gz * SpacingMetres;
+                    float d = Mathf.Sqrt(ox * ox + oz * oz);
+                    if (d > ReachMetres) continue;
+
+                    float x = epicentre.X + ox;
+                    float z = epicentre.Z + oz;
+
+                    // ★ 海の上にだけ置く。陸に置くと、そこから水が湧いて
+                    //   「津波」ではなく「泉」になる。
+                    var xz = new Vector2(x, z);
+                    if (!terrain.HasWater(xz)) continue;
+
+                    ushort handle;
+                    if (!TryCreate(terrain, x, z, out handle)) continue;
+
+                    _sources.Add(new Spring(handle, d));
+                }
+            }
+
+            if (_sources.Count == 0)
+            {
+                Detail = "no open water around the epicentre; no tsunami was raised";
+                Log.Info("trench earthquake tsunami: " + Detail);
+                return false;
+            }
+
+            _running = true;
+            _startFrame = frame;
+            _lastFrame = frame;
+            _drainFromFrame = 0u;
+            Detail = null;
+
+            Log.Info("tsunami raised at (" + epicentre.X.ToString("F0") + ","
+                     + epicentre.Z.ToString("F0") + "): " + _sources.Count
+                     + " water sources over the sea, peak wave "
+                     + _amplitude.ToString("F1") + " m, "
+                     + TsunamiWaveTrain.CrestCount + " crests "
+                     + TsunamiWaveTrain.CrestGapSeconds.ToString("F0")
+                     + " s apart travelling outward at "
+                     + TsunamiWaveTrain.SpeedMetresPerSecond.ToString("F0") + " m/s. "
+                     + "The DLC TsunamiAI is NOT used (it can only start from the map edge)");
+            return true;
+        }
+
+        /// <summary>
+        /// **sim スレッド、ポーズガードより下。** 波を進める。
+        /// </summary>
+        public static void Tick(uint frame, float framesPerMinute)
+        {
+            if (!_running) return;
+
+            try
+            {
+                Step(frame, framesPerMinute);
+            }
+            catch (System.Exception e)
+            {
+                Detail = "the tsunami tick threw " + e.GetType().Name;
+                if (!_errorLogged)
+                {
+                    _errorLogged = true;
+                    Log.Error("tsunami surge failed", e);
+                }
+
+                // ★★ **落ちたら畳む。** 持ち上げた水位を書き換える経路が
+                //    止まったまま泉が残ると、海がずっと高いままになる。
+                ReleaseAll();
+                _running = false;
+            }
+        }
+
+        private static void Step(uint frame, float framesPerMinute)
+        {
+            if (frame - _lastFrame < IntervalFrames) return;
+            _lastFrame = frame;
+
+            // ── 排水待ち。目標はもう海面に戻してある ──────────────────
+            if (_drainFromFrame != 0u)
+            {
+                if (frame - _drainFromFrame < DrainFrames) return;
+
+                Log.Info("tsunami finished; " + _sources.Count
+                         + " water sources released (the sea is back to "
+                         + _seaLevel.ToString("F0") + " m)");
+                ReleaseAll();
+                _running = false;
+                return;
+            }
+
+            // ★ ゲーム内の秒。フレームから出す（**実時間ではない** ——
+            //   ゲーム速度を変えたら波もそれに追随するのが正しい）。
+            float minutes = framesPerMinute > 0f
+                ? (frame - _startFrame) / framesPerMinute
+                : 0f;
+            float seconds = minutes * 60f;
+
+            TerrainManager terrain = Singleton<TerrainManager>.instance;
+            if (terrain == null || terrain.WaterSimulation == null)
+            {
+                ReleaseAll();
+                _running = false;
+                return;
+            }
+
+            if (seconds >= TsunamiWaveTrain.TotalSeconds)
+            {
+                // ★★ **目標を海面へ戻す。** 戻さずに解放すると、持ち上がった水が
+                //    引く相手を失って残る（クラス doc）。
+                LowerAllToSeaLevel(terrain);
+                _drainFromFrame = frame;
+                return;
+            }
+
+            for (int i = 0; i < _sources.Count; i++)
+            {
+                Spring spring = _sources[i];
+
+                float rise = TsunamiWaveTrain.RiseAt(spring.DistanceMetres, seconds, _amplitude);
+                if (rise > _peakRise) _peakRise = rise;
+
+                SetTarget(terrain, spring.Handle, _seaLevel + rise);
+            }
+        }
+
+        /// <summary>
+        /// 泉を 1 つ置く。**ハンドルは 1 基点**（<c>LockWaterSource</c> の IL 実測）。
+        /// </summary>
+        private static bool TryCreate(TerrainManager terrain, float x, float z,
+                                      out ushort handle)
+        {
+            handle = 0;
+
+            var data = new WaterSource();
+            data.m_type = TypeNatural;
+            data.m_inputPosition = new Vector3(x, _seaLevel, z);
+            data.m_outputPosition = new Vector3(x, _seaLevel, z);
+            data.m_inputRate = Rate;
+            data.m_outputRate = Rate;
+            data.m_target = (ushort)Mathf.Clamp(
+                Mathf.RoundToInt(_seaLevel * UnitsPerMetre), 0, 65535);
+
+            // ★★ **戻り値を必ず見る。** false は「上限に達した」で、
+            //    無視して 0 を台帳へ入れると、他人の泉を解放しに行くことになる。
+            return terrain.WaterSimulation.CreateWaterSource(out handle, data) && handle != 0;
+        }
+
+        /// <summary>
+        /// 1 つの泉の目標水位を書く。
+        ///
+        /// ★★ <c>UnlockWaterSource</c> は**必ず <c>finally</c> で呼ぶ。**
+        ///   <c>LockWaterSource</c> は <c>Monitor.TryEnter</c> のスピンロックで、
+        ///   <b>解放経路は <c>UnlockWaterSource</c> ただ 1 つ</b>である（IL 実測）。
+        ///   落とすと<b>ゲームが無反応になる</b>（④の <c>TyphoonFlood</c> の罠 3）。
+        /// </summary>
+        private static void SetTarget(TerrainManager terrain, ushort handle, float metres)
+        {
+            if (handle == 0) return;
+
+            WaterSource data = terrain.WaterSimulation.LockWaterSource(handle);
+            try
+            {
+                int units = Mathf.RoundToInt(metres * UnitsPerMetre);
+                if (units < 0) units = 0;
+                if (units > 65535) units = 65535;
+                data.m_target = (ushort)units;
+            }
+            finally
+            {
+                terrain.WaterSimulation.UnlockWaterSource(handle, data);
+            }
+        }
+
+        private static void LowerAllToSeaLevel(TerrainManager terrain)
+        {
+            for (int i = 0; i < _sources.Count; i++)
+            {
+                SetTarget(terrain, _sources[i].Handle, _seaLevel);
+            }
+        }
+
+        /// <summary>
+        /// 置いた泉を全部解放する。**冪等。例外を投げない。**
+        /// ここが最後の砦である —— 通らないとセーブに泉が残る。
+        /// </summary>
+        private static void ReleaseAll()
+        {
+            if (_sources.Count == 0) return;
+
+            try
+            {
+                TerrainManager terrain = Singleton<TerrainManager>.instance;
+                if (terrain != null && terrain.WaterSimulation != null)
+                {
+                    for (int i = 0; i < _sources.Count; i++)
+                    {
+                        if (_sources[i].Handle == 0) continue;
+                        terrain.WaterSimulation.ReleaseWaterSource(_sources[i].Handle);
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Warn("tsunami: releasing the water sources failed ("
+                         + e.GetType().Name + "); they may persist in this save");
+            }
+
+            _sources.Clear();
+            _drainFromFrame = 0u;
+        }
+    }
+}

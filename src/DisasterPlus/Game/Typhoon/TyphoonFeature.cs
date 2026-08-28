@@ -117,7 +117,23 @@ namespace DisasterPlus.Game
             if (TyphoonController.Active)
             {
                 TyphoonWeather.Drive(snapshot, deltaMinutes);
-                TyphoonLightning.Tick(snapshot, frameIndex);
+                // ★★ **バニラの落雷はもう積まない。**（2026-08-25、所有者の指示）
+                //
+                //    > いっそのこと「雷雨」にせずに「雨」だけにして、時々台風の
+                //    > 雲の中から稲妻を発生させる方がうまくいくかもしれません
+                //
+                //    <c>WeatherManager.QueueLightningStrike</c> が落とす雷の高さは
+                //    ゲームのレンダラが決めており、**MOD から動かせない。**
+                //    雲を 1200 m まで上げてもまだ上から降ってきた（実機報告）。
+                //
+                //    いまは⑤の噴煙と同じく<b>雲の中に自分で描く</b>
+                //    （<c>TyphoonBoltFx</c>、main スレッド）。ゲーム自身の自動落雷も
+                //    <c>TyphoonWeather</c> が雨を 0.8 で止めることで起きない
+                //    （IL_09D3: <c>m_currentRain &gt; 0.8</c> が唯一の条件）。
+                //
+                //    ★ <c>TyphoonLightning</c> は消していない —— バニラのキューの
+                //      予算計算と診断の実測がそこに書いてあり、**再び使う日が来たら
+                //      あの調査からやり直すことになる**からである。呼ばないだけ。
 
                 // ★ 風害は設定で切れる（既定 ON。強さ 0 でも完全に無効）。
                 //   切ったときに Apply を呼ばないのは②の第 2 層と同じ形で、

@@ -97,6 +97,15 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonButtonY;
         public static SavedInt TyphoonIntensity;
         public static SavedBool TyphoonWindDamage;
+
+        /// <summary>
+        /// 台風の雲の中で稲妻を光らせるか。**既定 ON。**
+        ///
+        /// ★ これは<b>自前の描画</b>である（<c>TyphoonBoltFx</c>）。
+        ///   バニラの空からの落雷は、雨を 0.8 で止めることで<b>そもそも起きない</b>
+        ///   （<c>TyphoonWeather.MaxRainWithoutLightning</c>）。
+        /// </summary>
+        public static SavedBool TyphoonLightning;
         public static SavedInt TyphoonWindStrength;
         public static SavedBool TyphoonFloodEnabled;
         public static SavedInt TyphoonFloodStrength;
@@ -396,6 +405,10 @@ namespace DisasterPlus.Game
             // ★ 既定 ON（風害と同じ理由）。ただしこれは**セーブに焼き付く状態を触る
             //    唯一の機能**なので、復元経路は 3 箇所（終了時・アンロード時・保存時）
             //    から呼ばれる（TyphoonFlood のクラス doc）。
+            // ★★ 雲の中の稲妻（2026-08-25、所有者の指示「時々台風の雲の中から
+            //    稲妻を発生させる」）。**バニラの落雷は雨の上限で封じてある。**
+            TyphoonLightning    = new SavedBool("typhoonLightning", FileName, true, true);
+
             TyphoonFloodEnabled = new SavedBool("typhoonFlood", FileName, true, true);
             TyphoonFloodStrength = new SavedInt("typhoonFloodStrength", FileName, 3, true);
 

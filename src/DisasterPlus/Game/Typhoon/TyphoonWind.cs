@@ -196,19 +196,38 @@ namespace DisasterPlus.Game
         private const float WindRadiusFactor = 1.5f;
 
         /// <summary>吹き上げの鉛直成分（§B-1 の竜巻の実引数と同じ 80）。</summary>
-        private const float WindUpward = 80f;
+        /// <summary>
+        /// 風の<b>上向き</b>成分。
+        ///
+        /// ★★ 80 -> 8 に落とした（2026-08-25、所有者の指摘「暴風で車が吹き飛ぶのは
+        ///   うまくできてますが、程度がひどすぎます。横転くらいでいいのにほんとに
+        ///   飛んで行ってます」）。
+        ///
+        ///   <b>車が飛んでいた原因はここである。</b> 上向き 80 は車を持ち上げるのに
+        ///   十分すぎて、横倒しになる前に離陸していた。8 なら接地したまま
+        ///   煽られて横転する。
+        /// </summary>
+        private const float WindUpward = 8f;
 
         /// <summary>回転成分と求心成分（§B-1 の竜巻の実引数と同じ）。</summary>
         private const float WindRotational = 0.5f;
 
-        private const float WindRadial = -40f;
+        /// <summary>
+        /// 中心へ吸い込む成分（負が内向き）。同上で -40 -> -12。
+        /// 強いと車が中心へ<b>射出</b>される。
+        /// </summary>
+        private const float WindRadial = -12f;
 
         /// <summary>
         /// 進行方向の押しの強さ（m/frame → 演出用の速度）。**④が選んだ数字。**
         /// 竜巻は自分の <c>m_velocity</c> をそのまま渡しているが、台風の中心速度は
         /// 数 m/frame しかなく、そのままでは市民が動かない。
         /// </summary>
-        private const float WindDirectionalScale = 20f;
+        /// <summary>
+        /// 進行方向へ押す強さの倍率。同上で 20 -> 7。
+        /// **0 にはしない** —— 風下へ流されるのは正しい見え方である。
+        /// </summary>
+        private const float WindDirectionalScale = 7f;
 
         private static float _minutesSincePass;
         private static ushort _typhoonId;

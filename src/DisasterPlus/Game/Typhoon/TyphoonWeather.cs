@@ -154,7 +154,40 @@ namespace DisasterPlus.Game
         private const float ForceWeatherOn = 2f;
 
         private const float RainBase = 0.35f;
-        private const float RainRange = 0.65f;
+
+        /// <summary>
+        /// 強度で足す雨量。<c>RainBase + RainRange</c> が上限になる。
+        ///
+        /// ── ★★ 0.65 -> 0.45 にした理由（2026-08-25、所有者の指示）──────────
+        ///
+        /// &gt; いっそのこと「雷雨」にせずに「雨」だけにして、時々台風の雲の中から
+        /// &gt; 稲妻を発生させる方がうまくいくかもしれません
+        ///
+        /// バニラが空から雷を落とす条件は<b>ただ 1 つ</b>である
+        /// （<c>WeatherManager.SimulationStepImpl</c>、IL_09D3 で実測）:
+        ///
+        /// <code>
+        ///   if (m_currentRain &lt;= 0.8f) -> 何もしない
+        ///   if (m_lightningQueue.m_size != 0) -> 何もしない
+        ///   t      = m_currentRain * 5 - 4
+        ///   chance = 5000 - RoundToInt(t * 4000)
+        ///   if (randomizer.UInt32(chance) == 0) QueueLightningStrike(...)
+        /// </code>
+        ///
+        /// ④は雨を 1.0 まで振っていたので<b>必ずこの枝に入っていた</b>。
+        /// 上限を <see cref="MaxRainWithoutLightning"/> に抑えれば、
+        /// **ゲームは 1 本も雷を落とさない**。雷は⑤の噴煙と同じやり方で
+        /// <b>雲の中に自分で描く</b>（<c>TyphoonBoltFx</c>）。
+        ///
+        /// ★ 0.8 でも土砂降りである（洪水の <c>MinRainForRise</c> は 0.5）。
+        ///   **雨量そのものは足りている。**
+        /// </summary>
+        private const float RainRange = 0.45f;
+
+        /// <summary>
+        /// これを超えるとバニラが空から雷を落とす（IL_09D3 実測）。**超えないこと。**
+        /// </summary>
+        public const float MaxRainWithoutLightning = 0.8f;
         private const float CloudBase = 0.55f;
         private const float CloudRange = 0.45f;
 
@@ -259,6 +292,11 @@ namespace DisasterPlus.Game
 
             // ★ 毎 tick 書く（クラス doc 1.）。
             float fog = Clamp01(FogPeak * near);
+
+            // ★★ **0.8 を超えさせない。** 超えるとバニラが空から雷を落とし、
+            //    それは雲より高いところから降ってくる（所有者の報告
+            //    「雷の発生場所が台風の雲より上です」）。上の doc に IL の根拠。
+            if (rain > MaxRainWithoutLightning) rain = MaxRainWithoutLightning;
 
             w.m_targetRain = rain;
             w.m_targetCloud = cloud;
