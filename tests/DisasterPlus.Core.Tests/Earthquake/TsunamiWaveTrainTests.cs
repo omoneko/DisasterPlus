@@ -116,24 +116,84 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         [Fact]
-        public void TheRiseNeverExceedsTheAmplitude()
+        public void TheRiseNeverExceedsTheAmplitudeAndThePlateauTogether()
         {
-            // 3 本の山が重なっても、頼んだ高さより大きく持ち上げないこと
-            // （重ねすぎると海が壁になる）。
+            // 山と台地が重なった高さより上には行かないこと（重ねすぎると海が壁になる）。
+            //
+            // ★★ **上限は定数から出す。**（テストを 1 度直した）1.35 と直書きして
+            //    いたので、台地を足した瞬間に嘘になった。上限は
+            //    「いちばん高い山（1.0）＋ 台地」そのものである。
+            float ceiling = Amplitude * (1f + TsunamiWaveTrain.PlateauFraction) * 1.02f;
+
             float worst = 0f;
             for (float t = 0f; t < TsunamiWaveTrain.TotalSeconds; t += 3f)
             {
-                for (float d = 0f; d <= 8000f; d += 100f)
+                for (float d = 0f; d <= 10000f; d += 100f)
                 {
                     float r = TsunamiWaveTrain.RiseAt(d, t, Amplitude);
                     if (r > worst) worst = r;
                 }
             }
 
-            Assert.True(worst <= Amplitude * 1.35f,
-                        "the crests stacked to " + worst + " m for a " + Amplitude + " m wave");
-            Assert.True(worst > Amplitude * 0.6f,
-                        "the wave never even reached " + (Amplitude * 0.6f) + " m");
+            Assert.True(worst <= ceiling,
+                        "the crests stacked to " + worst + " m for a " + Amplitude
+                        + " m wave (ceiling " + ceiling + ")");
+            Assert.True(worst > Amplitude,
+                        "the wave never even reached its own amplitude (" + worst + ")");
+        }
+
+        [Fact]
+        public void TheSeaStaysLiftedAfterTheCrestsHavePassed()
+        {
+            // ★★ これが所有者の指摘そのものである:
+            //
+            //    > 波は減衰していくので、水源をすぐに除去してしまうと
+            //    > ただの高潮になってしまっています
+            //
+            //    山が通り過ぎたあとも、震源のまわりの海は<b>持ち上がったまま</b>で
+            //    なければならない。戻ってしまうなら、それは津波ではなく高潮である。
+            const float Distance = 1500f;
+
+            // 3 本目が通り過ぎたあと。
+            float afterAll = TsunamiWaveTrain.CrestGapSeconds * TsunamiWaveTrain.CrestCount
+                             + Distance / TsunamiWaveTrain.SpeedMetresPerSecond
+                             + TsunamiWaveTrain.CrestWidthMetres
+                               / TsunamiWaveTrain.SpeedMetresPerSecond;
+
+            Assert.True(afterAll < TsunamiWaveTrain.TotalSeconds * TsunamiWaveTrain.FadeFromFraction,
+                        "the test window is past the fade; pick an earlier time");
+
+            float rise = TsunamiWaveTrain.RiseAt(Distance, afterAll, Amplitude);
+
+            Assert.True(rise > Amplitude * TsunamiWaveTrain.PlateauFraction * 0.9f,
+                        "the sea dropped back to " + rise + " m once the crests passed; "
+                        + "that is a storm surge, not a tsunami");
+        }
+
+        [Fact]
+        public void ThePlateauRisesSmoothlyRatherThanInstantly()
+        {
+            // 一瞬で上げると水が壁になって岸へ倒れ込む（それは決壊であって津波ではない）。
+            float a = TsunamiWaveTrain.PlateauShapeAt(0f, 1f);
+            float b = TsunamiWaveTrain.PlateauShapeAt(0f, TsunamiWaveTrain.PlateauRampSeconds * 0.5f);
+            float c = TsunamiWaveTrain.PlateauShapeAt(0f, TsunamiWaveTrain.PlateauRampSeconds);
+
+            Assert.True(a < b && b < c, a + " " + b + " " + c);
+            Assert.Equal(TsunamiWaveTrain.PlateauFraction, c, 3);
+        }
+
+        [Fact]
+        public void ThePlateauStopsAtItsEdge()
+        {
+            float t = TsunamiWaveTrain.PlateauRampSeconds;
+
+            Assert.Equal(TsunamiWaveTrain.PlateauFraction,
+                         TsunamiWaveTrain.PlateauShapeAt(0f, t), 3);
+            Assert.Equal(0f,
+                         TsunamiWaveTrain.PlateauShapeAt(TsunamiWaveTrain.PlateauEdgeMetres, t), 4);
+            Assert.Equal(0f,
+                         TsunamiWaveTrain.PlateauShapeAt(TsunamiWaveTrain.PlateauEdgeMetres * 2f,
+                                                         t), 4);
         }
 
         [Fact]

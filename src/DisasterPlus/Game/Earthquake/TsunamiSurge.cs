@@ -59,16 +59,28 @@ namespace DisasterPlus.Game
         private const int UnitsPerMetre = 64;
 
         /// <summary>泉を置く格子の間隔（m）。**波の幅より細かくする**（跨がれない）。</summary>
-        private const float SpacingMetres = 420f;
+        private const float SpacingMetres = 480f;
 
-        /// <summary>震源からこの距離までに泉を置く（m）。</summary>
-        private const float ReachMetres = 4200f;
+        /// <summary>
+        /// 震源からこの距離までに泉を置く（m）。
+        ///
+        /// ★★ 4200 -> 8200（2026-08-29、実機報告「海面全体が持ち上がるレベル
+        ///   じゃないと津波っぽさは出ない」）。<c>TsunamiWaveTrain</c> の台地は
+        ///   <c>PlateauEdgeMetres</c> まで海を持ち上げるので、**泉もそこまで
+        ///   置かないと、台地の外側だけが上がらない**。
+        /// </summary>
+        private const float ReachMetres = TsunamiWaveTrain.PlateauEdgeMetres;
 
         /// <summary>
         /// 置く泉の数の上限。**水シミュの負荷はここで決まる。**
         /// 増やす前に実機で測ること。
         /// </summary>
-        private const int MaxSources = 160;
+        /// <remarks>
+        /// ★★ 160 -> 300（2026-08-29）。半径 8.2 km を間隔 480 m で覆うには
+        ///   最大 900 個ほど要るが、水シミュの負荷を見て 300 で切る。
+        ///   **近い順に採る**ので、切られるのはいちばん外側である。
+        /// </remarks>
+        private const int MaxSources = 300;
 
         /// <summary>
         /// 注ぐ／吸う速さ。**この MOD が決めた値**（プレハブ由来ではない）。
@@ -82,14 +94,55 @@ namespace DisasterPlus.Game
         /// </summary>
         private const uint Rate = 250000u;
 
-        /// <summary>目標を海面へ戻してから解放するまで待つフレーム数。</summary>
-        private const int DrainFrames = 900;
+        /// <summary>
+        /// 目標を海面へ戻してから解放するまで待つフレーム数。
+        ///
+        /// ★★ 900 -> 3600（2026-08-29、実機報告「水源をすぐに除去してしまうと
+        ///   ただの高潮になってしまっています」）。**吸い戻すには注ぐより時間がかかる**
+        ///   —— 引くのを待たずに泉を消すと、水が引く相手を失って残る。
+        /// </summary>
+        private const int DrainFrames = 3600;
 
         /// <summary>海面が読めないときの既定（m）。<c>WaterSimulation.DEFAULT_SEA_LEVEL</c>。</summary>
         private const float DefaultSeaLevelMetres = 40f;
 
         /// <summary>更新の間隔（フレーム）。毎フレームは要らない。</summary>
         private const int IntervalFrames = 16;
+
+        // ── ★★ 目に見える「波の壁」（2026-08-29）──────────────────────────
+        //
+        // 泉の目標水位を上げるのは<b>じわじわ効く</b>ので、「海面が上がった」は
+        // 作れても「波が来た」は作れない。そこへ
+        // <c>DisasterHelpers.SplashWater(position, radius, depth)</c> を重ねる。
+        //
+        // IL 実測（SplashWater、IL_0000-0135）:
+        //
+        //     cells   = CeilToInt(radius / 16)
+        //     delta   = Clamp(CeilToInt(depth * 64), -32767, 32767)   // 65536/1024 = 64
+        //     origX   = Clamp((x + 8640)/16 + 0.5, 0, 1080)           // 16 m セル
+        //     m_type  = 2 (IMPACT) / m_duration = 256 / m_dirX = m_dirZ = 0
+        //
+        // ★ IMPACT の波は <c>SimulateWater</c> が<b>セルの水量に delta を足す</b>
+        //   （IL_099A-09C3）。**外周リング専用の TYPE_TSUNAMI と違い、どこにでも置ける。**
+        //   これが「震源を中心に」を満たす唯一のバニラ経路である。
+
+        /// <summary>波の壁を撃つ間隔（フレーム）。</summary>
+        private const int SplashIntervalFrames = 64;
+
+        /// <summary>1 発の波の壁の半径（m）。</summary>
+        private const float SplashRadiusMetres = 1400f;
+
+        /// <summary>波の壁の高さ（そのときの持ち上がりに対する比）。</summary>
+        private const float SplashDepthFraction = 0.55f;
+
+        /// <summary>1 回に撃つ数（前線に沿って円周上へ配る）。</summary>
+        private const int SplashesPerPulse = 8;
+
+        private static uint _lastSplashFrame;
+        private static int _splashPulses;
+
+        /// <summary>撃った波の壁の回数（診断用）。</summary>
+        public static int SplashPulses { get { return _splashPulses; } }
 
         /// <summary>置いた泉 1 つぶん。</summary>
         private struct Spring
@@ -115,6 +168,7 @@ namespace DisasterPlus.Game
         private static float _amplitude;
         private static float _seaLevel;
         private static float _peakRise;
+        private static Vec3 _centre;
         private static bool _errorLogged;
 
         /// <summary>今 津波が動いているか（診断・表示用）。</summary>
@@ -236,6 +290,9 @@ namespace DisasterPlus.Game
             }
 
             _running = true;
+            _centre = epicentre;
+            _lastSplashFrame = frame;
+            _splashPulses = 0;
             _startFrame = frame;
             _lastFrame = frame;
             _drainFromFrame = 0u;
@@ -333,7 +390,49 @@ namespace DisasterPlus.Game
 
                 SetTarget(terrain, spring.Handle, _seaLevel + rise);
             }
+
+            // ★★ **目に見える波の壁**（上の doc）。前線に沿って円周上へ撃つ。
+            if (frame - _lastSplashFrame >= SplashIntervalFrames)
+            {
+                _lastSplashFrame = frame;
+                Splash(seconds);
+            }
         }
+
+        /// <summary>
+        /// いちばん外の波の前線に沿って、バニラの <c>SplashWater</c> を円周上に撃つ。
+        /// **これが「波が来た」を作る**（泉の目標水位はじわじわしか効かない）。
+        /// </summary>
+        private static void Splash(float seconds)
+        {
+            float front = TsunamiWaveTrain.SpeedMetresPerSecond * seconds;
+            if (front <= SplashRadiusMetres) front = SplashRadiusMetres;
+            if (front > TsunamiWaveTrain.PlateauEdgeMetres) return;   // もう外へ出た
+
+            float rise = TsunamiWaveTrain.RiseAt(front, seconds, _amplitude);
+            if (!(rise > 0.5f)) return;
+
+            float depth = rise * SplashDepthFraction;
+
+            for (int i = 0; i < SplashesPerPulse; i++)
+            {
+                float a = 6.2831853f * i / SplashesPerPulse;
+                var at = new Vector2(_centre.X + Mathf.Cos(a) * front,
+                                     _centre.Z + Mathf.Sin(a) * front);
+
+                // ★ マップの外へ撃たない（SplashWater は自分でクランプするが、
+                //   外周へ寄せた波が 1 か所に固まるのを避ける）。
+                if (at.x < -MapHalfExtent || at.x > MapHalfExtent) continue;
+                if (at.y < -MapHalfExtent || at.y > MapHalfExtent) continue;
+
+                DisasterHelpers.SplashWater(at, SplashRadiusMetres, depth);
+            }
+
+            _splashPulses++;
+        }
+
+        /// <summary>マップ半辺（m）。<c>SplashWater</c> の IL 実測にある 8640 と同じ。</summary>
+        private const float MapHalfExtent = 8640f;
 
         /// <summary>
         /// 泉を 1 つ置く。**ハンドルは 1 基点**（<c>LockWaterSource</c> の IL 実測）。
