@@ -35,10 +35,10 @@ namespace DisasterPlus.Game
             // ★★ 海溝型地震の災害 ID も持ち越さない。持ち越すと、次の都市で
             //    同じ番号を取ったバニラの地震が「海溝型」と誤認され、津波が付く。
             TrenchQuakeSlot.Reset();
-            // ★★ **置いた水源を必ず解放する。** 水源は WaterSimulation.Data.Serialize で
-            //    セーブに焼き付くので、残すと MOD を外しても都市に残り続ける
-            //    （TsunamiSurge のクラス doc）。
-            TsunamiSurge.Reset();
+            // ★★ **置いた水波を必ず解放する。** WaterWave は Serialize を持ち
+            //    DisasterData.m_waveIndex で持たれる ＝ セーブに焼き付くので、
+            //    残すと MOD を外しても都市に残り続ける（TsunamiWave のクラス doc）。
+            TsunamiWave.Reset();
             LongPeriodDamage.Reset();
 
             // ★★ **ToolController は都市ごとに作り直される**ので、毎レベルロードで
@@ -125,11 +125,11 @@ namespace DisasterPlus.Game
                 TsunamiChain.Tick(snapshot, frameIndex);
             }
 
-            // ★★ **波を進めるのは設定に関係なく必ず呼ぶ。**
+            // ★★ **外力を進めるのは設定に関係なく必ず呼ぶ。**
             //    途中で設定を切られたときにここが呼ばれなくなると、
-            //    <b>持ち上げた海が下がらないまま泉が残る</b>（セーブに焼き付く）。
+            //    <b>海を押し続ける波が解放されないまま残る</b>（セーブに焼き付く）。
             //    走っていなければ即 return するので、ただの空振りである。
-            TsunamiSurge.Tick(frameIndex, FeatureHost.FramesPerMinute);
+            TsunamiWave.Tick(frameIndex);
 
             // ★ 第 2 層その 2。**既定 OFF**（ModSettings.EarthquakeLongPeriod の doc）。
             //    これは津波と違い、**バニラなら倒れなかった建物を実際に倒す**。
@@ -175,8 +175,8 @@ namespace DisasterPlus.Game
             // ★ 海溝型地震の災害 ID を持ち越さない。持ち越すと、次の都市で
             //   同じ番号を取ったバニラの地震が「海溝型」と誤認され、津波が付く。
             TrenchQuakeSlot.Reset();
-            // ★★ **ここが最後の砦である。** 置いた水源を解放しないとセーブに残る。
-            TsunamiSurge.Reset();
+            // ★★ **ここが最後の砦である。** 置いた水波を解放しないとセーブに残る。
+            TsunamiWave.Reset();
             // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
             // EarthquakePanel.Destroy() が波形テクスチャ（Texture2D）も破棄する
             // —— GameObject と違って Unity は勝手に回収しないので、これを
@@ -215,26 +215,29 @@ namespace DisasterPlus.Game
                 : "NOT SUPPRESSED - Harmony is not installed, so a trench quake will "
                   + "open a fissure like a fault quake");
 
-            // ★★ 津波は DLC の TsunamiAI ではなく自前の海面上昇である。
-            //    **どちらが動いているか**を名乗らないと、調査のしようがない。
-            b.Line(2, "tsunami surge", TsunamiSurge.Running
-                ? TsunamiSurge.ActiveSourceCount + " of " + TsunamiSurge.SourceCount
-                  + " water sources are laid along the wave front, peak rise "
-                  + TsunamiSurge.PeakRiseMetres.ToString("F1") + " m, "
-                  + TsunamiSurge.SplashPulses + " impact-wave pulses ("
-                  + TsunamiSurge.SplashesLastPulse + " in the last one)"
+            // ★★ 津波は DLC の TsunamiAI ではなく、震源に置いた TYPE_IMPACT の
+            //    水波である。**どちらが動いているか**を名乗らないと調査できない。
+            b.Line(2, "tsunami", TsunamiWave.Running
+                ? "drive " + TsunamiWave.DeltaUnits + " of " + TsunamiWave.PeakUnits
+                  + " units (" + TsunamiWave.Stage
+                  + "); highest sea over the epicentre so far "
+                  + TsunamiWave.PeakRiseMetres.ToString("F1") + " m above sea level"
                 : "not running"
-                  + (TsunamiSurge.Detail != null
-                     ? " (" + TsunamiSurge.Detail + ")" : ""));
+                  + (TsunamiWave.Detail != null
+                     ? " (" + TsunamiWave.Detail + ")" : ""));
 
             b.Line(2, "note: tsunami",
                    "ONLY a trench quake brings a tsunami. The game's own (fault) "
                    + "earthquakes never do - that is deliberate, not a fault. "
                    + "The DLC TsunamiAI is NOT used: it can only start a wave from the "
-                   + "map edge, never from an offshore epicentre. The wave here is a "
-                   + "bulge that spreads into a plateau, hollows out into a ring, then "
-                   + "spreads outward WITHOUT decaying, raised with TYPE_NATURAL "
-                   + "water sources plus SplashWater impact waves on the ring");
+                   + "map edge, never from an offshore epicentre (IL: WaterWave."
+                   + "GetSeaLevel is called from the outer-ring loop only). Instead a "
+                   + "single TYPE_IMPACT water wave sits on the epicentre. That is the "
+                   + "solver's own 'a hill of water is here' term, i.e. a sea-floor "
+                   + "uplift: negative draws the sea in and raises a bulge, positive "
+                   + "pushes it out into a ring. The drive stops after "
+                   + "TsunamiSource.TotalFrames - everything after that is the game's "
+                   + "own water solver, the same one that carries the DLC tsunami");
 
             var snapshot = EarthquakeHub.Latest;
             b.Line(1, "snapshot", snapshot == null ? "none yet" : (snapshot.Valid ? "valid" : "INVALID"));

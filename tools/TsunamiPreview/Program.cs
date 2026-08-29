@@ -6,220 +6,206 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.TsunamiPreview
 {
     /// <summary>
-    /// <see cref="TsunamiWaveTrain"/> の海面を、**ゲームを起動せずに**上から描いて
-    /// 確かめる。
+    /// 津波の<b>発生源</b>を、ゲームを起動せずに見る。
     ///
-    /// <b>上から見ないと「輪」かどうかが分からない。</b> 断面だけ見ていた頃は、
-    /// 台地（一様に持ち上がる）と輪の違いが図から読めなかった。
+    /// ── ★★ ここで描けるもの・描けないもの（2026-08-29）────────────────
     ///
-    /// ── ★★ 2026-08-29、所有者「シミュレーションして確認してますか？」──────
+    /// 作り直したあと、このツールが描けるのは<b>震源に与える外力</b>だけである。
+    /// <b>水の壁そのものは描けない</b> —— それを作るのはゲームの浅水ソルバ
+    /// （<c>WaterSimulation.SimulateWater</c>）で、こちらのコードには無いからである。
     ///
-    /// **形しか見ていなかった。** 形は正しかったのに実機で弱かったのは、
-    /// <b>形を海に載せる側</b>（フレーム・水源の作用半径・覆える範囲）を
-    /// 一度も数えていなかったからである。<see cref="Delivery"/> がそれを数える。
+    /// ★ 前の版はここで「波の形」を描いて満足していた。**それが間違いだった。**
+    ///   きれいな形を自分で描いても、ソルバを通っていない水は波として動かない。
+    ///   いま描いているのは<b>ソルバへの入力</b>で、出力ではない。
+    ///
+    /// 比較対象として、DLC の津波が外周の海面に与えている入力
+    /// （<c>WaterWave.GetSeaLevel</c>、IL 実測）も並べて描く。
+    /// **同じ絵の上で「DLC より強いのか弱いのか」を言えるようにするため。**
     ///
     ///   dotnet run --project tools/TsunamiPreview -- docs/images/earthquake
     /// </summary>
     internal static class Program
     {
-        private const int Size = 700;
+        private const int Width = 900;
+        private const int Height = 420;
 
-        /// <summary>見る範囲（m、片側）。波の届く限界より少し広く。</summary>
-        private const float ViewHalf = 9000f;
-
-        private const float Amplitude = 22f;
-
-        /// <summary>ゲーム速度 1 のおおよそ。**フレームと実秒を混ぜないための注釈。**</summary>
+        /// <summary>ゲーム速度 1 の目安。</summary>
         private const float FramesPerRealSecond = 60f;
 
-        /// <summary><c>TsunamiSurge.Rate</c> と同じ値。</summary>
-        private const uint Rate = 900000u;
+        private const byte Intensity = 100;
 
-        /// <summary><c>TsunamiSurge.MaxSources</c> と同じ値。</summary>
-        private const int MaxSources = 240;
+        // ── DLC の津波（IL 実測、プレハブ実測値）────────────────────────
 
-        /// <summary><c>TsunamiSurge.IntervalFrames</c> と同じ値。</summary>
-        private const int IntervalFrames = 8;
+        /// <summary><c>TsunamiAI.m_duration</c> のプレハブ実測値。</summary>
+        private const int VanillaDurationField = 256;
+
+        /// <summary><c>WaterWave.m_duration = m_duration &lt;&lt; 6</c>。</summary>
+        private const int VanillaWaveDuration = VanillaDurationField << 6;
+
+        /// <summary><c>m_currentTime</c> は毎水ステップ +64、1 水ステップ ≒ 1 sim フレーム。</summary>
+        private const int TicksPerFrame = 64;
 
         private static int Main(string[] args)
         {
             string dir = args.Length > 0 ? args[0] : ".";
             Directory.CreateDirectory(dir);
 
-            // ★ 4 つの段が 1 枚ずつ見えるように選ぶ（隆起・台地・ドーナツ・伝播）。
-            foreach (float f in new[] { 150f, 780f, 1500f, 2600f, 3700f })
-            {
-                string path = Path.Combine(dir, "tsunami-f" + ((int)f) + ".png");
-                Png.Write(path, Size, Size, Render(f));
-                Console.WriteLine("wrote " + path);
-            }
+            string path = Path.Combine(dir, "tsunami-drive.png");
+            Png.Write(path, Width, Height, Render());
+            Console.WriteLine("wrote " + path);
 
-            Shape();
-            Delivery();
+            Table();
+            Vanilla();
             return 0;
         }
 
-        /// <summary>
-        /// 目で見るだけにしない。**輪であることを数で確かめる。**
-        /// 前線の外は 0、前線で最大、内側も 0（＝平常の海）であること。
-        /// </summary>
-        private static void Shape()
+        /// <summary>こちらの外力を数で出す。**符号が段どおりか**を見る。</summary>
+        private static void Table()
         {
+            int peak = TsunamiSource.PeakDeltaUnits(Intensity);
+
             Console.WriteLine();
-            Console.WriteLine("== 形 ==");
-            Console.WriteLine(" frame |  real s | stage      | ring(m) | at ring | centre | outside");
+            Console.WriteLine("== 震源に与える外力（TYPE_IMPACT の m_delta）==");
+            Console.WriteLine("  intensity " + Intensity + " -> peak " + peak
+                              + " units = "
+                              + (peak / (float)TsunamiSource.UnitsPerMetre).ToString("F0")
+                              + " m の仮想的な海底隆起");
+            Console.WriteLine("  source radius " + TsunamiSource.RadiusMetres.ToString("F0")
+                              + " m (" + TsunamiSource.RadiusCells + " cells)");
+            Console.WriteLine();
+            Console.WriteLine(" frame | real s | delta  | 向き   | stage");
 
-            foreach (float f in new[] { 120f, 240f, 500f, 780f, 1100f, 1500f,
-                                        2000f, 2600f, 3200f, 3833f })
+            foreach (float f in new[] { 0f, 60f, 150f, 300f, 350f, 400f, 600f,
+                                        900f, 990f, 1079f, 1080f })
             {
-                float ring = TsunamiWaveTrain.RingRadiusAt(f);
-
-                string stage;
-                if (f <= TsunamiWaveTrain.BulgeFrames) stage = "1 bulge  ";
-                else if (f <= TsunamiWaveTrain.SpreadFrames) stage = "2 plateau";
-                else if (f <= TsunamiWaveTrain.CollapseFrames) stage = "3 hollow ";
-                else stage = "4 ring   ";
-
-                float atRing = Peak(f, Math.Max(ring - 300f, 0f), ring + 300f);
-                float centre = TsunamiWaveTrain.RiseAt(0f, f, Amplitude);
-                float outside = TsunamiWaveTrain.RiseAt(
-                    ring + TsunamiWaveTrain.RingWidthMetres + 300f, f, Amplitude);
+                int d = TsunamiSource.DeltaAt(f, peak);
+                string dirn = d < 0 ? "中心へ" : d > 0 ? "外へ  " : "なし  ";
 
                 Console.WriteLine(f.ToString("F0").PadLeft(6)
-                    + " |" + (f / FramesPerRealSecond).ToString("F1").PadLeft(8)
-                    + " | " + stage
-                    + " |" + ring.ToString("F0").PadLeft(8)
-                    + " |" + atRing.ToString("F1").PadLeft(8)
-                    + " |" + centre.ToString("F1").PadLeft(7)
-                    + " |" + outside.ToString("F1").PadLeft(8));
+                    + " |" + (f / FramesPerRealSecond).ToString("F1").PadLeft(7)
+                    + " |" + d.ToString().PadLeft(7)
+                    + " | " + dirn
+                    + " | " + TsunamiSource.StageAt(f));
             }
         }
 
         /// <summary>
-        /// ★★ **形を海に載せられるのかを数える。** ここを見ていなかったのが
-        ///    2026-08-29 の「高さと継続力が弱い」の原因だった。
-        ///
-        /// <list type="bullet">
-        /// <item>水源の作用直径 &gt; 並べる間隔 か（＝壁が繋がるか）</item>
-        /// <item>予算 <see cref="MaxSources"/> で前線の輪を丸ごと置けるか</item>
-        /// <item>並べ直す間隔のあいだに前線が帯より大きく飛ばないか</item>
-        /// </list>
+        /// DLC の津波が外周の海面に与える入力（IL 実測の式そのまま）。
+        /// **目盛りを合わせるために出す。**
         /// </summary>
-        private static void Delivery()
+        private static void Vanilla()
         {
-            float radius = TsunamiSourceLayout.RadiusForRate(Rate);
-            float step = TsunamiSourceLayout.StepFor(radius);
+            int delta = TsunamiSource.VanillaDeltaUnits(Intensity);
 
             Console.WriteLine();
-            Console.WriteLine("== 海に載せる側 ==");
-            Console.WriteLine("  水源の作用半径 = Sqrt(" + Rate + ")*0.4+10 = "
-                              + radius.ToString("F0") + " m（直径 "
-                              + (radius * 2f).ToString("F0") + " m）");
-            Console.WriteLine("  並べる間隔     = " + step.ToString("F0") + " m  -> "
-                              + (step < radius * 2f ? "重なる（壁になる）"
-                                                    : "★ 隙間ができる（壁にならない）"));
-            Console.WriteLine("  旧設定の比較   = rate 250000 -> 半径 "
-                              + TsunamiSourceLayout.RadiusForRate(250000u).ToString("F0")
-                              + " m を 480 m 間隔 -> 隙間 "
-                              + (480f - 2f * TsunamiSourceLayout.RadiusForRate(250000u))
-                                .ToString("F0") + " m");
-
-            float advance = TsunamiWaveTrain.SpeedMetresPerFrame * IntervalFrames;
-            Console.WriteLine("  並べ直しの間に前線が進む距離 = " + advance.ToString("F0")
-                              + " m（帯の幅 " + TsunamiWaveTrain.RingWidthMetres.ToString("F0")
-                              + " m）-> "
-                              + (advance < TsunamiWaveTrain.RingWidthMetres
-                                 ? "追随できる" : "★ 帯より大きく飛ぶ"));
-
+            Console.WriteLine("== 比較: DLC の津波が外周の海面に与える入力 ==");
+            Console.WriteLine("  m_delta " + delta + " units = "
+                              + (delta / (float)TsunamiSource.UnitsPerMetre).ToString("F0")
+                              + " m、発生源は " + (VanillaWaveDuration / TicksPerFrame)
+                              + " フレーム（"
+                              + (VanillaWaveDuration / (float)TicksPerFrame
+                                 / FramesPerRealSecond).ToString("F1")
+                              + " 実秒）だけ");
             Console.WriteLine();
-            Console.WriteLine(" frame | ring(m) | 要る数 | 置ける | 前線の隣接(m) | 高さ(m)");
+            Console.WriteLine(" frame | real s | 海面(m) | 何が起きているか");
 
-            var xz = new float[MaxSources * 2];
-
-            for (float f = TsunamiWaveTrain.CollapseFrames;
-                 f <= TsunamiWaveTrain.RingLeavesAtFrame + 1f; f += 300f)
+            for (int frame = 0; frame <= VanillaWaveDuration / TicksPerFrame; frame += 16)
             {
-                float ring = Math.Min(TsunamiWaveTrain.RingRadiusAt(f),
-                                      TsunamiWaveTrain.ReachEdgeMetres);
-                float inner = TsunamiWaveTrain.RingInnerRadiusAt(f);
+                float metres = VanillaSeaOffset(frame, delta)
+                               / (float)TsunamiSource.UnitsPerMetre;
 
-                int used = TsunamiSourceLayout.Fill(inner, ring, step, 0f, xz, MaxSources);
+                string what = metres < -1f ? "引き波" : metres > 1f ? "押し波" : "";
 
-                int onCrest = 0;
-                for (int i = 0; i < used; i++)
-                {
-                    float d = (float)Math.Sqrt(xz[i * 2] * xz[i * 2] +
-                                               xz[i * 2 + 1] * xz[i * 2 + 1]);
-                    if (Math.Abs(d - ring) < 1f) onCrest++;
-                }
-
-                int needed = (int)Math.Ceiling(6.2831853 * ring / step);
-                float chord = onCrest > 0
-                    ? 2f * ring * (float)Math.Sin(Math.PI / onCrest) : 0f;
-
-                Console.WriteLine(f.ToString("F0").PadLeft(6)
-                    + " |" + ring.ToString("F0").PadLeft(8)
-                    + " |" + needed.ToString().PadLeft(7)
-                    + " |" + onCrest.ToString().PadLeft(7)
-                    + " |" + chord.ToString("F0").PadLeft(14)
-                    + (chord < radius * 2f ? " ok" : " ★穴")
-                    + " |" + TsunamiWaveTrain.RiseAt(ring, f, Amplitude)
-                             .ToString("F1").PadLeft(8));
+                Console.WriteLine(frame.ToString().PadLeft(6)
+                    + " |" + (frame / FramesPerRealSecond).ToString("F1").PadLeft(7)
+                    + " |" + metres.ToString("F1").PadLeft(8)
+                    + " | " + what);
             }
         }
 
-        private static float Peak(float f, float from, float to)
+        /// <summary>
+        /// <c>WaterWave.GetSeaLevel</c> の中身（IL_0072–00B6）を、
+        /// 外周セル（phase = 0）についてそのまま写したもの。
+        /// </summary>
+        private static int VanillaSeaOffset(int frame, int delta)
         {
-            float best = 0f;
-            for (float d = Math.Max(from, 0f); d <= to; d += 20f)
-            {
-                float r = TsunamiWaveTrain.RiseAt(d, f, Amplitude);
-                if (r > best) best = r;
-            }
-            return best;
+            int currentTime = frame * TicksPerFrame;
+            int t = currentTime;                       // phase 0
+            if (t <= 0 || t >= VanillaWaveDuration) return 0;
+
+            int amp = (int)((long)delta * (65536 - currentTime) >> 16);
+            int d64 = VanillaWaveDuration >> 6;
+
+            double cos = Math.Cos(2.0 * Math.PI * ((t * 1024.0) / d64) / 65536.0);
+            double arg = amp - amp * cos;
+
+            double sin = Math.Sin(2.0 * Math.PI * ((t * 1536.0) / d64) / 65536.0);
+
+            // level = original - (arg*sin)/2  ==> 海面の上がりは -(arg*sin)/2
+            return (int)(-(arg * sin) / 2.0);
         }
 
-        private static byte[] Render(float f)
+        private static byte[] Render()
         {
-            var rgb = new byte[Size * Size * 3];
+            var rgb = new byte[Width * Height * 3];
 
-            for (int y = 0; y < Size; y++)
+            for (int i = 0; i < rgb.Length; i += 3)
             {
-                for (int x = 0; x < Size; x++)
+                rgb[i] = 16; rgb[i + 1] = 20; rgb[i + 2] = 28;
+            }
+
+            int mid = Height / 2;
+            for (int x = 0; x < Width; x++) Set(rgb, x, mid, 70, 78, 92);
+
+            int peak = TsunamiSource.PeakDeltaUnits(Intensity);
+            float span = TsunamiSource.TotalFrames * 1.15f;
+
+            // 段の境目。
+            foreach (float f in new[] { TsunamiSource.DrawInFrames,
+                                        TsunamiSource.DrawInFrames + TsunamiSource.TurnFrames,
+                                        TsunamiSource.PushFrames,
+                                        TsunamiSource.TotalFrames })
+            {
+                int x = (int)(f / span * (Width - 1));
+                for (int y = 0; y < Height; y += 3) Set(rgb, x, y, 48, 54, 66);
+            }
+
+            // こちらの外力。正＝外へ（上）、負＝中心へ（下）。
+            for (int x = 0; x < Width; x++)
+            {
+                float f = x / (float)(Width - 1) * span;
+                int d = TsunamiSource.DeltaAt(f, peak);
+                int y = mid - (int)(d / (float)peak * (mid - 20));
+
+                for (int k = -1; k <= 1; k++)
                 {
-                    float wx = (x / (float)(Size - 1) * 2f - 1f) * ViewHalf;
-                    float wz = (y / (float)(Size - 1) * 2f - 1f) * ViewHalf;
-                    float d = (float)Math.Sqrt(wx * wx + wz * wz);
-
-                    float rise = TsunamiWaveTrain.RiseAt(d, f, Amplitude);
-                    float k = rise / (Amplitude * 1.2f);
-                    if (k > 1f) k = 1f;
-
-                    int at = (y * Size + x) * 3;
-
-                    // 平常の海は暗い青、持ち上がるほど白へ。
-                    rgb[at] = (byte)(18 + 232f * k);
-                    rgb[at + 1] = (byte)(46 + 200f * k);
-                    rgb[at + 2] = (byte)(78 + 172f * k);
+                    Set(rgb, x, y + k, d < 0 ? (byte)120 : (byte)90,
+                        d < 0 ? (byte)190 : (byte)220,
+                        d < 0 ? (byte)255 : (byte)200);
                 }
             }
 
-            // 震源に印。
-            int c = Size / 2;
-            for (int i = -3; i <= 3; i++)
+            // DLC の入力を同じ縦目盛りで重ねる（点線）。
+            int vanilla = TsunamiSource.VanillaDeltaUnits(Intensity);
+            for (int x = 0; x < Width; x += 2)
             {
-                Mark(rgb, c + i, c);
-                Mark(rgb, c, c + i);
+                float f = x / (float)(Width - 1) * span;
+                int frame = (int)f;
+                if (frame > VanillaWaveDuration / TicksPerFrame) break;
+
+                int off = VanillaSeaOffset(frame, vanilla);
+                int y = mid - (int)(off / (float)peak * (mid - 20));
+                Set(rgb, x, y, 240, 170, 90);
             }
 
             return rgb;
         }
 
-        private static void Mark(byte[] rgb, int x, int y)
+        private static void Set(byte[] rgb, int x, int y, byte r, byte g, byte b)
         {
-            if (x < 0 || x >= Size || y < 0 || y >= Size) return;
-            int at = (y * Size + x) * 3;
-            rgb[at] = 255; rgb[at + 1] = 90; rgb[at + 2] = 60;
+            if (x < 0 || x >= Width || y < 0 || y >= Height) return;
+            int at = (y * Width + x) * 3;
+            rgb[at] = r; rgb[at + 1] = g; rgb[at + 2] = b;
         }
     }
 }

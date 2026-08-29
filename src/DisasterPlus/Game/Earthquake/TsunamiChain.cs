@@ -47,6 +47,10 @@ namespace DisasterPlus.Game
     ///
     /// したがって実現するのは「**震源に最も近い海側の外周から津波が来る**」であり、
     /// パネルはそう書く（<c>Strings.EarthquakeTsunamiFromShore</c>）。
+    ///
+    /// ★★ **2026-08-29、そこはもう当てはまらない。** <c>TsunamiAI</c> は使わず、
+    ///    <c>TsunamiWave</c> が <c>TYPE_IMPACT</c> の水波を震源に置く。
+    ///    波は震源から同心円状に広がる。
     /// **「震源から波が広がります」と書いてはいけない。**
     ///
     /// ── 4 つの罠（全部 IL で確定済み） ────────────────────────────
@@ -394,23 +398,27 @@ namespace DisasterPlus.Game
             //    開始時に原点セルの座標で上書きされる（§B-3、IL_03D3-0426）。
             //    つまり「沖合の震源から同心円状に広がる波」は原理的に作れなかった。
             //
-            //    いまは <c>TsunamiSurge</c> が震源のまわりの海に
-            //    <c>TYPE_NATURAL</c> の水源を格子状に置き、
-            //    <c>Core.Earthquake.TsunamiWaveTrain</c> の式で目標水位を
-            //    毎 tick 書き換える。**波は震源から外へ広がる。**
+            //    いまは <c>TsunamiWave</c> が震源に <c>TYPE_IMPACT</c> の水波を
+            //    1 個置き、<c>Core.Earthquake.TsunamiSource</c> の式でその外力を
+            //    毎 tick 書き換える。IMPACT はマップのどこにでも置けて、
+            //    <b>そこに水の山があるかのように水面の傾きを足す</b>
+            //    ＝ 海底の隆起と同じ外力である（IL 実測、
+            //    docs/superpowers/specs/2026-08-29-tsunami-il-facts.md）。
+            //    **同心円状の水の壁は、そのあとゲーム自身の浅水ソルバが作る**
+            //    —— バニラの津波の水の壁とまったく同じ経路である。
             uint frame = 0u;
             if (Singleton<SimulationManager>.exists)
             {
                 frame = Singleton<SimulationManager>.instance.m_currentFrameIndex;
             }
 
-            if (!TsunamiSurge.Begin(quake.Epicentre, quake.Intensity, frame))
+            if (!TsunamiWave.Begin(quake.Epicentre, quake.Intensity, frame))
             {
                 // ★ 海が無い／水シミュが読めない。**失敗ではない場合がある**ので、
-                //   理由をそのまま持ち帰る（TsunamiSurge.Detail）。
+                //   理由をそのまま持ち帰る（TsunamiWave.Detail）。
                 _state = TsunamiChainState.NoSea;
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiNoSea",
-                    TsunamiSurge.Detail ?? "the tsunami could not be raised");
+                    TsunamiWave.Detail ?? "the tsunami could not be raised");
                 return;
             }
 

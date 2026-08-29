@@ -532,15 +532,23 @@ namespace DisasterPlus.Game
         // **ここから先はバニラに存在しない挙動である。** 全て既定 OFF で、
         // パネルでは EarthquakeLayer2Header の節の下に [Disaster + model] 付きで出る。
         //
-        // EarthquakeTsunamiFromShore がこの機能でいちばん重要な 1 文。依頼は
-        // 「海中で地震を起こしてもプレート境界型の津波が来ない」だったが、
-        // **「震源から波が広がる」は TsunamiAI では literally 不可能**である
-        // （FindSea はマップ外周セルしか候補にせず、m_targetPosition も m_angle も
-        //  開始時に上書きされる。§B-3）。実現しているのは「震源に最も近い海側の
-        // 外周から津波が来る」であり、**できていないことをできているように書かない**。
+        // ★★ EarthquakeTsunamiFromShore を書き換えた（2026-08-29）。
+        //    **前の文は「ゲームは津波をマップ外周からしか起こせません」と
+        //    書いていたが、それはもう嘘である。**
+        //
+        //    たしかに DLC の <c>TsunamiAI</c> は外周からしか起こせない
+        //    （<c>WaterWave.GetSeaLevel</c> はマップ最外周セルのループでしか
+        //     呼ばれない。IL_16C7-16F9）。だが同じソルバには
+        //    <c>TYPE_IMPACT</c> という**どこにでも置ける外力**があり、
+        //    いまはそれを震源に置いている
+        //    （docs/superpowers/specs/2026-08-29-tsunami-il-facts.md）。
+        //    **波は震源から同心円状に広がる。**
+        //
+        //    ★ 文言の原則は変えていない ——「できていないことをできているように
+        //      書かない」。できるようになったので、書き換えた。
         //
         // EarthquakeTsunamiNoSea は**失敗の文言ではない**。内陸マップでは
-        // 海側外周区間が 10 セルに満たず、何も起きないのが正常な結果である。
+        // 震源に置ける海が無く、何も起きないのが正常な結果である。
         // ①の ForecastNoStormDetected と同じ扱いで、「0 を安全と読ませない」の裏返し
         // ——「何も起きなかった」を「壊れた」と読ませない。
 
@@ -550,10 +558,11 @@ namespace DisasterPlus.Game
         public static string EarthquakeTsunamiPending = "Tsunami expected in";
         public static string EarthquakeTsunamiRaised = "Tsunami raised";
         public static string EarthquakeTsunamiFromShore =
-            "The wave arrives from the sea nearest the epicentre, not from the epicentre itself. "
-            + "The game can only start a tsunami at the map edge.";
+            "The wave spreads out from the epicentre in rings. The sea is drawn in over the "
+            + "epicentre first, then pushed back out - the wall of water after that is the "
+            + "game's own water simulation, the same one that carries the DLC tsunami.";
         public static string EarthquakeTsunamiNoSea =
-            "No sea close enough to this map edge, so no tsunami was raised. This is normal on "
+            "The epicentre is not on open water, so no tsunami was raised. This is normal on "
             + "an inland map.";
 
         // --- ②地震（Task 10: 長周期地震動 ＝ 第 2 層の 2 つ目） ---
