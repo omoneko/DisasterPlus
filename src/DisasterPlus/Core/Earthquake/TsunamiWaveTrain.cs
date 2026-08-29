@@ -16,18 +16,43 @@ namespace DisasterPlus.Core.Earthquake
     /// 全部を 1 本の関数（<see cref="RiseAt"/>）で連続に繋いである。
     ///
     /// <code>
-    ///  ① 隆起   0 〜 BulgeSeconds
-    ///     震源に半径 BulgeStartRadius の山が立ち上がる（高さ 1.0）
+    ///  ① 隆起   0 〜 BulgeFrames
+    ///     震源に半径 BulgeStartRadius の山が立ち上がる（高さ 0 → 1）
     ///
-    ///  ② 拡大   BulgeSeconds 〜 SpreadSeconds
+    ///  ② 拡大   BulgeFrames 〜 SpreadFrames
     ///     山の縁が外へ広がり、天面が平らな**台地**になる
     ///
-    ///  ③ 陥没   SpreadSeconds 〜 CollapseSeconds
+    ///  ③ 陥没   SpreadFrames 〜 CollapseFrames
     ///     台地の**中央だけ**が海面へ戻り、**ドーナツ**になる
     ///
-    ///  ④ 伝播   CollapseSeconds 〜 TotalSeconds
+    ///  ④ 伝播   CollapseFrames 〜 TotalFrames
     ///     ドーナツの環が<b>減衰せずに</b>外へ広がる ＝ 同心円状の水の壁
     /// </code>
+    ///
+    /// ── ★★ 時計は「sim フレーム」である。ゲーム内秒ではない ────────────────
+    ///
+    /// **2026-08-29、実機報告「津波がやはり高さと波の継続力がとても弱いです」の
+    /// 原因の 1 つがここだった。** 前の版はこの時計を<b>ゲーム内秒</b>で持ち、
+    /// 呼び出し側が <c>(frame - start) / FramesPerMinute × 60</c> で渡していた。
+    /// ところが
+    ///
+    /// <code>
+    ///     SimulationManager.DAYTIME_FRAMES = 65536 / 日
+    ///     ＝ 45.51 フレーム / ゲーム内分
+    ///     ＝ **1 sim フレームが 1.32 ゲーム内秒**
+    /// </code>
+    ///
+    /// なので、当時の「900 ゲーム内秒」は<b>683 フレーム ≒ 11 実秒</b>にしかならず、
+    /// 肝心の④（環が広がる区間、124 ゲーム内秒）は
+    /// <b>94 フレーム ≒ 1.6 実秒</b>だった。**瞬きの間に終わっていた。**
+    ///
+    /// ★★ プレイヤーが見ているのは<b>フレーム</b>である。ゲーム内時計で演出を
+    ///   組むと、1 フレームが 1.32 ゲーム内秒であることを忘れた瞬間に
+    ///   <b>体感が 1/60 になる。</b>だから単位をフレームに変えて、
+    ///   名前にも <c>Frames</c> と書いた（<c>Seconds</c> という名前を残すと必ず戻る）。
+    ///
+    /// ★ ゲーム速度を上げればフレームも速く進む —— それは正しい挙動である
+    ///   （早送りすれば波も早送りになる）。
     ///
     /// ── ★★ 「減衰することなく」をどう守るか ────────────────────────────
     ///
@@ -41,9 +66,8 @@ namespace DisasterPlus.Core.Earthquake
     ///
     /// ── ★★ 「海面全体の隆起は不要」────────────────────────────────
     ///
-    /// 1 つ前の版は wake（前線の内側に残る水位）を敷いていた。
-    /// **それを捨てた。** ③ の陥没で中央は海面へ戻るので、
-    /// <b>環の内側は平常の海</b>である。環の外も平常。上がっているのは環だけ。
+    /// 環の内側は<b>平常の海</b>である（③の陥没で中央は海面へ戻る）。環の外も平常。
+    /// 上がっているのは環だけ。
     ///
     /// ── なぜ DLC の津波を使わないのか（IL 実測）──────────────────────────
     ///
@@ -55,19 +79,27 @@ namespace DisasterPlus.Core.Earthquake
     /// </summary>
     public static class TsunamiWaveTrain
     {
-        // ── 段の切れ目（秒。ゲーム内時間）──────────────────────────────
+        // ── 段の切れ目（**sim フレーム**。クラス doc の ★★ を読むこと）──────────
+        //
+        //   実秒の目安は 60 フレーム/実秒（ゲーム速度 1）で割ったもの。
 
-        /// <summary>① 隆起が立ち上がりきるまで。**「すぐに」なので短い。**</summary>
-        public const float BulgeSeconds = 12f;
+        /// <summary>① 隆起が立ち上がりきるまで（≒ 4 実秒）。</summary>
+        public const float BulgeFrames = 240f;
 
-        /// <summary>② 台地に育ちきるまで。</summary>
-        public const float SpreadSeconds = 40f;
+        /// <summary>② 台地に育ちきるまで（≒ 13 実秒）。</summary>
+        public const float SpreadFrames = 780f;
 
-        /// <summary>③ 中央が沈下しきって環になるまで。</summary>
-        public const float CollapseSeconds = 78f;
+        /// <summary>③ 中央が沈下しきって環になるまで（≒ 25 実秒）。</summary>
+        public const float CollapseFrames = 1500f;
 
-        /// <summary>④ 環が広がり終わるまで（＝全体の終わり）。</summary>
-        public const float TotalSeconds = 900f;
+        /// <summary>
+        /// ④ が終わって全部が畳まれるまで（≒ 70 実秒）。
+        ///
+        /// ★ 環が <see cref="ReachEdgeMetres"/> へ出るのは
+        ///   <c>CollapseFrames + (ReachEdge - Plateau) / Speed</c> ＝ 3833 フレーム。
+        ///   ここはそれより少しだけ後にする —— **空回りする時間を作らない。**
+        /// </summary>
+        public const float TotalFrames = 4200f;
 
         // ── 形 ────────────────────────────────────────────────
 
@@ -83,8 +115,13 @@ namespace DisasterPlus.Core.Earthquake
         /// </summary>
         public const float RingWidthMetres = 900f;
 
-        /// <summary>環が外へ広がる速さ（m/秒）。</summary>
-        public const float SpeedMetresPerSecond = 45f;
+        /// <summary>
+        /// 環が外へ広がる速さ（**m / sim フレーム**）。
+        ///
+        /// ★ 2.4 m/フレーム ＝ ゲーム速度 1 でおよそ 144 m/実秒。
+        ///   2600 m から 8200 m までを 2333 フレーム ≒ 39 実秒かけて渡る。
+        /// </summary>
+        public const float SpeedMetresPerFrame = 2.4f;
 
         /// <summary>波が届く限界（m）。ここから外へは水源も置かない。</summary>
         public const float ReachEdgeMetres = 8200f;
@@ -97,8 +134,8 @@ namespace DisasterPlus.Core.Earthquake
         /// </summary>
         public const float RingPeakFactor = 1.15f;
 
-        /// <summary>包絡線が落ちはじめる時刻（<see cref="TotalSeconds"/> に対する比）。</summary>
-        public const float FadeFromFraction = 0.86f;
+        /// <summary>包絡線が落ちはじめる時刻（<see cref="TotalFrames"/> に対する比）。</summary>
+        public const float FadeFromFraction = 0.92f;
 
         // ── 高さ ──────────────────────────────────────────────
 
@@ -117,49 +154,80 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
+        /// 環が <see cref="ReachEdgeMetres"/> へ出るフレーム。
+        /// **これ以降は何も持ち上がらない**ので、後始末はここから始めてよい。
+        /// </summary>
+        public static float RingLeavesAtFrame
+        {
+            get
+            {
+                return CollapseFrames
+                       + (ReachEdgeMetres - PlateauRadiusMetres) / SpeedMetresPerFrame;
+            }
+        }
+
+        /// <summary>
         /// 環（水の壁）の中心が今いる半径（m）。
         /// ③ が終わるまでは台地の縁に居り、④ から外へ走り出す。
         /// </summary>
-        public static float RingRadiusAt(float elapsedSeconds)
+        public static float RingRadiusAt(float elapsedFrames)
         {
-            if (IsBad(elapsedSeconds) || elapsedSeconds <= 0f) return 0f;
+            if (IsBad(elapsedFrames) || elapsedFrames <= 0f) return 0f;
 
-            if (elapsedSeconds <= BulgeSeconds) return BulgeStartRadiusMetres;
+            if (elapsedFrames <= BulgeFrames) return BulgeStartRadiusMetres;
 
-            if (elapsedSeconds <= SpreadSeconds)
+            if (elapsedFrames <= SpreadFrames)
             {
                 // ② 台地が広がる。
-                float k = (elapsedSeconds - BulgeSeconds) / (SpreadSeconds - BulgeSeconds);
+                float k = (elapsedFrames - BulgeFrames) / (SpreadFrames - BulgeFrames);
                 return BulgeStartRadiusMetres
                        + (PlateauRadiusMetres - BulgeStartRadiusMetres) * Smooth(k);
             }
 
-            if (elapsedSeconds <= CollapseSeconds) return PlateauRadiusMetres;
+            if (elapsedFrames <= CollapseFrames) return PlateauRadiusMetres;
 
             // ④ 環が外へ走る。**速さは一定**（減衰しないのと同じ理由）。
             return PlateauRadiusMetres
-                   + (elapsedSeconds - CollapseSeconds) * SpeedMetresPerSecond;
+                   + (elapsedFrames - CollapseFrames) * SpeedMetresPerFrame;
+        }
+
+        /// <summary>
+        /// 環の内側の縁（m）。**水源を並べる帯の内側**でもある。
+        ///
+        /// ★★ <b>ドーナツに「なりきる」まで 0 を返す</b>（<c>Hollowness &lt; 1</c>）。
+        ///   ③ の途中は中央がまだ海面より上で、<b>緩やかに沈んでいる最中</b>である。
+        ///   ここで内側を切り上げると、中央を担当していた水源が黙らされて
+        ///   <b>沈めるはずの水が置き去りになる</b>（水源は注ぐだけでなく
+        ///   目標より高い水を吸い戻す側でもある）。
+        ///   帯は必ず <see cref="ShapeAt"/> が 0 でない範囲を覆うこと。
+        /// </summary>
+        public static float RingInnerRadiusAt(float elapsedFrames)
+        {
+            if (Hollowness(elapsedFrames) < 1f) return 0f;
+
+            float inner = RingRadiusAt(elapsedFrames) - RingWidthMetres;
+            return inner > 0f ? inner : 0f;
         }
 
         /// <summary>
         /// 震源から <paramref name="distanceMetres"/> の地点で、地震から
-        /// <paramref name="elapsedSeconds"/> 秒後の<b>海面の持ち上がり</b>（m、0 以上）。
+        /// <paramref name="elapsedFrames"/> フレーム後の<b>海面の持ち上がり</b>（m、0 以上）。
         ///
         /// 終わったあとは 0 を返す —— <b>呼び出し側はそれで水位を戻す。</b>
         /// </summary>
-        public static float RiseAt(float distanceMetres, float elapsedSeconds,
+        public static float RiseAt(float distanceMetres, float elapsedFrames,
                                    float amplitudeMetres)
         {
             if (IsBad(distanceMetres) || distanceMetres < 0f) return 0f;
-            if (IsBad(elapsedSeconds) || elapsedSeconds < 0f) return 0f;
+            if (IsBad(elapsedFrames) || elapsedFrames < 0f) return 0f;
             if (IsBad(amplitudeMetres) || amplitudeMetres <= 0f) return 0f;
-            if (elapsedSeconds >= TotalSeconds) return 0f;
+            if (elapsedFrames >= TotalFrames) return 0f;
             if (distanceMetres >= ReachEdgeMetres) return 0f;
 
-            float envelope = EnvelopeAt(elapsedSeconds);
+            float envelope = EnvelopeAt(elapsedFrames);
             if (envelope <= 0f) return 0f;
 
-            float shape = ShapeAt(distanceMetres, elapsedSeconds);
+            float shape = ShapeAt(distanceMetres, elapsedFrames);
             if (shape <= 0f) return 0f;
 
             return amplitudeMetres * envelope * shape;
@@ -168,17 +236,23 @@ namespace DisasterPlus.Core.Earthquake
         /// <summary>
         /// 形だけ（高さ 1 に正規化）。<b>4 つの段がここで繋がっている。</b>
         /// </summary>
-        public static float ShapeAt(float distanceMetres, float elapsedSeconds)
+        public static float ShapeAt(float distanceMetres, float elapsedFrames)
         {
             if (IsBad(distanceMetres) || distanceMetres < 0f) return 0f;
-            if (IsBad(elapsedSeconds) || elapsedSeconds <= 0f) return 0f;
+            if (IsBad(elapsedFrames) || elapsedFrames <= 0f) return 0f;
 
-            float ring = RingRadiusAt(elapsedSeconds);
+            float ring = RingRadiusAt(elapsedFrames);
             if (ring <= 0f) return 0f;
+
+            // ① のあいだは高さそのものが 0 から立ち上がる（「隆起が生成」）。
+            float birth = elapsedFrames < BulgeFrames
+                ? Smooth(elapsedFrames / BulgeFrames)
+                : 1f;
+            if (birth <= 0f) return 0f;
 
             // ── ④ の「どれだけドーナツになっているか」 ─────────────────
             //    0 = 中央まで詰まった台地 / 1 = 完全な環
-            float hollow = Hollowness(elapsedSeconds);
+            float hollow = Hollowness(elapsedFrames);
 
             // 環（＝縁）の高さ。ドーナツになるほど高くなる。
             float peak = 1f + (RingPeakFactor - 1f) * hollow;
@@ -188,38 +262,37 @@ namespace DisasterPlus.Core.Earthquake
             {
                 float over = distanceMetres - ring;
                 if (over >= RingWidthMetres) return 0f;
-                return peak * Bell(over / RingWidthMetres);
+                return birth * peak * Bell(over / RingWidthMetres);
             }
 
             // ── 縁より内側 ──────────────────────────────────────
             //    hollow = 0 なら平らな天面（台地）。
             //    hollow = 1 なら中央は 0（＝海面）まで落ちる。
+            float centre = peak * (1f - hollow);
+
             float inner = ring - RingWidthMetres;
             if (inner < 0f) inner = 0f;
 
             if (distanceMetres >= inner)
             {
-                // 内側の壁。縁から inner へ向かって、hollow のぶんだけ落ちる。
+                // 内側の壁。縁（k=0）から inner（k=1）へ向かって centre まで落ちる。
                 float k = (ring - distanceMetres) / (ring - inner + 1e-3f);
-                float floorLevel = 1f - hollow;      // 中央の高さ
-                return peak + (floorLevel * peak - peak) * Smooth(k) * hollow
-                       + (1f - hollow) * 0f;
+                return birth * (peak + (centre - peak) * Smooth(k));
             }
 
-            // 中央部。台地のうちは 1、ドーナツになりきると 0。
-            return peak * (1f - hollow);
+            return birth * centre;
         }
 
         /// <summary>
         /// 中央がどれだけ抜けているか <c>[0,1]</c>。
         /// ③ の段で 0 → 1 へ、**緩やかに**動く（所有者の「緩やかに沈下して」）。
         /// </summary>
-        public static float Hollowness(float elapsedSeconds)
+        public static float Hollowness(float elapsedFrames)
         {
-            if (IsBad(elapsedSeconds) || elapsedSeconds <= SpreadSeconds) return 0f;
-            if (elapsedSeconds >= CollapseSeconds) return 1f;
+            if (IsBad(elapsedFrames) || elapsedFrames <= SpreadFrames) return 0f;
+            if (elapsedFrames >= CollapseFrames) return 1f;
 
-            float k = (elapsedSeconds - SpreadSeconds) / (CollapseSeconds - SpreadSeconds);
+            float k = (elapsedFrames - SpreadFrames) / (CollapseFrames - SpreadFrames);
             return Smooth(k);
         }
 
@@ -230,12 +303,12 @@ namespace DisasterPlus.Core.Earthquake
         ///   落とすのは<b>いちばん最後だけ</b> —— それは演出ではなく、
         ///   <b>持ち上げた海を戻すための合図</b>である（戻さないとセーブに残る）。
         /// </summary>
-        public static float EnvelopeAt(float elapsedSeconds)
+        public static float EnvelopeAt(float elapsedFrames)
         {
-            if (IsBad(elapsedSeconds) || elapsedSeconds < 0f) return 0f;
-            if (elapsedSeconds >= TotalSeconds) return 0f;
+            if (IsBad(elapsedFrames) || elapsedFrames < 0f) return 0f;
+            if (elapsedFrames >= TotalFrames) return 0f;
 
-            float w = elapsedSeconds / TotalSeconds;
+            float w = elapsedFrames / TotalFrames;
             if (w <= FadeFromFraction) return 1f;
 
             return (1f - w) / (1f - FadeFromFraction);

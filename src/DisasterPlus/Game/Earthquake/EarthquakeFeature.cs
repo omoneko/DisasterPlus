@@ -218,8 +218,11 @@ namespace DisasterPlus.Game
             // ★★ 津波は DLC の TsunamiAI ではなく自前の海面上昇である。
             //    **どちらが動いているか**を名乗らないと、調査のしようがない。
             b.Line(2, "tsunami surge", TsunamiSurge.Running
-                ? TsunamiSurge.SourceCount + " water sources over the sea, peak rise "
-                  + TsunamiSurge.PeakRiseMetres.ToString("F1") + " m"
+                ? TsunamiSurge.ActiveSourceCount + " of " + TsunamiSurge.SourceCount
+                  + " water sources are laid along the wave front, peak rise "
+                  + TsunamiSurge.PeakRiseMetres.ToString("F1") + " m, "
+                  + TsunamiSurge.SplashPulses + " impact-wave pulses ("
+                  + TsunamiSurge.SplashesLastPulse + " in the last one)"
                 : "not running"
                   + (TsunamiSurge.Detail != null
                      ? " (" + TsunamiSurge.Detail + ")" : ""));
