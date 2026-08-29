@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>WaterSolverSim</AssemblyName>
+    <RootNamespace>DisasterPlus.Tools.WaterSolverSim</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+
+    <!-- ★ このツールは 1 フレームあたり N*N セルを 2 周する。Debug の未最適化コードだと
+         512x512 で 1 フレーム 0.2 秒近くかかり、1500 フレームの確認が現実的でなくなる。
+         `dotnet run` は既定で Debug 構成なので、構成に関係なく最適化を有効にしておく。 -->
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <!-- Core の実物をそのままコンパイルする。**書き直した近似ではない。**
+       ここで要るのは DisasterPlus.Core.Earthquake.TsunamiSource（外力の段取り）で、
+       MOD が実機で使うのと 1 バイトも違わないものを駆動源にするため。 -->
+  <ItemGroup>
+    <Compile Include="..\..\src\DisasterPlus\Core\**\*.cs" />
+    <Compile Include="..\Shared\Png.cs" />
+  </ItemGroup>
+
+</Project>

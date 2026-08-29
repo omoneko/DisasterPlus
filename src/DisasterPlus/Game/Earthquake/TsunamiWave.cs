@@ -23,7 +23,7 @@ namespace DisasterPlus.Game
     /// <b>海底の隆起と同じ</b>、津波の教科書どおりの発生源である。
     /// だから震源にそれを置けば、同心円状の水の壁は<b>ソルバが作ってくれる</b>。
     ///
-    /// ── ★★ 外力から水位への増幅率は、読んでも決まらなかった ──────────────
+    /// ── ★★ 「発生しない」の真因（2026-08-30）──────────────────────────
     ///
     /// 所有者:「海溝型地震による津波は実装されていますか？発生しないんですが。」
     ///
@@ -35,12 +35,17 @@ namespace DisasterPlus.Game
     ///       Highest sea seen over the epicentre was 0.7 m above sea level
     /// </code>
     ///
-    /// ソルバの応答は<b>水深に頭打ちされる</b>（<c>v = min(v, m_height)</c>）し、
-    /// 周りの海の広さでも変わる。**IL からは決まらない。**
+    /// 原因は 2 つで、**どちらも読みだけでは分からず、ゲームの水ソルバを
+    /// オフラインで再現して（<c>tools/WaterSolverSim</c>）はじめて分かった**:
     ///
-    /// ★★ だから<b>決め打ちをやめた</b>。①の引き込みのあいだ、
-    ///   <b>震源の海面を毎 tick 実際に測って、目標の隆起に届くまで外力を上げる</b>
-    ///   （<see cref="TsunamiSource.NextDrive"/>）。増幅率を知らなくても届く。
+    /// <list type="number">
+    /// <item><b>時計が 64 倍速かった。</b><c>SimulateWater</c> は 64 sim フレームに
+    ///   1 回しか走らない（<see cref="FramesPerWaterStep"/>）。「1080 フレーム押す」は
+    ///   水ステップにして 17 回でしかなかった</item>
+    /// <item><b>押しっぱなしは波にならない。</b>定常的な外力は定常的な流出を作る ——
+    ///   それは波ではなく穴である。外力は「引き→押し→引き」でなければならない
+    ///   （<see cref="TsunamiSource"/> のクラス doc）</item>
+    /// </list>
     ///
     /// ★ Int16 の上限（32767）を超える外力が要りうるので、
     ///   <b>同じ原点・同じ半径の波を重ねる</b>（外力は波ごとに加算される）。
@@ -67,10 +72,19 @@ namespace DisasterPlus.Game
         private const float MapHalfExtent = 8640f;
 
         /// <summary>
-        /// 外力を書き換える間隔（フレーム）。
-        /// ★ ソルバは毎フレーム 1 水ステップ進むので、8 フレームなら十分細かい。
+        /// 1 水ステップぶんの sim フレーム数。
+        ///
+        /// ★★ **64 である。1 ではない。**（2026-08-30）
+        ///   <c>SimulateWater</c> は終わりに <c>m_waterFrameIndex</c> を
+        ///   <c>start + 64</c> にし、水スレッドはそれが
+        ///   <c>m_simulationFrameIndex</c> に追い越されるまで回らない。
+        ///   ＝ **ソルバは 64 sim フレームに 1 回しか進まない。**
+        ///
+        ///   前の版はここを 8 にしていたので、
+        ///   <b>水が 1 度も動かないうちに外力を 8 回書き換えていた</b>。
+        ///   （<see cref="TsunamiSource"/> のクラス doc に裏取り 2 件）
         /// </summary>
-        private const int IntervalFrames = 8;
+        private const int FramesPerWaterStep = 64;
 
         /// <summary>
         /// <c>m_duration</c>（<c>m_currentTime</c> は毎水ステップ +64）。
@@ -96,7 +110,6 @@ namespace DisasterPlus.Game
         private static uint _lastFrame;
         private static int _drive;
         private static int _delta;
-        private static float _targetMetres;
         private static float _peakRiseMetres;
         private static float _peakRingMetres;
         private static float _lastCentreMetres;
@@ -130,7 +143,8 @@ namespace DisasterPlus.Game
             {
                 if (!_running) return "not running";
                 return TsunamiSource.StageAt(
-                    Singleton<SimulationManager>.instance.m_currentFrameIndex - _startFrame);
+                    (Singleton<SimulationManager>.instance.m_currentFrameIndex - _startFrame)
+                    / (float)FramesPerWaterStep);
             }
         }
 
@@ -150,7 +164,6 @@ namespace DisasterPlus.Game
             _lastFrame = 0u;
             _drive = 0;
             _delta = 0;
-            _targetMetres = 0f;
             _peakRiseMetres = 0f;
             _peakRingMetres = 0f;
             _lastCentreMetres = 0f;
@@ -198,9 +211,8 @@ namespace DisasterPlus.Game
 
             _seaLevel = terrain.WaterSimulation.m_currentSeaLevel;
             _centre = epicentre;
-            _drive = TsunamiSource.FirstDriveUnits;
+            _drive = TsunamiSource.DriveUnitsFor(intensity);
             _delta = 0;
-            _targetMetres = TsunamiSource.TargetBulgeMetres(intensity);
             _peakRiseMetres = 0f;
             _peakRingMetres = 0f;
             _lastCentreMetres = 0f;
@@ -230,13 +242,15 @@ namespace DisasterPlus.Game
                      + " m. Sea level " + _seaLevel.ToString("F0")
                      + " m, water is " + _depthMetres.ToString("F1")
                      + " m deep here (the solver caps flow at the depth, so a shallow sea "
-                     + "cannot carry a big wave). Target bulge "
-                     + _targetMetres.ToString("F1") + " m; the drive starts at " + _drive
-                     + " units and is RAISED every " + IntervalFrames
-                     + " frames until the measured bulge reaches that target (up to "
-                     + TsunamiSource.MaxDriveUnits + "). For scale, the DLC tsunami drives "
-                     + "the map border with " + TsunamiSource.VanillaDeltaUnits(intensity)
-                     + " units");
+                     + "cannot carry a big wave). Drive " + _drive + " units over "
+                     + TsunamiSource.WavesNeeded(_drive) + " stacked waves, written once "
+                     + "per water step (" + FramesPerWaterStep
+                     + " sim frames). For scale, the DLC tsunami drives the map border "
+                     + "with " + TsunamiSource.VanillaDeltaUnits(intensity)
+                     + " units, though that is a boundary level, not a hill. "
+                     + "The drive lasts " + TsunamiSource.TotalSteps.ToString("F0")
+                     + " water steps = " + (TsunamiSource.TotalSteps * FramesPerWaterStep)
+                     .ToString("F0") + " sim frames");
             return true;
         }
 
@@ -267,7 +281,7 @@ namespace DisasterPlus.Game
 
         private static void Step(uint frame)
         {
-            if (frame - _lastFrame < IntervalFrames) return;
+            if (frame - _lastFrame < FramesPerWaterStep) return;
             _lastFrame = frame;
 
             TerrainManager terrain = Singleton<TerrainManager>.instance;
@@ -278,14 +292,16 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            float elapsed = frame - _startFrame;
+            // ★★ **水ステップに直す。** ソルバはこの単位でしか進まない。
+            float elapsed = (frame - _startFrame) / (float)FramesPerWaterStep;
 
             Observe(terrain);
 
             if (TsunamiSource.IsFinished(elapsed))
             {
                 Log.Info("tsunami drive finished after " + elapsed.ToString("F0")
-                         + " frames. Drive settled at " + _drive + " units ("
+                         + " water steps (" + (frame - _startFrame)
+                         + " sim frames). Drive settled at " + _drive + " units ("
                          + TsunamiSource.WavesNeeded(_drive) + " stacked waves). "
                          + "Highest sea over the epicentre " + _peakRiseMetres.ToString("F1")
                          + " m, over the source rim (" + TsunamiSource.RadiusMetres.ToString("F0")
@@ -297,14 +313,10 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ── ★★ ① のあいだだけ、実測を見て外力を決める ─────────────────
-            //    ② 以降は「① で見つかった大きさ」をそのまま押し出しに使う。
-            //    ② でも上げ続けると外向きの押しが際限なく強くなり、海が壊れる。
-            if (elapsed < TsunamiSource.DrawInFrames)
-            {
-                _drive = TsunamiSource.NextDrive(_drive, _lastCentreMetres, _targetMetres);
-            }
-
+            // ★★ 閉ループはやめた（2026-08-30）。ソルバの応答は 100 歩ほど遅れるので、
+            //    測って上げる制御は必ず巻き上がる（オフライン再現で確認:
+            //    2000 -> 139,516 units、中心が -40 m ＝ 海底まで掘れた）。
+            //    いまの外力は <c>tools/WaterSolverSim</c> で測って決めた開ループの定数。
             _delta = TsunamiSource.DeltaAt(elapsed, _drive);
             Write(terrain, _delta);
         }

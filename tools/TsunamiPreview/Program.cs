@@ -158,13 +158,13 @@ namespace DisasterPlus.Tools.TsunamiPreview
             for (int x = 0; x < Width; x++) Set(rgb, x, mid, 70, 78, 92);
 
             int peak = TsunamiSource.VanillaDeltaUnits(Intensity) * 4;
-            float span = TsunamiSource.TotalFrames * 1.15f;
+            float span = TsunamiSource.TotalSteps * 1.15f;
 
             // 段の境目。
-            foreach (float f in new[] { TsunamiSource.DrawInFrames,
-                                        TsunamiSource.DrawInFrames + TsunamiSource.TurnFrames,
-                                        TsunamiSource.PushFrames,
-                                        TsunamiSource.TotalFrames })
+            foreach (float f in new[] { TsunamiSource.DrawInSteps,
+                                        TsunamiSource.DrawInSteps + TsunamiSource.TurnSteps,
+                                        TsunamiSource.PushSteps,
+                                        TsunamiSource.TotalSteps })
             {
                 int x = (int)(f / span * (Width - 1));
                 for (int y = 0; y < Height; y += 3) Set(rgb, x, y, 48, 54, 66);
