@@ -62,7 +62,7 @@ namespace DisasterPlus.Tools.TsunamiPreview
         /// <summary>こちらの外力を数で出す。**符号が段どおりか**を見る。</summary>
         private static void Table()
         {
-            int peak = TsunamiSource.PeakDeltaUnits(Intensity);
+            int peak = TsunamiSource.VanillaDeltaUnits(Intensity) * 4;
 
             Console.WriteLine();
             Console.WriteLine("== 震源に与える外力（TYPE_IMPACT の m_delta）==");
@@ -157,7 +157,7 @@ namespace DisasterPlus.Tools.TsunamiPreview
             int mid = Height / 2;
             for (int x = 0; x < Width; x++) Set(rgb, x, mid, 70, 78, 92);
 
-            int peak = TsunamiSource.PeakDeltaUnits(Intensity);
+            int peak = TsunamiSource.VanillaDeltaUnits(Intensity) * 4;
             float span = TsunamiSource.TotalFrames * 1.15f;
 
             // 段の境目。

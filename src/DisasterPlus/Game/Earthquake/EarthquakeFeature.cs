@@ -218,10 +218,12 @@ namespace DisasterPlus.Game
             // ★★ 津波は DLC の TsunamiAI ではなく、震源に置いた TYPE_IMPACT の
             //    水波である。**どちらが動いているか**を名乗らないと調査できない。
             b.Line(2, "tsunami", TsunamiWave.Running
-                ? "drive " + TsunamiWave.DeltaUnits + " of " + TsunamiWave.PeakUnits
-                  + " units (" + TsunamiWave.Stage
-                  + "); highest sea over the epicentre so far "
-                  + TsunamiWave.PeakRiseMetres.ToString("F1") + " m above sea level"
+                ? "drive " + TsunamiWave.DeltaUnits + " of " + TsunamiWave.DriveUnits
+                  + " units (" + TsunamiWave.Stage + "); water is "
+                  + TsunamiWave.DepthMetres.ToString("F1")
+                  + " m deep at the epicentre; highest sea so far "
+                  + TsunamiWave.PeakRiseMetres.ToString("F1") + " m over the epicentre and "
+                  + TsunamiWave.PeakRingMetres.ToString("F1") + " m over the source rim"
                 : "not running"
                   + (TsunamiWave.Detail != null
                      ? " (" + TsunamiWave.Detail + ")" : ""));
