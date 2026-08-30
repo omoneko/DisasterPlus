@@ -169,9 +169,26 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
             Stopwatch clock = Stopwatch.StartNew();
 
+            // ★★ **印字の間引きは罠である。**（2026-08-30、判定役）
+            //    60 フレームおきに出すだけだと、そのあいだの谷と山が見えない。
+            //    「420 歩で緑・1080 歩で +111 m」を見落としたのと同じ穴なので、
+            //    **毎フレーム走査した最小・最大をここで持つ。**
+            float runningMin = float.MaxValue;
+            float runningMax = float.MinValue;
+            int runningMinFrame = -1;
+            int runningMaxFrame = -1;
+            int zeroWaterSteps = 0;
+
             for (int frame = 0; frame < frames; frame++)
             {
                 // ── 外力を組み直す（実機の MOD と同じ手順）──────────
+                {
+                    float watched = field.SurfaceAboveSeaMetres(centreX, centreZ);
+                    if (watched < runningMin) { runningMin = watched; runningMinFrame = frame; }
+                    if (watched > runningMax) { runningMax = watched; runningMaxFrame = frame; }
+                    if (watched <= -depth + 0.005f) zeroWaterSteps++;
+                }
+
                 if (frame % DriveInterval == 0)
                 {
                     float observed = field.SurfaceAboveSeaMetres(centreX, centreZ);
@@ -253,6 +270,11 @@ namespace DisasterPlus.Tools.WaterSolverSim
             Console.WriteLine("  " + frames + " frames in " + clock.Elapsed.TotalSeconds.ToString("F1")
                               + " s (" + (clock.Elapsed.TotalMilliseconds / frames).ToString("F1")
                               + " ms / frame)");
+            Console.WriteLine("  centre over EVERY frame: min " + runningMin.ToString("F2")
+                              + " m @f" + runningMinFrame + " (" + (100f * -runningMin / depth)
+                                .ToString("F0") + "% of the column), max "
+                              + runningMax.ToString("F2") + " m @f" + runningMaxFrame
+                              + ", steps at bare seabed " + zeroWaterSteps);
             Console.WriteLine("  final drive " + drive + " units = "
                               + (drive / (float)TsunamiSource.UnitsPerMetre).ToString("F0")
                               + " m の仮想的な海底隆起 ("

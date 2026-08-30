@@ -22,7 +22,20 @@ namespace DisasterPlus.Game
     /// ゲームの災害には型が 1 つしか無い（<c>EarthquakeAI</c>）。**新しい災害種別を
     /// 足すことはできない。** そこで「海溝型」は
     /// <b>この MOD が海の上に自分で起こした地震</b>と定義する。
-    /// 見分けは<b>災害 ID を覚えておくこと</b>で行う（<see cref="LastId"/>）。
+    /// 見分けは<b>災害 ID と乱数種の組</b>を覚えておくことで行う
+    /// （<see cref="LastId"/> と <see cref="IsTrenchQuake"/>）。
+    ///
+    /// ★★ **ID だけでは足りない。**（2026-08-30、最終検証で再現された）
+    ///   <c>DisasterManager.CreateDisaster</c> は index 1 から
+    ///   <c>m_flags == None</c> の枠を<b>先頭一致で使い回し</b>、
+    ///   <c>ReleaseDisaster</c> は枠を <c>default(DisasterData)</c> で潰す。
+    ///   つまり海溝型が終わると<b>次の災害がたいてい同じ番号を取る</b>。
+    ///   ID だけで見ていたので、その災害まで海溝型と誤認していた ——
+    ///   <b>バニラの地震の断層が抑止され、海の上なら津波まで付いた。</b>
+    ///   これは所有者の指示「バニラの地震では津波は発生させず」に真っ向から反する。
+    ///
+    ///   <c>CreateDisaster</c> は枠ごとに <c>m_randomSeed</c> を
+    ///   sim の乱数から引き直す（IL 実測）。**種が変わっていたら別人**である。
     ///
     /// ★ <b>震源の位置では見分けない。</b> プレイヤーがバニラの災害パネルから
     ///   海の上に地震を置くこともできるが、それは断層型のつもりで置いたものである。
@@ -47,6 +60,12 @@ namespace DisasterPlus.Game
         private const ushort SelfTrigger = 64;
 
         private static ushort _id;
+
+        /// <summary>
+        /// 起こしたときの <c>DisasterData.m_randomSeed</c>。
+        /// **番号が使い回されたことを見抜く唯一の手掛かり**（クラス doc の ★★）。
+        /// </summary>
+        private static ulong _seed;
         private static Vec3 _epicentre;
         private static float _searchDistanceMetres;
 
@@ -65,16 +84,48 @@ namespace DisasterPlus.Game
         /// <summary>直近の顛末（**英語・診断用**）。断ったときは必ず入る。</summary>
         public static string Detail { get; private set; }
 
-        /// <summary>この災害 ID は海溝型か。<paramref name="id"/> が 0 なら常に false。</summary>
+        /// <summary>
+        /// この災害 ID は海溝型か。<paramref name="id"/> が 0 なら常に false。
+        ///
+        /// ★★ **番号だけで判定しない。**<c>m_randomSeed</c> も照合する ——
+        ///   番号は使い回されるので、これが無いと<b>次のバニラの地震を
+        ///   海溝型と誤認する</b>（クラス doc の ★★）。
+        ///   照合できない状況（バッファが読めない）では<b>false</b>を返す。
+        ///   誤って津波を付けるより、付けないほうが指示に近い。
+        /// </summary>
         public static bool IsTrenchQuake(ushort id)
         {
-            return id != 0 && id == _id;
+            if (id == 0 || id != _id) return false;
+
+            try
+            {
+                DisasterManager manager = Singleton<DisasterManager>.instance;
+                if (manager == null || manager.m_disasters == null) return false;
+
+                DisasterData[] buffer = manager.m_disasters.m_buffer;
+                if (buffer == null || id >= buffer.Length) return false;
+
+                // ★ 枠が空いた ＝ もう自分の災害ではない。忘れる。
+                if (buffer[id].m_flags == DisasterData.Flags.None)
+                {
+                    _id = 0;
+                    _seed = 0UL;
+                    return false;
+                }
+
+                return buffer[id].m_randomSeed == _seed;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>レベルのロード／アンロードで呼ぶ。**都市をまたいで持ち越さない。**</summary>
         public static void Reset()
         {
             _id = 0;
+            _seed = 0UL;
             _epicentre = new Vec3(0f, 0f, 0f);
             _searchDistanceMetres = 0f;
             Detail = null;
@@ -111,15 +162,29 @@ namespace DisasterPlus.Game
 
             Vec3 sea;
             float distance;
-            if (!NearestSea(point, SeaSearch.MaxRing, out sea, out distance))
+            bool sawDeepWater;
+            if (!NearestSea(point, SearchRings, out sea, out distance, out sawDeepWater))
             {
                 // ★★ **内陸マップでは海が無いのが正しい答えである。**
                 //    「それらしい地点」を作って起こさない —— 海溝型地震の意味が消える。
-                Detail = "no open sea at least "
-                         + MinDepthMetres.ToString("F0") + " m deep within "
-                         + (SeaSearch.StepMetres * SeaSearch.MaxRing)
-                         .ToString("F0") + " m of the point you clicked; a trench "
-                         + "earthquake needs open water";
+                //
+                // ★★ **理由を取り違えない。** 深い水はあったが狭かった場合と、
+                //    そもそも深い水が無かった場合は、プレイヤーの次の一手が違う
+                //    （前者は沖へ寄る、後者は諦める）。
+                float reach = SeaSearch.StepMetres * SearchRings;
+
+                Detail = sawDeepWater
+                    ? ("the water within " + reach.ToString("F0")
+                       + " m of the point you clicked is deep enough but too narrow: a "
+                       + "trench earthquake needs open sea for "
+                       + DisasterPlus.Core.Earthquake.TsunamiSource.RadiusMetres
+                         .ToString("F0")
+                       + " m in every direction, or the source resonates instead of "
+                       + "radiating. Click further out to sea")
+                    : ("no sea at least " + MinDepthMetres.ToString("F0")
+                       + " m deep within " + reach.ToString("F0")
+                       + " m of the point you clicked; a trench earthquake needs "
+                       + "deep open water");
                 return false;
             }
 
@@ -149,6 +214,7 @@ namespace DisasterPlus.Game
             info.m_disasterAI.StartNow(id, ref buffer[id]);
 
             _id = id;
+            _seed = buffer[id].m_randomSeed;
             _epicentre = sea;
             _searchDistanceMetres = distance;
             Detail = null;
@@ -179,7 +245,7 @@ namespace DisasterPlus.Game
                 //    全走査は 37,249 点で、1 点ごとに HasWater と WaterLevel が
                 //    水シミュの読み取りロックを取り直す。RenderOverlay は
                 //    6 フレームごとに呼ぶので、毎秒 70 万回の錠のやり取りになっていた。
-                return NearestSea(point, PreviewRings, out sea, out distanceMetres);
+                return NearestSea(point, SearchRings, out sea, out distanceMetres);
             }
             catch
             {
@@ -197,8 +263,26 @@ namespace DisasterPlus.Game
         private static bool NearestSea(Vec3 point, int maxRings,
                                        out Vec3 sea, out float distanceMetres)
         {
+            bool ignored;
+            return NearestSea(point, maxRings, out sea, out distanceMetres, out ignored);
+        }
+
+        /// <summary>
+        /// 同上。<paramref name="sawDeepWater"/> に「十分に深い海はあったが
+        /// <see cref="IsOpenSea"/> で落ちた」かどうかを返す。
+        ///
+        /// ★★ **断る理由を取り違えない。**（2026-08-30、最終検証）
+        ///   30 m のフィヨルドや広い川は深さの条件を通り、開けていないことで落ちる。
+        ///   それを「そんなに深い海は無い」と言うと<b>嘘になる</b> ——
+        ///   プレイヤーがもらえる説明はこの 1 文だけなのだから、外してはいけない。
+        /// </summary>
+        private static bool NearestSea(Vec3 point, int maxRings,
+                                       out Vec3 sea, out float distanceMetres,
+                                       out bool sawDeepWater)
+        {
             sea = new Vec3(0f, 0f, 0f);
             distanceMetres = 0f;
+            sawDeepWater = false;
 
             TerrainManager terrain = Singleton<TerrainManager>.instance;
             if (terrain == null) return false;
@@ -249,6 +333,9 @@ namespace DisasterPlus.Game
                 //    水シミュが使うのは m_blockHeights である。
                 if (TsunamiWave.DepthAt(terrain, x, z) < MinDepthMetres) continue;
 
+                // ★ ここまで来た ＝ 十分に深い海はあった。断る理由が変わる。
+                sawDeepWater = true;
+
                 // ★★ **源のまわりが開けた海であること。**（2026-08-30、最終検証）
                 //    外力は半径 1280 m の円盤で、その中に陸があると
                 //    <b>源そのものが桶になって共振する</b>（掃引で +111 m まで跳ねた）。
@@ -265,10 +352,22 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// プレビューで見るリング数。<c>SeaSearch.MaxRing</c>(96) は 9,216 m ぶんで
-        /// 37,249 点になる。24 リング ＝ 2,304 m ＝ 2,401 点。
+        /// 海を探すリング数。**プレビューと発生で同じ値を使うこと。**
+        ///
+        /// ★★ 別々にしていたのが 2026-08-30 の指摘だった。プレビューは 24 リング
+        ///   （2,304 m）、発生は 96 リング（9,216 m）だったので、
+        ///   <b>印が出ないのにクリックすると 9 km 先で地震が起きた</b>。
+        ///   画面外で起きるので、プレイヤーには「押しても何も起きない」に見える ——
+        ///   まさに実機テストで判定を壊す壊れ方である。
+        ///
+        /// ★ 揃える先は<b>狭いほう</b>。<c>SeaSearch.MaxRing</c>(96) は 37,249 点で、
+        ///   1 点ごとに <c>HasWater</c> と <c>WaterLevel</c> が
+        ///   <c>WaterSimulation.BeginRead</c>（<c>Monitor.TryEnter</c> のスピン）を
+        ///   取り直す。プレビューは毎フレームに近い頻度で呼ばれるので、
+        ///   広いほうへ揃えると<b>水スレッドと錠を奪い合う。</b>
+        ///   24 リング ＝ 2,304 m ＝ 2,401 点。
         /// </summary>
-        private const int PreviewRings = 24;
+        private const int SearchRings = 24;
 
         /// <summary>源のまわりを確かめる方位の数（8 方位）。</summary>
         private const int OpenSeaProbes = 8;

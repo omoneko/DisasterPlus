@@ -128,6 +128,27 @@ namespace DisasterPlus.Game
                 return;
             }
 
+            // ★★ **印が出ていない所では起こさない。**（2026-08-30、最終検証）
+            //    以前は地面に当たりさえすれば無条件に注文を積んでいた。
+            //    海が見つからなければ sim 側が断るので何も起きないのだが、
+            //    ツールは閉じてしまうので、プレイヤーには
+            //    <b>「押したのに何も起きない」</b>としか映らない ——
+            //    実機テストで成功と失敗を見分けられなくする、いちばん悪い壊れ方である。
+            //
+            //    いまは<b>ツールを開いたまま</b>断る。カーソルが出しっぱなしなのが
+            //    「ここではない」の合図で、印が出る所まで動かせば起こせる。
+            //    （プレビューと同じ <c>TrenchQuakeSlot</c> の探索を使うので、
+            //     印が出ている所なら必ず通る。）
+            Vec3 previewSea;
+            float previewDistance;
+            if (!TrenchQuakeSlot.TryFindNearestSea(hit, out previewSea, out previewDistance))
+            {
+                Log.Diag("trenchPick",
+                    "no sea for a trench earthquake at the point that was clicked; "
+                    + "the tool stays armed so it can be clicked again further out");
+                return;
+            }
+
             byte intensity = (byte)Clamp(IntensitySlider.ReadOr(DefaultIntensity), 1, 255);
 
             // ★★ **地震を起こすのは sim スレッドである。** 災害バッファは
