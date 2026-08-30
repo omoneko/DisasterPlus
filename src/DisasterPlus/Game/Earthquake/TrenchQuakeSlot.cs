@@ -128,7 +128,15 @@ namespace DisasterPlus.Game
                     return false;
                 }
 
-                return buffer[id].m_randomSeed == _seed;
+                if (buffer[id].m_randomSeed == _seed) return true;
+
+                // ★★ **種が違う ＝ 番号が使い回された。** 忘れる。
+                //    忘れないと、以後この番号を見るたびに同じ照合を繰り返し、
+                //    <c>LastId</c> はセッションのあいだ 0 に戻らない
+                //    （2026-08-30、第 5 回検証）。
+                _id = 0;
+                _seed = 0UL;
+                return false;
             }
             catch
             {
@@ -230,8 +238,8 @@ namespace DisasterPlus.Game
                     ? ("the water within " + reach.ToString("F0")
                        + " m of the point you clicked is deep enough but too narrow: a "
                        + "trench earthquake needs open sea for "
-                       + DisasterPlus.Core.Earthquake.TsunamiSource.RadiusMetres
-                         .ToString("F0")
+                       + (DisasterPlus.Core.Earthquake.TsunamiSource.RadiusMetres
+                          * OpenSeaFraction).ToString("F0")
                        + " m in every direction, or the source resonates instead of "
                        + "radiating. Click further out to sea")
                     : ("no sea at least " + MinDepthMetres.ToString("F0")
@@ -364,8 +372,9 @@ namespace DisasterPlus.Game
             //    深いほうを採るのは物理的にも正しい。
             //
             //    近い順に走査し、**十分に深い海が見つかった時点で確定**する。
-            //    最後まで見つからなければ、途中でいちばん深かった所へ落とす
-            //    （浅い海しか無いマップでも津波は起こす —— 小さくなるだけ）。
+            //    ★ **見つからなければ断る（false）。**「いちばん深かった所へ落とす」
+            //      という逃げ道は置いていない —— 浅い海はこのソルバでは波を運べず、
+            //      震源に穴が開くだけになるからである（TsunamiSource のクラス doc）。
             int count = SeaSearch.CountUpTo(maxRings < 0 ? 0 : (maxRings > SeaSearch.MaxRing ? SeaSearch.MaxRing : maxRings));
             for (int i = 0; i < count; i++)
             {
@@ -396,7 +405,8 @@ namespace DisasterPlus.Game
                 sawDeepWater = true;
 
                 // ★★ **源のまわりが開けた海であること。**（2026-08-30、最終検証）
-                //    外力は半径 1280 m の円盤で、その中に陸があると
+                //    外力の円盤は半径 1280 m で、確かめるのはその 0.85 倍
+                //    （1,088 m）の 8 方位である。その中に陸があると
                 //    <b>源そのものが桶になって共振する</b>（掃引で +111 m まで跳ねた）。
                 //    オフライン再現で確かめたのは<b>開けた海</b>だけなので、
                 //    保証できない地形では起こさない。

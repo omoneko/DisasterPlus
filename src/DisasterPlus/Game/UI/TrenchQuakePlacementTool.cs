@@ -39,7 +39,7 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// 的を出すために海を探す間隔（フレーム）。**毎フレームは探さない** ——
-        /// 最悪 <see cref="SeaSearch.Count"/> ＝ 37,249 点を舐めるので、
+        /// 最悪 <c>SeaSearch.CountUpTo(24)</c> ＝ 2,401 点を舐めるので、
         /// カーソルを動かすだけで実機が重くなる。
         /// </summary>
         private const int PreviewEveryFrames = 6;
@@ -52,6 +52,12 @@ namespace DisasterPlus.Game
 
         /// <summary>注文を出した時点の <c>TrenchQuakeSlot.AttemptSerial</c>。</summary>
         private static int _awaitingSerial;
+
+        /// <summary>断られた印を「不可」の色で描き続ける時刻（実時間）。</summary>
+        private static float _refusedUntilRealtime;
+
+        /// <summary>その長さ（実秒）。**短すぎると見落とす、長すぎると嘘になる。**</summary>
+        private const float RefusedFlashSeconds = 2.5f;
         private static Vector3 _previewSea;
 
         /// <summary>このツールが今アクティブか。**main スレッドから呼ぶこと。**</summary>
@@ -89,6 +95,7 @@ namespace DisasterPlus.Game
             _previewCountdown = 0;
             _previewValid = false;
             _awaitingRaise = false;
+            _refusedUntilRealtime = 0f;
         }
 
         public static void Activate()
@@ -133,6 +140,11 @@ namespace DisasterPlus.Game
                 {
                     _awaitingRaise = false;
                     if (TrenchQuakeSlot.LastAttemptOk) { Deactivate(); return; }
+
+                    // ★★ **断られたことを画面にも出す。**（第 5 回検証）
+                    //    ログだけだと、ゲームを見ている人には分からない。
+                    //    しばらく印を「不可」の色で描く（下の RenderOverlay）。
+                    _refusedUntilRealtime = Time.realtimeSinceStartup + RefusedFlashSeconds;
                 }
 
                 // 返事が来るまでは次のクリックを受け付けない（注文を積み上げない）。
@@ -158,8 +170,12 @@ namespace DisasterPlus.Game
             //
             //    いまは<b>ツールを開いたまま</b>断る。カーソルが出しっぱなしなのが
             //    「ここではない」の合図で、印が出る所まで動かせば起こせる。
-            //    （プレビューと同じ <c>TrenchQuakeSlot</c> の探索を使うので、
-            //     印が出ている所なら必ず通る。）
+            //
+            //    ★ ここでは海を探さない。**探すのは sim 側だけ**である
+            //      （同じ述語を 2 か所で走らせると、断りの理由が食い違う）。
+            //      印はプレビューが同じ <c>SearchRings</c> で描いているので、
+            //      印が出ている所なら通るはずだが、**保証はしない** ——
+            //      通らなかったときは sim が理由を書き、ツールは開いたままになる。
             byte intensity = (byte)Clamp(IntensitySlider.ReadOr(DefaultIntensity), 1, 255);
 
             // ★★ **地震を起こすのは sim スレッドである。** 災害バッファは
@@ -197,7 +213,8 @@ namespace DisasterPlus.Game
 
             if (UIView.IsInsideUI()) return;
 
-            // ★ 探索は重い（最悪 37,249 点）ので間引く。あいだのフレームは
+            // ★ 探索は重い（最悪 2,401 点、1 点ごとに水シミュの読み取り錠）ので
+            //   間引く。あいだのフレームは
             //   前に見つけた海に的を出したままにする —— 消すとちらつく。
             if (--_previewCountdown <= 0)
             {
@@ -219,7 +236,9 @@ namespace DisasterPlus.Game
 
             if (!_previewValid) return;
 
-            PlacementMarker.Render(cameraInfo, _previewSea, GetToolColor(false, false));
+            // ★ 直前のクリックが断られていれば「不可」の色。理由はログにある。
+            bool refused = Time.realtimeSinceStartup < _refusedUntilRealtime;
+            PlacementMarker.Render(cameraInfo, _previewSea, GetToolColor(false, refused));
         }
 
         private static bool TryPickGround(out Vec3 hit)

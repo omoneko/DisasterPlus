@@ -266,6 +266,16 @@ namespace DisasterPlus.Game
 
         private static void Step(EarthquakeSnapshot snapshot, uint frame)
         {
+            // ★★ 追っている地震が<b>本当に同じ地震か</b>を種でも確かめる
+            //    （2026-08-30、第 5 回検証）。災害の番号は使い回されるので、
+            //    番号だけで追うと<b>別の地震に津波を付けかねない</b>。
+            //    海溝型を追っているときだけ効く（バニラの地震は元々採らない）。
+            if (_quakeId != 0 && _quakeId == TrenchQuakeSlot.LastId
+                && !TrenchQuakeSlot.IsTrenchQuake(_quakeId))
+            {
+                Forget();
+            }
+
             var quake = FindTracked(snapshot);
             if (quake == null)
             {

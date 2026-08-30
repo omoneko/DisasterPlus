@@ -257,7 +257,8 @@ namespace DisasterPlus.Game
                    + "solver's own 'a hill of water is here' term, i.e. a sea-floor "
                    + "uplift: negative draws the sea in and raises a bulge, positive "
                    + "pushes it out into a ring. The drive stops after "
-                   + "TsunamiSource.TotalFrames - everything after that is the game's "
+                   + "TsunamiSource.TotalSteps water steps - everything after that is "
+                   + "the game's "
                    + "own water solver, the same one that carries the DLC tsunami");
 
             var snapshot = EarthquakeHub.Latest;

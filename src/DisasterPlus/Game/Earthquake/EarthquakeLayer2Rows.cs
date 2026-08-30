@@ -334,9 +334,15 @@ namespace DisasterPlus.Game
                     {
                         EarthquakeRows.SetPlain(_tsunamiNoteLabel,
                             Strings.EarthquakeTsunamiFromShore);
+
+                        // ★★ **出し終えた波を「到達予定」に戻さない。**
+                        //    （第 5 回検証）連鎖が監視をやめても LastId は残るので、
+                        //    素直に書くと Raised -> 到達予定 と<b>逆戻りして見える</b>。
                         EarthquakeRows.SetLayer2(_tsunamiLabel,
-                            Strings.EarthquakeTsunamiPending + "   (#"
-                            + TrenchQuakeSlot.LastId + ")");
+                            (TsunamiChain.StillOwes(TrenchQuakeSlot.LastId)
+                                ? Strings.EarthquakeTsunamiPending
+                                : Strings.EarthquakeTsunamiRaised)
+                            + "   (#" + TrenchQuakeSlot.LastId + ")");
                         return;
                     }
 
