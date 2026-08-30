@@ -65,41 +65,64 @@ namespace DisasterPlus.Core.Earthquake
     /// **穴**である。波を作るのは<b>移り変わり</b>のほうで、
     /// だからバニラの津波も 1.5 周期の<b>振動</b>なのである（引き波→押し波→引き波）。
     ///
-    /// ★★ ここも同じ形にした。時間積分がほぼ 0 なので<b>穴が残らない</b>:
+    /// ★★ **どの形がいちばん良いかは、6 つ振ってオフライン再現で決めた**
+    ///   （2026-08-30。<c>tools/WaterSolverSim</c> で 5 つのゲート
+    ///    G1 隆起 / G2 穴を残さない / G3 環 / G4 到達 / G5 安全 を判定）。
+    ///   勝ったのは<b>「長く引いて、短く強く押す」</b>:
     ///
     /// <code>
-    ///   drive(t) = -envelope(t) * sin(2*pi * 1.5 * t/T)
-    ///   envelope(t) = (1 - cos(2*pi * t/T)) / 2       // 両端 0、真ん中 1
-    ///
-    ///     t/T = 0   〜 1/3 : 負 ＝ 水が中心へ → ①**隆起**
-    ///     t/T = 1/3 〜 2/3 : 正 ＝ 外へ押し出す → ②台地 ③ドーナツ（いちばん強い）
-    ///     t/T = 2/3 〜 1   : 負 ＝ 引き戻す → **掘った穴を埋める**
-    ///   そのあとは外力 0 ＝ ④ソルバだけが環を運ぶ
+    ///   w = t / TotalSteps
+    ///   w &lt; 0.6 : drive = -sin(pi * w / 0.6)              ①**隆起が育つ**
+    ///   w &gt;= 0.6: drive = +sin(pi * (w-0.6)/0.4) * 1.5    ②台地→ドーナツ→環
+    ///   そのあとは外力 0 ＝ ③ソルバだけが環を運ぶ
     /// </code>
+    ///
+    /// ★ 時間積分はちょうど 0（0.6×(2/pi) ＝ 0.4×1.5×(2/pi)）。**穴が残らない。**
+    ///
+    /// ★ 落ちた形の記録:
+    ///   ・1.5 周期（引き→押し→引き）は隆起が 3.2 m までしか育たなかった
+    ///   ・半径 200 セルは<b>源が桶になって共振し</b>、中心が海底まで抜けたあと
+    ///     **+111 m まで跳ね上がった**（420 歩で止めていたので最初は「緑」に見えた
+    ///     —— 1080 歩まで回して初めて分かった）
     /// </summary>
     public static class TsunamiSource
     {
         // ── 時計（**水ステップ**。クラス doc の ★★ を読むこと）──────────────
 
         /// <summary>
-        /// 外力が動いている長さ（水ステップ）。180 歩 ≒ 192 実秒 ≒ 3.2 実分。
+        /// 外力が動いている長さ（水ステップ）。300 歩 ≒ 320 実秒 ≒ 5.3 実分。
         ///
         /// ★ 目盛りはバニラ: DLC の津波の発生源は <c>m_duration 16384 / 64</c>
-        ///   ＝ **256 水ステップ**（≒ 4.5 実分）。こちらはその 7 割。
+        ///   ＝ **256 水ステップ**（≒ 4.5 実分）。同じ桁である。
         /// </summary>
-        public const float TotalSteps = 180f;
+        public const float TotalSteps = 300f;
 
         /// <summary>
-        /// 外力が回る周期の数。**バニラと同じ 1.5。**
-        /// 「引き → 押し → 引き」の 3 つの半周期になる。
+        /// 引き込みに使う割合。**残りが押し出し。**
+        ///
+        /// ★★ 0.6 は<b>オフライン再現の掃引で勝った値</b>（6 つの形を並列に振って
+        ///   5 つのゲートで判定した。<c>docs/…/2026-08-29-tsunami-il-facts.md</c>）。
+        ///   長く引いてから短く強く押す —— これがいちばん
+        ///   「隆起がしっかり見えてから、環になって走り出す」形だった。
         /// </summary>
-        public const float Cycles = 1.5f;
+        public const float DrawInFraction = 0.6f;
+
+        /// <summary>
+        /// 押し出しの山の高さ（引き込みの山を 1 としたとき）。
+        ///
+        /// ★ <c>0.6 : 0.4</c> の時間配分に対して <c>1 : 1.5</c> の高さなので、
+        ///   <b>時間積分がちょうど 0</b> になる（0.6×(2/π) ＝ 0.4×1.5×(2/π)）。
+        ///   **これが「穴を残さない」の代数的な担保**である。
+        /// </summary>
+        public const float PushOvershoot = 1.5f;
 
         /// <summary>①（引き込み）が終わる水ステップ。診断と試験のため。</summary>
-        public static float DrawInSteps { get { return TotalSteps / (Cycles * 2f); } }
+        public static float DrawInSteps { get { return TotalSteps * DrawInFraction; } }
 
-        /// <summary>②③（押し出し）が終わる水ステップ。</summary>
-        public static float PushSteps { get { return TotalSteps * 2f / (Cycles * 2f); } }
+        /// <summary>②（押し出し）がいちばん強くなる水ステップ。</summary>
+        public static float PushSteps
+        {
+            get { return TotalSteps * (DrawInFraction + (1f - DrawInFraction) * 0.5f); } }
 
         // ── 寸法 ──────────────────────────────────────────────
 
@@ -107,9 +130,14 @@ namespace DisasterPlus.Core.Earthquake
         /// 発生源の半径（セル。1 セル 16 m）。
         ///
         /// ★ IL では <c>R = 1 + max(maxX-origX, origX-minX)</c> ——<b>X しか見ない。</b>
-        ///   120 セル ＝ 1920 m。震源の「隆起」の大きさそのものである。
+        ///   80 セル ＝ 1280 m。震源の「隆起」の大きさそのものである。
+        ///
+        /// ★★ 120 -> 80（2026-08-30、オフライン再現の掃引）。大きくすると
+        ///   <b>源そのものが桶になって共振する</b> —— 半径 200 セルでは、
+        ///   縁で立った波が中心へ戻ってきて<b>中心が海底まで抜けたあと
+        ///   +111 m まで跳ね上がった</b>（掃引の shape 1）。
         /// </summary>
-        public const int RadiusCells = 120;
+        public const int RadiusCells = 80;
 
         /// <summary>同上をメートルで。</summary>
         public const float RadiusMetres = RadiusCells * 16f;
@@ -134,27 +162,84 @@ namespace DisasterPlus.Core.Earthquake
         public const int UnitsPerMetre = 64;
 
         /// <summary>
-        /// いちばん弱い地震の外力（<c>m_delta</c> の単位）。
+        /// いちばん弱い地震の外力（<c>m_delta</c> の単位、水深
+        /// <see cref="ReferenceDepthMetres"/> のとき）。
         /// **<c>tools/WaterSolverSim</c> で測って決めた値**であって、推測ではない。
         /// </summary>
-        public const int MinDriveUnits = 260;
+        public const int MinDriveUnits = 700;
 
         /// <summary>
-        /// いちばん強い地震（強度 255、＝強度解放の 25.5）の外力。
-        /// 同じく <c>tools/WaterSolverSim</c> の実測から決めた。
+        /// いちばん強い地震（強度 255 ＝ 強度解放の 25.5）の外力。同じく実測。
+        ///
+        /// ★★ **強度の帯が狭いのは手抜きではない。**
+        ///   波の大きさを決めているのは<b>海の深さ</b>である —— ソルバの流量は
+        ///   <c>v = min(v, m_height)</c> で頭打ちされるので、
+        ///   <b>浅い海はどんなに強い地震でも大きな波を運べない</b>。
+        ///   水深 40 m での実測（<c>tools/WaterSolverSim</c>、格子 1081、780 歩）:
+        ///
+        /// <code>
+        ///     drive   隆起     いちばん深い中心    環（1.4km → 5.3km）
+        ///       771   15.4 m   -21.6 m (54%)      6.2 → 1.6 m
+        ///      1000   20.0 m   -28.0 m (70%)      8.4 → 2.6 m   ← ここが最適点
+        ///      1150   22.8 m   -32.0 m (80%)      9.8 → 3.3 m
+        ///      1500   30.3 m   **-40.00 m ＝ 海底むき出し**（約 70 歩）
+        /// </code>
+        ///
+        ///   1500 は「強い」のではなく<b>壊れている</b>。だから上限は 1200 である。
         /// </summary>
-        public const int MaxIntensityDriveUnits = 2600;
+        public const int MaxIntensityDriveUnits = 1200;
 
-        /// <summary>地震の強度（0〜255）から外力の大きさを出す（符号なし）。</summary>
-        public static int DriveUnitsFor(byte intensity)
+        /// <summary>
+        /// 上の数字を測ったときの水深（m）。
+        ///
+        /// ★★ **外力は水深で割らなければならない。**（2026-08-30、判定エージェント）
+        ///   ソルバの流量は <c>v = min(v, m_height)</c> で水深に頭打ちされるので、
+        ///   同じ外力でも<b>浅い海ほど掘り抜けてしまう</b>。水深 10 m で
+        ///   水深 40 m 用の外力を出すと、震源のセルが
+        ///   <b>136 水ステップ（≒145 実秒）のあいだ海底むき出しになった</b>。
+        ///   隆起の高さと掘り下げの深さはこのソルバでは同じ量なので、
+        ///   浅い海では隆起そのものを小さくするしかない。
+        /// </summary>
+        public const float ReferenceDepthMetres = 40f;
+
+        /// <summary>
+        /// 水深の係数の下限。**0 にすると浅瀬で津波が消える。**
+        ///
+        /// ★ 0.15 -> 0.08（2026-08-30）。0.15 だと水深 5 m の海に
+        ///   水深 6 m ぶんの外力が出て、震源が<b>海底むき出しになった</b>
+        ///   （実測 -5.00 m ＝ 水柱まるごと）。素の比（depth/40）が使える
+        ///   範囲を水深 3.2 m まで下げる。
+        /// </summary>
+        public const float MinDepthFactor = 0.08f;
+
+        /// <summary>同じく上限。深い海でも青天井にはしない。</summary>
+        public const float MaxDepthFactor = 1.6f;
+
+        /// <summary>
+        /// 地震の強度（0〜255）と<b>震源の水深</b>から外力の大きさを出す（符号なし）。
+        /// </summary>
+        public static int DriveUnitsFor(byte intensity, float depthMetres)
         {
             float d = MinDriveUnits
                       + (MaxIntensityDriveUnits - MinDriveUnits) * (intensity / 255f);
 
+            d *= DepthFactor(depthMetres);
+
             int units = (int)(d + 0.5f);
-            if (units < MinDriveUnits) return MinDriveUnits;
+            if (units < 1) return 1;
             if (units > MaxDriveUnits) return MaxDriveUnits;
             return units;
+        }
+
+        /// <summary>水深による割り引き。**上のクラス doc の理由で必須。**</summary>
+        public static float DepthFactor(float depthMetres)
+        {
+            if (IsBad(depthMetres) || depthMetres <= 0f) return MinDepthFactor;
+
+            float f = depthMetres / ReferenceDepthMetres;
+            if (f < MinDepthFactor) return MinDepthFactor;
+            if (f > MaxDepthFactor) return MaxDepthFactor;
+            return f;
         }
 
         // ── バニラの目盛り（比較のためだけに持つ）─────────────────────
@@ -218,13 +303,15 @@ namespace DisasterPlus.Core.Earthquake
 
             double w = elapsedSteps / TotalSteps;
 
-            // 両端 0、真ん中 1 の包絡。**段差を作らない**（ソルバは傾きの差を積む）。
-            double envelope = (1.0 - Math.Cos(2.0 * Math.PI * w)) * 0.5;
+            // ① 長く引く（負 ＝ 水が中心へ集まる ＝ 隆起が育つ）。
+            if (w < DrawInFraction)
+            {
+                return (float)(-Math.Sin(Math.PI * w / DrawInFraction));
+            }
 
-            // 1.5 周期。最初の半周期を「引き」にしたいので符号を反転する。
-            double swing = -Math.Sin(2.0 * Math.PI * Cycles * w);
-
-            return (float)(envelope * swing);
+            // ②③ 短く強く押す（正 ＝ 外へ。隆起が台地→ドーナツ→環になる）。
+            double k = (w - DrawInFraction) / (1.0 - DrawInFraction);
+            return (float)(Math.Sin(Math.PI * k) * PushOvershoot);
         }
 
         /// <summary>
@@ -243,9 +330,8 @@ namespace DisasterPlus.Core.Earthquake
             if (elapsedSteps >= TotalSteps) return "4 done - the ring is on its own now";
 
             float w = elapsedSteps / TotalSteps;
-            if (w < 1f / 3f) return "1 the sea is drawn in over the epicentre";
-            if (w < 2f / 3f) return "2 the bulge is pushed out into a ring";
-            return "3 the sea is drawn back in so no crater is left";
+            if (w < DrawInFraction) return "1 the sea is drawn in and the bulge rises";
+            return "2 the bulge is pushed out into a spreading ring";
         }
 
         // ── 重ねた波への配分 ─────────────────────────────────────

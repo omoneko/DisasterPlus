@@ -195,6 +195,27 @@ namespace DisasterPlus.Game
                 ? terrain.WaterSimulation.m_currentSeaLevel
                 : DefaultSeaLevelMetres;
 
+            // ★★ **いちばん近い海ではなく、いちばん近い「深い」海を採る。**
+            //    （2026-08-30、オフライン再現で分かった）
+            //
+            //    ゲームの浅水ソルバは流量を <c>v = min(v, m_height)</c> で
+            //    <b>水深に頭打ちする</b>。だから浅い海はどんなに強く押しても
+            //    大きな波を運べない。実測（tools/WaterSolverSim、格子 1081）:
+            //
+            //        水深 40 m: 隆起 17.8 m、環は 5.3 km 先でも 2.1 m
+            //        水深 10 m: 隆起  4.2 m、環は 2.4 km でほぼ消える
+            //
+            //    「海溝型」はそもそも<b>沖の深い海</b>で起きるものなので、
+            //    深いほうを採るのは物理的にも正しい。
+            //
+            //    近い順に走査し、**十分に深い海が見つかった時点で確定**する。
+            //    最後まで見つからなければ、途中でいちばん深かった所へ落とす
+            //    （浅い海しか無いマップでも津波は起こす —— 小さくなるだけ）。
+            bool haveFallback = false;
+            Vec3 fallback = new Vec3(0f, 0f, 0f);
+            float fallbackDistance = 0f;
+            float fallbackDepth = 0f;
+
             int count = SeaSearch.Count;
             for (int i = 0; i < count; i++)
             {
@@ -217,15 +238,49 @@ namespace DisasterPlus.Game
                 // ★ 水深も見る。**波打ち際は「海」ではない** ——
                 //   そこで起こすと震源が陸に見える。
                 float ground = terrain.SampleRawHeightSmooth(new Vector3(x, 0f, z));
-                if (level - ground < MinDepthMetres) continue;
+                float depth = level - ground;
+                if (depth < MinDepthMetres) continue;
 
-                sea = new Vec3(x, level, z);
-                distanceMetres = SeaSearch.DistanceMetres(dx, dz);
+                if (depth >= PreferredDepthMetres)
+                {
+                    sea = new Vec3(x, level, z);
+                    distanceMetres = SeaSearch.DistanceMetres(dx, dz);
+                    return true;
+                }
+
+                if (depth > fallbackDepth)
+                {
+                    haveFallback = true;
+                    fallbackDepth = depth;
+                    fallback = new Vec3(x, level, z);
+                    fallbackDistance = SeaSearch.DistanceMetres(dx, dz);
+                }
+            }
+
+            if (haveFallback)
+            {
+                sea = fallback;
+                distanceMetres = fallbackDistance;
+                Log.Info("trench earthquake: no sea deeper than "
+                         + PreferredDepthMetres.ToString("F0")
+                         + " m within reach, so the epicentre falls back to the deepest "
+                         + "water found (" + fallbackDepth.ToString("F1")
+                         + " m). The wave will be smaller - the solver caps flow at the "
+                         + "depth, so a shallow sea cannot carry a big one");
                 return true;
             }
 
             return false;
         }
+
+        /// <summary>
+        /// 震源に選びたい水深（m）。これ以上あれば、そこで確定する。
+        ///
+        /// ★★ <c>TsunamiSource.ReferenceDepthMetres</c>（外力を測った水深）の 6 割。
+        ///   ここを下回る海では波が痩せることをオフライン再現で確かめてある。
+        /// </summary>
+        private const float PreferredDepthMetres =
+            DisasterPlus.Core.Earthquake.TsunamiSource.ReferenceDepthMetres * 0.6f;
 
         /// <summary>
         /// マップ半辺（m）。<c>TsunamiAI.FindSea</c> の IL 実測にある 8640 と同じ。

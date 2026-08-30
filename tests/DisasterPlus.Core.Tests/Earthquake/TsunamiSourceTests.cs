@@ -112,29 +112,72 @@ namespace DisasterPlus.Core.Tests.Earthquake
 
         // ── 外力の大きさ（tools/WaterSolverSim で測って決めた）────────────
 
+        private const float Deep = TsunamiSource.ReferenceDepthMetres;
+
         [Fact]
         public void AStrongerQuakeDrivesTheSeaHarder()
         {
-            Assert.True(TsunamiSource.DriveUnitsFor(255) > TsunamiSource.DriveUnitsFor(100));
-            Assert.True(TsunamiSource.DriveUnitsFor(100) > TsunamiSource.DriveUnitsFor(10));
+            Assert.True(TsunamiSource.DriveUnitsFor(255, Deep)
+                        > TsunamiSource.DriveUnitsFor(100, Deep));
+            Assert.True(TsunamiSource.DriveUnitsFor(100, Deep)
+                        > TsunamiSource.DriveUnitsFor(10, Deep));
         }
 
         [Fact]
         public void EvenTheWeakestQuakeDrivesSomething()
         {
-            Assert.Equal(TsunamiSource.MinDriveUnits, TsunamiSource.DriveUnitsFor(0));
+            Assert.Equal(TsunamiSource.MinDriveUnits, TsunamiSource.DriveUnitsFor(0, Deep));
             Assert.True(TsunamiSource.MinDriveUnits > 0);
         }
 
         [Fact]
-        public void TheStrongestQuakeStillFitsInTheStackedWaves()
+        public void TheStrongestQuakeStaysInsideTheBandWeMeasured()
         {
-            // 頭打ちされると、強度を上げても波が伸びなくなる。
+            // ★★ 上限を超えると「強い」ではなく**壊れる** ——
+            //    水深 40 m で drive 1500 は震源を海底まで掘り抜いた
+            //    （tools/WaterSolverSim、格子 1081）。
             for (int i = 0; i <= 255; i++)
             {
-                Assert.InRange(TsunamiSource.DriveUnitsFor((byte)i),
-                               TsunamiSource.MinDriveUnits, TsunamiSource.MaxDriveUnits);
+                Assert.InRange(TsunamiSource.DriveUnitsFor((byte)i, Deep),
+                               TsunamiSource.MinDriveUnits,
+                               TsunamiSource.MaxIntensityDriveUnits);
             }
+
+            Assert.True(TsunamiSource.MaxIntensityDriveUnits <= 1200,
+                        "above 1200 the epicentre is dug down to bare seabed");
+        }
+
+        // ── ★★ 水深で割る ───────────────────────────────────────
+
+        [Fact]
+        public void ShallowSeasGetAProportionallySmallerSource()
+        {
+            // ★★ ソルバの流量は v = min(v, m_height) で水深に頭打ちされる。
+            //    浅い海に深い海用の外力を出すと**震源が海底むき出しになる**。
+            int deep = TsunamiSource.DriveUnitsFor(100, Deep);
+            int shallow = TsunamiSource.DriveUnitsFor(100, Deep * 0.25f);
+
+            Assert.True(shallow < deep, deep + " -> " + shallow);
+            Assert.Equal(deep * 0.25f, shallow, 0);
+        }
+
+        [Fact]
+        public void TheDepthFactorIsBounded()
+        {
+            Assert.Equal(1f, TsunamiSource.DepthFactor(Deep), 4);
+            Assert.Equal(TsunamiSource.MinDepthFactor, TsunamiSource.DepthFactor(0.01f), 4);
+            Assert.Equal(TsunamiSource.MinDepthFactor, TsunamiSource.DepthFactor(0f), 4);
+            Assert.Equal(TsunamiSource.MinDepthFactor, TsunamiSource.DepthFactor(-5f), 4);
+            Assert.Equal(TsunamiSource.MinDepthFactor, TsunamiSource.DepthFactor(float.NaN), 4);
+            Assert.Equal(TsunamiSource.MaxDepthFactor, TsunamiSource.DepthFactor(9999f), 4);
+        }
+
+        [Fact]
+        public void AShallowSeaStillGetsSomething()
+        {
+            // **0 にしてはいけない。** 浅瀬でも津波は起きる（むしろ被害はそこで出る）。
+            Assert.True(TsunamiSource.DriveUnitsFor(255, 1f) > 0);
+            Assert.True(TsunamiSource.MinDepthFactor > 0f);
         }
 
         // ── ① 隆起: 水を中心へ集める（外力は負）───────────────────────
@@ -150,13 +193,21 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         [Fact]
-        public void TheDriveEndsByDrawingTheSeaBackIn()
+        public void TheDrawInComesFirstAndThePushSecond()
         {
-            // ★★ **これが「穴を残さない」の担保である。**
-            //    押しっぱなしにすると定常的な流出になり、波ではなく穴ができる
-            //    （オフライン再現で確認: 中心が -40 m ＝ 海底まで掘れた）。
-            float last = TsunamiSource.DriveAt(TsunamiSource.TotalSteps * 0.85f);
-            Assert.True(last < 0f, "the drive does not pull back at the end: " + last);
+            // ①長く引く（負）→ ②短く強く押す（正）。掃引で勝った形。
+            Assert.True(TsunamiSource.DriveAt(TsunamiSource.TotalSteps * 0.3f) < 0f);
+            Assert.True(TsunamiSource.DriveAt(TsunamiSource.TotalSteps * 0.8f) > 0f);
+        }
+
+        [Fact]
+        public void ThePushIsShorterAndHarderThanTheDrawIn()
+        {
+            float draw = System.Math.Abs(TsunamiSource.DriveAt(TsunamiSource.TotalSteps * 0.3f));
+            float push = System.Math.Abs(TsunamiSource.DriveAt(TsunamiSource.TotalSteps * 0.8f));
+
+            Assert.True(push > draw, draw + " -> " + push);
+            Assert.Equal(TsunamiSource.PushOvershoot, push / draw, 2);
         }
 
         [Fact]
@@ -172,7 +223,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
             // ★ 完全な 0 は要求しない（そこまで縛ると形が選べない）。
             //   縛りたいのは「押しっぱなし」で、それは +0.5*T あたりに出る。
             //   現行の形は -0.085*T（わずかに引き寄りで、穴ではなく僅かな盛り上がり）。
-            Assert.True(System.Math.Abs(sum) < TsunamiSource.TotalSteps * 0.20f,
+            // ★★ **ちょうど 0 になる形を選んである** ——
+            //    0.6 * (2/pi) == 0.4 * 1.5 * (2/pi)。押しっぱなしなら +0.5*T になる。
+            Assert.True(System.Math.Abs(sum) < TsunamiSource.TotalSteps * 0.01f,
                         "the drive has a net push of " + sum
                         + " (a push-only drive would be about +"
                         + (TsunamiSource.TotalSteps * 0.5f) + ")");
@@ -182,8 +235,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         public void TheBulgeRisesRatherThanPoppingIntoExistence()
         {
             float a = System.Math.Abs(TsunamiSource.DriveAt(TsunamiSource.DrawInSteps * 0.1f));
-            float b = System.Math.Abs(TsunamiSource.DriveAt(TsunamiSource.DrawInSteps * 0.4f));
-            float c = System.Math.Abs(TsunamiSource.DriveAt(TsunamiSource.DrawInSteps * 0.7f));
+            float b = System.Math.Abs(TsunamiSource.DriveAt(TsunamiSource.DrawInSteps * 0.3f));
+            float c = System.Math.Abs(TsunamiSource.DriveAt(TsunamiSource.DrawInSteps * 0.5f));
 
             Assert.True(a < b && b < c, a + " " + b + " " + c);
         }
@@ -245,11 +298,12 @@ namespace DisasterPlus.Core.Tests.Earthquake
             // ★ 目盛りはバニラ: DLC の発生源は 256 フレーム（≒4.3 実秒）しかない。
             //   こちらは円形に広げるぶん、それより長く押す。
             // DLC の発生源は m_duration 16384 / 64 = 256 水ステップ。
-            Assert.InRange(TsunamiSource.TotalSteps, 60f, 256f);
+            // DLC の発生源は m_duration 16384 / 64 = 256 水ステップ。同じ桁にする。
+            Assert.InRange(TsunamiSource.TotalSteps, 60f, 400f);
 
             // 1 水ステップ = 64 sim フレーム。
             float seconds = TsunamiSource.TotalSteps * 64f / FramesPerRealSecond;
-            Assert.InRange(seconds, 60f, 400f);
+            Assert.InRange(seconds, 60f, 500f);
         }
 
         [Fact]

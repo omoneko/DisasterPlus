@@ -110,7 +110,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
             int centreZ = gridSize / 2;
 
             float target = 0f;
-            int drive = (pinnedDrive >= 0) ? pinnedDrive : TsunamiSource.DriveUnitsFor(intensity);
+            int drive = (pinnedDrive >= 0) ? pinnedDrive : TsunamiSource.DriveUnitsFor(intensity, depth);
 
             // 初期の総水量。以降の行で「ソルバが水を作った／消した」を見るための基準。
             // ★ 外周の輪は設計どおり水を捨てる／湧かせるので、0% にはならない。
@@ -137,7 +137,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                               + ((int)(depth * WaterField.UnitsPerMetre)) + " units, seabed at "
                               + (seaLevel - depth).ToString("F0") + " m");
             Console.WriteLine("  intensity  " + intensity + "  -> drive "
-                              + TsunamiSource.DriveUnitsFor(intensity) + " units");
+                              + TsunamiSource.DriveUnitsFor(intensity, depth) + " units");
             Console.WriteLine("  source     R = " + (TsunamiSource.RadiusCells + 1) + " cells ("
                               + ((TsunamiSource.RadiusCells + 1) * WaterField.CellSizeMetres / 1000f).ToString("F2")
                               + " km), " + TsunamiSource.MaxStackedWaves + " stacked waves");
@@ -377,10 +377,9 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
             switch (shape)
             {
-                case 0:   // Core の現行（包絡 (1-cos)/2 × 1.5 周期）
-                    f = -((1.0 - Math.Cos(2.0 * Math.PI * w)) * 0.5)
-                        * Math.Sin(2.0 * Math.PI * 1.5 * w);
-                    break;
+                case 0:   // ★ Core の現行そのもの（掃引で勝った形を取り込んだ）
+                    return TsunamiSource.DeltaAt(step / total * TsunamiSource.TotalSteps,
+                                                 drive);
 
                 case 1:   // 引きを厚くした 1.5 周期（包絡を sin(pi*w) に）
                     f = -Math.Sin(Math.PI * w) * Math.Sin(2.0 * Math.PI * 1.5 * w);

@@ -211,16 +211,18 @@ namespace DisasterPlus.Game
 
             _seaLevel = terrain.WaterSimulation.m_currentSeaLevel;
             _centre = epicentre;
-            _drive = TsunamiSource.DriveUnitsFor(intensity);
             _delta = 0;
             _peakRiseMetres = 0f;
             _peakRingMetres = 0f;
             _lastCentreMetres = 0f;
 
-            // ★★ **水深を必ず名乗る。** ソルバの流量は <c>v = min(v, m_height)</c> で
-            //    <b>水深に頭打ちされる</b>。「押しても動かない」の第一容疑者はここなので、
-            //    ログに出しておかないと次も同じところで詰まる。
+            // ★★ **水深を先に測る。外力はそれで割る。**
+            //    ソルバの流量は v = min(v, m_height) で水深に頭打ちされるので、
+            //    浅い海に深い海用の外力を出すと<b>震源が海底むき出しになる</b>
+            //    （オフライン再現: 水深 10 m で 136 水ステップ ≒ 145 実秒）。
+            //    ログにも必ず出す —— 「押しても動かない」の第一容疑者だからである。
             _depthMetres = DepthAt(terrain, epicentre.X, epicentre.Z);
+            _drive = TsunamiSource.DriveUnitsFor(intensity, _depthMetres);
 
             if (!CreateAll(terrain))
             {
