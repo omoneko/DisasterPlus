@@ -79,6 +79,15 @@ namespace DisasterPlus.Game
             //    走っていなければ即 return するので、ただの空振りである。
             TsunamiWave.Tick(frameIndex);
 
+            // ★★ **終わった海溝型は忘れる。**（2026-08-30、第 4 回検証）
+            //    <c>IsTrenchQuake</c> はスロットが空いていたら自分で忘れるが、
+            //    それを呼ぶのは Harmony の前置きと <c>TsunamiChain</c> だけで、
+            //    どちらも<b>生きている災害しか見ない</b>。だから
+            //    <c>LastId</c> はセッションのあいだ 0 に戻らず、
+            //    診断が「海溝型のために走っている」と言い続けていた。
+            //    毎 tick 1 回だけ確かめる（配列 1 読みなのでただ同然）。
+            TrenchQuakeSlot.IsTrenchQuake(TrenchQuakeSlot.LastId);
+
             // ★★ **海溝型を置いたあとは、パネルの設定で止めない。**（第 3 回検証）
             //    <c>EarthquakeEnabled</c> は「地震パネルを出すか」の設定だが、
             //    ここで早期 return すると <c>TsunamiChain.Tick</c> まで飛ぶ。
@@ -455,7 +464,13 @@ namespace DisasterPlus.Game
                 ? "none"
                 : "#" + snapshot.TsunamiQuakeId);
             b.Line(2, "delay setting",
-                ModSettings.EarthquakeTsunamiDelayMinutes.value + " in-game minutes");
+                ModSettings.EarthquakeTsunamiDelayMinutes.value
+                + " in-game minutes - but a TRENCH quake CAPS it at "
+                + TsunamiChain.TrenchDelayMinutes
+                + " (the epicentre is just offshore, so the first wave is minutes away, "
+                + "not half an hour). A trench quake is the only kind that gets a "
+                + "tsunami, so any setting above " + TsunamiChain.TrenchDelayMinutes
+                + " changes nothing; below it the setting is used as-is");
         }
 
         /// <summary>

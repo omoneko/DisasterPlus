@@ -123,7 +123,7 @@ namespace DisasterPlus.Game
         /// ★ 設定の <c>eqTsunamiDelay</c> がこれより長ければ、海溝型に限って
         ///   こちらまで縮める。**短く設定している人の値は尊重する**（縮めるだけ）。
         /// </summary>
-        private const int TrenchDelayMinutes = 3;
+        internal const int TrenchDelayMinutes = 3;
 
         /// <summary>
         /// 強度の下限。強度 0 の津波は波高が 0 になり（<c>m_delta = m_height * 1024 * i / 55</c>、
@@ -148,6 +148,50 @@ namespace DisasterPlus.Game
 
         /// <summary>予約の満了フレーム。<see cref="State"/> が Scheduled のときだけ意味を持つ。</summary>
         public static uint DueFrame { get { return _dueFrame; } }
+
+        /// <summary>
+        /// この地震に<b>まだ津波を負っているか</b>。
+        ///
+        /// ★★ **2 つ目の海溝型を断る判定はこれで行う。**
+        ///   理由は「追える津波が 1 本だけ」であって、地震のスロットが
+        ///   17〜35 実分も生きることではない（<c>TrenchQuakeSlot.RaiseCore</c> の ★★）。
+        ///
+        /// ★★ <b>「予約済みか波が出ている最中か」だけでは足りない。</b>
+        ///   （2026-08-30、Codex P1）地震が Emerging のあいだ、こちらはまだ
+        ///   その地震を拾っていないので状態は Idle である。そこで 2 発目を通すと
+        ///   <b>1 発目の印が奪われ、しかも 2 発目は拾われない</b>。
+        ///   だから<b>決着（Raised / NoSea / NoDlc / Failed）が付くまで</b>
+        ///   負っていることにする。
+        ///
+        /// ★ 災害スロットが空けば <c>IsTrenchQuake</c> が忘れるので、
+        ///   この錠が地震より長生きすることはない。
+        /// </summary>
+        public static bool StillOwes(ushort quakeId)
+        {
+            if (quakeId == 0) return false;
+            if (TsunamiWave.Running) return true;
+
+            // まだ拾っていない（Emerging の最中など）。負っている。
+            if (_quakeId != quakeId) return true;
+
+            return _state == TsunamiChainState.Idle
+                   || _state == TsunamiChainState.Scheduled;
+        }
+
+        /// <summary>
+        /// **新しい海溝型地震が起きたときに呼ぶ（sim スレッド）。**
+        /// 追いかける相手を捨てて、次の tick から拾い直せるようにする。
+        ///
+        /// ★★ これが無いと、前の地震が Clearing で生きているあいだ
+        ///   <c>PickCandidate</c> は<b>古い相手を追い続け</b>、新しい海溝型は
+        ///   Emerging→Active の瞬間を見逃されて<b>津波を取りこぼす</b>
+        ///   （2026-08-30、Codex P1）。前の津波は既に出し終えている
+        ///   （<see cref="StillOwes"/> がそれを保証する）ので、捨ててよい。
+        /// </summary>
+        public static void Retarget()
+        {
+            Forget();
+        }
 
         /// <summary>監視している地震（災害バッファ上の添字）。0 なら監視していない。</summary>
         public static ushort QuakeId { get { return _quakeId; } }

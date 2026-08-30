@@ -46,6 +46,12 @@ namespace DisasterPlus.Game
 
         private static int _previewCountdown;
         private static bool _previewValid;
+
+        /// <summary>sim へ注文を出して返事を待っているか（<see cref="OnToolUpdate"/>）。</summary>
+        private static bool _awaitingRaise;
+
+        /// <summary>注文を出した時点の <c>TrenchQuakeSlot.AttemptSerial</c>。</summary>
+        private static int _awaitingSerial;
         private static Vector3 _previewSea;
 
         /// <summary>このツールが今アクティブか。**main スレッドから呼ぶこと。**</summary>
@@ -82,6 +88,7 @@ namespace DisasterPlus.Game
 
             _previewCountdown = 0;
             _previewValid = false;
+            _awaitingRaise = false;
         }
 
         public static void Activate()
@@ -118,6 +125,20 @@ namespace DisasterPlus.Game
             if (!ModSettings.TrenchQuakeEnabled.value) { Deactivate(); return; }
 
             if (Input.GetMouseButtonUp(1)) { Deactivate(); return; }
+
+            // ★★ sim の返事待ち。増えたら成否を見て、成功なら閉じる。
+            if (_awaitingRaise)
+            {
+                if (TrenchQuakeSlot.AttemptSerial != _awaitingSerial)
+                {
+                    _awaitingRaise = false;
+                    if (TrenchQuakeSlot.LastAttemptOk) { Deactivate(); return; }
+                }
+
+                // 返事が来るまでは次のクリックを受け付けない（注文を積み上げない）。
+                return;
+            }
+
             if (!Input.GetMouseButtonUp(0)) return;
             if (UIView.IsInsideUI()) return;
 
@@ -139,20 +160,6 @@ namespace DisasterPlus.Game
             //    「ここではない」の合図で、印が出る所まで動かせば起こせる。
             //    （プレビューと同じ <c>TrenchQuakeSlot</c> の探索を使うので、
             //     印が出ている所なら必ず通る。）
-            Vec3 previewSea;
-            float previewDistance;
-            if (!TrenchQuakeSlot.TryFindNearestSea(hit, out previewSea, out previewDistance))
-            {
-                // ★★ **Info で出す。**（第 3 回検証）Diag は既定で黙っているので、
-                //    断られたことがどこにも残らなかった。押しても何も起きない理由が
-                //    ログにすら無いのは、この MOD がいちばん嫌う出力である。
-                Log.Info("trench earthquake NOT raised: "
-                         + (TrenchQuakeSlot.Detail
-                            ?? "no open sea deep enough near the point that was clicked")
-                         + ". The tool stays armed - click further out to sea");
-                return;
-            }
-
             byte intensity = (byte)Clamp(IntensitySlider.ReadOr(DefaultIntensity), 1, 255);
 
             // ★★ **地震を起こすのは sim スレッドである。** 災害バッファは
@@ -160,16 +167,23 @@ namespace DisasterPlus.Game
             //    ②には⑤のような依頼の口が無いので、③と同じく
             //    SimulationManager.AddAction で 1 回だけ渡す。
             Vec3 point = hit;
+
+            // ★★ **返事を待ってから閉じる。**（2026-08-30、第 4 回検証）
+            //    以前はここで即 <c>Deactivate()</c> していた。sim が断ったとき
+            //    （海が無い・津波がまだ途中・DLC 非所持・災害枠が満杯）、
+            //    画面では<b>印が出てツールが閉じて何も起きない</b>だけになり、
+            //    <b>死んだボタンと見分けが付かなかった</b>。
+            //
+            //    いまは <c>AttemptSerial</c> が増えるのを待ち、
+            //    <b>成功したときだけ閉じる</b>。断られたらツールは開いたままで、
+            //    出しっぱなしのカーソルが「起きなかった」の合図になる。
+            _awaitingSerial = TrenchQuakeSlot.AttemptSerial;
+            _awaitingRaise = true;
+
             Singleton<SimulationManager>.instance.AddAction(delegate
             {
                 TrenchQuakeSlot.Raise(point, intensity);
             });
-
-            // 指したら用は済んでいる。押しっぱなしで 2 つ目を指させない。
-            Deactivate();
-
-            // ★ **黙って終わらない。** 起きたか・断られたかは
-            //   TrenchQuakeSlot.Detail と診断ダンプが名乗る。
         }
 
         /// <summary>

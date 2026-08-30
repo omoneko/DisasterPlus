@@ -324,6 +324,22 @@ namespace DisasterPlus.Game
                     return;
 
                 default:
+                    // ★★ **海溝型を起こした直後は、待っていることを名乗る。**
+                    //    （2026-08-30、第 4 回検証）
+                    //    海溝型は Emerging のあいだ Idle のままで、それが
+                    //    <b>クリックから 2 分 17 秒</b>続く。そのあいだ行を空にすると、
+                    //    画面には何も出ない —— 待っている人はそれを「壊れている」と読み、
+                    //    もう一度クリックする。**空白は答えではない。**
+                    if (TrenchQuakeSlot.LastId != 0)
+                    {
+                        EarthquakeRows.SetPlain(_tsunamiNoteLabel,
+                            Strings.EarthquakeTsunamiFromShore);
+                        EarthquakeRows.SetLayer2(_tsunamiLabel,
+                            Strings.EarthquakeTsunamiPending + "   (#"
+                            + TrenchQuakeSlot.LastId + ")");
+                        return;
+                    }
+
                     // Idle（陸の震源を含む）と Failed。行を出さない。
                     EarthquakeRows.SetPlain(_tsunamiLabel, "");
                     return;

@@ -85,6 +85,21 @@ namespace DisasterPlus.Game
         public static string Detail { get; private set; }
 
         /// <summary>
+        /// <see cref="Raise"/> を試みた回数。**ツールはこれが増えるのを待つ。**
+        ///
+        /// ★★ 地震を起こすのは sim スレッドなので、ツール（main）は
+        ///   <b>成否をその場では知れない</b>。以前はクリックした瞬間に
+        ///   ツールを閉じていたので、sim が断ったときは
+        ///   <b>印は出る・ツールは閉じる・何も起きない</b>——
+        ///   画面上は<b>死んだボタン</b>と見分けが付かなかった
+        ///   （2026-08-30、第 4 回検証）。
+        /// </summary>
+        public static int AttemptSerial { get; private set; }
+
+        /// <summary>直近の <see cref="Raise"/> が成功したか。</summary>
+        public static bool LastAttemptOk { get; private set; }
+
+        /// <summary>
         /// この災害 ID は海溝型か。<paramref name="id"/> が 0 なら常に false。
         ///
         /// ★★ **番号だけで判定しない。**<c>m_randomSeed</c> も照合する ——
@@ -128,6 +143,8 @@ namespace DisasterPlus.Game
             _seed = 0UL;
             _epicentre = new Vec3(0f, 0f, 0f);
             _searchDistanceMetres = 0f;
+            AttemptSerial = 0;
+            LastAttemptOk = false;
             Detail = null;
         }
 
@@ -138,16 +155,31 @@ namespace DisasterPlus.Game
         /// <param name="intensity">バニラの強度スライダーの生値（0〜255）。</param>
         public static bool Raise(Vec3 point, byte intensity)
         {
+            bool ok;
+
             try
             {
-                return RaiseCore(point, intensity);
+                ok = RaiseCore(point, intensity);
             }
             catch (System.Exception e)
             {
                 Detail = "raising the trench earthquake threw " + e.GetType().Name;
                 Log.Error("trench earthquake failed", e);
-                return false;
+                ok = false;
             }
+
+            // ★★ **必ず名乗る。** ツールはこの 2 つを見て、閉じるか開いたままかを決める。
+            LastAttemptOk = ok;
+            AttemptSerial++;
+
+            if (!ok)
+            {
+                Log.Info("trench earthquake NOT raised: "
+                         + (Detail ?? "no reason was recorded")
+                         + ". The tool stays armed so it can be tried again");
+            }
+
+            return ok;
         }
 
         private static bool RaiseCore(Vec3 point, byte intensity)
@@ -160,19 +192,24 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★★ **1 度に 1 つだけ。**（2026-08-30、第 3 回検証）
-            //    覚えておける海溝型は 1 つ（<see cref="_id"/> と <see cref="_seed"/>）
-            //    なので、まだ生きているうちに 2 つ目を起こすと
-            //    <b>1 つ目が海溝型でなくなる</b> —— 進行中の地震が途中から
-            //    地面を割りはじめ、しかも 2 つ目には津波が付かない
-            //    （<c>TsunamiChain</c> は追っている地震が死ぬまで次を採らない）。
-            //    待ち時間が数分あるので「もう一度押す」は起こりやすい。断って理由を言う。
-            if (IsTrenchQuake(_id))
+            // ★★ **断るのは「津波がまだ途中」のあいだだけ。**（第 4 回検証）
+            //
+            //    前の版は <c>IsTrenchQuake(_id)</c>（＝災害スロットがまだ生きているか）
+            //    で断っていた。ところが <c>EarthquakeAI</c> の Clearing は
+            //    <c>(|x| + 4800) &gt; elapsed*0.125 - 1000 - L</c> で終わるので、
+            //    スロットは<b>クリックから 17〜35 実分</b>も押さえられる。
+            //    津波のほうは 7 分 40 秒で終わっているのに、そのあと
+            //    <b>30 分ちかく「まだ走っている」と断り続けていた。</b>
+            //
+            //    断る理由は<b>津波を 1 本しか追えないこと</b>であって、
+            //    地震が長生きすることではない。だから津波の状態で見る。
+            //    （そのころには最初の地震は Active を過ぎていて地面も割らないので、
+            //     海溝型の印を 2 つ目へ移して構わない。）
+            if (IsTrenchQuake(_id) && TsunamiChain.StillOwes(_id))
             {
-                Detail = "a trench earthquake (#" + _id + ") is still running; only one "
-                         + "at a time is tracked. Wait for it to finish - its tsunami is "
-                         + "still on the way";
-                Log.Info("trench earthquake refused: " + Detail);
+                Detail = "the tsunami from the previous trench earthquake (#" + _id
+                         + ") has not finished yet; only one is tracked at a time. "
+                         + "Wait for it - the wave is still on its way";
                 return false;
             }
 
@@ -228,6 +265,12 @@ namespace DisasterPlus.Game
             //   <b>SelfTrigger(64) は 0x3C に含まれない</b>ので、先に立てても判定は
             //   変わらない（③の <c>FireWhirlSpawner</c> と同じ道）。
             info.m_disasterAI.StartNow(id, ref buffer[id]);
+
+            // ★★ **追う相手を乗り換える。**（Codex P1）前の地震が Clearing で
+            //    まだ生きていると、連鎖は古い相手を追い続けて<b>この地震の
+            //    Emerging→Active を見逃す</b>。前の津波は出し終えている
+            //    （上の StillOwes が保証）ので、ここで捨ててよい。
+            TsunamiChain.Retarget();
 
             _id = id;
             _seed = buffer[id].m_randomSeed;
