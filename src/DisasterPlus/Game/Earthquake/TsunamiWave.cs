@@ -87,8 +87,15 @@ namespace DisasterPlus.Game
         private const int FramesPerWaterStep = 64;
 
         /// <summary>
-        /// <c>m_duration</c>（<c>m_currentTime</c> は毎水ステップ +64）。
-        /// 4096 ＝ **64 水ステップ ≒ 1 実秒**。
+        /// <c>m_duration</c>（<c>m_currentTime</c> は<b>毎水ステップ</b> +64）。
+        /// 128 ＝ **2 水ステップ ≒ 2.1 実秒**。
+        ///
+        /// ★★ 4096 -> 128（2026-08-30、最終検証）。4096 を「1 実秒」と書いていたが
+        ///   <b>64 倍まちがっていた</b>: 4096/64 ＝ 64 水ステップ ＝ 4096 sim フレーム
+        ///   ＝ **68 実秒**。ロードでハンドルを失った波が、最後に書かれた外力
+        ///   （最大で drive の 1.5 倍）で<b>1 分以上も海を押し続ける</b>ことになる。
+        ///   <see cref="Write"/> が毎水ステップ <c>m_currentTime</c> を 0 に戻すので、
+        ///   短くしても走行中は何も困らない。
         ///
         /// ★★ **必ず有限にし、しかも短くする。**（Codex レビュー P1）
         ///   <c>WaterWave</c> はセーブに焼き付くのに <see cref="_waves"/> は静的変数なので
@@ -97,13 +104,29 @@ namespace DisasterPlus.Game
         ///   <c>currentTime &gt; duration</c> が永久に成立しない ——
         ///   **津波の最中にセーブした都市は外力を永久に抱える。**
         /// </summary>
-        private const ushort WaveDurationTicks = 4096;
+        private const ushort WaveDurationTicks = 128;
 
         // ── 状態 ──────────────────────────────────────────────
 
         /// <summary>重ねた波のハンドル。**0 は「その枠は使っていない」。**</summary>
         private static readonly ushort[] _waves =
             new ushort[TsunamiSource.MaxStackedWaves];
+
+        /// <summary>
+        /// その枠が<b>まだ自分の波であること</b>を確かめるための指紋。
+        ///
+        /// ★★ **<c>m_type == TYPE_IMPACT</c> だけでは足りない。**（2026-08-30、最終検証）
+        ///   IL: <c>CreateWaterWave</c> は <c>m_type == 0</c> の枠を<b>使い回す</b>し、
+        ///   <c>ReleaseWaterWave</c> は所有者を確かめずに <c>m_type</c> を 0 にして
+        ///   末尾の空き枠を詰める。さらにソルバは
+        ///   <c>m_currentTime &gt; m_duration</c> で<b>勝手に解放する</b>。
+        ///   一方 <c>DisasterHelpers.SplashWater</c> は<b>まさに TYPE_IMPACT</b> の波を
+        ///   作る（隕石・地震の水柱）ので、生きた都市では同じ型の枠が絶えず
+        ///   入れ替わる。指紋が合わない枠は<b>他人のもの</b>である ——
+        ///   書いても解放してもいけない。
+        /// </summary>
+        private static readonly int[] _fingerprints =
+            new int[TsunamiSource.MaxStackedWaves];
 
         private static bool _running;
         private static uint _startFrame;
@@ -359,11 +382,34 @@ namespace DisasterPlus.Game
             return float.IsNaN(rise) || rise < 0f ? 0f : rise;
         }
 
-        /// <summary>その地点の水深（m）。**ソルバの流量の上限そのもの。**</summary>
-        private static float DepthAt(TerrainManager terrain, float x, float z)
+        /// <summary>
+        /// その地点の水深（m）。**ソルバの流量の上限そのもの**なので、
+        /// <b>ソルバが使っているのと同じ量で測らなければならない。</b>
+        ///
+        /// ★★ <c>SampleRawHeightSmooth</c> で引いてはいけない（2026-08-30、最終検証）。
+        ///   IL: <c>WaterSimulation.Initialize</c> が受け取る地形配列は
+        ///   <c>TerrainManager.m_blockHeights</c> であり、
+        ///   <c>WaterLevel</c> も <c>blockHeights + Cell.m_height</c> を返す。
+        ///   ところが <c>SampleRawHeightSmooth</c> は <c>m_rawHeights2</c> を読む。
+        ///   両者は<b>岸壁・ダム・護岸・道路の基礎</b>で食い違うので、
+        ///   引き算すると水柱ではなく <c>m_height + (block - raw)</c> になる。
+        ///   **過大に出た水深はそのまま外力の過大につながり、掘り抜きを招く。**
+        /// </summary>
+        internal static float DepthAt(TerrainManager terrain, float x, float z)
         {
             float surface = terrain.WaterLevel(new Vector2(x, z));
-            float ground = terrain.SampleRawHeightSmooth(new Vector3(x, 0f, z));
+
+            ushort[] block = terrain.BlockHeights;
+            if (block == null) return 0f;
+
+            // ★ セルの index は TsunamiAI.FindSea の IL 実測と同じ:
+            //   (world + 8640) / 16 を 0..1080 に丸め、z * 1081 + x で引く。
+            int cx = CellOf(x);
+            int cz = CellOf(z);
+            int at = cz * (GridCells + 1) + cx;
+            if (at < 0 || at >= block.Length) return 0f;
+
+            float ground = block[at] / 64f;
 
             float depth = surface - ground;
             return float.IsNaN(depth) || depth < 0f ? 0f : depth;
@@ -392,7 +438,18 @@ namespace DisasterPlus.Game
             data.m_duration = WaveDurationTicks;
             data.m_currentTime = 0;
 
-            for (int i = 0; i < _waves.Length; i++)
+            // ★★ **要る本数だけ作る。**（2026-08-30、最終検証）
+            //    外力の最大は drive × PushOvershoot なので、いまの帯（≦900）では
+            //    Int16 の上限（32767）に遠く届かず、**8 本中 7 本は常に 0** だった。
+            //    それでもソルバは<b>全セルで全波の bbox を見に行く</b>ので、
+            //    ただの無駄である。使わない波を作らなければ、
+            //    <b>ハンドルが迷子になる面積も 8 分の 1</b>になる。
+            int needed = TsunamiSource.WavesNeeded(
+                (int)(_drive * TsunamiSource.PushOvershoot) + 1);
+            if (needed < 1) needed = 1;
+            if (needed > _waves.Length) needed = _waves.Length;
+
+            for (int i = 0; i < needed; i++)
             {
                 ushort handle;
 
@@ -404,6 +461,7 @@ namespace DisasterPlus.Game
                 }
 
                 _waves[i] = handle;
+                _fingerprints[i] = Fingerprint(data);
             }
 
             return CountWaves() > 0;
@@ -437,10 +495,19 @@ namespace DisasterPlus.Game
                     if (_waves[i] == 0) continue;
 
                     int at = _waves[i] - 1;
-                    if (at < 0 || at >= list.m_size) continue;
+                    if (at < 0 || at >= list.m_size)
+                    {
+                        // ★ 台帳から外れた ＝ もう自分の枠ではない。忘れる。
+                        _waves[i] = 0;
+                        continue;
+                    }
 
-                    // ★ 枠が生きているか確かめる。他人の枠を踏まない保証である。
-                    if (list.m_buffer[at].m_type != TypeImpact) continue;
+                    // ★★ **指紋で本人確認する**（<see cref="_fingerprints"/>）。
+                    if (Fingerprint(list.m_buffer[at]) != _fingerprints[i])
+                    {
+                        _waves[i] = 0;
+                        continue;
+                    }
 
                     list.m_buffer[at].m_delta =
                         (short)TsunamiSource.DeltaForWave(i, total);
@@ -453,6 +520,23 @@ namespace DisasterPlus.Game
             {
                 System.Threading.Monitor.Exit(list);
             }
+        }
+
+        /// <summary>
+        /// その波が「自分のもの」だと言えるだけの特徴を 1 つの int に畳む。
+        /// <c>m_delta</c> と <c>m_currentTime</c> は毎歩書き換えるので<b>入れない</b>。
+        /// </summary>
+        private static int Fingerprint(WaterWave w)
+        {
+            int h = w.m_type;
+            h = h * 397 ^ w.m_origX;
+            h = h * 397 ^ w.m_origZ;
+            h = h * 397 ^ w.m_minX;
+            h = h * 397 ^ w.m_maxX;
+            h = h * 397 ^ w.m_minZ;
+            h = h * 397 ^ w.m_maxZ;
+            h = h * 397 ^ w.m_duration;
+            return h;
         }
 
         /// <summary>
@@ -470,10 +554,20 @@ namespace DisasterPlus.Game
                 TerrainManager terrain = Singleton<TerrainManager>.instance;
                 if (terrain != null && terrain.WaterSimulation != null)
                 {
+                    FastList<WaterWave> list = terrain.WaterSimulation.m_waterWaves;
+
                     for (int i = 0; i < _waves.Length; i++)
                     {
                         if (_waves[i] == 0) continue;
-                        terrain.WaterSimulation.ReleaseWaterWave(_waves[i]);
+
+                        // ★★ **指紋が合う枠だけ解放する。**（2026-08-30、最終検証）
+                        //    合わない枠を解放すると<b>他人の波を消す</b> ——
+                        //    ReleaseWaterWave は所有者を確かめないからである。
+                        int at = _waves[i] - 1;
+                        bool mine = list != null && at >= 0 && at < list.m_size
+                                    && Fingerprint(list.m_buffer[at]) == _fingerprints[i];
+
+                        if (mine) terrain.WaterSimulation.ReleaseWaterWave(_waves[i]);
                     }
                 }
             }
@@ -483,7 +577,7 @@ namespace DisasterPlus.Game
                          + e.GetType().Name + "); they may persist in this save");
             }
 
-            for (int i = 0; i < _waves.Length; i++) _waves[i] = 0;
+            for (int i = 0; i < _waves.Length; i++) { _waves[i] = 0; _fingerprints[i] = 0; }
         }
 
         /// <summary>ワールド座標を 16 m セルへ（<c>SplashWater</c> の IL 実測と同じ式）。</summary>

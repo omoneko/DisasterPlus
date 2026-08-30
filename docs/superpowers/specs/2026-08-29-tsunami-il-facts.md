@@ -103,10 +103,25 @@ return original - off
 
 `m_currentTime` は水ステップごとに **+64**（IL_03B3–03C6）。
 `m_duration = 16384` なので **256 水ステップ**。
-そして `WaterThread` は `m_waterFrameIndex` が `m_simulationFrameIndex` に追いつくまで回る
-（IL_0048–0060）ので **1 水ステップ ≒ 1 sim フレーム**。
+★★ **1 水ステップ ＝ 64 sim フレームである**（2026-08-30 に訂正。ここは当初
+「≒ 1 sim フレーム」と書いていたが**まちがい**で、それが「津波が発生しない」の
+真因そのものだった）。`SimulateWater` は最後に
 
-> ★★ **バニラの津波の「発生源」は 256 フレーム ≒ 4.3 実秒しかない。**
+```
+SetCurrentWaterFrame(start, progress, .., max, ..)
+  -> m_waterFrameIndex = (start & ~63) + (progress << 6)/max = start + 64
+```
+
+を呼び、`WaterThread` は `m_waterFrameIndex < m_simulationFrameIndex` のあいだだけ回り、
+`SimulationStep` は `m_simulationFrameIndex > m_waterFrameIndex + 1` で待つ。
+＝ **SimulateWater は 64 sim フレームに 1 回しか走らない。**
+
+裏取り 2 件: オフライン再現（`tools/WaterSolverSim`）で測った波速
+8.22 m/水ステップ ÷ 64 ＝ 0.128 m/sim フレーム。`TsunamiAI.IsStillActive` が
+バニラで使う寿命定数は 0.125 m/sim フレーム（IL_0024）。小数第 2 位まで一致する。
+
+> ★★ **バニラの津波の「発生源」は 256 水ステップ ＝ 16,384 sim フレーム
+>    ≒ 4.5 実分である。**（当初「4.3 実秒」と書いていたのは上の誤りによる。）
 >    そのあと 10 分ちかく続く水の壁は、全部ソルバの伝播である。
 
 ## 4. `TYPE_IMPACT`(2) — **マップのどこにでも置ける外力**（IL_0845–0A49）

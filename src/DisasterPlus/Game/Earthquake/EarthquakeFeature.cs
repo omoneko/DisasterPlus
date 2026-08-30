@@ -69,6 +69,16 @@ namespace DisasterPlus.Game
         /// </summary>
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
+            // ★★ **津波の外力だけは、設定より先に必ず進める。**（2026-08-30、最終検証）
+            //    ここより下に置くと、津波の最中に設定を切られたときに
+            //    <c>TsunamiWave.Tick</c> が呼ばれなくなる。書き換えが止まると
+            //    ソルバが 2 水ステップで水波を解放し、こちらの台帳だけが
+            //    生きたハンドルを持ったまま残る —— その枠は
+            //    <c>SplashWater</c>（隕石・地震の水柱）に再利用されるので、
+            //    次に書いたときに<b>他人の波を踏む</b>。
+            //    走っていなければ即 return するので、ただの空振りである。
+            TsunamiWave.Tick(frameIndex);
+
             if (!ModSettings.EarthquakeEnabled.value) return;
 
             // ここまでが「読んで publish するだけ」。ポーズ中もここは通る。
@@ -124,12 +134,6 @@ namespace DisasterPlus.Game
             {
                 TsunamiChain.Tick(snapshot, frameIndex);
             }
-
-            // ★★ **外力を進めるのは設定に関係なく必ず呼ぶ。**
-            //    途中で設定を切られたときにここが呼ばれなくなると、
-            //    <b>海を押し続ける波が解放されないまま残る</b>（セーブに焼き付く）。
-            //    走っていなければ即 return するので、ただの空振りである。
-            TsunamiWave.Tick(frameIndex);
 
             // ★ 第 2 層その 2。**既定 OFF**（ModSettings.EarthquakeLongPeriod の doc）。
             //    これは津波と違い、**バニラなら倒れなかった建物を実際に倒す**。

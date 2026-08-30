@@ -111,11 +111,13 @@ namespace DisasterPlus.Game
 
             Vec3 sea;
             float distance;
-            if (!NearestSea(point, out sea, out distance))
+            if (!NearestSea(point, SeaSearch.MaxRing, out sea, out distance))
             {
                 // ★★ **内陸マップでは海が無いのが正しい答えである。**
                 //    「それらしい地点」を作って起こさない —— 海溝型地震の意味が消える。
-                Detail = "no sea within " + (SeaSearch.StepMetres * SeaSearch.MaxRing)
+                Detail = "no open sea at least "
+                         + MinDepthMetres.ToString("F0") + " m deep within "
+                         + (SeaSearch.StepMetres * SeaSearch.MaxRing)
                          .ToString("F0") + " m of the point you clicked; a trench "
                          + "earthquake needs open water";
                 return false;
@@ -173,7 +175,11 @@ namespace DisasterPlus.Game
         {
             try
             {
-                return NearestSea(point, out sea, out distanceMetres);
+                // ★★ **プレビューはリング数を絞る。**（2026-08-30、最終検証）
+                //    全走査は 37,249 点で、1 点ごとに HasWater と WaterLevel が
+                //    水シミュの読み取りロックを取り直す。RenderOverlay は
+                //    6 フレームごとに呼ぶので、毎秒 70 万回の錠のやり取りになっていた。
+                return NearestSea(point, PreviewRings, out sea, out distanceMetres);
             }
             catch
             {
@@ -183,7 +189,13 @@ namespace DisasterPlus.Game
             }
         }
 
-        private static bool NearestSea(Vec3 point, out Vec3 sea, out float distanceMetres)
+        /// <summary>
+        /// 震源に使える海を探す。<paramref name="maxRings"/> でリング数を絞れる
+        /// （プレビュー用）。<b>見つからなければ断る</b> ——
+        /// 浅い海に落とすくらいなら、起こさないほうがよい（下の ★★）。
+        /// </summary>
+        private static bool NearestSea(Vec3 point, int maxRings,
+                                       out Vec3 sea, out float distanceMetres)
         {
             sea = new Vec3(0f, 0f, 0f);
             distanceMetres = 0f;
@@ -211,12 +223,7 @@ namespace DisasterPlus.Game
             //    近い順に走査し、**十分に深い海が見つかった時点で確定**する。
             //    最後まで見つからなければ、途中でいちばん深かった所へ落とす
             //    （浅い海しか無いマップでも津波は起こす —— 小さくなるだけ）。
-            bool haveFallback = false;
-            Vec3 fallback = new Vec3(0f, 0f, 0f);
-            float fallbackDistance = 0f;
-            float fallbackDepth = 0f;
-
-            int count = SeaSearch.Count;
+            int count = SeaSearch.CountUpTo(maxRings < 0 ? 0 : (maxRings > SeaSearch.MaxRing ? SeaSearch.MaxRing : maxRings));
             for (int i = 0; i < count; i++)
             {
                 float dx, dz;
@@ -237,36 +244,20 @@ namespace DisasterPlus.Game
 
                 // ★ 水深も見る。**波打ち際は「海」ではない** ——
                 //   そこで起こすと震源が陸に見える。
-                float ground = terrain.SampleRawHeightSmooth(new Vector3(x, 0f, z));
-                float depth = level - ground;
-                if (depth < MinDepthMetres) continue;
+                // ★★ **水深はソルバと同じ量で測る**（TsunamiWave.DepthAt の doc）。
+                //    SampleRawHeightSmooth は m_rawHeights2 を読むが、
+                //    水シミュが使うのは m_blockHeights である。
+                if (TsunamiWave.DepthAt(terrain, x, z) < MinDepthMetres) continue;
 
-                if (depth >= PreferredDepthMetres)
-                {
-                    sea = new Vec3(x, level, z);
-                    distanceMetres = SeaSearch.DistanceMetres(dx, dz);
-                    return true;
-                }
+                // ★★ **源のまわりが開けた海であること。**（2026-08-30、最終検証）
+                //    外力は半径 1280 m の円盤で、その中に陸があると
+                //    <b>源そのものが桶になって共振する</b>（掃引で +111 m まで跳ねた）。
+                //    オフライン再現で確かめたのは<b>開けた海</b>だけなので、
+                //    保証できない地形では起こさない。
+                if (!IsOpenSea(terrain, x, z)) continue;
 
-                if (depth > fallbackDepth)
-                {
-                    haveFallback = true;
-                    fallbackDepth = depth;
-                    fallback = new Vec3(x, level, z);
-                    fallbackDistance = SeaSearch.DistanceMetres(dx, dz);
-                }
-            }
-
-            if (haveFallback)
-            {
-                sea = fallback;
-                distanceMetres = fallbackDistance;
-                Log.Info("trench earthquake: no sea deeper than "
-                         + PreferredDepthMetres.ToString("F0")
-                         + " m within reach, so the epicentre falls back to the deepest "
-                         + "water found (" + fallbackDepth.ToString("F1")
-                         + " m). The wave will be smaller - the solver caps flow at the "
-                         + "depth, so a shallow sea cannot carry a big one");
+                sea = new Vec3(x, level, z);
+                distanceMetres = SeaSearch.DistanceMetres(dx, dz);
                 return true;
             }
 
@@ -274,13 +265,48 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 震源に選びたい水深（m）。これ以上あれば、そこで確定する。
-        ///
-        /// ★★ <c>TsunamiSource.ReferenceDepthMetres</c>（外力を測った水深）の 6 割。
-        ///   ここを下回る海では波が痩せることをオフライン再現で確かめてある。
+        /// プレビューで見るリング数。<c>SeaSearch.MaxRing</c>(96) は 9,216 m ぶんで
+        /// 37,249 点になる。24 リング ＝ 2,304 m ＝ 2,401 点。
         /// </summary>
-        private const float PreferredDepthMetres =
-            DisasterPlus.Core.Earthquake.TsunamiSource.ReferenceDepthMetres * 0.6f;
+        private const int PreviewRings = 24;
+
+        /// <summary>源のまわりを確かめる方位の数（8 方位）。</summary>
+        private const int OpenSeaProbes = 8;
+
+        /// <summary>
+        /// 源のまわりを確かめる距離（外力の半径に対する比）。
+        /// 縁ぎりぎりまで見ると入り江が全部落ちるので、少し内側で見る。
+        /// </summary>
+        private const float OpenSeaFraction = 0.85f;
+
+        /// <summary>
+        /// 外力の円盤のまわりが<b>開けた海</b>かどうか。
+        ///
+        /// ★★ これが無いと、オフライン再現で確かめていない地形
+        ///   （入り江・浅瀬・マップ端）で起こしてしまう。
+        ///   再現ツールの海は<b>陸が 1 セルも無い平らな海</b>なので、
+        ///   そこで取った保証は「開けた海」にしか及ばない。
+        /// </summary>
+        private static bool IsOpenSea(TerrainManager terrain, float x, float z)
+        {
+            float r = DisasterPlus.Core.Earthquake.TsunamiSource.RadiusMetres
+                      * OpenSeaFraction;
+
+            for (int i = 0; i < OpenSeaProbes; i++)
+            {
+                float a = 6.2831853f * i / OpenSeaProbes;
+                float px = x + Mathf.Cos(a) * r;
+                float pz = z + Mathf.Sin(a) * r;
+
+                if (px < -MapHalfExtent || px > MapHalfExtent) return false;
+                if (pz < -MapHalfExtent || pz > MapHalfExtent) return false;
+
+                if (!terrain.HasWater(new Vector2(px, pz))) return false;
+                if (TsunamiWave.DepthAt(terrain, px, pz) < MinDepthMetres * 0.5f) return false;
+            }
+
+            return true;
+        }
 
         /// <summary>
         /// マップ半辺（m）。<c>TsunamiAI.FindSea</c> の IL 実測にある 8640 と同じ。
@@ -297,6 +323,7 @@ namespace DisasterPlus.Game
         private const float RiverToleranceMetres = 6f;
 
         /// <summary>これより浅い水は「海」に数えない（m）。</summary>
-        private const float MinDepthMetres = 8f;
+        private const float MinDepthMetres =
+            DisasterPlus.Core.Earthquake.TsunamiSource.ReferenceDepthMetres * 0.6f;
     }
 }

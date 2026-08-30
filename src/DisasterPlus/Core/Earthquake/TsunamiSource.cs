@@ -166,7 +166,7 @@ namespace DisasterPlus.Core.Earthquake
         /// <see cref="ReferenceDepthMetres"/> のとき）。
         /// **<c>tools/WaterSolverSim</c> で測って決めた値**であって、推測ではない。
         /// </summary>
-        public const int MinDriveUnits = 700;
+        public const int MinDriveUnits = 780;
 
         /// <summary>
         /// いちばん強い地震（強度 255 ＝ 強度解放の 25.5）の外力。同じく実測。
@@ -178,16 +178,22 @@ namespace DisasterPlus.Core.Earthquake
         ///   水深 40 m での実測（<c>tools/WaterSolverSim</c>、格子 1081、780 歩）:
         ///
         /// <code>
-        ///     drive   隆起     いちばん深い中心    環（1.4km → 5.3km）
-        ///       771   15.4 m   -21.6 m (54%)      6.2 → 1.6 m
-        ///      1000   20.0 m   -28.0 m (70%)      8.4 → 2.6 m   ← ここが最適点
-        ///      1150   22.8 m   -32.0 m (80%)      9.8 → 3.3 m
-        ///      1500   30.3 m   **-40.00 m ＝ 海底むき出し**（約 70 歩）
+        ///     drive   隆起     いちばん深い中心   底に残る水   環（2km）
+        ///       896   18.1 m   -29.2 m (73%)     10.8 m      5.7 m   ← 安全な作動点
+        ///      1200   24.4 m   -38.8 m (97%)      1.25 m     8.2 m   ← **掘り抜き**
+        ///      1500   30.3 m   -40.00 m (100%)    0 m        —       ← 海底むき出し
         /// </code>
         ///
-        ///   1500 は「強い」のではなく<b>壊れている</b>。だから上限は 1200 である。
+        /// ★★ **1200 は「強い」のではなく壊れている。**（2026-08-30、最終検証）
+        ///   1200 では震源の水柱が 40 m のうち 1.25 m しか残らず、
+        ///   画面には<b>2 km 幅の穴が 130 実秒</b>映る。強度スライダーは
+        ///   最初のクリックで 255 まで振れるので、これは隅ではなく<b>既定の最悪</b>だった。
+        ///
+        /// ★ だから上限は 900 ——「掘る割合 ≦ 75%」で決めた値である。
+        ///   帯が狭いのは手抜きではない: <b>波の大きさを決めるのは海の深さ</b>で、
+        ///   ソルバの流量は <c>v = min(v, m_height)</c> で頭打ちされる。
         /// </summary>
-        public const int MaxIntensityDriveUnits = 1200;
+        public const int MaxIntensityDriveUnits = 900;
 
         /// <summary>
         /// 上の数字を測ったときの水深（m）。
@@ -212,8 +218,15 @@ namespace DisasterPlus.Core.Earthquake
         /// </summary>
         public const float MinDepthFactor = 0.08f;
 
-        /// <summary>同じく上限。深い海でも青天井にはしない。</summary>
-        public const float MaxDepthFactor = 1.6f;
+        /// <summary>
+        /// 同じく上限。
+        ///
+        /// ★★ 1.6 -> 1.0（2026-08-30、最終検証）。1.6 は<b>測っていない領域</b>だった。
+        ///   そもそも CS の地形は標高 0 以上なので、海面 40 m のマップに
+        ///   40 m より深い海は作れない —— 1.0 を超える出番は無い。
+        ///   上限を残すと、海面を上げたマップで掘り抜きが再発する。
+        /// </summary>
+        public const float MaxDepthFactor = 1.0f;
 
         /// <summary>
         /// 地震の強度（0〜255）と<b>震源の水深</b>から外力の大きさを出す（符号なし）。
