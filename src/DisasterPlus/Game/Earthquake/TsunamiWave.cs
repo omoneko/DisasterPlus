@@ -140,6 +140,17 @@ namespace DisasterPlus.Game
         /// </summary>
         private const int WatchSteps = 900;
 
+        /// <summary>
+        /// 途中経過を出す間隔（水ステップ）。
+        ///
+        /// ★★ **最後に 1 行だけ出す作りは失敗だった。**（2026-08-31）
+        ///   900 歩 ＝ 16 実分。所有者はその前にゲームを閉じ、
+        ///   <b>1 行も残らなかった</b>。測る道具が「最後まで座っていること」を
+        ///   要求してはいけない。120 歩（≒2 実分）ごとに出す ——
+        ///   2 km は 2 分、4 km は 6 分で読めるようになる。
+        /// </summary>
+        private const int WatchReportEvery = 120;
+
         /// <summary>測る半径（m）。**街がありそうな距離**を並べる。</summary>
         private static readonly float[] WatchRadii = { 2000f, 4000f, 6000f, 8000f };
 
@@ -472,27 +483,41 @@ namespace DisasterPlus.Game
                 }
             }
 
+            // ★★ 途中経過。閉じられても、そこまでは分かる。
+            if (step > 0 && step % WatchReportEvery == 0)
+            {
+                Log.Info("tsunami watch @step " + step + " ("
+                         + (step * FramesPerWaterStep / 3600f).ToString("F1")
+                         + " real min since the drive ended): " + Rings());
+            }
+
             if (step < WatchSteps) return;
 
             _watching = false;
 
-            Log.Info("tsunami watch finished. Highest sea seen on each ring, and when "
-                     + "(1 water step = 1.07 real s):"
-                     + "  2 km: " + _watchPeak[0].ToString("F1") + " m @step "
-                     + _watchPeakStep[0] + " (water " + _watchMinDepth[0].ToString("F0") + " m)"
-                     + " | 4 km: " + _watchPeak[1].ToString("F1") + " m @step "
-                     + _watchPeakStep[1] + " (water " + _watchMinDepth[1].ToString("F0") + " m)"
-                     + " | 6 km: " + _watchPeak[2].ToString("F1") + " m @step "
-                     + _watchPeakStep[2] + " (water " + _watchMinDepth[2].ToString("F0") + " m)"
-                     + " | 8 km: " + _watchPeak[3].ToString("F1") + " m @step "
-                     + _watchPeakStep[3] + " (water " + _watchMinDepth[3].ToString("F0") + " m)."
-                     + " Sea azimuths out of " + WatchAzimuths + " on each ring: "
-                     + _watchSeaAzimuths[0] + " / " + _watchSeaAzimuths[1] + " / "
-                     + _watchSeaAzimuths[2] + " / " + _watchSeaAzimuths[3]
-                     + " (0 means that ring is all land, so nothing can arrive there)."
-                     + " If the heights fall away much faster than the ring should, the sea "
-                     + "between here and there is too shallow to carry it");
+            Log.Info("tsunami watch finished. " + Rings() + " Reading: a ring whose sea "
+                     + "azimuth count is 0 is all land, so nothing can arrive there; heights "
+                     + "that collapse between rings mean the sea in between is too shallow "
+                     + "to carry the wave.");
         }
+
+        /// <summary>リングごとの一行（途中経過と結びで同じ形にする）。</summary>
+        private static string Rings()
+        {
+            string t = "";
+
+            for (int r = 0; r < WatchRadii.Length; r++)
+            {
+                if (r > 0) t += " | ";
+                t += (WatchRadii[r] / 1000f).ToString("F0") + " km: "
+                     + _watchPeak[r].ToString("F1") + " m @step " + _watchPeakStep[r]
+                     + " (sea " + _watchSeaAzimuths[r] + "/" + WatchAzimuths
+                     + ", shallowest " + _watchMinDepth[r].ToString("F0") + " m)";
+            }
+
+            return t;
+        }
+
 
         /// <summary>
         /// 震源とその縁の海面をのぞく。
