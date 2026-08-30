@@ -129,6 +129,31 @@ namespace DisasterPlus.Game
         private static readonly int[] _fingerprints =
             new int[TsunamiSource.MaxStackedWaves];
 
+        /// <summary>
+        /// 外力を切ったあとも<b>波を追いかけて記録する</b>フレーム数（水ステップ）。
+        ///
+        /// ★★ **これが 2026-08-30 の「震源では 82 m なのに海岸では高潮」を
+        ///   詰めるための唯一の道具である。**（オフライン再現は海岸で 20〜28 m を
+        ///   出すのに、実機ではそう見えない。**再現とゲームが食い違っている**ので、
+        ///   ゲームの中で測るしかない。）
+        ///   波は 8.2 m/水ステップで進むので、900 歩 ＝ 7.4 km ぶん。
+        /// </summary>
+        private const int WatchSteps = 900;
+
+        /// <summary>測る半径（m）。**街がありそうな距離**を並べる。</summary>
+        private static readonly float[] WatchRadii = { 2000f, 4000f, 6000f, 8000f };
+
+        /// <summary>その半径で見た最高の海面（m）。</summary>
+        private static readonly float[] _watchPeak = new float[4];
+
+        /// <summary>それを見た水ステップ。</summary>
+        private static readonly int[] _watchPeakStep = new int[4];
+
+        /// <summary>その半径のいちばん浅い水深（m）。**棚で波が絞られるかを見る。**</summary>
+        private static readonly float[] _watchMinDepth = new float[4];
+
+        private static bool _watching;
+        private static uint _watchStartFrame;
         private static bool _running;
         private static uint _startFrame;
         private static uint _lastFrame;
@@ -184,6 +209,8 @@ namespace DisasterPlus.Game
             ReleaseAll();
 
             _running = false;
+            _watching = false;
+            _watchStartFrame = 0u;
             _startFrame = 0u;
             _lastFrame = 0u;
             _drive = 0;
@@ -283,10 +310,11 @@ namespace DisasterPlus.Game
         /// <summary>**sim スレッド、ポーズガードより下。** 外力を進める。</summary>
         public static void Tick(uint frame)
         {
-            if (!_running) return;
+            if (!_running && !_watching) return;
 
             try
             {
+                if (_watching && !_running) { Watch(frame); return; }
                 Step(frame);
             }
             catch (System.Exception e)
@@ -336,6 +364,9 @@ namespace DisasterPlus.Game
                          + " m. The waves are released; the solver carries the ring on its own");
                 ReleaseAll();
                 _running = false;
+
+                // ★★ **ここで終わりにしない。** 波がどこまで届くかを測る。
+                BeginWatch(frame);
                 return;
             }
 
@@ -345,6 +376,97 @@ namespace DisasterPlus.Game
             //    いまの外力は <c>tools/WaterSolverSim</c> で測って決めた開ループの定数。
             _delta = TsunamiSource.DeltaAt(elapsed, _drive);
             Write(terrain, _delta);
+        }
+
+        /// <summary>監視を始める。水深はここで 1 度だけ測る（地形は動かない）。</summary>
+        private static void BeginWatch(uint frame)
+        {
+            TerrainManager terrain = Singleton<TerrainManager>.instance;
+            if (terrain == null) return;
+
+            _watching = true;
+            _watchStartFrame = frame;
+
+            for (int r = 0; r < WatchRadii.Length; r++)
+            {
+                _watchPeak[r] = 0f;
+                _watchPeakStep[r] = -1;
+                _watchMinDepth[r] = float.MaxValue;
+
+                for (int a = 0; a < WatchAzimuths; a++)
+                {
+                    float ang = 6.2831853f * a / WatchAzimuths;
+                    float x = _centre.X + Mathf.Cos(ang) * WatchRadii[r];
+                    float z = _centre.Z + Mathf.Sin(ang) * WatchRadii[r];
+
+                    if (x < -MapHalfExtent || x > MapHalfExtent) continue;
+                    if (z < -MapHalfExtent || z > MapHalfExtent) continue;
+                    if (!terrain.HasWater(new Vector2(x, z))) continue;
+
+                    float d = DepthAt(terrain, x, z);
+                    if (d < _watchMinDepth[r]) _watchMinDepth[r] = d;
+                }
+
+                if (_watchMinDepth[r] == float.MaxValue) _watchMinDepth[r] = 0f;
+            }
+
+            Log.Info("tsunami watch started: sampling the sea every water step at 2/4/6/8 km "
+                     + "from the epicentre for " + WatchSteps + " water steps ("
+                     + (WatchSteps * FramesPerWaterStep / 3600f).ToString("F0")
+                     + " real minutes). Shallowest water on each ring: "
+                     + _watchMinDepth[0].ToString("F0") + " / "
+                     + _watchMinDepth[1].ToString("F0") + " / "
+                     + _watchMinDepth[2].ToString("F0") + " / "
+                     + _watchMinDepth[3].ToString("F0") + " m. The solver caps flow at the "
+                     + "depth, so a shallow ring throttles the wave rather than raising it");
+        }
+
+        /// <summary>方位の数。**円周のどこかで高ければ、そこへ届いている。**</summary>
+        private const int WatchAzimuths = 12;
+
+        /// <summary>**sim スレッド。** 波を追いかけて、半径ごとの最高を覚える。</summary>
+        private static void Watch(uint frame)
+        {
+            if (frame - _lastFrame < FramesPerWaterStep) return;
+            _lastFrame = frame;
+
+            TerrainManager terrain = Singleton<TerrainManager>.instance;
+            if (terrain == null) { _watching = false; return; }
+
+            int step = (int)((frame - _watchStartFrame) / FramesPerWaterStep);
+
+            for (int r = 0; r < WatchRadii.Length; r++)
+            {
+                float best = 0f;
+
+                for (int a = 0; a < WatchAzimuths; a++)
+                {
+                    float ang = 6.2831853f * a / WatchAzimuths;
+                    float rise = RiseAt(terrain,
+                                        _centre.X + Mathf.Cos(ang) * WatchRadii[r],
+                                        _centre.Z + Mathf.Sin(ang) * WatchRadii[r]);
+                    if (rise > best) best = rise;
+                }
+
+                if (best > _watchPeak[r]) { _watchPeak[r] = best; _watchPeakStep[r] = step; }
+            }
+
+            if (step < WatchSteps) return;
+
+            _watching = false;
+
+            Log.Info("tsunami watch finished. Highest sea seen on each ring, and when "
+                     + "(1 water step = 1.07 real s):"
+                     + "  2 km: " + _watchPeak[0].ToString("F1") + " m @step "
+                     + _watchPeakStep[0] + " (water " + _watchMinDepth[0].ToString("F0") + " m)"
+                     + " | 4 km: " + _watchPeak[1].ToString("F1") + " m @step "
+                     + _watchPeakStep[1] + " (water " + _watchMinDepth[1].ToString("F0") + " m)"
+                     + " | 6 km: " + _watchPeak[2].ToString("F1") + " m @step "
+                     + _watchPeakStep[2] + " (water " + _watchMinDepth[2].ToString("F0") + " m)"
+                     + " | 8 km: " + _watchPeak[3].ToString("F1") + " m @step "
+                     + _watchPeakStep[3] + " (water " + _watchMinDepth[3].ToString("F0") + " m)."
+                     + " If these fall away much faster than the ring should, the sea between "
+                     + "here and there is too shallow to carry it");
         }
 
         /// <summary>

@@ -157,6 +157,75 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
+        /// **深い海 → 大陸棚 → 海岸 → 陸**の断面を作る（+X 方向に浅くなる）。
+        ///
+        /// ★★ **陸の無い海で取った保証は、海岸には及ばない。**（2026-08-30）
+        ///   ソルバの流量は <c>v = min(v, m_height)</c> で<b>水深に頭打ち</b>される。
+        ///   実際の津波は浅瀬でせり上がる（shoaling）が、<b>この解法は逆に絞る</b> ——
+        ///   深い海で 20 m あった波も、10 m の棚に乗れば 1 歩に 10 m しか運べない。
+        ///   実機報告「震源では 82 m なのに海岸では高潮程度」はこれで説明が付く。
+        ///   だから<b>海岸で何 m 届くか</b>を測れるようにする。
+        /// </summary>
+        /// <param name="deepMetres">沖の水深（m）。</param>
+        /// <param name="shelfStartCells">この列より +X 側で浅くなりはじめる。</param>
+        /// <param name="shoreCells">この列で水深 0（＝汀線）。以降は陸。</param>
+        /// <param name="landRiseMetres">汀線から先、1 セルあたり何 m 上がるか。</param>
+        public void FillShelf(float deepMetres, int shelfStartCells, int shoreCells,
+                              float landRiseMetres)
+        {
+            int sea = SeaLevelUnits;
+
+            for (int z = 0; z < Size; z++)
+            {
+                for (int x = 0; x < Size; x++)
+                {
+                    float depth;
+
+                    if (x <= shelfStartCells)
+                    {
+                        depth = deepMetres;
+                    }
+                    else if (x < shoreCells)
+                    {
+                        float k = (x - shelfStartCells)
+                                  / (float)(shoreCells - shelfStartCells);
+                        depth = deepMetres * (1f - k);
+                    }
+                    else
+                    {
+                        // 陸。汀線から離れるほど高い。
+                        depth = -(x - shoreCells) * landRiseMetres;
+                    }
+
+                    int floor = sea - (int)(depth * UnitsPerMetre);
+                    if (floor < 0) floor = 0;
+                    if (floor > 65535) floor = 65535;
+
+                    int i = z * Size + x;
+                    _terrain[i] = (ushort)floor;
+
+                    Cell c = new Cell();
+                    int h = sea - floor;
+                    if (h > 0) c.Height = (ushort)Math.Min(h, 65535);
+                    _current[i] = c;
+                }
+            }
+
+            Array.Copy(_current, (_current == _bufferA) ? _bufferB : _bufferA,
+                       _current.Length);
+        }
+
+        /// <summary>その列の海面が平常からどれだけ上がっているか（m）。</summary>
+        public float ColumnRiseMetres(int x, int z)
+        {
+            int i = z * Size + x;
+            if (i < 0 || i >= _terrain.Length) return 0f;
+
+            float surface = (_terrain[i] + _current[i].Height) / (float)UnitsPerMetre;
+            return surface - SeaLevel;
+        }
+
+        /// <summary>
         /// <b>1 回の <c>SimulateWater</c>。</b>
         /// </summary>
         /// <param name="impulses">この 1 フレームに効かせる TYPE_IMPACT の波。null 可。</param>

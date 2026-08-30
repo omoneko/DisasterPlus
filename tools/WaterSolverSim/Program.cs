@@ -63,6 +63,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
             int frames = 1500;
             int pinnedDrive = -1;
             int shape = 0;             // 0 = TsunamiSource.DriveAt をそのまま使う
+            bool shelf = false;   // 沖 -> 大陸棚 -> 汀線 -> 陸 の断面で回す
+            float srcFrac = 0.5f;   // 源の X 位置（格子に対する比）。0.1 ならマップ端すれすれ
             int radiusCells = TsunamiSource.RadiusCells;
             float totalSteps = TsunamiSource.TotalSteps;
             // ★ 外周の輪は矩形の Dirichlet 境界なので、盤面が狭いと角の反射が
@@ -82,6 +84,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 else if (a == "--drive" && i + 1 < args.Length) { pinnedDrive = ParseInt(args[++i], pinnedDrive); }
                 else if (a == "--grid" && i + 1 < args.Length) { gridSize = ParseInt(args[++i], gridSize); }
                 else if (a == "--shape" && i + 1 < args.Length) { shape = ParseInt(args[++i], shape); }
+                else if (a == "--shelf") { shelf = true; }
+                else if (a == "--srcx" && i + 1 < args.Length) { srcFrac = ParseFloat(args[++i], srcFrac); }
                 else if (a == "--radius" && i + 1 < args.Length) { radiusCells = ParseInt(args[++i], radiusCells); }
                 else if (a == "--steps" && i + 1 < args.Length) { totalSteps = ParseFloat(args[++i], totalSteps); }
                 else if (a == "--audit") { audit = true; }
@@ -104,9 +108,18 @@ namespace DisasterPlus.Tools.WaterSolverSim
             float seaLevel = Math.Max(SeaLevelMetres, depth);
 
             WaterField field = new WaterField(gridSize, seaLevel);
-            field.FillFlatSea(depth);
 
-            int centreX = gridSize / 2;
+            // ★★ 海岸を置くと「震源では大きいのに海岸では高潮」が測れる。
+            //    棚は格子の 60% 地点から始まり、85% 地点が汀線。
+            int shelfStart = (int)(gridSize * 0.60f);
+            int shoreCell = (int)(gridSize * 0.85f);
+
+            if (shelf) field.FillShelf(depth, shelfStart, shoreCell, 0.5f);
+            else field.FillFlatSea(depth);
+
+            // ★★ 源を端に寄せられるようにする（2026-08-30）。外周セルはソルバが
+            //    海面に固定する境界なので、**近いとエネルギーを吸われる**。
+            int centreX = (int)(gridSize * srcFrac);
             int centreZ = gridSize / 2;
 
             float target = 0f;
@@ -173,6 +186,10 @@ namespace DisasterPlus.Tools.WaterSolverSim
             //    60 フレームおきに出すだけだと、そのあいだの谷と山が見えない。
             //    「420 歩で緑・1080 歩で +111 m」を見落としたのと同じ穴なので、
             //    **毎フレーム走査した最小・最大をここで持つ。**
+            float shoreMax = 0f;
+            int shoreMaxFrame = -1;
+            int floodCells = 0;
+
             float runningMin = float.MaxValue;
             float runningMax = float.MinValue;
             int runningMinFrame = -1;
@@ -183,6 +200,22 @@ namespace DisasterPlus.Tools.WaterSolverSim
             {
                 // ── 外力を組み直す（実機の MOD と同じ手順）──────────
                 {
+                    if (shelf)
+                    {
+                        // ★ 汀線の手前 2 セルで、平常からの上がりを追う。
+                        //   **ここが「街に何 m 来たか」である。**
+                        float atShore = field.ColumnRiseMetres(shoreCell - 2, centreZ);
+                        if (atShore > shoreMax) { shoreMax = atShore; shoreMaxFrame = frame; }
+
+                        // 陸へ何セル乗り上げたか（水があるいちばん内陸の列）。
+                        for (int lx = shoreCell; lx < gridSize; lx++)
+                        {
+                            if (field.ColumnRiseMetres(lx, centreZ) <= 0.05f) break;
+                            int inland = lx - shoreCell + 1;
+                            if (inland > floodCells) floodCells = inland;
+                        }
+                    }
+
                     float watched = field.SurfaceAboveSeaMetres(centreX, centreZ);
                     if (watched < runningMin) { runningMin = watched; runningMinFrame = frame; }
                     if (watched > runningMax) { runningMax = watched; runningMaxFrame = frame; }
@@ -270,6 +303,17 @@ namespace DisasterPlus.Tools.WaterSolverSim
             Console.WriteLine("  " + frames + " frames in " + clock.Elapsed.TotalSeconds.ToString("F1")
                               + " s (" + (clock.Elapsed.TotalMilliseconds / frames).ToString("F1")
                               + " ms / frame)");
+            if (shelf)
+            {
+                Console.WriteLine("  SHORE (" + ((gridSize * 0.85f - centreX)
+                                  * WaterField.CellSizeMetres / 1000f).ToString("F1")
+                                  + " km from the epicentre): highest water "
+                                  + shoreMax.ToString("F2") + " m above sea level @f"
+                                  + shoreMaxFrame + ", flooded "
+                                  + (floodCells * WaterField.CellSizeMetres).ToString("F0")
+                                  + " m inland");
+            }
+
             Console.WriteLine("  centre over EVERY frame: min " + runningMin.ToString("F2")
                               + " m @f" + runningMinFrame + " (" + (100f * -runningMin / depth)
                                 .ToString("F0") + "% of the column), max "
