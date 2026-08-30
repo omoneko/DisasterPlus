@@ -152,6 +152,12 @@ namespace DisasterPlus.Game
         /// <summary>その半径のいちばん浅い水深（m）。**棚で波が絞られるかを見る。**</summary>
         private static readonly float[] _watchMinDepth = new float[4];
 
+        /// <summary>
+        /// その半径で<b>海だった方位の数</b>（<see cref="WatchAzimuths"/> のうち）。
+        /// **0 ならそのリングは全部陸で、そこには波の届きようがない。**
+        /// </summary>
+        private static readonly int[] _watchSeaAzimuths = new int[4];
+
         private static bool _watching;
         private static uint _watchStartFrame;
         private static bool _running;
@@ -403,6 +409,9 @@ namespace DisasterPlus.Game
                     if (z < -MapHalfExtent || z > MapHalfExtent) continue;
                     if (!terrain.HasWater(new Vector2(x, z))) continue;
 
+                    // ★ 陸を水深 0 として混ぜない（「棚だ」と誤読する）。
+                    if (IsLand(terrain, x, z)) continue;
+
                     float d = DepthAt(terrain, x, z);
                     if (d < _watchMinDepth[r]) _watchMinDepth[r] = d;
                 }
@@ -418,7 +427,9 @@ namespace DisasterPlus.Game
                      + _watchMinDepth[1].ToString("F0") + " / "
                      + _watchMinDepth[2].ToString("F0") + " / "
                      + _watchMinDepth[3].ToString("F0") + " m. The solver caps flow at the "
-                     + "depth, so a shallow ring throttles the wave rather than raising it");
+                     + "depth, so a shallow ring throttles the wave rather than raising it. "
+                     + "NOTE: only cells whose seabed is BELOW sea level are sampled - "
+                     + "hitting a mountain would otherwise read as a huge false wave");
         }
 
         /// <summary>方位の数。**円周のどこかで高ければ、そこへ届いている。**</summary>
@@ -438,6 +449,7 @@ namespace DisasterPlus.Game
             for (int r = 0; r < WatchRadii.Length; r++)
             {
                 float best = 0f;
+                int seaCount = 0;
 
                 for (int a = 0; a < WatchAzimuths; a++)
                 {
@@ -445,10 +457,19 @@ namespace DisasterPlus.Game
                     float rise = RiseAt(terrain,
                                         _centre.X + Mathf.Cos(ang) * WatchRadii[r],
                                         _centre.Z + Mathf.Sin(ang) * WatchRadii[r]);
+
+                    if (rise < 0f) continue;   // 陸。混ぜない
+                    seaCount++;
                     if (rise > best) best = rise;
                 }
 
-                if (best > _watchPeak[r]) { _watchPeak[r] = best; _watchPeakStep[r] = step; }
+                _watchSeaAzimuths[r] = seaCount;
+
+                if (seaCount > 0 && best > _watchPeak[r])
+                {
+                    _watchPeak[r] = best;
+                    _watchPeakStep[r] = step;
+                }
             }
 
             if (step < WatchSteps) return;
@@ -465,8 +486,12 @@ namespace DisasterPlus.Game
                      + _watchPeakStep[2] + " (water " + _watchMinDepth[2].ToString("F0") + " m)"
                      + " | 8 km: " + _watchPeak[3].ToString("F1") + " m @step "
                      + _watchPeakStep[3] + " (water " + _watchMinDepth[3].ToString("F0") + " m)."
-                     + " If these fall away much faster than the ring should, the sea between "
-                     + "here and there is too shallow to carry it");
+                     + " Sea azimuths out of " + WatchAzimuths + " on each ring: "
+                     + _watchSeaAzimuths[0] + " / " + _watchSeaAzimuths[1] + " / "
+                     + _watchSeaAzimuths[2] + " / " + _watchSeaAzimuths[3]
+                     + " (0 means that ring is all land, so nothing can arrive there)."
+                     + " If the heights fall away much faster than the ring should, the sea "
+                     + "between here and there is too shallow to carry it");
         }
 
         /// <summary>
@@ -475,8 +500,10 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void Observe(TerrainManager terrain)
         {
-            _lastCentreMetres = RiseAt(terrain, _centre.X, _centre.Z);
-            if (_lastCentreMetres > _peakRiseMetres) _peakRiseMetres = _lastCentreMetres;
+            // ★ NotSea(-1) は混ぜない（上の RiseAt の ★★）。
+            float centre = RiseAt(terrain, _centre.X, _centre.Z);
+            _lastCentreMetres = centre > 0f ? centre : 0f;
+            if (centre > _peakRiseMetres) _peakRiseMetres = centre;
 
             // ★ 環ができるのは<b>発生源の縁</b>である。中心だけ見ていると
             //   ②③ に入った瞬間「効いていない」と読み違える（中心は下がるので）。
@@ -495,14 +522,49 @@ namespace DisasterPlus.Game
             if (ring > _peakRingMetres) _peakRingMetres = ring;
         }
 
-        /// <summary>海面が平常からどれだけ上がっているか（m）。マップの外では 0。</summary>
+        /// <summary>海の上でない地点。**平均や最大に混ぜてはいけない。**</summary>
+        private const float NotSea = -1f;
+
+        /// <summary>
+        /// 海面が平常からどれだけ上がっているか（m）。
+        /// **海の上でないところは <see cref="NotSea"/> を返す**（呼び出し側は捨てる）。
+        ///
+        /// ★★ **陸の標高を「波」と読んではいけない。**（2026-08-31、実機の計測で発覚）
+        ///   <c>TerrainManager.WaterLevel</c> は<b>地形の高さ + 水柱</b>を返す。
+        ///   海面 207 m のマップで標高 277 m の山を叩けば、水が 1 滴も無くても
+        ///   <c>WaterLevel - seaLevel = +70 m</c> になる。実際そうなった ——
+        ///   「4 km 地点に 70.3 m の波、ただし水深 2 m」という<b>ありえない組</b>で
+        ///   気づいた。あれは波ではなく山だった。
+        ///
+        /// ★ 海底が海面より高いセルは陸である。そこは測らない。
+        ///   （岸に乗り上げた水を測るには別の物差しが要る。ここで見たいのは
+        ///    <b>沖で波が生きているか</b>である。）
+        /// </summary>
         private static float RiseAt(TerrainManager terrain, float x, float z)
         {
-            if (x < -MapHalfExtent || x > MapHalfExtent) return 0f;
-            if (z < -MapHalfExtent || z > MapHalfExtent) return 0f;
+            if (x < -MapHalfExtent || x > MapHalfExtent) return NotSea;
+            if (z < -MapHalfExtent || z > MapHalfExtent) return NotSea;
 
-            float rise = terrain.WaterLevel(new Vector2(x, z)) - _seaLevel;
-            return float.IsNaN(rise) || rise < 0f ? 0f : rise;
+            if (IsLand(terrain, x, z)) return NotSea;
+
+            var xz = new Vector2(x, z);
+            if (!terrain.HasWater(xz)) return NotSea;
+
+            float rise = terrain.WaterLevel(xz) - _seaLevel;
+            if (float.IsNaN(rise)) return NotSea;
+            return rise < 0f ? 0f : rise;
+        }
+
+        /// <summary>海底が海面より高いか（＝陸か）。**ソルバと同じ配列で見る。**</summary>
+        private static bool IsLand(TerrainManager terrain, float x, float z)
+        {
+            ushort[] block = terrain.BlockHeights;
+            if (block == null) return true;
+
+            int at = CellOf(z) * (GridCells + 1) + CellOf(x);
+            if (at < 0 || at >= block.Length) return true;
+
+            return block[at] / 64f >= _seaLevel;
         }
 
         /// <summary>
