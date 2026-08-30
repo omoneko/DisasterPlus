@@ -79,7 +79,13 @@ namespace DisasterPlus.Game
             //    走っていなければ即 return するので、ただの空振りである。
             TsunamiWave.Tick(frameIndex);
 
-            if (!ModSettings.EarthquakeEnabled.value) return;
+            // ★★ **海溝型を置いたあとは、パネルの設定で止めない。**（第 3 回検証）
+            //    <c>EarthquakeEnabled</c> は「地震パネルを出すか」の設定だが、
+            //    ここで早期 return すると <c>TsunamiChain.Tick</c> まで飛ぶ。
+            //    一方タイル（<c>DisasterPanelBar</c>）は <c>TrenchQuakeEnabled</c> しか
+            //    見ていないので、<b>タイルは押せる・地震は起きる・断層は抑止される・
+            //    でも津波だけ永久に来ない</b>という、説明の出ない壊れ方になっていた。
+            if (!ModSettings.EarthquakeEnabled.value && TrenchQuakeSlot.LastId == 0) return;
 
             // ここまでが「読んで publish するだけ」。ポーズ中もここは通る。
             var snapshot = EarthquakeReader.Read();
@@ -395,10 +401,25 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteTsunamiChain(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
+            // ★★ **tick と同じ式で判定する。**（2026-08-30、第 3 回検証）
+            //    ここだけ設定を見ていたので、<b>既定の構成では
+            //    「off」と書きながら実際には走っていた</b> ——
+            //    海溝型地震は設定に関係なく連鎖するからである（:132 の ★★）。
+            //    「動いているのに off と書く」は、この MOD がいちばん嫌う出力である。
+            if (!ModSettings.EarthquakeTsunamiChain.value
+                && TrenchQuakeSlot.LastId == 0)
+            {
+                b.Line(1, "tsunami chain",
+                       "off (setting; this is the default). A trench earthquake would "
+                       + "still bring a tsunami - that path ignores this setting");
+                return;
+            }
+
             if (!ModSettings.EarthquakeTsunamiChain.value)
             {
-                b.Line(1, "tsunami chain", "off (setting; this is the default)");
-                return;
+                b.Line(1, "tsunami chain source",
+                       "running for the trench earthquake even though the setting is off "
+                       + "- a trench quake exists only to bring a tsunami");
             }
 
             string state;
@@ -411,8 +432,11 @@ namespace DisasterPlus.Game
                     state = "raised (a wave was actually created)";
                     break;
                 case TsunamiChainState.NoSea:
-                    state = "no wave: TsunamiAI.FindSea found no run of 10+ sea cells on the map "
-                            + "border. This is normal on an inland map and is NOT a failure";
+                    // ★★ 文言が古かった（第 3 回検証）。いまの NoSea は
+                    //    TsunamiAI.FindSea ではなく TsunamiWave.Begin が断ったときに立つ。
+                    state = "no wave: " + (TsunamiWave.Detail
+                            ?? "the wave could not be raised")
+                            + ". On an inland map this is normal and is NOT a failure";
                     break;
                 case TsunamiChainState.NoDlc:
                     state = "no TsunamiAI prefab (the Natural Disasters DLC is not owned)";

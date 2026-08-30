@@ -54,6 +54,24 @@ namespace DisasterPlus.Game
     /// </summary>
     internal static class EarthquakeLayer2Rows
     {
+        /// <summary>
+        /// 津波の節を出すか。
+        ///
+        /// ★★ **設定だけで決めてはいけない。**（2026-08-30、第 3 回検証）
+        ///   <c>EarthquakeTsunamiChain</c> は既定 OFF だが、海溝型地震は
+        ///   設定に関係なく津波を連れてくる。設定だけで隠していたので、
+        ///   <b>クリックしてから波が来るまでの数分間、画面には何も出なかった</b>。
+        ///   待っているあいだ何も出ないのは「壊れている」と読まれる。
+        /// </summary>
+        private static bool TsunamiRowWanted
+        {
+            get
+            {
+                return ModSettings.EarthquakeTsunamiChain.value
+                       || TrenchQuakeSlot.LastId != 0;
+            }
+        }
+
         /// <summary>見出し。ブロックが 1 つでも出ていれば出す。</summary>
         private const int BlockHeader = 0;
 
@@ -153,7 +171,7 @@ namespace DisasterPlus.Game
             Record(_timeNoteLabel, BlockLongPeriod, t - before);
 
             _built = true;
-            _tsunamiVisible = ModSettings.EarthquakeTsunamiChain.value;
+            _tsunamiVisible = TsunamiRowWanted;
             _longPeriodVisible = ModSettings.EarthquakeLongPeriod.value;
             Layout();
 
@@ -194,7 +212,7 @@ namespace DisasterPlus.Game
         {
             if (!_built) return;
 
-            bool tsunami = ModSettings.EarthquakeTsunamiChain.value;
+            bool tsunami = TsunamiRowWanted;
             bool longPeriod = ModSettings.EarthquakeLongPeriod.value;
             if (tsunami != _tsunamiVisible || longPeriod != _longPeriodVisible)
             {

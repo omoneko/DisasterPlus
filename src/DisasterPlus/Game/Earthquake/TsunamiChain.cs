@@ -319,6 +319,8 @@ namespace DisasterPlus.Game
             if (FindTsunamiInfo() == null)
             {
                 _state = TsunamiChainState.NoDlc;
+                Log.Info("tsunami NOT raised: the Natural Disasters DLC is not owned, "
+                         + "so there is no TsunamiAI prefab to name the disaster after");
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiNoDlc",
                     "no TsunamiAI DisasterInfo found; the Natural Disasters DLC is required "
                     + "for the tsunami chain");
@@ -353,6 +355,15 @@ namespace DisasterPlus.Game
             _dueFrame = baseFrame + delay;
             _state = TsunamiChainState.Scheduled;
 
+            // ★★ **海溝型なら必ず出す。**（第 3 回検証）Diag だけだと
+            //    LogChannel.DefaultMask は General だけなので、既定では
+            //    「いつ波が来るのか」がどこにも残らない。
+            Log.Info("tsunami scheduled for quake #" + quake.DisasterId + " at frame "
+                     + _dueFrame + " (" + minutes
+                     + " in-game minutes from now). After that the drive runs for "
+                     + DisasterPlus.Core.Earthquake.TsunamiSource.TotalSteps.ToString("F0")
+                     + " water steps and the sea over the epicentre needs about 100 real "
+                     + "seconds to lift a metre, so give it time before calling it broken");
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiSchedule",
                 "undersea quake #" + quake.DisasterId + "; tsunami scheduled for frame "
                 + _dueFrame);
@@ -417,6 +428,8 @@ namespace DisasterPlus.Game
                 // ★ 海が無い／水シミュが読めない。**失敗ではない場合がある**ので、
                 //   理由をそのまま持ち帰る（TsunamiWave.Detail）。
                 _state = TsunamiChainState.NoSea;
+                Log.Info("tsunami NOT raised: "
+                         + (TsunamiWave.Detail ?? "the wave could not be raised"));
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiNoSea",
                     TsunamiWave.Detail ?? "the tsunami could not be raised");
                 return;

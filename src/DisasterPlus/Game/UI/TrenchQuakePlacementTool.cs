@@ -143,9 +143,13 @@ namespace DisasterPlus.Game
             float previewDistance;
             if (!TrenchQuakeSlot.TryFindNearestSea(hit, out previewSea, out previewDistance))
             {
-                Log.Diag("trenchPick",
-                    "no sea for a trench earthquake at the point that was clicked; "
-                    + "the tool stays armed so it can be clicked again further out");
+                // ★★ **Info で出す。**（第 3 回検証）Diag は既定で黙っているので、
+                //    断られたことがどこにも残らなかった。押しても何も起きない理由が
+                //    ログにすら無いのは、この MOD がいちばん嫌う出力である。
+                Log.Info("trench earthquake NOT raised: "
+                         + (TrenchQuakeSlot.Detail
+                            ?? "no open sea deep enough near the point that was clicked")
+                         + ". The tool stays armed - click further out to sea");
                 return;
             }
 

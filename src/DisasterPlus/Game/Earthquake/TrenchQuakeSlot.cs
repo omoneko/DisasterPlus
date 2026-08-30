@@ -160,6 +160,22 @@ namespace DisasterPlus.Game
                 return false;
             }
 
+            // ★★ **1 度に 1 つだけ。**（2026-08-30、第 3 回検証）
+            //    覚えておける海溝型は 1 つ（<see cref="_id"/> と <see cref="_seed"/>）
+            //    なので、まだ生きているうちに 2 つ目を起こすと
+            //    <b>1 つ目が海溝型でなくなる</b> —— 進行中の地震が途中から
+            //    地面を割りはじめ、しかも 2 つ目には津波が付かない
+            //    （<c>TsunamiChain</c> は追っている地震が死ぬまで次を採らない）。
+            //    待ち時間が数分あるので「もう一度押す」は起こりやすい。断って理由を言う。
+            if (IsTrenchQuake(_id))
+            {
+                Detail = "a trench earthquake (#" + _id + ") is still running; only one "
+                         + "at a time is tracked. Wait for it to finish - its tsunami is "
+                         + "still on the way";
+                Log.Info("trench earthquake refused: " + Detail);
+                return false;
+            }
+
             Vec3 sea;
             float distance;
             bool sawDeepWater;
