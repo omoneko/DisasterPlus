@@ -173,6 +173,44 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         [Fact]
+        public void TheDriveScalesWithDepthSoTheDugFractionStaysTheSame()
+        {
+            // ★★ **これが 2026-08-30 の実機報告「津波が発生しない」の再発防止である。**
+            //    上限を 1.0 にしていたので、水深 174 m の海に水深 40 m ぶんの外力しか
+            //    出しておらず、<b>水柱の 15% しか掘らず</b>、環は 2〜3 m にしかならず、
+            //    外洋では見えなかった。
+            //
+            //    応答は水深に無依存（tools/WaterSolverSim で 40 m と 174 m が
+            //    全列一致）なので、掘る割合は 0.0329 * drive / depth。
+            //    70% を超えない線は drive ≒ 21 * depth である。
+            for (float depth = 24f; depth <= 500f; depth += 8f)
+            {
+                for (int i = 0; i <= 255; i += 17)
+                {
+                    int drive = TsunamiSource.DriveUnitsFor((byte)i, depth);
+
+                    Assert.True(drive <= 22.5f * depth + 1f,
+                                "drive " + drive + " at depth " + depth
+                                + " digs more than 74% of the water column");
+                    Assert.True(drive >= 19f * depth - 1f,
+                                "drive " + drive + " at depth " + depth
+                                + " leaves most of the column unused - the wave will be "
+                                + "invisible on the open sea");
+                }
+            }
+        }
+
+        [Fact]
+        public void TheDeepestPossibleSeaStillFitsTheStackedWaves()
+        {
+            // WaterSimulation.MAX_SEA_LEVEL は 500（IL 実測）。
+            int deepest = TsunamiSource.DriveUnitsFor(255, 500f);
+
+            Assert.InRange(deepest, 1, TsunamiSource.MaxDriveUnits);
+            Assert.Equal(12.5f, TsunamiSource.MaxDepthFactor, 3);
+        }
+
+        [Fact]
         public void AShallowSeaStillGetsSomething()
         {
             // **0 にしてはいけない。** 浅瀬でも津波は起きる（むしろ被害はそこで出る）。
