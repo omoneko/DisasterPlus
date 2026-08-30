@@ -39,6 +39,7 @@ namespace DisasterPlus.Game
             //    DisasterData.m_waveIndex で持たれる ＝ セーブに焼き付くので、
             //    残すと MOD を外しても都市に残り続ける（TsunamiWave のクラス doc）。
             TsunamiWave.Reset();
+            SeaWatch.Reset();
             LongPeriodDamage.Reset();
 
             // ★★ **ToolController は都市ごとに作り直される**ので、毎レベルロードで
@@ -78,6 +79,11 @@ namespace DisasterPlus.Game
             //    次に書いたときに<b>他人の波を踏む</b>。
             //    走っていなければ即 return するので、ただの空振りである。
             TsunamiWave.Tick(frameIndex);
+
+            // ★★ **海全体の物差し。**（2026-08-31、所有者の提案）
+            //    バニラの津波でもこちらの波でも<b>同じ 1 行</b>が出る。
+            //    設定にも機能にも紐づけない —— 比べることが目的だからである。
+            SeaWatch.Tick(frameIndex);
 
             // ★★ **終わった海溝型は忘れる。**（2026-08-30、第 4 回検証）
             //    <c>IsTrenchQuake</c> はスロットが空いていたら自分で忘れるが、
@@ -196,6 +202,7 @@ namespace DisasterPlus.Game
             TrenchQuakeSlot.Reset();
             // ★★ **ここが最後の砦である。** 置いた水波を解放しないとセーブに残る。
             TsunamiWave.Reset();
+            SeaWatch.Reset();
             // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
             // EarthquakePanel.Destroy() が波形テクスチャ（Texture2D）も破棄する
             // —— GameObject と違って Unity は勝手に回収しないので、これを

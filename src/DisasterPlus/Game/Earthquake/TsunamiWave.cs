@@ -305,6 +305,9 @@ namespace DisasterPlus.Game
             _lastFrame = frame;
             Detail = null;
 
+            // ★ バニラと同じ物差しで自分の波も測る（SeaWatch のクラス doc）。
+            SeaWatch.Arm("Disaster+ trench tsunami, drive " + _drive + " units", frame);
+
             Log.Info("tsunami started at (" + epicentre.X.ToString("F0") + ","
                      + epicentre.Z.ToString("F0") + "): " + CountWaves()
                      + " stacked TYPE_IMPACT water waves, radius "
