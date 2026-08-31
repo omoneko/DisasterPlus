@@ -311,7 +311,7 @@ namespace DisasterPlus.Game
                 case TsunamiChainState.Raised:
                     EarthquakeRows.SetPlain(_tsunamiNoteLabel, Strings.EarthquakeTsunamiFromShore);
                     EarthquakeRows.SetLayer2(_tsunamiLabel, Strings.EarthquakeTsunamiRaised
-                        + "   (#" + snapshot.TsunamiQuakeId + ")");
+                        + RaisedProgress() + "   (#" + snapshot.TsunamiQuakeId + ")");
                     return;
 
                 case TsunamiChainState.NoSea:
@@ -342,6 +342,7 @@ namespace DisasterPlus.Game
                             (TsunamiChain.StillOwes(TrenchQuakeSlot.LastId)
                                 ? Strings.EarthquakeTsunamiPending
                                 : Strings.EarthquakeTsunamiRaised)
+                            + RaisedProgress()
                             + "   (#" + TrenchQuakeSlot.LastId + ")");
                         return;
                     }
@@ -350,6 +351,34 @@ namespace DisasterPlus.Game
                     EarthquakeRows.SetPlain(_tsunamiLabel, "");
                     return;
             }
+        }
+
+        /// <summary>
+        /// 波を出しているあいだの<b>動く数字</b>。
+        ///
+        /// ★★ **静止した 1 行は「壊れている」と読まれる。**（2026-08-31、相互検証）
+        ///   発生源は 768 水ステップ＝約 14 実分、そのあと波が着くまでさらに 10 分ほど
+        ///   掛かる。そのあいだ画面が「津波発生」のまま一切変わらないと、
+        ///   待っている人には止まって見える —— <c>Idle</c> の空白行で一度踏んだのと
+        ///   同じ穴である（この下の default 節のコメント）。
+        ///
+        ///   出すのは<b>いま海面をどれだけ持ち上げているか</b>と<b>進み具合</b>。
+        ///   発生源が終わったあとは「波が進行中」であることだけ言う ——
+        ///   到達時刻は地形しだいなので、嘘になる数字は出さない。
+        /// </summary>
+        private static string RaisedProgress()
+        {
+            if (!TsunamiRing.Running) return "";
+
+            int total = TsunamiRing.TotalSteps;
+            if (total <= 0) return "";
+
+            int done = TsunamiRing.ElapsedSteps;
+            if (done > total) done = total;
+
+            return "  " + (done * 100 / total) + "%  "
+                   + (TsunamiRing.OffsetMetres >= 0f ? "+" : "")
+                   + TsunamiRing.OffsetMetres.ToString("F0") + " m";
         }
 
         /// <summary>
