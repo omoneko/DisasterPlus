@@ -282,6 +282,20 @@ namespace DisasterPlus.Game
             NotEnoughRoom,// 海が狭すぎて円が入らない
             Busy,         // 前の津波がまだ走っている
             NoRoomInGame, // ゲームが水源の枠をくれなかった
+            TooWeak,      // 地震が弱すぎて、立てても見えない
+        }
+
+        /// <summary>
+        /// <see cref="Begin"/> を呼ぶ前に断ったときに、その理由を記録する。
+        ///
+        /// ★★ これが無いと、<c>TsunamiChain</c> が震度で断ったときに
+        ///   <see cref="LastRefusal"/> が <c>None</c> のままになり、パネルが
+        ///   <b>「内陸マップです」</b>と言う（2026-08-31、第 5 回検証）。
+        /// </summary>
+        public static void NoteRefusal(Refusal reason, string detail)
+        {
+            LastRefusal = reason;
+            Detail = detail;
         }
 
         /// <summary>直近の断りの種類。</summary>
@@ -323,6 +337,9 @@ namespace DisasterPlus.Game
                 _running = false;
                 _ticks = 0;
                 _lastFrame = 0u;
+                // ★ 断りの理由を都市をまたいで持ち越さない（第 5 回検証）。
+                LastRefusal = Refusal.None;
+                Detail = null;
                 _deltaUnits = 0;
                 _rate = 0L;
                 OffsetMetres = 0f;
@@ -674,9 +691,19 @@ namespace DisasterPlus.Game
         {
             ushort[] block = terrain.BlockHeights;
             if (block == null) return 0f;
+            if (terrain.WaterSimulation == null) return 0f;
 
-            int seaUnits = (int)(terrain.WaterSimulation.m_currentSeaLevel * 64f);
             int minDepthUnits = (int)(MinSourceDepthMetres * 64f);
+
+            // ★★ **水柱そのものを見る**（<c>TrenchQuakeSlot.NearestSea</c> の ★★）。
+            //    地面の高さだけでは、海面より低いまま乾いている土地
+            //    （干拓地・クレーター）を「海」と読んでしまう。
+            //    <c>BeginRead</c> は円盤 1 枚につき 1 回だけ取る。
+            WaterSimulation.Cell[] cells = terrain.WaterSimulation.BeginRead();
+
+            try
+            {
+            if (cells == null) return 0f;
 
             int cx = CellOf(x);
             int cz = CellOf(z);
@@ -703,8 +730,8 @@ namespace DisasterPlus.Game
                     else
                     {
                         int at = row + gx;
-                        land = at < 0 || at >= block.Length
-                               || seaUnits - block[at] < minDepthUnits;
+                        land = at < 0 || at >= block.Length || at >= cells.Length
+                               || cells[at].m_height < minDepthUnits;
                     }
 
                     if (land) best = square;
@@ -718,6 +745,11 @@ namespace DisasterPlus.Game
 
             // ★ best <= reach^2 なので metres は必ず RadiusMetres 未満。頭打ちは要らない。
             return metres < MinUsefulRadiusMetres ? 0f : metres;
+            }
+            finally
+            {
+                terrain.WaterSimulation.EndRead();
+            }
         }
 
         /// <summary>ワールド座標を 16 m セルへ（<c>TsunamiWave.CellOf</c> と同じ式）。</summary>

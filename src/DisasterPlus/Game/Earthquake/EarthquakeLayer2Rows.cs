@@ -317,7 +317,7 @@ namespace DisasterPlus.Game
                 case TsunamiChainState.Raised:
                     EarthquakeRows.SetPlain(_tsunamiNoteLabel, Strings.EarthquakeTsunamiFromShore);
                     EarthquakeRows.SetLayer2(_tsunamiLabel, Strings.EarthquakeTsunamiRaised
-                        + RaisedProgress() + "   (#" + snapshot.TsunamiQuakeId + ")");
+                        + RaisedProgress(true) + "   (#" + snapshot.TsunamiQuakeId + ")");
                     return;
 
                 case TsunamiChainState.NoSea:
@@ -347,12 +347,32 @@ namespace DisasterPlus.Game
                         // ★★ **出し終えた波を「到達予定」に戻さない。**
                         //    （第 5 回検証）連鎖が監視をやめても LastId は残るので、
                         //    素直に書くと Raised -> 到達予定 と<b>逆戻りして見える</b>。
+                        // ★★ **走っているなら「発生」、まだなら「予定」。**
+                        //    （2026-08-31、第 5 回検証）以前は
+                        //    <c>StillOwes</c> で選んでいたが、あれは
+                        //    <b>まだ何も立っていない Emerging の 2 分 17 秒</b>にも
+                        //    true になるので、「予定」の横に「波が進行中です」が
+                        //    並ぶという矛盾した 1 行になっていた。
+                        bool live = TsunamiRing.Running;
+
                         EarthquakeRows.SetLayer2(_tsunamiLabel,
-                            (TsunamiChain.StillOwes(TrenchQuakeSlot.LastId)
-                                ? Strings.EarthquakeTsunamiPending
-                                : Strings.EarthquakeTsunamiRaised)
-                            + RaisedProgress()
+                            (live ? Strings.EarthquakeTsunamiRaised
+                                  : (TsunamiChain.StillOwes(TrenchQuakeSlot.LastId)
+                                        ? Strings.EarthquakeTsunamiPending
+                                        : Strings.EarthquakeTsunamiRaised))
+                            + RaisedProgress(live)
                             + "   (#" + TrenchQuakeSlot.LastId + ")");
+                        return;
+                    }
+
+                    // ★★ **空白の行を出さない。**（第 5 回検証）
+                    //    TsunamiRowWanted に Running を足したので、
+                    //    地震の枠が空いたあとも波が走っているあいだは
+                    //    ここへ落ちてくる。空にすると見出しの下が空欄になる。
+                    if (TsunamiRing.Running)
+                    {
+                        EarthquakeRows.SetLayer2(_tsunamiLabel,
+                            Strings.EarthquakeTsunamiRaised + RaisedProgress(true));
                         return;
                     }
 
@@ -373,6 +393,12 @@ namespace DisasterPlus.Game
                 case TsunamiRing.Refusal.Busy:
                     return Strings.EarthquakeTsunamiBusy;
 
+                case TsunamiRing.Refusal.TooWeak:
+                    return Strings.EarthquakeTsunamiTooWeak;
+
+                case TsunamiRing.Refusal.NoRoomInGame:
+                    return Strings.EarthquakeTsunamiNoSlot;
+
                 case TsunamiRing.Refusal.NotSea:
                 default:
                     return Strings.EarthquakeTsunamiNoSea;
@@ -392,8 +418,14 @@ namespace DisasterPlus.Game
         ///   発生源が終わったあとは「波が進行中」であることだけ言う ——
         ///   到達時刻は地形しだいなので、嘘になる数字は出さない。
         /// </summary>
-        private static string RaisedProgress()
+        /// <param name="raised">
+        /// 既に波を立てたか。**false のときは何も足さない** ——
+        /// まだ何も立っていない段階で「波が進行中です」と出すと、
+        /// すぐ左の「◯分後」と矛盾する（2026-08-31、第 5 回検証）。
+        /// </param>
+        private static string RaisedProgress(bool raised)
         {
+            if (!raised) return "";
             if (!TsunamiRing.Running) return "  " + Strings.EarthquakeTsunamiTravelling;
 
             int total = TsunamiRing.TotalSteps;

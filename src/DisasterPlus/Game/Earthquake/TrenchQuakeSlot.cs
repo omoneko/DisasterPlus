@@ -363,9 +363,29 @@ namespace DisasterPlus.Game
                 ? terrain.WaterSimulation.m_currentSeaLevel
                 : DefaultSeaLevelMetres;
 
-            // ★ 錠を取らない読み（下の ★★）。
             ushort[] block = terrain.BlockHeights;
             int seaUnits = (int)(seaLevel * 64f);
+            int minDepthUnits = (int)(MinDepthMetres * 64f);
+            int toleranceUnits = (int)(RiverToleranceMetres * 64f);
+
+            // ★★ **水柱そのものを見る。**（2026-08-31、第 5 回検証）
+            //    直前の版は <c>seaUnits - block[cell]</c>、つまり
+            //    <b>地面が海面よりどれだけ低いか</b>だけを見ていた。それは
+            //    「海がある」ではない —— <b>堤防で囲まれた干拓地やクレーターは
+            //    海面より低いまま乾いている</b>。そこへ半径 3.8 km の水源を置くと、
+            //    引きの円は 160 m しかないので<b>戻せない水が永久に残る</b>。
+            //
+            // ★ <c>WaterSimulation.Cell.m_height</c> が水柱（1/64 m）そのもの。
+            //   <c>BeginRead</c> は<b>走査の前後で 1 回ずつ</b>しか取らない ——
+            //   1 点ごとに <c>HasWater</c> を呼ぶと数千回の錠になる（第 4 回検証）。
+            if (block == null) return false;
+            if (terrain.WaterSimulation == null) return false;
+
+            WaterSimulation.Cell[] cells = terrain.WaterSimulation.BeginRead();
+
+            try
+            {
+            if (cells == null) return false;
 
             // ★★ **いちばん近い海ではなく、いちばん近い「深い」海を採る。**
             //    （2026-08-30、オフライン再現で分かった）
@@ -410,13 +430,15 @@ namespace DisasterPlus.Game
                 //   そのまま水深なので、これだけで「十分に深い海か」は決まる。
                 //   川・湖は海面より高いので、この式では自動的に落ちる
                 //   （<c>seaLevel - block</c> が小さくなる）。
-                if (block == null) continue;
-
                 int cell = CellOf(z) * (GridCells + 1) + CellOf(x);
-                if (cell < 0 || cell >= block.Length) continue;
+                if (cell < 0 || cell >= block.Length || cell >= cells.Length) continue;
 
-                float depth = (seaUnits - block[cell]) / 64f;
-                if (depth < MinDepthMetres) continue;
+                // ★ 実際に水があり、十分に深いこと。
+                int column = cells[cell].m_height;
+                if (column < minDepthUnits) continue;
+
+                // ★ 海面より目に見えて高い水は川・湖である。
+                if (block[cell] + column > seaUnits + toleranceUnits) continue;
 
                 // ★ ここまで来た ＝ 十分に深い海はあった。断る理由が変わる。
                 sawDeepWater = true;
@@ -443,6 +465,11 @@ namespace DisasterPlus.Game
             }
 
             return false;
+            }
+            finally
+            {
+                terrain.WaterSimulation.EndRead();
+            }
         }
 
         /// <summary>

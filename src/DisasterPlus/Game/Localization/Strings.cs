@@ -573,6 +573,12 @@ namespace DisasterPlus.Game
         //    「開けた海が足りない」も「前の波がまだ走っている」も
         //    「内陸マップです」と説明されていた（2026-08-31、相互検証）。
         public static string EarthquakeTsunamiTravelling = "the wave is on its way";
+        public static string EarthquakeTsunamiTooWeak =
+            "The earthquake was too weak to raise a wave anyone would see, so none was "
+            + "raised. Use a stronger one.";
+        public static string EarthquakeTsunamiNoSlot =
+            "The game had no room left to create the wave. Too many disasters are running "
+            + "at once - wait for some to finish.";
         public static string EarthquakeTsunamiSourceLeft = "source ends in";
         public static string EarthquakeRealMinutes = "real min";
         public static string EarthquakeTsunamiNoRoom =

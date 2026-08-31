@@ -419,6 +419,8 @@ namespace DisasterPlus.Game
             if (quake.Intensity < MinIntensity)
             {
                 _state = TsunamiChainState.NoSea;
+                TsunamiRing.NoteRefusal(TsunamiRing.Refusal.TooWeak,
+                    "the earthquake is too weak to raise a wave anyone would see");
                 Log.Info("tsunami NOT scheduled for quake #" + quake.DisasterId
                          + ": intensity " + quake.Intensity + " is below " + MinIntensity
                          + ", which would raise a wave too small to see. This is not a "
