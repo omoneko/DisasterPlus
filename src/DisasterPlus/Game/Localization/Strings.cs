@@ -560,6 +560,9 @@ namespace DisasterPlus.Game
             "Always show the tsunami row (trench earthquakes raise one either way)";
         public static string EarthquakeTsunamiDelay = "Tsunami delay (in-game minutes)";
         public static string EarthquakeTsunamiPending = "Tsunami expected in";
+
+        /// <summary>数字を添えられないときの言い方（<c>Pending</c> は後ろに数が要る）。</summary>
+        public static string EarthquakeTsunamiSoon = "Tsunami on the way";
         public static string EarthquakeTsunamiRaised = "Tsunami raised";
         public static string EarthquakeTsunamiFromShore =
             "The wave spreads out from the epicentre in rings. The sea is drawn in over the "

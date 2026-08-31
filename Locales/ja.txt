@@ -158,6 +158,7 @@ EarthquakeOverlayLegend = 凡例 — 青緑: 破壊係数（震央がいちば�
 EarthquakeTsunamiChain = 津波の行を常に表示する（海溝型地震はこの設定に関係なく津波を起こします）
 EarthquakeTsunamiDelay = 津波までの遅延 (ゲーム内分)
 EarthquakeTsunamiPending = 津波の到達予定
+EarthquakeTsunamiSoon = 津波が向かっています
 EarthquakeTsunamiRaised = 津波が発生しました
 EarthquakeTsunamiFromShore = 波は震源から同心円状に広がります。まず震源へ海水が引き寄せられて隆起し、それが外へ押し出されます。そのあとの水の壁は、DLC の津波と同じゲーム自身の水シミュレーションが運びます。
 EarthquakeTsunamiNoSea = 震源が海の上ではないため、津波は起きませんでした。内陸マップでは正常な結果です。

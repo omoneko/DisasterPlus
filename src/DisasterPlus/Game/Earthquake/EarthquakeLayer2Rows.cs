@@ -353,14 +353,17 @@ namespace DisasterPlus.Game
                         //    <b>まだ何も立っていない Emerging の 2 分 17 秒</b>にも
                         //    true になるので、「予定」の横に「波が進行中です」が
                         //    並ぶという矛盾した 1 行になっていた。
+                        // ★★ **一度立てたら二度と「予定」に戻さない。**
+                        //    （2026-08-31、第 6 回検証）<c>StillOwes</c> は
+                        //    地震の相が終わったあとも true になるので、
+                        //    それだけで選ぶと<b>発生 → 予定と巻き戻って見える</b>。
                         bool live = TsunamiRing.Running;
+                        bool done = TsunamiChain.HasRaisedFor(TrenchQuakeSlot.LastId);
 
                         EarthquakeRows.SetLayer2(_tsunamiLabel,
-                            (live ? Strings.EarthquakeTsunamiRaised
-                                  : (TsunamiChain.StillOwes(TrenchQuakeSlot.LastId)
-                                        ? Strings.EarthquakeTsunamiPending
-                                        : Strings.EarthquakeTsunamiRaised))
-                            + RaisedProgress(live)
+                            (live || done ? Strings.EarthquakeTsunamiRaised
+                                          : Strings.EarthquakeTsunamiSoon)
+                            + RaisedProgress(live || done)
                             + "   (#" + TrenchQuakeSlot.LastId + ")");
                         return;
                     }
@@ -457,7 +460,10 @@ namespace DisasterPlus.Game
             float framesPerMinute = FeatureHost.FramesPerMinute;
             if (framesPerMinute <= 0f || snapshot.TsunamiDueFrame <= snapshot.CurrentFrame)
             {
-                return Strings.EarthquakeTsunamiPending + "   (#" + snapshot.TsunamiQuakeId + ")";
+                // ★★ **数字が無いなら「◯分後」とは言わない。**（第 6 回検証）
+                //    英語の "Tsunami expected in" は後ろに数が来ないと文にならず、
+                //    画面には「Tsunami expected in   (#12)」と出ていた。
+                return Strings.EarthquakeTsunamiSoon + "   (#" + snapshot.TsunamiQuakeId + ")";
             }
 
             float minutes = (snapshot.TsunamiDueFrame - snapshot.CurrentFrame) / framesPerMinute;

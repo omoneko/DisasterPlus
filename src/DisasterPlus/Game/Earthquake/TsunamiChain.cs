@@ -139,6 +139,16 @@ namespace DisasterPlus.Game
         /// </summary>
         private const byte MinIntensity = 10;
 
+        /// <summary>
+        /// <b>波を立て終えた地震の番号。</b>
+        ///
+        /// ★★ <c>_quakeId</c> は地震の相が終わると <c>Forget()</c> で 0 に戻るが、
+        ///   波はそのあと 10 分以上走る。それだけを見ていたので、パネルが
+        ///   <b>「津波発生」から「到達予定」へ巻き戻って</b>見えた
+        ///   （2026-08-31、第 6 回検証）。**立てた事実は別に覚える。**
+        /// </summary>
+        private static ushort _raisedQuakeId;
+
         private static ushort _quakeId;
         private static bool _havePhase;
         private static EarthquakePhase _lastPhase;
@@ -174,6 +184,12 @@ namespace DisasterPlus.Game
         /// ★ 災害スロットが空けば <c>IsTrenchQuake</c> が忘れるので、
         ///   この錠が地震より長生きすることはない。
         /// </summary>
+        /// <summary>その地震にはもう波を立てたか。**パネルの文言を選ぶために要る。**</summary>
+        public static bool HasRaisedFor(ushort quakeId)
+        {
+            return quakeId != 0 && _raisedQuakeId == quakeId;
+        }
+
         public static bool StillOwes(ushort quakeId)
         {
             if (quakeId == 0) return false;
@@ -228,6 +244,7 @@ namespace DisasterPlus.Game
         private static void Forget()
         {
             _quakeId = 0;
+            _raisedQuakeId = 0;
             _havePhase = false;
             _lastPhase = EarthquakePhase.Unknown;
             _dueFrame = 0u;
@@ -515,6 +532,7 @@ namespace DisasterPlus.Game
             }
 
             _state = TsunamiChainState.Raised;
+            _raisedQuakeId = quake.DisasterId;
         }
 
         /// <summary>

@@ -230,7 +230,7 @@ namespace DisasterPlus.Game
             Vec3 sea;
             float distance;
             bool sawDeepWater;
-            if (!NearestSea(point, SearchRings, out sea, out distance, out sawDeepWater))
+            if (!NearestSea(point, SearchRings, true, out sea, out distance, out sawDeepWater))
             {
                 // ★★ **内陸マップでは海が無いのが正しい答えである。**
                 //    「それらしい地点」を作って起こさない —— 海溝型地震の意味が消える。
@@ -317,7 +317,8 @@ namespace DisasterPlus.Game
                 //    全走査は 37,249 点で、1 点ごとに HasWater と WaterLevel が
                 //    水シミュの読み取りロックを取り直す。RenderOverlay は
                 //    6 フレームごとに呼ぶので、毎秒 70 万回の錠のやり取りになっていた。
-                return NearestSea(point, SearchRings, out sea, out distanceMetres);
+                // ★ プレビューは円の適合検査をしない（NearestSea の checkRingFits）。
+            return NearestSea(point, SearchRings, false, out sea, out distanceMetres);
             }
             catch
             {
@@ -332,11 +333,11 @@ namespace DisasterPlus.Game
         /// （プレビュー用）。<b>見つからなければ断る</b> ——
         /// 浅い海に落とすくらいなら、起こさないほうがよい（下の ★★）。
         /// </summary>
-        private static bool NearestSea(Vec3 point, int maxRings,
+        private static bool NearestSea(Vec3 point, int maxRings, bool checkRingFits,
                                        out Vec3 sea, out float distanceMetres)
         {
             bool ignored;
-            return NearestSea(point, maxRings, out sea, out distanceMetres, out ignored);
+            return NearestSea(point, maxRings, checkRingFits, out sea, out distanceMetres, out ignored);
         }
 
         /// <summary>
@@ -348,7 +349,11 @@ namespace DisasterPlus.Game
         ///   それを「そんなに深い海は無い」と言うと<b>嘘になる</b> ——
         ///   プレイヤーがもらえる説明はこの 1 文だけなのだから、外してはいけない。
         /// </summary>
-        private static bool NearestSea(Vec3 point, int maxRings,
+        /// <param name="checkRingFits">
+        /// 津波の円がその地点に入るかまで確かめるか。**置く瞬間だけ true**
+        /// （下の ★★: 描画スレッドでやると水スレッドを止める）。
+        /// </param>
+        private static bool NearestSea(Vec3 point, int maxRings, bool checkRingFits,
                                        out Vec3 sea, out float distanceMetres,
                                        out bool sawDeepWater)
         {
@@ -366,7 +371,6 @@ namespace DisasterPlus.Game
             ushort[] block = terrain.BlockHeights;
             int seaUnits = (int)(seaLevel * 64f);
             int minDepthUnits = (int)(MinDepthMetres * 64f);
-            int toleranceUnits = (int)(RiverToleranceMetres * 64f);
 
             // ★★ **水柱そのものを見る。**（2026-08-31、第 5 回検証）
             //    直前の版は <c>seaUnits - block[cell]</c>、つまり
@@ -433,12 +437,10 @@ namespace DisasterPlus.Game
                 int cell = CellOf(z) * (GridCells + 1) + CellOf(x);
                 if (cell < 0 || cell >= block.Length || cell >= cells.Length) continue;
 
-                // ★ 実際に水があり、十分に深いこと。
-                int column = cells[cell].m_height;
-                if (column < minDepthUnits) continue;
-
-                // ★ 海面より目に見えて高い水は川・湖である。
-                if (block[cell] + column > seaUnits + toleranceUnits) continue;
+                // ★★ 「外洋か」は 1 つの式に統一してある
+                //    （<c>TsunamiRing.IsOpenSeaCell</c> の doc）。
+                if (!TsunamiRing.IsOpenSeaCell(block, cells, cell,
+                                               seaUnits, minDepthUnits)) continue;
 
                 // ★ ここまで来た ＝ 十分に深い海はあった。断る理由が変わる。
                 sawDeepWater = true;
@@ -449,7 +451,7 @@ namespace DisasterPlus.Game
                 //    <b>源そのものが桶になって共振する</b>（掃引で +111 m まで跳ねた）。
                 //    オフライン再現で確かめたのは<b>開けた海</b>だけなので、
                 //    保証できない地形では起こさない。
-                if (!IsOpenSea(terrain, x, z)) continue;
+                if (!IsOpenSea(terrain, cells, seaUnits, x, z)) continue;
 
                 // ★★ **津波の円がそこに入るかも、置く前に確かめる。**
                 //    （2026-08-31、第 4 回検証）これが無いと、
@@ -457,7 +459,17 @@ namespace DisasterPlus.Game
                 //    <c>TsunamiRing.Begin</c> の円盤走査で落ちる地形があり、
                 //    <b>地震だけ起きて 2 分半後に津波が来ない</b>という、
                 //    プレイヤーには原因の分からない失敗になる。
-                if (TsunamiRing.OpenWaterRadius(terrain, x, z) <= 0f) continue;
+                // ★★ **描画スレッドではやらない。**（2026-08-31、第 6 回検証）
+                //    これは 58,081 セルの走査で、しかも水シミュの読み取り錠を
+                //    握ったまま走る。プレビューは 6 フレームごとに最大 2,401 点を
+                //    見るので、島の多い海岸では 1 回の更新に 0.2〜0.5 実秒かかり、
+                //    そのあいだ<b>水スレッドのバッファ入れ替えが止まる</b>。
+                //
+                //    プレビューは「だいたいここ」を示すためのものなので、
+                //    円が入るかどうかは<b>実際に置く瞬間（sim スレッド）だけ</b>
+                //    確かめれば足りる。入らなければその場で断り、
+                //    理由が出る（クリックから 2 分半後ではなく、すぐ）。
+                if (checkRingFits && TsunamiRing.OpenWaterRadius(terrain, x, z) <= 0f) continue;
 
                 sea = new Vec3(x, seaLevel, z);
                 distanceMetres = SeaSearch.DistanceMetres(dx, dz);
@@ -531,16 +543,15 @@ namespace DisasterPlus.Game
         ///   再現ツールの海は<b>陸が 1 セルも無い平らな海</b>なので、
         ///   そこで取った保証は「開けた海」にしか及ばない。
         /// </summary>
-        private static bool IsOpenSea(TerrainManager terrain, float x, float z)
+        private static bool IsOpenSea(TerrainManager terrain, WaterSimulation.Cell[] cells,
+                                      int seaUnits, float x, float z)
         {
-            // ★★ **ここも水シミュを読まない**（NearestSea の ★★ と同じ理由）。
+            // ★★ 呼び出し側が既に <c>BeginRead</c> を握っている（NearestSea）。
+            //    ここで取り直さず、渡された配列をそのまま使う。
             ushort[] block = terrain.BlockHeights;
-            if (block == null) return false;
+            if (block == null || cells == null) return false;
 
-            float seaLevel = terrain.WaterSimulation != null
-                ? terrain.WaterSimulation.m_currentSeaLevel
-                : DefaultSeaLevelMetres;
-            int seaUnits = (int)(seaLevel * 64f);
+            int minDepthUnits = (int)(MinDepthMetres * 0.5f * 64f);
 
             float r = OpenSeaRadiusMetres;
 
@@ -553,9 +564,10 @@ namespace DisasterPlus.Game
                 if (px < -MapHalfExtent || px > MapHalfExtent) return false;
                 if (pz < -MapHalfExtent || pz > MapHalfExtent) return false;
 
-                int cell = CellOf(pz) * (GridCells + 1) + CellOf(px);
-                if (cell < 0 || cell >= block.Length) return false;
-                if ((seaUnits - block[cell]) / 64f < MinDepthMetres * 0.5f) return false;
+                // ★★ ここも同じ式で見る（第 6 回検証: ここだけ海底の高さのままだった）。
+                if (!TsunamiRing.IsOpenSeaCell(block, cells,
+                        CellOf(pz) * (GridCells + 1) + CellOf(px),
+                        seaUnits, minDepthUnits)) return false;
             }
 
             return true;

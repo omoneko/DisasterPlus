@@ -693,6 +693,7 @@ namespace DisasterPlus.Game
             if (block == null) return 0f;
             if (terrain.WaterSimulation == null) return 0f;
 
+            int seaUnits = (int)(terrain.WaterSimulation.m_currentSeaLevel * 64f);
             int minDepthUnits = (int)(MinSourceDepthMetres * 64f);
 
             // ★★ **水柱そのものを見る**（<c>TrenchQuakeSlot.NearestSea</c> の ★★）。
@@ -729,9 +730,8 @@ namespace DisasterPlus.Game
                     }
                     else
                     {
-                        int at = row + gx;
-                        land = at < 0 || at >= block.Length || at >= cells.Length
-                               || cells[at].m_height < minDepthUnits;
+                        land = !IsOpenSeaCell(block, cells, row + gx,
+                                              seaUnits, minDepthUnits);
                     }
 
                     if (land) best = square;
@@ -750,6 +750,35 @@ namespace DisasterPlus.Game
             {
                 terrain.WaterSimulation.EndRead();
             }
+        }
+
+        /// <summary>
+        /// <b>そのセルは「外洋」か。</b>この 1 つの式に統一する。
+        ///
+        /// <code>水柱 &gt;= 最小水深   かつ   海底 &lt;= 海面 - 最小水深</code>
+        ///
+        /// ★★ **片方だけでは必ずどこかで間違える。**（2026-08-31、第 5・6 回検証）
+        ///
+        /// <list type="bullet">
+        /// <item><b>海底だけ</b>見ると、堤防で囲まれた干拓地やクレーターが
+        ///   「海」になる —— 海面より低いまま<b>乾いている</b>のに。
+        ///   そこへ半径 3.8 km の水源を置くと、引きの円は 160 m しかないので
+        ///   <b>戻せない水が永久に残る</b>（セーブを壊す）。</item>
+        /// <item><b>水柱だけ</b>見ると、川・高い湖・<b>前の津波で冠水した街</b>が
+        ///   「海」になる。2 本目の津波が円をその上に広げ、
+        ///   目標より低い陸をいきなり満たす —— 同じ失敗に裏口から入る。</item>
+        /// </list>
+        ///
+        /// ★ 両方を要求すると、<b>高潮の最中でも海は海のまま</b>である
+        ///   （海底は動かない）。海面からの高さで川を落とす旧実装は、
+        ///   バニラの津波が来ているあいだ<b>外洋を丸ごと「海ではない」と答えて</b>いた。
+        /// </summary>
+        internal static bool IsOpenSeaCell(ushort[] block, WaterSimulation.Cell[] cells,
+                                           int at, int seaUnits, int minDepthUnits)
+        {
+            if (at < 0 || at >= block.Length || at >= cells.Length) return false;
+            if (cells[at].m_height < minDepthUnits) return false;
+            return block[at] <= seaUnits - minDepthUnits;
         }
 
         /// <summary>ワールド座標を 16 m セルへ（<c>TsunamiWave.CellOf</c> と同じ式）。</summary>

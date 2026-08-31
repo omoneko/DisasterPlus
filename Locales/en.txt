@@ -159,6 +159,7 @@ EarthquakeOverlayLegend = Legend - blue-green: the destruction factor, densest a
 EarthquakeTsunamiChain = Always show the tsunami row (trench earthquakes raise one either way)
 EarthquakeTsunamiDelay = Tsunami delay (in-game minutes)
 EarthquakeTsunamiPending = Tsunami expected in
+EarthquakeTsunamiSoon = Tsunami on the way
 EarthquakeTsunamiRaised = Tsunami raised
 EarthquakeTsunamiFromShore = The wave spreads out from the epicentre in rings. The sea is drawn in over the epicentre first, then pushed back out - the wall of water after that is the game's own water simulation, the same one that carries the DLC tsunami.
 EarthquakeTsunamiNoSea = The epicentre is not on open water, so no tsunami was raised. This is normal on an inland map.
