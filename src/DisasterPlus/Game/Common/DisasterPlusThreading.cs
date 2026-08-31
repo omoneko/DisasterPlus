@@ -31,8 +31,9 @@ namespace DisasterPlus.Game
             try { TsunamiChain.Reset(); }
             catch (System.Exception e) { Log.Error("TsunamiChain.Reset on release", e); }
 
-            // ★ permanent: true。以後 Begin は必ず断る（TsunamiRing._shutDown）。
-            try { TsunamiRing.Reset(true); }
+            // ★ 片道の錠は置かない（TsunamiRing の ★★: OnReleased は
+            //   メインメニューへ戻るたびにも来る）。予約を消したうえで解放する。
+            try { TsunamiRing.Reset(); }
             catch (System.Exception e) { Log.Error("TsunamiRing.Reset on release", e); }
 
             base.OnReleased();

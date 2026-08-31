@@ -176,6 +176,12 @@ namespace DisasterPlus.Game
         private const float DrainRadiusMetres = 160f;
 
         /// <summary>
+        /// 取り込み円の <c>total</c> の上限（1/64 m の総和）。
+        /// 半径 160 m ＝ 10 セル ＝ 314 セル、1 セルは最大 65535。余裕を見て切り上げ。
+        /// </summary>
+        private const long MaxTotalUnits = 22000000L;
+
+        /// <summary>
         /// 引き波で抜いてよい水深の割合。**海底を露出させない。**
         /// 押しと違いこちらは<b>水深で縛る</b> —— 深さ 60 m で蓋 60 m にすると
         /// 水柱が 100% 抜けて海底が 94 水ステップ露出した（実測 2026-08-31）。
@@ -213,17 +219,21 @@ namespace DisasterPlus.Game
         /// </summary>
         private static readonly object _gate = new object();
 
-        /// <summary>
-        /// <b>もう二度と立てない。</b>MOD が外されたときに立てる片道の錠。
-        ///
-        /// ★★ **<c>Reset</c> だけでは足りない。**（2026-08-31、第 2 回検証）
-        ///   <c>Reset</c> は <c>_running = false</c> にするが、それは
-        ///   <c>Begin</c> が待っている前提条件そのものである。拡張が外された直後、
-        ///   まだ走っていた sim tick が予約済みの津波を立ててしまうと、
-        ///   <b>そのあと tick も保存も解放も二度と来ない</b> ——
-        ///   置きっぱなしの水源が次のオートセーブに焼き付く。
-        /// </summary>
-        private static volatile bool _shutDown;
+        // ★★ **ここに「二度と立てない」錠を置いてはいけない。**（2026-08-31、第 3 回検証）
+        //    第 2 回の指摘に応えて <c>_shutDown</c> を入れたが、**それが最悪の欠陥だった。**
+        //    <c>OnReleased</c> は「MOD が外された」ときだけ来るのではない ——
+        //    IL（<c>ThreadingWrapper.GetImplementations</c>）を読むと、
+        //    <c>eventPluginsChanged</c> / <c>eventPluginsStateChanged</c> と
+        //    <b>メインメニューへ戻るたび</b>に来て、そのあと<b>すぐ作り直される</b>。
+        //    つまり「無関係な MOD を切り替えた」「街を出た」だけで錠が下り、
+        //    <b>プロセスを再起動するまで津波が二度と起きなくなる</b>。
+        //    防ごうとした漏れより、ずっと起きやすくずっと悪い。
+        //
+        //    いま漏れを止めているのは <c>OnReleased</c> の
+        //    <c>TsunamiChain.Reset()</c>（予約を消す）＋ <c>TsunamiRing.Reset()</c>
+        //    （水源を解放して掃除する）である。拡張が本当に外されるなら
+        //    予約が消えているので <c>Begin</c> は呼ばれず、
+        //    作り直されるなら次の tick が普通に面倒を見る。
 
         // ★ 下の 4 つは sim スレッドが錠の外で読み書きし、main スレッドが
         //   パネルのために読む。**正しさの拠り所は Drive / Release の中の
@@ -281,18 +291,8 @@ namespace DisasterPlus.Game
         /// </summary>
         public static void Reset()
         {
-            Reset(false);
-        }
-
-        /// <summary>
-        /// <paramref name="permanent"/> なら二度と立てない（MOD が外されたとき）。
-        /// </summary>
-        public static void Reset(bool permanent)
-        {
             lock (_gate)
             {
-                if (permanent) _shutDown = true;
-
                 ReleaseLocked();
 
                 // ★★ 握っていた番号が何かの理由で外れていても、**自分の指紋の
@@ -321,13 +321,6 @@ namespace DisasterPlus.Game
 
             lock (_gate)
             {
-            // ★★ 片道の錠（_shutDown の doc）。ここを通すと解放できない水源になる。
-            if (_shutDown)
-            {
-                Detail = "the mod is being unloaded, so no new tsunami is raised";
-                return false;
-            }
-
             if (_running)
             {
                 Detail = "a tsunami is already running";
@@ -358,6 +351,17 @@ namespace DisasterPlus.Game
             //    <b>低い土地が円の形にいきなり満たされる</b>。
             //    しかも取り込みの円は 160 m しかないので、<b>戻せない</b>。
             float radius = OpenWaterRadius(terrain, epicentre.X, epicentre.Z);
+            if (radius <= 0f)
+            {
+                Detail = "there is not enough open water around the epicentre - a source "
+                         + "circle needs at least "
+                         + MinUsefulRadiusMetres.ToString("F0")
+                         + " m of sea at least " + MinSourceDepthMetres.ToString("F0")
+                         + " m deep in every direction, or it would simply fill the low "
+                         + "ground around it instead of making a wave";
+                return false;
+            }
+
             _rate = TsunamiRingShape.RateForRadiusMetres(radius);
             _drainRate = TsunamiRingShape.RateForRadiusMetres(DrainRadiusMetres);
             _deltaUnits = TsunamiRingShape.VanillaDeltaUnits(intensity);
@@ -385,14 +389,18 @@ namespace DisasterPlus.Game
             //    1 セルの超過が最悪どこまで行くかを見積もり、
             //    `share * take` が int32 に収まる流量までしか出さない。
             //    見積もりは実測（蓋 40 m のとき最悪 102 m）に 3 倍の余裕を見た値。
-            // ★★ ゲームが int32 で持つのは <c>share*take + total - 1</c> であって
-            //    <c>share*take</c> ではない（2026-08-31、第 2 回検証）。
-            //    <c>total</c> は最悪 <c>2*take</c> まで行くので、
-            //    <b>4 分の 1 の余裕</b>を見て切り下げる。
+            // ★★ ゲームが int32 で持つのは <c>share*take + total - 1</c> である。
+            //
+            // ★ **4 で割るのはやりすぎだった。**（2026-08-31、第 3 回検証）
+            //   <c>total</c> は掛け算の相手ではなく<b>足し算の相手</b>なので、
+            //   要る余裕は掛け算ではなく引き算である。<c>total</c> の上限は
+            //   「取り込み円のセル数 × 65535」——半径 160 m なら 314 セルで
+            //   およそ 2.1e7、int の 1% に過ぎない。4 で割ると円が 85 m まで縮み、
+            //   <b>実測で保証した 160 m から外れてしまう</b>。
             long worstShare = 3L * (_riseCapUnits + _drawCapUnits);
             if (worstShare > 0L)
             {
-                long safe = (int.MaxValue / 4L) / worstShare;
+                long safe = (int.MaxValue - MaxTotalUnits) / worstShare;
                 if (_drainRate > safe) _drainRate = safe;
                 if (_drainRate < 1L) _drainRate = 1L;
             }
@@ -586,50 +594,97 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>16 m セルの数。<c>BlockHeights</c> の添字は <c>z*(1080+1)+x</c>。</summary>
+        private const int GridCells = 1080;
+
+        /// <summary>円の中で「海」と認める最小の水深（m）。</summary>
+        private const float MinSourceDepthMetres = 2f;
+
         /// <summary>
-        /// 震源から<b>陸に当たらずに広げられる半径</b>（m）。
+        /// この半径すら取れないなら津波は立てない（m）。
+        /// これより狭い水域で 3.8 km の円を名乗っても意味が無い。
+        /// </summary>
+        private const float MinUsefulRadiusMetres = 320f;
+
+        /// <summary>
+        /// 震源から<b>陸に当たらずに広げられる半径</b>（m）。0 なら立てられない。
         ///
         /// ★★ 吐き出しの円は<b>陸にも水を置く</b>（<see cref="Begin"/> の ★★）。
         ///   だから <see cref="RadiusMetres"/> をそのまま使わず、
         ///   <b>実際の海の広さまで縮める</b>。狭い湾では弱い津波になるが、
         ///   それは<b>正しい</b> —— 湾の奥で外洋規模の波は立たない。
         ///
-        /// ★ 16 方位を 160 m 刻みで外へ辿り、最初に陸に当たった距離のうち
-        ///   いちばん短いものを採る。1 方位あたり最大 24 点なので、
-        ///   1 回の <c>Begin</c> で 384 点 —— 置くときに 1 度だけである。
+        /// ★★ **光線を放つ実装は捨てた。**（2026-08-31、第 3 回検証）
+        ///   16 方位・160 m 刻みでは、3,840 m のところで隣の光線と 1,508 m 離れる。
+        ///   そのあいだに在る島も岬も防波堤も<b>見えない</b>し、
+        ///   160 m より細い砂州は<b>またいで通り過ぎる</b>。
+        ///   どちらも「安全」と答えて陸を水浸しにする。
+        ///   さらに、最初の 1 点が陸だったときに 0 を下限で 160 m へ押し戻していた ——
+        ///   <b>陸が 160 m 以内にあると証明した場合にちょうど 160 m を返していた。</b>
+        ///
+        ///   いまは<b>格子をそのまま舐める</b>。<c>BlockHeights</c> は生の配列で
+        ///   錠を取らないので、241×241 を 2 セルおきに見ても 1 万数千回の配列読みで済む
+        ///   （置くときに 1 度だけ）。取りこぼすのは 32 m 未満の構造物だけである。
+        ///
+        /// ★ <c>DepthAt</c> は使わない。あれは水面が地形より 0.125 m 高ければ
+        ///   「海」と答えるので、干潟や側溝を素通りする。ここでは
+        ///   <see cref="MinSourceDepthMetres"/> を要求する。
         /// </summary>
         private static float OpenWaterRadius(TerrainManager terrain, float x, float z)
         {
-            const int Azimuths = 16;
-            const float StepMetres = 160f;
+            ushort[] block = terrain.BlockHeights;
+            if (block == null) return 0f;
 
-            float best = RadiusMetres;
+            int seaUnits = (int)(terrain.WaterSimulation.m_currentSeaLevel * 64f);
+            int minDepthUnits = (int)(MinSourceDepthMetres * 64f);
 
-            for (int a = 0; a < Azimuths; a++)
+            int cx = CellOf(x);
+            int cz = CellOf(z);
+            int reach = (int)(RadiusMetres / 16f);
+            int best = reach * reach;   // セル単位の二乗距離で持つ（平方根を避ける）
+
+            for (int dz = -reach; dz <= reach; dz += 2)
             {
-                float angle = 6.2831853f * a / Azimuths;
-                float dx = Mathf.Cos(angle);
-                float dz = Mathf.Sin(angle);
+                int gz = cz + dz;
+                int row = gz * (GridCells + 1);
 
-                float reach = RadiusMetres;
-
-                for (float d = StepMetres; d <= RadiusMetres; d += StepMetres)
+                for (int dx = -reach; dx <= reach; dx += 2)
                 {
-                    float px = x + dx * d;
-                    float pz = z + dz * d;
+                    int square = dx * dx + dz * dz;
+                    if (square >= best) continue;      // 既に見つけた陸より遠い
 
-                    bool land = px < -MapHalfExtent || px > MapHalfExtent
-                                || pz < -MapHalfExtent || pz > MapHalfExtent
-                                || TsunamiWave.DepthAt(terrain, px, pz) <= 0f;
+                    int gx = cx + dx;
 
-                    if (land) { reach = d - StepMetres; break; }
+                    bool land;
+                    if (gx < 0 || gx > GridCells || gz < 0 || gz > GridCells)
+                    {
+                        land = true;                  // マップの外は陸として扱う
+                    }
+                    else
+                    {
+                        int at = row + gx;
+                        land = at < 0 || at >= block.Length
+                               || seaUnits - block[at] < minDepthUnits;
+                    }
+
+                    if (land) best = square;
                 }
-
-                if (reach < best) best = reach;
             }
 
-            if (best < StepMetres) best = StepMetres;
-            return best;
+            float metres = Mathf.Sqrt(best) * 16f;
+
+            // ★ 見つけた陸のセルそのものには掛からないよう、1 セルぶん内側で止める。
+            metres -= 16f;
+
+            if (metres > RadiusMetres) metres = RadiusMetres;
+            return metres < MinUsefulRadiusMetres ? 0f : metres;
+        }
+
+        /// <summary>ワールド座標を 16 m セルへ（<c>TsunamiWave.CellOf</c> と同じ式）。</summary>
+        private static int CellOf(float world)
+        {
+            int c = (int)((world + MapHalfExtent) / 16f + 0.5f);
+            return c < 0 ? 0 : (c > GridCells ? GridCells : c);
         }
 
         /// <summary>
@@ -734,7 +789,12 @@ namespace DisasterPlus.Game
                 // ★ <c>Monitor</c> は同じスレッドに対して再入可能なので、
                 //   ここで取ったまま <c>ReleaseWaterSource</c> を呼んでよい。
                 //   ゲーム自身と同じ相手（<c>m_waterSources</c>）を掴む。
-                while (!System.Threading.Monitor.TryEnter(list, 0)) { }
+                // ★ 譲らずに回すと、main スレッドから来たときに
+                //   水スレッドを飢えさせる（第 3 回検証）。
+                while (!System.Threading.Monitor.TryEnter(list, 0))
+                {
+                    System.Threading.Thread.Sleep(0);
+                }
 
                 try
                 {
