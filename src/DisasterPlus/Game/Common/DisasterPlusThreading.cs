@@ -25,7 +25,14 @@ namespace DisasterPlus.Game
         /// </summary>
         public override void OnReleased()
         {
-            try { TsunamiRing.Reset(); }
+            // ★★ **予約も消す。**（2026-08-31、第 2 回検証）これを忘れると、
+            //    まだ走っていた sim tick が予約済みの津波を立ててしまい、
+            //    そのあと解放する手立てが無くなる。
+            try { TsunamiChain.Reset(); }
+            catch (System.Exception e) { Log.Error("TsunamiChain.Reset on release", e); }
+
+            // ★ permanent: true。以後 Begin は必ず断る（TsunamiRing._shutDown）。
+            try { TsunamiRing.Reset(true); }
             catch (System.Exception e) { Log.Error("TsunamiRing.Reset on release", e); }
 
             base.OnReleased();

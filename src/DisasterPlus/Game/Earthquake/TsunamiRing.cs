@@ -186,7 +186,23 @@ namespace DisasterPlus.Game
         /// </summary>
         private static readonly object _gate = new object();
 
-        private static ushort _source;
+        /// <summary>
+        /// <b>もう二度と立てない。</b>MOD が外されたときに立てる片道の錠。
+        ///
+        /// ★★ **<c>Reset</c> だけでは足りない。**（2026-08-31、第 2 回検証）
+        ///   <c>Reset</c> は <c>_running = false</c> にするが、それは
+        ///   <c>Begin</c> が待っている前提条件そのものである。拡張が外された直後、
+        ///   まだ走っていた sim tick が予約済みの津波を立ててしまうと、
+        ///   <b>そのあと tick も保存も解放も二度と来ない</b> ——
+        ///   置きっぱなしの水源が次のオートセーブに焼き付く。
+        /// </summary>
+        private static volatile bool _shutDown;
+
+        // ★ 下の 4 つは sim スレッドが錠の外で読み書きし、main スレッドが
+        //   パネルのために読む。**正しさの拠り所は Drive / Release の中の
+        //   _gate 越しの再確認であって、volatile ではない** ——
+        //   volatile は「古い値を見たまま回り続ける」のを防ぐだけである。
+        private static volatile ushort _source;
 
         /// <summary>
         /// 震源。<b><see cref="Reset"/> で消してはいけない。</b>
@@ -199,14 +215,14 @@ namespace DisasterPlus.Game
         private static Vector3 _centre;
         private static long _rate;
         private static int _deltaUnits;
-        private static int _ticks;
+        private static volatile int _ticks;
         private static int _seaUnits;
         private static int _depthUnits;
         private static int _riseCapUnits;
         private static int _drawCapUnits;
         private static long _drainRate;
-        private static uint _lastFrame;
-        private static bool _running;
+        private static volatile uint _lastFrame;
+        private static volatile bool _running;
 
         /// <summary>いま津波を出しているか。</summary>
         public static bool Running { get { return _running; } }
@@ -238,8 +254,18 @@ namespace DisasterPlus.Game
         /// </summary>
         public static void Reset()
         {
+            Reset(false);
+        }
+
+        /// <summary>
+        /// <paramref name="permanent"/> なら二度と立てない（MOD が外されたとき）。
+        /// </summary>
+        public static void Reset(bool permanent)
+        {
             lock (_gate)
             {
+                if (permanent) _shutDown = true;
+
                 ReleaseLocked();
 
                 // ★★ 握っていた番号が何かの理由で外れていても、**自分の指紋の
@@ -268,6 +294,13 @@ namespace DisasterPlus.Game
 
             lock (_gate)
             {
+            // ★★ 片道の錠（_shutDown の doc）。ここを通すと解放できない水源になる。
+            if (_shutDown)
+            {
+                Detail = "the mod is being unloaded, so no new tsunami is raised";
+                return false;
+            }
+
             if (_running)
             {
                 Detail = "a tsunami is already running";
@@ -299,11 +332,15 @@ namespace DisasterPlus.Game
             //   強い地震ほど高い塔、にはしない（MaxRiseMetres の doc）。
             _riseCapUnits = (int)(MaxRiseMetres * 64f * intensity / 255f);
 
-            // ★★ 浅い海では水深で縛る（MaxRiseFraction の doc）。
-            int byDepth = (int)(_depthUnits * MaxRiseFraction);
-            if (_riseCapUnits > byDepth) _riseCapUnits = byDepth;
-
+            // ★ 弱い地震でも波形が消えないように下限を置く。**水深の蓋より先に**置く
+            //   —— あとに置くと、水深 2 m 未満のとき下限が蓋を打ち消して
+            //   浅い海に大きな押し波が戻ってくる（2026-08-31、Codex の指摘）。
             if (_riseCapUnits < 64) _riseCapUnits = 64;
+
+            // ★★ 浅い海では水深で縛る（MaxRiseFraction の doc）。**ここが最後**。
+            int byDepth = (int)(_depthUnits * MaxRiseFraction);
+            if (byDepth < 0) byDepth = 0;
+            if (_riseCapUnits > byDepth) _riseCapUnits = byDepth;
 
             // ★ 引きは水深に縛る。押しの蓋より深くは引かない。
             _drawCapUnits = (int)(_depthUnits * MaxDrawFraction);
@@ -388,7 +425,14 @@ namespace DisasterPlus.Game
 
             _ticks += TsunamiRingShape.TicksPerWaterStep;
 
-            if (_ticks >= DurationTicks * TsunamiRingShape.TicksPerWaterStep)
+            // ★★ **DurationTicks は既にティックである。**（2026-08-31、第 2 回検証）
+            //    ここで 64 を掛け直していたせいで、打ち切りが 3,145,728 ティック
+            //    ＝ 49,152 水ステップ ＝ <b>14.5 実時間</b>になっていた。
+            //    波形自体は 768 歩で 0 に戻るので<b>見た目には終わって見え</b>、
+            //    そのあいだ水源だけが生き続けて半径 3.8 km の海を
+            //    海面ちょうどに固定し続ける（次の波を平らに均してしまう）。
+            //    <b>例外的な解放経路ばかり固めて、正常な経路を壊していた。</b>
+            if (_ticks >= DurationTicks)
             {
                 lock (_gate)
                 {
@@ -465,7 +509,17 @@ namespace DisasterPlus.Game
                 {
                     // ★★ 錠の中でもう一度確かめる。OwnsSource は錠の外の読みなので、
                     //    そこから先で枠が入れ替わっている余地がある。
-                    if (src.m_type != TypeNatural) { foreign = true; }
+                    // ★★ **型だけでは足りない。**（2026-08-31、第 2 回検証）
+                    //    錠の外の <c>OwnsSource</c> は型と位置の両方を見ているのに、
+                    //    錠の中の確認が型だけだと<b>弱いほうが最後に立つ</b>。
+                    //    枠が別の TYPE_NATURAL に入れ替わっていたら、
+                    //    他人の川に自分の目標水位と 3.8 km ぶんの流量を書いてしまう。
+                    if (src.m_type != TypeNatural
+                        || src.m_inputPosition != _centre
+                        || src.m_outputPosition != _centre)
+                    {
+                        foreign = true;
+                    }
                     else
                     {
                         src.m_target = (ushort)target;
@@ -584,19 +638,38 @@ namespace DisasterPlus.Game
                 FastList<WaterSource> list = sim.m_waterSources;
                 if (list == null || list.m_buffer == null) return;
 
-                int size = list.m_size;
-                if (size > list.m_buffer.Length) size = list.m_buffer.Length;
+                // ★★ **走査と解放をひとつの錠の中で行う。**（2026-08-31、第 2 回検証）
+                //    配列を錠の外で読んでから <c>ReleaseWaterSource</c> を呼ぶと、
+                //    そのあいだに枠が動いて番号が古くなる。古い番号を渡すと
+                //    ゲームは<b>Monitor を取ったあとで</b>例外を投げ、
+                //    <c>Monitor.Exit</c> に届かない —— 水スレッドが永久に止まる。
+                //
+                // ★ <c>Monitor</c> は同じスレッドに対して再入可能なので、
+                //   ここで取ったまま <c>ReleaseWaterSource</c> を呼んでよい。
+                //   ゲーム自身と同じ相手（<c>m_waterSources</c>）を掴む。
+                while (!System.Threading.Monitor.TryEnter(list, 0)) { }
 
-                for (int i = size - 1; i >= 0; i--)
+                try
                 {
-                    WaterSource s = list.m_buffer[i];
-                    if (s.m_type != TypeNatural) continue;
-                    if (s.m_outputPosition != _centre || s.m_inputPosition != _centre) continue;
+                    int size = list.m_size;
+                    if (size > list.m_buffer.Length) size = list.m_buffer.Length;
 
-                    sim.ReleaseWaterSource((ushort)(i + 1));
-                    Log.Info("tsunami: swept a stray water source at the epicentre "
-                             + "(slot " + (i + 1) + "). It would have kept making water "
-                             + "in this city forever.");
+                    for (int i = size - 1; i >= 0; i--)
+                    {
+                        WaterSource s = list.m_buffer[i];
+                        if (s.m_type != TypeNatural) continue;
+                        if (s.m_outputPosition != _centre) continue;
+                        if (s.m_inputPosition != _centre) continue;
+
+                        sim.ReleaseWaterSource((ushort)(i + 1));
+                        Log.Info("tsunami: swept a stray water source at the epicentre "
+                                 + "(slot " + (i + 1) + "). It would have kept making "
+                                 + "water in this city forever.");
+                    }
+                }
+                finally
+                {
+                    System.Threading.Monitor.Exit(list);
                 }
             }
             catch (System.Exception e)
@@ -618,7 +691,15 @@ namespace DisasterPlus.Game
         {
             lock (_gate)
             {
-                if (!_running || _source == 0) return false;
+                if (!_running) return false;
+
+                // ★★ **既に外してあるときも true を返す。**（2026-08-31、第 2 回検証）
+                //    false を返すと呼び出し側は「戻すものは無い」と読み、
+                //    2 回目の保存が始まった窓で<b>戻し忘れる</b>。
+                //    <c>ReapplyAfterSave</c> は <c>_source != 0</c> なら何もしないので、
+                //    余分に予約されても害は無い。
+                if (_source == 0) return true;
+
                 ReleaseLocked();
                 SweepOursLocked();
                 return true;
