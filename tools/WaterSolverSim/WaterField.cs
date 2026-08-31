@@ -67,6 +67,14 @@ namespace DisasterPlus.Tools.WaterSolverSim
         public float SeaLevel;
 
         /// <summary>
+        /// 外周に差し込む DLC の津波。null なら輪はただの海面固定。
+        ///
+        /// ★★ **これが在るときだけ、盤面は水を「もらう」ことができる。**
+        ///   <see cref="EdgeWave"/> のクラス doc を参照。
+        /// </summary>
+        public EdgeWave Edge;
+
+        /// <summary>
         /// <c>SimulateWater</c> の唯一の引数 <c>m_finalPollutionDisposeRate</c>（IL_02D1-02E8）。
         /// 汚染は水の動きに影響しないので、既定の 1 のままでよい。
         /// </summary>
@@ -350,13 +358,17 @@ namespace DisasterPlus.Tools.WaterSolverSim
         /// ★ z が 0 か最終行のときだけ全 x を回り、それ以外の行では x = 0 と x = 最終列
         ///   だけを触る（IL_1699-16B1 の歩幅）。つまり触るのはちょうど盤面の縁だけ。
         /// </summary>
-        private void RingRow(int z, Cell[] buf, int level, int maskPollution)
+        private void RingRow(int z, Cell[] buf, int baseLevel, int maskPollution)
         {
             int step = (z == 0 || z == _last) ? 1 : _last;
             int i = z * _n;
 
             for (int x = 0; x <= _last; x += step, i += step)
             {
+                // ★★ 実機はここで WaterWave.GetSeaLevel を通す（IL_16C7-16F9）。
+                //    津波の入口はこの 1 行だけである。
+                int level = (Edge == null) ? baseLevel : Edge.LevelAt(x, z, baseLevel);
+
                 Cell c = buf[i];
                 int excess = _terrain[i] + c.Height - level;   // IL_170E-171E
 

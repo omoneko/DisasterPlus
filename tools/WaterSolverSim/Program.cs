@@ -73,6 +73,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
             int gridSize = DefaultGridSize;
             bool noPng = false;
             bool audit = false;
+            int edgeIntensity = 0;   // >0 なら DLC の津波を左端に立てる（外力は使わない）
             float arrivalThreshold = float.NaN;   // ★ 診断。>0 なら波頭の到達時刻を測る。         // ★ 診断用。ゲームには対応物が無い。
 
             for (int i = 0; i < args.Length; i++)
@@ -89,6 +90,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 else if (a == "--radius" && i + 1 < args.Length) { radiusCells = ParseInt(args[++i], radiusCells); }
                 else if (a == "--steps" && i + 1 < args.Length) { totalSteps = ParseFloat(args[++i], totalSteps); }
                 else if (a == "--audit") { audit = true; }
+                else if (a == "--edge" && i + 1 < args.Length) { edgeIntensity = ParseInt(args[++i], 0); }
                 else if (a == "--arrival" && i + 1 < args.Length) { arrivalThreshold = ParseFloat(args[++i], arrivalThreshold); }
                 else if (a == "--nopng") { noPng = true; }
                 else if (!a.StartsWith("--")) { outDir = a; }
@@ -135,6 +137,40 @@ namespace DisasterPlus.Tools.WaterSolverSim
             //   <c>Math.Max(...,0)</c> / <c>Math.Min(...,65535)</c> の飽和は
             //   <b>一度も発火しなかった</b>（satLost = satGain = 0、65535 のセルも 0 個）。
             //   「飽和が水を失わせている」という当初の見立ては**誤り**である。
+            // ── DLC の津波（--edge）──────────────────────────────
+            //
+            // ★★ **こちらの外力とは仕掛けがまるで違う**（EdgeWave のクラス doc）。
+            //   左端まるごとを海の区画とみなし、内向き +X で立てる。
+            //   実機の GetSeaSideLocation は「いちばん長く続く海の区画」を採るので、
+            //   左が全部海のこの断面ではまさにこうなる。
+            if (edgeIntensity > 0)
+            {
+                field.Edge = new EdgeWave
+                {
+                    OrigX = 0,
+                    OrigZ = gridSize / 2,
+                    DirX = 32768,
+                    DirZ = 0,
+                    MinX = 0,
+                    MaxX = 0,
+                    MinZ = 0,
+                    MaxZ = gridSize - 1,
+                    Delta = EdgeWave.DeltaFor(edgeIntensity),
+                    Duration = EdgeWave.VanillaDuration,
+                };
+
+                drive = 0;   // 外力は出さない。比べたいのは仕掛けの違いである。
+                pinnedDrive = 0;
+
+                Console.WriteLine("  ** DLC tsunami mode ** intensity " + edgeIntensity
+                                  + " -> m_delta " + field.Edge.Delta + " units = "
+                                  + (field.Edge.Delta / 64f).ToString("F1")
+                                  + " m, driven along the WHOLE LEFT EDGE for "
+                                  + (EdgeWave.VanillaDuration / EdgeWave.TimePerStep)
+                                  + " water steps. The edge is a Dirichlet boundary, so this "
+                                  + "MAKES water - it does not borrow it. No impact drive is used.");
+            }
+
             long baseVolume = TotalWaterUnits(field);
 
             Console.WriteLine("== WaterSolverSim : SimulateWater のオフライン再現 ==");
@@ -247,6 +283,9 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 }
 
                 field.Step(impulses);
+
+                // ★ DLC の津波の時計を進める。m_currentTime は 1 水ステップで +64。
+                if (field.Edge != null) field.Edge.Step();
 
                 if (trackArrival)
                 {

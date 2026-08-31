@@ -183,8 +183,9 @@ namespace DisasterPlus.Game
                      + ((frame - _armedFrame) / 64) + " water steps: the sea rose at most "
                      + _peakRise.ToString("F1") + " m above where it was, most newly "
                      + "flooded land "
-                     + _peakFloodCells + " cells = "
-                     + (_peakFloodCells * 16f * 16f / 1000000f).ToString("F2") + " km2");
+                     + _peakFloodCells + " sampled cells = "
+                     + (_peakFloodCells * SampleStride * SampleStride * 16f * 16f / 1000000f)
+                       .ToString("F2") + " km2");
 
             _armed = false;
             _reason = null;
