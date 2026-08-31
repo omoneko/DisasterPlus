@@ -33,6 +33,21 @@ namespace DisasterPlus.Game
     /// ★ 陸の標高を「波」と読まないこと。<c>WaterLevel</c> は地形＋水柱を返すので、
     ///   海面 207 m のマップで標高 277 m の山を叩けば水無しで +70 m になる
     ///   （<c>TsunamiWave.RiseAt</c> の ★★ で一度踏んだ）。
+    ///
+    /// ── ★★ 基準値を引く（2026-08-31、最初の実測で判明）────────────────
+    ///
+    /// 一度目の実装は<b>絶対値</b>を出していた。実機の 1 行目がこれである：
+    ///
+    /// <code>sea watch @0 steps: highest sea 55.1 m, land under water 3721 cells</code>
+    ///
+    /// **波が来る前の 0 歩目で 55 m・15 km2。** 数えていたのは
+    /// <b>そのマップが元から持っている川と、川床が海面下に落ちる谷</b>だった。
+    /// 川は「陸のセルに水が乗っている」ので浸水と区別が付かず、
+    /// 谷は <c>ground &lt; 海面</c> なので海と区別が付かない。
+    ///
+    /// だから<b>測り始める瞬間の水面を丸ごと覚えて、以後はそこからの差だけ</b>を出す。
+    /// 覚えるのは水面（地形＋水柱）で、地形だけではない —— 川は動かないので
+    /// 差を取れば消える。バニラでもこちらでも同じ引き算をするので、比較は保たれる。
     /// </summary>
     public static class SeaWatch
     {
@@ -55,6 +70,16 @@ namespace DisasterPlus.Game
         private static float _peakRise;
         private static int _peakFloodCells;
         private static bool _errorLogged;
+        private static bool _sawVanilla;
+
+        /// <summary>
+        /// 測り始めた瞬間の水面（1/64 m）。添字は<b>間引いた格子</b>で
+        /// <c>(z/Stride)*BaseSide + (x/Stride)</c>。null は「まだ取っていない」。
+        /// </summary>
+        private static int[] _base;
+
+        /// <summary>間引いた格子の一辺。</summary>
+        private static readonly int BaseSide = GridCells / SampleStride + 1;
 
         /// <summary>いま測っているか。</summary>
         public static bool Armed { get { return _armed; } }
@@ -68,12 +93,15 @@ namespace DisasterPlus.Game
         /// <summary>レベルのロード／アンロードで呼ぶ。</summary>
         public static void Reset()
         {
+            // ★ 都市をまたいで基準値を持ち越さない。地形が別物になる。
+            _base = null;
             _armed = false;
             _armedFrame = 0u;
             _lastFrame = 0u;
             _reason = null;
             _peakRise = 0f;
             _peakFloodCells = 0;
+            _sawVanilla = false;
         }
 
         /// <summary>
@@ -90,11 +118,60 @@ namespace DisasterPlus.Game
             _peakRise = 0f;
             _peakFloodCells = 0;
 
+            if (!CaptureBaseline())
+            {
+                _armed = false;
+                Log.Info("sea watch could not read the water, so it is not measuring.");
+                return;
+            }
+
             Log.Info("sea watch armed (" + reason + "). From here the whole map's water is "
                      + "sampled every " + (EveryFrames / 64) + " water steps: the highest "
                      + "the sea gets anywhere, and how many land cells are under water. "
                      + "**The same ruler is used for the DLC tsunami and for ours, so the "
                      + "two runs can be compared directly.**");
+        }
+
+        /// <summary>
+        /// いまの水面を丸ごと覚える。**これを取らない計測は嘘になる**（クラス doc）。
+        /// </summary>
+        private static bool CaptureBaseline()
+        {
+            TerrainManager terrain = Singleton<TerrainManager>.instance;
+            if (terrain == null || terrain.WaterSimulation == null) return false;
+
+            ushort[] block = terrain.BlockHeights;
+            if (block == null) return false;
+
+            if (_base == null) _base = new int[BaseSide * BaseSide];
+
+            WaterSimulation.Cell[] cells = terrain.WaterSimulation.BeginRead();
+
+            try
+            {
+                if (cells == null) return false;
+
+                for (int z = 0; z <= GridCells; z += SampleStride)
+                {
+                    int row = z * (GridCells + 1);
+                    int baseRow = (z / SampleStride) * BaseSide;
+
+                    for (int x = 0; x <= GridCells; x += SampleStride)
+                    {
+                        int at = row + x;
+                        _base[baseRow + x / SampleStride] =
+                            (at >= 0 && at < block.Length && at < cells.Length)
+                                ? block[at] + cells[at].m_height
+                                : int.MinValue;
+                    }
+                }
+            }
+            finally
+            {
+                terrain.WaterSimulation.EndRead();
+            }
+
+            return true;
         }
 
         /// <summary>測るのをやめて、結びの 1 行を出す。</summary>
@@ -103,8 +180,9 @@ namespace DisasterPlus.Game
             if (!_armed) return;
 
             Log.Info("sea watch finished (" + _reason + ") after "
-                     + ((frame - _armedFrame) / 64) + " water steps: highest sea anywhere "
-                     + _peakRise.ToString("F1") + " m above normal, most land under water "
+                     + ((frame - _armedFrame) / 64) + " water steps: the sea rose at most "
+                     + _peakRise.ToString("F1") + " m above where it was, most newly "
+                     + "flooded land "
                      + _peakFloodCells + " cells = "
                      + (_peakFloodCells * 16f * 16f / 1000000f).ToString("F2") + " km2");
 
@@ -156,9 +234,26 @@ namespace DisasterPlus.Game
         public static void Tick(uint frame)
         {
             // ★ バニラの津波が始まったら、こちらから測りはじめる。
-            if (!_armed && (frame & 63u) == 0u && VanillaTsunamiRunning())
+            if ((frame & 63u) == 0u)
             {
-                Arm("the DLC's own tsunami - this is the yardstick", frame);
+                bool vanilla = VanillaTsunamiRunning();
+
+                if (!_armed && vanilla)
+                {
+                    Arm("the DLC's own tsunami - this is the yardstick", frame);
+                }
+                else if (_armed && vanilla && !_sawVanilla)
+                {
+                    // ★★ こちらの波を測っている最中にバニラが起きても取りこぼさない。
+                    //    Arm は二度目を無視するので、ここで印を付けておかないと
+                    //    <b>比べる相手の数字が「うちの波」と札を付けて出てしまう。</b>
+                    _sawVanilla = true;
+                    _reason += " + THE DLC TSUNAMI JOINED at step "
+                               + ((frame - _armedFrame) / 64);
+                    Log.Info("sea watch: the DLC's own tsunami started while we were "
+                             + "already measuring. From here the numbers are both waves "
+                             + "together, not ours alone.");
+                }
             }
 
             if (_armed && (frame - _armedFrame) / 64 >= MaxSteps)
@@ -195,6 +290,8 @@ namespace DisasterPlus.Game
             ushort[] block = terrain.BlockHeights;
             if (block == null) return;
 
+            if (_base == null) return;
+
             float seaLevel = terrain.WaterSimulation.m_currentSeaLevel;
             int seaUnits = (int)(seaLevel * 64f);
 
@@ -202,6 +299,7 @@ namespace DisasterPlus.Game
             int bestX = 0;
             int bestZ = 0;
             int flooded = 0;
+            int floodUnits = (int)(FloodMetres * 64f);
 
             // ★★ **1 回借りて舐める。** WaterLevel() を何万回も呼ぶと、
             //    1 回ごとに BeginRead/EndRead の錠を取り直して水スレッドと奪い合う。
@@ -214,28 +312,31 @@ namespace DisasterPlus.Game
                 for (int z = 0; z <= GridCells; z += SampleStride)
                 {
                     int row = z * (GridCells + 1);
+                    int baseRow = (z / SampleStride) * BaseSide;
 
                     for (int x = 0; x <= GridCells; x += SampleStride)
                     {
                         int at = row + x;
                         if (at < 0 || at >= block.Length || at >= cells.Length) continue;
 
+                        int was = _base[baseRow + x / SampleStride];
+                        if (was == int.MinValue) continue;
+
                         int ground = block[at];
-                        int height = cells[at].m_height;
+
+                        // ★★ **平常時の水面からの差。** 絶対値ではない（クラス doc）。
+                        int rise = ground + cells[at].m_height - was;
+                        if (rise <= 0) continue;
 
                         if (ground < seaUnits)
                         {
-                            // 海。平常の海面からどれだけ上がっているか。
-                            int rise = ground + height - seaUnits;
-                            if (rise > 0)
-                            {
-                                float m = rise / 64f;
-                                if (m > best) { best = m; bestX = x; bestZ = z; }
-                            }
+                            // 海。どれだけ盛り上がったか。
+                            float m = rise / 64f;
+                            if (m > best) { best = m; bestX = x; bestZ = z; }
                         }
-                        else if (height > FloodMetres * 64f)
+                        else if (rise > floodUnits)
                         {
-                            // 陸の上に水がある ＝ 浸水。
+                            // 陸。**元より 0.5 m 以上深くなった** ＝ 新しく浸かった。
                             flooded++;
                         }
                     }
@@ -250,7 +351,7 @@ namespace DisasterPlus.Game
             if (flooded > _peakFloodCells) _peakFloodCells = flooded;
 
             Log.Info("sea watch @" + ((frame - _armedFrame) / 64) + " steps ("
-                     + _reason + "): highest sea " + best.ToString("F1")
+                     + _reason + "): sea up " + best.ToString("F1")
                      + " m at cell (" + bestX + "," + bestZ + ") = world ("
                      + (bestX * 16f - 8640f).ToString("F0") + ","
                      + (bestZ * 16f - 8640f).ToString("F0") + "), land under water "
