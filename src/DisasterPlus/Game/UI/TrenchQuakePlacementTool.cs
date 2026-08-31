@@ -213,7 +213,7 @@ namespace DisasterPlus.Game
 
             if (UIView.IsInsideUI()) return;
 
-            // ★ 探索は重い（最悪 2,401 点、1 点ごとに水シミュの読み取り錠）ので
+            // ★ 探索は重い（最悪 2,401 点。錠は走査ごとに 1 回だが配列は舐める）ので
             //   間引く。あいだのフレームは
             //   前に見つけた海に的を出したままにする —— 消すとちらつく。
             if (--_previewCountdown <= 0)

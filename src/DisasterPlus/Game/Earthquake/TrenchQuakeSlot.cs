@@ -438,21 +438,15 @@ namespace DisasterPlus.Game
                 if (x < -MapHalfExtent || x > MapHalfExtent) continue;
                 if (z < -MapHalfExtent || z > MapHalfExtent) continue;
 
-                // ★★ **水シミュを読まない。**（2026-08-31、第 4 回検証）
+                // ★★ **錠は走査の前後で 1 回ずつしか取らない。**（第 4 回検証）
                 //    ここは <c>RenderOverlay</c> から<b>main スレッド</b>で
                 //    毎 6 フレーム、最大 2,401 点まわる。以前は 1 点ごとに
                 //    <c>HasWater</c> / <c>WaterLevel</c> / <c>DepthAt</c> を呼んでいて、
                 //    そのどれもが <c>WaterSimulation.BeginRead</c>
                 //    （<c>Monitor.TryEnter</c> のスピン）を取る ——
                 //    **1 フレームに数百回、水スレッドと錠を奪い合っていた。**
-                //    このプロジェクト自身の規則（<c>VolcanoLava.Ignite</c> と
-                //    <c>TyphoonController</c> のクラス doc）が
-                //    「<c>HasWater</c> は sim スレッド専用」と 2 度書いている。
-                //
-                // ★ <c>BlockHeights</c> は生の配列で錠を取らない。海面との差が
-                //   そのまま水深なので、これだけで「十分に深い海か」は決まる。
-                //   川・湖は海面より高いので、この式では自動的に落ちる
-                //   （<c>seaLevel - block</c> が小さくなる）。
+                //    いまは走査の頭で 1 回 <c>BeginRead</c> し、
+                //    借りた配列を最後まで使い回す（<c>SeaWatch</c> と同じ形）。
                 int cell = CellOf(z) * (GridCells + 1) + CellOf(x);
                 if (cell < 0 || cell >= block.Length || cell >= cells.Length) continue;
 
@@ -465,19 +459,17 @@ namespace DisasterPlus.Game
                 sawDeepWater = true;
 
                 // ★★ **源のまわりが開けた海であること。**（2026-08-30、最終検証）
-                //    外力の円盤は半径 1280 m で、確かめるのはその 0.85 倍
-                //    （1,088 m）の 8 方位である。その中に陸があると
+                //    確かめるのは <c>OpenSeaRadiusMetres</c>（2,000 m）の 8 方位である。
+                //    その中に陸があると
                 //    <b>源そのものが桶になって共振する</b>（掃引で +111 m まで跳ねた）。
                 //    オフライン再現で確かめたのは<b>開けた海</b>だけなので、
                 //    保証できない地形では起こさない。
                 if (!IsOpenSea(terrain, cells, seaUnits, x, z)) continue;
 
-                // ★★ **津波の円がそこに入るかも、置く前に確かめる。**
-                //    （2026-08-31、第 4 回検証）これが無いと、
-                //    <c>IsOpenSea</c>（8 方位・2,000 m）は通ったのに
-                //    <c>TsunamiRing.Begin</c> の円盤走査で落ちる地形があり、
-                //    <b>地震だけ起きて 2 分半後に津波が来ない</b>という、
-                //    プレイヤーには原因の分からない失敗になる。
+                // ★ 円が入るかどうかは<b>ここでは見ない</b>。見ると、入らない点を
+                //   飛ばして先へ進むことになり、プレビューの印と震源がずれる
+                //   （<c>RaiseCore</c> の ★★、第 7 回検証）。検査は
+                //   選ばれた 1 点に対して <c>RaiseCore</c> が 1 回だけ行う。
                 sea = new Vec3(x, seaLevel, z);
                 distanceMetres = SeaSearch.DistanceMetres(dx, dz);
                 return true;
