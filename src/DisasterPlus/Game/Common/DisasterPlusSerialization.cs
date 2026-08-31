@@ -55,6 +55,11 @@ namespace DisasterPlus.Game
             //   （下の if (_data == null) より上にある理由）。
             RestoreFloodedRiversForSave();
 
+            // ★★ ②の津波も同じ理由で外す。あちらは MOD が<b>自分で作った</b>
+            //   水源なので、残ると MOD を外しても消えない
+            //   （<c>TsunamiRing</c> のクラス doc §3）。
+            LiftTsunamiSourceForSave();
+
             // ★ 天候の上書きも同じ理由でセーブに焼き付く（WeatherManager+Data.Serialize は
             //   m_targetRain / m_targetCloud / m_forceWeatherOn を書く。全体レビュー I2 で
             //   IL 実測）。水源と同じく**保存の前に降ろし、AddAction で戻す**。
@@ -161,6 +166,38 @@ namespace DisasterPlus.Game
             {
                 Log.Error("could not lower the typhoon's weather override before saving; "
                           + "the save may restore with the storm's rain still forced on", e);
+            }
+        }
+
+        /// <summary>
+        /// ②が置いている津波の水源を、**バニラが水源配列を書く前に**外し、
+        /// 保存が終わってから <c>AddAction</c> で戻す。
+        ///
+        /// 形は <see cref="RestoreFloodedRiversForSave"/> と同じで、理由も同じである。
+        /// ただし④が触るのは<b>マップに元から在る</b>水源の <c>m_target</c> なのに対し、
+        /// ②の水源は<b>MOD が作ったもの</b>なので、残ると MOD を外しても消えない。
+        ///
+        /// ここで例外を出して**セーブそのものを失敗させない**。
+        /// </summary>
+        private static void LiftTsunamiSourceForSave()
+        {
+            try
+            {
+                if (!TsunamiRing.SuspendForSave()) return;
+
+                // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
+                // new GameObject を走らせるので、exists で先に確認する。
+                if (!Singleton<SimulationManager>.exists) return;
+
+                Singleton<SimulationManager>.instance.AddAction(delegate
+                {
+                    TsunamiRing.ReapplyAfterSave();
+                });
+            }
+            catch (System.Exception e)
+            {
+                Log.Error("could not lift the tsunami's water source before saving; "
+                          + "the save may contain a spring that never stops", e);
             }
         }
 

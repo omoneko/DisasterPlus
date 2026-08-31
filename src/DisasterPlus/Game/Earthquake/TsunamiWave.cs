@@ -62,6 +62,16 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class TsunamiWave
     {
+        // ★★ **2026-08-31 以降、この経路で津波は立たない。**
+        //    <c>TYPE_IMPACT</c> は水を押しのけるだけで作らないので、汀線まで持たない
+        //    （オフライン実測: 汀線 19.3 m 対 DLC 84.8 m）。いまの津波は
+        //    <see cref="TsunamiRing"/>（震源に置く WaterSource）である。
+        //    ここに残しているのは
+        //      1. <see cref="DepthAt"/> —— 水深はソルバと同じ量で測る必要があり、
+        //         その式がここにある（TrenchQuakeSlot も使う）
+        //      2. <see cref="Reset"/> —— 旧版で置いた水波が残っている都市の後始末
+        //    の 2 つだけである。**Begin は誰も呼ばない。**
+
         /// <summary><c>WaterWave.m_type</c> の <c>TYPE_IMPACT</c>（IL 実測）。</summary>
         private const ushort TypeImpact = 2;
 

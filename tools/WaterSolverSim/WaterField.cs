@@ -75,6 +75,14 @@ namespace DisasterPlus.Tools.WaterSolverSim
         public EdgeWave Edge;
 
         /// <summary>
+        /// 震源に置く <c>WaterSource</c>（TYPE_NATURAL）。null なら何もしない。
+        ///
+        /// ★★ **これが「境界条件をマップの真ん中へ持ってきた」もの**である
+        ///   （<see cref="SourceDisc"/> のクラス doc）。
+        /// </summary>
+        internal SourceDisc Source;
+
+        /// <summary>
         /// <c>SimulateWater</c> の唯一の引数 <c>m_finalPollutionDisposeRate</c>（IL_02D1-02E8）。
         /// 汚染は水の動きに影響しないので、既定の 1 のままでよい。
         /// </summary>
@@ -234,6 +242,22 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
+        /// そのセルに乗っている水の厚み（m）。
+        ///
+        /// ★★ **陸を測るときは必ずこちらを使う。**<see cref="ColumnRiseMetres"/> は
+        ///   地形＋水柱から海面を引くので、<b>水の無い陸でも標高ぶん正の値を返す</b>。
+        ///   浸水距離をあれで測っていたせいで、どの条件でも「陸を全部飲んだ」と
+        ///   出ていた（2026-08-31 に判明。実機側の <c>SeaWatch</c> で踏んだのと
+        ///   まったく同じ穴である）。
+        /// </summary>
+        public float WaterDepthMetres(int x, int z)
+        {
+            int i = z * Size + x;
+            if (i < 0 || i >= _terrain.Length) return 0f;
+            return _current[i].Height / (float)UnitsPerMetre;
+        }
+
+        /// <summary>
         /// <b>1 回の <c>SimulateWater</c>。</b>
         /// </summary>
         /// <param name="impulses">この 1 フレームに効かせる TYPE_IMPACT の波。null 可。</param>
@@ -304,6 +328,13 @@ namespace DisasterPlus.Tools.WaterSolverSim
             }
 
             _current = dst;
+
+            // ★★ 水源は輪のあと（IL_184A は外周ループ IL_1690-1810 より後ろ）。
+            //    **_current の入れ替えより後**でなければならない —— 前に置くと
+            //    書き込み先が「今フレームで捨てられるほうの配列」になり、
+            //    水源が<b>まるごと無かったことになる</b>（2026-08-31 に踏んだ:
+            //    強度 100 と 255 が 1 ビットも違わない出力になって気付いた）。
+            if (Source != null) Source.Apply(this);
         }
 
         /// <summary>

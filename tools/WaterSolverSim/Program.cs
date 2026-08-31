@@ -74,6 +74,13 @@ namespace DisasterPlus.Tools.WaterSolverSim
             bool noPng = false;
             bool audit = false;
             int edgeIntensity = 0;   // >0 なら DLC の津波を左端に立てる（外力は使わない）
+            int ringIntensity = 0;   // >0 なら震源に WaterSource を置いて同心円で立てる
+            int ringRadius = 80;     // 震源の円の半径（セル）。80 -> 1280 m
+            long ringRate = 0;       // その半径を出すのに要る流量
+            bool ringHold = false;   // 円をつねに目標水位へ張り付かせる
+            int ringDurSteps = 256;  // 波形の長さ（水ステップ）。バニラは 256
+            float ringCap = 0f;      // >0 なら押し波の高さの頭打ち（m）
+            float ringDraw = 0f;     // >0 なら引き波の深さの頭打ち（m）。既定は ringCap と同じ
             float arrivalThreshold = float.NaN;   // ★ 診断。>0 なら波頭の到達時刻を測る。         // ★ 診断用。ゲームには対応物が無い。
 
             for (int i = 0; i < args.Length; i++)
@@ -91,6 +98,12 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 else if (a == "--steps" && i + 1 < args.Length) { totalSteps = ParseFloat(args[++i], totalSteps); }
                 else if (a == "--audit") { audit = true; }
                 else if (a == "--edge" && i + 1 < args.Length) { edgeIntensity = ParseInt(args[++i], 0); }
+                else if (a == "--ring" && i + 1 < args.Length) { ringIntensity = ParseInt(args[++i], 0); }
+                else if (a == "--ringr" && i + 1 < args.Length) { ringRadius = ParseInt(args[++i], ringRadius); }
+                else if (a == "--ringhold") { ringHold = true; }
+                else if (a == "--ringdur" && i + 1 < args.Length) { ringDurSteps = ParseInt(args[++i], ringDurSteps); }
+                else if (a == "--ringcap" && i + 1 < args.Length) { ringCap = ParseFloat(args[++i], ringCap); }
+                else if (a == "--ringdraw" && i + 1 < args.Length) { ringDraw = ParseFloat(args[++i], ringDraw); }
                 else if (a == "--arrival" && i + 1 < args.Length) { arrivalThreshold = ParseFloat(args[++i], arrivalThreshold); }
                 else if (a == "--nopng") { noPng = true; }
                 else if (!a.StartsWith("--")) { outDir = a; }
@@ -171,6 +184,49 @@ namespace DisasterPlus.Tools.WaterSolverSim
                                   + "MAKES water - it does not borrow it. No impact drive is used.");
             }
 
+            // ── 震源の同心円（--ring）─────────────────────────────
+            //
+            // ★★ DLC の<b>波形はそのまま</b>、置き場所だけ震源へ移す。
+            //   水位が海面より下の位相は取り込み（引き波）、上の位相は
+            //   吐き出し（押し波）。<see cref="SourceDisc"/> のクラス doc。
+            EdgeWave ringShape = null;
+
+            if (ringIntensity > 0)
+            {
+                // 半径 r [m] を出すのに要る流量: rate = ((r - 10) / 0.4)^2
+                float wantR = ringRadius * WaterField.CellSizeMetres;
+                long rate = (long)Math.Pow((wantR - 10f) / 0.4f, 2.0);
+
+                field.Source = new SourceDisc
+                {
+                    CellX = centreX,
+                    CellZ = centreZ,
+                };
+
+                ringShape = new EdgeWave
+                {
+                    Delta = EdgeWave.DeltaFor(ringIntensity),
+                    Duration = ringDurSteps * EdgeWave.TimePerStep,
+                };
+
+                drive = 0;
+                pinnedDrive = 0;
+
+                Console.WriteLine("  ** EPICENTRE RING mode ** intensity " + ringIntensity
+                                  + " -> m_delta " + ringShape.Delta + " units = "
+                                  + (ringShape.Delta / 64f).ToString("F1") + " m. A "
+                                  + "TYPE_NATURAL WaterSource of radius "
+                                  + SourceDisc.RadiusMetres(rate).ToString("F0")
+                                  + " m (rate " + rate + ") sits ON the epicentre and is "
+                                  + "driven with the DLC's own waveform for "
+                                  + (EdgeWave.VanillaDuration / EdgeWave.TimePerStep)
+                                  + " water steps. It MAKES water on the crest and TAKES it "
+                                  + "on the retreat, so the wave radiates concentrically.");
+
+                // 流量は毎ステップ位相で切り替える。ここでは覚えておくだけ。
+                ringRate = rate;
+            }
+
             long baseVolume = TotalWaterUnits(field);
 
             Console.WriteLine("== WaterSolverSim : SimulateWater のオフライン再現 ==");
@@ -243,10 +299,11 @@ namespace DisasterPlus.Tools.WaterSolverSim
                         float atShore = field.ColumnRiseMetres(shoreCell - 2, centreZ);
                         if (atShore > shoreMax) { shoreMax = atShore; shoreMaxFrame = frame; }
 
-                        // 陸へ何セル乗り上げたか（水があるいちばん内陸の列）。
+                        // 陸へ何セル乗り上げたか（水が 0.5 m 以上乗っている列）。
+                        // ★★ **標高ではなく水の厚みで見る**（WaterDepthMetres の doc）。
                         for (int lx = shoreCell; lx < gridSize; lx++)
                         {
-                            if (field.ColumnRiseMetres(lx, centreZ) <= 0.05f) break;
+                            if (field.WaterDepthMetres(lx, centreZ) <= 0.5f) break;
                             int inland = lx - shoreCell + 1;
                             if (inland > floodCells) floodCells = inland;
                         }
@@ -280,6 +337,43 @@ namespace DisasterPlus.Tools.WaterSolverSim
                         if (d == 0) continue;
                         impulses.Add(Impulse.Round(centreX, centreZ, radiusCells, d));
                     }
+                }
+
+                // ★ 震源の円を DLC の波形で動かす。取り込みと吐き出しは排他。
+                if (ringShape != null)
+                {
+                    int level = ringShape.LevelAt(0, 0, field.SeaLevelUnits);
+
+                    // ★★ 押し波の高さに蓋をする。遠くへ届かせるのは
+                    //    高さではなく<b>体積</b>なので、蓋のぶんは長さで補う。
+                    if (ringCap > 0f)
+                    {
+                        int capUnits = field.SeaLevelUnits + (int)(ringCap * 64f);
+                        if (level > capUnits) level = capUnits;
+
+                        float drawCap = ringDraw > 0f ? ringDraw : ringCap;
+                        int floorUnits = field.SeaLevelUnits - (int)(drawCap * 64f);
+                        if (level < floorUnits) level = floorUnits;
+                    }
+
+                    field.Source.Target = level;
+
+                    // ★★ **押しと引きを両方いつも入れる。** これで円は
+                    //    「目標水位へ張り付く」——DLC が外周セルにやっている
+                    //    Dirichlet 境界とまったく同じ振る舞いになる。
+                    //    片方ずつにすると、寄せ集まった水を抜く力が無いので
+                    //    震源が目標の 2 倍以上に盛り上がる（2026-08-31 実測:
+                    //    目標 +102 m に対して実際 +232 m）。
+                    field.Source.OutputRate = ringHold ? ringRate : (level > field.SeaLevelUnits ? ringRate : 0);
+                    field.Source.InputRate = ringHold ? ringRate : (level < field.SeaLevelUnits ? ringRate : 0);
+
+                    if (!ringShape.Active)
+                    {
+                        field.Source.OutputRate = 0;
+                        field.Source.InputRate = 0;
+                    }
+
+                    ringShape.Step();
                 }
 
                 field.Step(impulses);

@@ -169,7 +169,7 @@ namespace DisasterPlus.Game
         public static bool StillOwes(ushort quakeId)
         {
             if (quakeId == 0) return false;
-            if (TsunamiWave.Running) return true;
+            if (TsunamiRing.Running) return true;
 
             // まだ拾っていない（Emerging の最中など）。負っている。
             if (_quakeId != quakeId) return true;
@@ -477,15 +477,15 @@ namespace DisasterPlus.Game
                 frame = Singleton<SimulationManager>.instance.m_currentFrameIndex;
             }
 
-            if (!TsunamiWave.Begin(quake.Epicentre, quake.Intensity, frame))
+            if (!TsunamiRing.Begin(quake.Epicentre, quake.Intensity, frame))
             {
                 // ★ 海が無い／水シミュが読めない。**失敗ではない場合がある**ので、
-                //   理由をそのまま持ち帰る（TsunamiWave.Detail）。
+                //   理由をそのまま持ち帰る（TsunamiRing.Detail）。
                 _state = TsunamiChainState.NoSea;
                 Log.Info("tsunami NOT raised: "
-                         + (TsunamiWave.Detail ?? "the wave could not be raised"));
+                         + (TsunamiRing.Detail ?? "the wave could not be raised"));
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiNoSea",
-                    TsunamiWave.Detail ?? "the tsunami could not be raised");
+                    TsunamiRing.Detail ?? "the tsunami could not be raised");
                 return;
             }
 

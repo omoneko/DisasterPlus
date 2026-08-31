@@ -39,6 +39,7 @@ namespace DisasterPlus.Game
             //    DisasterData.m_waveIndex で持たれる ＝ セーブに焼き付くので、
             //    残すと MOD を外しても都市に残り続ける（TsunamiWave のクラス doc）。
             TsunamiWave.Reset();
+            TsunamiRing.Reset();
             SeaWatch.Reset();
             LongPeriodDamage.Reset();
 
@@ -79,6 +80,13 @@ namespace DisasterPlus.Game
             //    次に書いたときに<b>他人の波を踏む</b>。
             //    走っていなければ即 return するので、ただの空振りである。
             TsunamiWave.Tick(frameIndex);
+
+            // ★★ **震源から同心円に立つ本体。**（2026-08-31、所有者の指示）
+            //    <c>TsunamiWave</c>（TYPE_IMPACT の丘）と違い、これは
+            //    <b>水を作る</b>ので波が遠くまで落ちない。上と同じ理由で
+            //    設定より先に必ず進める —— 止めると水源が置きっぱなしになり、
+            //    <b>セーブに焼き付いて永久に水が湧く</b>（TsunamiRing のクラス doc）。
+            TsunamiRing.Tick(frameIndex);
 
             // ★★ **海全体の物差し。**（2026-08-31、所有者の提案）
             //    バニラの津波でもこちらの波でも<b>同じ 1 行</b>が出る。
@@ -202,6 +210,9 @@ namespace DisasterPlus.Game
             TrenchQuakeSlot.Reset();
             // ★★ **ここが最後の砦である。** 置いた水波を解放しないとセーブに残る。
             TsunamiWave.Reset();
+            // ★★ 水源はもっと重い —— WaterWave と違い**寿命が無い**ので、
+            //    残すとその都市で永久に水が湧く（TsunamiRing のクラス doc §3）。
+            TsunamiRing.Reset();
             SeaWatch.Reset();
             // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
             // EarthquakePanel.Destroy() が波形テクスチャ（Texture2D）も破棄する
@@ -241,18 +252,19 @@ namespace DisasterPlus.Game
                 : "NOT SUPPRESSED - Harmony is not installed, so a trench quake will "
                   + "open a fissure like a fault quake");
 
-            // ★★ 津波は DLC の TsunamiAI ではなく、震源に置いた TYPE_IMPACT の
-            //    水波である。**どちらが動いているか**を名乗らないと調査できない。
-            b.Line(2, "tsunami", TsunamiWave.Running
-                ? "drive " + TsunamiWave.DeltaUnits + " of " + TsunamiWave.DriveUnits
-                  + " units (" + TsunamiWave.Stage + "); water is "
-                  + TsunamiWave.DepthMetres.ToString("F1")
-                  + " m deep at the epicentre; highest sea so far "
-                  + TsunamiWave.PeakRiseMetres.ToString("F1") + " m over the epicentre and "
-                  + TsunamiWave.PeakRingMetres.ToString("F1") + " m over the source rim"
+            // ★★ 津波は DLC の TsunamiAI ではなく、震源に置いた WaterSource
+            //    （TYPE_NATURAL）である。**どちらが動いているか**を名乗らないと調査できない。
+            b.Line(2, "tsunami", TsunamiRing.Running
+                ? "the sea over the epicentre is being held "
+                  + TsunamiRing.OffsetMetres.ToString("F1")
+                  + " m from normal (" + TsunamiRing.ElapsedSteps + " of "
+                  + TsunamiRing.TotalSteps + " water steps); water is "
+                  + TsunamiRing.DepthMetres.ToString("F1")
+                  + " m deep at the epicentre; the highest it has been held is "
+                  + TsunamiRing.PeakRiseMetres.ToString("F1") + " m"
                 : "not running"
-                  + (TsunamiWave.Detail != null
-                     ? " (" + TsunamiWave.Detail + ")" : ""));
+                  + (TsunamiRing.Detail != null
+                     ? " (" + TsunamiRing.Detail + ")" : ""));
 
             b.Line(2, "note: tsunami",
                    "ONLY a trench quake brings a tsunami. The game's own (fault) "
