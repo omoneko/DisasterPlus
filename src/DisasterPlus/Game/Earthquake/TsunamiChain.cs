@@ -129,6 +129,14 @@ namespace DisasterPlus.Game
         /// 強度の下限。強度 0 の津波は波高が 0 になり（<c>m_delta = m_height * 1024 * i / 55</c>、
         /// §B-3）、「起こしたのに何も起きない」という原因の分からない状態になる。
         /// </summary>
+        /// <summary>
+        /// これ未満の震度では津波を予約しない。
+        ///
+        /// ★★ **長らく誰も見ていなかった。**（2026-08-31、第 4 回検証）
+        ///   doc には「起こしたのに何も来ない状態を作らないため」と書いてあったのに、
+        ///   どこからも参照されていなかった。震度 1 でも予約が通り、
+        ///   蓋が下限の 1 m になって<b>本当に何も来なかった</b>。
+        /// </summary>
         private const byte MinIntensity = 10;
 
         private static ushort _quakeId;
@@ -407,6 +415,17 @@ namespace DisasterPlus.Game
             uint delay = (uint)(minutes * framesPerMinute);
             uint baseFrame = quake.ActivationScheduled ? quake.ActivationFrame : frame;
             _dueFrame = baseFrame + delay;
+            // ★★ 弱すぎる地震では予約しない（MinIntensity の doc）。
+            if (quake.Intensity < MinIntensity)
+            {
+                _state = TsunamiChainState.NoSea;
+                Log.Info("tsunami NOT scheduled for quake #" + quake.DisasterId
+                         + ": intensity " + quake.Intensity + " is below " + MinIntensity
+                         + ", which would raise a wave too small to see. This is not a "
+                         + "fault - a weak quake makes a weak sea.");
+                return;
+            }
+
             _state = TsunamiChainState.Scheduled;
 
             // ★★ **海溝型なら必ず出す。**（第 3 回検証）Diag だけだと

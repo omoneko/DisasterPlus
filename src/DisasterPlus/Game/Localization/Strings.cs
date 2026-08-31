@@ -552,8 +552,12 @@ namespace DisasterPlus.Game
         // ①の ForecastNoStormDetected と同じ扱いで、「0 を安全と読ませない」の裏返し
         // ——「何も起きなかった」を「壊れた」と読ませない。
 
+        // ★ この設定は<b>海溝型地震には効かない</b>（海溝型は津波を起こすためだけに
+        //   在る災害なので、設定に関係なく必ず連れてくる）。効くのはパネルの行を
+        //   常に出すかどうかだけである。ラベルにそう書く（2026-08-31、第 4 回検証:
+        //   旧ラベルは「効きます」と読める書き方だった）。
         public static string EarthquakeTsunamiChain =
-            "Raise a tsunami after an undersea earthquake";
+            "Always show the tsunami row (trench earthquakes raise one either way)";
         public static string EarthquakeTsunamiDelay = "Tsunami delay (in-game minutes)";
         public static string EarthquakeTsunamiPending = "Tsunami expected in";
         public static string EarthquakeTsunamiRaised = "Tsunami raised";
@@ -568,6 +572,9 @@ namespace DisasterPlus.Game
         // ★★ この 2 つが無かったせいで、上の 1 行が**どの理由でも**出ていた。
         //    「開けた海が足りない」も「前の波がまだ走っている」も
         //    「内陸マップです」と説明されていた（2026-08-31、相互検証）。
+        public static string EarthquakeTsunamiTravelling = "the wave is on its way";
+        public static string EarthquakeTsunamiSourceLeft = "source ends in";
+        public static string EarthquakeRealMinutes = "real min";
         public static string EarthquakeTsunamiNoRoom =
             "There is sea at the epicentre, but not enough of it. The wave needs open water "
             + "all around the epicentre; in a narrow bay or channel it would just fill the "

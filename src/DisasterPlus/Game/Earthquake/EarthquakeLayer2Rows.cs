@@ -67,7 +67,13 @@ namespace DisasterPlus.Game
         {
             get
             {
-                return ModSettings.EarthquakeTsunamiChain.value
+                // ★★ **波が走っているあいだは必ず出す。**（2026-08-31、第 4 回検証）
+                //    <c>LastId</c> は地震の災害枠が空いた時点で 0 になるが、
+                //    波はそのあと 10 分ちかく走り続ける。それだけだと
+                //    <b>波が来る前に行が消える</b> —— 待っている人には
+                //    「終わった」か「壊れた」にしか見えない。
+                return TsunamiRing.Running
+                       || ModSettings.EarthquakeTsunamiChain.value
                        || TrenchQuakeSlot.LastId != 0;
             }
         }
@@ -388,7 +394,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static string RaisedProgress()
         {
-            if (!TsunamiRing.Running) return "";
+            if (!TsunamiRing.Running) return "  " + Strings.EarthquakeTsunamiTravelling;
 
             int total = TsunamiRing.TotalSteps;
             if (total <= 0) return "";
@@ -396,9 +402,17 @@ namespace DisasterPlus.Game
             int done = TsunamiRing.ElapsedSteps;
             if (done > total) done = total;
 
+            // ★★ **残りは実時間で出す。**（2026-08-31、第 4 回検証）
+            //    上の行の「◯分後」はゲーム内の分（≒4 実秒）なのに、
+            //    実際に水が動くまでは 10 分以上かかる。
+            //    1 水ステップ ＝ 64 sim フレーム ≒ 1.07 実秒。
+            float leftMinutes = (total - done) * 64f / 3600f;
+
             return "  " + (done * 100 / total) + "%  "
                    + (TsunamiRing.OffsetMetres >= 0f ? "+" : "")
-                   + TsunamiRing.OffsetMetres.ToString("F0") + " m";
+                   + TsunamiRing.OffsetMetres.ToString("F0") + " m  "
+                   + Strings.EarthquakeTsunamiSourceLeft + " "
+                   + leftMinutes.ToString("F0") + " " + Strings.EarthquakeRealMinutes;
         }
 
         /// <summary>
