@@ -44,8 +44,31 @@ namespace DisasterPlus.Core.Tests.Earthquake
             //    半径 3.8 km の水源を乾いた土地に置こうとした。
             Assert.False(Is(0f, 0f));
 
-            // 底に少しだけ雨水が溜まっていても同じ。
+            // 底に少しだけ雨水が溜まっていても同じ（2 m 未満は「水が在る」に入らない）。
             Assert.False(Is(0f, 1f));
+            Assert.False(Is(0f, 1.9f));
+
+            // ★ 2 m 溜まっていれば「水が在る」と認める。**ここが線引きである。**
+            //   これより下げると窪地の雨水を海と読み、
+            //   上げると引き波のあいだ外洋を海でないと読む（PresenceUnits の doc）。
+            Assert.True(Is(0f, 2f));
+        }
+
+        [Fact]
+        public void A_trough_does_not_turn_the_sea_into_land()
+        {
+            // ★★ **高潮の鏡写し。**（2026-08-31、第 7 回検証）
+            //    水柱に「最小水深」そのものを求めていた版は、引き波で水位が
+            //    下がっているあいだ<b>外洋を丸ごと「海ではない」</b>と答え、
+            //    プレイヤーに「2,304 m 以内に深い海がありません」と表示していた ——
+            //    見るからに海なのに。深さを決めるのは海底であって、水柱ではない。
+            Assert.True(Is(5f, 35f));   // 平常（水深 35 m）
+            Assert.True(Is(5f, 20f));   // 15 m 引いた
+            Assert.True(Is(5f, 5f));    // 30 m 引いた。まだ海である
+            Assert.True(Is(5f, 2f));    // 33 m 引いた。ぎりぎり海
+
+            // ★ 完全に干上がったら、さすがに海ではない。
+            Assert.False(Is(5f, 0f));
         }
 
         [Fact]
@@ -88,17 +111,21 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         [Fact]
-        public void The_boundary_is_inclusive_on_the_seabed_and_on_the_column()
+        public void The_boundary_is_inclusive_on_the_seabed()
         {
             // 海底がちょうど「海面 - 最小水深」なら海。
             Assert.True(Is(16f, 24f));
 
-            // その 1 単位上は陸。
+            // その 1 単位上は陸。**深さを決めるのはここだけである。**
             Assert.False(SeaCell.IsOpenSea(16 * 64 + 1, 24 * 64, Sea, MinDepth));
+        }
 
-            // 水柱がちょうど最小水深なら海。1 単位下は違う。
-            Assert.True(SeaCell.IsOpenSea(5 * 64, MinDepth, Sea, MinDepth));
-            Assert.False(SeaCell.IsOpenSea(5 * 64, MinDepth - 1, Sea, MinDepth));
+        [Fact]
+        public void The_column_only_has_to_be_present()
+        {
+            // ★ 水柱に最小水深は求めない（PresenceUnits の doc）。
+            Assert.True(SeaCell.IsOpenSea(5 * 64, SeaCell.PresenceUnits, Sea, MinDepth));
+            Assert.False(SeaCell.IsOpenSea(5 * 64, SeaCell.PresenceUnits - 1, Sea, MinDepth));
         }
 
         [Fact]
@@ -109,6 +136,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
             int min = 24 * 64;
 
             Assert.True(SeaCell.IsOpenSea(30 * 64, 177 * 64, sea, min));   // 水深 177 m
+            Assert.True(SeaCell.IsOpenSea(30 * 64, 10 * 64, sea, min));    // 引き波の最中
             Assert.False(SeaCell.IsOpenSea(30 * 64, 0, sea, min));         // 乾いた窪地
             Assert.False(SeaCell.IsOpenSea(220 * 64, 40 * 64, sea, min));  // 高い湖
         }
@@ -116,10 +144,10 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Asking_for_no_depth_still_needs_water()
         {
-            // 最小水深 0 でも、水が 0 なら海ではない…
-            // ではなく、0 >= 0 なので海になる。**その挙動をここで固定する** ——
-            // 呼び出し側は必ず正の最小水深を渡すこと。
-            Assert.True(SeaCell.IsOpenSea(0, 0, Sea, 0));
+            // ★ 最小水深 0 を渡しても、**水が無ければ海ではない**。
+            //   乾いた窪地を落とすのは水柱の側の役目だからである。
+            Assert.False(SeaCell.IsOpenSea(0, 0, Sea, 0));
+            Assert.True(SeaCell.IsOpenSea(0, SeaCell.PresenceUnits, Sea, 0));
         }
     }
 }

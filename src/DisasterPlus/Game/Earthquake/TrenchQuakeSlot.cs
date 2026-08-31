@@ -230,7 +230,19 @@ namespace DisasterPlus.Game
             Vec3 sea;
             float distance;
             bool sawDeepWater;
-            if (!NearestSea(point, SearchRings, true, out sea, out distance, out sawDeepWater))
+
+            // ★★ **プレビューとまったく同じ探索をする。**（2026-08-31、第 7 回検証）
+            //    以前は探索の中で「津波の円が入るか」も見て、入らない点は
+            //    <b>飛ばして先へ進んで</b>いた。すると<b>印を出した場所と
+            //    実際の震源が最大 2,304 m ずれる</b>のに、ツールは成功として閉じる ——
+            //    画面外で地震が起きるので、プレイヤーには「押しても何も起きない」と
+            //    区別が付かない。このプロジェクトが自分で
+            //    「実機テストで判定を壊す壊れ方」と名指ししている形である。
+            //
+            //    円の検査は<b>選ばれた 1 点にだけ、置く直前に</b>行う。
+            //    走査は 1 回で済み（描画スレッドの負荷も戻らない）、
+            //    印と震源は必ず一致し、入らなければその場で理由付きで断る。
+            if (!NearestSea(point, SearchRings, out sea, out distance, out sawDeepWater))
             {
                 // ★★ **内陸マップでは海が無いのが正しい答えである。**
                 //    「それらしい地点」を作って起こさない —— 海溝型地震の意味が消える。
@@ -251,6 +263,18 @@ namespace DisasterPlus.Game
                        + " m deep within " + reach.ToString("F0")
                        + " m of the point you clicked; a trench earthquake needs "
                        + "deep open water");
+                return false;
+            }
+
+            // ★★ 円が入らないなら、ここで断る（上の ★★）。
+            TerrainManager ringTerrain = Singleton<TerrainManager>.instance;
+            if (ringTerrain != null
+                && TsunamiRing.OpenWaterRadius(ringTerrain, sea.X, sea.Z) <= 0f)
+            {
+                Detail = "the sea at (" + sea.X.ToString("F0") + "," + sea.Z.ToString("F0")
+                         + ") is deep enough but too narrow for the wave: the source needs "
+                         + "a stretch of open water around it, and here the nearest shore "
+                         + "or shallow is too close. Click further out to sea";
                 return false;
             }
 
@@ -317,8 +341,7 @@ namespace DisasterPlus.Game
                 //    全走査は 37,249 点で、1 点ごとに HasWater と WaterLevel が
                 //    水シミュの読み取りロックを取り直す。RenderOverlay は
                 //    6 フレームごとに呼ぶので、毎秒 70 万回の錠のやり取りになっていた。
-                // ★ プレビューは円の適合検査をしない（NearestSea の checkRingFits）。
-            return NearestSea(point, SearchRings, false, out sea, out distanceMetres);
+                return NearestSea(point, SearchRings, out sea, out distanceMetres);
             }
             catch
             {
@@ -333,11 +356,11 @@ namespace DisasterPlus.Game
         /// （プレビュー用）。<b>見つからなければ断る</b> ——
         /// 浅い海に落とすくらいなら、起こさないほうがよい（下の ★★）。
         /// </summary>
-        private static bool NearestSea(Vec3 point, int maxRings, bool checkRingFits,
+        private static bool NearestSea(Vec3 point, int maxRings,
                                        out Vec3 sea, out float distanceMetres)
         {
             bool ignored;
-            return NearestSea(point, maxRings, checkRingFits, out sea, out distanceMetres, out ignored);
+            return NearestSea(point, maxRings, out sea, out distanceMetres, out ignored);
         }
 
         /// <summary>
@@ -349,11 +372,7 @@ namespace DisasterPlus.Game
         ///   それを「そんなに深い海は無い」と言うと<b>嘘になる</b> ——
         ///   プレイヤーがもらえる説明はこの 1 文だけなのだから、外してはいけない。
         /// </summary>
-        /// <param name="checkRingFits">
-        /// 津波の円がその地点に入るかまで確かめるか。**置く瞬間だけ true**
-        /// （下の ★★: 描画スレッドでやると水スレッドを止める）。
-        /// </param>
-        private static bool NearestSea(Vec3 point, int maxRings, bool checkRingFits,
+        private static bool NearestSea(Vec3 point, int maxRings,
                                        out Vec3 sea, out float distanceMetres,
                                        out bool sawDeepWater)
         {
@@ -459,18 +478,6 @@ namespace DisasterPlus.Game
                 //    <c>TsunamiRing.Begin</c> の円盤走査で落ちる地形があり、
                 //    <b>地震だけ起きて 2 分半後に津波が来ない</b>という、
                 //    プレイヤーには原因の分からない失敗になる。
-                // ★★ **描画スレッドではやらない。**（2026-08-31、第 6 回検証）
-                //    これは 58,081 セルの走査で、しかも水シミュの読み取り錠を
-                //    握ったまま走る。プレビューは 6 フレームごとに最大 2,401 点を
-                //    見るので、島の多い海岸では 1 回の更新に 0.2〜0.5 実秒かかり、
-                //    そのあいだ<b>水スレッドのバッファ入れ替えが止まる</b>。
-                //
-                //    プレビューは「だいたいここ」を示すためのものなので、
-                //    円が入るかどうかは<b>実際に置く瞬間（sim スレッド）だけ</b>
-                //    確かめれば足りる。入らなければその場で断り、
-                //    理由が出る（クリックから 2 分半後ではなく、すぐ）。
-                if (checkRingFits && TsunamiRing.OpenWaterRadius(terrain, x, z) <= 0f) continue;
-
                 sea = new Vec3(x, seaLevel, z);
                 distanceMetres = SeaSearch.DistanceMetres(dx, dz);
                 return true;

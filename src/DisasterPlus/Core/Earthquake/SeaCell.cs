@@ -42,8 +42,28 @@ namespace DisasterPlus.Core.Earthquake
         public static bool IsOpenSea(int terrainUnits, int columnUnits,
                                      int seaUnits, int minDepthUnits)
         {
-            if (columnUnits < minDepthUnits) return false;
+            // ★★ **水柱には「深さ」を求めない。「在るか」だけを見る。**
+            //    （2026-08-31、第 7 回検証）
+            //
+            //    水柱に最小水深そのものを求めると、<b>引き波のあいだ外洋が
+            //    「海ではない」</b>ことになる —— 高潮で同じ間違いをしたのと
+            //    鏡写しである（このクラスの 3 つ目の失敗例）。
+            //    深さは<b>海底の高さ</b>が決める。海底は波では動かない。
+            //
+            //    水柱を見るのは、<b>乾いた窪地を落とすため</b>だけである。
+            if (columnUnits < PresenceUnits) return false;
             return terrainUnits <= seaUnits - minDepthUnits;
         }
+
+        /// <summary>
+        /// 「水が在る」と認める厚み（1/64 m 単位、＝ 2 m）。
+        /// **水深ではない** —— 深さは海底が決める（<see cref="IsOpenSea"/> の ★★）。
+        ///
+        /// ★ 2 m は<b>両側の失敗の間</b>に取った値である。
+        ///   小さすぎると、深い窓地に溜まった雨水を「海」と読む（セーブを壊す）。
+        ///   大きすぎると、引き波のあいだ外洋を「海ではない」と読む（嘘の文言）。
+        ///   前者のほうが重いので、そちらへ寄せてある。
+        /// </summary>
+        public const int PresenceUnits = 128;
     }
 }
