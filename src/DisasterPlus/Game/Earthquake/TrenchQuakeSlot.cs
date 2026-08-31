@@ -363,6 +363,10 @@ namespace DisasterPlus.Game
                 ? terrain.WaterSimulation.m_currentSeaLevel
                 : DefaultSeaLevelMetres;
 
+            // ★ 錠を取らない読み（下の ★★）。
+            ushort[] block = terrain.BlockHeights;
+            int seaUnits = (int)(seaLevel * 64f);
+
             // ★★ **いちばん近い海ではなく、いちばん近い「深い」海を採る。**
             //    （2026-08-30、オフライン再現で分かった）
             //
@@ -391,20 +395,28 @@ namespace DisasterPlus.Game
                 if (x < -MapHalfExtent || x > MapHalfExtent) continue;
                 if (z < -MapHalfExtent || z > MapHalfExtent) continue;
 
-                var xz = new Vector2(x, z);
-                if (!terrain.HasWater(xz)) continue;
+                // ★★ **水シミュを読まない。**（2026-08-31、第 4 回検証）
+                //    ここは <c>RenderOverlay</c> から<b>main スレッド</b>で
+                //    毎 6 フレーム、最大 2,401 点まわる。以前は 1 点ごとに
+                //    <c>HasWater</c> / <c>WaterLevel</c> / <c>DepthAt</c> を呼んでいて、
+                //    そのどれもが <c>WaterSimulation.BeginRead</c>
+                //    （<c>Monitor.TryEnter</c> のスピン）を取る ——
+                //    **1 フレームに数百回、水スレッドと錠を奪い合っていた。**
+                //    このプロジェクト自身の規則（<c>VolcanoLava.Ignite</c> と
+                //    <c>TyphoonController</c> のクラス doc）が
+                //    「<c>HasWater</c> は sim スレッド専用」と 2 度書いている。
+                //
+                // ★ <c>BlockHeights</c> は生の配列で錠を取らない。海面との差が
+                //   そのまま水深なので、これだけで「十分に深い海か」は決まる。
+                //   川・湖は海面より高いので、この式では自動的に落ちる
+                //   （<c>seaLevel - block</c> が小さくなる）。
+                if (block == null) continue;
 
-                float level = terrain.WaterLevel(xz);
+                int cell = CellOf(z) * (GridCells + 1) + CellOf(x);
+                if (cell < 0 || cell >= block.Length) continue;
 
-                // ★ 海面より目に見えて高い水は川・湖である。
-                if (level > seaLevel + RiverToleranceMetres) continue;
-
-                // ★ 水深も見る。**波打ち際は「海」ではない** ——
-                //   そこで起こすと震源が陸に見える。
-                // ★★ **水深はソルバと同じ量で測る**（TsunamiWave.DepthAt の doc）。
-                //    SampleRawHeightSmooth は m_rawHeights2 を読むが、
-                //    水シミュが使うのは m_blockHeights である。
-                if (TsunamiWave.DepthAt(terrain, x, z) < MinDepthMetres) continue;
+                float depth = (seaUnits - block[cell]) / 64f;
+                if (depth < MinDepthMetres) continue;
 
                 // ★ ここまで来た ＝ 十分に深い海はあった。断る理由が変わる。
                 sawDeepWater = true;
@@ -417,7 +429,15 @@ namespace DisasterPlus.Game
                 //    保証できない地形では起こさない。
                 if (!IsOpenSea(terrain, x, z)) continue;
 
-                sea = new Vec3(x, level, z);
+                // ★★ **津波の円がそこに入るかも、置く前に確かめる。**
+                //    （2026-08-31、第 4 回検証）これが無いと、
+                //    <c>IsOpenSea</c>（8 方位・2,000 m）は通ったのに
+                //    <c>TsunamiRing.Begin</c> の円盤走査で落ちる地形があり、
+                //    <b>地震だけ起きて 2 分半後に津波が来ない</b>という、
+                //    プレイヤーには原因の分からない失敗になる。
+                if (TsunamiRing.OpenWaterRadius(terrain, x, z) <= 0f) continue;
+
+                sea = new Vec3(x, seaLevel, z);
                 distanceMetres = SeaSearch.DistanceMetres(dx, dz);
                 return true;
             }
@@ -444,6 +464,16 @@ namespace DisasterPlus.Game
         private const int SearchRings = 24;
 
         /// <summary>源のまわりを確かめる方位の数（8 方位）。</summary>
+        /// <summary>16 m セルの数。<c>BlockHeights</c> の添字は <c>z*(1080+1)+x</c>。</summary>
+        private const int GridCells = 1080;
+
+        /// <summary>ワールド座標を 16 m セルへ（<c>TsunamiWave.CellOf</c> と同じ式）。</summary>
+        private static int CellOf(float world)
+        {
+            int c = (int)((world + MapHalfExtent) / 16f + 0.5f);
+            return c < 0 ? 0 : (c > GridCells ? GridCells : c);
+        }
+
         private const int OpenSeaProbes = 8;
 
         /// <summary>
@@ -476,6 +506,15 @@ namespace DisasterPlus.Game
         /// </summary>
         private static bool IsOpenSea(TerrainManager terrain, float x, float z)
         {
+            // ★★ **ここも水シミュを読まない**（NearestSea の ★★ と同じ理由）。
+            ushort[] block = terrain.BlockHeights;
+            if (block == null) return false;
+
+            float seaLevel = terrain.WaterSimulation != null
+                ? terrain.WaterSimulation.m_currentSeaLevel
+                : DefaultSeaLevelMetres;
+            int seaUnits = (int)(seaLevel * 64f);
+
             float r = OpenSeaRadiusMetres;
 
             for (int i = 0; i < OpenSeaProbes; i++)
@@ -487,8 +526,9 @@ namespace DisasterPlus.Game
                 if (px < -MapHalfExtent || px > MapHalfExtent) return false;
                 if (pz < -MapHalfExtent || pz > MapHalfExtent) return false;
 
-                if (!terrain.HasWater(new Vector2(px, pz))) return false;
-                if (TsunamiWave.DepthAt(terrain, px, pz) < MinDepthMetres * 0.5f) return false;
+                int cell = CellOf(pz) * (GridCells + 1) + CellOf(px);
+                if (cell < 0 || cell >= block.Length) return false;
+                if ((seaUnits - block[cell]) / 64f < MinDepthMetres * 0.5f) return false;
             }
 
             return true;

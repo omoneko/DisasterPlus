@@ -79,7 +79,9 @@ namespace DisasterPlus.Game
             //    <c>SplashWater</c>（隕石・地震の水柱）に再利用されるので、
             //    次に書いたときに<b>他人の波を踏む</b>。
             //    走っていなければ即 return するので、ただの空振りである。
-            TsunamiWave.Tick(frameIndex);
+            // ★ 旧 TYPE_IMPACT の波は誰も Begin しないので、Tick は永久に空振りする。
+            //   呼ぶのをやめる（TsunamiWave のクラス doc: 残しているのは
+            //   DepthAt と、旧版の波が残る都市のための Reset だけである）。
 
             // ★★ **震源から同心円に立つ本体。**（2026-08-31、所有者の指示）
             //    <c>TsunamiWave</c>（TYPE_IMPACT の丘）と違い、これは

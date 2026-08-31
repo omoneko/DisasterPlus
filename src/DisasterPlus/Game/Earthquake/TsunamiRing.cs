@@ -267,6 +267,26 @@ namespace DisasterPlus.Game
         /// <summary>直近の理由（パネルと診断に出す）。</summary>
         public static string Detail { get; private set; }
 
+        /// <summary>
+        /// <b>断った理由の種類。</b>プレイヤーに出す 1 行を選ぶために要る。
+        ///
+        /// ★★ <see cref="Detail"/> は英語の 1 文なので、そのまま画面には出せない。
+        ///   長らくパネルは<b>どの理由でも「内陸マップです」</b>と言っていた ——
+        ///   沖の深海で断られた人を正反対の方向へ送る、最悪の 1 行だった
+        ///   （2026-08-31、相互検証）。
+        /// </summary>
+        public enum Refusal
+        {
+            None = 0,
+            NotSea,       // 震源が海ではない（内陸マップでは正常）
+            NotEnoughRoom,// 海が狭すぎて円が入らない
+            Busy,         // 前の津波がまだ走っている
+            NoRoomInGame, // ゲームが水源の枠をくれなかった
+        }
+
+        /// <summary>直近の断りの種類。</summary>
+        public static Refusal LastRefusal { get; private set; }
+
         /// <summary>いまの目標水位の平常からのずれ（m）。診断用。</summary>
         public static float OffsetMetres { get; private set; }
 
@@ -318,12 +338,14 @@ namespace DisasterPlus.Game
         public static bool Begin(Vec3 epicentre, byte intensity, uint frame)
         {
             Detail = null;
+            LastRefusal = Refusal.None;
 
             lock (_gate)
             {
             if (_running)
             {
                 Detail = "a tsunami is already running";
+                LastRefusal = Refusal.Busy;
                 return false;
             }
 
@@ -331,6 +353,7 @@ namespace DisasterPlus.Game
             if (terrain == null || terrain.WaterSimulation == null)
             {
                 Detail = "the water simulation is not there";
+                LastRefusal = Refusal.NoRoomInGame;
                 return false;
             }
 
@@ -338,6 +361,7 @@ namespace DisasterPlus.Game
             if (depth <= 0f)
             {
                 Detail = "the epicentre is not in the sea";
+                LastRefusal = Refusal.NotSea;
                 return false;
             }
 
@@ -359,6 +383,7 @@ namespace DisasterPlus.Game
                          + " m of sea at least " + MinSourceDepthMetres.ToString("F0")
                          + " m deep in every direction, or it would simply fill the low "
                          + "ground around it instead of making a wave";
+                LastRefusal = Refusal.NotEnoughRoom;
                 return false;
             }
 
@@ -368,7 +393,21 @@ namespace DisasterPlus.Game
 
             // ★ 蓋は震度で決まる。255 で 40 m。**これより上げても弱くなる**ので、
             //   強い地震ほど高い塔、にはしない（MaxRiseMetres の doc）。
-            _riseCapUnits = (int)(MaxRiseMetres * 64f * intensity / 255f);
+            // ★★ **255 で割ってはいけなかった。**（2026-08-31、第 4 回検証）
+            //    タイルが送る既定値はバニラのスライダーの既定 55 である。
+            //    255 で割ると蓋は 8.6 m にしかならず、クラス doc の表
+            //    （蓋 40 m / 20 m で測った値）とはまるで別の波になる ——
+            //    <b>既定のまま遊ぶ人が「弱い」と言うのは当たり前だった。</b>
+            //
+            //    バニラのスライダーの上限は 100 なので、**100 で飽和**させる。
+            //    既定 55 → 22 m、上限 100 → 40 m。
+            //
+            // ★ 100 を超えても蓋は上げない。上げると<b>むしろ弱くなる</b>のは
+            //   実測済みである（MaxRiseMetres の表: 蓋 40 m → 汀線 66.98 m、
+            //   蓋 70 m → 64.56 m、しかも震源の水柱は 190 m → 255 m）。
+            //   解禁した強度は地震の揺れと被害のほうに効く。
+            int forCap = intensity > 100 ? 100 : intensity;
+            _riseCapUnits = (int)(MaxRiseMetres * 64f * forCap / 100f);
 
             // ★ 弱い地震でも波形が消えないように下限を置く。**水深の蓋より先に**置く
             //   —— あとに置くと、水深 2 m 未満のとき下限が蓋を打ち消して
@@ -425,6 +464,7 @@ namespace DisasterPlus.Game
             if (!terrain.WaterSimulation.CreateWaterSource(out handle, src) || handle == 0)
             {
                 Detail = "the game would not give us a water source slot";
+                LastRefusal = Refusal.NoRoomInGame;
                 return false;
             }
 
@@ -630,7 +670,7 @@ namespace DisasterPlus.Game
         ///   「海」と答えるので、干潟や側溝を素通りする。ここでは
         ///   <see cref="MinSourceDepthMetres"/> を要求する。
         /// </summary>
-        private static float OpenWaterRadius(TerrainManager terrain, float x, float z)
+        public static float OpenWaterRadius(TerrainManager terrain, float x, float z)
         {
             ushort[] block = terrain.BlockHeights;
             if (block == null) return 0f;
@@ -676,7 +716,7 @@ namespace DisasterPlus.Game
             // ★ 見つけた陸のセルそのものには掛からないよう、1 セルぶん内側で止める。
             metres -= 16f;
 
-            if (metres > RadiusMetres) metres = RadiusMetres;
+            // ★ best <= reach^2 なので metres は必ず RadiusMetres 未満。頭打ちは要らない。
             return metres < MinUsefulRadiusMetres ? 0f : metres;
         }
 

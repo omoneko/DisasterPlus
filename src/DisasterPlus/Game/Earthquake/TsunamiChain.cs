@@ -479,6 +479,8 @@ namespace DisasterPlus.Game
                 frame = Singleton<SimulationManager>.instance.m_currentFrameIndex;
             }
 
+            // ★ 上の doc が <c>TYPE_IMPACT</c> の話をしていたら、それは古い。
+            //   いま立てるのは <see cref="TsunamiRing"/>（震源に置く WaterSource）である。
             if (!TsunamiRing.Begin(quake.Epicentre, quake.Intensity, frame))
             {
                 // ★ 海が無い／水シミュが読めない。**失敗ではない場合がある**ので、

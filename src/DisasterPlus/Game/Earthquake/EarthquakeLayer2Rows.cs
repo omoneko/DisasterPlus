@@ -315,7 +315,10 @@ namespace DisasterPlus.Game
                     return;
 
                 case TsunamiChainState.NoSea:
-                    EarthquakeRows.SetLayer2(_tsunamiLabel, Strings.EarthquakeTsunamiNoSea);
+                    // ★★ **理由ごとに違う 1 行を出す。**（2026-08-31、相互検証）
+                    //    どの理由でも「内陸マップです」と言っていたのは、
+                    //    沖の深海で断られた人を正反対の方向へ送っていた。
+                    EarthquakeRows.SetLayer2(_tsunamiLabel, TsunamiRefusalText());
                     return;
 
                 case TsunamiChainState.NoDlc:
@@ -350,6 +353,23 @@ namespace DisasterPlus.Game
                     // Idle（陸の震源を含む）と Failed。行を出さない。
                     EarthquakeRows.SetPlain(_tsunamiLabel, "");
                     return;
+            }
+        }
+
+        /// <summary>断られた理由に合う 1 行（<see cref="TsunamiRing.Refusal"/>）。</summary>
+        private static string TsunamiRefusalText()
+        {
+            switch (TsunamiRing.LastRefusal)
+            {
+                case TsunamiRing.Refusal.NotEnoughRoom:
+                    return Strings.EarthquakeTsunamiNoRoom;
+
+                case TsunamiRing.Refusal.Busy:
+                    return Strings.EarthquakeTsunamiBusy;
+
+                case TsunamiRing.Refusal.NotSea:
+                default:
+                    return Strings.EarthquakeTsunamiNoSea;
             }
         }
 

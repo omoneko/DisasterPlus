@@ -565,6 +565,17 @@ namespace DisasterPlus.Game
             "The epicentre is not on open water, so no tsunami was raised. This is normal on "
             + "an inland map.";
 
+        // ★★ この 2 つが無かったせいで、上の 1 行が**どの理由でも**出ていた。
+        //    「開けた海が足りない」も「前の波がまだ走っている」も
+        //    「内陸マップです」と説明されていた（2026-08-31、相互検証）。
+        public static string EarthquakeTsunamiNoRoom =
+            "There is sea at the epicentre, but not enough of it. The wave needs open water "
+            + "all around the epicentre; in a narrow bay or channel it would just fill the "
+            + "low ground instead of travelling. Try further out to sea.";
+        public static string EarthquakeTsunamiBusy =
+            "The tsunami from the previous trench earthquake has not finished yet. Only one "
+            + "is tracked at a time - wait for the wave to arrive.";
+
         // --- ②地震（Task 10: 長周期地震動 ＝ 第 2 層の 2 つ目） ---
         //
         // **津波より踏み込んでいる。** 津波はバニラの災害を 1 個起こすだけだったが、

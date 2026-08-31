@@ -57,8 +57,13 @@ namespace DisasterPlus.Game
         /// <summary>何セルおきに見るか。**4 なら 1/16 の点だけ見る。**</summary>
         private const int SampleStride = 4;
 
-        /// <summary>何 sim フレームおきに測るか（64 ＝ 1 水ステップ）。</summary>
-        private const int EveryFrames = 64 * 8;
+        /// <summary>
+        /// 何 sim フレームおきに測るか（64 ＝ 1 水ステップ）。
+        ///
+        /// ★ 8 歩おきだと 1 回の津波で 300 行になり、<c>output_log.txt</c> を
+        ///   埋め尽くす（2026-08-31、第 4 回検証）。60 歩 ≒ 1 実分おきで十分である。
+        /// </summary>
+        private const int EveryFrames = 64 * 60;
 
         /// <summary>陸の上に水があると認める深さ（m）。**波飛沫と浸水を分ける。**</summary>
         private const float FloodMetres = 0.5f;
