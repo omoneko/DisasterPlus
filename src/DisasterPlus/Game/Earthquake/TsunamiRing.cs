@@ -97,10 +97,31 @@ namespace DisasterPlus.Game
         /// 40 m は DLC の津波（強度 100）とほぼ同じ威力になる点でもある
         /// （同条件で汀線 66.81 m、浸水 2592 m）。
         ///
-        /// ★ <b>水深にはしない。</b>深さ 60 / 100 / 174 m で汀線 67.1 / 66.4 / 67.0 m と
-        ///   ほぼ変わらなかったので、割合にする根拠が無い。
+        /// ★★ ただし<b>水深でも縛る</b>（<see cref="MaxRiseFraction"/>）。
+        ///   蓋そのものは深さによらず効くのだが、<b>浅い海では出ていく波が
+        ///   震源の水を持ち去って海底を剥き出しにする</b>。実測（震源距離 5.2 km）:
+        ///
+        /// <list type="bullet">
+        /// <item>水深 25 m・蓋 40 m … 海底の露出 <b>297 水ステップ（約 5 実分）</b></item>
+        /// <item>水深 25 m・蓋 12 m … 露出 <b>0</b>、汀線 12.8 m</item>
+        /// <item>水深 40 m・蓋 20 m … 露出 <b>0</b>、汀線 20.6 m</item>
+        /// <item>水深 174 m・蓋 40 m … 露出 <b>0</b>、汀線 35.5 m</item>
+        /// </list>
+        ///
+        ///   ★ 深い海を要求して逃げることはできない ——
+        ///     バニラの既定の海面は 40 m で、<b>海底は標高 0 より下へ行けない</b>ので、
+        ///     標準的なマップの海は最大でも 40 m しかない。
         /// </summary>
         private const float MaxRiseMetres = 40f;
+
+        /// <summary>
+        /// 押し波の頭打ち（水深に対する割合）。<see cref="MaxRiseMetres"/> と
+        /// <b>小さいほうを採る</b>。0.5 で海底の露出が消える（上の実測）。
+        ///
+        /// ★ 結果として<b>深い海ほど大きな津波</b>になる。物理的にも正しく、
+        ///   海溝型地震を沖に置く動機にもなる。
+        /// </summary>
+        private const float MaxRiseFraction = 0.5f;
 
         /// <summary>
         /// <b>引き波の円の半径（m）。押し波の円とは別である。</b>
@@ -277,6 +298,11 @@ namespace DisasterPlus.Game
             // ★ 蓋は震度で決まる。255 で 40 m。**これより上げても弱くなる**ので、
             //   強い地震ほど高い塔、にはしない（MaxRiseMetres の doc）。
             _riseCapUnits = (int)(MaxRiseMetres * 64f * intensity / 255f);
+
+            // ★★ 浅い海では水深で縛る（MaxRiseFraction の doc）。
+            int byDepth = (int)(_depthUnits * MaxRiseFraction);
+            if (_riseCapUnits > byDepth) _riseCapUnits = byDepth;
+
             if (_riseCapUnits < 64) _riseCapUnits = 64;
 
             // ★ 引きは水深に縛る。押しの蓋より深くは引かない。
