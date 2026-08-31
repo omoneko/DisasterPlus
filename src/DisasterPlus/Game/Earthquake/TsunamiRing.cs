@@ -777,8 +777,12 @@ namespace DisasterPlus.Game
                                            int at, int seaUnits, int minDepthUnits)
         {
             if (at < 0 || at >= block.Length || at >= cells.Length) return false;
-            if (cells[at].m_height < minDepthUnits) return false;
-            return block[at] <= seaUnits - minDepthUnits;
+
+            // ★★ 式そのものは Core にある（SeaCell）。
+            //    3 度書き直して 3 度とも別の地形を取り違えたので、
+            //    テストで縛める場所へ出した。
+            return DisasterPlus.Core.Earthquake.SeaCell.IsOpenSea(
+                block[at], cells[at].m_height, seaUnits, minDepthUnits);
         }
 
         /// <summary>ワールド座標を 16 m セルへ（<c>TsunamiWave.CellOf</c> と同じ式）。</summary>
