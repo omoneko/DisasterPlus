@@ -191,8 +191,14 @@ namespace DisasterPlus.Game
             _reason = null;
         }
 
-        /// <summary>測りっぱなしにしない上限（水ステップ）。</summary>
-        private const int MaxSteps = 1500;
+        /// <summary>
+        /// 測りっぱなしにしない上限（水ステップ）。
+        ///
+        /// ★ 発生源が 768 歩、そのあと波がマップを渡るのに同じくらい掛かる。
+        ///   1500 では<b>浸水の最中に打ち切られる</b>ので余裕を持たせる
+        ///   （2026-08-31、相互検証）。2400 歩 ≒ 43 実分。
+        /// </summary>
+        private const int MaxSteps = 2400;
 
         /// <summary>バニラの <c>TsunamiAI</c> のプレハブ索引。-1 は「まだ探していない」。</summary>
         private static int _tsunamiPrefabIndex = -1;

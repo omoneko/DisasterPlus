@@ -78,7 +78,7 @@ namespace DisasterPlus.Game
         /// ここが効く（オフライン実測 2026-08-31: 半径 1280 m → 汀線 35 m、
         /// 半径 3840 m → 汀線 83 m、いずれも強度 100・水深 174 m・汀線 6.1 km）。
         /// </summary>
-        private const float RadiusMetres = 3840f;
+        public const float RadiusMetres = 3840f;
 
         /// <summary>
         /// <b>押し波の頭打ち（m、絶対値）。</b>強度 255 のときの値。
@@ -121,7 +121,35 @@ namespace DisasterPlus.Game
         /// </summary>
         private const int DurationSteps = 768;
 
+        /// <summary>同じ長さをティックで。波形の<b>周期でもある</b>（LevelOffsetUnits の doc）。</summary>
+        private const int DurationTicks = DurationSteps * TsunamiRingShape.TicksPerWaterStep;
+
+        /// <summary>
+        /// <c>_source</c> と <c>_running</c> を守る錠。
+        ///
+        /// ★★ **必要である。**（2026-08-31、相互検証）<c>Reset</c> は
+        ///   <c>LoadingExtensionBase.OnLevelUnloading</c> から<b>メインスレッド</b>で
+        ///   呼ばれ、<c>SuspendForSave</c> は <c>OnSaveData</c> から呼ばれる。
+        ///   どちらも sim スレッドの <see cref="Tick"/> と<b>同時に走る</b>
+        ///   （<c>LoadingManager.UnloadLevel</c> は sim を止める前に
+        ///    <c>OnLevelUnloading</c> を同期で呼ぶ）。
+        ///
+        /// ★★ <b>ゲームは決してこの錠を取らない</b>ので、
+        ///   <c>m_waterSources</c> の Monitor との間に輪はできない。
+        ///   ただし順序は<b>必ず _gate → m_waterSources</b> にすること。
+        /// </summary>
+        private static readonly object _gate = new object();
+
         private static ushort _source;
+
+        /// <summary>
+        /// 震源。<b><see cref="Reset"/> で消してはいけない。</b>
+        ///
+        /// ★★ これは所有権の指紋である。消すと <see cref="OwnsSource"/> が
+        ///   <c>Vector3.zero</c> に居る他人の水源を「自分のもの」と誤認し、
+        ///   <b>他人の川を消す</b>。次の都市に持ち越しても、位置が一致しない限り
+        ///   何も起きないので無害である。
+        /// </summary>
         private static Vector3 _centre;
         private static long _rate;
         private static int _deltaUnits;
@@ -163,14 +191,24 @@ namespace DisasterPlus.Game
         /// </summary>
         public static void Reset()
         {
-            Release();
-            _running = false;
-            _ticks = 0;
-            _lastFrame = 0u;
-            _deltaUnits = 0;
-            _rate = 0L;
-            OffsetMetres = 0f;
-            PeakRiseMetres = 0f;
+            lock (_gate)
+            {
+                ReleaseLocked();
+
+                // ★★ 握っていた番号が何かの理由で外れていても、**自分の指紋の
+                //    水源は必ず消す**。ここを抜けると MOD を外しても消えない
+                //    湧き水がその都市に残る（クラス doc §3）。
+                SweepOursLocked();
+
+                _running = false;
+                _ticks = 0;
+                _lastFrame = 0u;
+                _deltaUnits = 0;
+                _rate = 0L;
+                OffsetMetres = 0f;
+                PeakRiseMetres = 0f;
+                // ★ _centre は消さない（そのフィールドの doc）。
+            }
         }
 
         /// <summary>
@@ -181,6 +219,8 @@ namespace DisasterPlus.Game
         {
             Detail = null;
 
+            lock (_gate)
+            {
             if (_running)
             {
                 Detail = "a tsunami is already running";
@@ -263,6 +303,7 @@ namespace DisasterPlus.Game
                      + "water instead of borrowing it from the hole it digs.**");
 
             return true;
+            }
         }
 
         /// <summary>**sim スレッド。** 毎 tick 呼んでよい（自分で間引く）。</summary>
@@ -272,12 +313,21 @@ namespace DisasterPlus.Game
             if (frame - _lastFrame < FramesPerWaterStep) return;
             _lastFrame = frame;
 
+            // ★ 保存の最中は水源を外してある。戻るまで時計も止める ——
+            //   進めてしまうと、戻ってきたときに波形が飛ぶ。
+            if (_source == 0) return;
+
             _ticks += TsunamiRingShape.TicksPerWaterStep;
 
-            if (_ticks >= TsunamiRingShape.DurationTicks)
+            if (_ticks >= DurationTicks * TsunamiRingShape.TicksPerWaterStep)
             {
-                Release();
-                _running = false;
+                lock (_gate)
+                {
+                    ReleaseLocked();
+                    SweepOursLocked();
+                    _running = false;
+                }
+
                 Log.Info("tsunami source finished after " + DurationSteps
                          + " water steps and is released. The highest the target got was "
                          + PeakRiseMetres.ToString("F1")
@@ -286,7 +336,8 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            int offset = TsunamiRingShape.LevelOffsetUnits(_ticks, _deltaUnits);
+            int offset = TsunamiRingShape.LevelOffsetUnits(
+                _ticks, _deltaUnits, DurationTicks);
 
             // ★ 押しは絶対値で、引きは水深で縛る（それぞれの定数の doc）。
             if (offset > _riseCapUnits) offset = _riseCapUnits;
@@ -309,23 +360,62 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void Drive(int target)
         {
-            TerrainManager terrain = Singleton<TerrainManager>.instance;
-            if (terrain == null || terrain.WaterSimulation == null) return;
-            if (!OwnsSource(terrain.WaterSimulation)) { _running = false; _source = 0; return; }
-
-            // ★ LockWaterSource は Monitor を取ったまま返る。
-            //   UnlockWaterSource が唯一の解放経路なので必ず finally に置く。
-            WaterSource src = terrain.WaterSimulation.LockWaterSource(_source);
-
-            try
+            lock (_gate)
             {
-                src.m_target = (ushort)target;
-                src.m_inputRate = (uint)_rate;
-                src.m_outputRate = (uint)_rate;
-            }
-            finally
-            {
-                terrain.WaterSimulation.UnlockWaterSource(_source, src);
+                if (!_running || _source == 0) return;
+
+                TerrainManager terrain = Singleton<TerrainManager>.instance;
+                if (terrain == null || terrain.WaterSimulation == null) return;
+
+                WaterSimulation sim = terrain.WaterSimulation;
+
+                // ★★ **番号は一度だけ読んで、以後はその控えを使う。**
+                //    ロックの前後で読み直すと、あいだに 0 になった場合に
+                //    <c>LockWaterSource(0)</c> が <b>Monitor を取ったあとで</b>
+                //    IndexOutOfRange を投げ、<c>Monitor.Exit</c> に到達しない ——
+                //    水スレッドが永久に止まる（2026-08-31 の相互検証で指摘）。
+                ushort handle = _source;
+                if (!OwnsSource(sim, handle))
+                {
+                    // ★ 枠が自分のものでなくなった。**番号を捨てるだけにしない** ——
+                    //   捨てると以後どの解放経路も届かず、湧き水が残る。
+                    ReleaseLocked();
+                    SweepOursLocked();
+                    _running = false;
+                    Detail = "the water source slot was taken by something else";
+                    return;
+                }
+
+                bool foreign = false;
+
+                // ★ LockWaterSource は Monitor を取ったまま返る。
+                //   UnlockWaterSource が唯一の解放経路なので必ず finally に置く。
+                WaterSource src = sim.LockWaterSource(handle);
+
+                try
+                {
+                    // ★★ 錠の中でもう一度確かめる。OwnsSource は錠の外の読みなので、
+                    //    そこから先で枠が入れ替わっている余地がある。
+                    if (src.m_type != TypeNatural) { foreign = true; }
+                    else
+                    {
+                        src.m_target = (ushort)target;
+                        src.m_inputRate = (uint)_rate;
+                        src.m_outputRate = (uint)_rate;
+                    }
+                }
+                finally
+                {
+                    sim.UnlockWaterSource(handle, src);
+                }
+
+                if (foreign)
+                {
+                    _source = 0;
+                    SweepOursLocked();
+                    _running = false;
+                    Detail = "the water source slot was taken by something else";
+                }
             }
         }
 
@@ -333,14 +423,14 @@ namespace DisasterPlus.Game
         /// その枠が<b>いまも自分のもの</b>か。<c>CreateWaterSource</c> は
         /// <c>m_type == 0</c> の枠を使い回すので、番号だけでは足りない（クラス doc §4）。
         /// </summary>
-        private static bool OwnsSource(WaterSimulation sim)
+        private static bool OwnsSource(WaterSimulation sim, ushort handle)
         {
-            if (_source == 0) return false;
+            if (handle == 0) return false;
 
             FastList<WaterSource> list = sim.m_waterSources;
             if (list == null || list.m_buffer == null) return false;
 
-            int at = _source - 1;
+            int at = handle - 1;
             if (at < 0 || at >= list.m_size) return false;
 
             WaterSource s = list.m_buffer[at];
@@ -354,40 +444,94 @@ namespace DisasterPlus.Game
         /// 置いた水源を解放する。**冪等。例外を投げない。**
         /// ここが最後の砦である —— 通らないとセーブに水源が残る。
         /// </summary>
-        private static void Release()
+        private static void ReleaseLocked()
         {
-            if (_source == 0) return;
+            // ★★ **先に番号を手放す。** こうしておけば、この下で何が起きても
+            //    「まだ持っている」と誤解した別の経路が同じ枠を触らない。
+            ushort handle = _source;
+            _source = 0;
+            if (handle == 0) return;
 
             try
             {
+                if (!Singleton<TerrainManager>.exists) return;
+
                 TerrainManager terrain = Singleton<TerrainManager>.instance;
+                if (terrain == null || terrain.WaterSimulation == null) return;
 
-                if (terrain != null && terrain.WaterSimulation != null
-                    && OwnsSource(terrain.WaterSimulation))
+                WaterSimulation sim = terrain.WaterSimulation;
+                if (!OwnsSource(sim, handle)) return;
+
+                // ★ 解放の前に流量を 0 にする。ReleaseWaterSource は m_type を
+                //   0 にするだけなので、枠を拾い直した誰かが古い流量を見る余地を消す。
+                WaterSource src = sim.LockWaterSource(handle);
+                try
                 {
-                    // ★ 解放の前に流量を 0 にする。ReleaseWaterSource は m_type を
-                    //   0 にするだけなので、枠を拾い直した誰かが古い流量を見る余地を消す。
-                    WaterSource src = terrain.WaterSimulation.LockWaterSource(_source);
-                    try
-                    {
-                        src.m_inputRate = 0u;
-                        src.m_outputRate = 0u;
-                    }
-                    finally
-                    {
-                        terrain.WaterSimulation.UnlockWaterSource(_source, src);
-                    }
-
-                    terrain.WaterSimulation.ReleaseWaterSource(_source);
+                    if (src.m_type != TypeNatural) return;
+                    src.m_inputRate = 0u;
+                    src.m_outputRate = 0u;
                 }
+                finally
+                {
+                    sim.UnlockWaterSource(handle, src);
+                }
+
+                sim.ReleaseWaterSource(handle);
             }
             catch (System.Exception e)
             {
                 Log.Warn("tsunami: releasing the water source failed ("
                          + e.GetType().Name + "); it may persist in this save");
             }
+        }
 
-            _source = 0;
+        /// <summary>
+        /// <b>指紋の合う水源をすべて消す。</b>呼び出し側は <c>_gate</c> を握っていること。
+        ///
+        /// ★★ **番号を失っても取り戻せる唯一の手段である。**（2026-08-31、相互検証）
+        ///   <c>CreateWaterSource</c> が成功したのに握り損ねた、枠を横取りされた、
+        ///   例外で経路が飛んだ —— どの筋でも、置いた水源は
+        ///   <b>両方の位置が震源にビット一致する TYPE_NATURAL</b> という
+        ///   他に例のない形をしている。走査は数十件の配列なのでただ同然。
+        ///
+        /// ★ 震源が <c>Vector3.zero</c> のときは何もしない。まだ何も置いていないか、
+        ///   マップ中央にたまたま在る他人の川を巻き込む恐れがあるからである。
+        /// </summary>
+        private static void SweepOursLocked()
+        {
+            if (_centre == Vector3.zero) return;
+
+            try
+            {
+                if (!Singleton<TerrainManager>.exists) return;
+
+                TerrainManager terrain = Singleton<TerrainManager>.instance;
+                if (terrain == null || terrain.WaterSimulation == null) return;
+
+                WaterSimulation sim = terrain.WaterSimulation;
+                FastList<WaterSource> list = sim.m_waterSources;
+                if (list == null || list.m_buffer == null) return;
+
+                int size = list.m_size;
+                if (size > list.m_buffer.Length) size = list.m_buffer.Length;
+
+                for (int i = size - 1; i >= 0; i--)
+                {
+                    WaterSource s = list.m_buffer[i];
+                    if (s.m_type != TypeNatural) continue;
+                    if (s.m_outputPosition != _centre || s.m_inputPosition != _centre) continue;
+
+                    sim.ReleaseWaterSource((ushort)(i + 1));
+                    Log.Info("tsunami: swept a stray water source at the epicentre "
+                             + "(slot " + (i + 1) + "). It would have kept making water "
+                             + "in this city forever.");
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Warn("tsunami: sweeping stray water sources failed ("
+                         + e.GetType().Name + ")");
+            }
         }
 
         /// <summary>
@@ -400,43 +544,64 @@ namespace DisasterPlus.Game
         /// </summary>
         public static bool SuspendForSave()
         {
-            if (!_running || _source == 0) return false;
-            Release();
-            return true;
+            lock (_gate)
+            {
+                if (!_running || _source == 0) return false;
+                ReleaseLocked();
+                SweepOursLocked();
+                return true;
+            }
         }
 
         /// <summary>保存が終わってから <c>AddAction</c> 越しに呼ぶ。**sim スレッド。**</summary>
         public static void ReapplyAfterSave()
         {
-            if (!_running || _source != 0) return;
-
-            try
+            lock (_gate)
             {
-                TerrainManager terrain = Singleton<TerrainManager>.instance;
-                if (terrain == null || terrain.WaterSimulation == null) { _running = false; return; }
+                if (!_running || _source != 0) return;
 
-                WaterSource src = new WaterSource();
-                src.m_type = TypeNatural;
-                src.m_inputPosition = _centre;
-                src.m_outputPosition = _centre;
-                src.m_target = (ushort)Clamp(_seaUnits, 0, TsunamiRingShape.MaxLevelUnits);
-
-                ushort handle;
-                if (terrain.WaterSimulation.CreateWaterSource(out handle, src) && handle != 0)
+                try
                 {
-                    _source = handle;
+                    // ★★ <c>.instance</c> は sInstance が null のとき
+                    //    FindObjectOfType と new GameObject を走らせる。都市を出た
+                    //    あとにこの遅延処理が届くことがあるので、**必ず exists で先に確かめる**
+                    //    （DisasterPlusSerialization のコメントと同じ理由）。
+                    if (!Singleton<TerrainManager>.exists) { _running = false; return; }
+
+                    TerrainManager terrain = Singleton<TerrainManager>.instance;
+                    if (terrain == null || terrain.WaterSimulation == null)
+                    {
+                        _running = false;
+                        return;
+                    }
+
+                    WaterSource src = new WaterSource();
+                    src.m_type = TypeNatural;
+                    src.m_inputPosition = _centre;
+                    src.m_outputPosition = _centre;
+                    src.m_target = (ushort)Clamp(_seaUnits, 0, TsunamiRingShape.MaxLevelUnits);
+
+                    ushort handle;
+                    if (terrain.WaterSimulation.CreateWaterSource(out handle, src) && handle != 0)
+                    {
+                        _source = handle;
+                    }
+                    else
+                    {
+                        _running = false;
+                        Log.Warn("tsunami: could not put the water source back after saving; "
+                                 + "the wave stops here");
+                    }
                 }
-                else
+                catch (System.Exception e)
                 {
                     _running = false;
-                    Log.Warn("tsunami: could not put the water source back after saving; "
-                             + "the wave stops here");
+
+                    // ★★ 生成が通ってから落ちた場合、番号を受け取れていないので
+                    //    <b>掃除でしか回収できない</b>（SweepOursLocked の doc）。
+                    SweepOursLocked();
+                    Log.Error("tsunami: putting the water source back after saving failed", e);
                 }
-            }
-            catch (System.Exception e)
-            {
-                _running = false;
-                Log.Error("tsunami: putting the water source back after saving failed", e);
             }
         }
 

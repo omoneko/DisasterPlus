@@ -97,13 +97,29 @@ namespace DisasterPlus.Core.Earthquake
         /// </summary>
         /// <param name="elapsedTicks">経過（1 水ステップ = 64）。</param>
         /// <param name="deltaUnits">振幅の元（<c>m_delta</c> 相当、1/64 m）。</param>
-        public static int LevelOffsetUnits(int elapsedTicks, int deltaUnits)
+        /// <param name="durationTicks">
+        /// 波形の長さ。**周期でもあり打ち切りでもある。**
+        ///
+        /// ★★ <b>これを定数にしてはいけない。</b>（2026-08-31、IL 相互検証で判明）
+        ///   ゲームも <c>den = m_duration &gt;&gt; 6</c> で周期をここから作っており
+        ///   （IL_0089）、<c>m_duration</c> は災害ごとに決まる<b>値</b>である。
+        ///   ここを <c>DurationTicks</c> に固定していたせいで、呼び出し側が
+        ///   768 水ステップのつもりでも<b>実際は 256 歩で終わっていた</b> ——
+        ///   オフラインで測った 768 歩（汀線 67 m）ではなく 256 歩相当の波しか
+        ///   出ていなかった。
+        ///
+        /// ★ 減衰項 <c>(65536 - t)/65536</c> は<b>絶対時刻</b>で効く（周期では割らない）。
+        ///   だから長い波形ほど後半の振幅が落ちる。65536 ティック
+        ///   ＝ 1024 水ステップで 0 になる。
+        /// </param>
+        public static int LevelOffsetUnits(int elapsedTicks, int deltaUnits, int durationTicks)
         {
-            if (elapsedTicks <= 0 || elapsedTicks >= DurationTicks) return 0;
+            if (durationTicks <= 0) return 0;
+            if (elapsedTicks <= 0 || elapsedTicks >= durationTicks) return 0;
             if (deltaUnits <= 0) return 0;
 
             double amp = (double)deltaUnits * (65536 - elapsedTicks) / 65536.0;
-            double phase = 2.0 * Math.PI * elapsedTicks / DurationTicks;
+            double phase = 2.0 * Math.PI * elapsedTicks / durationTicks;
             double arg = amp - amp * Math.Cos(phase);
             double off = arg * Math.Sin(1.5 * phase) / 2.0;
 

@@ -272,13 +272,15 @@ namespace DisasterPlus.Game
                    + "The DLC TsunamiAI is NOT used: it can only start a wave from the "
                    + "map edge, never from an offshore epicentre (IL: WaterWave."
                    + "GetSeaLevel is called from the outer-ring loop only). Instead a "
-                   + "single TYPE_IMPACT water wave sits on the epicentre. That is the "
-                   + "solver's own 'a hill of water is here' term, i.e. a sea-floor "
-                   + "uplift: negative draws the sea in and raises a bulge, positive "
-                   + "pushes it out into a ring. The drive stops after "
-                   + "TsunamiSource.TotalSteps water steps - everything after that is "
-                   + "the game's "
-                   + "own water solver, the same one that carries the DLC tsunami");
+                   + "WaterSource of the kind that feeds the map's own rivers is placed "
+                   + "ON the epicentre, and its target sea level is driven with the DLC's "
+                   + "own waveform - retreat, crest, retreat. That kind of source MAKES "
+                   + "water rather than pushing existing water around, which is why the "
+                   + "wave still stands up when it reaches the coast. The source stops "
+                   + "after " + TsunamiRing.TotalSteps + " water steps ("
+                   + (TsunamiRing.TotalSteps * 64 / 3600f).ToString("F0")
+                   + " real minutes); everything after that is the game's own water "
+                   + "solver, the same one that carries the DLC tsunami");
 
             var snapshot = EarthquakeHub.Latest;
             b.Line(1, "snapshot", snapshot == null ? "none yet" : (snapshot.Valid ? "valid" : "INVALID"));
@@ -461,11 +463,15 @@ namespace DisasterPlus.Game
                     state = "raised (a wave was actually created)";
                     break;
                 case TsunamiChainState.NoSea:
-                    // ★★ 文言が古かった（第 3 回検証）。いまの NoSea は
-                    //    TsunamiAI.FindSea ではなく TsunamiWave.Begin が断ったときに立つ。
-                    state = "no wave: " + (TsunamiWave.Detail
+                    // ★★ **理由は必ず名指しする。**（2026-08-31、相互検証）
+                    //    ここは長らく <c>TsunamiWave.Detail</c> を読んでいたが、
+                    //    その経路はもう誰も呼ばないので<b>常に null</b> になり、
+                    //    どんな原因でも「内陸マップです」と言い続けていた ——
+                    //    沖の深海で断られた人を正反対の方向へ送る、最悪の 1 行だった。
+                    state = "no wave: " + (TsunamiRing.Detail
                             ?? "the wave could not be raised")
-                            + ". On an inland map this is normal and is NOT a failure";
+                            + ". Only 'the epicentre is not in the sea' means an inland "
+                            + "map; the other reasons are real faults";
                     break;
                 case TsunamiChainState.NoDlc:
                     state = "no TsunamiAI prefab (the Natural Disasters DLC is not owned)";

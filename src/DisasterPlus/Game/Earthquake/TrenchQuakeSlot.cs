@@ -213,7 +213,13 @@ namespace DisasterPlus.Game
             //    地震が長生きすることではない。だから津波の状態で見る。
             //    （そのころには最初の地震は Active を過ぎていて地面も割らないので、
             //     海溝型の印を 2 つ目へ移して構わない。）
-            if (IsTrenchQuake(_id) && TsunamiChain.StillOwes(_id))
+            // ★★ **&& にしてはいけない。**（2026-08-31、相互検証）
+            //    <c>IsTrenchQuake</c> は地震の災害枠が空いた時点で false になるが、
+            //    津波はそのあと 20 分以上走り続ける。&& だと短絡して
+            //    <c>StillOwes</c>（＝<c>TsunamiRing.Running</c>）が評価されず、
+            //    2 本目を通してしまう。通ったあと <c>Begin</c> が
+            //    「もう走っている」と断るので、<b>地震だけ起きて津波が来ない</b>。
+            if (TsunamiRing.Running || (IsTrenchQuake(_id) && TsunamiChain.StillOwes(_id)))
             {
                 Detail = "the tsunami from the previous trench earthquake (#" + _id
                          + ") has not finished yet; only one is tracked at a time. "
@@ -238,8 +244,7 @@ namespace DisasterPlus.Game
                     ? ("the water within " + reach.ToString("F0")
                        + " m of the point you clicked is deep enough but too narrow: a "
                        + "trench earthquake needs open sea for "
-                       + (DisasterPlus.Core.Earthquake.TsunamiSource.RadiusMetres
-                          * OpenSeaFraction).ToString("F0")
+                       + (TsunamiRing.RadiusMetres * OpenSeaFraction).ToString("F0")
                        + " m in every direction, or the source resonates instead of "
                        + "radiating. Click further out to sea")
                     : ("no sea at least " + MinDepthMetres.ToString("F0")

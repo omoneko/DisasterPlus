@@ -414,10 +414,12 @@ namespace DisasterPlus.Game
             //    「いつ波が来るのか」がどこにも残らない。
             Log.Info("tsunami scheduled for quake #" + quake.DisasterId + " at frame "
                      + _dueFrame + " (" + minutes
-                     + " in-game minutes from now). After that the drive runs for "
-                     + DisasterPlus.Core.Earthquake.TsunamiSource.TotalSteps.ToString("F0")
-                     + " water steps and the sea over the epicentre needs about 100 real "
-                     + "seconds to lift a metre, so give it time before calling it broken");
+                     + " in-game minutes from now). After that the source runs for "
+                     + TsunamiRing.TotalSteps + " water steps = "
+                     + (TsunamiRing.TotalSteps * 64 / 3600f).ToString("F0")
+                     + " real minutes, and the wave then needs about as long again to "
+                     + "cross the map. **It is a slow disaster by design - do not call it "
+                     + "broken until the sea watch lines in the log stop moving.**");
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "EqTsunamiSchedule",
                 "undersea quake #" + quake.DisasterId + "; tsunami scheduled for frame "
                 + _dueFrame);

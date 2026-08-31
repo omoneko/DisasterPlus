@@ -78,6 +78,9 @@ namespace DisasterPlus.Tools.WaterSolverSim
             int ringRadius = 80;     // 震源の円の半径（セル）。80 -> 1280 m
             long ringRate = 0;       // その半径を出すのに要る流量
             bool ringHold = false;   // 円をつねに目標水位へ張り付かせる
+            bool ringNoIn = false;   // 取り込みを一切使わない（int32 の溢れを避ける）
+            int ringImpact = 0;      // >0 なら引き波を TYPE_IMPACT で出す（その最大 delta）
+            float ringInR = 0f;      // >0 なら取り込み円の半径（m）を別に決める
             int ringDurSteps = 256;  // 波形の長さ（水ステップ）。バニラは 256
             float ringCap = 0f;      // >0 なら押し波の高さの頭打ち（m）
             float ringDraw = 0f;     // >0 なら引き波の深さの頭打ち（m）。既定は ringCap と同じ
@@ -101,6 +104,9 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 else if (a == "--ring" && i + 1 < args.Length) { ringIntensity = ParseInt(args[++i], 0); }
                 else if (a == "--ringr" && i + 1 < args.Length) { ringRadius = ParseInt(args[++i], ringRadius); }
                 else if (a == "--ringhold") { ringHold = true; }
+                else if (a == "--ringnoin") { ringNoIn = true; }
+                else if (a == "--ringinr" && i + 1 < args.Length) { ringInR = ParseFloat(args[++i], ringInR); }
+                else if (a == "--ringimpact" && i + 1 < args.Length) { ringImpact = ParseInt(args[++i], 0); }
                 else if (a == "--ringdur" && i + 1 < args.Length) { ringDurSteps = ParseInt(args[++i], ringDurSteps); }
                 else if (a == "--ringcap" && i + 1 < args.Length) { ringCap = ParseFloat(args[++i], ringCap); }
                 else if (a == "--ringdraw" && i + 1 < args.Length) { ringDraw = ParseFloat(args[++i], ringDraw); }
@@ -365,12 +371,39 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     //    震源が目標の 2 倍以上に盛り上がる（2026-08-31 実測:
                     //    目標 +102 m に対して実際 +232 m）。
                     field.Source.OutputRate = ringHold ? ringRate : (level > field.SeaLevelUnits ? ringRate : 0);
-                    field.Source.InputRate = ringHold ? ringRate : (level < field.SeaLevelUnits ? ringRate : 0);
+                    // ★ 取り込みは別半径にできる。ゲームの int32 が溢れないところまで
+                    //   小さくするため（このファイルを書いた理由）。
+                    long inRate = ringInR > 0f
+                        ? (long)Math.Pow((ringInR - 10f) / 0.4f, 2.0)
+                        : ringRate;
+
+                    field.Source.InputRate = ringNoIn ? 0
+                        : (ringHold ? inRate : (level < field.SeaLevelUnits ? inRate : 0));
 
                     if (!ringShape.Active)
                     {
                         field.Source.OutputRate = 0;
                         field.Source.InputRate = 0;
+                    }
+
+                    // ★★ 引き波は水源ではなく丘で出す（このファイルの冒頭 doc）。
+                    if (ringImpact > 0)
+                    {
+                        field.Source.InputRate = 0;
+
+                        impulses.Clear();
+
+                        if (level < field.SeaLevelUnits)
+                        {
+                            // 目標がどれだけ下かに比例して、負の丘＝窪みを置く。
+                            float drop = (field.SeaLevelUnits - level)
+                                         / (float)Math.Max(1, (int)(ringCap * 64f));
+                            int delta = -(int)(ringImpact * Math.Min(1f, drop));
+                            if (delta != 0)
+                            {
+                                impulses.Add(Impulse.Round(centreX, centreZ, ringRadius, delta));
+                            }
+                        }
                     }
 
                     ringShape.Step();
@@ -436,6 +469,19 @@ namespace DisasterPlus.Tools.WaterSolverSim
             Console.WriteLine("  " + frames + " frames in " + clock.Elapsed.TotalSeconds.ToString("F1")
                               + " s (" + (clock.Elapsed.TotalMilliseconds / frames).ToString("F1")
                               + " ms / frame)");
+            if (field.Source != null)
+            {
+                Console.WriteLine();
+                Console.WriteLine("  INT32 OVERFLOWS in the game's water-source maths: "
+                                  + field.Source.Int32Overflows
+                                  + (field.Source.Int32Overflows == 0
+                                     ? "  (this configuration is safe on the real game)"
+                                     : "  ** THIS CONFIGURATION CORRUPTS CELL HEIGHTS ON THE "
+                                       + "REAL GAME ** worst product "
+                                       + field.Source.WorstProduct
+                                       + " vs int.MaxValue 2147483647"));
+            }
+
             if (shelf)
             {
                 Console.WriteLine("  SHORE (" + ((gridSize * 0.85f - centreX)
