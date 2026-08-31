@@ -103,6 +103,31 @@ namespace DisasterPlus.Game
         private const float MaxRiseMetres = 40f;
 
         /// <summary>
+        /// <b>引き波の円の半径（m）。押し波の円とは別である。</b>
+        ///
+        /// ★★ **これがゲームの整数演算で決まる上限である。**（2026-08-31、IL 検証）
+        ///
+        ///   取り込みパス（<c>SimulateWater</c> IL_1B4C-1B58）は
+        ///   <c>share * take</c> を<b>int32 の <c>mul</c></b> で計算する
+        ///   （<c>conv.i8</c> はどこにも無い）。<c>take = min(inputRate, total&gt;&gt;1)</c>
+        ///   で、<c>inputRate</c> は半径から <c>((r-10)/0.4)^2</c> と決まるので、
+        ///   <b>円を大きくすると必ず積が 2^31 を越える</b>。越えた先は
+        ///   <c>m_height = (ushort)(h - share)</c> なので<b>セルの高さが壊れる</b>。
+        ///
+        ///   押し波（吐き出し）側にはこの積が無いので、そちらは 3840 m で構わない。
+        ///   バニラでこれが踏まれないのは、マップの川の水源が小さいからである。
+        ///
+        /// ★ 実測（オフライン再現に「実機の int32 なら溢れたか」を数えさせた）:
+        ///   半径 250 m は一部の配置で溢れる（最悪の積 2.35e9）。
+        ///   <b>160 m は水深 174/60 m × 震源距離 2.6-13.0 km の 8 通りすべてで 0 件。</b>
+        ///
+        /// ★ 引きを大きくできないぶん威力は落ちるが、落ち幅は小さい ——
+        ///   汀線で 2.6 km 54 m / 5.2 km 35 m / 13 km 23 m は変わらず、
+        ///   むしろ震源が穏やかになる（水柱 190 m → 63 m）。
+        /// </summary>
+        private const float DrainRadiusMetres = 160f;
+
+        /// <summary>
         /// 引き波で抜いてよい水深の割合。**海底を露出させない。**
         /// 押しと違いこちらは<b>水深で縛る</b> —— 深さ 60 m で蓋 60 m にすると
         /// 水柱が 100% 抜けて海底が 94 水ステップ露出した（実測 2026-08-31）。
@@ -158,6 +183,7 @@ namespace DisasterPlus.Game
         private static int _depthUnits;
         private static int _riseCapUnits;
         private static int _drawCapUnits;
+        private static long _drainRate;
         private static uint _lastFrame;
         private static bool _running;
 
@@ -245,6 +271,7 @@ namespace DisasterPlus.Game
             _depthUnits = (int)(depth * 64f);
             _centre = new Vector3(epicentre.X, 0f, epicentre.Z);
             _rate = TsunamiRingShape.RateForRadiusMetres(RadiusMetres);
+            _drainRate = TsunamiRingShape.RateForRadiusMetres(DrainRadiusMetres);
             _deltaUnits = TsunamiRingShape.VanillaDeltaUnits(intensity);
 
             // ★ 蓋は震度で決まる。255 で 40 m。**これより上げても弱くなる**ので、
@@ -256,6 +283,17 @@ namespace DisasterPlus.Game
             _drawCapUnits = (int)(_depthUnits * MaxDrawFraction);
             if (_drawCapUnits > _riseCapUnits) _drawCapUnits = _riseCapUnits;
             if (_drawCapUnits < 0) _drawCapUnits = 0;
+
+            // ★★ **溢れない流量に切り下げる。**（DrainRadiusMetres の doc）
+            //    1 セルの超過が最悪どこまで行くかを見積もり、
+            //    `share * take` が int32 に収まる流量までしか出さない。
+            //    見積もりは実測（蓋 40 m のとき最悪 102 m）に 3 倍の余裕を見た値。
+            long worstShare = 3L * (_riseCapUnits + _drawCapUnits);
+            if (worstShare > 0L)
+            {
+                long safe = int.MaxValue / worstShare;
+                if (_drainRate > safe) _drainRate = safe;
+            }
 
             _ticks = 0;
             _lastFrame = frame;
@@ -298,7 +336,12 @@ namespace DisasterPlus.Game
                      + " m but it is held to " + (_riseCapUnits / 64f).ToString("F0")
                      + " m up and " + (_drawCapUnits / 64f).ToString("F0")
                      + " m down (the water is " + depth.ToString("F1")
-                     + " m deep here). **A taller source does not travel further - what "
+                     + " m deep here). The push covers "
+                     + TsunamiRingShape.RadiusMetresForRate(_rate).ToString("F0")
+                     + " m and the retreat only "
+                     + TsunamiRingShape.RadiusMetresForRate(_drainRate).ToString("F0")
+                     + " m - the game's own take-water maths is int32 and would corrupt "
+                     + "cell heights if the retreat circle were any bigger. **A taller source does not travel further - what "
                      + "travels is volume - and unlike the old impact wave this MAKES "
                      + "water instead of borrowing it from the hole it digs.**");
 
@@ -400,7 +443,10 @@ namespace DisasterPlus.Game
                     else
                     {
                         src.m_target = (ushort)target;
-                        src.m_inputRate = (uint)_rate;
+
+                        // ★★ 引きと押しで流量が違う。**同じにしてはいけない**
+                        //    （DrainRadiusMetres の doc: 実機の int32 が壊れる）。
+                        src.m_inputRate = (uint)_drainRate;
                         src.m_outputRate = (uint)_rate;
                     }
                 }

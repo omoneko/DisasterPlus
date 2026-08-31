@@ -234,10 +234,26 @@ namespace DisasterPlus.Game
                 }
             }
 
-            if (!_previewValid) return;
-
-            // ★ 直前のクリックが断られていれば「不可」の色。理由はログにある。
+            // ★★ **断りは必ず見せる。**（2026-08-31、相互検証）
+            //    この 2 行は長らく `if (!_previewValid) return;` の<b>下</b>に在った。
+            //    ところが海の無いマップでは的が一度も有効にならないので、
+            //    <b>断りの色も一度も描かれなかった</b> ——
+            //    クリックしても、印も色も音も出ない「死んだボタン」に戻っていた。
+            //    断られたときは<b>カーソルの位置に</b>不可の印を出す。
             bool refused = Time.realtimeSinceStartup < _refusedUntilRealtime;
+
+            if (!_previewValid)
+            {
+                if (!refused) return;
+
+                Vec3 here;
+                if (!TryPickGround(out here)) return;
+
+                PlacementMarker.Render(cameraInfo,
+                    new Vector3(here.X, here.Y, here.Z), GetToolColor(false, true));
+                return;
+            }
+
             PlacementMarker.Render(cameraInfo, _previewSea, GetToolColor(false, refused));
         }
 

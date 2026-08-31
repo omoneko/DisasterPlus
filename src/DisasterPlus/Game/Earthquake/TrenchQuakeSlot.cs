@@ -244,7 +244,7 @@ namespace DisasterPlus.Game
                     ? ("the water within " + reach.ToString("F0")
                        + " m of the point you clicked is deep enough but too narrow: a "
                        + "trench earthquake needs open sea for "
-                       + (TsunamiRing.RadiusMetres * OpenSeaFraction).ToString("F0")
+                       + OpenSeaRadiusMetres.ToString("F0")
                        + " m in every direction, or the source resonates instead of "
                        + "radiating. Click further out to sea")
                     : ("no sea at least " + MinDepthMetres.ToString("F0")
@@ -447,10 +447,24 @@ namespace DisasterPlus.Game
         private const int OpenSeaProbes = 8;
 
         /// <summary>
-        /// 源のまわりを確かめる距離（外力の半径に対する比）。
-        /// 縁ぎりぎりまで見ると入り江が全部落ちるので、少し内側で見る。
+        /// 源のまわりに要る<b>開けた海</b>の距離（m）。
+        ///
+        /// ★★ **旧実装の 1,088 m は、いまの円に対して短すぎた。**
+        ///   （2026-08-31、相互検証）当時の外力は半径 1,280 m だったが、
+        ///   いまの水源は<b>半径 3,840 m</b> で、しかもその円の中の
+        ///   「目標水位より低い陸」は<b>直接その水位まで満たされる</b>。
+        ///   震源が岸に近いと、波が来るのではなく<b>円形の洪水が出現する</b>。
+        ///
+        /// ★ ではなぜ 3,840 m にしないのか —— それを要求すると、
+        ///   湾や内海のあるマップがほぼ全部落ちる。妥協点として 2,000 m を採る。
+        ///   これより内側に岸があるときは、円の縁が陸に掛かるぶんだけ
+        ///   「せり上がり」が早く始まる。<b>壊れてはいないが、波らしくはない。</b>
+        ///
+        /// ★★ この値は<b>断りの文言と同じものを使うこと</b>。
+        ///   以前は判定が 1,088 m、文言が別の数字で、
+        ///   プレイヤーに嘘の距離を伝えていた。
         /// </summary>
-        private const float OpenSeaFraction = 0.85f;
+        public const float OpenSeaRadiusMetres = 2000f;
 
         /// <summary>
         /// 外力の円盤のまわりが<b>開けた海</b>かどうか。
@@ -462,8 +476,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static bool IsOpenSea(TerrainManager terrain, float x, float z)
         {
-            float r = DisasterPlus.Core.Earthquake.TsunamiSource.RadiusMetres
-                      * OpenSeaFraction;
+            float r = OpenSeaRadiusMetres;
 
             for (int i = 0; i < OpenSeaProbes; i++)
             {
