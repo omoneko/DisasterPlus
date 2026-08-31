@@ -155,15 +155,17 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 }
             }
 
-            long take = Math.Min(InputRate, total >> 1);
-            if (take <= 0) return;
-
-            // ★★ ゲームは `total` も int32（loc154）。ここが溢れる設定も使えない。
+            // ★★ ゲームは `total` も int32（loc154）。**early return より前に見る** ——
+            //    後ろに置くと、負に溢れた total（円の中に陸があるとき）を
+            //    数え損ねる（2026-08-31、第 2 回検証）。
             if (total > int.MaxValue || total < int.MinValue)
             {
                 Int32Overflows++;
                 if (Math.Abs(total) > WorstProduct) WorstProduct = Math.Abs(total);
             }
+
+            long take = Math.Min(InputRate, total >> 1);
+            if (take <= 0) return;
 
             for (int z = minZ; z <= maxZ; z++)
             {
@@ -180,9 +182,11 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     int lvl = Math.Max(Target, g);
                     long share = Math.Min(g + h - lvl, h);
 
-                    // ★★ **ゲームなら int32 の mul である**（IL_1B50）。
-                    //    積が int.MaxValue を越える設定は実機でセルの高さを壊す。
-                    long product = share * take;
+                    // ★★ **ゲームが int32 で持つのは商の手前まで全部である**
+                    //    （IL_1B4C-1B58: mul, add, sub がすべて int32）。
+                    //    `share * take` だけを見ていたのは<b>式を取り違えていた</b>
+                    //    （2026-08-31、第 2 回検証）。
+                    long product = share * take + total - 1;
                     if (product > int.MaxValue || product < int.MinValue)
                     {
                         Int32Overflows++;
@@ -191,8 +195,12 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
                     share = (share * take + total - 1) / total;
                     if (share <= 0) continue;
-                    if (share > h) share = h;
 
+                    // ★★ **ゲームには h での頭打ちが無い**（IL_1B59-1BDA には
+                    //    `share <= 0` の判定しか無く、そのまま
+                    //    `m_height = (ushort)(h - share)` へ行く）。
+                    //    ここで丸めていたせいで、<b>再現側だけが壊れずに済んでいた</b>。
+                    //    実機と同じく ushort へ落として、壊れるなら壊れさせる。
                     cells[i].Height = (ushort)(h - share);
                     Taken += share;
                 }

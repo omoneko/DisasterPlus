@@ -30,6 +30,33 @@ namespace DisasterPlus.Game
     /// 差は振幅ではなく<b>水を作るかどうか</b>だった。丘をいくら大きくしても
     /// 湧き出しの真似はできない（海底を掘り抜くだけである）。
     ///
+    /// ★ ただし DLC の 84.8 m と直接は競えない。あちらは<b>マップの辺全体</b>を
+    ///   使う線の波源で、こちらは点の波源だから、幾何的な広がりのぶんだけ落ちる。
+    ///   競うべきは数字ではなく<b>大津波に見えるか</b>である。
+    ///
+    /// ── 出せる津波（実測、2026-08-31。円が汀線に掛からない配置のみ）──────
+    ///
+    /// **深い海**（水深 174 m ＝ 海面の高いマップ。押し波の蓋 40 m）:
+    ///
+    /// <list type="bullet">
+    /// <item>震源から 5.2 km … 汀線 <b>35.5 m</b>、内陸へ <b>1,328 m</b></item>
+    /// <item>震源から 8.7 km … 汀線 25.9 m、内陸へ 912 m</item>
+    /// <item>震源から 13.0 km … 汀線 23.0 m、内陸へ 848 m</item>
+    /// </list>
+    ///
+    /// **標準的なマップ**（水深 40 m ＝ 海面 40 m の既定。蓋は水深に縛られ 20 m）:
+    ///
+    /// <list type="bullet">
+    /// <item>震源から 5.2 km … 汀線 <b>20.6 m</b>、内陸へ 704 m</item>
+    /// <item>震源から 8.7 km … 汀線 13.1 m、内陸へ 432 m</item>
+    /// </list>
+    ///
+    /// ★★ **どちらも「実機で int32 が溢れない」ことを確かめた設定である。**
+    ///   再現ツールに<b>実機の int32 なら溢れていた回数</b>を数えさせている
+    ///   （<c>tools/WaterSolverSim/SourceDisc.cs</c> の <c>Int32Overflows</c>）。
+    ///   これを付けるまでは、<b>再現側だけが綺麗な答えを返す</b>設定を
+    ///   良い設定だと思い込んでいた。
+    ///
     /// ★★ **だが DLC の津波をそのまま呼ぶのは解析ではない。**（所有者、2026-08-31）
     ///   あれは<b>マップ外周でしか評価されない</b>ので、震源から同心円にはならない。
     ///   <c>WaterSource</c> は同じ「目標水位まで満たす」装置を<b>どこにでも置ける</b>形で
@@ -67,9 +94,6 @@ namespace DisasterPlus.Game
         /// <summary>1 水ステップ ＝ 64 sim フレーム（IL 実測、<c>SetCurrentWaterFrame</c>）。</summary>
         private const int FramesPerWaterStep = 64;
 
-        /// <summary>16 m セルの数。<c>BlockHeights</c> の添字は <c>z*(1080+1)+x</c>。</summary>
-        private const int GridCells = 1080;
-
         /// <summary>マップ半幅（m）。</summary>
         private const float MapHalfExtent = 8640f;
 
@@ -94,8 +118,11 @@ namespace DisasterPlus.Game
         /// </list>
         ///
         /// 高い塔を立てても遠くへは行かない —— 効くのは<b>体積</b>だからである。
-        /// 40 m は DLC の津波（強度 100）とほぼ同じ威力になる点でもある
-        /// （同条件で汀線 66.81 m、浸水 2592 m）。
+        ///
+        /// ★★ <b>この表は引き波の円が 3,840 m だったときのものである。</b>
+        ///   その設定は実機の int32 を壊すので使えない（<see cref="DrainRadiusMetres"/>）。
+        ///   採れる設定での実際の値はクラス doc の表を見ること。
+        ///   ここに残すのは<b>「蓋を上げると弱くなる」という向き</b>のためだけである。
         ///
         /// ★★ ただし<b>水深でも縛る</b>（<see cref="MaxRiseFraction"/>）。
         ///   蓋そのものは深さによらず効くのだが、<b>浅い海では出ていく波が
@@ -324,7 +351,14 @@ namespace DisasterPlus.Game
             _seaUnits = (int)(terrain.WaterSimulation.m_currentSeaLevel * 64f);
             _depthUnits = (int)(depth * 64f);
             _centre = new Vector3(epicentre.X, 0f, epicentre.Z);
-            _rate = TsunamiRingShape.RateForRadiusMetres(RadiusMetres);
+            // ★★ **円は海の広さに合わせる。**（2026-08-31、第 2 回検証）
+            //    吐き出しは<b>目標より低い陸のセルにも水を置く</b>
+            //    （IL_1E51: 飛ばすのは <c>terrain &gt;= target</c> のセルだけ）。
+            //    だから円が岸に掛かっていると、波が来るのではなく
+            //    <b>低い土地が円の形にいきなり満たされる</b>。
+            //    しかも取り込みの円は 160 m しかないので、<b>戻せない</b>。
+            float radius = OpenWaterRadius(terrain, epicentre.X, epicentre.Z);
+            _rate = TsunamiRingShape.RateForRadiusMetres(radius);
             _drainRate = TsunamiRingShape.RateForRadiusMetres(DrainRadiusMetres);
             _deltaUnits = TsunamiRingShape.VanillaDeltaUnits(intensity);
 
@@ -351,11 +385,16 @@ namespace DisasterPlus.Game
             //    1 セルの超過が最悪どこまで行くかを見積もり、
             //    `share * take` が int32 に収まる流量までしか出さない。
             //    見積もりは実測（蓋 40 m のとき最悪 102 m）に 3 倍の余裕を見た値。
+            // ★★ ゲームが int32 で持つのは <c>share*take + total - 1</c> であって
+            //    <c>share*take</c> ではない（2026-08-31、第 2 回検証）。
+            //    <c>total</c> は最悪 <c>2*take</c> まで行くので、
+            //    <b>4 分の 1 の余裕</b>を見て切り下げる。
             long worstShare = 3L * (_riseCapUnits + _drawCapUnits);
             if (worstShare > 0L)
             {
-                long safe = int.MaxValue / worstShare;
+                long safe = (int.MaxValue / 4L) / worstShare;
                 if (_drainRate > safe) _drainRate = safe;
+                if (_drainRate < 1L) _drainRate = 1L;
             }
 
             _ticks = 0;
@@ -388,7 +427,9 @@ namespace DisasterPlus.Game
             SeaWatch.Arm("Disaster+ concentric tsunami from the epicentre", frame);
 
             Log.Info("tsunami rising at (" + epicentre.X.ToString("F0") + ","
-                     + epicentre.Z.ToString("F0") + "): a water source of radius "
+                     + epicentre.Z.ToString("F0") + "): the open water around it reaches "
+                     + radius.ToString("F0") + " m of the " + RadiusMetres.ToString("F0")
+                     + " m the source would like, so it uses a water source of radius "
                      + TsunamiRingShape.RadiusMetresForRate(_rate).ToString("F0")
                      + " m sits on the epicentre and its target sea level is driven with "
                      + "the DLC's own waveform (retreat, crest, retreat) for "
@@ -543,6 +584,52 @@ namespace DisasterPlus.Game
                     Detail = "the water source slot was taken by something else";
                 }
             }
+        }
+
+        /// <summary>
+        /// 震源から<b>陸に当たらずに広げられる半径</b>（m）。
+        ///
+        /// ★★ 吐き出しの円は<b>陸にも水を置く</b>（<see cref="Begin"/> の ★★）。
+        ///   だから <see cref="RadiusMetres"/> をそのまま使わず、
+        ///   <b>実際の海の広さまで縮める</b>。狭い湾では弱い津波になるが、
+        ///   それは<b>正しい</b> —— 湾の奥で外洋規模の波は立たない。
+        ///
+        /// ★ 16 方位を 160 m 刻みで外へ辿り、最初に陸に当たった距離のうち
+        ///   いちばん短いものを採る。1 方位あたり最大 24 点なので、
+        ///   1 回の <c>Begin</c> で 384 点 —— 置くときに 1 度だけである。
+        /// </summary>
+        private static float OpenWaterRadius(TerrainManager terrain, float x, float z)
+        {
+            const int Azimuths = 16;
+            const float StepMetres = 160f;
+
+            float best = RadiusMetres;
+
+            for (int a = 0; a < Azimuths; a++)
+            {
+                float angle = 6.2831853f * a / Azimuths;
+                float dx = Mathf.Cos(angle);
+                float dz = Mathf.Sin(angle);
+
+                float reach = RadiusMetres;
+
+                for (float d = StepMetres; d <= RadiusMetres; d += StepMetres)
+                {
+                    float px = x + dx * d;
+                    float pz = z + dz * d;
+
+                    bool land = px < -MapHalfExtent || px > MapHalfExtent
+                                || pz < -MapHalfExtent || pz > MapHalfExtent
+                                || TsunamiWave.DepthAt(terrain, px, pz) <= 0f;
+
+                    if (land) { reach = d - StepMetres; break; }
+                }
+
+                if (reach < best) best = reach;
+            }
+
+            if (best < StepMetres) best = StepMetres;
+            return best;
         }
 
         /// <summary>
