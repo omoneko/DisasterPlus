@@ -82,6 +82,9 @@ namespace DisasterPlus.Tools.WaterSolverSim
         /// </summary>
         internal SourceDisc Source;
 
+        /// <summary>断層に沿って並べた円。null なら <see cref="Source"/> だけを使う。</summary>
+        internal SourceDisc[] Sources;
+
         /// <summary>
         /// <c>SimulateWater</c> の唯一の引数 <c>m_finalPollutionDisposeRate</c>（IL_02D1-02E8）。
         /// 汚染は水の動きに影響しないので、既定の 1 のままでよい。
@@ -334,7 +337,11 @@ namespace DisasterPlus.Tools.WaterSolverSim
             //    書き込み先が「今フレームで捨てられるほうの配列」になり、
             //    水源が<b>まるごと無かったことになる</b>（2026-08-31 に踏んだ:
             //    強度 100 と 255 が 1 ビットも違わない出力になって気付いた）。
-            if (Source != null) Source.Apply(this);
+            if (Sources != null)
+            {
+                for (int k = 0; k < Sources.Length; k++) Sources[k].Apply(this);
+            }
+            else if (Source != null) Source.Apply(this);
         }
 
         /// <summary>

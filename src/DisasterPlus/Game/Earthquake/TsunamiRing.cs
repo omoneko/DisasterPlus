@@ -223,6 +223,11 @@ namespace DisasterPlus.Game
         private const float MaxDrawFraction = 0.5f;
 
         /// <summary>
+        /// <summary>
+        /// 断層に並べる円の最大数。**5 が頭打ち**（<see cref="_sources"/> の表）。
+        /// </summary>
+        private const int MaxSegments = 5;
+
         /// 波形の長さ（水ステップ）。バニラは 256。
         ///
         /// ★★ **長さは効く。** 同じ蓋 40 m で 512 歩なら汀線 52.77 m、
@@ -272,7 +277,38 @@ namespace DisasterPlus.Game
         //   パネルのために読む。**正しさの拠り所は Drive / Release の中の
         //   _gate 越しの再確認であって、volatile ではない** ——
         //   volatile は「古い値を見たまま回り続ける」のを防ぐだけである。
-        private static volatile ushort _source;
+        /// <summary>
+        /// 置いた水源の番号。**0 の要素は「持っていない」。**
+        ///
+        /// ★★ **1 個ではなく線である。**（2026-09-02、所有者の報告
+        ///   「最大規模でも高潮程度」への答え）点の波源は円周に比例して薄まるので、
+        ///   遠くへ行くほど必ず落ちる —— DLC の津波が強いのは
+        ///   <b>マップの辺全体を使う線の波源</b>だからだった。
+        ///
+        ///   海溝型地震の断層は現実にも数百 km にわたって線状に割れるので、
+        ///   点で表すほうが不自然である。実測（水深 165 m・半径 2,048 m・
+        ///   蓋 130 m、汀線 5.2 km）:
+        ///
+        /// <list type="bullet">
+        /// <item>1 個（点）… 汀線 81.8 m、内陸へ 768 m、海底の露出 5 歩、震源の引き 100%</item>
+        /// <item>3 個 …… 汀線 <b>126.8 m</b>、内陸へ 1,280 m、露出 <b>0</b>、引き 29%</item>
+        /// <item><b>5 個 …… 汀線 152.2 m、内陸へ 1,504 m、露出 0、引き 25%</b></item>
+        /// <item>9 個 …… 汀線 148.2 m（<b>頭打ち</b>）、内陸へ 1,424 m</item>
+        /// </list>
+        ///
+        /// ★ 強くなるだけでなく<b>行儀も良くなる</b> —— 水を 1 点から吸い上げず
+        ///   広い前線から集めるので、海底が露出しなくなる。
+        ///
+        /// ★★ int32 の制約（<see cref="DrainRadiusMetres"/>）は<b>円ごとに独立</b>
+        ///   なので、並べるぶんには壊れない。
+        /// </summary>
+        private static ushort[] _sources = new ushort[MaxSegments];
+
+        /// <summary>並べた円の数（0 なら何も置いていない）。</summary>
+        private static volatile int _segmentCount;
+
+        /// <summary>保存のために外したときの区画数（戻すときに要る）。</summary>
+        private static int _suspendedCount;
 
         /// <summary>
         /// 震源。<b><see cref="Reset"/> で消してはいけない。</b>
@@ -283,6 +319,11 @@ namespace DisasterPlus.Game
         ///   何も起きないので無害である。
         /// </summary>
         private static Vector3 _centre;
+
+        /// <summary>
+        /// 各円の中心。<b><see cref="Reset"/> で消してはいけない</b>（<see cref="_centre"/> と同じ理由）。
+        /// </summary>
+        private static Vector3[] _centres = new Vector3[MaxSegments];
         private static long _rate;
         private static int _deltaUnits;
         private static volatile int _ticks;
@@ -424,7 +465,9 @@ namespace DisasterPlus.Game
             //    だから円が岸に掛かっていると、波が来るのではなく
             //    <b>低い土地が円の形にいきなり満たされる</b>。
             //    しかも取り込みの円は 160 m しかないので、<b>戻せない</b>。
-            float radius = OpenWaterRadius(terrain, epicentre.X, epicentre.Z);
+            float toLandX, toLandZ;
+            float radius = OpenWaterRadius(terrain, epicentre.X, epicentre.Z,
+                                           out toLandX, out toLandZ);
             if (radius <= 0f)
             {
                 Detail = "there is not enough open water around the epicentre - a source "
@@ -498,26 +541,89 @@ namespace DisasterPlus.Game
             OffsetMetres = 0f;
             PeakRiseMetres = 0f;
 
-            WaterSource src = new WaterSource();
-            src.m_type = TypeNatural;
-            src.m_inputPosition = _centre;
-            src.m_outputPosition = _centre;
-            src.m_target = (ushort)Clamp(_seaUnits, 0, TsunamiRingShape.MaxLevelUnits);
-            src.m_inputRate = 0u;
-            src.m_outputRate = 0u;
-            src.m_water = 0u;
-            src.m_pollution = 0u;
-            src.m_flow = 0u;
+            // ★★ **断層を組み立てる。**（<see cref="_sources"/> の ★★）
+            //    向きは「いちばん近い陸への方向に直交」——
+            //    波面が海岸と平行になり、海岸へ向かって来る。海溝と同じ形である。
+            //    区画数は震度で決まる（弱い地震は点、強い地震は 5 区画）。
+            int wanted = 1 + (int)(MaxSegments - 1) * (intensity > 100 ? 100 : intensity) / 100;
+            if (wanted < 1) wanted = 1;
+            if (wanted > MaxSegments) wanted = MaxSegments;
 
-            ushort handle;
-            if (!terrain.WaterSimulation.CreateWaterSource(out handle, src) || handle == 0)
+            float alongX = -toLandZ;   // 陸への向きに直交（90 度回す）
+            float alongZ = toLandX;
+            float alongLen = Mathf.Sqrt(alongX * alongX + alongZ * alongZ);
+            if (alongLen < 0.001f) { alongX = 0f; alongZ = 1f; }
+            else { alongX /= alongLen; alongZ /= alongLen; }
+
+            _segmentCount = 0;
+
+            for (int k = 0; k < wanted; k++)
+            {
+                float offset = (k - (wanted - 1) * 0.5f) * radius;
+                float px = epicentre.X + alongX * offset;
+                float pz = epicentre.Z + alongZ * offset;
+
+                // ★★ **区画は全部確かめる。**（2026-09-02、Codex の指摘）
+                //    `k != 0` を免除していたが、区画が 2 つ以上あるとき
+                //    <b>k == 0 は震源ではなく断層の端</b>である。震源で通した検査を
+                //    端に流用すると、陸やマップ縁に円を置いてしまう ——
+                //    まさにこの検査が防ぐはずの場所である。
+                //    入らない区画は落とすだけで、津波そのものは中止しない
+                //    （断層は端で細くなるものである）。
+                if (OpenWaterRadius(terrain, px, pz) < radius) continue;
+
+                Vector3 at = new Vector3(px, 0f, pz);
+
+                WaterSource src = new WaterSource();
+                src.m_type = TypeNatural;
+                src.m_inputPosition = at;
+                src.m_outputPosition = at;
+                src.m_target = (ushort)Clamp(_seaUnits, 0, TsunamiRingShape.MaxLevelUnits);
+                src.m_inputRate = 0u;
+                src.m_outputRate = 0u;
+                src.m_water = 0u;
+                src.m_pollution = 0u;
+                src.m_flow = 0u;
+
+                ushort handle;
+                if (!terrain.WaterSimulation.CreateWaterSource(out handle, src) || handle == 0)
+                {
+                    // ★ 1 個も置けなければ失敗。途中まで置けたなら、それで進む。
+                    break;
+                }
+
+                _centres[_segmentCount] = at;
+                _sources[_segmentCount] = handle;
+                _segmentCount++;
+            }
+
+            // ★★ 端が全部落ちても、**震源そのものは上で検査済み**なので
+            //    そこに 1 本だけ置いて成立させる（点の波源に退化する）。
+            if (_segmentCount == 0)
+            {
+                WaterSource only = new WaterSource();
+                only.m_type = TypeNatural;
+                only.m_inputPosition = _centre;
+                only.m_outputPosition = _centre;
+                only.m_target = (ushort)Clamp(_seaUnits, 0, TsunamiRingShape.MaxLevelUnits);
+
+                ushort onlyHandle;
+                if (terrain.WaterSimulation.CreateWaterSource(out onlyHandle, only)
+                    && onlyHandle != 0)
+                {
+                    _centres[0] = _centre;
+                    _sources[0] = onlyHandle;
+                    _segmentCount = 1;
+                }
+            }
+
+            if (_segmentCount == 0)
             {
                 Detail = "the game would not give us a water source slot";
                 LastRefusal = Refusal.NoRoomInGame;
                 return false;
             }
 
-            _source = handle;
             _running = true;
 
             // ★ バニラの津波と同じ物差しで自分の波も測る（SeaWatch のクラス doc）。
@@ -528,7 +634,9 @@ namespace DisasterPlus.Game
                      + radius.ToString("F0") + " m of the " + RadiusMetres.ToString("F0")
                      + " m the source would like, so it uses a water source of radius "
                      + TsunamiRingShape.RadiusMetresForRate(_rate).ToString("F0")
-                     + " m sits on the epicentre and its target sea level is driven with "
+                     + " m, " + _segmentCount + " of them in a line along the rupture "
+                     + "(a megathrust tears open along a fault, it is not a point), and "
+                     + "their target sea level is driven with "
                      + "the DLC's own waveform (retreat, crest, retreat) for "
                      + DurationSteps + " water steps = "
                      + (DurationSteps * FramesPerWaterStep / 3600f).ToString("F1")
@@ -559,7 +667,7 @@ namespace DisasterPlus.Game
 
             // ★ 保存の最中は水源を外してある。戻るまで時計も止める ——
             //   進めてしまうと、戻ってきたときに波形が飛ぶ。
-            if (_source == 0) return;
+            if (_segmentCount == 0) return;
 
             _ticks += TsunamiRingShape.TicksPerWaterStep;
 
@@ -613,7 +721,7 @@ namespace DisasterPlus.Game
         {
             lock (_gate)
             {
-                if (!_running || _source == 0) return;
+                if (!_running || _segmentCount == 0) return;
 
                 TerrainManager terrain = Singleton<TerrainManager>.instance;
                 if (terrain == null || terrain.WaterSimulation == null) return;
@@ -625,9 +733,12 @@ namespace DisasterPlus.Game
                 //    <c>LockWaterSource(0)</c> が <b>Monitor を取ったあとで</b>
                 //    IndexOutOfRange を投げ、<c>Monitor.Exit</c> に到達しない ——
                 //    水スレッドが永久に止まる（2026-08-31 の相互検証で指摘）。
-                ushort handle = _source;
-                if (!OwnsSource(sim, handle))
+                // ★★ 線のどれか 1 本でも自分のものでなくなったら、全部畳む。
+                //    部分的に生きた水源を残すと、解放経路が届かなくなる。
+                for (int k = 0; k < _segmentCount; k++)
                 {
+                    if (OwnsSource(sim, _sources[k], _centres[k])) continue;
+
                     // ★ 枠が自分のものでなくなった。**番号を捨てるだけにしない** ——
                     //   捨てると以後どの解放経路も届かず、湧き水が残る。
                     ReleaseLocked();
@@ -637,6 +748,9 @@ namespace DisasterPlus.Game
                     return;
                 }
 
+                for (int k = 0; k < _segmentCount; k++)
+                {
+                ushort handle = _sources[k];
                 bool foreign = false;
 
                 // ★ LockWaterSource は Monitor を取ったまま返る。
@@ -653,8 +767,8 @@ namespace DisasterPlus.Game
                     //    枠が別の TYPE_NATURAL に入れ替わっていたら、
                     //    他人の川に自分の目標水位と 3.8 km ぶんの流量を書いてしまう。
                     if (src.m_type != TypeNatural
-                        || src.m_inputPosition != _centre
-                        || src.m_outputPosition != _centre)
+                        || src.m_inputPosition != _centres[k]
+                        || src.m_outputPosition != _centres[k])
                     {
                         foreign = true;
                     }
@@ -675,10 +789,12 @@ namespace DisasterPlus.Game
 
                 if (foreign)
                 {
-                    _source = 0;
+                    ReleaseLocked();
                     SweepOursLocked();
                     _running = false;
                     Detail = "the water source slot was taken by something else";
+                    return;
+                }
                 }
             }
         }
@@ -721,6 +837,21 @@ namespace DisasterPlus.Game
         /// </summary>
         public static float OpenWaterRadius(TerrainManager terrain, float x, float z)
         {
+            float ignoreX, ignoreZ;
+            return OpenWaterRadius(terrain, x, z, out ignoreX, out ignoreZ);
+        }
+
+        /// <summary>
+        /// 同上。<paramref name="toLandX"/>/<paramref name="toLandZ"/> に
+        /// <b>いちばん近い陸への向き</b>（正規化しない）を返す。
+        /// 断層はこれに直交させる（<see cref="_sources"/> の ★★）。
+        /// </summary>
+        public static float OpenWaterRadius(TerrainManager terrain, float x, float z,
+                                            out float toLandX, out float toLandZ)
+        {
+            toLandX = 1f;
+            toLandZ = 0f;
+
             ushort[] block = terrain.BlockHeights;
             if (block == null) return 0f;
             if (terrain.WaterSimulation == null) return 0f;
@@ -766,7 +897,12 @@ namespace DisasterPlus.Game
                                               seaUnits, minDepthUnits);
                     }
 
-                    if (land) best = square;
+                    if (land)
+                    {
+                        best = square;
+                        toLandX = dx;
+                        toLandZ = dz;
+                    }
                 }
             }
 
@@ -828,7 +964,7 @@ namespace DisasterPlus.Game
         /// その枠が<b>いまも自分のもの</b>か。<c>CreateWaterSource</c> は
         /// <c>m_type == 0</c> の枠を使い回すので、番号だけでは足りない（クラス doc §4）。
         /// </summary>
-        private static bool OwnsSource(WaterSimulation sim, ushort handle)
+        private static bool OwnsSource(WaterSimulation sim, ushort handle, Vector3 centre)
         {
             if (handle == 0) return false;
 
@@ -842,7 +978,7 @@ namespace DisasterPlus.Game
             if (s.m_type != TypeNatural) return false;
 
             // 位置は自分で書いた値そのものなので、ビット一致で照合できる。
-            return s.m_outputPosition == _centre && s.m_inputPosition == _centre;
+            return s.m_outputPosition == centre && s.m_inputPosition == centre;
         }
 
         /// <summary>
@@ -853,9 +989,21 @@ namespace DisasterPlus.Game
         {
             // ★★ **先に番号を手放す。** こうしておけば、この下で何が起きても
             //    「まだ持っている」と誤解した別の経路が同じ枠を触らない。
-            ushort handle = _source;
-            _source = 0;
-            if (handle == 0) return;
+            // ★★ **先に番号を手放す。** こうしておけば、この下で何が起きても
+            //    「まだ持っている」と誤解した別の経路が同じ枠を触らない。
+            ushort[] handles = new ushort[MaxSegments];
+            Vector3[] centres = new Vector3[MaxSegments];
+            int count = _segmentCount;
+
+            for (int k = 0; k < count; k++)
+            {
+                handles[k] = _sources[k];
+                centres[k] = _centres[k];
+                _sources[k] = 0;
+            }
+
+            _segmentCount = 0;
+            if (count == 0) return;
 
             try
             {
@@ -865,23 +1013,29 @@ namespace DisasterPlus.Game
                 if (terrain == null || terrain.WaterSimulation == null) return;
 
                 WaterSimulation sim = terrain.WaterSimulation;
-                if (!OwnsSource(sim, handle)) return;
 
-                // ★ 解放の前に流量を 0 にする。ReleaseWaterSource は m_type を
-                //   0 にするだけなので、枠を拾い直した誰かが古い流量を見る余地を消す。
-                WaterSource src = sim.LockWaterSource(handle);
-                try
+                for (int k = 0; k < count; k++)
                 {
-                    if (src.m_type != TypeNatural) return;
-                    src.m_inputRate = 0u;
-                    src.m_outputRate = 0u;
-                }
-                finally
-                {
-                    sim.UnlockWaterSource(handle, src);
-                }
+                    ushort handle = handles[k];
+                    if (handle == 0) continue;
+                    if (!OwnsSource(sim, handle, centres[k])) continue;
 
-                sim.ReleaseWaterSource(handle);
+                    // ★ 解放の前に流量を 0 にする。ReleaseWaterSource は m_type を
+                    //   0 にするだけなので、枠を拾い直した誰かが古い流量を見る余地を消す。
+                    WaterSource src = sim.LockWaterSource(handle);
+                    try
+                    {
+                        if (src.m_type != TypeNatural) continue;
+                        src.m_inputRate = 0u;
+                        src.m_outputRate = 0u;
+                    }
+                    finally
+                    {
+                        sim.UnlockWaterSource(handle, src);
+                    }
+
+                    sim.ReleaseWaterSource(handle);
+                }
             }
             catch (System.Exception e)
             {
@@ -902,6 +1056,20 @@ namespace DisasterPlus.Game
         /// ★ 震源が <c>Vector3.zero</c> のときは何もしない。まだ何も置いていないか、
         ///   マップ中央にたまたま在る他人の川を巻き込む恐れがあるからである。
         /// </summary>
+        /// <summary>その位置は自分が置いた円のどれかか（線の全区画を見る）。</summary>
+        private static bool IsOneOfOurs(Vector3 at)
+        {
+            if (at == _centre) return true;
+
+            for (int k = 0; k < _centres.Length; k++)
+            {
+                if (_centres[k] == Vector3.zero) continue;
+                if (_centres[k] == at) return true;
+            }
+
+            return false;
+        }
+
         private static void SweepOursLocked()
         {
             if (_centre == Vector3.zero) return;
@@ -942,8 +1110,8 @@ namespace DisasterPlus.Game
                     {
                         WaterSource s = list.m_buffer[i];
                         if (s.m_type != TypeNatural) continue;
-                        if (s.m_outputPosition != _centre) continue;
-                        if (s.m_inputPosition != _centre) continue;
+                        if (s.m_outputPosition != s.m_inputPosition) continue;
+                        if (!IsOneOfOurs(s.m_outputPosition)) continue;
 
                         sim.ReleaseWaterSource((ushort)(i + 1));
                         Log.Info("tsunami: swept a stray water source at the epicentre "
@@ -982,7 +1150,10 @@ namespace DisasterPlus.Game
                 //    2 回目の保存が始まった窓で<b>戻し忘れる</b>。
                 //    <c>ReapplyAfterSave</c> は <c>_source != 0</c> なら何もしないので、
                 //    余分に予約されても害は無い。
-                if (_source == 0) return true;
+                if (_segmentCount == 0) return true;
+
+                // ★ 戻すときに何区画あったかを覚えておく（ReleaseLocked が 0 にする）。
+                _suspendedCount = _segmentCount;
 
                 ReleaseLocked();
                 SweepOursLocked();
@@ -995,7 +1166,7 @@ namespace DisasterPlus.Game
         {
             lock (_gate)
             {
-                if (!_running || _source != 0) return;
+                if (!_running || _segmentCount != 0) return;
 
                 try
                 {
@@ -1012,18 +1183,34 @@ namespace DisasterPlus.Game
                         return;
                     }
 
-                    WaterSource src = new WaterSource();
-                    src.m_type = TypeNatural;
-                    src.m_inputPosition = _centre;
-                    src.m_outputPosition = _centre;
-                    src.m_target = (ushort)Clamp(_seaUnits, 0, TsunamiRingShape.MaxLevelUnits);
+                    // ★★ **線の全区画を戻す。**（2026-09-02）1 本だけ戻すと、
+                    //    残りの区画の中心が <c>_centres</c> に残ったまま
+                    //    水源が無い状態になり、掃除の指紋だけが宙に浮く。
+                    int back = 0;
 
-                    ushort handle;
-                    if (terrain.WaterSimulation.CreateWaterSource(out handle, src) && handle != 0)
+                    for (int k = 0; k < _suspendedCount; k++)
                     {
-                        _source = handle;
+                        WaterSource src = new WaterSource();
+                        src.m_type = TypeNatural;
+                        src.m_inputPosition = _centres[k];
+                        src.m_outputPosition = _centres[k];
+                        src.m_target =
+                            (ushort)Clamp(_seaUnits, 0, TsunamiRingShape.MaxLevelUnits);
+
+                        ushort handle;
+                        if (!terrain.WaterSimulation.CreateWaterSource(out handle, src)
+                            || handle == 0)
+                        {
+                            break;
+                        }
+
+                        _sources[back] = handle;
+                        back++;
                     }
-                    else
+
+                    _segmentCount = back;
+
+                    if (back == 0)
                     {
                         _running = false;
                         Log.Warn("tsunami: could not put the water source back after saving; "

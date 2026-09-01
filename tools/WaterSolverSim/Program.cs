@@ -84,6 +84,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
             int ringDurSteps = 256;  // 波形の長さ（水ステップ）。バニラは 256
             float ringCap = 0f;      // >0 なら押し波の高さの頭打ち（m）
             float landRise = 0.5f;   // 陸の勾配（m/セル）。飽和すると浸水距離が測れない
+            int ringRepeat = 1;      // 波形を何回打つか（第2波・第3波）
+            int ringLine = 1;        // 断層に沿って並べる円の数（1 なら点の波源）
             float ringDraw = 0f;     // >0 なら引き波の深さの頭打ち（m）。既定は ringCap と同じ
             float arrivalThreshold = float.NaN;   // ★ 診断。>0 なら波頭の到達時刻を測る。         // ★ 診断用。ゲームには対応物が無い。
 
@@ -111,6 +113,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 else if (a == "--ringdur" && i + 1 < args.Length) { ringDurSteps = ParseInt(args[++i], ringDurSteps); }
                 else if (a == "--ringcap" && i + 1 < args.Length) { ringCap = ParseFloat(args[++i], ringCap); }
                 else if (a == "--landrise" && i + 1 < args.Length) { landRise = ParseFloat(args[++i], landRise); }
+                else if (a == "--ringrepeat" && i + 1 < args.Length) { ringRepeat = ParseInt(args[++i], ringRepeat); }
+                else if (a == "--ringline" && i + 1 < args.Length) { ringLine = ParseInt(args[++i], ringLine); }
                 else if (a == "--ringdraw" && i + 1 < args.Length) { ringDraw = ParseFloat(args[++i], ringDraw); }
                 else if (a == "--arrival" && i + 1 < args.Length) { arrivalThreshold = ParseFloat(args[++i], arrivalThreshold); }
                 else if (a == "--nopng") { noPng = true; }
@@ -205,11 +209,20 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 float wantR = ringRadius * WaterField.CellSizeMetres;
                 long rate = (long)Math.Pow((wantR - 10f) / 0.4f, 2.0);
 
-                field.Source = new SourceDisc
+                // ★★ 断層に沿って円を並べる（線の波源）。ringLine == 1 なら従来どおり点。
+                //    円の間隔は半径ぶん —— 重なりすぎると同じ水を奪い合い、
+                //    離しすぎると波が 1 本にならない。
+                field.Sources = new SourceDisc[ringLine];
+                int lineStep = ringRadius;
+                for (int k = 0; k < ringLine; k++)
                 {
-                    CellX = centreX,
-                    CellZ = centreZ,
-                };
+                    field.Sources[k] = new SourceDisc
+                    {
+                        CellX = centreX,
+                        CellZ = centreZ + (k - (ringLine - 1) / 2) * lineStep,
+                    };
+                }
+                field.Source = field.Sources[0];
 
                 ringShape = new EdgeWave
                 {
@@ -364,7 +377,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                         if (level < floorUnits) level = floorUnits;
                     }
 
-                    field.Source.Target = level;
+                    for (int k = 0; k < field.Sources.Length; k++) field.Sources[k].Target = level;
 
                     // ★★ **押しと引きを両方いつも入れる。** これで円は
                     //    「目標水位へ張り付く」——DLC が外周セルにやっている
@@ -372,15 +385,17 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     //    片方ずつにすると、寄せ集まった水を抜く力が無いので
                     //    震源が目標の 2 倍以上に盛り上がる（2026-08-31 実測:
                     //    目標 +102 m に対して実際 +232 m）。
-                    field.Source.OutputRate = ringHold ? ringRate : (level > field.SeaLevelUnits ? ringRate : 0);
+                    long outRate = ringHold ? ringRate : (level > field.SeaLevelUnits ? ringRate : 0);
+                    for (int k = 0; k < field.Sources.Length; k++) field.Sources[k].OutputRate = outRate;
                     // ★ 取り込みは別半径にできる。ゲームの int32 が溢れないところまで
                     //   小さくするため（このファイルを書いた理由）。
                     long inRate = ringInR > 0f
                         ? (long)Math.Pow((ringInR - 10f) / 0.4f, 2.0)
                         : ringRate;
 
-                    field.Source.InputRate = ringNoIn ? 0
+                    long inputRate = ringNoIn ? 0
                         : (ringHold ? inRate : (level < field.SeaLevelUnits ? inRate : 0));
+                    for (int k = 0; k < field.Sources.Length; k++) field.Sources[k].InputRate = inputRate;
 
                     if (!ringShape.Active)
                     {
@@ -409,6 +424,14 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     }
 
                     ringShape.Step();
+
+                    // ★ 波形を打ち直す（第2波・第3波）。時計を 0 に戻すので
+                    //   振幅の減衰項もやり直しになり、同じ高さの波がもう一度来る。
+                    if (ringRepeat > 1 && !ringShape.Active)
+                    {
+                        ringRepeat--;
+                        ringShape.CurrentTime = 0;
+                    }
                 }
 
                 field.Step(impulses);
