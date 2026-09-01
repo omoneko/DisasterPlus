@@ -83,6 +83,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
             float ringInR = 0f;      // >0 なら取り込み円の半径（m）を別に決める
             int ringDurSteps = 256;  // 波形の長さ（水ステップ）。バニラは 256
             float ringCap = 0f;      // >0 なら押し波の高さの頭打ち（m）
+            float landRise = 0.5f;   // 陸の勾配（m/セル）。飽和すると浸水距離が測れない
             float ringDraw = 0f;     // >0 なら引き波の深さの頭打ち（m）。既定は ringCap と同じ
             float arrivalThreshold = float.NaN;   // ★ 診断。>0 なら波頭の到達時刻を測る。         // ★ 診断用。ゲームには対応物が無い。
 
@@ -109,6 +110,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 else if (a == "--ringimpact" && i + 1 < args.Length) { ringImpact = ParseInt(args[++i], 0); }
                 else if (a == "--ringdur" && i + 1 < args.Length) { ringDurSteps = ParseInt(args[++i], ringDurSteps); }
                 else if (a == "--ringcap" && i + 1 < args.Length) { ringCap = ParseFloat(args[++i], ringCap); }
+                else if (a == "--landrise" && i + 1 < args.Length) { landRise = ParseFloat(args[++i], landRise); }
                 else if (a == "--ringdraw" && i + 1 < args.Length) { ringDraw = ParseFloat(args[++i], ringDraw); }
                 else if (a == "--arrival" && i + 1 < args.Length) { arrivalThreshold = ParseFloat(args[++i], arrivalThreshold); }
                 else if (a == "--nopng") { noPng = true; }
@@ -135,7 +137,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
             int shelfStart = (int)(gridSize * 0.60f);
             int shoreCell = (int)(gridSize * 0.85f);
 
-            if (shelf) field.FillShelf(depth, shelfStart, shoreCell, 0.5f);
+            if (shelf) field.FillShelf(depth, shelfStart, shoreCell, landRise);
             else field.FillFlatSea(depth);
 
             // ★★ 源を端に寄せられるようにする（2026-08-30）。外周セルはソルバが
