@@ -94,6 +94,13 @@ namespace DisasterPlus.Game
         private static float _speed;
         private static byte _peakIntensity;
         private static uint _totalFrames;
+
+        /// <summary>
+        /// クリック地点に着くまでのフレーム数。
+        /// **台風はこれだけ時計を戻した場所から入ってくる**
+        /// （<c>TyphoonTrack.ApproachFramesFor</c>）。
+        /// </summary>
+        private static uint _approachFrames;
         private static uint _elapsedFrames;
         private static uint _lastFrame;
         private static float _decay;
@@ -327,8 +334,12 @@ namespace DisasterPlus.Game
             _landfallScanFrame = 0u;
             MinutesToLandfall = 0f;
 
-            _centre = TyphoonTrack.CentreAt(_origin, _seed, 0u, _speed);
-            _heading = TyphoonTrack.HeadingAt(_seed, 0u, _speed);
+            // ★★ **マップ端から入ってくる**（2026-09-02）。
+            //    クリック地点は出発点ではなく<b>到達点</b>になる。
+            _approachFrames = TyphoonTrack.ApproachFramesFor(_origin, _seed, _speed,
+                                                            _totalFrames);
+            _centre = TyphoonTrack.CentreAt(_origin, _seed, 0u, _speed, _approachFrames);
+            _heading = TyphoonTrack.HeadingAt(_origin, _seed, 0u, _speed, _approachFrames);
             _phase = TyphoonTrack.PhaseAt(0u, _totalFrames);
             _intensity = TyphoonTrack.IntensityAt(_peakIntensity, 0u, _totalFrames, 0f);
             _stormRadius = TyphoonProfile.StormRadiusOf(_intensity, _prefabRadius);
@@ -380,11 +391,13 @@ namespace DisasterPlus.Game
             _lastFrame = frame;
 
             // 経路は elapsedFrames の閉じた関数。積算しない（Core の doc）。
-            _centre = TyphoonTrack.CentreAt(_origin, _seed, _elapsedFrames, _speed);
+            _centre = TyphoonTrack.CentreAt(_origin, _seed, _elapsedFrames, _speed,
+                                           _approachFrames);
             // ★ 出発点を渡す。**マップを横切る向きを選ぶため**
             //   （TyphoonTrack.BearingFrom のクラス doc）。渡さないと、端を
             //   指されたとき台風が数百 m でマップを出て消える。
-            _heading = TyphoonTrack.HeadingAt(_origin, _seed, _elapsedFrames, _speed);
+            _heading = TyphoonTrack.HeadingAt(_origin, _seed, _elapsedFrames, _speed,
+                                              _approachFrames);
 
             bool inside = TyphoonTrack.IsInsideMap(_centre);
             if (inside) _wasInsideMap = true;

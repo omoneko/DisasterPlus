@@ -82,7 +82,33 @@ namespace DisasterPlus.Core.Typhoon
         ///   終わり方は「持続時間を使い切った」のほうが通常になる。終了経路は
         ///   どちらも <c>TyphoonController.Stop</c> ＝ <c>Forget</c> を通る（設計書 §4.2）。
         /// </summary>
-        public const float NominalPathLength = MapHalfExtent;
+        /// <remarks>
+        /// ★★ <b>2026-09-02、マップ半辺 → 12,000 m へ伸ばした。</b>
+        ///   所有者の依頼「クリックしてその場に急に発生するのではなく、マップ端で
+        ///   発生して徐々にクリックした地点に近づき、その後進路を維持して立ち去る」。
+        ///
+        ///   進入ぶんの道のりが要る。半辺（8,640 m）のままだと、クリック地点まで
+        ///   来るのに寿命のほとんどを使ってしまい、<b>最盛期を沖で迎えて
+        ///   衰えながら上陸する</b>ことになる（強度の包絡線は寿命の真ん中が頂点で、
+        ///   これは宿主の落雷ランプに合わせてあるので動かせない）。
+        ///
+        /// ★★ <b>要る道のりは「一辺」であって半辺ではない。</b>
+        ///   接近に使えるのは寿命の半分（<see cref="ApproachFraction"/>。強度の頂点が
+        ///   そこだから）なので、<b>半分の時間でマップ半辺を戻れる速さ</b>が要る。
+        ///   マップ中央を指されたとき、端までがちょうど半辺（8,640 m）である。
+        ///
+        ///   <c>速さ × 寿命/2 ≥ 8,640</c> ⇔ <c>速さ ≥ 2.109</c>
+        ///   ⇔ <c>経路長 ≥ 17,280 ＝ マップの一辺</c>。
+        ///   12,000 m で試して落ちた（中央を指すと 6,000 m しか戻れず、
+        ///   マップの中から湧いてしまう）ので、一辺まで戻した。
+        ///
+        /// ★ これは 2026-08-22 に「もっとゆっくり」で半分にする前の速さである。
+        ///   <b>ただし当時とは意味が違う</b> —— あのときは<b>クリック地点から</b>
+        ///   走り出して足早にマップを出ていた。いまは半分を接近に使うので、
+        ///   街の上に居る時間はむしろ長い。**速く見えるようなら、
+        ///   ここではなく <see cref="ApproachFraction"/> を下げて調整すること。**
+        /// </remarks>
+        public const float NominalPathLength = MapHalfExtent * 2f;
 
         /// <summary>
         /// ④の寿命が宿主の嵐の <c>m_activeDuration</c> の何倍か。
@@ -260,10 +286,21 @@ namespace DisasterPlus.Core.Typhoon
         /// </summary>
         public static float HeadingAt(Vec2 origin, uint seed, uint elapsedFrames, float speed)
         {
+            return HeadingAt(origin, seed, elapsedFrames, speed, 0u);
+        }
+
+        /// <summary>
+        /// 同上。<paramref name="approachFrames"/> だけ時計を戻す
+        /// （<see cref="CentreAt(Vec2, uint, uint, float, uint)"/> と揃えること ——
+        /// ずらし忘れると<b>進んでいる向きと表示の向きが食い違う</b>）。
+        /// </summary>
+        public static float HeadingAt(Vec2 origin, uint seed, uint elapsedFrames, float speed,
+                                      uint approachFrames)
+        {
             float theta = BearingFrom(origin, seed);
             if (speed <= 0f) return theta;
 
-            theta += CurvatureOf(seed) * elapsedFrames;
+            theta += CurvatureOf(seed) * ((float)elapsedFrames - approachFrames);
 
             // [0, 2π) に畳む。表示（度）と m_angle の両方でそのまま使えるようにする。
             const float twoPi = 6.28318531f;
@@ -288,8 +325,106 @@ namespace DisasterPlus.Core.Typhoon
         /// </summary>
         public static Vec2 CentreAt(Vec2 origin, uint seed, uint elapsedFrames, float speed)
         {
+            return CentreAt(origin, seed, elapsedFrames, speed, 0u);
+        }
+
+        /// <summary>
+        /// 同上。<paramref name="approachFrames"/> だけ<b>時計を戻して</b>評価する。
+        ///
+        /// ★★ これが「マップ端から来る」の実体である（2026-09-02）。
+        ///   <paramref name="origin"/> は<b>出発点ではなく到達点</b>になり、
+        ///   <c>t = approachFrames</c> でちょうどそこを通る。
+        ///   <c>t = 0</c> では円弧を後ろへ辿った先 ——ふつうはマップの外—— に居る。
+        ///
+        /// ★ 経路そのものは変えていない。同じ円弧の<b>どこを t = 0 と呼ぶか</b>を
+        ///   ずらしただけなので、「経路は elapsedFrames の閉じた関数」という
+        ///   このクラスの約束（クラス doc）は保たれる。
+        /// </summary>
+        public static Vec2 CentreAt(Vec2 origin, uint seed, uint elapsedFrames, float speed,
+                                    uint approachFrames)
+        {
             return ArcPosition(origin, BearingFrom(origin, seed), CurvatureOf(seed),
-                               elapsedFrames, speed);
+                               (float)elapsedFrames - approachFrames, speed);
+        }
+
+        /// <summary>
+        /// 寿命のうち<b>接近に使う割合</b>。
+        ///
+        /// ★★ 0.5 にしてある。<see cref="IntensityAt"/> の包絡線は<b>寿命の真ん中が
+        ///   頂点</b>（宿主の落雷ランプと同じ台形）なので、
+        ///   <b>クリック地点に着いた瞬間が最盛期</b>になる。
+        ///
+        /// ★★ <see cref="RampFraction"/> が 0.25 なので、強度の台形は
+        ///   <b>寿命の 25% から 75% までが平ら</b>である。その間に着けば満額なので、
+        ///   ちょうど 0.5 である必要は無い。
+        ///
+        ///   だから接近の長さは<b>「端まで戻れた時点」で決める</b>のであって、
+        ///   割合で決め打ちしない。割合は<b>その探索の上限</b>である。
+        ///
+        ///   0.5 / 0.6 で決め打ちして 2 度落ちた —— 円弧の弦は弧より短いので、
+        ///   マップ中央を指されると戻り切れない
+        ///   （実測: 0.5 で (8154, 2857)、0.6 で (-7848, 6774)。どちらもまだ中）。
+        ///
+        /// ★ 上限を 0.75 にしてあるのは、強度の台形がそこまで平らだからである。
+        /// </summary>
+        public const float ApproachFraction = 0.75f;
+
+        /// <summary>
+        /// 接近に<b>最低でも</b>使う割合。
+        ///
+        /// ★★ 端のすぐそばを指されると数百フレームで着いてしまい、
+        ///   <b>まだ強度が立ち上がりきっていない</b>（台形は 25% で満額になる）。
+        ///   それでは「弱い台風が通り過ぎた」で終わる。
+        ///   端より手前から始めることになるが、そこはマップの外なので誰も見ていない。
+        /// </summary>
+        public const float MinApproachFraction = 0.25f;
+
+        /// <summary>
+        /// 進入点を探すときの刻み（フレーム）。粗くてよい ——
+        /// マップの外に出たことさえ分かればいい。
+        /// </summary>
+        private const int ApproachProbeFrames = 64;
+
+        /// <summary>
+        /// <b>クリック地点に着くまでのフレーム数。</b>
+        ///
+        /// 台風の経路は「クリック地点を <c>t = これ</c> で通る円弧」である。
+        /// <see cref="CentreAt"/> はこの値だけ時計を戻して評価するので、
+        /// <c>t = 0</c> では<b>マップの外（か、端の近く）</b>に居る。
+        ///
+        /// ★ 求め方は<b>後ろ向きに辿るだけ</b>。円弧は閉形式なので負の時間を
+        ///   そのまま入れられる（<see cref="ArcPosition"/> の <c>sinc</c> は偶関数）。
+        ///   マップの外へ出た時点で止め、<see cref="ApproachFraction"/> で頭打ちにする。
+        ///
+        /// ★★ 頭打ちに当たる＝<b>クリック地点が端から遠すぎて、寿命の半分では
+        ///   端まで戻れない</b>場合である。そのときは端ではなくマップの中から
+        ///   湧くことになるが、**それでも「向こうから来て通り過ぎる」形は保つ**。
+        ///   ここで寿命を延ばす手は採らない（<see cref="NominalPathLength"/> の
+        ///   doc にある通り、宿主より長生きすると別の壊れ方をする）。
+        /// </summary>
+        public static uint ApproachFramesFor(Vec2 origin, uint seed, float speed,
+                                             uint totalFrames)
+        {
+            if (speed <= 0f || totalFrames == 0u) return 0u;
+
+            int cap = (int)(totalFrames * ApproachFraction);
+            if (cap <= 0) return 0u;
+
+            float theta = BearingFrom(origin, seed);
+            float curvature = CurvatureOf(seed);
+
+            int floor = (int)(totalFrames * MinApproachFraction);
+
+            for (int back = ApproachProbeFrames; back <= cap; back += ApproachProbeFrames)
+            {
+                Vec2 at = ArcPosition(origin, theta, curvature, -back, speed);
+                if (IsInsideMap(at)) continue;
+
+                // ★ 端を出た。ただし早すぎる到達は避ける（MinApproachFraction）。
+                return (uint)(back < floor ? floor : back);
+            }
+
+            return (uint)cap;
         }
 
         /// <summary>

@@ -79,16 +79,26 @@ namespace DisasterPlus.Core.Tests.Typhoon
         }
 
         [Fact]
-        public void TheStormMovesAtHalfTheSpeedItUsedTo()
+        public void TheStormCrossesTheWholeMapInOneLife()
         {
-            // ★ 持ち主の指摘への直接の答え。実測のプレハブ値での速度を固定する。
-            //   NominalPathLength を戻すとここが赤くなる。
+            // ★★ **2026-09-02 に半辺 → 一辺へ戻した。**（所有者「マップ端で発生して
+            //   徐々にクリック地点に近づき、その後進路を維持して立ち去る」）
+            //
+            //   接近に使えるのは寿命の半分なので、<b>その半分でマップ半辺を戻れる</b>
+            //   速さが要る。中央を指されたときの端までの距離がちょうど半辺である。
+            //   12,000 m で試したら中央から 6,000 m しか戻れず、マップの中から
+            //   湧いてしまった（<c>NominalPathLength</c> の doc）。
             float speed = TyphoonTrack.SpeedFor(TyphoonPrefabActiveDuration);
-            Assert.Equal(1.0547f, speed, 3);
+            Assert.Equal(2.1094f, speed, 3);
 
-            // マップの一辺（17280 m）を渡り切るのに掛かるフレーム数 ＝ 寿命の 2 倍。
+            // 寿命いっぱいでマップの一辺（17280 m）を渡り切る。
             float framesToCross = TyphoonTrack.MapHalfExtent * 2f / speed;
-            Assert.Equal(2f * TyphoonPrefabActiveDuration, framesToCross, 0);
+            Assert.Equal((float)TyphoonPrefabActiveDuration, framesToCross, 0);
+
+            // ★ 接近には寿命の 25〜75% を使う（強度の台形が平らな区間）。
+            //   「速すぎる」と感じたら下げるのは速さではなく、この割合である。
+            Assert.Equal(0.25f, TyphoonTrack.MinApproachFraction, 3);
+            Assert.Equal(0.75f, TyphoonTrack.ApproachFraction, 3);
         }
 
         /// <summary><c>ThunderStormAI.m_activeDuration</c> の実測値

@@ -38,16 +38,21 @@ namespace DisasterPlus.Core.Tests.Typhoon
         }
 
         [Fact]
-        public void ItStillTakesLongerThanItsLifeToCrossTheWholeMap()
+        public void ItCrossesTheWholeMapInOneLifeSoItCanArriveFromOutside()
         {
-            // 経路長はマップの半辺なので、寿命いっぱいでも渡り切らない ——
-            // 「ゆっくり」を寿命の延長だけで作っていないことの確認。
+            // ★★ **2026-09-02 に意図が反転した。** 以前は「寿命いっぱいでも
+            //   渡り切らない」ことを固定していたが、いまは台風が
+            //   <b>マップ外から入ってきて、クリック地点を通って、去る</b>。
+            //   そのためには一辺ぶんの道のりが要る（NominalPathLength の doc）。
+            //
+            // ★ 「ゆっくり見える」は速さではなく<b>接近に使う割合</b>で作る。
+            //   速すぎると言われたら下げるのは ApproachFraction のほうである。
             float speed = TyphoonTrack.SpeedFor(TyphoonTrack.LifetimeFramesFor(HostDuration));
             float life = TyphoonTrack.LifetimeFramesFor(HostDuration);
 
             float travelled = speed * life;
-            Assert.True(travelled < TyphoonTrack.MapHalfExtent * 2f,
-                        "it crosses the whole map within its life");
+            Assert.True(travelled >= TyphoonTrack.MapHalfExtent * 2f,
+                        "it must be able to cross the map to arrive from outside");
         }
 
         [Fact]
