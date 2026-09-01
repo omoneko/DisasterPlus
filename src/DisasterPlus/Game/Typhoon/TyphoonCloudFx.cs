@@ -1,3 +1,4 @@
+using ColossalFramework;
 using DisasterPlus.Core.Common;
 using DisasterPlus.Core.Typhoon;
 using UnityEngine;
@@ -173,6 +174,90 @@ namespace DisasterPlus.Game
         /// </summary>
         private const float BaseAltitudeMetres = 1200f;
 
+        /// <summary>
+        /// <b>雷の起点（バニラの稲妻メッシュの天辺、m）。</b>まだ測っていなければ 0。
+        ///
+        /// ★★ **定数で当てずっぽうに上げない。**（2026-09-02、実機報告
+        ///   「雷の起点より台風雲のほうが半分ほどの高度」）
+        ///
+        ///   バニラの稲妻は <c>WeatherProperties.m_lightningMesh</c> を
+        ///   <b>着地点に、回転だけ掛けて等倍で</b> 置く（<c>WeatherManager</c> の
+        ///   IL_0231-0256）。つまり<b>起点の高さはメッシュの寸法そのもの</b>で、
+        ///   コードのどこにも数字が無い。前回 560 → 1200 m と上げたのは
+        ///   「雷より低い」を直すためだったが、<b>雷が何 m なのかを測らずに</b>
+        ///   決めたので半端なところで止まっていた。
+        ///
+        ///   だから<b>実行時に読む</b>。<c>m_lightningMesh</c> は public で、
+        ///   <c>bounds</c> はメッシュのローカル境界なので、そのまま起点の高さになる。
+        ///
+        /// ★ 都市ごとに読み直す（<see cref="Reset"/>）。Unity のオブジェクトは
+        ///   都市をまたぐと fake-null になるので、static に持ちっぱなしにしない
+        ///   （このプロジェクトの「静的キャッシュの罠」）。
+        /// </summary>
+        private static float _boltTopMetres;
+
+        /// <summary>雷の高さを測れなかったときに使う値（m）。従来の雲頂と同じ。</summary>
+        private const float BoltTopFallbackMetres = 3400f;
+
+        /// <summary>
+        /// 雷の起点の高さ（m）。**main スレッド。** 1 度測ったら覚える。
+        /// </summary>
+        private static float BoltTopMetres()
+        {
+            if (_boltTopMetres > 0f) return _boltTopMetres;
+
+            try
+            {
+                if (Singleton<WeatherManager>.exists)
+                {
+                    WeatherProperties props = Singleton<WeatherManager>.instance.m_properties;
+                    Mesh mesh = props != null ? props.m_lightningMesh : null;
+
+                    if (mesh != null)
+                    {
+                        float top = mesh.bounds.max.y;
+                        if (top > 1f)
+                        {
+                            _boltTopMetres = top;
+                            Log.Info("typhoon: the vanilla lightning bolt is "
+                                     + top.ToString("F0") + " m tall (mesh bounds "
+                                     + mesh.bounds.min.y.ToString("F0") + " .. "
+                                     + mesh.bounds.max.y.ToString("F0")
+                                     + "). The storm cloud is placed so its base sits at "
+                                     + "that height - a bolt has to come out of the cloud, "
+                                     + "not fall through it.");
+                            return _boltTopMetres;
+                        }
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Warn("typhoon: could not measure the lightning bolt ("
+                         + e.GetType().Name + "); using "
+                         + BoltTopFallbackMetres.ToString("F0") + " m");
+            }
+
+            _boltTopMetres = BoltTopFallbackMetres;
+            return _boltTopMetres;
+        }
+
+        /// <summary>
+        /// 雲底の高さ（m）。**雷の天辺と地形の両方より上に置く。**
+        /// </summary>
+        private static float CloudBaseMetres(float centreY)
+        {
+            float altitude = centreY + MinClearanceMetres;
+
+            if (altitude < BaseAltitudeMetres) altitude = BaseAltitudeMetres;
+
+            // ★★ 雷の天辺より下に雲があると、**雷が雲を突き抜けて上から降る**。
+            float bolt = BoltTopMetres();
+            if (altitude < bolt) altitude = bolt;
+
+            return altitude;
+        }
+
         /// <summary>山岳マップで山に埋まらないための、中心の地形高からの最低クリアランス（m）。</summary>
         /// <summary>
         /// 地面（台風の中心の地形高さ）からの最低の浮き（m）。同上で 300 → 900。
@@ -334,8 +419,7 @@ namespace DisasterPlus.Game
             //
             //    <see cref="TyphoonVortexPuffFx"/> は同じ <see cref="VortexPuffLayout"/> の
             //    表を使って、**芯が不透明な白い雲の粒を毎フレーム置き直す**。
-            float altitudeMetres = snapshot.Centre.Y + MinClearanceMetres;
-            if (altitudeMetres < BaseAltitudeMetres) altitudeMetres = BaseAltitudeMetres;
+            float altitudeMetres = CloudBaseMetres(snapshot.Centre.Y);
 
             // ★★ **雲の中の稲妻。** 雲と<b>同じ半径・高さ・厚み</b>を渡すこと ——
             //    ずれると雷が雲の外で光る（それが直そうとしている症状そのものである）。
@@ -388,8 +472,7 @@ namespace DisasterPlus.Game
                                  float timeDelta, RenderManager.CameraInfo camera)
         {
             Vec3 centre = snapshot.Centre;
-            float altitude = centre.Y + MinClearanceMetres;
-            if (altitude < BaseAltitudeMetres) altitude = BaseAltitudeMetres;
+            float altitude = CloudBaseMetres(centre.Y);
 
             // 粒径は渦の大きさに合わせる。**共有状態ではなくクローン側**なので
             // 毎フレーム書いてよい（MainModule は struct、確保は 0 バイト）。
@@ -472,6 +555,11 @@ namespace DisasterPlus.Game
             _lookupMissCount = 0;
             _lastRenderCalls = 0;
             _state = TyphoonCloudFxState.Off;
+
+            // ★★ 雷の高さも忘れる。<c>Mesh</c> は Unity のオブジェクトなので、
+            //    都市をまたぐと fake-null になる——持ちっぱなしにしない
+            //    （このプロジェクトの「静的キャッシュの罠」）。
+            _boltTopMetres = 0f;
             // ★ _unavailableLogged / _errorLogged は戻さない（クラス doc）。
         }
     }
