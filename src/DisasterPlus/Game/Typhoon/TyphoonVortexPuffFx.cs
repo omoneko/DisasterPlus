@@ -55,16 +55,22 @@ namespace DisasterPlus.Game
     public static class TyphoonVortexPuffFx
     {
         /// <summary>
-        /// 粒の色。**真っ白にしない** —— 真っ白は光っているように見える。
-        /// 入道雲の日向側のわずかに青い白である。
+        /// 粒の色（日向側）。**真っ白にしない** —— 真っ白は光っているように見える。
+        ///
+        /// ★★ 2026-09-02 に (242,244,248) から下げた（所有者「もっと濃く灰色に」）。
+        ///   台風の雲は積乱雲でも<b>日向側からして鉛色</b>である。晴れた日の
+        ///   入道雲の白を基準にしていたのが、そもそもの取り違えだった。
         /// </summary>
-        private static readonly Color32 SunlitColor = new Color32(242, 244, 248, 255);
+        private static readonly Color32 SunlitColor = new Color32(168, 174, 186, 255);
 
         /// <summary>
         /// 底面の色。雲は下から見ると暗い。上下で色を変えないと、
         /// **平らな円盤が空に貼り付いているように見える**。
+        ///
+        /// ★★ 同じく (150,156,170) から下げた。上下の差（明度差 84）は保つ ——
+        ///   差を詰めると立体感が消えて、また円盤に見える。
         /// </summary>
-        private static readonly Color32 ShadedColor = new Color32(150, 156, 170, 255);
+        private static readonly Color32 ShadedColor = new Color32(84, 90, 104, 255);
 
         /// <summary>いちばん濃い粒の不透明度。芯が不透明なテクスチャなので 1 に近くてよい。</summary>
         private const float MaxAlpha = 0.95f;

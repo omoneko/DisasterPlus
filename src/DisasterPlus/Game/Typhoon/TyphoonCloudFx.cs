@@ -145,15 +145,26 @@ namespace DisasterPlus.Game
         /// ★ 上限（<see cref="MaxVortexRadiusMetres"/> ＝ マップ半辺）はそのまま。
         ///   そこへ当たった時点で「マップに収まる」という別の制約が勝つ。
         /// </remarks>
-        private const float VortexRadiusFactor = 2.70f;
+        /// <remarks>
+        /// ★★ 2.70 -> 4.05（2026-09-02、所有者「デフォルトの大きさをもっと大きく」）。
+        ///   <b>半径 1.5 倍 ＝ 面積 2.25 倍</b>。上限（マップ半辺）はそのままなので、
+        ///   強い台風では今までどおりそこで頭打ちになり、
+        ///   <b>効くのは中くらいまでの台風＝「既定の大きさ」</b>である。
+        /// </remarks>
+        private const float VortexRadiusFactor = 4.05f;
 
         /// <summary>渦の外周半径の上限（m）。マップ半辺は 8640 m なので、
         /// 直径 12 km ＝ マップの 7 割に収まる。</summary>
         private const float MaxVortexRadiusMetres = 8640f;
 
         /// <summary>同下限（m）。これより小さいと眼が粒 1 個で埋まる。</summary>
-        /// <remarks>★ 下限も同じく 2 倍（900 -> 1800）。弱い台風でも 4 倍にする。</remarks>
-        private const float MinVortexRadiusMetres = 1800f;
+        /// <remarks>
+        /// ★ 下限も同じく 2 倍（900 -> 1800）。弱い台風でも 4 倍にする。
+        /// ★★ さらに 1800 -> 2700（2026-09-02、半径を 1.5 倍にしたのに合わせる）。
+        ///   クラス doc の検算（粒径 0.040 × 半径）はこの下限を前提にしているので、
+        ///   **下げるときはあちらを計算し直すこと。**
+        /// </remarks>
+        private const float MinVortexRadiusMetres = 2700f;
 
         /// <summary>粒径の下限（m）。小さすぎると点にしか見えない。
         /// **いちばん小さい渦でだけ効き、そこでも眼は埋まらない**（クラス doc の検算）。</summary>

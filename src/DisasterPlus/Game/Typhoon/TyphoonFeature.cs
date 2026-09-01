@@ -80,6 +80,7 @@ namespace DisasterPlus.Game
                 //   壊している」と読める**（局所被害と同じ理由）。Reset は冪等で、
                 //   台帳を持たないので毎 tick 通ってよい。
                 TyphoonWind.Reset();
+                TyphoonTreeSway.Reset();
             // ★ 飛ばしたプロップは戻らない。ここで畳むのは走査のカーソルと
             //   診断の数だけである。
             TyphoonPropDamage.Reset();
@@ -164,6 +165,14 @@ namespace DisasterPlus.Game
                 {
                     TyphoonWind.Gale(snapshot, deltaMinutes);
                 }
+
+                // ★★ **木を揺らす。**（2026-09-02、所有者「木がもっと激しく揺れるように」）
+                //    木の揺れはバニラでは<b>遮蔽の高さだけ</b>で決まり、天候に
+                //    まったく反応しない（<c>TyphoonTreeSway</c> のクラス doc に IL）。
+                //    暴風雨の演出と同じ設定に載せる —— どちらも「嵐の見た目」である。
+                TyphoonTreeSway.Apply(snapshot.Centre.X, snapshot.Centre.Z,
+                                      snapshot.GaleRadius,
+                                      snapshot.Intensity / 255f);
             }
 
             // ★ 河川氾濫は台風が居なくても呼ぶ。**持ち上げた水位を戻すのが
@@ -281,6 +290,7 @@ namespace DisasterPlus.Game
             // ★ 風害の走査位置とカウンタも都市をまたがない。持ち越すと次の都市で
             //    前の都市の序数から走り出す（＝中心の周りが 1 度も判定されない）。
             TyphoonWind.Reset();
+            TyphoonTreeSway.Reset();
             // ★★ 河川の水位を必ず戻す（罠 4 の復元経路 2 本目）。
             //    ここを忘れると、次に開いた都市で**前の都市のハンドル**を復元しに行き、
             //    無関係な川の水位を書き換える。TyphoonFlood.Reset は内部で
