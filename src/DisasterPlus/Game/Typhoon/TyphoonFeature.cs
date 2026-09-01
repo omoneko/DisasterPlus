@@ -80,7 +80,7 @@ namespace DisasterPlus.Game
                 //   壊している」と読める**（局所被害と同じ理由）。Reset は冪等で、
                 //   台帳を持たないので毎 tick 通ってよい。
                 TyphoonWind.Reset();
-                TyphoonTreeSway.Reset();
+                TyphoonTreeWindPatch.Clear();
             // ★ 飛ばしたプロップは戻らない。ここで畳むのは走査のカーソルと
             //   診断の数だけである。
             TyphoonPropDamage.Reset();
@@ -168,11 +168,14 @@ namespace DisasterPlus.Game
 
                 // ★★ **木を揺らす。**（2026-09-02、所有者「木がもっと激しく揺れるように」）
                 //    木の揺れはバニラでは<b>遮蔽の高さだけ</b>で決まり、天候に
-                //    まったく反応しない（<c>TyphoonTreeSway</c> のクラス doc に IL）。
-                //    暴風雨の演出と同じ設定に載せる —— どちらも「嵐の見た目」である。
-                TyphoonTreeSway.Apply(snapshot.Centre.X, snapshot.Centre.Z,
-                                      snapshot.GaleRadius,
-                                      snapshot.Intensity / 255f);
+                //    まったく反応しない。しかも <c>GetWindSpeed</c> は末尾で
+                //    <c>Clamp(…, 0, 2)</c> するので、遮蔽を下げる手では
+                //    <b>平常の 2 倍で頭打ち</b>になる（最初にそれを実装して、足りなかった）。
+                //    <c>TyphoonTreeWindPatch</c> は<b>そのクランプの外側</b>で掛ける。
+                //    セーブに焼き付く <c>m_windGrid</c> には 1 バイトも触らない。
+                TyphoonTreeWindPatch.SetStorm(
+                    snapshot.Centre.X, snapshot.Centre.Z, snapshot.GaleRadius,
+                    TreeSwayGainFor(snapshot.Intensity));
             }
 
             // ★ 河川氾濫は台風が居なくても呼ぶ。**持ち上げた水位を戻すのが
@@ -205,6 +208,23 @@ namespace DisasterPlus.Game
         /// <see cref="TyphoonWeather"/>）を呼ばないこと。** 読むのは
         /// <see cref="TyphoonHub.Latest"/> のスナップショットだけである。
         /// </summary>
+        /// <summary>
+        /// 震度から木の揺れの倍率を出す。
+        ///
+        /// ★★ **平常が 1.0、バニラの上限が 2.0** である（<c>GetWindSpeed</c> の
+        ///   末尾のクランプ）。<c>TyphoonTreeWindPatch</c> はその外側で掛けるので、
+        ///   ここで返す値がそのまま「平常の何倍揺れるか」になる。
+        ///
+        /// ★ 既定のスライダー（55）で 3.2 倍、上限（100 以上）で 5 倍。
+        ///   台風の下の木は<b>ちぎれそうに見えてよい</b>ので強めに取ってある ——
+        ///   弱すぎると「風で木が揺れていない」に逆戻りする。
+        /// </summary>
+        private static float TreeSwayGainFor(byte intensity)
+        {
+            float t = intensity > 100 ? 1f : intensity / 100f;
+            return 1f + 4f * t;
+        }
+
         public void OnMainThreadUpdate()
         {
             // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
@@ -290,7 +310,7 @@ namespace DisasterPlus.Game
             // ★ 風害の走査位置とカウンタも都市をまたがない。持ち越すと次の都市で
             //    前の都市の序数から走り出す（＝中心の周りが 1 度も判定されない）。
             TyphoonWind.Reset();
-            TyphoonTreeSway.Reset();
+            TyphoonTreeWindPatch.Clear();
             // ★★ 河川の水位を必ず戻す（罠 4 の復元経路 2 本目）。
             //    ここを忘れると、次に開いた都市で**前の都市のハンドル**を復元しに行き、
             //    無関係な川の水位を書き換える。TyphoonFlood.Reset は内部で

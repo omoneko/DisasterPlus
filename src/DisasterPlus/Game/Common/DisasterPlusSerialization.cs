@@ -60,11 +60,6 @@ namespace DisasterPlus.Game
             //   （<c>TsunamiRing</c> のクラス doc §3）。
             LiftTsunamiSourceForSave();
 
-            // ★★ ④が下げている遮蔽図も同じ理由で戻す。<c>WeatherManager+Data</c> が
-            //   <c>m_windGrid</c> を書くので、下げたまま保存すると
-            //   その都市の風が狂ったまま残る（<c>TyphoonTreeSway</c> のクラス doc）。
-            RestoreWindGridForSave();
-
             // ★ 天候の上書きも同じ理由でセーブに焼き付く（WeatherManager+Data.Serialize は
             //   m_targetRain / m_targetCloud / m_forceWeatherOn を書く。全体レビュー I2 で
             //   IL 実測）。水源と同じく**保存の前に降ろし、AddAction で戻す**。
@@ -203,34 +198,6 @@ namespace DisasterPlus.Game
             {
                 Log.Error("could not lift the tsunami's water source before saving; "
                           + "the save may contain a spring that never stops", e);
-            }
-        }
-
-        /// <summary>
-        /// ④が下げている遮蔽図（<c>m_windGrid</c>）を、**バニラが書く前に**戻す。
-        /// 形も理由も <see cref="RestoreFloodedRiversForSave"/> と同じ。
-        ///
-        /// ★ 戻しは <c>AddAction</c> で遅らせる。**次の tick に任せてはいけない** ——
-        ///   sim スレッドは保存の最中も回っているので、バニラが配列を書く前に
-        ///   下げ直してしまう（このファイルの他の 2 つと同じ穴）。
-        /// </summary>
-        private static void RestoreWindGridForSave()
-        {
-            try
-            {
-                if (!TyphoonTreeSway.SuspendForSave()) return;
-
-                if (!Singleton<SimulationManager>.exists) return;
-
-                Singleton<SimulationManager>.instance.AddAction(delegate
-                {
-                    TyphoonTreeSway.ReapplyAfterSave();
-                });
-            }
-            catch (System.Exception e)
-            {
-                Log.Error("could not restore the wind grid before saving; the save may "
-                          + "carry a lowered shelter map", e);
             }
         }
 
