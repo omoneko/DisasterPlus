@@ -1,17 +1,20 @@
-DRAFT - not published yet. The owner reviews this before it goes on the Workshop page.
+Steam Workshop item: https://steamcommunity.com/sharedfiles/filedetails/?id=3794409201
+This is the text currently published on the Workshop page, EXCEPT for two changes
+made at publish time:
 
-Format follows the KAIJU Disaster page (Steam BBCode, English, with the same
-section order) so the author's mods read as a set.
+  1. The [h1]Source code[/h1] section was DROPPED. This repository still has no git
+     remote - it has never been pushed - so the GitHub URL could not be verified and
+     a dead link had no business on a public page. Push the repo, then add the
+     section back (see "Changing the description" in the cs-workshop-upload skill:
+     add a `description` key to the VDF for that one upload, then remove it again).
+  2. The Language section no longer says "open a pull request on GitHub", for the
+     same reason. It asks for translations in the comments instead.
 
-Every claim below was checked against the code. TWO LINES ARE STILL UNVERIFIED
-and the owner must settle them before pasting:
+The ko-fi link WAS kept: it is verified - the same URL is live on the published
+KAIJU Disaster page.
 
-  1. The GitHub URL. This repository has NO git remote configured - it has never
-     been pushed - so "github.com/omoneko/DisasterPlus" is a guess at the name.
-     Confirm it, or drop the Source code section.
-  2. The ko-fi URL. Carried over from the published KAIJU Disaster page (same
-     author), not verified from anything in this repository.
-
+Size: 7,952 bytes of the 8,000-byte Steam cap. There are 48 bytes of headroom, so
+anything added here must displace something else.
 ---
 
 [h1]Disaster +[/h1]
