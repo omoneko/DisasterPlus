@@ -22,7 +22,7 @@ Five disaster systems for Cities: Skylines, built from the game's own physics ra
 [h1]Weather forecast[/h1]
 [list]
 [*] A panel showing [b]temperature, rain, cloud, fog and wind direction[/b] read straight out of the simulation, [b]with the value the weather is heading towards[/b] next to the one it is at - so you can see the change coming.
-[*] [b]Lightning and tornado hazard maps[/b] drawn over the terrain, so you can see where the game is about to strike before it does.
+[*] [b]One click to the lightning and tornado hazard maps.[/b] The game already draws these - it just buries them several clicks deep in the info views. The panel takes you straight there, so you can see where the game is about to strike before it does.
 [*] [b]Hazard at cursor[/b]: point at a spot and read its odds.
 [/list]
 
@@ -69,7 +69,7 @@ Every system has its own on/off switch, and every kind of damage has a [b]streng
 [*] Fire whirl: detection radius and building count, lifetime, spread strength, minimum separation, and an option to [b]suppress vanilla tornadoes[/b].
 [*] Earthquake: trench tile, tsunami chain and its delay, long-period strength, distant damage strength, seismograph.
 [*] Typhoon: default intensity, wind / flood / gust strengths, cloud, storm effects, sound, hemisphere.
-[*] Volcano: cone shape, clearing lead time, uplift duration, relief strength, plume, lightning, dust bands, sound, lava flow count, lava ignition, lava surface, tremor.
+[*] Volcano: shape, clearing lead time, uplift duration, relief strength, plume, lightning, dust bands, sound, lava flow count, lava ignition, lava surface, tremor.
 [*] General: [b]intensity unlock[/b] - raises the manual disaster slider from 10.0 to 25.5.
 [/list]
 
