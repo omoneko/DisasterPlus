@@ -13,8 +13,7 @@ made at publish time:
 The ko-fi link WAS kept: it is verified - the same URL is live on the published
 KAIJU Disaster page.
 
-Size: 7,952 bytes of the 8,000-byte Steam cap. There are 48 bytes of headroom, so
-anything added here must displace something else.
+Size: 7,545 bytes of the 8,000-byte Steam cap. There are 455 bytes of headroom.
 ---
 
 [h1]Disaster +[/h1]
@@ -99,9 +98,6 @@ Every system has its own on/off switch, and every kind of damage has a [b]streng
 [*] [b]Natural Disasters DLC[/b] for everything except the volcano and the basic forecast
 [*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2040656402][b]Harmony (CitiesHarmony)[/b][/url] - [b]strongly recommended.[/b] The mod runs without it and says so in the log, but three things stop working: fire whirls drift instead of staying put, a trench quake tears a crack across the seabed it should not have, and the wind stops shaking the trees.
 [/list]
-
-[h1]Compatibility[/h1]
-[b]Natural Disasters Renewal[/b] can run alongside this mod; they divide the work. NDR owns how often vanilla disasters fire and how hard they hit; Disaster + adds new phenomena and visualisation and does not touch vanilla frequency. When NDR is present, an extra option appears letting you choose which mod owns earthquake damage, and the intensity unlock defers to NDR by default.
 
 [h1]Language[/h1]
 English and Japanese - the game's own language setting picks between them.
