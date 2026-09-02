@@ -172,6 +172,23 @@ namespace DisasterPlus.Game
 
         public static uint TotalFrames { get { return _totalFrames; } }
 
+        /// <summary>
+        /// これから先の経路を引くのに要る値ひとそろい（<see cref="TyphoonTrackPlan"/>）。
+        ///
+        /// ★★ **描画（main スレッド）はここを直接読んではいけない。**
+        ///   スナップショットに載って渡る。1 個の struct にまとめてあるのは、
+        ///   4 つを別々に運ぶと<b>どれか 1 つだけ古い組み合わせ</b>が起こりうるからで、
+        ///   その組で引いた経路は実在しない台風の経路になる。
+        /// </summary>
+        public static TyphoonTrackPlan TrackPlan
+        {
+            get
+            {
+                return new TyphoonTrackPlan(_origin, _seed, _speed,
+                                            _approachFrames, _totalFrames);
+            }
+        }
+
         public static bool OverLand { get { return _overLand; } }
 
         /// <summary>上陸予測が立っているか。**false は「0 分後」ではなく「このまま
@@ -242,8 +259,7 @@ namespace DisasterPlus.Game
             // ★ 1 tick に 1 回だけ（TyphoonHub.TakeRequest の doc）。
             var request = TyphoonHub.TakeRequest();
 
-            if (request.Kind == TyphoonRequest.Stop && _active) Stop();
-            else if (request.Kind == TyphoonRequest.Start)
+            if (request.Kind == TyphoonRequest.Start)
             {
                 // ★ 依頼は**地点と強度を運ぶ**。ここで座標も強度も発明しないこと
                 //   （強度を設定画面から読み直すと「押した時と違う強度で始まる」）。
@@ -516,8 +532,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 終わり方は 3 つ（マップを抜けた／持続時間を使い切った／プレイヤーが止めた）だが、
+        /// 終わり方は 2 つ（マップを抜けた／持続時間を使い切った）だが、
         /// **後始末は必ずこの 1 本を通す。**
+        ///
+        /// ★★ <b>プレイヤーが止める経路はもう無い</b>（2026-09-02、所有者
+        ///   「自然災害を止めることは誰にもできません」）。ここを呼ぶのは
+        ///   <see cref="Step"/> の中の 2 つの終端条件だけである。
+        ///   **依頼から呼べるようにし直さないこと。**
         /// </summary>
         private static void Stop()
         {

@@ -19,6 +19,11 @@ namespace DisasterPlus.Game
 
         public void OnLevelLoaded()
         {
+            // ★ 地図オーバーレイ（進路・暴風域・風）。登録は②と共有する 1 個で、
+            //   都市をロードするたび全トグル OFF から始まる。
+            ForecastOverlay.EnsureRegistered();
+            WeatherRadarWatch.Reset();
+
             ForecastHub.Clear();
             // ボタンの設置はここでは試みない。UIView がこの時点でまだ準備できていない
             // ことがあるので、③のパネルボタンと同じく OnMainThreadUpdate の間引きに任せる。
@@ -35,6 +40,10 @@ namespace DisasterPlus.Game
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
             if (!ModSettings.ForecastEnabled.value) return;
+
+            // ★ 気象レーダーの有無（「これからの天気」の解禁条件）。
+            //   中で 1 ゲーム内分に 1 回へ間引くので、毎 tick 呼んでよい。
+            WeatherRadarWatch.Poll(deltaMinutes);
 
             var snapshot = WeatherReader.Read();
             ForecastHub.Publish(snapshot);
@@ -66,6 +75,10 @@ namespace DisasterPlus.Game
 
         public void OnLevelUnloading()
         {
+            // ★ 登録は外せないので、描かないことをこちらの状態で保証する。
+            ForecastOverlay.Reset();
+            WeatherRadarWatch.Reset();
+
             ForecastHub.Clear();
             ForecastPanel.Destroy();
         }

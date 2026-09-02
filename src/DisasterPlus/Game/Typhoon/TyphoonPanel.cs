@@ -50,23 +50,13 @@ namespace DisasterPlus.Game
     public static class TyphoonPanel
     {
         /// <summary>ボタン 1 個の動作。net35 なので <c>Action</c> ではなく自前の delegate。</summary>
-        private delegate void ClickHandler();
-
         private const string PanelName = FreeSlotFinder.SelfPrefix + "TyphoonPanel";
 
         /// <summary>ボタン 1 個の大きさ。発生・停止の 2 個を横に並べる。</summary>
-        private const float ActionButtonWidth = 200f;
 
-        private const float ActionButtonHeight = 28f;
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
-
-        /// <summary>
-        /// 「暴風域へ移動」。**台風がいないときは押せない**ようにするため、
-        /// <see cref="Refresh"/> から握れるように持っておく。
-        /// </summary>
-        private static UIButton _jumpButton;
 
         /// <summary>
         /// 台風の行を構築したか。Natural Disasters DLC が無い環境では
@@ -141,7 +131,6 @@ namespace DisasterPlus.Game
 
             _panel = null;
             _titleLabel = null;
-            _jumpButton = null;
             _bodyBuilt = false;
 
             // ★ 破棄されたカメラの参照を次の都市へ持ち越さない。
@@ -240,75 +229,26 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 「台風を止める」の 1 個だけ。
+        /// **ボタンは 1 個も無い。** このパネルは<b>読むための場所</b>である。
         ///
         /// ★★ **発生させるボタンはここには無い。** 台風を起こすのは災害パネルの
-        ///    ④タイル（バニラの災害ボタンと同じ 3 手）だけである。このパネルは
-        ///    <b>読むための場所</b>で、起こす場所ではない —— 2 か所から起こせると、
-        ///    「押してから地図をクリック」という約束の入口が 2 つになる。
+        ///    ④タイル（バニラの災害ボタンと同じ 3 手）だけである ——
+        ///    2 か所から起こせると、「押してから地図をクリック」という約束の
+        ///    入口が 2 つになる。
         ///
-        /// 止めるのは地点が要らないので依頼を積むだけ。ボタンのテキストは
-        /// <c>UIButton.text</c> であって <c>UILabel.text</c> ではないので、
-        /// <see cref="TyphoonRows"/> の担保（<c>UILabel</c> の生成と <c>.text</c> 代入の
-        /// 一元化）とは無関係である。
+        /// ★★ **「台風を止める」も撤去した**（2026-09-02、所有者
+        ///    「自然災害を止めることは誰にもできません。停止の概念そのものを削除」）。
+        ///
+        /// ★★ **「暴風域へ移動」も撤去した。** 同じ日に、このパネルが
+        ///    <b>そもそも開けない</b>ことが分かった —— <c>Show()</c> を呼ぶ経路は
+        ///    どこにも無い（2026-08-22 に D+ のタブが予報と地震の 2 枚に絞られた
+        ///    ときから）。地図へ寄せる機能は<b>予報パネル</b>へ移した。
+        ///
+        /// ★ このメソッド自体は残してある。**行を足す場所が要る**ときのための
+        ///   足場で、いま呼んでも何もしない。
         /// </summary>
         private static void AddActionButtons(UIPanel panel, ref float y)
         {
-            AddButton(panel, "StopButton", Strings.TyphoonStop, null,
-                TyphoonRows.RowLeft, y,
-                delegate { TyphoonHub.Request(TyphoonRequestData.Of(TyphoonRequest.Stop)); });
-
-            // ★★ **これは依頼を積まない。** カメラを動かすのは main スレッドの仕事で、
-            //    sim へ渡す理由が無い（渡すと 1 tick 遅れるだけ損をする）。
-            _jumpButton = AddButton(panel, "JumpButton", Strings.TyphoonJump,
-                Strings.TyphoonJumpTooltip,
-                TyphoonRows.RowLeft + ActionButtonWidth + 10f, y,
-                JumpToStorm);
-
-            y += ActionButtonHeight + 10f;
-        }
-
-        /// <summary>
-        /// カメラを台風の目へ寄せる。**main スレッド（ボタンのクリック）。**
-        ///
-        /// ★ スナップショットをここで取り直す。<see cref="Refresh"/> が持っている
-        ///   ものは<b>1 フレーム古い</b>可能性があり、台風は動いている。
-        ///
-        /// ★ 接近中の中心はマップの外にある。そこは
-        ///   <c>CameraController.UpdateTargetPosition</c> が
-        ///   <c>GameAreaManager.ClampPoint</c> で引き戻すので、
-        ///   <b>「台風が来ている方角のマップ端」へ行く</b>（<see cref="CameraJump"/>）。
-        ///   これは意味としても正しいので、こちらでは何も判定しない。
-        /// </summary>
-        private static void JumpToStorm()
-        {
-            var snapshot = TyphoonHub.Latest;
-            if (snapshot == null || !snapshot.Active) return;
-
-            var centre = new Vector3(snapshot.Centre.X, snapshot.Centre.Y, snapshot.Centre.Z);
-
-            // 寄り具合は暴風域の半径に合わせる —— 目と壁雲がちょうど画面に入る。
-            // 0 なら今の寄り具合を変えない（半径が読めていないとき）。
-            CameraJump.To(centre, snapshot.StormRadius);
-        }
-
-        private static UIButton AddButton(UIPanel panel, string suffix, string text,
-                                          string tooltip,
-                                          float x, float y, ClickHandler onClick)
-        {
-            var button = (UIButton)panel.AddUIComponent(typeof(UIButton));
-            button.name = FreeSlotFinder.SelfPrefix + "Typhoon" + suffix;
-            button.text = text;
-            if (!string.IsNullOrEmpty(tooltip)) button.tooltip = tooltip;
-            button.width = ActionButtonWidth;
-            button.height = ActionButtonHeight;
-            button.relativePosition = new Vector3(x, y);
-            button.normalBgSprite = "ButtonMenu";
-            button.hoveredBgSprite = "ButtonMenuHovered";
-            button.pressedBgSprite = "ButtonMenuPressed";
-            // ★ main スレッドから DisasterManager に触らない。構えるか、依頼を積むだけ。
-            button.eventClick += (c, e) => onClick();
-            return button;
         }
 
         /// <summary>
@@ -366,13 +306,6 @@ namespace DisasterPlus.Game
 
             // ★ スナップショットは 1 フレームに 1 回だけ取る（ロックを 2 回取らない）。
             var snapshot = TyphoonHub.Latest;
-
-            // ★ 台風がいないときに押せると、**押しても何も起きないボタン**になる。
-            //   押せる／押せないで「今いるか」が分かるほうが親切である。
-            if (_jumpButton != null)
-            {
-                _jumpButton.isEnabled = snapshot != null && snapshot.Active;
-            }
 
             TyphoonStatusRows.Refresh(snapshot);
             TyphoonEffectRows.Refresh(snapshot);

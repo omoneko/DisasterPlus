@@ -98,6 +98,7 @@ namespace DisasterPlus.Game
                                            TyphoonController.Intensity,
                                            TyphoonController.StormRadius,
                                            TyphoonController.GaleRadius,
+                                           TyphoonController.TrackPlan,
                                            TyphoonController.Phase,
                                            TyphoonController.ElapsedFrames,
                                            TyphoonController.TotalFrames,

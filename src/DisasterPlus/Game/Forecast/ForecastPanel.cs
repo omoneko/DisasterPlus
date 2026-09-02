@@ -100,6 +100,17 @@ namespace DisasterPlus.Game
         private static UILabel _cursorHeaderLabel;
         private static UILabel _cursorValueLabel;
 
+        // ── これからの天気（気象レーダーで解禁）─────────────────────
+        private static UILabel _comingHeaderLabel;
+        private static UILabel _comingBodyLabel;
+
+        // ── 台風を地図に出す 3 つのトグル ──────────────────────────
+        private static UILabel _typhoonHeaderLabel;
+        private static UIButton _trackButton;
+        private static UIButton _galeButton;
+        private static UIButton _windButton;
+        private static UIButton _gotoButton;
+
         /// <summary>
         /// ハザード関連の行（落雷・竜巻の見出し／「マップに表示」ボタン／カーソル位置の
         /// 数値）を構築したか。Natural Disasters DLC が無い環境では構築せず、
@@ -181,6 +192,13 @@ namespace DisasterPlus.Game
 
             _panel = null;
             _titleLabel = null;
+            _comingHeaderLabel = null;
+            _comingBodyLabel = null;
+            _typhoonHeaderLabel = null;
+            _trackButton = null;
+            _galeButton = null;
+            _windButton = null;
+            _gotoButton = null;
             _temperatureLabel = null;
             _rainLabel = null;
             _cloudLabel = null;
@@ -279,6 +297,9 @@ namespace DisasterPlus.Game
             _windLabel = AddLabel(panel, "Wind", 12f, y, PanelWidth - 24f, 20f);
             y += 28f;
 
+            BuildComingSection(panel, ref y);
+            BuildTyphoonSection(panel, ref y);
+
             // 確率は災害種別に依らない単一値。落雷・竜巻それぞれの見出しの下ではなく、
             // その 2 つより上に 1 回だけ出す(クラス doc 参照)。
             _probabilityLabel = AddLabel(panel, "Probability", 12f, y, PanelWidth - 24f, 20f);
@@ -367,6 +388,104 @@ namespace DisasterPlus.Game
             }
         }
 
+        /// <summary>
+        /// これからの天気。**気象レーダーを建てると解禁**（所有者の依頼）。
+        ///
+        /// ★★ 出すのは<b>ゲームが持っている目標値</b>だけで、到達時刻は出さない
+        ///   （<c>Strings.ForecastComing</c> の上の ★★ に理由）。
+        ///
+        /// ★ 「DLC が無い」と「まだ建てていない」を<b>同じ文言にしない</b>
+        ///   （<see cref="WeatherRadarWatch.PrefabKnown"/> の doc）。
+        /// </summary>
+        private static void BuildComingSection(UIPanel panel, ref float y)
+        {
+            _comingHeaderLabel = AddLabel(panel, "ComingHeader", 12f, y, PanelWidth - 24f, 20f);
+            y += 22f;
+
+            _comingBodyLabel = AddLabel(panel, "ComingBody", 12f, y, PanelWidth - 24f, 76f);
+            _comingBodyLabel.wordWrap = true;
+            y += 82f;
+        }
+
+        /// <summary>
+        /// 台風を地図に出す 3 つのトグルと、目へ寄るボタン。
+        ///
+        /// ★★ **ここが「暴風域へ移動」の置き場所である。** 元は④のパネルに付けたが、
+        ///   あのパネルは <c>Show()</c> を呼ぶ経路が無く<b>開けなかった</b>
+        ///   （2026-08-22 に D+ のタブが 2 枚に絞られて以来。2026-09-02 に発覚）。
+        ///   ここなら実際に押せる。
+        ///
+        /// ★ 3 つは別々に切れる。同時に全部出すと地図が読めない。
+        /// </summary>
+        private static void BuildTyphoonSection(UIPanel panel, ref float y)
+        {
+            _typhoonHeaderLabel = AddLabel(panel, "TyphoonHeader", 12f, y, PanelWidth - 24f, 20f);
+            y += 22f;
+
+            const float gap = 8f;
+            float w = (PanelWidth - 24f - gap * 2f) / 3f;
+
+            _trackButton = AddToggle(panel, "ShowTrack", Strings.ForecastShowTrack,
+                Strings.ForecastTrackTooltip, 12f, y, w, ForecastOverlay.ToggleTrack);
+            _galeButton = AddToggle(panel, "ShowGale", Strings.ForecastShowGale,
+                Strings.ForecastGaleTooltip, 12f + w + gap, y, w, ForecastOverlay.ToggleGale);
+            _windButton = AddToggle(panel, "ShowWind", Strings.ForecastShowWind,
+                Strings.ForecastWindTooltip, 12f + (w + gap) * 2f, y, w,
+                ForecastOverlay.ToggleWind);
+            y += 28f;
+
+            _gotoButton = AddToggle(panel, "GoToStorm", Strings.ForecastGoToStorm,
+                Strings.ForecastGoToStormTooltip, 12f, y, PanelWidth - 24f, JumpToStorm);
+            y += 34f;
+        }
+
+        /// <summary>
+        /// カメラを台風の目へ寄せる。**main スレッド（クリック）。**
+        ///
+        /// ★ スナップショットをここで取り直す —— 台風は動いているので、
+        ///   <see cref="Refresh"/> が持っているものは 1 フレーム古い。
+        ///
+        /// ★ 接近中の中心はマップの外にある。そこは
+        ///   <c>GameAreaManager.ClampPoint</c> がゲーム側で引き戻すので、
+        ///   「台風が来ている方角のマップ端」へ行く（<see cref="CameraJump"/>）。
+        /// </summary>
+        private static void JumpToStorm()
+        {
+            var typhoon = TyphoonHub.Latest;
+            if (typhoon == null || !typhoon.Active) return;
+
+            CameraJump.To(new Vector3(typhoon.Centre.X, typhoon.Centre.Y, typhoon.Centre.Z),
+                          typhoon.StormRadius);
+        }
+
+        private static UIButton AddToggle(UIPanel parent, string suffix, string text,
+                                          string tooltip, float x, float y, float width,
+                                          OnClick onClick)
+        {
+            var button = (UIButton)parent.AddUIComponent(typeof(UIButton));
+            button.name = FreeSlotFinder.SelfPrefix + "Forecast" + suffix;
+            button.text = text;
+            if (!string.IsNullOrEmpty(tooltip)) button.tooltip = tooltip;
+            button.width = width;
+            button.height = 24f;
+            button.relativePosition = new Vector3(x, y);
+            button.textScale = 0.85f;
+            button.normalBgSprite = "ButtonMenu";
+            button.hoveredBgSprite = "ButtonMenuHovered";
+            button.pressedBgSprite = "ButtonMenuPressed";
+            button.eventClick += (c, e) => onClick();
+            return button;
+        }
+
+        private delegate void OnClick();
+
+        /// <summary>
+        /// 行送り。**リテラルで書かない** —— このファイルはパッチスクリプトから
+        /// 書き換えることがあり、エスケープが素の改行に化けて文字列が壊れる
+        /// （2026-09-02 に実際に壊れた）。定数なら化けようがない。
+        /// </summary>
+        private static readonly string Newline = ((char)10).ToString();
+
         private static UILabel AddLabel(UIPanel parent, string suffix, float x, float y, float width, float height)
         {
             var label = (UILabel)parent.AddUIComponent(typeof(UILabel));
@@ -400,6 +519,9 @@ namespace DisasterPlus.Game
             var snapshot = ForecastHub.Latest;
 
             _titleLabel.text = Strings.ForecastTitle;
+            RefreshComing(snapshot);
+            RefreshTyphoon();
+
             if (_hazardRowsBuilt)
             {
                 _lightningLabel.text = Strings.ForecastLightning;
@@ -518,6 +640,83 @@ namespace DisasterPlus.Game
         /// 「嵐は検知されていません」と言い切ってはいけない（それ自体が、
         /// 読めていない事実を隠した断定になる）。汎用の不明扱いに落とす。
         /// </param>
+        /// <summary>
+        /// これからの天気。**目標値だけ**（到達時刻は出さない —— 理由は
+        /// <c>Strings.ForecastComing</c> の上）。
+        /// </summary>
+        private static void RefreshComing(WeatherSnapshot snapshot)
+        {
+            if (_comingHeaderLabel == null) return;
+
+            _comingHeaderLabel.text = Strings.ForecastComing;
+
+            // ★ DLC が無い／まだ建てていない／建てたが動いていない、を混ぜない。
+            if (!WeatherRadarWatch.PrefabKnown)
+            {
+                _comingBodyLabel.text = Strings.ForecastComingNeedsDlc;
+                return;
+            }
+
+            if (!WeatherRadarWatch.HasWorkingRadar)
+            {
+                _comingBodyLabel.text = Strings.ForecastComingLocked;
+                return;
+            }
+
+            if (snapshot == null || !snapshot.Valid)
+            {
+                _comingBodyLabel.text = snapshot == null
+                    ? Strings.ForecastWaiting : Strings.ForecastUnavailable;
+                return;
+            }
+
+            string arrow = "  " + Strings.ForecastComingHeading + " ";
+            _comingBodyLabel.text =
+                Strings.ForecastTemperature + " " + snapshot.Temperature.Current.ToString("F1")
+                + arrow + snapshot.Temperature.Target.ToString("F1") + Newline
+                + Strings.ForecastRain + " " + snapshot.Rain.Current.ToString("F2")
+                + arrow + snapshot.Rain.Target.ToString("F2") + Newline
+                + Strings.ForecastCloud + " " + snapshot.Cloud.Current.ToString("F2")
+                + arrow + snapshot.Cloud.Target.ToString("F2") + Newline
+                + Strings.ForecastFog + " " + snapshot.Fog.Current.ToString("F2")
+                + arrow + snapshot.Fog.Target.ToString("F2");
+        }
+
+        /// <summary>
+        /// 地図トグルの見た目。**押されているものは色を変える** ——
+        /// トグルは押しても画面のこちら側では何も変わらないので、
+        /// 状態が見えないと「効いていない」と読まれる。
+        /// </summary>
+        private static void RefreshTyphoon()
+        {
+            if (_typhoonHeaderLabel == null) return;
+
+            var typhoon = TyphoonHub.Latest;
+            bool live = typhoon != null && typhoon.Active;
+
+            _typhoonHeaderLabel.text = live
+                ? Strings.ForecastTyphoonSection
+                : Strings.ForecastTyphoonSection + "  -  " + Strings.ForecastNoTyphoon;
+
+            SetToggleLook(_trackButton, ForecastOverlay.ShowTrack);
+            SetToggleLook(_galeButton, ForecastOverlay.ShowGale);
+            SetToggleLook(_windButton, ForecastOverlay.ShowWind);
+
+            // ★ 台風が居ないとき、トグルは押せたままにする（次の台風のために
+            //   構えておける）。**寄るボタンだけは無効にする** ——
+            //   寄る先が無いのに押せると、押しても何も起きないボタンになる。
+            if (_gotoButton != null) _gotoButton.isEnabled = live;
+        }
+
+        private static void SetToggleLook(UIButton button, bool on)
+        {
+            if (button == null) return;
+            button.normalBgSprite = on ? "ButtonMenuFocused" : "ButtonMenu";
+            button.textColor = on
+                ? new Color32(255, 220, 120, 255)
+                : new Color32(255, 255, 255, 255);
+        }
+
         private static void RefreshCursorHazard(WeatherSnapshot snapshot)
         {
             // DLC が無い環境ではハザードの行そのものを構築していない（I2）。

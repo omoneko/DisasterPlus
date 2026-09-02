@@ -142,6 +142,13 @@ namespace DisasterPlus.Game
 
         public readonly float StormRadius;
         public readonly float GaleRadius;
+
+        /// <summary>
+        /// 経路を<b>これから先まで</b>引くための値（<see cref="TyphoonTrackPlan"/>）。
+        /// 予報パネルの「進路」がこれを使う。<c>Usable</c> が false なら描かない。
+        /// </summary>
+        public readonly TyphoonTrackPlan Track;
+
         public readonly TyphoonPhase Phase;
         public readonly uint ElapsedFrames;
         public readonly uint TotalFrames;
@@ -286,6 +293,7 @@ namespace DisasterPlus.Game
                                bool weatherEnabled, bool weatherReadable,
                                bool active, ushort typhoonId, Vec3 centre, float headingRadians,
                                byte intensity, float stormRadius, float galeRadius,
+                               TyphoonTrackPlan track,
                                TyphoonPhase phase, uint elapsedFrames, uint totalFrames,
                                bool overLand, bool landfallKnown, float minutesToLandfall,
                                string refusal,
@@ -340,6 +348,7 @@ namespace DisasterPlus.Game
             Intensity = intensity;
             StormRadius = stormRadius;
             GaleRadius = galeRadius;
+            Track = track;
             Phase = phase;
             ElapsedFrames = elapsedFrames;
             TotalFrames = totalFrames;
@@ -354,7 +363,8 @@ namespace DisasterPlus.Game
             return new TyphoonSnapshot(false, new TyphoonPrefabFacts(), 0u,
                                        0f, 0f, 0f, 0f, false, false,
                                        false, 0, new Vec3(0f, 0f, 0f), 0f,
-                                       0, 0f, 0f, TyphoonPhase.Idle, 0u, 0u,
+                                       0, 0f, 0f, TyphoonTrackPlan.None,
+                                       TyphoonPhase.Idle, 0u, 0u,
                                        false, false, 0f, null,
                                        false, 0f, 0f, 0f,
                                        0, 0, 0, 0,

@@ -168,19 +168,11 @@ namespace DisasterPlus.Game
             // トグルを引き継がない。
             _enabled = false;
             ClearStats();
-            if (_registered) return;
 
-            try
-            {
-                RenderManager.RegisterRenderableManager(new OverlayRenderable());
-                _registered = true;
-                Log.Info("earthquake intensity overlay registered with RenderManager");
-            }
-            catch (System.Exception e)
-            {
-                // 構築時の 1 回だけなのでスロットル不要。
-                Log.Error("failed to register the earthquake intensity overlay", e);
-            }
+            // ★ 登録は①と共有する 1 個だけ（OverlayRenderable.EnsureRegistered）。
+            //   ここで別の 1 個を作らないこと —— 外す API が無いので増える一方になる。
+            OverlayRenderable.EnsureRegistered();
+            _registered = true;
         }
 
         /// <summary>

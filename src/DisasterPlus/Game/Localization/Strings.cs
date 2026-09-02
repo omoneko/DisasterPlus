@@ -138,6 +138,47 @@ namespace DisasterPlus.Game
         public static string ForecastLightning = "Lightning";
         public static string ForecastTornado = "Tornado";
         public static string ForecastShowOnMap = "Show on map";
+
+        // ── ①予報: これからの天気（気象レーダーで解禁）─────────────────
+        //
+        // ★★ **到達時刻は出さない。**（2026-09-02）
+        //    ゲームは current を target へ
+        //    `speed = min(speed + 0.0001, |target-current| * 0.001)` /
+        //    `current = MoveTowards(current, target, speed)`
+        //    で寄せる（WeatherManager.SimulationStepImpl IL_0777-07C2 実測）。
+        //    式は完全に決まっているので**歩数**なら正確に出せるが、
+        //    それを分へ直すには「1 フレームあたり何歩進むか」が要る。
+        //    そこは SimulationManager の sub-step の回し方次第で、まだ実測していない。
+        //    <b>倍率を仮定して「あと 40 分」と書けば、確信を持った誤りになる。</b>
+        //    目標値そのものはゲームが持っている確定値なので、そちらだけを出す。
+        public static string ForecastComing = "Coming weather";
+        public static string ForecastComingLocked =
+            "Build a weather radar to unlock this. It is the only building that watches "
+            + "the sky, so it is the one that earns you the forecast.";
+        public static string ForecastComingNeedsDlc =
+            "The coming-weather forecast needs the Natural Disasters DLC (the weather radar "
+            + "comes with it).";
+        public static string ForecastComingHeading = "heading for";
+
+        // ── ①予報: 台風を地図に出す 3 つのトグル ────────────────────
+        public static string ForecastTyphoonSection = "Typhoon on the map";
+        public static string ForecastShowTrack = "Track";
+        public static string ForecastShowGale = "Storm area";
+        public static string ForecastShowWind = "Wind field";
+        public static string ForecastGoToStorm = "Go to the storm";
+        public static string ForecastNoTyphoon = "No typhoon right now.";
+        public static string ForecastTrackTooltip =
+            "Draw the whole path across the map. The part still to come is bright; the part "
+            + "it has already travelled is faint. The path is exact - it carries no randomness.";
+        public static string ForecastGaleTooltip =
+            "Draw the eyewall and the gale radius at the storm's position right now. "
+            + "Future sizes are not drawn: they depend on whether the storm crosses land.";
+        public static string ForecastWindTooltip =
+            "Draw the wind field. This is the same field the mod uses to decide what breaks, "
+            + "so the dark red is where the damage will be.";
+        public static string ForecastGoToStormTooltip =
+            "Move the camera to the eye. While the storm is still off the map, this takes you "
+            + "to the edge it is coming from.";
         public static string ForecastAtCursor = "Hazard at cursor";
         public static string ForecastUnavailable = "Weather data unavailable";
         public static string ForecastNdrNote =

@@ -69,9 +69,38 @@ namespace DisasterPlus.Game
     /// </summary>
     public sealed class OverlayRenderable : IRenderableManager
     {
+        /// <summary>
+        /// 登録済みか。**<c>RenderManager.m_renderables</c> は外す API を持たない**
+        /// ので、プロセスにつき 1 個に絞る（クラス doc の IL）。
+        /// </summary>
+        private static bool _registered;
+
+        /// <summary>
+        /// **1 個だけ登録する。** ②（震度）と①（台風の進路・暴風域・風）の
+        /// どちらから呼ばれても同じ 1 個で足りる —— 増やしても外せないので、
+        /// 機能ごとに 1 個ずつ登録すると<b>都市を出入りするたびに増えていく</b>。
+        /// </summary>
+        public static void EnsureRegistered()
+        {
+            if (_registered) return;
+
+            try
+            {
+                RenderManager.RegisterRenderableManager(new OverlayRenderable());
+                _registered = true;
+                Log.Info("map overlay registered with RenderManager "
+                         + "(earthquake intensity and typhoon forecast share it)");
+            }
+            catch (System.Exception e)
+            {
+                // 構築時の 1 回だけなのでスロットル不要。
+                Log.Error("failed to register the map overlay", e);
+            }
+        }
+
         public string GetName()
         {
-            return "DisasterPlus.EarthquakeOverlay";
+            return "DisasterPlus.MapOverlay";
         }
 
         public DrawCallData GetDrawCallData()
@@ -87,10 +116,16 @@ namespace DisasterPlus.Game
 
         public void BeginOverlay(RenderManager.CameraInfo cameraInfo) { }
 
-        /// <summary>**ここだけが実装。** カメラの <c>OnPostRender</c> の中＝メインスレッド。</summary>
+        /// <summary>
+        /// **ここだけが実装。** カメラの <c>OnPostRender</c> の中＝メインスレッド。
+        ///
+        /// ★ 2 つとも、自分が出るべきでないときは<b>先頭で即座に戻る</b>ので、
+        ///   ここで設定や状態を見分けない（見分けると条件が 2 か所に散る）。
+        /// </summary>
         public void EndOverlay(RenderManager.CameraInfo cameraInfo)
         {
             EarthquakeOverlay.Render(cameraInfo);
+            ForecastOverlay.Render(cameraInfo);
         }
 
         public void UndergroundOverlay(RenderManager.CameraInfo cameraInfo) { }
