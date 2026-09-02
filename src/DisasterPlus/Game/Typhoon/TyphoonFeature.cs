@@ -215,18 +215,34 @@ namespace DisasterPlus.Game
         ///   末尾のクランプ）。<c>TyphoonTreeWindPatch</c> はその外側で掛けるので、
         ///   ここで返す値がそのまま「平常の何倍揺れるか」になる。
         ///
-        /// ★ 既定のスライダー（55）で 3.2 倍、上限（100 以上）で 5 倍。
-        ///   台風の下の木は<b>ちぎれそうに見えてよい</b>ので強めに取ってある ——
-        ///   弱すぎると「風で木が揺れていない」に逆戻りする。
+        /// ★★ **近くの木にしか効かない。**（2026-09-02、IL で確定）
+        ///   木の描画は 2 経路あり、遠景の<b>まとめ描画</b>は
+        ///   <c>Color32.a = Clamp(round(wind * 128), 0, 255)</c> と
+        ///   <b>バイトに詰める</b>ので（<c>TreeInstance.PopulateGroupData</c>
+        ///   IL_00CE-00E5）、そちらは何を返しても 1.99 で頭打ちになる。
+        ///   近くの木が通る <c>RenderInstance</c> は <c>Color.a</c>（float）を
+        ///   <c>MaterialPropertyBlock</c> へ渡すので、<b>そこには上限が無い</b>。
+        ///
+        ///   所有者の指示は「見えている範囲だけでも派手に」なので、
+        ///   <b>近くの木に全振りする</b>。
+        ///
+        /// ★ 既定のスライダー（55）で 7 倍、上限（100 以上）で 12 倍。
+        ///   遠景は 2 倍で止まるため、近景との差は出る。
+        ///   **シェーダ側にさらに上限があれば、そこで頭打ちになる** ——
+        ///   それは実機でしか分からないので、まず大きく振って見てもらう。
         /// </summary>
         private static float TreeSwayGainFor(byte intensity)
         {
             float t = intensity > 100 ? 1f : intensity / 100f;
-            return 1f + 4f * t;
+            return 1f + 11f * t;
         }
 
         public void OnMainThreadUpdate()
         {
+            // ★★ **main スレッドでしか Camera.main に触れない**（CameraFocus の doc）。
+            //    sim スレッドの吹き飛ばしが、ここで置いた値を読む。
+            CameraFocus.Update();
+
             // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
             TyphoonPanel.Tick();
 
@@ -311,6 +327,7 @@ namespace DisasterPlus.Game
             //    前の都市の序数から走り出す（＝中心の周りが 1 度も判定されない）。
             TyphoonWind.Reset();
             TyphoonTreeWindPatch.Clear();
+            CameraFocus.Reset();
             // ★★ 河川の水位を必ず戻す（罠 4 の復元経路 2 本目）。
             //    ここを忘れると、次に開いた都市で**前の都市のハンドル**を復元しに行き、
             //    無関係な川の水位を書き換える。TyphoonFlood.Reset は内部で

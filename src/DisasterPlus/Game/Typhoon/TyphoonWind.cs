@@ -207,16 +207,23 @@ namespace DisasterPlus.Game
         ///   十分すぎて、横倒しになる前に離陸していた。8 なら接地したまま
         ///   煽られて横転する。
         /// </summary>
-        private const float WindUpward = 8f;
+        /// ★★ 8 -> 1.5（2026-09-02、所有者「飛距離を抑えるだけでいい。
+        ///   せいぜい少し動く程度で」）。<b>浮くから飛ぶ</b>ので、上向きを削るのが
+        ///   いちばん効く —— <c>AddWind</c> で飛ばされた車は<b>当たり判定を持たない</b>
+        ///   （バニラの竜巻と同じ）ので、浮いたら建物をすり抜ける。
+        ///   低いままなら、すり抜ける前に落ちる。
+        private const float WindUpward = 1.5f;
 
         /// <summary>回転成分と求心成分（§B-1 の竜巻の実引数と同じ）。</summary>
-        private const float WindRotational = 0.5f;
+        /// ★ 0.5 -> 0.25（同上）。回されるほど遠くへ行く。
+        private const float WindRotational = 0.25f;
 
         /// <summary>
         /// 中心へ吸い込む成分（負が内向き）。同上で -40 -> -12。
         /// 強いと車が中心へ<b>射出</b>される。
         /// </summary>
-        private const float WindRadial = -12f;
+        /// ★ -12 -> -4（同上）。中心へ吸い込む力も飛距離になる。
+        private const float WindRadial = -4f;
 
         /// <summary>
         /// 進行方向の押しの強さ（m/frame → 演出用の速度）。**④が選んだ数字。**
@@ -227,7 +234,10 @@ namespace DisasterPlus.Game
         /// 進行方向へ押す強さの倍率。同上で 20 -> 7。
         /// **0 にはしない** —— 風下へ流されるのは正しい見え方である。
         /// </summary>
-        private const float WindDirectionalScale = 7f;
+        /// ★★ 7 -> 2.5（2026-09-02）。**進行方向へ押す力そのもの。**
+        ///   ここが飛距離をいちばん素直に決める。2.5 なら「揺すられて少しずれる」
+        ///   程度で、道路の上から吹き飛んで行かない。
+        private const float WindDirectionalScale = 2.5f;
 
         private static float _minutesSincePass;
         private static ushort _typhoonId;

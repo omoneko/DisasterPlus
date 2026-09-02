@@ -1,3 +1,5 @@
+using DisasterPlus.Core.Common;
+
 namespace DisasterPlus.Game
 {
     /// <summary>
@@ -99,7 +101,56 @@ namespace DisasterPlus.Game
             var centre = TyphoonController.Centre;
             if (float.IsNaN(centre.X) || float.IsNaN(centre.Z)) return;
 
-            PushWind(centre, GroupOf(TyphoonController.DisasterId), range);
+            var group = GroupOf(TyphoonController.DisasterId);
+
+            PushWind(centre, group, range);
+            _galePushes++;
+
+            // ★★ **見ているところにも当てる。**（2026-09-02、所有者の指示）
+            //    中心の 1 発だけだと、カメラが中心から離れているときに
+            //    <b>目の前の車や人が何事も無かったように走っている</b>。
+            //    かといってマップ全体を相手にはしたくないので、
+            //    <b>カメラの見ている先＋余白</b>にもう 1 発だけ撃つ。
+            //
+            //    ★ 費用は「1 発ぶん」で固定である。都市が大きくなっても増えない。
+            PushAtCamera(centre, group, range);
+        }
+
+        /// <summary>
+        /// カメラが見ている先の余白（m）。画面の外側まで少し掛ける ——
+        /// **画面の縁でぴたりと止まると、そこに線が見える。**
+        /// </summary>
+        private const float CameraMarginMetres = 400f;
+
+        /// <summary>
+        /// カメラの高さに対する影響半径の比。引いているほど広く映るので、
+        /// それに比例させる。近寄っているときは小さくて足りる。
+        /// </summary>
+        private const float CameraRadiusPerHeight = 1.2f;
+
+        /// <summary>影響半径の上限（m）。引き切ったときに全域へ広がらないように。</summary>
+        private const float CameraRadiusMaxMetres = 2000f;
+
+        /// <summary>
+        /// <b>カメラが見ている先</b>に 1 発だけ撃つ。**sim スレッド。**
+        ///
+        /// ★ カメラが暴風域の外に居るなら撃たない —— 見ているだけで
+        ///   嵐が来ていない場所の車を揺らすのは、ただの誤りである。
+        /// </summary>
+        private static void PushAtCamera(Vec3 centre, InstanceManager.Group group,
+                                         float range)
+        {
+            if (!CameraFocus.Valid) return;
+
+            float dx = CameraFocus.X - centre.X;
+            float dz = CameraFocus.Z - centre.Z;
+            if (dx * dx + dz * dz > range * range) return;
+
+            float radius = CameraFocus.Height * CameraRadiusPerHeight + CameraMarginMetres;
+            if (radius > CameraRadiusMaxMetres) radius = CameraRadiusMaxMetres;
+            if (!(radius > 0f)) return;
+
+            PushWind(new Vec3(CameraFocus.X, centre.Y, CameraFocus.Z), group, radius);
             _galePushes++;
         }
 
