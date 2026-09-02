@@ -1,7 +1,12 @@
 # Workshop preview image for "Disaster +".
 #
 # 512x512 is the house convention (CSWARFRONT / KAIJU both ship that size).
-# Three portrait panels — volcano, typhoon, tsunami — under one title band.
+# One hero shot -- the eruption -- with the title over a fade at the bottom.
+#
+# It was a three-panel triptych first (volcano / typhoon / tsunami). The owner
+# cut it down to the eruption alone: at 512 px a Workshop tile is read at a
+# glance, and one strong image beats three weak slivers. The typhoon shot in
+# particular was a white cloud on grey sky, which says nothing at thumbnail size.
 #
 # Usage:  powershell -File tools\make-preview.ps1
 $ErrorActionPreference = 'Stop'
@@ -10,28 +15,25 @@ Add-Type -AssemblyName System.Drawing
 $root = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $root 'PreviewImage.png'
 
-# Source shots and the portrait window to take from each.
-#
-# CentreX is a fraction of the source width: it decides what stays in frame
-# once the shot is cropped to a tall, narrow panel.
-#
-# Weight is the panel's share of the 512 px. They are NOT equal on purpose --
-# the eruption is the widest subject (cone plus the plume leaning off it) and
-# gets squeezed into an unreadable sliver at one third. The typhoon shot is
-# mostly sky, so it survives being the narrowest.
 # NOTE: the shots have Japanese file names. Do NOT paste them into this script --
 # Windows PowerShell 5.1 reads a .ps1 as ANSI unless it carries a BOM, so the
 # literals arrive mojibake'd and FromFile throws FileNotFoundException.
 # Match on the timestamp tail instead; that part is pure ASCII.
-$panels = @(
-    @{ Match = '*105338.png'; CentreX = 0.68; Top = 0.00; Height = 1.00; Weight = 0.38 },
-    @{ Match = '*105407.png'; CentreX = 0.62; Top = 0.00; Height = 1.00; Weight = 0.29 },
-    @{ Match = '*115328.png'; CentreX = 0.58; Top = 0.00; Height = 1.00; Weight = 0.33 }
-)
+$match = '*105338.png'
+
+# The square window taken from the source, as fractions.
+#   Side    - side length, as a fraction of the source height.
+#             0.93 crops in slightly so the cone fills the frame edge to edge.
+#   CentreX - horizontal centre. 0.70 puts the summit just right of centre and
+#             keeps the whole plume, which leans left as it rises.
+#   Top     - top edge. 0 keeps the plume; the foreground grass is what falls off.
+$side = 0.93
+$centreX = 0.70
+$top = 0.00
 
 $size = 512
-$gap = 3                     # hairline between panels
-$titleBand = 92              # solid strip at the bottom
+$fadeH = 190                 # tall, so the title sits on a soft ground
+$titleBaseline = 372         # top of the "DISASTER +" glyphs
 
 $bmp = New-Object System.Drawing.Bitmap($size, $size)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -39,77 +41,48 @@ $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQuality
 $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
 $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-
 $g.Clear([System.Drawing.Color]::FromArgb(255, 12, 14, 18))
 
-# ── panels ────────────────────────────────────────────────────────────
-$panelH = $size - $titleBand
-$totalGap = $gap * ($panels.Count - 1)
-$usable = $size - $totalGap
-$x = 0
-
-for ($i = 0; $i -lt $panels.Count; $i++) {
-    $spec = $panels[$i]
-    # last panel absorbs the rounding so the strip ends exactly at 512
-    $w = if ($i -eq $panels.Count - 1) { $size - $x }
-         else { [int][Math]::Round($usable * $spec.Weight) }
-
-    $found = @(Get-ChildItem -LiteralPath $root -Filter $spec.Match -File)
-    if ($found.Count -ne 1) {
-        throw ("expected exactly one screenshot matching " + $spec.Match +
-               " in " + $root + ", found " + $found.Count)
-    }
-    $src = [System.Drawing.Image]::FromFile($found[0].FullName)
-    try {
-        $srcTop = [int]($src.Height * $spec.Top)
-        $srcH = [int]($src.Height * $spec.Height)
-        if ($srcTop + $srcH -gt $src.Height) { $srcH = $src.Height - $srcTop }
-
-        # widest window that still fills the panel without stretching
-        $srcW = [int]([Math]::Round($srcH * ($w / [double]$panelH)))
-        if ($srcW -gt $src.Width) { $srcW = $src.Width }
-
-        $srcX = [int]([Math]::Round($src.Width * $spec.CentreX - $srcW / 2.0))
-        if ($srcX -lt 0) { $srcX = 0 }
-        if ($srcX + $srcW -gt $src.Width) { $srcX = $src.Width - $srcW }
-
-        $dest = New-Object System.Drawing.Rectangle($x, 0, $w, $panelH)
-        $g.DrawImage($src, $dest, $srcX, $srcTop, $srcW, $srcH,
-                     [System.Drawing.GraphicsUnit]::Pixel)
-    } finally {
-        $src.Dispose()
-    }
-    $x += $w + $gap
+# ── hero ──────────────────────────────────────────────────────────────
+$found = @(Get-ChildItem -LiteralPath $root -Filter $match -File)
+if ($found.Count -ne 1) {
+    throw ("expected exactly one screenshot matching " + $match +
+           " in " + $root + ", found " + $found.Count)
 }
 
-# ── bottom fade into the title band, so the seam is not a hard line ───
-$fadeH = 88
-$fadeRect = New-Object System.Drawing.Rectangle(0, ($panelH - $fadeH), $size, $fadeH)
+$src = [System.Drawing.Image]::FromFile($found[0].FullName)
+try {
+    $win = [int]([Math]::Round($src.Height * $side))
+    if ($win -gt $src.Width) { $win = $src.Width }
+
+    $srcY = [int]([Math]::Round($src.Height * $top))
+    if ($srcY + $win -gt $src.Height) { $srcY = $src.Height - $win }
+    if ($srcY -lt 0) { $srcY = 0 }
+
+    $srcX = [int]([Math]::Round($src.Width * $centreX - $win / 2.0))
+    if ($srcX -lt 0) { $srcX = 0 }
+    if ($srcX + $win -gt $src.Width) { $srcX = $src.Width - $win }
+
+    $dest = New-Object System.Drawing.Rectangle(0, 0, $size, $size)
+    $g.DrawImage($src, $dest, $srcX, $srcY, $win, $win,
+                 [System.Drawing.GraphicsUnit]::Pixel)
+} finally {
+    $src.Dispose()
+}
+
+# ── fade, so the title reads over the bright grass ────────────────────
+$fadeRect = New-Object System.Drawing.Rectangle(0, ($size - $fadeH), $size, $fadeH)
 $fade = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
     $fadeRect,
-    [System.Drawing.Color]::FromArgb(0, 10, 12, 16),
-    [System.Drawing.Color]::FromArgb(255, 10, 12, 16),
+    [System.Drawing.Color]::FromArgb(0, 8, 10, 14),
+    [System.Drawing.Color]::FromArgb(248, 8, 10, 14),
     [System.Drawing.Drawing2D.LinearGradientMode]::Vertical)
 $g.FillRectangle($fade, $fadeRect)
 $fade.Dispose()
 
-$bandBrush = New-Object System.Drawing.SolidBrush(
-    [System.Drawing.Color]::FromArgb(255, 10, 12, 16))
-$g.FillRectangle($bandBrush, 0, $panelH, $size, $titleBand)
-$bandBrush.Dispose()
-
-# thin warning-orange rule above the title, echoing the hazard theme
-$rule = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-    (New-Object System.Drawing.Rectangle(0, ($panelH - 3), $size, 3)),
-    [System.Drawing.Color]::FromArgb(255, 232, 96, 32),
-    [System.Drawing.Color]::FromArgb(255, 248, 176, 48),
-    [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
-$g.FillRectangle($rule, 0, ($panelH - 3), $size, 3)
-$rule.Dispose()
-
 # ── title ─────────────────────────────────────────────────────────────
 function Draw-Centred([string]$text, [string]$family, [single]$emSize,
-                      [int]$style, [int]$baselineY, [System.Drawing.Color]$fill,
+                      [int]$style, [int]$topY, [System.Drawing.Color]$fill,
                       [single]$outline, [System.Drawing.Color]$outlineColor) {
     $path = New-Object System.Drawing.Drawing2D.GraphicsPath
     $fam = New-Object System.Drawing.FontFamily($family)
@@ -120,7 +93,7 @@ function Draw-Centred([string]$text, [string]$family, [single]$emSize,
         $b = $path.GetBounds()
 
         $m = New-Object System.Drawing.Drawing2D.Matrix
-        $m.Translate(($size - $b.Width) / 2.0 - $b.X, $baselineY - $b.Y)
+        $m.Translate(($size - $b.Width) / 2.0 - $b.X, $topY - $b.Y)
         $path.Transform($m)
         $m.Dispose()
 
@@ -140,13 +113,24 @@ function Draw-Centred([string]$text, [string]$family, [single]$emSize,
 }
 
 $bold = [int][System.Drawing.FontStyle]::Bold
-$white = [System.Drawing.Color]::White
-$ink = [System.Drawing.Color]::FromArgb(255, 10, 12, 16)
+$ink = [System.Drawing.Color]::FromArgb(255, 8, 10, 14)
 
-Draw-Centred 'DISASTER +' 'Arial Black' 46 $bold ($panelH + 8) $white 5 $ink
+# hazard-orange rule, sized to the title, sitting just above it
+$ruleW = 300
+$ruleRect = New-Object System.Drawing.Rectangle((($size - $ruleW) / 2), ($titleBaseline - 22), $ruleW, 3)
+$rule = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+    $ruleRect,
+    [System.Drawing.Color]::FromArgb(255, 232, 88, 24),
+    [System.Drawing.Color]::FromArgb(255, 250, 182, 56),
+    [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
+$g.FillRectangle($rule, $ruleRect)
+$rule.Dispose()
+
+Draw-Centred 'DISASTER +' 'Arial Black' 52 $bold $titleBaseline `
+    ([System.Drawing.Color]::White) 5 $ink
 Draw-Centred 'EARTHQUAKE - TSUNAMI - TYPHOON - VOLCANO - FIRE WHIRL' `
-    'Arial' 12.5 $bold ($panelH + 66) `
-    ([System.Drawing.Color]::FromArgb(255, 214, 220, 230)) 0 $ink
+    'Arial' 12.5 $bold ($titleBaseline + 72) `
+    ([System.Drawing.Color]::FromArgb(255, 208, 216, 228)) 3 $ink
 
 $g.Dispose()
 $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
