@@ -98,9 +98,25 @@ namespace DisasterPlus.Game
         /// <c>WeatherManager.GetWindSpeed(Vector3)</c> の後置き。
         /// **クランプの外側**で倍率を掛ける（クラス doc の ★★）。
         /// </summary>
+        /// <summary>1 度だけ実測を出す（効いているかを推測で語らないため）。</summary>
+        private static bool _reported;
+
         public static void Postfix(Vector3 position, ref float __result)
         {
             if (!_active) return;
+
+            if (!_reported)
+            {
+                _reported = true;
+                Log.Info("typhoon: the tree-wind patch is live. Vanilla returned "
+                         + __result.ToString("F2") + " here; we are multiplying by up to "
+                         + _gain.ToString("F1") + ". **But the batched tree path packs "
+                         + "this into a byte as round(wind * 128) clamped to 255 "
+                         + "(TreeInstance.PopulateGroupData, IL_00CE-00E5), so the "
+                         + "shader can never see more than 1.99.** 2x the calm sway is "
+                         + "the game's own ceiling for trees.");
+            }
+
 
             float dx = position.x - _centreX;
             float dz = position.z - _centreZ;
