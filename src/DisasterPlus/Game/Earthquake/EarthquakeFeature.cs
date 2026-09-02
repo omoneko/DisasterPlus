@@ -42,6 +42,7 @@ namespace DisasterPlus.Game
             TsunamiRing.Reset();
             SeaWatch.Reset();
             LongPeriodDamage.Reset();
+            TrenchQuakeDistantDamage.Reset();
 
             // ★★ **ToolController は都市ごとに作り直される**ので、毎レベルロードで
             //    登録し直す。忘れると「タイルは押せるのにカーソルが変わらない」
@@ -173,6 +174,12 @@ namespace DisasterPlus.Game
             {
                 LongPeriodDamage.Apply(snapshot, deltaMinutes);
             }
+
+            // ★★ 海溝型の遠地被害。**海溝型地震にしか効かない**ので、
+            //    設定のチェックボックスは持たず強さのスライダーだけで抑える
+            //    （ModSettings.EarthquakeTrenchDamageStrength の doc）。
+            //    0 のときは走査そのものが 1 回も走らない。
+            TrenchQuakeDistantDamage.Apply(snapshot, deltaMinutes);
         }
 
         /// <summary>main スレッド。パネル・ボタンの設置と、表示中のみの内容更新はここから。</summary>
@@ -202,6 +209,7 @@ namespace DisasterPlus.Game
             TsunamiChain.Reset();
             // ★ 走査の途中状態と診断カウンタ、そして Degraded の自己申告を下ろす。
             LongPeriodDamage.Reset();
+            TrenchQuakeDistantDamage.Reset();
             // ★ オーバーレイを止める。登録は外せないので、描かないことを
             //    こちらの状態で保証する（EarthquakeOverlay.Reset の doc）。
             //    これを忘れると、都市を出た直後の数フレームに前の都市の
@@ -300,6 +308,7 @@ namespace DisasterPlus.Game
             WriteWaveform(b, snapshot);
             WriteTsunamiChain(b, snapshot);
             WriteLongPeriod(b, snapshot);
+            WriteTrenchDistant(b);
             WriteQuakes(b, snapshot);
             WriteNotes(b);
         }
@@ -342,6 +351,45 @@ namespace DisasterPlus.Game
         /// **倒壊 0 のときも必ず全数字を出す**（③で「延焼が動いているか診断から
         /// 一切見えなかった」失敗を繰り返さない）。
         /// </summary>
+        /// <summary>
+        /// 海溝型の遠地被害。**倒壊も出火も 0 のときに全数字を出す**のがこの節の
+        /// 存在理由である —— 「機能が死んでいる」と「範囲に建物が無い」は、
+        /// 画面上ではどちらも「何も起きない」で同じ顔になる。
+        /// </summary>
+        private static void WriteTrenchDistant(DiagnosticBuilder b)
+        {
+            int strength = ModSettings.EarthquakeTrenchDamageStrength.value;
+            if (strength <= 0)
+            {
+                b.Line(1, "trench distant damage",
+                    "off (strength slider is 0; trench quakes fall back to the vanilla disc, "
+                    + "which is centred out at sea and therefore barely reaches the city)");
+                return;
+            }
+
+            b.Line(1, "trench distant damage",
+                "on, strength " + strength + " of 10  (trench quakes only; "
+                + "fault quakes and vanilla quakes are untouched)");
+
+            b.Line(2, "model", "reach = " + DistantDamage.ReachFactor.ToString("F0")
+                + "x the vanilla disc, floor "
+                + (DistantDamage.FloorFraction * 100f).ToString("F0")
+                + "% of the near field, magnitude (i/255)^2, ceilings "
+                + (DistantDamage.MaxCollapseChance * 100f).ToString("F0") + "% collapse / "
+                + (DistantDamage.MaxFireChance * 100f).ToString("F0") + "% fire");
+
+            b.Line(2, "passes", TrenchQuakeDistantDamage.Passes.ToString());
+            b.Line(2, "last pass",
+                "scanned=" + TrenchQuakeDistantDamage.LastScanned
+                + " collapsed=" + TrenchQuakeDistantDamage.LastCollapsed
+                + " ignited=" + TrenchQuakeDistantDamage.LastIgnited
+                + " refused=" + TrenchQuakeDistantDamage.LastRefused
+                + (TrenchQuakeDistantDamage.LastCapped
+                    ? "  (capped; resumes next pass)" : ""));
+            b.Line(2, "total", "collapsed=" + TrenchQuakeDistantDamage.TotalCollapsed
+                + " ignited=" + TrenchQuakeDistantDamage.TotalIgnited);
+        }
+
         private static void WriteLongPeriod(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
             if (!ModSettings.EarthquakeLongPeriod.value)

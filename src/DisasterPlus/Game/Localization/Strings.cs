@@ -612,6 +612,8 @@ namespace DisasterPlus.Game
         public static string EarthquakeLongPeriodEnabled =
             "Enable long-period ground motion (adds damage vanilla never does)";
         public static string EarthquakeLongPeriodStrength = "Long-period strength (0 = off)";
+        public static string EarthquakeTrenchDamageStrength =
+            "Trench quake: distant fire and collapse (0 = off)";
         public static string EarthquakeLongPeriodNoHeight =
             "This building's height could not be read, so no long-period damage is applied to it. "
             + "The mod never guesses a height.";

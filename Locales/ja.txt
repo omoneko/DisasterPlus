@@ -172,6 +172,7 @@ EarthquakeTsunamiBusy = 前回の海溝型地震による津波がまだ終わ�
 EarthquakeLongPeriod = 長周期地震動
 EarthquakeLongPeriodEnabled = 長周期地震動を有効にする (バニラには無い被害を足します)
 EarthquakeLongPeriodStrength = 長周期地震動の強さ (0 で無効)
+EarthquakeTrenchDamageStrength = 海溝型地震: 遠方の火災と倒壊 (0 = 無効)
 EarthquakeLongPeriodNoHeight = この建物の高さが読めなかったため、長周期地震動による追加被害は与えていません。高さを推測することはしません。
 EarthquakeBuildingHeight = 建物の高さ
 EarthquakeResonance = 共振

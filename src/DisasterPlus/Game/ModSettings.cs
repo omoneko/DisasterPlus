@@ -79,6 +79,21 @@ namespace DisasterPlus.Game
         public static SavedInt EarthquakeLongPeriodStrength;
 
         /// <summary>
+        /// **海溝型地震の遠地被害の強さ（0〜10）。0 で完全に無効。**
+        ///
+        /// ★★ 上の長周期（既定 OFF）と違い、**これは既定 ON（6）である。**
+        ///   長周期は「バニラなら倒れなかった建物を倒す」新しい被害だが、
+        ///   こちらは<b>本 MOD 自身が作った災害（海溝型）が、本来あるべき被害を
+        ///   出していなかったのを直すもの</b>である（2026-09-02、所有者
+        ///   「海溝型地震の、地震による被害が少ないです」）。
+        ///   既定 OFF にすると、直した不足が既定では直らない。
+        ///
+        /// ★ 断層型とバニラの地震には<b>一切効かない</b>
+        ///   （<c>TrenchQuakeDistantDamage</c> のクラス doc）。
+        /// </summary>
+        public static SavedInt EarthquakeTrenchDamageStrength;
+
+        /// <summary>
         /// **第 2 層。合成記象（P 波・S 波・コーダ）**。既定 OFF。
         ///
         /// ON にすると 2 つのことが同時に起きる:
@@ -367,6 +382,11 @@ namespace DisasterPlus.Game
             // 厳密に 0 を返す）。範囲はスライダー側で縛るが、.cgs の値は公開契約なので
             // 範囲外が入っていても読み捨てず、使う側でクランプする。
             EarthquakeLongPeriodStrength = new SavedInt("eqLongPeriodStrength", FileName, 3, true);
+            // 0〜10。0 で完全に無効（DistantDamage が厳密に 0 を返す）。
+            // ★ 既定 6（このフィールドの doc）。.cgs の値は公開契約なので、
+            //   範囲外が入っていても読み捨てず、使う側でクランプする。
+            EarthquakeTrenchDamageStrength =
+                new SavedInt("eqTrenchDamageStrength", FileName, 6, true);
 
             // ★ 第 2 層その 3。既定 OFF（ModSettings.EarthquakeSeismogram の doc）。
             //    OFF のあいだ、記録も描画もカメラの揺れも**今日と 1 ビットも違わない**。

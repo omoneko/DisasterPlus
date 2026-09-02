@@ -173,6 +173,7 @@ EarthquakeTsunamiBusy = The tsunami from the previous trench earthquake has not 
 EarthquakeLongPeriod = Long-period ground motion
 EarthquakeLongPeriodEnabled = Enable long-period ground motion (adds damage vanilla never does)
 EarthquakeLongPeriodStrength = Long-period strength (0 = off)
+EarthquakeTrenchDamageStrength = Trench quake: distant fire and collapse (0 = off)
 EarthquakeLongPeriodNoHeight = This building's height could not be read, so no long-period damage is applied to it. The mod never guesses a height.
 EarthquakeBuildingHeight = Building height
 EarthquakeResonance = Resonance

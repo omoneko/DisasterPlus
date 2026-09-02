@@ -167,6 +167,12 @@ namespace DisasterPlus.Game
                     ModSettings.EarthquakeLongPeriodStrength.value,
                     v => ModSettings.EarthquakeLongPeriodStrength.value = (int)v);
 
+                // ★ 海溝型の遠地被害。**チェックボックスは無い** —— 海溝型地震
+                //   そのものが本 MOD の機能なので、その強さを 0 にできれば足りる。
+                earthquake.AddSlider(Strings.EarthquakeTrenchDamageStrength, 0f, 10f, 1f,
+                    ModSettings.EarthquakeTrenchDamageStrength.value,
+                    v => ModSettings.EarthquakeTrenchDamageStrength.value = (int)v);
+
                 // ★ 合成記象（P 波・S 波・コーダ）。**既定 OFF。**
                 //   こちらは建物を 1 軒も壊さないが、**カメラの揺れの形をバニラから
                 //   変える**ので、やはり第 2 層である。上の EarthquakeShakeBoost が
