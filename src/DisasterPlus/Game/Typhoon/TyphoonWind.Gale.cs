@@ -103,7 +103,12 @@ namespace DisasterPlus.Game
 
             var group = GroupOf(TyphoonController.DisasterId);
 
-            PushWind(centre, group, range);
+            // ★★ **この巡ぶんの答えを 1 回だけ決める**（TyphoonWind.NextLatch の ★★）。
+            //    中心とカメラの前で別々に決めると、カメラの前が永久に
+            //    「掴む」側に来ない。
+            bool latch = NextLatch();
+
+            PushWind(centre, group, range, latch);
             _galePushes++;
 
             // ★★ **見ているところにも当てる。**（2026-09-02、所有者の指示）
@@ -113,7 +118,7 @@ namespace DisasterPlus.Game
             //    <b>カメラの見ている先＋余白</b>にもう 1 発だけ撃つ。
             //
             //    ★ 費用は「1 発ぶん」で固定である。都市が大きくなっても増えない。
-            PushAtCamera(centre, group, range);
+            PushAtCamera(centre, group, range, latch);
         }
 
         /// <summary>
@@ -138,7 +143,7 @@ namespace DisasterPlus.Game
         ///   嵐が来ていない場所の車を揺らすのは、ただの誤りである。
         /// </summary>
         private static void PushAtCamera(Vec3 centre, InstanceManager.Group group,
-                                         float range)
+                                         float range, bool latch)
         {
             if (!CameraFocus.Valid) return;
 
@@ -150,7 +155,8 @@ namespace DisasterPlus.Game
             if (radius > CameraRadiusMaxMetres) radius = CameraRadiusMaxMetres;
             if (!(radius > 0f)) return;
 
-            PushWind(new Vec3(CameraFocus.X, centre.Y, CameraFocus.Z), group, radius);
+            PushWind(new Vec3(CameraFocus.X, centre.Y, CameraFocus.Z), group, radius,
+                     latch);
             _galePushes++;
         }
 

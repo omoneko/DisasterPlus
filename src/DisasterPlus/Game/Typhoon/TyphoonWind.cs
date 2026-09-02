@@ -195,49 +195,113 @@ namespace DisasterPlus.Game
 
         private const float WindRadiusFactor = 1.5f;
 
-        /// <summary>吹き上げの鉛直成分（§B-1 の竜巻の実引数と同じ 80）。</summary>
         /// <summary>
-        /// 風の<b>上向き</b>成分。
+        /// 車と歩行者を<b>掴む</b>ための鉛直成分。
         ///
-        /// ★★ 80 -> 8 に落とした（2026-08-25、所有者の指摘「暴風で車が吹き飛ぶのは
-        ///   うまくできてますが、程度がひどすぎます。横転くらいでいいのにほんとに
-        ///   飛んで行ってます」）。
+        /// ── ★★ 19.62 は動かせない壁である（2026-09-02、IL で確定）──────────
         ///
-        ///   <b>車が飛んでいた原因はここである。</b> 上向き 80 は車を持ち上げるのに
-        ///   十分すぎて、横倒しになる前に離陸していた。8 なら接地したまま
-        ///   煽られて横転する。
+        /// <c>CarAI.AddWind</c> IL_0018–0031 と <c>HumanAI.AddWind</c> IL_000E–002B:
+        ///
+        /// <code>
+        /// if ((v.m_flags2 &amp; 2) == 0 &amp;&amp; wind.y &lt;= 19.62f) return false;
+        /// </code>
+        ///
+        /// <b>19.62 = 2g である。</b>まだ吹き飛ばされていない車と市民は、
+        /// <b>ここを越えない風には一切反応しない</b> —— 速度も向きも 1 ビットも
+        /// 変わらず、false が返るだけである。
+        ///
+        /// ★★ **これが「走っている車や歩いている人にも影響がない」の正体だった。**
+        ///   （2026-08-25 に 80 → 8 へ、2026-09-02 に 8 → 1.5 へ落としていた。
+        ///     どちらも壁の下で、<b>移動中の車には最初から何も起きていなかった</b>。
+        ///     止まっている車が飛んでいたのは、駐車車両にこの門が無いからである。）
+        ///
+        /// だから壁の<b>すぐ上</b>を取る。バニラの竜巻は 80（＝壁の 4 倍）で、
+        /// あれが「本当に飛んで行く」の正体である。
         /// </summary>
-        /// ★★ 8 -> 1.5（2026-09-02、所有者「飛距離を抑えるだけでいい。
-        ///   せいぜい少し動く程度で」）。<b>浮くから飛ぶ</b>ので、上向きを削るのが
-        ///   いちばん効く —— <c>AddWind</c> で飛ばされた車は<b>当たり判定を持たない</b>
-        ///   （バニラの竜巻と同じ）ので、浮いたら建物をすり抜ける。
-        ///   低いままなら、すり抜ける前に落ちる。
-        private const float WindUpward = 1.5f;
-
-        /// <summary>回転成分と求心成分（§B-1 の竜巻の実引数と同じ）。</summary>
-        /// ★ 0.5 -> 0.25（同上）。回されるほど遠くへ行く。
-        private const float WindRotational = 0.25f;
-
-        /// <summary>
-        /// 中心へ吸い込む成分（負が内向き）。同上で -40 -> -12。
-        /// 強いと車が中心へ<b>射出</b>される。
-        /// </summary>
-        /// ★ -12 -> -4（同上）。中心へ吸い込む力も飛距離になる。
-        private const float WindRadial = -4f;
+        private const float WindUpwardLatch = 19.7f;
 
         /// <summary>
-        /// 進行方向の押しの強さ（m/frame → 演出用の速度）。**④が選んだ数字。**
-        /// 竜巻は自分の <c>m_velocity</c> をそのまま渡しているが、台風の中心速度は
-        /// 数 m/frame しかなく、そのままでは市民が動かない。
+        /// 掴んだ<b>あと</b>の鉛直成分。
+        ///
+        /// ★ 一度 <c>m_flags2 |= 2</c> が立つと上の門は素通しになる（IL_00A7–00C6）。
+        ///   つまり<b>2 回目からは低い値で押せる</b>。
+        ///   速度は <c>v = v*0.875 + wind*0.125</c> で混ざるので、毎回 19.7 を
+        ///   渡し続けると<b>浮き上がり続けて落ちてこない</b> ——
+        ///   所有者が 2026-08-25 に苦情を言った「ほんとに飛んで行ってます」がこれ。
+        ///
+        ///   <b>掴むのは時々、押すのは毎回。</b>（<c>LatchEveryNthPush</c>）
         /// </summary>
+        private const float WindUpwardSustain = 2f;
+
         /// <summary>
-        /// 進行方向へ押す強さの倍率。同上で 20 -> 7。
-        /// **0 にはしない** —— 風下へ流されるのは正しい見え方である。
+        /// 何回に 1 回、<see cref="WindUpwardLatch"/> の高い風を撃つか。
+        /// 残りは <see cref="WindUpwardSustain"/> で、既に掴んだ相手だけを押す。
         /// </summary>
-        /// ★★ 7 -> 2.5（2026-09-02）。**進行方向へ押す力そのもの。**
-        ///   ここが飛距離をいちばん素直に決める。2.5 なら「揺すられて少しずれる」
-        ///   程度で、道路の上から吹き飛んで行かない。
-        private const float WindDirectionalScale = 2.5f;
+        private const int LatchEveryNthPush = 4;
+
+        /// <summary>
+        /// 渦の<b>外周での接線速度</b>（単位/フレーム）。
+        ///
+        /// ── ★★ 竜巻の 0.5 をそのまま使ってはいけない（2026-09-02、IL）──────
+        ///
+        /// <c>DisasterHelpers.AddWindVehicles</c> の中身（IL_00F8–0145）は
+        ///
+        /// <code>
+        /// delta = 車の位置 - 風の位置          ← <b>メートル。正規化されない</b>
+        /// w = directional
+        /// w.x -= delta.z * rotational          ← <b>距離に比例して増える</b>
+        /// w.z += delta.x * rotational
+        /// w += (delta * radial) / Max(1, |delta|)   ← こちらは正規化済み
+        /// </code>
+        ///
+        /// ★★ <b>回転成分だけが距離で割られていない。</b>竜巻の半径は 100〜200 m
+        ///   なので 0.5 × 150 ＝ 75 で収まるが、<b>台風の半径は数千 m である</b> ——
+        ///   同じ 0.5 を渡すと外周で <c>0.5 × 3000 = 1500</c> 単位/フレームになる。
+        ///   <b>車が建物をすり抜けて飛んで行っていたのはこれである。</b>
+        ///   竜巻の定数は、竜巻の大きさとセットでしか正しくない。
+        ///
+        /// だからここは<b>速度で指定し、半径で割って</b>回転成分に直す。
+        /// そうすると台風がどんな大きさでも外周の速さは同じになる。
+        /// </summary>
+        private const float WindRimSpeed = 4f;
+
+        /// <summary>
+        /// 中心へ吸い込む成分（負が内向き、単位/フレーム）。
+        ///
+        /// ★ こちらは <c>/ Max(1, |delta|)</c> で割られているので、<b>大きさが
+        ///   そのまま速度</b>になる（回転成分と違って半径に依らない）。
+        ///   竜巻は -40。台風でそれをやると中心へ射出される。
+        /// </summary>
+        private const float WindRadial = -3f;
+
+        /// <summary>
+        /// 進行方向へ押す強さ（単位/フレーム、強度 255 のとき）。
+        ///
+        /// ★ 2.5 -> 6（2026-09-02、所有者「台風で車をもう少し動かせることができれば」）。
+        ///   <b>ここだけが「風下へ流される距離」を素直に決める</b> ——
+        ///   回転と求心は向きを変えるだけで、街を横切らせるのはこの成分である。
+        /// </summary>
+        private const float WindDirectionalScale = 6f;
+
+        /// <summary>
+        /// 「掴む」風を撃った周期の数え手。**sim スレッドからのみ。**
+        /// </summary>
+        private static int _pushOrdinal;
+
+        /// <summary>
+        /// 今回の一巡を「掴む」風にするか。**1 巡につき 1 回だけ呼ぶこと。**
+        ///
+        /// ★★ <b>押す場所ごとに呼んではいけない。</b>（2026-09-02、書いた直後に気付いた。）
+        ///   1 巡で中心と<b>カメラの前</b>の 2 発を撃つので、場所ごとに数えると
+        ///   偶数と奇数で固定され、<b>カメラの前の風は永久に「掴む」側に来ない</b>。
+        ///   暴風域の中でも中心の押しが届かない帯（暴風域は強風域の 1/2.2）では、
+        ///   <b>目の前の車だけが最後まで動かない</b>という形で出る。
+        ///   1 巡に 1 回だけ決めて、その巡の全ての押しに同じ答えを配る。
+        /// </summary>
+        internal static bool NextLatch()
+        {
+            return (_pushOrdinal++ % LatchEveryNthPush) == 0;
+        }
 
         private static float _minutesSincePass;
         private static ushort _typhoonId;
@@ -317,6 +381,8 @@ namespace DisasterPlus.Game
             _minutesSincePass = 0f;
             _minutesSinceGale = 0f;
             _galePushes = 0;
+            // ★ 次の台風の 1 発目は必ず「掴む」風から始める（NextLatch）。
+            _pushOrdinal = 0;
             _typhoonId = 0;
             _centreCellX = -1;
             _centreCellZ = -1;
@@ -598,7 +664,24 @@ namespace DisasterPlus.Game
 
             // 演出は走査 1 回につき 1 度、台風の中心で。**建物とは独立**に呼ぶ
             // （倒壊 0 でも風は吹くし、木は倒れる）。
-            PushWind(centre3, group, range);
+            //
+            // ★★ **吹き飛ばしは <c>TyphoonStormFx</c> のつまみに属する。**
+            //    （2026-09-02、Codex レビュー。ここは以前から素通しだった。）
+            //    あの設定の doc が「吹き飛ばしは AddWind（市民と車だけ）…
+            //    だから風害とは別のつまみにしてある」と名乗っている以上、
+            //    <b>演出を切った人の街で車が飛んではいけない</b>。
+            //
+            //    以前は上向きが 2g の門（19.62）の下だったので、素通しでも
+            //    走っている車には何も起きず、誰も気付かなかった。
+            //    門を越えた今、この漏れは<b>目に見える</b>。
+            //
+            //    ★ 切っているときは <see cref="NextLatch"/> も進めない ——
+            //      進めると「何回に 1 回掴むか」の数えが、撃っていない回で狂う。
+            if (ModSettings.TyphoonStormFx.value)
+            {
+                PushWind(centre3, group, range, NextLatch());
+            }
+
             FellTrees(typhoonId, centre3, group, range);
 
             // ★ collapsed > 0 で囲ってはいけない。「機能が死んでいる」と
@@ -664,21 +747,39 @@ namespace DisasterPlus.Game
         /// <summary>
         /// 市民と車両を吹き飛ばす。**無害**（<c>AddWindCitizens</c> ＋
         /// <c>AddWindVehicles</c> の 2 行だけで、建物・道路・樹木には一切触らない。§B-1）。
-        /// 引数の形は §B-1 の竜巻の実引数を手本にした。
+        /// 引数の形は §B-1 の竜巻の実引数を手本にしたが、**回転成分だけは違う**
+        /// （<see cref="WindRimSpeed"/> の ★★）。
+        ///
         /// </summary>
-        private static void PushWind(Vec3 centre, InstanceManager.Group group, float range)
+        /// <param name="latch">
+        /// <see cref="NextLatch"/> の答え。<c>true</c> なら
+        /// <see cref="WindUpwardLatch"/> の高い風で**まだ掴んでいない車と市民を掴み**、
+        /// <c>false</c> なら低い風で**既に掴んだ相手だけ**を押す。
+        /// </param>
+        private static void PushWind(Vec3 centre, InstanceManager.Group group, float range,
+                                     bool latch)
         {
+
             float heading = TyphoonController.HeadingRadians;
             float speed = TyphoonController.Intensity / 255f * WindDirectionalScale;
+
+            float radius = range * WindRadiusFactor;
+            if (!(radius > 0f)) return;
 
             var position = new Vector3(centre.X,
                                        centre.Y + range * WindHeightFraction,
                                        centre.Z);
-            var directional = new Vector3(Mathf.Cos(heading) * speed, WindUpward,
-                                          Mathf.Sin(heading) * speed);
+            var directional = new Vector3(
+                Mathf.Cos(heading) * speed,
+                latch ? WindUpwardLatch : WindUpwardSustain,
+                Mathf.Sin(heading) * speed);
 
-            DisasterHelpers.AddWind(position, range * WindRadiusFactor, directional,
-                                    WindRotational, WindRadial, group);
+            // ★★ 回転成分は<b>半径で割ってから</b>渡す（WindRimSpeed の doc の ★★）。
+            //    ここを定数にすると、台風が大きいほど車が速く飛ぶ。
+            float rotational = WindRimSpeed / radius;
+
+            DisasterHelpers.AddWind(position, radius, directional,
+                                    rotational, WindRadial, group);
         }
 
         /// <summary>
