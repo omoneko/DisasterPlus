@@ -735,6 +735,10 @@ namespace DisasterPlus.Game
         public static string TyphoonButtonTooltip =
             "Typhoon: pick a strength on the slider, then click the map";
         public static string TyphoonStop = "Stop the typhoon";
+        public static string TyphoonJump = "Go to the storm";
+        public static string TyphoonJumpTooltip =
+            "Move the camera to the eye of the typhoon. While the storm is still "
+            + "approaching from off the map, this takes you to the edge it is coming from.";
         public static string TyphoonInactive = "No typhoon right now.";
         public static string TyphoonWaiting = "Waiting for the first simulation update.";
         public static string TyphoonUnavailable = "Typhoon data unavailable";
