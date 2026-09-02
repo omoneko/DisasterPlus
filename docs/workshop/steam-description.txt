@@ -1,6 +1,5 @@
 Steam Workshop item: https://steamcommunity.com/sharedfiles/filedetails/?id=3794409201
-This is the text currently published on the Workshop page, EXCEPT for two changes
-made at publish time:
+This is the text currently published on the Workshop page, EXCEPT for the GitHub link:
 
   1. The [h1]Source code[/h1] section was DROPPED. This repository still has no git
      remote - it has never been pushed - so the GitHub URL could not be verified and
@@ -87,25 +86,19 @@ Every system has its own on/off switch, and every kind of damage has a [b]streng
 [h1]Notes[/h1]
 [list]
 [*] [b]The volcano's terrain change is permanent.[/b] Nothing can undo it and it is saved. Try it on a city you don't mind reshaping, or keep a backup save.
-[*] [b]The volcano needs no DLC.[/b] It writes the terrain itself and does not use a disaster slot. (Without Natural Disasters, lava cannot set trees alight - the game itself refuses - and the mod says so in its diagnostics.)
-[*] [b]Everything else needs the Natural Disasters DLC[/b]: fire whirls, earthquakes and typhoons all borrow vanilla disaster machinery. The forecast panel works without it, minus the lightning and tornado hazard maps.
 [*] [b]The mod cleans up after itself before the game saves.[/b] Water sources it raised for a tsunami and weather it was driving are put back first, so a save made during a storm does not keep flooding or raining once the mod is gone. What does persist is the [b]volcano's terrain[/b], ordinary fire and rubble, and a small block of the mod's own data (a fire whirl in progress) that the game simply ignores if you uninstall.
 [/list]
 
 [h1]Requirements[/h1]
 [list]
 [*] [b]Cities: Skylines[/b] (the original, not CS2)
-[*] [b]Natural Disasters DLC[/b] for everything except the volcano and the basic forecast
-[*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2040656402][b]Harmony (CitiesHarmony)[/b][/url] - [b]strongly recommended.[/b] The mod runs without it and says so in the log, but three things stop working: fire whirls drift instead of staying put, a trench quake tears a crack across the seabed it should not have, and the wind stops shaking the trees.
+[*] [b]Natural Disasters DLC[/b] - required
+[*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2040656402][b]Harmony (CitiesHarmony)[/b][/url] - required
 [/list]
 
 [h1]Language[/h1]
 English and Japanese - the game's own language setting picks between them.
-Other languages are welcome. The mod ships Locales/en.txt as a template: copy it to your language code (de.txt, fr.txt, zh.txt, ...), translate the values, and open a pull request on GitHub or post the file in the comments. Missing lines fall back to English, so a partial translation is fine.
-
-[h1]Source code[/h1]
-This mod is open source under the MIT licence. Bug reports and pull requests are welcome:
-[url=https://github.com/omoneko/DisasterPlus]github.com/omoneko/DisasterPlus[/url]
+Other languages are welcome. The mod ships Locales/en.txt as a template: copy it to your language code (de.txt, fr.txt, zh.txt, ...), translate the values and post the file in the comments. Missing lines fall back to English, so a partial translation is fine.
 
 [h1]Support[/h1]
 If you enjoy the mod, you can support development here:
