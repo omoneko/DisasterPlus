@@ -1,0 +1,104 @@
+DRAFT - not published yet. The owner reviews this before it goes on the Workshop page.
+
+Format follows the KAIJU Disaster page (Steam BBCode, English, with the same
+section order) so the author's mods read as a set.
+
+---
+
+[h1]Disaster +[/h1]
+[i]The ground you build on was never as quiet as the game let you believe.[/i]
+
+Five disaster systems for Cities: Skylines, built from the game's own physics rather than bolted on top of it: a weather forecast you can actually read, earthquakes with a real intensity field, megathrust quakes that raise a tsunami, self-forming fire whirls, typhoons that cross your map, and volcanoes that permanently reshape the terrain.
+
+[h1]Weather forecast[/h1]
+[list]
+[*] A panel showing [b]temperature, rain, cloud, fog and wind[/b] as they actually are in the simulation - not estimates.
+[*] [b]Lightning and tornado hazard maps[/b] drawn over the terrain, so you can see where the game is about to strike before it does.
+[*] [b]Hazard at cursor[/b]: point at a spot and read its odds.
+[/list]
+
+[h1]Earthquake[/h1]
+[list]
+[*] [b]The intensity field made visible.[/b] The game always faded damage with distance from the epicentre - it just never showed you. Now you can see the falloff, and where your city sits in it.
+[*] [b]Trench (megathrust) earthquake[/b] - a new tile. It raises the quake in the [b]sea nearest the point you click[/b], and it is the [b]only quake that brings a tsunami[/b]. No ground crack: the rupture is out under the seabed.
+[*] [b]The tsunami radiates from the epicentre[/b] as a ring, built from the game's own water solver rather than the DLC's map-edge wave.
+[*] [b]Distant fire and collapse[/b] - a megathrust shakes the whole map, so buildings burn and fall far from the epicentre, scaled to the magnitude.
+[*] [b]Long-period ground motion[/b] (off by default) - tall buildings resonate and come down while short ones nearby stand.
+[*] [b]Seismograph[/b] (off by default) - a synthetic P-wave / S-wave / coda trace, with the S-P interval.
+[*] [b]Stronger camera shake[/b], scaled to the intensity you chose.
+[/list]
+
+[h1]Fire whirl[/h1]
+[list]
+[*] A column of fire that [b]forms on its own[/b] out of a large, dense fire and [b]stays where it formed[/b].
+[*] It [b]throws embers[/b] into the buildings around it and spreads the fire further.
+[*] [b]There is no button for it.[/b] A fire whirl is what a big fire turns into - if you want one, you have to let a fire get out of hand. When it does not appear, the panel tells you how many more burning buildings it would take.
+[*] Survives save and load, with its remaining lifetime intact.
+[/list]
+
+[h1]Typhoon[/h1]
+[list]
+[*] It [b]forms off the edge of the map[/b], approaches the point you clicked, passes over it and [b]carries on out the other side[/b] - it does not appear on top of you out of nowhere.
+[*] Its [b]own storm cloud[/b], a real object in the world with an eye and spiral bands, drawn above the vanilla sky.
+[*] [b]Wind damage[/b], [b]storm surge and flooding[/b], [b]gust patches[/b] that tear at a small area, [b]lightning[/b], rain, and storm sound.
+[*] [b]The right of track is the dangerous semicircle[/b] (left, in the southern hemisphere - there is a setting) - wider damage radius and higher odds on that side, as in a real storm.
+[*] Cars and pedestrians are [b]shoved around by the wind[/b], and trees whip near the eye.
+[*] [b]One click to jump to the storm[/b] from the panel.
+[/list]
+
+[h1]Volcano[/h1]
+[list]
+[*] [b]The ground itself rises[/b] over time into a cone with a crater - you watch the mountain grow.
+[*] [b]Eruption plume[/b], [b]volcanic lightning[/b] inside the ash column, and [b]dust bands running down the flanks[/b].
+[*] [b]Lava flows[/b] down the slope, scorches the ground and [b]sets buildings alight[/b].
+[*] [b]Volcanic tremor[/b] shakes the screen independently of the earthquake feature.
+[*] Three cone shapes to choose from.
+[/list]
+
+[h1]Options[/h1]
+Every system has its own on/off switch, and every kind of damage has a [b]strength slider that goes to 0[/b] - so you can keep the spectacle and drop the destruction, or the other way round.
+[list]
+[*] Fire whirl: detection radius and building count, lifetime, spread strength, minimum separation, and an option to [b]suppress vanilla tornadoes[/b].
+[*] Earthquake: trench tile, tsunami chain and its delay, long-period strength, distant damage strength, seismograph.
+[*] Typhoon: default intensity, wind / flood / gust strengths, cloud, storm effects, sound, hemisphere.
+[*] Volcano: cone shape, clearing lead time, uplift duration, relief strength, plume, lightning, dust bands, sound, lava flow count, lava ignition, lava surface, tremor.
+[*] General: [b]intensity unlock[/b] - raises the manual disaster slider from 10.0 to 25.5.
+[/list]
+
+[h1]How to use[/h1]
+[list]
+[*] Open the [b]Disasters[/b] info-view panel. The new tiles sit next to the vanilla disaster buttons: [b]Trench quake[/b], [b]Typhoon[/b], [b]Volcano[/b].
+[*] Pick a strength on the slider, then [b]click the map[/b].
+[*] The [b]D+ button[/b] at the top left opens the information window - forecast, earthquake, typhoon and volcano tabs.
+[*] Fire whirls have no tile on purpose (see above).
+[/list]
+
+[h1]Notes[/h1]
+[list]
+[*] [b]The volcano's terrain change is permanent.[/b] Nothing can undo it and it is saved. Try it on a city you don't mind reshaping, or keep a backup save.
+[*] [b]The volcano needs no DLC.[/b] It writes the terrain itself and does not use a disaster slot. (Without Natural Disasters, lava cannot set trees alight - the game itself refuses - and the mod says so in its diagnostics.)
+[*] [b]Everything else needs the Natural Disasters DLC[/b]: fire whirls, earthquakes and typhoons all borrow vanilla disaster machinery. The forecast panel works without it, minus the lightning and tornado hazard maps.
+[*] [b]Nothing is written into your save that outlives the mod[/b], apart from the volcano's terrain and ordinary fire and rubble. Remove the mod and the city keeps working.
+[/list]
+
+[h1]Requirements[/h1]
+[list]
+[*] [b]Cities: Skylines[/b] (the original, not CS2)
+[*] [b]Natural Disasters DLC[/b] for everything except the volcano and the basic forecast
+[*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2040656402][b]Harmony (CitiesHarmony)[/b][/url] - required
+[/list]
+
+[h1]Compatibility[/h1]
+[b]Natural Disasters Renewal[/b] can run alongside this mod; they divide the work. NDR owns how often vanilla disasters fire and how hard they hit; Disaster + adds new phenomena and visualisation and does not touch vanilla frequency. When NDR is present, an extra option appears letting you choose which mod owns earthquake damage, and the intensity unlock defers to NDR by default.
+
+[h1]Language[/h1]
+English and Japanese - the game's own language setting picks between them.
+Other languages are welcome. The mod ships Locales/en.txt as a template: copy it to your language code (de.txt, fr.txt, zh.txt, ...), translate the values, and open a pull request on GitHub or post the file in the comments. Missing lines fall back to English, so a partial translation is fine.
+
+[h1]Source code[/h1]
+This mod is open source under the MIT licence. Bug reports and pull requests are welcome:
+[url=https://github.com/omoneko/DisasterPlus]github.com/omoneko/DisasterPlus[/url]
+
+[h1]Support[/h1]
+If you enjoy the mod, you can support development here:
+https://ko-fi.com/omoneko
