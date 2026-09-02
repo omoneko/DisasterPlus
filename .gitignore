@@ -4,3 +4,4 @@ obj/
 *.suo
 .vs/
 .superpowers/
+tools/*/forecast-map.png

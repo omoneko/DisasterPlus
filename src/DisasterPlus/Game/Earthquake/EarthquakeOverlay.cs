@@ -97,7 +97,6 @@ namespace DisasterPlus.Game
         private static readonly FaultBandOutline[] _outlines = CreateOutlines();
 
         private static bool _enabled;
-        private static bool _registered;
         private static bool _sessionActive;
         private static bool _errorLogged;
 
@@ -129,7 +128,16 @@ namespace DisasterPlus.Game
         public static bool FaultGeometryMissing { get { return _faultGeometryMissing; } }
 
         /// <summary><c>RenderManager</c> への登録に成功したか。</summary>
-        public static bool Registered { get { return _registered; } }
+        /// <summary>
+        /// 描画ループに刺さっているか（診断）。
+        ///
+        /// ★★ **自前の旗を持たない。** 以前はここで <c>_registered = true</c> と
+        ///   していたが、登録は <see cref="OverlayRenderable"/> が行い、失敗しても
+        ///   例外を飲んで false のまま返る —— 自前の旗だと
+        ///   <b>登録に失敗しているのに「登録済み」と名乗る</b>。
+        ///   診断で嘘をつくのは、この基盤がいちばん避けたい壊れ方である。
+        /// </summary>
+        public static bool Registered { get { return OverlayRenderable.Registered; } }
 
         public static void Toggle()
         {
@@ -172,7 +180,6 @@ namespace DisasterPlus.Game
             // ★ 登録は①と共有する 1 個だけ（OverlayRenderable.EnsureRegistered）。
             //   ここで別の 1 個を作らないこと —— 外す API が無いので増える一方になる。
             OverlayRenderable.EnsureRegistered();
-            _registered = true;
         }
 
         /// <summary>

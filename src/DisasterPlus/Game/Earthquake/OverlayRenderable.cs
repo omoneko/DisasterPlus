@@ -80,6 +80,13 @@ namespace DisasterPlus.Game
         /// どちらから呼ばれても同じ 1 個で足りる —— 増やしても外せないので、
         /// 機能ごとに 1 個ずつ登録すると<b>都市を出入りするたびに増えていく</b>。
         /// </summary>
+        /// <summary>
+        /// 本当に登録できたか。**診断はこれを見ること。**
+        /// 呼んだ回数ではなく、<c>RegisterRenderableManager</c> が例外を投げずに
+        /// 通ったかを表す。
+        /// </summary>
+        public static bool Registered { get { return _registered; } }
+
         public static void EnsureRegistered()
         {
             if (_registered) return;
