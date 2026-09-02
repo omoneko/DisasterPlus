@@ -3,6 +3,15 @@ DRAFT - not published yet. The owner reviews this before it goes on the Workshop
 Format follows the KAIJU Disaster page (Steam BBCode, English, with the same
 section order) so the author's mods read as a set.
 
+Every claim below was checked against the code. TWO LINES ARE STILL UNVERIFIED
+and the owner must settle them before pasting:
+
+  1. The GitHub URL. This repository has NO git remote configured - it has never
+     been pushed - so "github.com/omoneko/DisasterPlus" is a guess at the name.
+     Confirm it, or drop the Source code section.
+  2. The ko-fi URL. Carried over from the published KAIJU Disaster page (same
+     author), not verified from anything in this repository.
+
 ---
 
 [h1]Disaster +[/h1]
@@ -12,7 +21,7 @@ Five disaster systems for Cities: Skylines, built from the game's own physics ra
 
 [h1]Weather forecast[/h1]
 [list]
-[*] A panel showing [b]temperature, rain, cloud, fog and wind[/b] as they actually are in the simulation - not estimates.
+[*] A panel showing [b]temperature, rain, cloud, fog and wind direction[/b] read straight out of the simulation, [b]with the value the weather is heading towards[/b] next to the one it is at - so you can see the change coming.
 [*] [b]Lightning and tornado hazard maps[/b] drawn over the terrain, so you can see where the game is about to strike before it does.
 [*] [b]Hazard at cursor[/b]: point at a spot and read its odds.
 [/list]
@@ -32,7 +41,7 @@ Five disaster systems for Cities: Skylines, built from the game's own physics ra
 [list]
 [*] A column of fire that [b]forms on its own[/b] out of a large, dense fire and [b]stays where it formed[/b].
 [*] It [b]throws embers[/b] into the buildings around it and spreads the fire further.
-[*] [b]There is no button for it.[/b] A fire whirl is what a big fire turns into - if you want one, you have to let a fire get out of hand. When it does not appear, the panel tells you how many more burning buildings it would take.
+[*] [b]There is no button for it.[/b] A fire whirl is what a big fire turns into - if you want one, you have to let a fire get out of hand. When it does not appear, the [b]diagnostics dump[/b] ([b]F11[/b]) says how close the nearest cluster of fires got.
 [*] Survives save and load, with its remaining lifetime intact.
 [/list]
 
@@ -42,8 +51,7 @@ Five disaster systems for Cities: Skylines, built from the game's own physics ra
 [*] Its [b]own storm cloud[/b], a real object in the world with an eye and spiral bands, drawn above the vanilla sky.
 [*] [b]Wind damage[/b], [b]storm surge and flooding[/b], [b]gust patches[/b] that tear at a small area, [b]lightning[/b], rain, and storm sound.
 [*] [b]The right of track is the dangerous semicircle[/b] (left, in the southern hemisphere - there is a setting) - wider damage radius and higher odds on that side, as in a real storm.
-[*] Cars and pedestrians are [b]shoved around by the wind[/b], and trees whip near the eye.
-[*] [b]One click to jump to the storm[/b] from the panel.
+[*] Cars and pedestrians are [b]shoved around by the wind[/b], and the trees nearest you sway harder under the eyewall.
 [/list]
 
 [h1]Volcano[/h1]
@@ -52,7 +60,7 @@ Five disaster systems for Cities: Skylines, built from the game's own physics ra
 [*] [b]Eruption plume[/b], [b]volcanic lightning[/b] inside the ash column, and [b]dust bands running down the flanks[/b].
 [*] [b]Lava flows[/b] down the slope, scorches the ground and [b]sets buildings alight[/b].
 [*] [b]Volcanic tremor[/b] shakes the screen independently of the earthquake feature.
-[*] Three cone shapes to choose from.
+[*] Three volcano forms to choose from: [b]shield[/b], [b]stratovolcano[/b] and [b]lava dome[/b].
 [/list]
 
 [h1]Options[/h1]
@@ -69,7 +77,8 @@ Every system has its own on/off switch, and every kind of damage has a [b]streng
 [list]
 [*] Open the [b]Disasters[/b] info-view panel. The new tiles sit next to the vanilla disaster buttons: [b]Trench quake[/b], [b]Typhoon[/b], [b]Volcano[/b].
 [*] Pick a strength on the slider, then [b]click the map[/b].
-[*] The [b]D+ button[/b] at the top left opens the information window - forecast, earthquake, typhoon and volcano tabs.
+[*] The [b]D+ button[/b] at the top left opens the information window: a [b]weather forecast[/b] tab and an [b]earthquake[/b] tab. Typhoons and volcanoes have no panel on purpose - their tiles just raise the disaster, like the vanilla buttons.
+[*] [b]F11[/b] writes a full diagnostics dump to the log, for when something does not happen and you want to know why.
 [*] Fire whirls have no tile on purpose (see above).
 [/list]
 
@@ -78,14 +87,14 @@ Every system has its own on/off switch, and every kind of damage has a [b]streng
 [*] [b]The volcano's terrain change is permanent.[/b] Nothing can undo it and it is saved. Try it on a city you don't mind reshaping, or keep a backup save.
 [*] [b]The volcano needs no DLC.[/b] It writes the terrain itself and does not use a disaster slot. (Without Natural Disasters, lava cannot set trees alight - the game itself refuses - and the mod says so in its diagnostics.)
 [*] [b]Everything else needs the Natural Disasters DLC[/b]: fire whirls, earthquakes and typhoons all borrow vanilla disaster machinery. The forecast panel works without it, minus the lightning and tornado hazard maps.
-[*] [b]Nothing is written into your save that outlives the mod[/b], apart from the volcano's terrain and ordinary fire and rubble. Remove the mod and the city keeps working.
+[*] [b]The mod cleans up after itself before the game saves.[/b] Water sources it raised for a tsunami and weather it was driving are put back first, so a save made during a storm does not keep flooding or raining once the mod is gone. What does persist is the [b]volcano's terrain[/b], ordinary fire and rubble, and a small block of the mod's own data (a fire whirl in progress) that the game simply ignores if you uninstall.
 [/list]
 
 [h1]Requirements[/h1]
 [list]
 [*] [b]Cities: Skylines[/b] (the original, not CS2)
 [*] [b]Natural Disasters DLC[/b] for everything except the volcano and the basic forecast
-[*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2040656402][b]Harmony (CitiesHarmony)[/b][/url] - required
+[*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2040656402][b]Harmony (CitiesHarmony)[/b][/url] - [b]strongly recommended.[/b] The mod runs without it and says so in the log, but three things stop working: fire whirls drift instead of staying put, a trench quake tears a crack across the seabed it should not have, and the wind stops shaking the trees.
 [/list]
 
 [h1]Compatibility[/h1]
