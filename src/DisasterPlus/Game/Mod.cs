@@ -79,10 +79,10 @@ namespace DisasterPlus.Game
                 //    スライダーが 400 / 40 で止まっていると、**触った瞬間に既定より
                 //    小さい値へ落ちる**（しかも下がったことは画面に出ない）。
                 //    設定の既定値を変えたら、必ずその値を含む帯にすること。
-                fw.AddSlider(Strings.DetectRadius, 50f, 900f, 25f, ModSettings.DetectRadius.value,
+                OptionsSlider.Add(fw, Strings.DetectRadius, null, 50f, 900f, 25f, ModSettings.DetectRadius.value,
                     v => ModSettings.DetectRadius.value = (int)v);
 
-                fw.AddSlider(Strings.DetectCount, 4f, 200f, 4f, ModSettings.DetectCount.value,
+                OptionsSlider.Add(fw, Strings.DetectCount, null, 4f, 200f, 4f, ModSettings.DetectCount.value,
                     v => ModSettings.DetectCount.value = (int)v);
 
                 // ★ バニラ（DLC）の竜巻を止める。火災旋風の渦には影響しない
@@ -90,13 +90,13 @@ namespace DisasterPlus.Game
                 fw.AddCheckbox(Strings.NoVanillaTornado, ModSettings.NoVanillaTornado.value,
                     v => ModSettings.NoVanillaTornado.value = v);
 
-                fw.AddSlider(Strings.MaxLifetime, 1f, 60f, 1f, ModSettings.MaxLifetimeMinutes.value,
+                OptionsSlider.Add(fw, Strings.MaxLifetime, Strings.MaxLifetimeTip, 1f, 60f, 1f, ModSettings.MaxLifetimeMinutes.value,
                     v => ModSettings.MaxLifetimeMinutes.value = (int)v);
 
-                fw.AddSlider(Strings.SpreadStrength, 0f, IgnitionSpread.MaxStrength, 1f,
+                OptionsSlider.Add(fw, Strings.SpreadStrength, null, 0f, IgnitionSpread.MaxStrength, 1f,
                     ModSettings.SpreadStrength.value, v => ModSettings.SpreadStrength.value = (int)v);
 
-                fw.AddSlider(Strings.MinSeparation, 100f, 800f, 25f, ModSettings.MinSeparation.value,
+                OptionsSlider.Add(fw, Strings.MinSeparation, null, 100f, 800f, 25f, ModSettings.MinSeparation.value,
                     v => ModSettings.MinSeparation.value = (int)v);
             }
             else
@@ -153,20 +153,20 @@ namespace DisasterPlus.Game
                 earthquake.AddCheckbox(Strings.EarthquakeTsunamiChain,
                     ModSettings.EarthquakeTsunamiChain.value,
                     v => ModSettings.EarthquakeTsunamiChain.value = v);
-                earthquake.AddSlider(Strings.EarthquakeTsunamiDelay, 5f, 120f, 5f,
+                OptionsSlider.Add(earthquake, Strings.EarthquakeTsunamiDelay, Strings.EarthquakeTsunamiDelayTip, 5f, 120f, 5f,
                     ModSettings.EarthquakeTsunamiDelayMinutes.value,
                     v => ModSettings.EarthquakeTsunamiDelayMinutes.value = (int)v);
 
                 // ★ 長周期地震動。**既定 OFF。** 津波と違い、これは
                 //    「バニラなら倒れなかった建物を倒す」ので、チェックボックスの
                 //    ラベル自体にその事実を書く（Strings.EarthquakeLongPeriodEnabled）。
-                earthquake.AddSlider(Strings.EarthquakeLongPeriodStrength, 0f, 10f, 1f,
+                OptionsSlider.Add(earthquake, Strings.EarthquakeLongPeriodStrength, Strings.EarthquakeLongPeriodStrengthTip, 0f, 10f, 1f,
                     ModSettings.EarthquakeLongPeriodStrength.value,
                     v => ModSettings.EarthquakeLongPeriodStrength.value = (int)v);
 
                 // ★ 海溝型の遠地被害。**チェックボックスは無い** —— 海溝型地震
                 //   そのものが本 MOD の機能なので、その強さを 0 にできれば足りる。
-                earthquake.AddSlider(Strings.EarthquakeTrenchDamageStrength, 0f, 10f, 1f,
+                OptionsSlider.Add(earthquake, Strings.EarthquakeTrenchDamageStrength, Strings.EarthquakeTrenchDamageStrengthTip, 0f, 10f, 1f,
                     ModSettings.EarthquakeTrenchDamageStrength.value,
                     v => ModSettings.EarthquakeTrenchDamageStrength.value = (int)v);
 
@@ -197,13 +197,13 @@ namespace DisasterPlus.Game
             var typhoon = helper.AddGroup(Strings.GroupTyphoon);
             typhoon.AddCheckbox(Strings.TyphoonEnabled, ModSettings.TyphoonEnabled.value,
                 v => ModSettings.TyphoonEnabled.value = v);
-            typhoon.AddSlider(Strings.TyphoonIntensity, 10f, 255f, 5f,
+            OptionsSlider.Add(typhoon, Strings.TyphoonIntensity, Strings.TyphoonIntensityTip, 10f, 255f, 5f,
                 ModSettings.TyphoonIntensity.value,
                 v => ModSettings.TyphoonIntensity.value = (int)v);
             // ★★ **チェックボックスは置かない。** 強さ 0 が「切る」である
             //    （ModSettings.MigrateEnableFlagsIntoStrength）。氾濫・局所被害・
             //    長周期も同じ形にしてある。
-            typhoon.AddSlider(Strings.TyphoonWindStrength, 0f, 10f, 1f,
+            OptionsSlider.Add(typhoon, Strings.TyphoonWindStrength, Strings.TyphoonWindStrengthTip, 0f, 10f, 1f,
                 ModSettings.TyphoonWindStrength.value,
                 v => ModSettings.TyphoonWindStrength.value = (int)v);
             // ★ 危険半円の向き。既定は北半球（＝進行方向の右が強い）。
@@ -212,13 +212,13 @@ namespace DisasterPlus.Game
                 v => ModSettings.TyphoonSouthernHemisphere.value = v);
             // ★ 河川氾濫も既定 ON。**セーブに焼き付く状態を触る唯一の機能**なので、
             //    水位は台風の終了時・都市を出るとき・保存のたびに元へ戻す。
-            typhoon.AddSlider(Strings.TyphoonFloodStrength, 0f, 10f, 1f,
+            OptionsSlider.Add(typhoon, Strings.TyphoonFloodStrength, Strings.TyphoonFloodStrengthTip, 0f, 10f, 1f,
                 ModSettings.TyphoonFloodStrength.value,
                 v => ModSettings.TyphoonFloodStrength.value = (int)v);
             // ★ 竜巻並みの局所被害。**竜巻の実体は 1 つも作らない**（既定 ON）。
             //    随伴竜巻（バニラの竜巻災害を借りる機能）は撤去された ——
             //    その代わりがこれである。強さ 0 で完全に無効になる。
-            typhoon.AddSlider(Strings.TyphoonGustStrength, 0f, 10f, 1f,
+            OptionsSlider.Add(typhoon, Strings.TyphoonGustStrength, Strings.TyphoonGustStrengthTip, 0f, 10f, 1f,
                 ModSettings.TyphoonGustStrength.value,
                 v => ModSettings.TyphoonGustStrength.value = (int)v);
             // ★ 雲は既定 ON。**見た目だけの機能**で、切っても他の 5 要素はそのまま動く
@@ -286,14 +286,14 @@ namespace DisasterPlus.Game
             //    0 だと「何も壊さない → 何も上がらない → 進捗が動かない」の輪から
             //    出られなくなる（VolcanoClearing.LeadMetres）。使う側でも
             //    同じ下限へクランプするので、.cgs を手で書き換えても止まらない。
-            volcano.AddSlider(Strings.VolcanoClearingLead, 16f, 400f, 16f,
+            OptionsSlider.Add(volcano, Strings.VolcanoClearingLead, Strings.VolcanoClearingLeadTip, 16f, 400f, 16f,
                 ModSettings.VolcanoClearingLeadMetres.value,
                 v => ModSettings.VolcanoClearingLeadMetres.value = (int)v);
 
             // ★ 隆起にかけるゲーム内分（T6）。長すぎる値を入れても
             //    UpliftSchedule.TotalTicksFor が「山頂が毎 tick 1/64 m 以上動く」上限で
             //    切り詰めるので、**無言で隆起が止まることは無い**（罠 2）。
-            volcano.AddSlider(Strings.VolcanoUpliftMinutes, 5f, 240f, 5f,
+            OptionsSlider.Add(volcano, Strings.VolcanoUpliftMinutes, Strings.VolcanoUpliftMinutesTip, 5f, 240f, 5f,
                 ModSettings.VolcanoUpliftMinutes.value,
                 v => ModSettings.VolcanoUpliftMinutes.value = (int)v);
 
@@ -302,7 +302,7 @@ namespace DisasterPlus.Game
             //   持っていて、ここはその全体倍率 1 本だけである（つまみを増やさない）。
             //   起伏は半径 R と最終高 H を決して超えない —— 掛け算だけで作ってあり、
             //   実効半径は縮む向きにしか動かない（VolcanoRelief のクラス doc）。
-            volcano.AddSlider(Strings.VolcanoReliefStrength,
+            OptionsSlider.Add(volcano, Strings.VolcanoReliefStrength, Strings.VolcanoReliefStrengthTip,
                 0f, VolcanoRelief.MaxStrengthUnit * 100f, 10f,
                 ModSettings.VolcanoReliefStrength.value,
                 v => ModSettings.VolcanoReliefStrength.value = (int)v);
@@ -337,7 +337,7 @@ namespace DisasterPlus.Game
             // ★ 溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
             //    上限は VolcanoLava.MaxFlows と同じ 8 —— 1 tick あたりの仕事量が
             //    「本数 × 2 歩」で決まるので、ここが費用の上限そのものである。
-            volcano.AddSlider(Strings.VolcanoLavaFlowsSetting, 0f, VolcanoLava.MaxFlows, 1f,
+            OptionsSlider.Add(volcano, Strings.VolcanoLavaFlowsSetting, Strings.VolcanoLavaFlowsSettingTip, 0f, VolcanoLava.MaxFlows, 1f,
                 ModSettings.VolcanoLavaFlows.value,
                 v => ModSettings.VolcanoLavaFlows.value = (int)v);
 

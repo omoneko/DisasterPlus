@@ -42,8 +42,10 @@ namespace DisasterPlus.Game
 
         public static string DetectRadius = "Detection radius (m)";
         public static string DetectCount = "Buildings required";
-        public static string MaxLifetime = "Maximum lifetime (in-game minutes)";
-        public static string SpreadStrength = "Fire spread strength (0 = off)";
+        public static string MaxLifetime = "Maximum lifetime (min)";
+        public static string MaxLifetimeTip =
+            "In-game minutes.";
+        public static string SpreadStrength = "Fire spread (0 = off)";
         public static string MinSeparation = "Minimum separation (m)";
 
         public static string IntensityUnlock = "Unlock disaster intensity up to 25.5";
@@ -599,7 +601,9 @@ namespace DisasterPlus.Game
         //   旧ラベルは「効きます」と読める書き方だった）。
         public static string EarthquakeTsunamiChain =
             "Always show the tsunami row (trench earthquakes raise one either way)";
-        public static string EarthquakeTsunamiDelay = "Tsunami delay (in-game minutes)";
+        public static string EarthquakeTsunamiDelay = "Tsunami delay (min)";
+        public static string EarthquakeTsunamiDelayTip =
+            "In-game minutes between the quake and the wave.";
         public static string EarthquakeTsunamiPending = "Tsunami expected in";
 
         /// <summary>数字を添えられないときの言い方（<c>Pending</c> は後ろに数が要る）。</summary>
@@ -652,10 +656,12 @@ namespace DisasterPlus.Game
         //     「読めなかった」と「低いので対象外」が同じ文になってしまうので新設した
 
         public static string EarthquakeLongPeriod = "Long-period ground motion";
-        public static string EarthquakeLongPeriodStrength =
-            "Long-period ground motion, 0 = off (adds damage vanilla never does)";
-        public static string EarthquakeTrenchDamageStrength =
-            "Trench quake: distant fire and collapse (0 = off)";
+        public static string EarthquakeLongPeriodStrength = "Long-period (0 = off)";
+        public static string EarthquakeLongPeriodStrengthTip =
+            "Long-period ground motion. Adds damage the game never does: tall buildings come down while short ones nearby stand.";
+        public static string EarthquakeTrenchDamageStrength = "Distant damage (0 = off)";
+        public static string EarthquakeTrenchDamageStrengthTip =
+            "Trench quakes start fires and collapse buildings far from the epicentre, scaled to the magnitude.";
         public static string EarthquakeLongPeriodNoHeight =
             "This building's height could not be read, so no long-period damage is applied to it. "
             + "The mod never guesses a height.";
@@ -727,8 +733,9 @@ namespace DisasterPlus.Game
         //   押したときに出るスライダーで選ぶ（そのスライダーの初期値がこの値）。
         //   ラベルが「既定」と名乗らないと、スライダーで変えた強度が
         //   ここに従っていないように見える。
-        public static string TyphoonIntensity =
-            "Default typhoon intensity (10-255; vanilla storms use 55)";
+        public static string TyphoonIntensity = "Default intensity";
+        public static string TyphoonIntensityTip =
+            "From 10 to 255. The game own thunderstorms use 55.";
         // ★ **設定画面からは降ろした。** 「バニラの嵐は 55」はスライダーの
         //   ラベル（TyphoonIntensity）に畳んである。
         public static string TyphoonIntensityNote =
@@ -852,8 +859,9 @@ namespace DisasterPlus.Game
         // （書式文字列を使わない。翻訳の {0} がずれると実行時に落ちる）。
         public static string TyphoonWindRow =
             "Wind damage (collapsed this pass / total / examined / refused by the game)";
-        public static string TyphoonWindStrength =
-            "Wind damage, 0 = off (collapses buildings vanilla never would)";
+        public static string TyphoonWindStrength = "Wind damage (0 = off)";
+        public static string TyphoonWindStrengthTip =
+            "Collapses buildings the game would never collapse by itself.";
         public static string TyphoonWindCapped =
             "sweep truncated this pass; the outer edge has not been rolled yet";
 
@@ -877,8 +885,9 @@ namespace DisasterPlus.Game
         //   （設計書 §7.4。①の「なぜハザードマップが空か」と同じ扱い）。
         //   **不具合ではないと明示する。**
         public static string TyphoonFloodRow = "River flooding";
-        public static string TyphoonFloodStrength =
-            "River flooding, 0 = off (raises the map's own water sources)";
+        public static string TyphoonFloodStrength = "River flooding (0 = off)";
+        public static string TyphoonFloodStrengthTip =
+            "Raises the map own water sources. Put back when the storm ends.";
         public static string TyphoonFloodNoSources =
             "This map has no natural water sources near the storm, so no river can rise. "
             + "Nothing is wrong - the game has no flood disaster of its own, and Disaster + "
@@ -896,8 +905,9 @@ namespace DisasterPlus.Game
         public static string TyphoonGustRow =
             "Tornado-strength damage (patches now / collapsed this pass / total / refused "
             + "by the game)";
-        public static string TyphoonGustStrength =
-            "Tornado-strength damage patches, 0 = off (no tornado is spawned)";
+        public static string TyphoonGustStrength = "Gust damage (0 = off)";
+        public static string TyphoonGustStrengthTip =
+            "Tornado-strength damage in small patches. No tornado is spawned.";
 
         // --- ④台風（Task 9: 巨大な回転雲） ---
         //
@@ -1130,8 +1140,9 @@ namespace DisasterPlus.Game
             + "the terrain back to the height of every road and building on every update, and "
             + "the mountain would come out full of flat trenches and bowls.";
 
-        public static string VolcanoClearingLead =
-            "How far the clearing runs ahead of the uplift (m)";
+        public static string VolcanoClearingLead = "Clearing lead (m)";
+        public static string VolcanoClearingLeadTip =
+            "How far the clearing runs ahead of the uplift.";
 
         // ★ VolcanoStopButton は 2026-08-22 に退役した（キーごと削除）。
         //   所有者の判断「止めるボタンは不要です。だって実際に噴火を止めることなんて
@@ -1153,8 +1164,12 @@ namespace DisasterPlus.Game
         //   範囲だけ**を流す。プレイヤーにとって意味があるのは「変わった分が画面に
         //   出るまでに地形更新が何回要るか」で、1 なら同じ tick で全部出ている
         //   ＝ いちばん滑らかな状態である（VolcanoUplift のクラス doc）。
-        public static string VolcanoUpliftMinutes = "Time the uplift takes (in-game minutes)";
-        public static string VolcanoReliefStrength = "Relief on the mountain's flanks (%, 0 = a smooth cone)";
+        public static string VolcanoUpliftMinutes = "Uplift time (min)";
+        public static string VolcanoUpliftMinutesTip =
+            "In-game minutes the uplift takes.";
+        public static string VolcanoReliefStrength = "Flank relief (%)";
+        public static string VolcanoReliefStrengthTip =
+            "Relief on the mountain flanks. 0 = a smooth cone.";
 
         // ★★ ⑤を構えているあいだの強度スライダーの説明。**言葉はここ 1 行だけ**で、
         //    ラベルには数字（倍率と実寸）しか出さない（VolcanoSizeReadout のクラス doc）。
@@ -1210,7 +1225,9 @@ namespace DisasterPlus.Game
         // ★ ここも [measured] は付かない。流れた距離も着火数も**⑤が自分で数えた
         //   実績**であって、ゲームが計算した値ではない（設計書 §7.4）。
         public static string VolcanoLavaRow = "Lava";
-        public static string VolcanoLavaFlowsSetting = "Number of lava flows (0 = off)";
+        public static string VolcanoLavaFlowsSetting = "Lava flows (0 = off)";
+        public static string VolcanoLavaFlowsSettingTip =
+            "Number of flows from the crater.";
         public static string VolcanoLavaFireSetting = "Lava sets fire to what it touches";
         public static string VolcanoLavaLongest = "Longest flow";
 

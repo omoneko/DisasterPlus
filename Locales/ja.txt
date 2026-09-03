@@ -8,11 +8,12 @@ TrenchQuakeButtonLabel = 海溝型地震
 TrenchQuakeButtonTooltip = クリックした地点にいちばん近い海で、プレート境界型の地震を起こします。津波を連れてくるのはこの地震だけです —— ゲーム自身の（断層型の）地震では津波は起きません。
 TrenchQuakeNeedsDlc = 海溝型地震には Natural Disasters DLC が必要です。
 NoVanillaTornado = ゲーム自身の竜巻を発生させない
-DetectRadius = 発生判定の半径 (m)
-DetectCount = 発生に必要な延焼棟数
-MaxLifetime = 最大持続時間 (ゲーム内分)
-SpreadStrength = 延焼拡大の強さ (0 で無効)
-MinSeparation = 多重発生の最小離隔距離 (m)
+DetectRadius = 検知半径 (m)
+DetectCount = 必要な建物数
+MaxLifetime = 最大持続時間 (分)
+MaxLifetimeTip = ゲーム内の分。
+SpreadStrength = 延焼の強さ (0 = 無効)
+MinSeparation = 最小間隔 (m)
 IntensityUnlock = 災害の強度上限を 25.5 まで解放する
 IntensityUnlockHandledByOther = Natural Disasters Renewal が担当しています。Disaster + 側で制御したい場合のみ有効にしてください。
 EarthquakeDamageOwner = 地震の被害計算の担当
@@ -170,7 +171,8 @@ EarthquakeOverlayUnavailable = このビルドでは、ゲームの描画系に�
 EarthquakeOverlayBothOn = ゲームのハザード情報ビューも同時に表示されています。2 つの絵は別の量です（下の凡例を参照）。
 EarthquakeOverlayLegend = 凡例 — 青緑: 破壊係数（震央がいちばん濃い）。紅紫: 断層帯。白: 震央と断層の走向
 EarthquakeTsunamiChain = 津波の行を常に表示する（海溝型地震はこの設定に関係なく津波を起こします）
-EarthquakeTsunamiDelay = 津波までの遅延 (ゲーム内分)
+EarthquakeTsunamiDelay = 津波までの遅れ (分)
+EarthquakeTsunamiDelayTip = 地震から波が来るまでのゲーム内の分。
 EarthquakeTsunamiPending = 津波の到達予定
 EarthquakeTsunamiSoon = 津波が向かっています
 EarthquakeTsunamiRaised = 津波が発生しました
@@ -184,8 +186,10 @@ EarthquakeRealMinutes = 実分
 EarthquakeTsunamiNoRoom = 震源に海はありますが、広さが足りません。波は震源のまわり一面に開けた海を必要とします。狭い湾や水路では、波として伝わらずに低地を満たすだけになります。もっと沖を狙ってください。
 EarthquakeTsunamiBusy = 前回の海溝型地震による津波がまだ終わっていません。同時に追えるのは1本だけです。波が到達するまでお待ちください。
 EarthquakeLongPeriod = 長周期地震動
-EarthquakeLongPeriodStrength = 長周期地震動 (0 = 無効。バニラには無い被害を足します)
-EarthquakeTrenchDamageStrength = 海溝型地震: 遠方の火災と倒壊 (0 = 無効)
+EarthquakeLongPeriodStrength = 長周期地震動 (0 = 無効)
+EarthquakeLongPeriodStrengthTip = バニラには無い被害を足します。近くの低層が建っていても高層が倒れます。
+EarthquakeTrenchDamageStrength = 遠地被害 (0 = 無効)
+EarthquakeTrenchDamageStrengthTip = 海溝型地震で、震源から遠くても規模に応じて火災と倒壊が起きます。
 EarthquakeLongPeriodNoHeight = この建物の高さが読めなかったため、長周期地震動による追加被害は与えていません。高さを推測することはしません。
 EarthquakeBuildingHeight = 建物の高さ
 EarthquakeResonance = 共振
@@ -200,7 +204,8 @@ TyphoonEnabled = 台風パネルを有効にする
 TyphoonResetButton = 台風ボタンの位置をリセットする（次に都市を読み込んだときに反映されます）
 TyphoonNeedsDlc = 台風機能には Natural Disasters DLC が必要です。
 LogChannelTyphoon = 台風
-TyphoonIntensity = 台風の強度の既定値 (10〜255。バニラの嵐は 55)
+TyphoonIntensity = 台風の既定の強度
+TyphoonIntensityTip = 10〜255。ゲームの雷雨は 55。
 TyphoonIntensityNote = ゲーム自身の嵐は 55 です。100 を超える値はバニラが生成しない領域になります。
 TyphoonTitle = 台風
 TyphoonStart = 台風の発生地点を指す
@@ -233,18 +238,21 @@ TyphoonEffectsHeader = 台風がもたらすもの
 TyphoonLightningRow = 落雷（飛行中 / 累計 / 宿主の嵐に残している数 / 捨てられた数）
 TyphoonLightningYielded = この強度では宿主の雷雨だけで 20 発の枠を使い切る見込みのため、Disaster + は自前の落雷を 1 発も足しません。見えている雷は宿主の嵐のもので、壁雲のまわりではなく円盤全体に一様に散ります。壁雲への偏りを戻すには台風の強度を下げてください。
 TyphoonWindRow = 風害（この走査の倒壊 / 累計 / 調べた棟数 / ゲームに断られた棟数）
-TyphoonWindStrength = 風害 (0 = 無効。バニラなら倒れない建物が倒れます)
+TyphoonWindStrength = 風害 (0 = 無効)
+TyphoonWindStrengthTip = バニラなら倒れない建物が倒れます。
 TyphoonWindCapped = この走査は上限で打ち切られました（外縁はまだ判定されていません）
 TyphoonSouthernHemisphere = 南半球（危険半円が進行方向の「左」になります）
 TyphoonDangerousSideNote = 実在の台風は左右対称ではありません。渦の回転と台風自身の移動が足し算になる側があり、その側だけ被害の範囲と確率が少しだけ大きくなります。北半球では進行方向の右、南半球では左です。
 TyphoonDangerousSideRight = 進行方向の右側がやや強い
 TyphoonDangerousSideLeft = 進行方向の左側がやや強い
 TyphoonFloodRow = 河川氾濫
-TyphoonFloodStrength = 河川の氾濫 (0 = 無効。マップの水源を持ち上げます)
+TyphoonFloodStrength = 河川の氾濫 (0 = 無効)
+TyphoonFloodStrengthTip = マップの水源を持ち上げます。台風が去ると元に戻します。
 TyphoonFloodNoSources = 台風の近くにこのマップの自然水源が無いため、川は増水しません。不具合ではありません — ゲームに洪水災害は存在せず、Disaster + はマップが元から持っている水源の水位を上げているだけです。
 TyphoonFloodRaised = 増水中
 TyphoonGustRow = 竜巻並みの局所被害（今の箇所数 / この走査の倒壊 / 累計 / ゲームに断られた棟数）
-TyphoonGustStrength = 突風による局所被害 (0 = 無効。竜巻は発生しません)
+TyphoonGustStrength = 突風の局所被害 (0 = 無効)
+TyphoonGustStrengthTip = 竜巻並みの被害を狭い範囲に。竜巻そのものは発生しません。
 TyphoonCloudEnabled = 台風の渦巻き雲を描く
 TyphoonVanillaCloudBoost = ゲーム自身の空の雲も濃く・速く流す
 TyphoonCloudUnavailable = この環境にはゲームの空の雲の設定が無いため、Disaster + 自身の雲だけを描いています。
@@ -293,12 +301,15 @@ VolcanoShapeSetting = 火山の形態
 VolcanoClearingRow = 準備
 VolcanoClearedRadius = 走査した半径
 VolcanoClearingPathUnavailable = このゲームのビルドでは範囲内の道路と建物を取り除く方法が見つからなかったため、火山は作りません。先に取り除かずに地面を上げることはできません —— ゲームが更新のたびに地形を道路と建物の高さへ押し戻すため、山の中に平らな溝とすり鉢が残ります。
-VolcanoClearingLead = 準備が隆起より先行する距離 (m)
+VolcanoClearingLead = 先行更地の距離 (m)
+VolcanoClearingLeadTip = 隆起より先に更地にする距離。
 VolcanoUpliftRow = 隆起
 VolcanoUpliftProgress = 進捗
 VolcanoSummitRow = 山頂
-VolcanoUpliftMinutes = 隆起にかける時間（ゲーム内分）
-VolcanoReliefStrength = 山肌の凹凸の強さ（%、0 で滑らかな円錐）
+VolcanoUpliftMinutes = 隆起にかける時間 (分)
+VolcanoUpliftMinutesTip = 隆起に使うゲーム内の分。
+VolcanoReliefStrength = 山肌の凹凸 (%)
+VolcanoReliefStrengthTip = 0 で滑らかな円錐。
 VolcanoSizeSliderTooltip = 火山の大きさ。設定の半径と最終高に対する倍率です。
 VolcanoEruptionRow = 噴火
 VolcanoEruptionFx = 噴煙を描く
@@ -306,7 +317,8 @@ VolcanoEruptionSound = 噴火の音を鳴らす
 VolcanoPyroclasticSetting = 裾野へ広がる土煙の扇を出す
 VolcanoEffectsMissing = この環境ではゲームの粒子エフェクトを借りられなかったため、噴火は描かれません。山はそのまませり上がり、溶岩も流れ、建物にも火が付きます。
 VolcanoLavaRow = 溶岩
-VolcanoLavaFlowsSetting = 溶岩の本数 (0 で無効)
+VolcanoLavaFlowsSetting = 溶岩の本数 (0 = 無効)
+VolcanoLavaFlowsSettingTip = 火口から出す流れの本数。
 VolcanoLavaFireSetting = 溶岩が通った場所に火を付ける
 VolcanoLavaLongest = いちばん長い流れ
 VolcanoQuakeSetting = 火山性地震（揺れるだけ）
