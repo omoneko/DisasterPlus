@@ -348,7 +348,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteGusts(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
-            if (!ModSettings.TyphoonGustEnabled.value)
+            if (ModSettings.TyphoonGustStrength.value <= 0)
             {
                 b.Line(2, "tornado-strength damage", "off (setting)");
                 return;
@@ -422,7 +422,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteFlood(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
-            if (!ModSettings.TyphoonFloodEnabled.value)
+            if (ModSettings.TyphoonFloodStrength.value <= 0)
             {
                 b.Line(2, "river flooding", "off (setting)");
                 return;
@@ -462,7 +462,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void WriteWind(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
-            if (!ModSettings.TyphoonWindDamage.value)
+            if (ModSettings.TyphoonWindStrength.value <= 0)
             {
                 b.Line(2, "wind damage", "off (setting)");
                 return;

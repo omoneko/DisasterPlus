@@ -184,8 +184,7 @@ EarthquakeRealMinutes = 実分
 EarthquakeTsunamiNoRoom = 震源に海はありますが、広さが足りません。波は震源のまわり一面に開けた海を必要とします。狭い湾や水路では、波として伝わらずに低地を満たすだけになります。もっと沖を狙ってください。
 EarthquakeTsunamiBusy = 前回の海溝型地震による津波がまだ終わっていません。同時に追えるのは1本だけです。波が到達するまでお待ちください。
 EarthquakeLongPeriod = 長周期地震動
-EarthquakeLongPeriodEnabled = 長周期地震動を有効にする (バニラには無い被害を足します)
-EarthquakeLongPeriodStrength = 長周期地震動の強さ (0 で無効)
+EarthquakeLongPeriodStrength = 長周期地震動 (0 = 無効。バニラには無い被害を足します)
 EarthquakeTrenchDamageStrength = 海溝型地震: 遠方の火災と倒壊 (0 = 無効)
 EarthquakeLongPeriodNoHeight = この建物の高さが読めなかったため、長周期地震動による追加被害は与えていません。高さを推測することはしません。
 EarthquakeBuildingHeight = 建物の高さ
@@ -234,22 +233,18 @@ TyphoonEffectsHeader = 台風がもたらすもの
 TyphoonLightningRow = 落雷（飛行中 / 累計 / 宿主の嵐に残している数 / 捨てられた数）
 TyphoonLightningYielded = この強度では宿主の雷雨だけで 20 発の枠を使い切る見込みのため、Disaster + は自前の落雷を 1 発も足しません。見えている雷は宿主の嵐のもので、壁雲のまわりではなく円盤全体に一様に散ります。壁雲への偏りを戻すには台風の強度を下げてください。
 TyphoonWindRow = 風害（この走査の倒壊 / 累計 / 調べた棟数 / ゲームに断られた棟数）
-TyphoonWindEnabled = 風害を有効にする（バニラでは絶対に倒れない建物が倒れます）
-TyphoonWindStrength = 風害の強さ (0 で無効)
+TyphoonWindStrength = 風害 (0 = 無効。バニラなら倒れない建物が倒れます)
 TyphoonWindCapped = この走査は上限で打ち切られました（外縁はまだ判定されていません）
 TyphoonSouthernHemisphere = 南半球（危険半円が進行方向の「左」になります）
 TyphoonDangerousSideNote = 実在の台風は左右対称ではありません。渦の回転と台風自身の移動が足し算になる側があり、その側だけ被害の範囲と確率が少しだけ大きくなります。北半球では進行方向の右、南半球では左です。
 TyphoonDangerousSideRight = 進行方向の右側がやや強い
 TyphoonDangerousSideLeft = 進行方向の左側がやや強い
 TyphoonFloodRow = 河川氾濫
-TyphoonFloodEnabled = 河川氾濫を有効にする（マップ自身の水源の水位を上げます）
-TyphoonFloodStrength = 河川氾濫の強さ (0 で無効)
+TyphoonFloodStrength = 河川の氾濫 (0 = 無効。マップの水源を持ち上げます)
 TyphoonFloodNoSources = 台風の近くにこのマップの自然水源が無いため、川は増水しません。不具合ではありません — ゲームに洪水災害は存在せず、Disaster + はマップが元から持っている水源の水位を上げているだけです。
 TyphoonFloodRaised = 増水中
 TyphoonGustRow = 竜巻並みの局所被害（今の箇所数 / この走査の倒壊 / 累計 / ゲームに断られた棟数）
-TyphoonGustEnabled = 竜巻並みの局所被害を出す（竜巻そのものは発生しません）
-TyphoonGustStrength = 竜巻並みの局所被害の強さ (0 で無効)
-TyphoonTornadoRetiredNote = 旧「随伴する竜巻」の設定は廃止しました。保存されている値は二度と読まれません。
+TyphoonGustStrength = 突風による局所被害 (0 = 無効。竜巻は発生しません)
 TyphoonCloudEnabled = 台風の渦巻き雲を描く
 TyphoonVanillaCloudBoost = ゲーム自身の空の雲も濃く・速く流す
 TyphoonCloudUnavailable = この環境にはゲームの空の雲の設定が無いため、Disaster + 自身の雲だけを描いています。

@@ -136,8 +136,7 @@ namespace DisasterPlus.Game
         /// .cgs のキーと値は公開契約だからである。
         /// **この 2 本を別の意味で再利用してはいけない** —— 新しい設定
         /// （<see cref="TyphoonGustEnabled"/> / <see cref="TyphoonGustStrength"/>）には
-        /// 新しいキー名を付けてある。撤去したことは
-        /// <c>Strings.TyphoonTornadoRetiredNote</c> が設定画面で名乗る。
+        /// 新しいキー名を付けてある。
         /// </summary>
         public static SavedBool TyphoonTornadoes;
         public static SavedInt TyphoonTornadoCount;
@@ -513,7 +512,64 @@ namespace DisasterPlus.Game
             //   （.cgs は公開契約で、番号も文字列も詰め直さない）。
             VolcanoQuake = new SavedBool("volcanoQuake", FileName, true, true);
 
+            MigrateEnableFlagsIntoStrength();
+
             _ready = true;
+        }
+
+        /// <summary>
+        /// <b>「有効」チェックと「強さ 0」の二重操作を畳む。</b>
+        ///
+        /// ── 所有者の指摘（2026-09-02）────────────────────────────
+        ///
+        /// &gt; Option パネルの UI で一部重複して操作がしづらいところがあります
+        ///
+        /// 風害・局所被害・氾濫・長周期の 4 つは、**同じ機能に対して
+        /// チェックボックスと「0 で無効」のスライダーが両方付いていた**。
+        /// 切り方が 2 通りあると、片方だけ戻したときに
+        /// <b>入っているのに効かない</b>状態になり、画面からは理由が読めない。
+        ///
+        /// つまみはスライダー 1 本に寄せる。チェックは設定画面から降ろした。
+        ///
+        /// ── ★★ 既存の設定を 1 つも変えずに移行する ─────────────────
+        ///
+        /// <c>.cgs</c> の値は公開契約なので、<b>キーは消さないし詰め直さない</b>。
+        /// 代わりに<b>意味を 1 度だけ移す</b>:
+        ///
+        /// <code>
+        /// チェックが外れていた -> 強さを 0 にする（切っていた事実を保つ）
+        /// そのあとチェックを true に固定 -> 2 度目以降は何もしない
+        /// </code>
+        ///
+        /// これで**どの組み合わせも今日と同じ挙動になる**:
+        ///
+        /// <list type="bullet">
+        /// <item>チェック ON・強さ 3 → そのまま（効く）</item>
+        /// <item>チェック OFF・強さ 3 → 強さ 0（切れたまま。<b>勝手に有効化しない</b>）</item>
+        /// <item>チェック ON・強さ 0 → そのまま（切れたまま）</item>
+        /// </list>
+        ///
+        /// ★★ 長周期は<b>既定 OFF</b> だった（バニラなら倒れない建物を倒すため）。
+        ///   真新しい環境でも <c>eqLongPeriod</c> の既定が false なので、
+        ///   ここを通ると強さが 0 に落ちる —— <b>既定 OFF はそのまま保たれる</b>。
+        /// </summary>
+        private static void MigrateEnableFlagsIntoStrength()
+        {
+            Fold(EarthquakeLongPeriod, EarthquakeLongPeriodStrength);
+            Fold(TyphoonWindDamage, TyphoonWindStrength);
+            Fold(TyphoonFloodEnabled, TyphoonFloodStrength);
+            Fold(TyphoonGustEnabled, TyphoonGustStrength);
+        }
+
+        /// <summary>
+        /// 1 組ぶんの移行。**冪等** —— 2 度目以降は旗が立っているので何もしない。
+        /// </summary>
+        private static void Fold(SavedBool enabled, SavedInt strength)
+        {
+            if (enabled.value) return;
+
+            strength.value = 0;
+            enabled.value = true;
         }
 
         /// <summary>設定値を Core の設定オブジェクトへ詰め替える。Core は SavedInt を知らない。</summary>

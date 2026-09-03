@@ -170,7 +170,7 @@ namespace DisasterPlus.Game
             // ★ 第 2 層その 2。**既定 OFF**（ModSettings.EarthquakeLongPeriod の doc）。
             //    これは津波と違い、**バニラなら倒れなかった建物を実際に倒す**。
             //    設定を見てから呼ぶので、OFF のときは走査そのものが 1 回も走らない。
-            if (ModSettings.EarthquakeLongPeriod.value)
+            if (ModSettings.EarthquakeLongPeriodStrength.value > 0)
             {
                 LongPeriodDamage.Apply(snapshot, deltaMinutes);
             }
@@ -392,7 +392,7 @@ namespace DisasterPlus.Game
 
         private static void WriteLongPeriod(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
-            if (!ModSettings.EarthquakeLongPeriod.value)
+            if (ModSettings.EarthquakeLongPeriodStrength.value <= 0)
             {
                 b.Line(1, "long period", "off (setting; this is the default)");
                 return;

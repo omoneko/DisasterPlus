@@ -160,9 +160,6 @@ namespace DisasterPlus.Game
                 // ★ 長周期地震動。**既定 OFF。** 津波と違い、これは
                 //    「バニラなら倒れなかった建物を倒す」ので、チェックボックスの
                 //    ラベル自体にその事実を書く（Strings.EarthquakeLongPeriodEnabled）。
-                earthquake.AddCheckbox(Strings.EarthquakeLongPeriodEnabled,
-                    ModSettings.EarthquakeLongPeriod.value,
-                    v => ModSettings.EarthquakeLongPeriod.value = v);
                 earthquake.AddSlider(Strings.EarthquakeLongPeriodStrength, 0f, 10f, 1f,
                     ModSettings.EarthquakeLongPeriodStrength.value,
                     v => ModSettings.EarthquakeLongPeriodStrength.value = (int)v);
@@ -203,10 +200,9 @@ namespace DisasterPlus.Game
             typhoon.AddSlider(Strings.TyphoonIntensity, 10f, 255f, 5f,
                 ModSettings.TyphoonIntensity.value,
                 v => ModSettings.TyphoonIntensity.value = (int)v);
-            // ★ 風害は既定 ON（②の第 2 層と判断が違う理由は TyphoonWind のクラス doc）。
-            //    強さ 0 で完全に無効になる。
-            typhoon.AddCheckbox(Strings.TyphoonWindEnabled, ModSettings.TyphoonWindDamage.value,
-                v => ModSettings.TyphoonWindDamage.value = v);
+            // ★★ **チェックボックスは置かない。** 強さ 0 が「切る」である
+            //    （ModSettings.MigrateEnableFlagsIntoStrength）。氾濫・局所被害・
+            //    長周期も同じ形にしてある。
             typhoon.AddSlider(Strings.TyphoonWindStrength, 0f, 10f, 1f,
                 ModSettings.TyphoonWindStrength.value,
                 v => ModSettings.TyphoonWindStrength.value = (int)v);
@@ -216,18 +212,12 @@ namespace DisasterPlus.Game
                 v => ModSettings.TyphoonSouthernHemisphere.value = v);
             // ★ 河川氾濫も既定 ON。**セーブに焼き付く状態を触る唯一の機能**なので、
             //    水位は台風の終了時・都市を出るとき・保存のたびに元へ戻す。
-            typhoon.AddCheckbox(Strings.TyphoonFloodEnabled,
-                ModSettings.TyphoonFloodEnabled.value,
-                v => ModSettings.TyphoonFloodEnabled.value = v);
             typhoon.AddSlider(Strings.TyphoonFloodStrength, 0f, 10f, 1f,
                 ModSettings.TyphoonFloodStrength.value,
                 v => ModSettings.TyphoonFloodStrength.value = (int)v);
             // ★ 竜巻並みの局所被害。**竜巻の実体は 1 つも作らない**（既定 ON）。
             //    随伴竜巻（バニラの竜巻災害を借りる機能）は撤去された ——
             //    その代わりがこれである。強さ 0 で完全に無効になる。
-            typhoon.AddCheckbox(Strings.TyphoonGustEnabled,
-                ModSettings.TyphoonGustEnabled.value,
-                v => ModSettings.TyphoonGustEnabled.value = v);
             typhoon.AddSlider(Strings.TyphoonGustStrength, 0f, 10f, 1f,
                 ModSettings.TyphoonGustStrength.value,
                 v => ModSettings.TyphoonGustStrength.value = (int)v);
@@ -254,11 +244,6 @@ namespace DisasterPlus.Game
             //     （TyphoonEffectRows。左上のショートカットから 1 クリック）
             //   - 危険半円の理屈は診断ダンプ（TyphoonFeatureDiagnostics.WriteNotes）
             //
-            // ★★ **退役した設定の告知だけは残す。** 随伴竜巻を ON にしていた
-            //    プレイヤーには、その項目が消えたことと .cgs の値がもう読まれない
-            //    ことを 1 度は見せる（設定は公開契約である）。
-            helper.AddGroup(Strings.TyphoonTornadoRetiredNote);
-
             // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
             // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。
             if (!ModCompat.NaturalDisastersOwned)

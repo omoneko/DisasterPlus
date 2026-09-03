@@ -139,7 +139,7 @@ namespace DisasterPlus.Game
                 // ★ 風害は設定で切れる（既定 ON。強さ 0 でも完全に無効）。
                 //   切ったときに Apply を呼ばないのは②の第 2 層と同じ形で、
                 //   走査そのものを起こさないためである。
-                if (ModSettings.TyphoonWindDamage.value)
+                if (ModSettings.TyphoonWindStrength.value > 0)
                 {
                     TyphoonWind.Apply(snapshot, deltaMinutes);
 
@@ -153,7 +153,7 @@ namespace DisasterPlus.Game
 
                 // ★ 竜巻並みの局所被害（既定 ON。強さ 0 でも完全に無効）。
                 //   **竜巻の実体は 1 つも作らない**（TyphoonGust のクラス doc）。
-                if (ModSettings.TyphoonGustEnabled.value)
+                if (ModSettings.TyphoonGustStrength.value > 0)
                 {
                     TyphoonGust.Tick(snapshot, frameIndex, deltaMinutes);
                 }
@@ -183,7 +183,7 @@ namespace DisasterPlus.Game
             //    RestoreAll を呼んでいるが、取りこぼしをここで拾う）。
             //    設定を OFF にした瞬間に呼ばれなくなると川が溢れたままになるので、
             //    OFF のときも「台帳が空でなければ戻す」ところまでは通す。
-            if (ModSettings.TyphoonFloodEnabled.value)
+            if (ModSettings.TyphoonFloodStrength.value > 0)
             {
                 TyphoonFlood.Tick(snapshot, frameIndex, deltaMinutes);
             }
@@ -197,7 +197,7 @@ namespace DisasterPlus.Game
             //    存在しないが、**診断が「直近の走査」の数字を抱えたままだと
             //    「台風が去ったのにまだ壊している」ように読める**。
             //    Reset は台帳を持たないので 1 命令で返る（毎 tick 通ってよい）。
-            if (!TyphoonController.Active || !ModSettings.TyphoonGustEnabled.value)
+            if (!TyphoonController.Active || ModSettings.TyphoonGustStrength.value <= 0)
             {
                 TyphoonGust.Reset();
             }

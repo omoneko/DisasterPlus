@@ -142,7 +142,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void RefreshGust(TyphoonSnapshot s)
         {
-            if (!ModSettings.TyphoonGustEnabled.value
+            if (ModSettings.TyphoonGustStrength.value <= 0
                 || ModSettings.TyphoonGustStrength.value <= 0)
             {
                 TyphoonRows.SetPlain(_gustLabel, Strings.TyphoonGustRow + ": off");
@@ -166,7 +166,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void RefreshFlood(TyphoonSnapshot s)
         {
-            if (!ModSettings.TyphoonFloodEnabled.value
+            if (ModSettings.TyphoonFloodStrength.value <= 0
                 || ModSettings.TyphoonFloodStrength.value <= 0)
             {
                 TyphoonRows.SetPlain(_floodLabel, Strings.TyphoonFloodRow + ": off");
@@ -213,7 +213,7 @@ namespace DisasterPlus.Game
         /// </summary>
         private static void RefreshWind(TyphoonSnapshot s)
         {
-            if (!ModSettings.TyphoonWindDamage.value
+            if (ModSettings.TyphoonWindStrength.value <= 0
                 || ModSettings.TyphoonWindStrength.value <= 0)
             {
                 TyphoonRows.SetPlain(_windLabel, Strings.TyphoonWindRow + ": off");

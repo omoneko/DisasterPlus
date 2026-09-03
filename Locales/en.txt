@@ -185,8 +185,7 @@ EarthquakeRealMinutes = real min
 EarthquakeTsunamiNoRoom = There is sea at the epicentre, but not enough of it. The wave needs open water all around the epicentre; in a narrow bay or channel it would just fill the low ground instead of travelling. Try further out to sea.
 EarthquakeTsunamiBusy = The tsunami from the previous trench earthquake has not finished yet. Only one is tracked at a time - wait for the wave to arrive.
 EarthquakeLongPeriod = Long-period ground motion
-EarthquakeLongPeriodEnabled = Enable long-period ground motion (adds damage vanilla never does)
-EarthquakeLongPeriodStrength = Long-period strength (0 = off)
+EarthquakeLongPeriodStrength = Long-period ground motion, 0 = off (adds damage vanilla never does)
 EarthquakeTrenchDamageStrength = Trench quake: distant fire and collapse (0 = off)
 EarthquakeLongPeriodNoHeight = This building's height could not be read, so no long-period damage is applied to it. The mod never guesses a height.
 EarthquakeBuildingHeight = Building height
@@ -235,22 +234,18 @@ TyphoonEffectsHeader = What the typhoon brings
 TyphoonLightningRow = Lightning (in flight / total / left to the host storm / dropped)
 TyphoonLightningYielded = At this intensity the host thunderstorm is expected to use the whole 20-strike queue, so Disaster + adds none of its own. The lightning you see is the host storm's, spread evenly over its disc instead of around the eye wall. Lower the typhoon intensity to get the eye-wall placement back.
 TyphoonWindRow = Wind damage (collapsed this pass / total / examined / refused by the game)
-TyphoonWindEnabled = Wind damage (buildings vanilla would never collapse)
-TyphoonWindStrength = Wind damage strength (0 = off)
+TyphoonWindStrength = Wind damage, 0 = off (collapses buildings vanilla never would)
 TyphoonWindCapped = sweep truncated this pass; the outer edge has not been rolled yet
 TyphoonSouthernHemisphere = Southern hemisphere (the dangerous side is the LEFT of the track)
 TyphoonDangerousSideNote = A real typhoon is not symmetric: on one side the spin and the storm's own travel add up. That side gets a slightly wider and slightly more likely damage footprint - the right of the track in the northern hemisphere, the left in the southern one.
 TyphoonDangerousSideRight = stronger on the right of the track
 TyphoonDangerousSideLeft = stronger on the left of the track
 TyphoonFloodRow = River flooding
-TyphoonFloodEnabled = River flooding (raises the map's own water sources)
-TyphoonFloodStrength = River flooding strength (0 = off)
+TyphoonFloodStrength = River flooding, 0 = off (raises the map's own water sources)
 TyphoonFloodNoSources = This map has no natural water sources near the storm, so no river can rise. Nothing is wrong - the game has no flood disaster of its own, and Disaster + only raises water sources the map already has.
 TyphoonFloodRaised = raised
 TyphoonGustRow = Tornado-strength damage (patches now / collapsed this pass / total / refused by the game)
-TyphoonGustEnabled = Tornado-strength damage patches (no tornado is spawned)
-TyphoonGustStrength = Tornado-strength damage (0 = off)
-TyphoonTornadoRetiredNote = The old "accompanying tornadoes" option was removed; its saved value is never read again.
+TyphoonGustStrength = Tornado-strength damage patches, 0 = off (no tornado is spawned)
 TyphoonCloudEnabled = Draw the typhoon's cloud spiral
 TyphoonVanillaCloudBoost = Also thicken and speed up the game's own sky clouds
 TyphoonCloudUnavailable = The game's sky cloud settings are not present in this environment, so only Disaster +'s own cloud is drawn.

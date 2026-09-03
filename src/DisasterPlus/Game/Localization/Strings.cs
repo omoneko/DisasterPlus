@@ -29,8 +29,8 @@ namespace DisasterPlus.Game
 
         public static string TrenchQuakeButtonTooltip =
             "Raise a megathrust earthquake at the sea nearest to the point you click. "
-            + "This is the only earthquake that brings a tsunami - the game's own "
-            + "(fault) earthquakes no longer do.";
+            + "This is the only earthquake that brings a tsunami; the game's own "
+            + "fault earthquakes do not.";
 
         public static string TrenchQuakeNeedsDlc =
             "The Natural Disasters DLC is required for the trench earthquake.";
@@ -638,9 +638,11 @@ namespace DisasterPlus.Game
         // **津波より踏み込んでいる。** 津波はバニラの災害を 1 個起こすだけだったが、
         // こちらは**バニラなら倒れなかった建物を倒す**。だから:
         //
-        //   - 設定のラベル（EarthquakeLongPeriodEnabled）自体に
-        //     「バニラには無い被害を足します」と書く。チェックを入れる前に読める場所は
-        //     ここしかない
+        //   - 設定のラベル（EarthquakeLongPeriodStrength）自体に
+        //     「バニラには無い被害を足します」と書く。**つまみを動かす前に読める
+        //     場所はここしかない。** 短くしないこと ——
+        //     チェックボックスを畳んだとき（2026-09-02）に、この警告を
+        //     スライダーのラベルへ移し損ねて一度失いかけた
         //   - EarthquakeLongPeriodNote は、バニラが建物の高さを揺れにも被害にも
         //     一切使っていないこと（§A-7 / §A-3）を名乗る。この 1 文が無いと、
         //     プレイヤーは「高層ほど揺れる」をゲームの仕様だと思う
@@ -650,9 +652,8 @@ namespace DisasterPlus.Game
         //     「読めなかった」と「低いので対象外」が同じ文になってしまうので新設した
 
         public static string EarthquakeLongPeriod = "Long-period ground motion";
-        public static string EarthquakeLongPeriodEnabled =
-            "Enable long-period ground motion (adds damage vanilla never does)";
-        public static string EarthquakeLongPeriodStrength = "Long-period strength (0 = off)";
+        public static string EarthquakeLongPeriodStrength =
+            "Long-period ground motion, 0 = off (adds damage vanilla never does)";
         public static string EarthquakeTrenchDamageStrength =
             "Trench quake: distant fire and collapse (0 = off)";
         public static string EarthquakeLongPeriodNoHeight =
@@ -851,9 +852,8 @@ namespace DisasterPlus.Game
         // （書式文字列を使わない。翻訳の {0} がずれると実行時に落ちる）。
         public static string TyphoonWindRow =
             "Wind damage (collapsed this pass / total / examined / refused by the game)";
-        public static string TyphoonWindEnabled =
-            "Wind damage (buildings vanilla would never collapse)";
-        public static string TyphoonWindStrength = "Wind damage strength (0 = off)";
+        public static string TyphoonWindStrength =
+            "Wind damage, 0 = off (collapses buildings vanilla never would)";
         public static string TyphoonWindCapped =
             "sweep truncated this pass; the outer edge has not been rolled yet";
 
@@ -877,9 +877,8 @@ namespace DisasterPlus.Game
         //   （設計書 §7.4。①の「なぜハザードマップが空か」と同じ扱い）。
         //   **不具合ではないと明示する。**
         public static string TyphoonFloodRow = "River flooding";
-        public static string TyphoonFloodEnabled =
-            "River flooding (raises the map's own water sources)";
-        public static string TyphoonFloodStrength = "River flooding strength (0 = off)";
+        public static string TyphoonFloodStrength =
+            "River flooding, 0 = off (raises the map's own water sources)";
         public static string TyphoonFloodNoSources =
             "This map has no natural water sources near the storm, so no river can rise. "
             + "Nothing is wrong - the game has no flood disaster of its own, and Disaster + "
@@ -892,24 +891,13 @@ namespace DisasterPlus.Game
         //   「竜巻の姿はどこにも出ないのに、狭い範囲だけが竜巻並みに壊れる」は
         //   説明が無ければ不具合にしか見えない。**短くしないこと。**
         //
-        // ★★ TyphoonTornadoRetiredNote は**退役の告知**である。随伴竜巻を ON に
-        //   していたプレイヤーには、チェックボックスが消えた理由と、.cgs に残った
-        //   値がもう読まれないことを 1 度は見せる。設定は公開契約なので、
-        //   黙って消したり別の意味で再利用したりしない
-        //   （ModSettings.TyphoonTornadoes の doc）。
-        //
         // TyphoonGustRow は他の行と同じく**並べる順序をラベルが語で名乗る**
         // （書式文字列を使わない。翻訳の {0} がずれると実行時に落ちる）。
         public static string TyphoonGustRow =
             "Tornado-strength damage (patches now / collapsed this pass / total / refused "
             + "by the game)";
-        public static string TyphoonGustEnabled =
-            "Tornado-strength damage patches (no tornado is spawned)";
         public static string TyphoonGustStrength =
-            "Tornado-strength damage (0 = off)";
-        public static string TyphoonTornadoRetiredNote =
-            "The old \"accompanying tornadoes\" option was removed; its saved value is "
-            + "never read again.";
+            "Tornado-strength damage patches, 0 = off (no tornado is spawned)";
 
         // --- ④台風（Task 9: 巨大な回転雲） ---
         //

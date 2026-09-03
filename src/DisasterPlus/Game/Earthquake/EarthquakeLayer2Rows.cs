@@ -178,7 +178,7 @@ namespace DisasterPlus.Game
 
             _built = true;
             _tsunamiVisible = TsunamiRowWanted;
-            _longPeriodVisible = ModSettings.EarthquakeLongPeriod.value;
+            _longPeriodVisible = ModSettings.EarthquakeLongPeriodStrength.value > 0;
             Layout();
 
             y = _sectionTop + _sectionHeight;
@@ -219,7 +219,7 @@ namespace DisasterPlus.Game
             if (!_built) return;
 
             bool tsunami = TsunamiRowWanted;
-            bool longPeriod = ModSettings.EarthquakeLongPeriod.value;
+            bool longPeriod = ModSettings.EarthquakeLongPeriodStrength.value > 0;
             if (tsunami != _tsunamiVisible || longPeriod != _longPeriodVisible)
             {
                 _tsunamiVisible = tsunami;
