@@ -1,18 +1,7 @@
 Steam Workshop item: https://steamcommunity.com/sharedfiles/filedetails/?id=3794409201
-This is the text currently published on the Workshop page, EXCEPT for the GitHub link:
+Source: https://github.com/omoneko/DisasterPlus
+This file is the text published on the Workshop page.
 
-  1. The [h1]Source code[/h1] section was DROPPED. This repository still has no git
-     remote - it has never been pushed - so the GitHub URL could not be verified and
-     a dead link had no business on a public page. Push the repo, then add the
-     section back (see "Changing the description" in the cs-workshop-upload skill:
-     add a `description` key to the VDF for that one upload, then remove it again).
-  2. The Language section no longer says "open a pull request on GitHub", for the
-     same reason. It asks for translations in the comments instead.
-
-The ko-fi link WAS kept: it is verified - the same URL is live on the published
-KAIJU Disaster page.
-
-Size: 7,545 bytes of the 8,000-byte Steam cap. There are 455 bytes of headroom.
 ---
 
 [h1]Disaster +[/h1]
@@ -98,7 +87,11 @@ Every system has its own on/off switch, and every kind of damage has a [b]streng
 
 [h1]Language[/h1]
 English and Japanese - the game's own language setting picks between them.
-Other languages are welcome. The mod ships Locales/en.txt as a template: copy it to your language code (de.txt, fr.txt, zh.txt, ...), translate the values and post the file in the comments. Missing lines fall back to English, so a partial translation is fine.
+Other languages are welcome. The mod ships Locales/en.txt as a template: copy it to your language code (de.txt, fr.txt, zh.txt, ...), translate the values, and open a pull request on GitHub or post the file in the comments. Missing lines fall back to English, so a partial translation is fine.
+
+[h1]Source code[/h1]
+This mod is open source under the MIT licence. Bug reports and pull requests are welcome:
+[url=https://github.com/omoneko/DisasterPlus]github.com/omoneko/DisasterPlus[/url]
 
 [h1]Support[/h1]
 If you enjoy the mod, you can support development here:
