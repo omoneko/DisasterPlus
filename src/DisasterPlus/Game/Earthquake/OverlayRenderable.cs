@@ -78,18 +78,18 @@ namespace DisasterPlus.Game
         private static bool _registered;
 
         /// <summary>
-        /// **Register exactly one.** The same single instance serves whether the call
-        /// comes from ② (seismic intensity) or ① (typhoon track, storm area, wind) —
-        /// since extras cannot be removed, registering one per feature would mean
-        /// <b>the count growing every time you enter and leave a city</b>.
-        /// </summary>
-        /// <summary>
         /// Whether registration really succeeded. **This is what to look at when
         /// diagnosing.** It is not a count of calls: it says whether
         /// <c>RegisterRenderableManager</c> got through without throwing.
         /// </summary>
         public static bool Registered { get { return _registered; } }
 
+        /// <summary>
+        /// **Register exactly one.** The same single instance serves whether the call
+        /// comes from ② (seismic intensity) or ① (typhoon track, storm area, wind) —
+        /// since extras cannot be removed, registering one per feature would mean
+        /// <b>the count growing every time you enter and leave a city</b>.
+        /// </summary>
         public static void EnsureRegistered()
         {
             if (_registered) return;

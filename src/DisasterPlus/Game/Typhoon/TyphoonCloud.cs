@@ -124,8 +124,6 @@ namespace DisasterPlus.Game
     /// </summary>
     public static class TyphoonCloud
     {
-        /// <summary>Turn it slowly (degrees per second). 6 deg/s = one turn in 60 seconds.
-        /// **A presentation value ④ chose.**</summary>
         /// <summary>
         /// How fast the vortex turns (degrees per second).
         ///

@@ -102,14 +102,14 @@ namespace DisasterPlus.Game
             _gain = 1f;
         }
 
-        /// <summary>
-        /// Postfix for <c>WeatherManager.GetWindSpeed(Vector3)</c>.
-        /// Applies the multiplier **outside the clamp** (the ★★ in the class doc).
-        /// </summary>
         /// <summary>Report a real measurement once, so we never guess aloud at whether
         /// this is working.</summary>
         private static bool _reported;
 
+        /// <summary>
+        /// Postfix for <c>WeatherManager.GetWindSpeed(Vector3)</c>.
+        /// Applies the multiplier **outside the clamp** (the ★★ in the class doc).
+        /// </summary>
         public static void Postfix(Vector3 position, ref float __result)
         {
             if (!_active) return;

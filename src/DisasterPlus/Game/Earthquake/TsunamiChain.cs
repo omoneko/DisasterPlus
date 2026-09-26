@@ -138,12 +138,9 @@ namespace DisasterPlus.Game
         internal const int TrenchDelayMinutes = 3;
 
         /// <summary>
-        /// The lower bound on intensity. A tsunami at intensity 0 has a wave height of 0
-        /// (<c>m_delta = m_height * 1024 * i / 55</c>, §B-3), giving the inexplicable
-        /// state "it was triggered and nothing happened".
-        /// </summary>
-        /// <summary>
-        /// Below this intensity no tsunami is scheduled.
+        /// Below this intensity no tsunami is scheduled. A tsunami at intensity 0 has a
+        /// wave height of 0 (<c>m_delta = m_height * 1024 * i / 55</c>, §B-3), giving the
+        /// inexplicable state "it was triggered and nothing happened".
         ///
         /// ★★ **For a long time nobody looked at this.** (2026-08-31, fourth round of
         ///   verification) The doc said it was there "so we never create a state where it

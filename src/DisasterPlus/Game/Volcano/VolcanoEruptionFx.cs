@@ -404,22 +404,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <b>The eruption column.</b> The 9 segments decided by
-        /// <c>Core/Volcano/EruptionColumn</c> are welled up segment by segment as **cylinders**
-        /// via <c>SpawnArea(position, up, radius, height)</c>.
-        /// Pushed out every frame in **continuous mode** (<c>timeOffset &lt; 0</c>).
-        ///
-        /// ★ The umbrella segments are drawn with a separate clone (<c>AshUmbrella</c>) — pale,
-        ///   with large, long-lived particles.
-        ///   If it cannot be looked up, **the column's clone stands in** (the umbrella just comes
-        ///   out denser; it does not disappear).
-        ///
-        /// ★ The wind is decided from the volcano's location (<see cref="DeterministicRandom"/>),
-        ///   so **the same mountain always leans the same way**. Only the single sine of
-        ///   <c>SwayAt</c> swings it slowly left and right (a 37-second period). The frame number
-        ///   is never mixed in.
-        /// </summary>
-        /// <summary>
         /// This frame's column shape. **Built once, before drawing** — it used to be built inside
         /// <see cref="RenderColumn"/>, but the lightning (<see cref="VolcanoCraterFx"/>) has to
         /// look at **the same shape** (build it separately and the lightning alone runs through a
@@ -459,6 +443,22 @@ namespace DisasterPlus.Game
                                       Mathf.Cos(bearing), Mathf.Sin(bearing), windSpeed);
         }
 
+        /// <summary>
+        /// <b>The eruption column.</b> The 9 segments decided by
+        /// <c>Core/Volcano/EruptionColumn</c> are welled up segment by segment as **cylinders**
+        /// via <c>SpawnArea(position, up, radius, height)</c>.
+        /// Pushed out every frame in **continuous mode** (<c>timeOffset &lt; 0</c>).
+        ///
+        /// ★ The umbrella segments are drawn with a separate clone (<c>AshUmbrella</c>) — pale,
+        ///   with large, long-lived particles.
+        ///   If it cannot be looked up, **the column's clone stands in** (the umbrella just comes
+        ///   out denser; it does not disappear).
+        ///
+        /// ★ The wind is decided from the volcano's location (<see cref="DeterministicRandom"/>),
+        ///   so **the same mountain always leans the same way**. Only the single sine of
+        ///   <c>SwayAt</c> swings it slowly left and right (a 37-second period). The frame number
+        ///   is never mixed in.
+        /// </summary>
         private static bool RenderColumn(ParticleEffect column, ParticleEffect umbrella,
                                          RenderManager.CameraInfo camera, Vec3 vent,
                                          EruptionColumn plume, float craterRadius, float dt)

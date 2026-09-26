@@ -312,19 +312,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// The two eruption rows (T7). **Not shown until the eruption stage is entered** (handled
-        /// the same way as the four uplift rows).
-        ///
-        /// ★ The strength is reported as <b>a stage from 0 to 10</b>. ⑤ holds neither a
-        ///   temperature nor an ejecta volume, and must not quote a real physical unit
-        ///   (design doc §7.4 / item 5 of the plan's "the range of assertions we may make").
-        ///   No marker (<c>[measured]</c>) is applied either — this is a quantity ⑤ chose, not a
-        ///   value the game computed.
-        ///
-        /// ★ The note is shown **only during the eruption stage**. Show it always and you would
-        ///   be saying "the game has no lava" for the whole time the mountain is being built.
-        /// </summary>
-        /// <summary>
         /// The single volcanic-earthquake row. **A shaking strength of 0 to 10**, which is neither
         /// a real seismic intensity nor a magnitude (it is a quantity ⑤ chose. The discipline of
         /// design doc §7.4).
@@ -352,6 +339,19 @@ namespace DisasterPlus.Game
                 Strings.VolcanoQuakeRow + ": " + (activity * 10f).ToString("F1") + " / 10");
         }
 
+        /// <summary>
+        /// The two eruption rows (T7). **Not shown until the eruption stage is entered** (handled
+        /// the same way as the four uplift rows).
+        ///
+        /// ★ The strength is reported as <b>a stage from 0 to 10</b>. ⑤ holds neither a
+        ///   temperature nor an ejecta volume, and must not quote a real physical unit
+        ///   (design doc §7.4 / item 5 of the plan's "the range of assertions we may make").
+        ///   No marker (<c>[measured]</c>) is applied either — this is a quantity ⑤ chose, not a
+        ///   value the game computed.
+        ///
+        /// ★ The note is shown **only during the eruption stage**. Show it always and you would
+        ///   be saying "the game has no lava" for the whole time the mountain is being built.
+        /// </summary>
         private static float RefreshEruption(float y, VolcanoSnapshot s)
         {
             // ★ T8 narrowed the phases. Shown only during the eruption stage — while the lava is

@@ -642,47 +642,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// The hazard value under the cursor. Only the submode currently on display is
-        /// attempted. Never, ever show a figure under the label of a type that is not on
-        /// display (HazardMapReader.SampleAt guarantees this by returning ok=false).
-        ///
-        /// Review finding: ForecastUnavailable ("cannot read the weather data") used to be
-        /// reused for the case where no hazard view is up, and that was wrong. The weather
-        /// data itself is alive (temperature, rain, cloud, fog and wind are all being
-        /// shown); the only thing we cannot show is the hazard figure, and we have
-        /// identified the cause as "no hazard view is up" (§4.2). On top of that, while
-        /// the panel is being read the mouse is almost certainly over the panel itself
-        /// (UIView.IsInsideUI()==true) and picking a cursor point on the terrain always
-        /// fails — which makes this the line the user sees most often of all. So we check
-        /// "is there a hazard view on display?" before asking about the cursor position,
-        /// and if there is not we immediately show the hint that names the cause
-        /// (ForecastSwitchHazardView). ForecastUnavailable (= the cursor position is
-        /// unknown) is used only for the case where some hazard view is up but the cursor
-        /// position cannot be worked out (over the UI, or off the terrain).
-        ///
-        /// **The most important finding of the full review (it changed what this method
-        /// means):** vanilla's hazard map is not a static risk surface but the predicted
-        /// damage area of "storms the radar has located (Located) and that are under way
-        /// (Emerging|Active)" (the IL evidence is in the doc on
-        /// WeatherSnapshot.LocatedLightningStorms). With not a single such storm,
-        /// UpdateTexture refills the grid with zeroes every time and then nobody writes
-        /// into it, so **the whole city** reads 0. This method used to display that as
-        /// plainly as "Lightning: 0". SampleAt returns ok=true — the submode does match
-        /// and the grid really is there, its contents are just all zero. As a number it is
-        /// genuine, but the meaning the player takes from it ("this city has no lightning
-        /// risk") is a lie. The truth is "no storm is detected right now", and this was
-        /// **a confidently wrong number reached not from a wrong label but from a wrong
-        /// premise**. So when the located count for the type on display is 0, we show no
-        /// figure at all and write the reason it is empty (namely, you need a weather
-        /// radar).
-        /// </summary>
-        /// <param name="snapshot">
-        /// Where the located counts come from. When it is null, or Valid=false, or
-        /// DisasterInfoAvailable=false, the counts are **unknown**, so we must not state
-        /// flatly that "no storm is detected" (that would itself be an assertion hiding
-        /// the fact that we could not read anything). Fall back to the generic unknown.
-        /// </param>
-        /// <summary>
         /// The weather to come. **Target values only** (no time of arrival — the reason is
         /// above <c>Strings.ForecastComing</c>).
         /// </summary>
@@ -760,6 +719,47 @@ namespace DisasterPlus.Game
                 : new Color32(255, 255, 255, 255);
         }
 
+        /// <summary>
+        /// The hazard value under the cursor. Only the submode currently on display is
+        /// attempted. Never, ever show a figure under the label of a type that is not on
+        /// display (HazardMapReader.SampleAt guarantees this by returning ok=false).
+        ///
+        /// Review finding: ForecastUnavailable ("cannot read the weather data") used to be
+        /// reused for the case where no hazard view is up, and that was wrong. The weather
+        /// data itself is alive (temperature, rain, cloud, fog and wind are all being
+        /// shown); the only thing we cannot show is the hazard figure, and we have
+        /// identified the cause as "no hazard view is up" (§4.2). On top of that, while
+        /// the panel is being read the mouse is almost certainly over the panel itself
+        /// (UIView.IsInsideUI()==true) and picking a cursor point on the terrain always
+        /// fails — which makes this the line the user sees most often of all. So we check
+        /// "is there a hazard view on display?" before asking about the cursor position,
+        /// and if there is not we immediately show the hint that names the cause
+        /// (ForecastSwitchHazardView). ForecastUnavailable (= the cursor position is
+        /// unknown) is used only for the case where some hazard view is up but the cursor
+        /// position cannot be worked out (over the UI, or off the terrain).
+        ///
+        /// **The most important finding of the full review (it changed what this method
+        /// means):** vanilla's hazard map is not a static risk surface but the predicted
+        /// damage area of "storms the radar has located (Located) and that are under way
+        /// (Emerging|Active)" (the IL evidence is in the doc on
+        /// WeatherSnapshot.LocatedLightningStorms). With not a single such storm,
+        /// UpdateTexture refills the grid with zeroes every time and then nobody writes
+        /// into it, so **the whole city** reads 0. This method used to display that as
+        /// plainly as "Lightning: 0". SampleAt returns ok=true — the submode does match
+        /// and the grid really is there, its contents are just all zero. As a number it is
+        /// genuine, but the meaning the player takes from it ("this city has no lightning
+        /// risk") is a lie. The truth is "no storm is detected right now", and this was
+        /// **a confidently wrong number reached not from a wrong label but from a wrong
+        /// premise**. So when the located count for the type on display is 0, we show no
+        /// figure at all and write the reason it is empty (namely, you need a weather
+        /// radar).
+        /// </summary>
+        /// <param name="snapshot">
+        /// Where the located counts come from. When it is null, or Valid=false, or
+        /// DisasterInfoAvailable=false, the counts are **unknown**, so we must not state
+        /// flatly that "no storm is detected" (that would itself be an assertion hiding
+        /// the fact that we could not read anything). Fall back to the generic unknown.
+        /// </param>
         private static void RefreshCursorHazard(WeatherSnapshot snapshot)
         {
             // On a setup without the DLC the hazard rows were never built at all (I2).

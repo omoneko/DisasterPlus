@@ -7,6 +7,38 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
+    /// Which shape <see cref="VolcanoUplift"/> is writing right now.
+    ///
+    /// ── added for the super-eruption (2026-08-22, owner's request) ─────────────────────────
+    ///
+    /// &gt; a volcano forms as magma rises underground → the magma chamber grows over tens of
+    /// &gt; thousands of years → internal pressure reaches its limit and a super-eruption (a huge
+    /// &gt; explosion) follows → the ground founders under its own weight and a caldera forms
+    ///
+    /// <b>Only one mechanism writes terrain.</b> Taking the rectangle, the snapshot, the flush
+    /// and the ceiling count are identical in all three; the only differences are <b>the radius
+    /// of the rectangle, the profile that gets baked, and the rule for advancing</b>. So the
+    /// stages live in the same type.
+    /// </summary>
+    public enum UpliftStage
+    {
+        /// <summary>Raise the cone (the only shape until now). **It spreads outwards from the summit.**</summary>
+        Cone = 0,
+
+        /// <summary>
+        /// The magma chamber inflating. Lifts a **far wider and far lower** dome than the skirt,
+        /// uniformly (<c>SuperEruption.InflationAt</c>).
+        /// </summary>
+        Inflation = 1,
+
+        /// <summary>
+        /// The caldera foundering. Digs a **flat-bottomed basin** down uniformly
+        /// (<c>SuperEruption.BowlProfileAt</c>; the profile is negative).
+        /// </summary>
+        Collapse = 2,
+    }
+
+    /// <summary>
     /// Uplift — writing <c>RawHeights</c>, the split <c>UpdateArea</c>, and the summit crater.
     /// **Sim thread only. This is the one type in ⑤ that writes terrain.**
     ///
@@ -225,38 +257,6 @@ namespace DisasterPlus.Game
     /// rule, and **this class doc holds all of the discipline**
     /// (the same shape as <c>VolcanoClearing.Sweep.cs</c> / <c>VolcanoLava.Ignite.cs</c>).
     /// </summary>
-    /// <summary>
-    /// Which shape <see cref="VolcanoUplift"/> is writing right now.
-    ///
-    /// ── added for the super-eruption (2026-08-22, owner's request) ─────────────────────────
-    ///
-    /// &gt; a volcano forms as magma rises underground → the magma chamber grows over tens of
-    /// &gt; thousands of years → internal pressure reaches its limit and a super-eruption (a huge
-    /// &gt; explosion) follows → the ground founders under its own weight and a caldera forms
-    ///
-    /// <b>Only one mechanism writes terrain.</b> Taking the rectangle, the snapshot, the flush
-    /// and the ceiling count are identical in all three; the only differences are <b>the radius
-    /// of the rectangle, the profile that gets baked, and the rule for advancing</b>. So the
-    /// stages live in the same type.
-    /// </summary>
-    public enum UpliftStage
-    {
-        /// <summary>Raise the cone (the only shape until now). **It spreads outwards from the summit.**</summary>
-        Cone = 0,
-
-        /// <summary>
-        /// The magma chamber inflating. Lifts a **far wider and far lower** dome than the skirt,
-        /// uniformly (<c>SuperEruption.InflationAt</c>).
-        /// </summary>
-        Inflation = 1,
-
-        /// <summary>
-        /// The caldera foundering. Digs a **flat-bottomed basin** down uniformly
-        /// (<c>SuperEruption.BowlProfileAt</c>; the profile is negative).
-        /// </summary>
-        Collapse = 2,
-    }
-
     public static partial class VolcanoUplift
     {
         /// <summary>
@@ -847,14 +847,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// Fetch <c>RawHeights</c>. **If the length is not 1081², not one cell is written** —
-        /// the <c>z*1081 + x</c> index would point at a different cell and
-        /// **an unrelated part of the map would be uplifted**
-        /// (the same predicate as <see cref="VolcanoTerrainFacts.Usable"/>).
-        ///
-        /// Check <c>Singleton&lt;T&gt;.exists</c> first (<c>instance</c> is a main-thread-only API).
-        /// </summary>
-        /// <summary>
         /// How long the current stage takes (in-game minutes).
         ///
         /// ★ The foundering is **fast**. It does not take tens of thousands of years for the roof
@@ -985,6 +977,14 @@ namespace DisasterPlus.Game
             return -deepest;
         }
 
+        /// <summary>
+        /// Fetch <c>RawHeights</c>. **If the length is not 1081², not one cell is written** —
+        /// the <c>z*1081 + x</c> index would point at a different cell and
+        /// **an unrelated part of the map would be uplifted**
+        /// (the same predicate as <see cref="VolcanoTerrainFacts.Usable"/>).
+        ///
+        /// Check <c>Singleton&lt;T&gt;.exists</c> first (<c>instance</c> is a main-thread-only API).
+        /// </summary>
         private static ushort[] ReadRawHeights()
         {
             if (!Singleton<TerrainManager>.exists)

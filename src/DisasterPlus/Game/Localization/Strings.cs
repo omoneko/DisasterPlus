@@ -1187,8 +1187,6 @@ namespace DisasterPlus.Game
         public static string VolcanoSettingsChanged =
             "The settings changed, so the area was surveyed again.";
 
-        /// <summary>In-game minutes. **Not a real physical unit**, so it is treated differently from the likes of m/s.</summary>
-
         /// <summary>
         /// In-game hours. **The delay for "ground you can build on" is given in these**
         /// (overall review M13) — in minutes the number exceeds 400, and the player ends up

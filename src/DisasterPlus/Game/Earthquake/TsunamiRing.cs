@@ -1126,21 +1126,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <b>Delete every water source matching our fingerprint.</b> The caller must hold
-        /// <c>_gate</c>.
-        ///
-        /// ★★ **The only way back if the index is lost.** (2026-08-31, cross-verified)
-        ///   <c>CreateWaterSource</c> succeeded but the index was dropped, the slot was
-        ///   taken from under us, an exception skipped the path — however it happened, a
-        ///   source we placed has a shape nothing else has: <b>a TYPE_NATURAL whose two
-        ///   positions both match the epicentre bit for bit</b>. The scan walks an array of
-        ///   a few dozen entries, so it costs nothing.
-        ///
-        /// ★ Does nothing when the epicentre is <c>Vector3.zero</c>: either nothing has
-        ///   been placed yet, or we would risk sweeping up somebody else's river that
-        ///   happens to sit at the centre of the map.
-        /// </summary>
-        /// <summary>
         /// Is that position one of the discs we placed (checking every segment of the line)?
         /// </summary>
         private static bool IsOneOfOurs(Vector3 at)
@@ -1156,6 +1141,21 @@ namespace DisasterPlus.Game
             return false;
         }
 
+        /// <summary>
+        /// <b>Delete every water source matching our fingerprint.</b> The caller must hold
+        /// <c>_gate</c>.
+        ///
+        /// ★★ **The only way back if the index is lost.** (2026-08-31, cross-verified)
+        ///   <c>CreateWaterSource</c> succeeded but the index was dropped, the slot was
+        ///   taken from under us, an exception skipped the path — however it happened, a
+        ///   source we placed has a shape nothing else has: <b>a TYPE_NATURAL whose two
+        ///   positions both match the epicentre bit for bit</b>. The scan walks an array of
+        ///   a few dozen entries, so it costs nothing.
+        ///
+        /// ★ Does nothing when the epicentre is <c>Vector3.zero</c>: either nothing has
+        ///   been placed yet, or we would risk sweeping up somebody else's river that
+        ///   happens to sit at the centre of the map.
+        /// </summary>
         private static void SweepOursLocked()
         {
             if (_centre == Vector3.zero) return;

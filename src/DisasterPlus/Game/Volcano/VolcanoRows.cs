@@ -148,8 +148,6 @@ namespace DisasterPlus.Game
             return AddLabel(p, suffix, x, y, width, height);
         }
 
-        /// <summary>A section heading. Its content is decided at build time, so it is put in here.</summary>
-
         /// <summary>
         /// Put it in with the section heading's decoration (<c>-- ... --</c>).
         /// **Do not make the caller write the decoration** — write it in two places and one day

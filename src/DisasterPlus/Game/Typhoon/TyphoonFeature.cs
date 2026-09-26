@@ -232,11 +232,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// Main thread. **Do not call the sim-side types (<see cref="TyphoonController"/> /
-        /// <see cref="TyphoonWeather"/>) from here.** All we read is the snapshot from
-        /// <see cref="TyphoonHub.Latest"/>.
-        /// </summary>
-        /// <summary>
         /// Work out the tree-sway multiplier from the intensity.
         ///
         /// ★★ **Calm is 1.0 and vanilla's ceiling is 2.0** (the clamp at the end of
@@ -267,6 +262,11 @@ namespace DisasterPlus.Game
             return 1f + 11f * t;
         }
 
+        /// <summary>
+        /// Main thread. **Do not call the sim-side types (<see cref="TyphoonController"/> /
+        /// <see cref="TyphoonWeather"/>) from here.** All we read is the snapshot from
+        /// <see cref="TyphoonHub.Latest"/>.
+        /// </summary>
         public void OnMainThreadUpdate()
         {
             // ★★ **Camera.main is only ever touched on the main thread** (CameraFocus's

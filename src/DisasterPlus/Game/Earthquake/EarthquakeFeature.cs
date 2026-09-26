@@ -383,18 +383,6 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// The state of layer 2 (long-period ground motion). **Telling "did extra
-        /// buildings come down" apart can only be done here.** There are six reasons
-        /// nothing falls (the setting is off / strength 0 / the quake in progress is not
-        /// Active / there are no tall buildings in range / the height cannot be read /
-        /// vanilla refused the collapse), and on screen every one of them wears the same
-        /// face: "nothing happens".
-        ///
-        /// **Always print every number, including when the collapse count is 0** (so as
-        /// not to repeat ③'s failure, where "is the fire spread working" was completely
-        /// invisible from the diagnostics).
-        /// </summary>
-        /// <summary>
         /// The trench quake's distant damage. **Printing every number when both the
         /// collapses and the fires are 0** is the reason this section exists — "the
         /// feature is dead" and "there are no buildings in range" both wear the same face
@@ -434,6 +422,18 @@ namespace DisasterPlus.Game
                 + " ignited=" + TrenchQuakeDistantDamage.TotalIgnited);
         }
 
+        /// <summary>
+        /// The state of layer 2 (long-period ground motion). **Telling "did extra
+        /// buildings come down" apart can only be done here.** There are six reasons
+        /// nothing falls (the setting is off / strength 0 / the quake in progress is not
+        /// Active / there are no tall buildings in range / the height cannot be read /
+        /// vanilla refused the collapse), and on screen every one of them wears the same
+        /// face: "nothing happens".
+        ///
+        /// **Always print every number, including when the collapse count is 0** (so as
+        /// not to repeat ③'s failure, where "is the fire spread working" was completely
+        /// invisible from the diagnostics).
+        /// </summary>
         private static void WriteLongPeriod(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
             if (ModSettings.EarthquakeLongPeriodStrength.value <= 0)

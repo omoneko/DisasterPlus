@@ -132,7 +132,6 @@ namespace DisasterPlus.Game
         /// </summary>
         public static bool FaultGeometryMissing { get { return _faultGeometryMissing; } }
 
-        /// <summary>Whether registration with <c>RenderManager</c> succeeded.</summary>
         /// <summary>
         /// Whether we are hooked into the render loop (diagnostic).
         ///

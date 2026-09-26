@@ -52,12 +52,12 @@ namespace DisasterPlus.Tools.IconPreview
             return 0;
         }
 
-        /// <summary>One sheet with actual size, 2x and 6x laid out on a light and a dark
-        /// background.</summary>
         /// <summary>Which artwork to bake. **With a two-valued bool a third one cannot be
         /// added.**</summary>
         private enum Kind { Volcano, Typhoon, TrenchQuake }
 
+        /// <summary>One sheet with actual size, 2x and 6x laid out on a light and a dark
+        /// background.</summary>
         private static void Sheet(string dir, string name, Kind kind)
         {
             const int Pad = 12;

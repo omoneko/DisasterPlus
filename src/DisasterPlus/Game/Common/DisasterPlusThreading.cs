@@ -5,13 +5,6 @@ namespace DisasterPlus.Game
     public class DisasterPlusThreading : ThreadingExtensionBase
     {
         /// <summary>
-        /// Sim thread. Creating and modifying the building, vehicle and disaster buffers
-        /// happens only from here. Touch those from the main thread (OnUpdate) and an
-        /// IndexOutOfRangeException with no stack trace turns up later, which your own
-        /// try/catch will not catch either.
-        /// </summary>
-
-        /// <summary>
         /// **Called when the mod is removed.**
         ///
         /// ★★ Leave this unimplemented and <b>a city where the mod was disabled mid-tsunami
@@ -39,6 +32,13 @@ namespace DisasterPlus.Game
 
             base.OnReleased();
         }
+
+        /// <summary>
+        /// Sim thread. Creating and modifying the building, vehicle and disaster buffers
+        /// happens only from here. Touch those from the main thread (OnUpdate) and an
+        /// IndexOutOfRangeException with no stack trace turns up later, which your own
+        /// try/catch will not catch either.
+        /// </summary>
 
         public override void OnAfterSimulationTick()
         {

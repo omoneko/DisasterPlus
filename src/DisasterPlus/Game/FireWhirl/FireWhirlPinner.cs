@@ -40,11 +40,6 @@ namespace DisasterPlus.Game
         private const float MaxAttachDistanceSq = MaxAttachDistance * MaxAttachDistance;
 
         /// <summary>
-        /// Attaches the vortex vehicle to whirls whose vehicle ID is not yet known.
-        /// The vehicle is created by ActivateDisaster, so it does not exist immediately
-        /// after CreateDisaster.
-        /// </summary>
-        /// <summary>
         /// Whether this ID is <b>one we synthesised</b> (i.e. not a vanilla disaster).
         ///
         /// ★★ Since 2026-08-29 the fire whirl creates no tornado disaster at all (see the
@@ -59,6 +54,11 @@ namespace DisasterPlus.Game
             return disasterId >= FireWhirlSpawner.SyntheticIdBase;
         }
 
+        /// <summary>
+        /// Attaches the vortex vehicle to whirls whose vehicle ID is not yet known.
+        /// The vehicle is created by ActivateDisaster, so it does not exist immediately
+        /// after CreateDisaster.
+        /// </summary>
         public static void AttachVehicles()
         {
             var views = FireWhirlRegistry.Snapshot();

@@ -255,24 +255,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// The size of the screen in the UI coordinate system. **Returns (0,0) if it cannot be
-        /// read** — <see cref="ScreenSlot"/> reads that as "do not constrain", so in an
-        /// environment where the dimensions cannot be read it never becomes impossible to
-        /// place a button at all.
-        ///
-        /// The path by which <c>GetScreenResolution()</c> throws (uiCamera already destroyed,
-        /// and so on) has not been measured, so it is swallowed and falls to (0,0).
-        /// **No Warn is emitted** — this only runs once per placement, and there would be
-        /// nothing to do about it anyway.
-        /// <c>fixedHeight</c> is the fallback, and that one is always a readable integer.
-        /// </summary>
-        /// <summary>
         /// The size of the screen in the UI coordinate system. <c>(0,0)</c> if it cannot be
         /// read — <see cref="ScreenSlot"/> reads that as "do not constrain".
         ///
         /// <see cref="InfoHub"/> uses it for rounding during a drag. **Do not make this a
         /// second thing that decides where to place** (see the class doc) — it only answers
         /// "how big is the screen", never "where does it go".
+        ///
+        /// The path by which <c>GetScreenResolution()</c> throws (uiCamera already destroyed,
+        /// and so on) has not been measured, so it is swallowed and falls to (0,0).
+        /// **No Warn is emitted** — this only runs once per placement, and there would be
+        /// nothing to do about it anyway. <c>fixedHeight</c> is the fallback, and that one is
+        /// always a readable integer.
         /// </summary>
         public static Vector2 ScreenSize()
         {

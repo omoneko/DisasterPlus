@@ -202,9 +202,6 @@ namespace DisasterPlus.Game
         /// board, and the overlapping transparency is expensive.</summary>
         private const float MaxSizeMetres = 900f;
 
-        /// <summary>The reference altitude of the cloud base (m). **Lower than the old
-        /// implementation (900 m)** — a cumulonimbus has a low underside and grows upwards
-        /// from there.</summary>
         /// <summary>
         /// The floor on the cloud base (m).
         ///
@@ -307,11 +304,10 @@ namespace DisasterPlus.Game
             return altitude;
         }
 
-        /// <summary>The minimum clearance above the terrain height at the centre (m), so
-        /// it does not get buried in a mountain on a mountainous map.</summary>
         /// <summary>
         /// The minimum lift above the ground (the terrain height at the typhoon's centre)
-        /// in metres. 300 → 900 for the same reason as above.
+        /// in metres, so the cloud does not end up buried in a mountain on a mountainous map.
+        /// 300 → 900 for the same reason as above.
         /// </summary>
         private const float MinClearanceMetres = 900f;
 

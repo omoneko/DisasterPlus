@@ -46,8 +46,6 @@ namespace DisasterPlus.Game
 
         private readonly BurningBuildingScanner _scanner = new BurningBuildingScanner();
 
-        /// <summary>The intensity is a byte. We start at 60, a middling tornado (displayed
-        /// as 6.0).</summary>
         /// <summary>
         /// The disaster intensity used when creating the vortex.
         ///
