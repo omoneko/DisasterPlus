@@ -3,84 +3,95 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// 進行中の地震 1 個ぶんの、不変な読み取り結果。
-    /// ①の <c>ForecastReading</c> と同じ役割で、sim スレッドが作り main スレッドが読む。
+    /// An immutable set of readings for one earthquake in progress.
+    /// It plays the same role as ①'s <c>ForecastReading</c>: the sim thread builds it and
+    /// the main thread reads it.
     ///
-    /// **ここには「読んだ値」しか入れない。** 推定も予測も持たせない
-    /// （それらは表示側と第 2 層の仕事）。唯一の例外が <see cref="Radius"/> で、
-    /// これは <see cref="Intensity"/> から一意に決まるバニラの式そのものなので、
-    /// 半径を 2 箇所に持たないために計算プロパティにしてある。
+    /// **Nothing but "values that were read" goes in here.** No estimates, no predictions
+    /// (those are the display side's and the second layer's job). The one exception is
+    /// <see cref="Radius"/>, which is vanilla's own formula determined uniquely by
+    /// <see cref="Intensity"/>, so it is a computed property to avoid holding the radius in
+    /// two places.
     /// </summary>
     public class EarthquakeReading
     {
-        /// <summary>災害バッファ上の添字。診断とログの識別子として使う。</summary>
+        /// <summary>The index into the disaster buffer. Used as the identifier in
+        /// diagnostics and logs.</summary>
         public readonly ushort DisasterId;
 
-        /// <summary>震央（<c>DisasterData.m_targetPosition</c>）。</summary>
+        /// <summary>The epicentre (<c>DisasterData.m_targetPosition</c>).</summary>
         public readonly Vec3 Epicentre;
 
-        /// <summary>断層の向き（<c>DisasterData.m_angle</c>、ラジアン）。</summary>
+        /// <summary>The fault's orientation (<c>DisasterData.m_angle</c>, radians).</summary>
         public readonly float AngleRadians;
 
-        /// <summary><c>DisasterData.m_intensity</c>。バニラのランダム発生は 10〜100、本 MOD は 255 まで解放済み。</summary>
+        /// <summary><c>DisasterData.m_intensity</c>. Vanilla's random spawns use 10-100;
+        /// this mod has unlocked it up to 255.</summary>
         public readonly byte Intensity;
 
         public readonly EarthquakePhase Phase;
 
         /// <summary>
-        /// 測位済みか。地震にこれを立てるのは震央の <c>EarthquakeCoverage != 0</c>、
-        /// すなわち**地震計だけ**（IL 事実文書 §A-2 / §C-2）。
-        /// false ならこの地震はハザードマップに一切塗られない（§A-6）。
+        /// Whether it has been located. The only thing that sets this for an earthquake is
+        /// <c>EarthquakeCoverage != 0</c> at the epicentre — that is, **the seismometer and
+        /// nothing else** (§A-2 / §C-2 of the IL facts document).
+        /// If false, this earthquake is never painted onto the hazard map at all (§A-6).
         /// </summary>
         public readonly bool Located;
 
         public readonly uint StartFrame;
 
         /// <summary>
-        /// 予定されている（あるいは実測された）発動フレーム。
-        /// **0 は「今」ではなく「未定」**。<see cref="ActivationScheduled"/> を必ず先に見ること。
+        /// The scheduled (or observed) activation frame.
+        /// **0 means "not decided yet", not "now".** Always check
+        /// <see cref="ActivationScheduled"/> first.
         /// </summary>
         public readonly uint ActivationFrame;
 
         /// <summary>
-        /// <c>m_activationFrame != 0</c>。§A-1 の罠そのもの。
+        /// <c>m_activationFrame != 0</c>. Exactly the trap in §A-1.
         ///
-        /// <c>SelfTrigger(64)</c> が立っていない地震は <c>EarthquakeAI.StartDisaster</c> が
-        /// 即 return するため <c>m_activationFrame</c> が 0 のまま残り、
-        /// <c>IsStillEmerging</c> が <c>m_activationFrame == 0</c> で常に true を返して
-        /// **Emerging のまま永久に固まる**。この 0 をそのまま時刻計算へ流すと
-        /// 「あと 4739 年」のような数字になるので、表示側は必ずここで分岐する。
+        /// For an earthquake without <c>SelfTrigger(64)</c> set,
+        /// <c>EarthquakeAI.StartDisaster</c> returns immediately, so
+        /// <c>m_activationFrame</c> stays 0, <c>IsStillEmerging</c> always returns true via
+        /// <c>m_activationFrame == 0</c>, and it **freezes in Emerging forever**. Feed that
+        /// 0 straight into a time calculation and you get numbers like "4,739 years to go",
+        /// so the display side must always branch here.
         /// </summary>
         public readonly bool ActivationScheduled;
 
         /// <summary>
-        /// 震央の <c>ImmaterialResourceManager.Resource.EarthquakeCoverage</c> の**生値**。
-        /// バニラの警報式は <c>Min(coverage, 100)</c> を使うが、ここではクランプしない
-        /// （生値と表示値の両方を診断に出せるようにするため。クランプは
-        /// Task 7 の <c>WarningLeadTime</c> が行う）。
+        /// The **raw value** of
+        /// <c>ImmaterialResourceManager.Resource.EarthquakeCoverage</c> at the epicentre.
+        /// Vanilla's warning formula uses <c>Min(coverage, 100)</c>, but we do not clamp
+        /// here (so that diagnostics can show both the raw value and the displayed one; the
+        /// clamping is done by Task 7's <c>WarningLeadTime</c>).
         ///
-        /// <see cref="CoverageKnown"/> が false のときこの値は無意味。
+        /// When <see cref="CoverageKnown"/> is false this value is meaningless.
         /// </summary>
         public readonly int CoverageAtEpicentre;
 
         /// <summary>
-        /// カバレッジを実際に読めたか。
+        /// Whether the coverage could actually be read.
         ///
-        /// 計画の型一覧には無いフィールドだが、①の <c>WeatherSnapshot.DisasterInfoAvailable</c> と
-        /// 同じ理由で足している。カバレッジ 0 は「地震計が無い」という**意味のある実測値**であり、
-        /// 読み取りに失敗したときに同じ 0 を返すと、両者が外見上区別できない捏造ゼロになる。
-        /// 「地震計が無いのでハザードマップが空です」は本機能が出す最重要の説明なので、
-        /// その根拠が読めなかったことを隠してはいけない。
+        /// This field is not in the plan's list of types, but it is added for the same
+        /// reason as ①'s <c>WeatherSnapshot.DisasterInfoAvailable</c>. A coverage of 0 is
+        /// **a meaningful measurement** — "there is no seismometer" — and returning the same
+        /// 0 when the read fails would make the two indistinguishable from the outside: an
+        /// invented zero. "The hazard map is empty because you have no seismometer" is the
+        /// single most important explanation this feature produces, so we must not hide the
+        /// fact that the evidence behind it could not be read.
         /// </summary>
         public readonly bool CoverageKnown;
 
         /// <summary>
-        /// この地震の断層長 <c>L = m_crackLength * (0.5 + intensity*0.005)</c>（§A-3）。
-        /// プレハブが解決できていないときは 0（＝不明）。
+        /// This earthquake's fault length <c>L = m_crackLength * (0.5 + intensity*0.005)</c>
+        /// (§A-3). 0 (= unknown) when the prefab could not be resolved.
         /// </summary>
         public readonly float CrackLength;
 
-        /// <summary>同じく断層幅 <c>W = m_crackWidth * (0.5 + intensity*0.005)</c>。不明なら 0。</summary>
+        /// <summary>Likewise the fault width
+        /// <c>W = m_crackWidth * (0.5 + intensity*0.005)</c>. 0 if unknown.</summary>
         public readonly float CrackWidth;
 
         public EarthquakeReading(ushort disasterId, Vec3 epicentre, float angleRadians,
@@ -104,7 +115,8 @@ namespace DisasterPlus.Core.Earthquake
             CrackWidth = crackWidth;
         }
 
-        /// <summary>全体円盤の半径 R。<see cref="SeismicIntensity.RadiusOf"/> をそのまま返す。</summary>
+        /// <summary>The whole-quake disc radius R. Simply returns
+        /// <see cref="SeismicIntensity.RadiusOf"/>.</summary>
         public float Radius
         {
             get { return SeismicIntensity.RadiusOf(Intensity); }

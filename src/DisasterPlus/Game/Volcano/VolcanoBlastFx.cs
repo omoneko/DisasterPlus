@@ -6,94 +6,99 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **爆発と噴石。** 火口が区切りごとに<b>ドンと弾け</b>、岩塊が放物線を描いて
-    /// 山肌と裾へ落ちる。**main スレッド専用、毎フレーム。**
-    /// <see cref="VolcanoEruptionFx"/> が自分の時計と一緒に呼ぶ（時計を 2 本持たない）。
+    /// **The blast and the ejecta.** The crater <b>goes off with a bang</b> at each segment and
+    /// blocks arc out onto the flanks and the lower slopes.
+    /// **Main thread only, every frame.**
+    /// <see cref="VolcanoEruptionFx"/> calls it along with its own clock (do not keep two clocks).
     ///
-    /// ── 何が変わったのか（2026-08-22、所有者の依頼）───────────────────
+    /// ── what changed (2026-08-22, the owner's request) ─────────────────────────────────────
     ///
-    /// > 噴火の際に爆発＋噴石のアニメーションも実装してほしいです。
+    /// > I'd also like a blast + ejecta animation implemented for the eruption.
     ///
-    /// 今までの「噴石」は火口の上の円から粒子を湧かせ続けるだけで、
-    /// **弾ける瞬間も、飛んで落ちる岩も無かった**（あれは噴出口の噴水である。
-    /// そのまま残してある —— 消すと火口が静かになりすぎる）。ここが足すのは 2 つ:
+    /// The "ejecta" up to now just kept welling particles up out of a circle above the crater;
+    /// **there was no moment of detonation and no rock flying and landing** (that one is the
+    /// fountain at the vent. It has been left in place — remove it and the crater goes too quiet).
+    /// What this adds is two things:
     ///
     /// <code>
-    /// 爆発   EffectManager.DispatchEffect(Medium Explosion Particles, 火口, …)
-    ///        ★ 一発もの。m_renderDuration = 1.0 秒あるので 1 回積めば減衰して消える
-    /// 噴石   Core/Volcano/EjectaBallistics が決めた放物線に沿って、
-    ///        毎フレーム RenderEffect で小さな熱い玉を湧かせ直す（1 回に最大 16 個、
-    ///        枠は 48 個ぶん）
-    ///        → 山肌 / 裾に落ちたら、そこに 0.9 秒だけ土煙を出す
+    /// blast   EffectManager.DispatchEffect(Medium Explosion Particles, the crater, …)
+    ///         ★ A one-shot. m_renderDuration is 1.0 s, so queuing it once is enough; it decays away
+    /// ejecta  Along the parabola decided by Core/Volcano/EjectaBallistics, re-well a small hot
+    ///         ball every frame with RenderEffect (at most 16 per blast, with 48 slots)
+    ///         → once it lands on the flank or the lower slope, emit dust there for 0.9 s
     /// </code>
     ///
-    /// ── 「1 発」ではなく「脈打つ」──────────────────────────────
+    /// ── "pulsing", not "a single bang" ─────────────────────────────────────────────────────
     ///
-    /// 実際の噴火は連続ではなく脈動する。区切りは
-    /// <c>EruptionEffectPlan.EjectaPeriodSeconds</c>（強いほど短い。7.5 → 1.6 秒）
-    /// で、**噴出口の噴水と同じ式**である ——
-    /// 別の式にすると弾ける瞬間と噴水の山がずれて、2 つの別々の演出に見える。
+    /// A real eruption pulses rather than running continuously. The segment comes from
+    /// <c>EruptionEffectPlan.EjectaPeriodSeconds</c> (shorter the stronger it is; 7.5 → 1.6 s),
+    /// which is **the same formula as the fountain at the vent** —
+    /// use a different formula and the moment of detonation drifts out of step with the fountain's
+    /// peaks, and it reads as two unrelated effects.
     ///
-    /// ★ さらに 1 回の爆発を <see cref="BlastPulses"/> 発に割り、
-    ///   <c>DispatchEffect</c> の <c>startFrame</c> でずらす（IL 事実 §C:
-    ///   <c>m_startFrame</c> まで発火を遅らせられる）。1 発だと「ポン」で終わるが、
-    ///   3 発ずれると**ドドン**と鳴っているように見える。
+    /// ★ On top of that, each blast is split into <see cref="BlastPulses"/> bursts, offset via
+    ///   <c>DispatchEffect</c>'s <c>startFrame</c> (IL fact §C: firing can be delayed until
+    ///   <c>m_startFrame</c>). One burst ends with a "pop", but three offset bursts look like a
+    ///   **ba-da-boom**.
     ///
-    /// ── ★ <c>DispatchEffect</c> に渡すのは複製ではない ────────────────────
+    /// ── ★ what is passed to <c>DispatchEffect</c> is not a clone ──────────────────────────
     ///
-    /// あれは**キューに積むだけで、描くのはあとのフレーム**である。⑤の複製を積んだ直後に
-    /// レベルアンロードで複製を破棄すると、バニラの中で破棄済みオブジェクトを触る。
-    /// だから積むのは <c>VolcanoVanillaFx.BlastOneShot()</c>
-    /// （＝**ゲーム自身のプレハブそのもの**）だけである。飛ぶ岩の尾のほうは
-    /// <c>RenderEffect</c> の継続モードなので、生存期間は完全にこちらの手の内にある
-    /// （<see cref="VolcanoEruptionFx"/> の同じ判断）。
+    /// That **only queues it; the drawing happens on a later frame**. Queue ⑤'s clone and then
+    /// destroy the clone on level unload right afterwards, and vanilla touches a destroyed object.
+    /// So what is queued is only <c>VolcanoVanillaFx.BlastOneShot()</c>
+    /// (= **the game's own prefab itself**). The flying rocks' trails are on
+    /// <c>RenderEffect</c>'s continuous mode, so their lifetime is entirely in our hands
+    /// (the same call as in <see cref="VolcanoEruptionFx"/>).
     ///
-    /// ── 毎フレームの費用 ─────────────────────────────────
+    /// ── the per-frame cost ─────────────────────────────────────────────────────────────────
     ///
-    /// 生きている岩の数だけ <c>RenderEffect</c>（枠は 48 個。飛んでいる岩と、
-    /// 落ちてから 0.9 秒の土煙が同じ枠を使う）。
-    /// 岩 1 個の粒子は玉 1 つぶん（半径 9 m ＝ <c>max(100, πr²)</c> の下限側）なので、
-    /// 噴煙柱 1 段よりずっと軽い。**弾道は噴出のたびに 1 回だけ解いて配列に焼く。**
-    /// 配列は固定長で作り置きし、<b>毎フレームの確保は 0 バイト</b>。
-    /// **<c>EjectaBlock</c> は struct なので、この配列は Unity の fake-null の罠に当たらない。**
+    /// One <c>RenderEffect</c> per live rock (48 slots; the rocks in flight and the 0.9 s of dust
+    /// after landing share the same slots).
+    /// One rock's particles are one ball's worth (radius 9 m = the lower side of
+    /// <c>max(100, πr²)</c>), so it is far lighter than a single plume-column segment.
+    /// **The ballistics are solved once per blast and baked into an array.**
+    /// The arrays are fixed-length and pre-built, so <b>per-frame allocation is zero bytes</b>.
+    /// **<c>EjectaBlock</c> is a struct, so this array does not fall into Unity's fake-null trap.**
     /// </summary>
     public static class VolcanoBlastFx
     {
-        // ★★ BlastPulses / BlastPulseFrames / BlastPulseShrink は 2026-08-22 に退役した。
+        // ★★ BlastPulses / BlastPulseFrames / BlastPulseShrink were retired on 2026-08-22.
         //
-        //    「同じ場所へ 3 発、6 フレームずつずらして、細らせながら積む」だった。
-        //    ずらす先が**同じ場所**なので、濃くはなったが広がらない ——
-        //    実機報告「爆発のエフェクトがスケール通りではない、特に破局噴火の時の
-        //    爆発がしょぼすぎます」の一因である。
+        //    They were "queue three bursts at the same place, 6 frames apart, shrinking each
+        //    time". Because what was offset landed in **the same place**, it got denser but never
+        //    wider — part of the cause of the live report "the explosion effect isn't to scale;
+        //    the blast during a super-eruption in particular is far too feeble".
         //
-        //    今は <c>Core.Volcano.BlastCluster</c> が**場所も大きさも遅れも**決め、
-        //    数そのものを山の大きさと大爆発かどうかで変える。
-        //    定数は残さない —— 残すと「まだ 3 発なのか」と読まれる。
+        //    Now <c>Core.Volcano.BlastCluster</c> decides **the place, the size and the delay**,
+        //    and varies the count itself with the mountain's size and whether it is a great
+        //    explosion.
+        //    The constants are not kept — keep them and someone reads "so it is still three".
 
-        /// <summary>爆発と岩を火口の底からどれだけ上げるか（m）。</summary>
+        /// <summary>How far above the crater floor the blast and the rocks start (m).</summary>
         private const float LaunchLiftMetres = 4f;
 
-        /// <summary>噴出の番号を種に混ぜる塩。</summary>
+        /// <summary>The salt that mixes the eruption's index into the seed.</summary>
         private const uint BlastSalt = 0x424C5354u;
 
-        // ── 状態（**全部 struct と平の値。Unity の参照を 1 つも持たない**）──────
+        // ── state (**all structs and plain values. It holds not one Unity reference**) ──────
 
         /// <summary>
-        /// 同時に空を飛んでいられる岩の数。
+        /// How many rocks may be in the air at once.
         ///
-        /// ★★ <b>1 回の噴出ぶん（16 個）では足りない。</b> いちばん長い弾道は 30 秒を
-        /// 超えるのに、噴出の間隔は強いときで 1.6 秒しかない ——
-        /// 1 回ぶんの配列にすると、**次の噴出が来るたびに前の岩が空中で消える。**
-        /// 3 回ぶん置いておけば、いちばん詰まった状況でも消える岩は出ない。
+        /// ★★ <b>One blast's worth (16) is not enough.</b> The longest trajectory runs over 30
+        /// seconds, while the interval between blasts is only 1.6 seconds at full strength —
+        /// with an array sized for one blast, **the previous rocks vanish in mid-air every time
+        /// the next blast comes**.
+        /// Keep three blasts' worth and not one rock vanishes even in the tightest case.
         /// </summary>
         private const int MaxLiveBlocks = EjectaBallistics.MaxBlocksPerBlast * 3;
 
         private static readonly EjectaBlock[] _blocks = new EjectaBlock[MaxLiveBlocks];
 
-        /// <summary>各枠の打ち上げ時刻（⑤の効果時計の秒）。</summary>
+        /// <summary>The launch time of each slot (in seconds of ⑤'s effect clock).</summary>
         private static readonly float[] _launchedAt = new float[MaxLiveBlocks];
 
-        /// <summary>最後に弾けた区切りの番号。<see cref="NoBlast"/> は「まだ 1 度も」。</summary>
+        /// <summary>The index of the last segment that detonated. <see cref="NoBlast"/> means "not once yet".</summary>
         private static int _lastBlastIndex = NoBlast;
 
         private const int NoBlast = int.MinValue;
@@ -102,22 +107,22 @@ namespace DisasterPlus.Game
         private static int _drawnLastFrame;
         private static bool _dispatchFailedLogged;
 
-        /// <summary>直近の 1 回の爆発を何発に割ったか（診断用）。</summary>
+        /// <summary>How many bursts the most recent blast was split into (for diagnostics).</summary>
         private static int _burstsLastBlast;
 
-        /// <summary>同上（外から読む口）。</summary>
+        /// <summary>As above (the entry point read from outside).</summary>
         public static int BurstsLastBlast { get { return _burstsLastBlast; } }
 
-        /// <summary>これまでに弾けた回数（診断用）。</summary>
+        /// <summary>How many detonations there have been so far (for diagnostics).</summary>
         public static int BlastsSoFar { get { return _blastsSoFar; } }
 
-        /// <summary>今フレームに描いた岩の数（診断用）。</summary>
+        /// <summary>The number of rocks drawn this frame (for diagnostics).</summary>
         public static int BlocksDrawn { get { return _drawnLastFrame; } }
 
         /// <summary>
-        /// **main スレッド。** 噴火が終わったフレームと、レベルアンロードで呼ぶ。
-        /// 借り物の後始末は <see cref="VolcanoVanillaFx"/> の仕事なので、
-        /// ここで畳むのは⑤自身の予定だけである。冪等。
+        /// **Main thread.** Call on the frame the eruption ends, and on level unload.
+        /// Cleaning up the borrowings is <see cref="VolcanoVanillaFx"/>'s job, so all that is
+        /// folded away here is ⑤'s own plan. Idempotent.
         /// </summary>
         public static void Reset()
         {
@@ -132,15 +137,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッド、毎フレーム。**
-        /// <paramref name="clockSeconds"/> は⑤の効果時計（一時停止で止まり、
-        /// ゲーム速度に追随する。<see cref="VolcanoEruptionFx"/> が持っている）。
+        /// **Main thread, every frame.**
+        /// <paramref name="clockSeconds"/> is ⑤'s effect clock (it stops when paused and follows
+        /// the game speed. <see cref="VolcanoEruptionFx"/> holds it).
         /// </summary>
         /// <param name="climax">
-        /// カルデラ形成期の大爆発か（<c>VolcanoEruption.InClimax</c>）。
+        /// Whether this is the caldera-forming great explosion (<c>VolcanoEruption.InClimax</c>).
         /// </param>
         /// <param name="ringRadiusMetres">
-        /// 環状火口列の半径（m）。**0 なら中央火口だけ**。破局噴火のときだけ意味を持つ。
+        /// The radius of the ring of fissures (m). **0 means the central vent only.** It only has
+        /// meaning during a super-eruption.
         /// </param>
         public static void Update(RenderManager.CameraInfo camera, Vec3 vent, Vec3 centre,
                                   VolcanoFootprint footprint, float craterRadiusMetres,
@@ -172,8 +178,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 弾ける瞬間。**一発ものを <see cref="BlastPulses"/> 発ずらして積み**、
-        /// 同時に岩の弾道を解いて配列へ焼く。
+        /// The moment of detonation. **Queues the one-shot as <see cref="BlastPulses"/> offset
+        /// bursts** and, at the same time, solves the rocks' ballistics and bakes them into the
+        /// array.
         /// </summary>
         private static void Detonate(uint seed, int blastIndex, Vec3 vent,
                                      VolcanoFootprint footprint, float craterRadiusMetres,
@@ -183,8 +190,9 @@ namespace DisasterPlus.Game
             DispatchBlast(seed + (uint)blastIndex * 977u, vent, footprint,
                           craterRadiusMetres, unit, climax, ringRadiusMetres);
 
-            // ★ 火口の底が地面（山を置いた地点）から何 m 上か。
-            //   VolcanoFootprint.GroundHeightMetres は調査時の地形高さである。
+            // ★ How many metres the crater floor is above the ground (the spot the mountain was
+            //   placed on). VolcanoFootprint.GroundHeightMetres is the terrain height at survey
+            //   time.
             float ventAboveBase = vent.Y - footprint.GroundHeightMetres;
             if (float.IsNaN(ventAboveBase) || ventAboveBase < 0f) ventAboveBase = 0f;
 
@@ -206,8 +214,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 空いている枠。**空きが無ければいちばん古い枠を潰す** ——
-        /// そのときに消えるのは「もう落ちている確率がいちばん高い岩」である。
+        /// A free slot. **If there is none, overwrite the oldest slot** — what disappears then is
+        /// the rock most likely to have already landed.
         /// </summary>
         private static int FreeSlot(float clockSeconds)
         {
@@ -228,8 +236,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ゲーム自身の爆発を <c>DispatchEffect</c> で積む。
-        /// **引けなければ 1 行だけ残して何もしない**（岩は飛ぶ）。
+        /// Queue the game's own explosion with <c>DispatchEffect</c>.
+        /// **If it cannot be looked up, leave one line and do nothing** (the rocks still fly).
         /// </summary>
         private static void DispatchBlast(uint seed, Vec3 vent, VolcanoFootprint footprint,
                                           float craterRadiusMetres, float unit,
@@ -249,10 +257,12 @@ namespace DisasterPlus.Game
                     startFrame = Singleton<SimulationManager>.instance.m_referenceFrameIndex;
                 }
 
-                // ★★ **1 発では大きくならない**（<see cref="BlastCluster"/> のクラス doc）。
-                //    <c>SpawnArea</c> の半径を広げても粒は大きくならず、同じ大きさの粒が
-                //    薄く散るだけである。数を増やしてずらして重ねるのが唯一の手で、
-                //    その数は<b>山の大きさ</b>と<b>大爆発かどうか</b>で決まる。
+                // ★★ **One burst does not make it bigger** (the class doc of
+                //    <see cref="BlastCluster"/>).
+                //    Widen <c>SpawnArea</c>'s radius and the particles do not get bigger; the
+                //    same-sized particles just scatter more thinly. The only approach is to
+                //    increase the count and layer them with offsets, and that count is decided by
+                //    <b>the mountain's size</b> and <b>whether it is a great explosion</b>.
                 float sizeUnit = BlastCluster.SizeUnitOf(
                     footprint.RadiusMetres,
                     VolcanoShape.DefaultRadiusOf(footprint.Form),
@@ -272,16 +282,16 @@ namespace DisasterPlus.Game
                     var position = new Vector3(origin.x + burst.OffsetX,
                                                origin.y + burst.OffsetY,
                                                origin.z + burst.OffsetZ);
-                    // ★★ **4 引数のほうを使う。**（2026-08-22、所有者の指摘
-                    //    「エフェクトが平面的」）3 引数の SpawnArea は
-                    //    m_halfHeight = 0 を書き込む（IL_006F-0075 で確認）ので、
-                    //    粒が**厚みゼロの円盤**にしか湧かない。
+                    // ★★ **Use the four-argument one.** (2026-08-22, the owner's report
+                    //    "the effect looks flat") The three-argument SpawnArea writes
+                    //    m_halfHeight = 0 (confirmed at IL_006F-0075), so the particles only well
+                    //    up in **a disc of zero thickness**.
                     var area = new EffectInfo.SpawnArea(position, Vector3.up,
                                                         burst.RadiusMetres,
                                                         burst.HalfHeightMetres);
 
-                    // ★ audioGroup は null でよい。ParticleEffect は RequirePlay() が
-                    //   false なので、音のキューには 1 件も積まれない（IL 事実 §C）。
+                    // ★ audioGroup may be null. ParticleEffect's RequirePlay() is false, so not
+                    //   one entry is queued on the audio side (IL fact §C).
                     effects.DispatchEffect(blast, default(InstanceID), area,
                                            Vector3.zero, 0f, burst.Magnitude, null,
                                            startFrame + (uint)burst.DelayFrames, false);
@@ -289,7 +299,8 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // ★ 区切りごとの経路（数秒に 1 回）。それでも 1 度だけにする。
+                // ★ This is a per-segment path (once every few seconds). Even so, say it once
+                //   only.
                 if (!_dispatchFailedLogged)
                 {
                     _dispatchFailedLogged = true;
@@ -300,7 +311,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>飛んでいる岩と、落ちた跡の土煙。**継続モードで自分で窓を作る。**</summary>
+        /// <summary>The rocks in flight, and the dust where they landed. **Make the window ourselves in continuous mode.**</summary>
         private static void RenderBlocks(RenderManager.CameraInfo camera, Vec3 vent,
                                          float clockSeconds, float dt)
         {
@@ -318,8 +329,9 @@ namespace DisasterPlus.Game
                 float age = clockSeconds - _launchedAt[i];
                 if (age < 0f) continue;
 
-                // ★ 落ちて土煙も消えた枠は**その場で空ける**。空けないと、
-                //   長く続く噴火で枠が全部埋まり、新しい岩が古い岩を空中で消す。
+                // ★ Free a slot **on the spot** once the rock has landed and its dust has gone.
+                //   Without freeing it, a long-running eruption fills every slot and new rocks
+                //   delete old ones in mid-air.
                 if (age >= block.FlightSeconds + EruptionEffectPlan.ImpactSeconds)
                 {
                     _blocks[i] = default(EjectaBlock);
@@ -345,7 +357,7 @@ namespace DisasterPlus.Game
                     continue;
                 }
 
-                // 着弾。**落ちた場所**に短い土煙を出す。
+                // Impact. Emit a short burst of dust **where it landed**.
                 if (dust == null) continue;
 
                 float impactMagnitude = EruptionEffectPlan.ImpactMagnitude(

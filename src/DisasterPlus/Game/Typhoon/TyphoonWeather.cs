@@ -4,210 +4,230 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 台風が天候を駆動する。<b>sim スレッド専用。</b>
+    /// The typhoon drives the weather. <b>Sim thread only.</b>
     ///
-    /// 小さいが間違え方が独特で、**どの間違いも例外を出さない**。
+    /// Small, but with a peculiar set of ways to get it wrong, and **none of them raises
+    /// an exception**.
     ///
-    /// ── 1. 毎 tick 書く ────────────────────────────────────
+    /// ── 1. Write every tick ──────────────────────────────────
     ///
-    /// <c>WeatherManager.SimulationStepImpl</c> は <c>m_targetRain</c> を
-    /// <c>m_currentRain</c> と比べ、**等しいときにだけ** <c>Randomizer.Int32(20000) == 0</c>
-    /// で勝手に別の値へ振り直す（IL 事実文書 §A-4、本タスクで IL_0222 を再確認）。
-    /// つまり 1 回書いて放置すると、<c>current</c> が <c>target</c> に追いついた瞬間から
-    /// 1/20000/step で天候を奪われる。**毎 tick 書いていれば奪われない。**
-    /// 霧も雲も同型で、遷移レートは雨・霧 <c>0.0002/step</c>、雲 <c>0.0008/step</c>。
+    /// <c>WeatherManager.SimulationStepImpl</c> compares <c>m_targetRain</c> with
+    /// <c>m_currentRain</c> and, **only when they are equal**, redraws it to some other
+    /// value on <c>Randomizer.Int32(20000) == 0</c> (IL facts document §A-4; IL_0222
+    /// re-confirmed for this task). In other words, write once and leave it and the
+    /// weather is taken away from you at 1/20000 per step from the moment
+    /// <c>current</c> catches up with <c>target</c>. **Write every tick and it is never
+    /// taken away.** Fog and cloud work the same way; the transition rates are
+    /// <c>0.0002/step</c> for rain and fog and <c>0.0008/step</c> for cloud.
     ///
-    /// ── 2. <c>m_forceWeatherOn</c> を書かないと、天候 OFF の環境で全部 0 になる ──
+    /// ── 2. Without writing <c>m_forceWeatherOn</c>, everything goes to 0 in an environment with weather off ──
     ///
-    /// 同メソッドは <c>w = m_enableWeather ? 1 : 0</c> を作り、
-    /// <c>m_forceWeatherOn != 0</c> なら <c>w = Max(w, m_forceWeatherOn)</c> にする。
-    /// <c>w &lt; 1</c> の枝（IL_053D）は <c>m_targetRain / Fog / Cloud</c> を 0 にし、
-    /// <c>current</c> も <c>Min(current, w)</c> で潰す。**プレイヤーが天候を切っていると
-    /// 台風は晴天の下を進む。** <c>m_forceWeatherOn</c> は <c>0.001/step</c> で減衰するので
-    /// 毎 tick 書き直す。値 2f はバニラの嵐・竜巻が書いているのと同じである（§A-1）。
+    /// The same method builds <c>w = m_enableWeather ? 1 : 0</c> and, if
+    /// <c>m_forceWeatherOn != 0</c>, makes it <c>w = Max(w, m_forceWeatherOn)</c>.
+    /// The <c>w &lt; 1</c> branch (IL_053D) zeroes <c>m_targetRain / Fog / Cloud</c> and
+    /// crushes <c>current</c> too with <c>Min(current, w)</c>. **With the player's weather
+    /// switched off, the typhoon travels under clear skies.** <c>m_forceWeatherOn</c>
+    /// decays at <c>0.001/step</c>, so we rewrite it every tick. The value 2f is the same
+    /// one vanilla's storms and tornadoes write (§A-1).
     ///
-    /// ── 3. バニラの嵐と 256 フレームに 1 度だけ食い違う（対策は不要） ─────────
+    /// ── 3. It disagrees with the vanilla storm once every 256 frames (no action needed) ──
     ///
-    /// ④の宿主は <c>SelfTrigger</c> 付きの <c>ThunderStormAI</c> なので、**バニラ自身も**
-    /// Active 分岐で <c>m_targetRain = 1; m_targetCloud = 1; m_targetFog = 0;
-    /// m_forceWeatherOn = 2</c> を書く（§A-1）。ただしそれが走るのは
-    /// **256 sim フレームに 1 回**（§E-2）で、④は毎 tick 書く。
-    /// <c>m_currentRain</c> は <c>0.0002/step</c> でしか動かないので、
-    /// **1 tick ぶんの target の食い違いは画面に出ない。対策は不要である。**
-    /// Harmony パッチで抑えに行かないこと。
+    /// ④'s host is a <c>ThunderStormAI</c> with <c>SelfTrigger</c>, so **vanilla itself**
+    /// also writes <c>m_targetRain = 1; m_targetCloud = 1; m_targetFog = 0;
+    /// m_forceWeatherOn = 2</c> in its Active branch (§A-1). But that runs only
+    /// **once per 256 sim frames** (§E-2), while ④ writes every tick.
+    /// <c>m_currentRain</c> only moves at <c>0.0002/step</c>, so **one tick's worth of
+    /// disagreement in the target never shows on screen. No action is needed.**
+    /// Do not go and suppress it with a Harmony patch.
     ///
-    /// 本タスクで走査したところ、同じ性質の書き手がもう 1 つある:
-    /// <c>ForestFireAI.SimulationStep</c> は Active（<c>m_flags &amp; 8</c>）の間
-    /// <c>m_targetRain = 0f</c> を書く（IL_001F。事実文書に記載が無かったので追記する）。
-    /// ④の落雷が森林火災を起こせば同居しうるが、こちらも 256 フレームに 1 回なので
-    /// 結論は同じ。
+    /// A scan for this task found one more writer of the same character:
+    /// <c>ForestFireAI.SimulationStep</c> writes <c>m_targetRain = 0f</c> while Active
+    /// (<c>m_flags &amp; 8</c>) (IL_001F; the facts document had no entry for this, so it
+    /// is added here). ④'s lightning could start a forest fire and the two could coexist,
+    /// but that too runs once per 256 frames, so the conclusion is the same.
     ///
-    /// ── 4. 風向は台風に追いつかない（<c>m_windDirection</c> を直接書かない） ──────
+    /// ── 4. The wind direction cannot keep up with the typhoon (do not write <c>m_windDirection</c> directly) ──
     ///
-    /// <c>m_directionSpeed</c> は <c>+0.001/step</c> ずつしか上がらず、上限は残角×0.001
-    /// （§A-4）。**台風の急旋回は表現できない。** <c>m_windDirection</c> を直接書けば
-    /// 可能だが、書き手はバニラの <c>SimulationStepImpl</c> と <c>Data.Deserialize</c> の
-    /// 2 つだけで、毎フレーム補間しているものを外から差し替えると木と道路の揺れが飛ぶ。
-    /// **直接書かない。** 代わりに T5 のパネルが「風向はゆっくりしか変わりません
-    /// （ゲームの制約）」を 1 行出す。
+    /// <c>m_directionSpeed</c> only rises by <c>+0.001/step</c> and is capped at the
+    /// remaining angle × 0.001 (§A-4). **A typhoon's sharp turns cannot be expressed.**
+    /// Writing <c>m_windDirection</c> directly would make it possible, but the only
+    /// writers are vanilla's <c>SimulationStepImpl</c> and <c>Data.Deserialize</c>, and
+    /// swapping out from outside something that is interpolated every frame makes the tree
+    /// and road sway jump. **Do not write it directly.** Instead T5's panel shows one line
+    /// saying "the wind direction only changes slowly (a limitation of the game)".
     ///
-    /// 角度の対応は推測ではなく実測してある。<c>WeatherManager.EndRenderingImpl</c> は
-    /// <c>rad = m_windDirection * 0.01745329</c> から
-    /// <c>_WindDirection = (sin rad, 0, cos rad, ...)</c> を作る（IL_0000–0050）ので、
-    /// <c>m_windDirection</c> は **0 度 = +Z、90 度 = +X の方位角**である。
-    /// 一方④の進行方位 φ は <c>(cos φ, sin φ)</c> を (X, Z) とする数学系なので、
-    /// 変換は <c>θ = 90 - φ[deg]</c> になる（<see cref="WindDegreesOf"/>）。
+    /// The angle convention was measured, not guessed. <c>WeatherManager.EndRenderingImpl</c>
+    /// builds <c>_WindDirection = (sin rad, 0, cos rad, ...)</c> from
+    /// <c>rad = m_windDirection * 0.01745329</c> (IL_0000-0050), so
+    /// <c>m_windDirection</c> is **a bearing where 0 degrees = +Z and 90 degrees = +X**.
+    /// ④'s heading φ, on the other hand, is in a mathematical convention where
+    /// <c>(cos φ, sin φ)</c> is (X, Z), so the conversion is <c>θ = 90 - φ[deg]</c>
+    /// (<see cref="WindDegreesOf"/>).
     ///
-    /// ── 5. 雨量と雲量の式は④が発明したものである ────────────────────
+    /// ── 5. The rainfall and cloud formulae are ④'s own invention ─────────
     ///
     /// <code>
-    /// near  = 1 - clamp01(|centre| / galeRadius)     // 強風域に入るほど 1 へ
+    /// near  = 1 - clamp01(|centre| / galeRadius)     // towards 1 as it enters the gale radius
     /// rain  = clamp01(0.35 + 0.65 * near)
     /// cloud = clamp01(0.55 + 0.45 * near)
-    /// fog   = clamp01(0.45 * near)                   // ★ 2026-08-22 に足した（視程）
+    /// fog   = clamp01(0.45 * near)                   // ★ added on 2026-08-22 (visibility)
     /// </code>
-    /// バニラに参照すべき制約は無い（設計書 §1.2）。距離は**マップ原点＝都市の中心**から
-    /// 台風の中心（クランプ前）までで測る。
+    /// There is no vanilla constraint to refer to (design doc §1.2). The distance is
+    /// measured from **the map origin, i.e. the centre of the city**, to the typhoon's
+    /// centre (before clamping).
     ///
-    /// ── 6. ★ 雨量 0.8 超がバニラの雷雨を生むことについての判断 ──────────────
+    /// ── 6. ★ The decision about rainfall above 0.8 creating vanilla thunderstorms ──
     ///
-    /// **④は意図して雨量を 0.8 より上へ持っていく。** 台風の最盛期に土砂降りに
-    /// ならないほうが嘘であり、しかも §A-5 のとおり**風速を上げるフィールドは
-    /// 存在しない**ので、④が「強さ」を天候として出せる手段は雨量と雲量しか無い。
-    /// その代償を隠さずここに書く。
+    /// **④ deliberately takes the rainfall above 0.8.** It would be a lie for it not to
+    /// pour at a typhoon's peak, and as §A-5 says **there is no field that raises the wind
+    /// speed**, so rainfall and cloud cover are the only means ④ has of expressing
+    /// "strength" as weather. We write the price of that here rather than hide it.
     ///
-    /// <c>WeatherManager.SimulationStepImpl</c> 末尾（IL_09D3–0A30）:
-    /// <c>m_currentRain &gt; 0.8f &amp;&amp; m_lightningQueue.m_size == 0</c> なら
-    /// <c>QueueLightningStrike(uint)</c> を呼ぶ。**本タスクでその 1 引数版の IL を
-    /// 全部読み、事実文書 §A-3 の記述をさらに絞り込んだ**:
+    /// At the end of <c>WeatherManager.SimulationStepImpl</c> (IL_09D3-0A30):
+    /// if <c>m_currentRain &gt; 0.8f &amp;&amp; m_lightningQueue.m_size == 0</c> it calls
+    /// <c>QueueLightningStrike(uint)</c>. **For this task we read all of that one-argument
+    /// overload's IL and narrowed down what the facts document §A-3 says**:
     ///
     /// <code>
-    /// IL_00CA-0125  災害バッファを走査し、m_flags &amp; 8 (Active) かつ
-    ///               Info == ThunderStormAI プレハブのものを探す
-    /// IL_012A       ★ 見つかったら brtrue で **CreateDisaster を飛ばす**
-    /// IL_0131-01B1  見つからなかったときだけ CreateDisaster（戻り値検査あり）→
-    ///               m_intensity = 10 → m_targetPosition = マップ一様乱数点 →
+    /// IL_00CA-0125  sweeps the disaster buffer looking for one with m_flags &amp; 8 (Active)
+    ///               whose Info is the ThunderStormAI prefab
+    /// IL_012A       ★ if found, a brtrue **skips CreateDisaster**
+    /// IL_0131-01B1  only when none was found: CreateDisaster (with a return-value check) →
+    ///               m_intensity = 10 → m_targetPosition = a uniformly random point on the map →
     ///               StartNow → ActivateNow
     /// </code>
     ///
-    /// したがって:
+    /// Therefore:
     ///
-    /// 1. **④の台風が Active の間、ゲームは新しい雷雨災害を作らない。** 既にある
-    ///    ④の嵐を見つけて再利用し、落雷 1 発をそのグループに足すだけである。
-    ///    計画 §3.1 が心配していた「④の雨がゲームに嵐を作らせる自己増殖」は、
-    ///    Active の間は**起きない**（案 (b) を却下した結論そのものは変わらない ——
-    ///    却下の第 2 の理由「プレイヤーから原因が MOD だと分からない」は残る）。
-    /// 2. 新しい雷雨災害が生まれうるのは、雨量が既に 0.8 超なのに④の嵐がまだ
-    ///    **Emerging**（Active ではない）である窓と、④が終わったあと
-    ///    <c>m_currentRain</c> が <c>0.0002/step</c> で 0.8 を下り切るまでの窓だけ。
-    ///    どちらも <c>CreateDisaster</c> の戻り値をゲーム自身が見ているので
-    ///    スロットは壊れない。**これは受け入れる** —— 台風の前後に雷雨が出るのは
-    ///    現象として正しく、抑えるにはバニラへパッチを当てるしかない。
-    /// 3. 落着点は台風の中心ではなく**マップ一様の乱数点**である
-    ///    （1 引数版 IL_000F–004D、<c>Randomizer.Int32(-8640, 8640)</c>）。
-    ///    ④の落雷（T6）とは分布が違うので、遠方に落ちる雷は④のものではない。
-    /// 4. **T6（落雷）への申し送り。** 環境落雷の条件は
-    ///    <c>m_lightningQueue.m_size == 0</c> である。T6 が常に 1 発以上キューへ
-    ///    積んでいれば環境落雷は**完全に止まる**ので、20 発の上限に対して
-    ///    環境落雷ぶんの取り分を見積もる必要は無い。逆に T6 が発数を 0 に絞る
-    ///    位相（眼の中など）を作ると、そこだけ環境落雷が復活する。
+    /// 1. **While ④'s typhoon is Active, the game creates no new thunderstorm disaster.**
+    ///    It finds ④'s existing storm, reuses it, and merely adds one strike to that
+    ///    group. The "④'s rain makes the game create a storm, self-breeding" that plan
+    ///    §3.1 worried about **does not happen** while Active (the conclusion that
+    ///    rejected option (b) itself does not change — the second reason for rejecting it,
+    ///    "the player cannot tell that the mod is the cause", still stands).
+    /// 2. A new thunderstorm disaster can only be born in the window where the rainfall is
+    ///    already above 0.8 while ④'s storm is still **Emerging** (not Active), and in the
+    ///    window after ④ ends while <c>m_currentRain</c> comes back down through 0.8 at
+    ///    <c>0.0002/step</c>. In both cases the game itself looks at
+    ///    <c>CreateDisaster</c>'s return value, so the slots do not break.
+    ///    **We accept this** — a thunderstorm before and after a typhoon is correct as a
+    ///    phenomenon, and suppressing it would mean patching vanilla.
+    /// 3. The strike point is **a uniformly random point on the map**, not the typhoon's
+    ///    centre (the one-argument overload, IL_000F-004D,
+    ///    <c>Randomizer.Int32(-8640, 8640)</c>). Its distribution differs from ④'s
+    ///    lightning (T6), so a bolt falling far away is not one of ④'s.
+    /// 4. **A note for T6 (lightning).** The condition for ambient lightning is
+    ///    <c>m_lightningQueue.m_size == 0</c>. If T6 always keeps at least one entry in the
+    ///    queue then ambient lightning **stops completely**, so there is no need to
+    ///    estimate a share for it against the ceiling of 20. Conversely, if T6 creates a
+    ///    phase where it narrows the count to 0 (inside the eye, say), ambient lightning
+    ///    comes back just there.
     ///
-    /// ── 7. 戻し方（<see cref="Release"/>） ───────────────────────────
+    /// ── 7. How it is put back (<see cref="Release"/>) ──────────────────────
     ///
-    /// ④が上書きするのは 4 つで、戻り方は 2 種類ある:
+    /// ④ overrides four things, and there are two ways of putting them back:
     ///
-    /// | 上書きするもの | 戻し方 |
+    /// | What is overridden | How it is put back |
     /// |---|---|
-    /// | <c>m_targetRain</c> / <c>m_targetCloud</c> | **明示的に 0 を書く。** |
-    /// | <c>m_targetFog</c> | **明示的に 0 を書く。**（④は最大 0.45 まで上げるので、やめるだけでは晴れない） |
-    /// | <c>m_forceWeatherOn</c> | 書くのをやめる。<c>0.001/step</c> で自然に切れる |
-    /// | <c>m_targetDirection</c> | 書くのをやめる。到達した瞬間にバニラが再抽選する（§A-4） |
+    /// | <c>m_targetRain</c> / <c>m_targetCloud</c> | **Write 0 explicitly.** |
+    /// | <c>m_targetFog</c> | **Write 0 explicitly.** (④ raises it to 0.45, so simply stopping does not clear the sky) |
+    /// | <c>m_forceWeatherOn</c> | Stop writing. It expires naturally at <c>0.001/step</c> |
+    /// | <c>m_targetDirection</c> | Stop writing. Vanilla redraws it the moment it is reached (§A-4) |
     ///
-    /// <c>ThunderStormAI.DeactivateDisaster</c> は <c>SelfTrigger</c> 付きなら
-    /// <c>m_targetRain = 0; m_targetCloud = 0</c> を書く（§A-1、本タスクで IL 再確認）ので
-    /// 本来は「書くのをやめる」だけでよい。**だがそれに頼れない** ——
-    /// <c>DisasterAI.DeactivateNow</c> は <c>m_flags &amp; Active(8)</c> が無ければ
-    /// 何もしないので（本タスクで IL 実測）、Emerging 中に止めた台風では空振りする。
-    /// だから <see cref="Release"/> でも同じ 2 つを 0 にする。二重に書いても害は無い。
+    /// <c>ThunderStormAI.DeactivateDisaster</c> writes
+    /// <c>m_targetRain = 0; m_targetCloud = 0</c> when <c>SelfTrigger</c> is set (§A-1,
+    /// re-confirmed from the IL for this task), so in principle "just stop writing" would
+    /// do. **But we cannot rely on that** — <c>DisasterAI.DeactivateNow</c> does nothing
+    /// without <c>m_flags &amp; Active(8)</c> (measured from the IL for this task), so it
+    /// does nothing for a typhoon stopped while Emerging. That is why
+    /// <see cref="Release"/> zeroes the same two as well. Writing them twice does no harm.
     ///
-    /// <c>m_forceWeatherOn</c> に 0 を書かないのは意図である。バニラの
-    /// <c>DeactivateDisaster</c> も触っていないし、天候 OFF のプレイヤーの環境で
-    /// ここに 0 を書くと「台風が去って雨が引いていく」ではなく
-    /// 「台風が去った瞬間に雨が消える」になる。
+    /// Not writing 0 to <c>m_forceWeatherOn</c> is deliberate. Vanilla's
+    /// <c>DeactivateDisaster</c> does not touch it either, and writing 0 here in the
+    /// environment of a player with the weather off turns "the typhoon leaves and the rain
+    /// eases off" into "the rain vanishes the instant the typhoon leaves".
     ///
-    /// ── 8. セーブへの焼き付き（全体レビュー I2 で塞いだ）───────────────────
+    /// ── 8. Burning into the save (closed off in whole-project review I2) ──
     ///
-    /// ④が書く <c>m_targetRain</c> / <c>m_targetCloud</c> / <c>m_targetFog</c> /
-    /// <c>m_forceWeatherOn</c> / <c>m_targetDirection</c> は**全部セーブに焼き付く**
-    /// （<c>WeatherManager+Data.Serialize</c> を本レビューで IL 実測。並びは
-    /// <see cref="SuspendForSave"/> の doc）。台風の最中に保存して開き直すと、
-    /// ④が走っていないのに最大の雨が期待値 2 万 step 続く。
-    /// <see cref="SuspendForSave"/> と <see cref="ReapplyAfterSave"/> がその穴を塞ぐ。
-    /// **宿主の嵐そのものをセーブから外さない判断**も同じ doc にある。
+    /// The <c>m_targetRain</c> / <c>m_targetCloud</c> / <c>m_targetFog</c> /
+    /// <c>m_forceWeatherOn</c> / <c>m_targetDirection</c> that ④ writes **all burn into
+    /// the save** (<c>WeatherManager+Data.Serialize</c>, measured from the IL in this
+    /// review; the ordering is in <see cref="SuspendForSave"/>'s doc). Save in the middle
+    /// of a typhoon and reopen it, and maximum rain continues for an expected 20,000 steps
+    /// with ④ not even running.
+    /// <see cref="SuspendForSave"/> and <see cref="ReapplyAfterSave"/> close that hole.
+    /// **The decision not to take the host storm itself out of the save** is in the same
+    /// doc.
     /// </summary>
     public static class TyphoonWeather
     {
         /// <summary>
-        /// <c>m_forceWeatherOn</c> に書く値。バニラの嵐・竜巻と同じ 2f（§A-1）。
-        /// <c>0.001/step</c> 減衰なので 2000 step ぶんの猶予がある。
+        /// The value written to <c>m_forceWeatherOn</c>. 2f, the same as vanilla's storms
+        /// and tornadoes (§A-1). It decays at <c>0.001/step</c>, so it gives 2000 steps of
+        /// grace.
         /// </summary>
         private const float ForceWeatherOn = 2f;
 
         private const float RainBase = 0.35f;
 
         /// <summary>
-        /// 強度で足す雨量。<c>RainBase + RainRange</c> が上限になる。
+        /// The rainfall added by intensity. <c>RainBase + RainRange</c> is the ceiling.
         ///
-        /// ── ★★ 0.65 -> 0.45 にした理由（2026-08-25、所有者の指示）──────────
+        /// ── ★★ Why this went from 0.65 to 0.45 (2026-08-25, the owner's instruction) ──
         ///
-        /// &gt; いっそのこと「雷雨」にせずに「雨」だけにして、時々台風の雲の中から
-        /// &gt; 稲妻を発生させる方がうまくいくかもしれません
+        /// &gt; It might work better to drop the "thunderstorm" and have just "rain", with
+        /// &gt; lightning occasionally coming out of the typhoon's clouds
         ///
-        /// バニラが空から雷を落とす条件は<b>ただ 1 つ</b>である
-        /// （<c>WeatherManager.SimulationStepImpl</c>、IL_09D3 で実測）:
+        /// There is <b>exactly one</b> condition under which vanilla drops lightning out of
+        /// the sky (measured at IL_09D3 in
+        /// <c>WeatherManager.SimulationStepImpl</c>):
         ///
         /// <code>
-        ///   if (m_currentRain &lt;= 0.8f) -> 何もしない
-        ///   if (m_lightningQueue.m_size != 0) -> 何もしない
+        ///   if (m_currentRain &lt;= 0.8f) -> do nothing
+        ///   if (m_lightningQueue.m_size != 0) -> do nothing
         ///   t      = m_currentRain * 5 - 4
         ///   chance = 5000 - RoundToInt(t * 4000)
         ///   if (randomizer.UInt32(chance) == 0) QueueLightningStrike(...)
         /// </code>
         ///
-        /// ④は雨を 1.0 まで振っていたので<b>必ずこの枝に入っていた</b>。
-        /// 上限を <see cref="MaxRainWithoutLightning"/> に抑えれば、
-        /// **ゲームは 1 本も雷を落とさない**。雷は⑤の噴煙と同じやり方で
-        /// <b>雲の中に自分で描く</b>（<c>TyphoonBoltFx</c>）。
+        /// ④ was swinging the rain all the way to 1.0, so it <b>always entered this
+        /// branch</b>. Hold the ceiling down to <see cref="MaxRainWithoutLightning"/> and
+        /// **the game drops not one bolt**. The lightning is <b>drawn inside the cloud by
+        /// ourselves</b>, the same way as ⑤'s ash plume (<c>TyphoonBoltFx</c>).
         ///
-        /// ★ 0.8 でも土砂降りである（洪水の <c>MinRainForRise</c> は 0.5）。
-        ///   **雨量そのものは足りている。**
+        /// ★ 0.8 is still a downpour (flooding's <c>MinRainForRise</c> is 0.5).
+        ///   **The rainfall itself is quite enough.**
         /// </summary>
         private const float RainRange = 0.45f;
 
         /// <summary>
-        /// これを超えるとバニラが空から雷を落とす（IL_09D3 実測）。**超えないこと。**
+        /// Go above this and vanilla drops lightning out of the sky (measured at IL_09D3).
+        /// **Do not go above it.**
         /// </summary>
         public const float MaxRainWithoutLightning = 0.8f;
         private const float CloudBase = 0.55f;
         private const float CloudRange = 0.45f;
 
         /// <summary>
-        /// 台風が最も近いときの <c>m_targetFog</c>。
+        /// The <c>m_targetFog</c> when the typhoon is at its closest.
         ///
-        /// ★★ <b>2026-08-22 に 0 から変えた</b>（持ち主の指摘「暴風雨を再現してほしい」）。
-        ///   以前はバニラの嵐に合わせて 0 を書いていた。だが暴風雨の見え方の半分は
-        ///   <b>視程が落ちること</b>で、④が地上でそれを出せる手段は霧しか無い ——
-        ///   雨量はもう 1.0 に張り付いていて、しかも 0.8 超はゲーム自身に雷雨災害を
-        ///   作らせる境界なので**上げる余地が無い**（クラス doc 6.）。
+        /// ★★ <b>Changed from 0 on 2026-08-22</b> (the owner's note "I would like the
+        ///   storm itself reproduced"). Previously we wrote 0 to match vanilla's storms.
+        ///   But half of what a storm looks like is <b>visibility dropping</b>, and fog is
+        ///   the only means ④ has of showing that at ground level — the rainfall is
+        ///   already pinned at 1.0, and above 0.8 is the boundary at which the game creates
+        ///   a thunderstorm disaster of its own, so **there is no room to raise it**
+        ///   (class doc, 6.).
         ///
-        ///   <b>霧はその境界に一切関わらない。</b> <c>WeatherManager</c> が
-        ///   <c>QueueLightningStrike</c> を呼ぶ条件は <c>m_currentRain &gt; 0.8</c> だけで、
-        ///   <c>m_currentFog</c> はどこにも出てこない（本タスクで IL 再確認）。
-        ///   **落雷の釣り合いは 1 ビットも動かない。**
+        ///   <b>Fog has nothing whatsoever to do with that boundary.</b> The condition
+        ///   under which <c>WeatherManager</c> calls <c>QueueLightningStrike</c> is
+        ///   <c>m_currentRain &gt; 0.8</c> and nothing else; <c>m_currentFog</c> appears
+        ///   nowhere (re-confirmed from the IL for this task).
+        ///   **The lightning balance does not move by one bit.**
         ///
-        ///   0.45 に留めてあるのは、都市が見えなくなると遊べなくなるからである。
-        ///   遷移レートは雨と同じ <c>0.0002/step</c> なので、近づくにつれて
-        ///   ゆっくり霞み、去ればゆっくり晴れる。
+        ///   It is held at 0.45 because the game becomes unplayable once you cannot see the
+        ///   city. The transition rate is <c>0.0002/step</c>, the same as rain, so it hazes
+        ///   over slowly as the typhoon approaches and clears slowly once it leaves.
         /// </summary>
         private const float FogPeak = 0.45f;
 
@@ -219,10 +239,11 @@ namespace DisasterPlus.Game
         private static bool _weatherDisabledByPlayer;
         private static bool _errorLogged;
 
-        /// <summary>④が今この tick で天候を書いているか。</summary>
+        /// <summary>Whether ④ is writing the weather on this tick.</summary>
         public static bool Driving { get { return _driving; } }
 
-        /// <summary>直近に書いた <c>m_targetRain</c>。**これは目標値で、実測の降雨量ではない。**</summary>
+        /// <summary>The <c>m_targetRain</c> most recently written. **This is a target, not
+        /// the measured rainfall.**</summary>
         public static float LastRain { get { return _lastRain; } }
 
         public static float LastCloud { get { return _lastCloud; } }
@@ -232,25 +253,29 @@ namespace DisasterPlus.Game
         public static float LastDirectionDegrees { get { return _lastDirectionDegrees; } }
 
         /// <summary>
-        /// プレイヤーが設定で天候を切っているか（<c>m_enableWeather == false</c>）。
-        /// **不具合ではなく正当な設定。** ④はその環境でも
-        /// <c>m_forceWeatherOn</c> で嵐を見せるが、黙ってやらずに診断へ note を出す。
+        /// Whether the player has weather switched off in the settings
+        /// (<c>m_enableWeather == false</c>).
+        /// **A legitimate setting, not a fault.** ④ still shows the storm in that
+        /// environment through <c>m_forceWeatherOn</c>, but it does not do so silently — it
+        /// puts a note in the diagnostics.
         /// </summary>
         public static bool WeatherDisabledByPlayer { get { return _weatherDisabledByPlayer; } }
 
         /// <summary>
-        /// sim スレッド。<c>TyphoonFeature.OnSimulationTick</c> のポーズガードより下、
-        /// <c>TyphoonController.Tick</c> の**直後**に、台風が動いているときだけ呼ぶ。
+        /// Sim thread. Call it below the pause guard in
+        /// <c>TyphoonFeature.OnSimulationTick</c>, **immediately after**
+        /// <c>TyphoonController.Tick</c>, and only while a typhoon is running.
         ///
-        /// <paramref name="deltaMinutes"/> は使わない。ここが書くのは
-        /// **今の幾何から決まる目標値**であって時間で積算する量ではなく、
-        /// 目標へ寄せる速度はゲーム側が <c>0.0002/step</c>（雲は <c>0.0008</c>）で
-        /// 決めている（§A-4）。引数に残してあるのは、他の要素（T6〜T10）と
-        /// 呼び出しの形をそろえるためである。
+        /// <paramref name="deltaMinutes"/> is not used. What this writes is
+        /// **a target determined by the current geometry**, not a quantity accumulated over
+        /// time, and the speed at which it approaches the target is decided by the game at
+        /// <c>0.0002/step</c> (<c>0.0008</c> for cloud) (§A-4). It is kept as a parameter to
+        /// give every element (T6 to T10) the same call shape.
         ///
-        /// <paramref name="snapshot"/> に載っている台風の状態は**前 tick のもの**なので
-        /// 使わない（<see cref="TyphoonSnapshot"/> の T3 節の注記）。座標も半径も
-        /// <see cref="TyphoonController"/> の static から同じスレッドで直接読む。
+        /// The typhoon state carried on <paramref name="snapshot"/> is **the previous
+        /// tick's**, so it is not used (the note in <see cref="TyphoonSnapshot"/>'s T3
+        /// section). Both the coordinates and the radii are read directly from
+        /// <see cref="TyphoonController"/>'s statics on the same thread.
         /// </summary>
         public static void Drive(TyphoonSnapshot snapshot, float deltaMinutes)
         {
@@ -275,8 +300,9 @@ namespace DisasterPlus.Game
 
         private static void Step()
         {
-            // ★ exists を先に見る。Singleton<T>.instance は sInstance が null のとき
-            //    FindObjectOfType と new GameObject を走らせる main スレッド専用 API。
+            // ★ Look at exists first. Singleton<T>.instance runs FindObjectOfType and
+            //    new GameObject when sInstance is null, which makes it a main thread only
+            //    API.
             if (!Singleton<WeatherManager>.exists)
             {
                 _driving = false;
@@ -290,22 +316,25 @@ namespace DisasterPlus.Game
             float cloud = Clamp01(CloudBase + CloudRange * near);
             float direction = WindDegreesOf(TyphoonController.HeadingRadians);
 
-            // ★ 毎 tick 書く（クラス doc 1.）。
+            // ★ Write every tick (class doc, 1.).
             float fog = Clamp01(FogPeak * near);
 
-            // ★★ **0.8 を超えさせない。** 超えるとバニラが空から雷を落とし、
-            //    それは雲より高いところから降ってくる（所有者の報告
-            //    「雷の発生場所が台風の雲より上です」）。上の doc に IL の根拠。
+            // ★★ **Never let it go above 0.8.** Above that, vanilla drops lightning out of
+            //    the sky, and it comes down from higher up than the cloud (the owner's
+            //    report "the lightning appears above the typhoon's cloud"). The IL basis is
+            //    in the doc above.
             if (rain > MaxRainWithoutLightning) rain = MaxRainWithoutLightning;
 
             w.m_targetRain = rain;
             w.m_targetCloud = cloud;
             w.m_targetFog = fog;
 
-            // ★ これが無いと天候 OFF の環境で全部 0 に潰される（クラス doc 2.）。
+            // ★ Without this, everything is crushed to 0 in an environment with weather off
+            //   (class doc, 2.).
             w.m_forceWeatherOn = ForceWeatherOn;
 
-            // 風向は到達した瞬間に再抽選されるので、これも毎 tick 書き続ける（§A-4）。
+            // The wind direction is redrawn the moment it is reached, so we keep writing
+            // this every tick too (§A-4).
             w.m_targetDirection = direction;
 
             _driving = true;
@@ -317,12 +346,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 都市（マップ原点）から見た台風の近さ [0, 1]。強風域の縁で 0、中心で 1。
-        /// 半径が読めていなければ 0（＝いちばん弱い雨。推測した半径で強めない）。
+        /// How near the typhoon is as seen from the city (the map origin), [0, 1]. 0 at the
+        /// rim of the gale radius, 1 at the centre.
+        /// 0 if the radius could not be read (i.e. the weakest rain; we do not strengthen
+        /// it from a guessed radius).
         /// </summary>
         private static float NearnessOf(Vec3 centre, float galeRadius)
         {
-            if (!(galeRadius > 0f)) return 0f;   // NaN もここで落ちる
+            if (!(galeRadius > 0f)) return 0f;   // NaN falls out here too
 
             float distance = (float)System.Math.Sqrt(centre.X * centre.X + centre.Z * centre.Z);
             if (float.IsNaN(distance)) return 0f;
@@ -332,9 +363,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ④の進行方位（rad、<c>(cos φ, sin φ)</c> を (X, Z) とする数学系）を
-        /// <c>m_targetDirection</c> の方位角（度、0 = +Z / 90 = +X）へ。
-        /// 対応はクラス doc 4. のとおり <c>EndRenderingImpl</c> の IL から取ってある。
+        /// Convert ④'s heading (rad, in the mathematical convention where
+        /// <c>(cos φ, sin φ)</c> is (X, Z)) into <c>m_targetDirection</c>'s bearing
+        /// (degrees, 0 = +Z / 90 = +X).
+        /// The convention was taken from <c>EndRenderingImpl</c>'s IL, as class doc 4.
+        /// describes.
         /// </summary>
         private static float WindDegreesOf(float headingRadians)
         {
@@ -355,20 +388,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ④が握っていた天候を手放す。戻し方の内訳はクラス doc 7. の表。
+        /// Let go of the weather ④ was holding. The breakdown of how each is put back is
+        /// the table in class doc 7.
         ///
-        /// 呼ばれるのは 2 箇所で、**台風を手放すあらゆる経路がこの 2 つのどちらかを通る**:
+        /// It is called from two places, and **every route that lets go of a typhoon passes
+        /// through one of those two**:
         ///
-        /// - <c>TyphoonController.Forget</c> —— 通常の終了（<c>Stop</c>）だけでなく、
-        ///   **災害スロットを奪われたとき**（<c>LoseSlot</c>）も通る。復元を
-        ///   <c>Stop</c> 側に置くと、スロットを奪われた瞬間に天候を握ったまま
-        ///   台風だけが消える
-        /// - <see cref="Reset"/> —— レベルアンロード
+        /// - <c>TyphoonController.Forget</c> — not only the normal ending (<c>Stop</c>) but
+        ///   also **when the disaster slot is taken away** (<c>LoseSlot</c>). Put the
+        ///   restore on the <c>Stop</c> side and, the moment the slot is taken, the typhoon
+        ///   alone disappears while the weather stays held
+        /// - <see cref="Reset"/> — level unload
         ///
-        /// 冪等である（<c>_driving</c> が false なら即 return）ので重ねて呼んでよい。
+        /// It is idempotent (it returns immediately when <c>_driving</c> is false), so
+        /// calling it repeatedly is fine.
         ///
-        /// 駆動していなければ何もしない —— 台風を 1 度も起こしていない都市で
-        /// プレイヤーの雨を勝手に 0 にしない。
+        /// If we are not driving it does nothing — we do not go and zero a player's rain in
+        /// a city where no typhoon has ever been raised.
         /// </summary>
         public static void Release()
         {
@@ -382,12 +418,12 @@ namespace DisasterPlus.Game
                     var w = Singleton<WeatherManager>.instance;
                     w.m_targetRain = 0f;
                     w.m_targetCloud = 0f;
-                    // ★★ **霧も明示的に 0 を書く。** ④が入れる値が 0 だった頃は
-                    //    「書くのをやめる」だけでよかったが、いまは最大 0.45 まで
-                    //    上げている（FogPeak）。書くのをやめるだけだと、
-                    //    バニラが振り直すまで（期待値 2 万 step）霞んだままになる。
+                    // ★★ **Write 0 explicitly for fog too.** Back when the value ④ put in
+                    //    was 0, "stop writing" was enough, but now we raise it to 0.45
+                    //    (FogPeak). Merely stopping would leave it hazy until vanilla
+                    //    redraws it (an expected 20,000 steps).
                     w.m_targetFog = 0f;
-                    // ★ m_forceWeatherOn と m_targetDirection には書かない（クラス doc 7.）。
+                    // ★ Do not write to m_forceWeatherOn or m_targetDirection (class doc 7.).
                 }
             }
             catch (System.Exception e)
@@ -406,50 +442,52 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **セーブの直前に呼ぶ**（<c>DisasterPlusSerialization.OnSaveData</c>）。
-        /// ④が握っている天候の上書きを、バニラが <c>WeatherManager+Data</c> を
-        /// 書く前に降ろす。<b>戻り値を <see cref="ReapplyAfterSave"/> へ渡すこと。</b>
+        /// **Call immediately before saving** (<c>DisasterPlusSerialization.OnSaveData</c>).
+        /// It lowers the weather overrides ④ holds before vanilla writes
+        /// <c>WeatherManager+Data</c>. <b>Pass the return value to
+        /// <see cref="ReapplyAfterSave"/>.</b>
         ///
-        /// ── なぜ要るか（本タスクで IL 実測して確定させた）─────────────────
+        /// ── Why it is needed (settled by measuring the IL for this task) ─────
         ///
-        /// <c>WeatherManager+Data.Serialize</c> は
+        /// <c>WeatherManager+Data.Serialize</c> writes, in order,
         /// <c>m_windDirection / m_targetDirection / m_directionSpeed /
         /// m_currentTemperature / m_targetTemperature / m_temperatureSpeed /
         /// m_currentRain / m_targetRain / m_currentFog / m_targetFog /
         /// m_currentCloud / m_targetCloud / m_forceWeatherOn / m_groundWetness / …</c>
-        /// を順に書く（<c>Deserialize</c> が同じ並びで戻す）。つまり
-        /// **④が毎 tick 書いている 4 値はそのままセーブに焼き付く。**
+        /// (<c>Deserialize</c> restores them in the same order). In other words
+        /// **the four values ④ writes every tick burn straight into the save.**
         ///
-        /// 焼き付いたセーブを開くと、④は走っていないのに <c>m_targetRain</c> が
-        /// 1.0 のまま復元される。バニラが振り直すのは
-        /// <c>m_currentRain == m_targetRain</c> になってから <c>Int32(20000) == 0</c> を
-        /// 引いたときだけ（§A-4）なので、期待値でおよそ 2 万 step ——
-        /// その間ずっと最大の雨が降り続け、雨量 0.8 超の判定でゲーム自身が
-        /// 雷雨を作り始める。<c>m_forceWeatherOn</c> も同じ経路で焼き付き、
-        /// **天候を切っているプレイヤーの環境で天候が復活する。**
+        /// Open a save with them burnt in and <c>m_targetRain</c> is restored as 1.0 with
+        /// ④ not running. Vanilla only redraws it once <c>m_currentRain == m_targetRain</c>
+        /// and it then draws <c>Int32(20000) == 0</c> (§A-4), i.e. roughly 20,000 steps in
+        /// expectation — and throughout that time it pours at maximum, and the game itself
+        /// starts creating thunderstorms on the rainfall-above-0.8 test.
+        /// <c>m_forceWeatherOn</c> burns in by the same route, and
+        /// **weather comes back in the environment of a player who has it switched off.**
         ///
-        /// ── 宿主の嵐そのものは触らない（意識して決めた）─────────────────
+        /// ── We do not touch the host storm itself (a conscious decision) ─────
         ///
-        /// ④の宿主は <c>SelfTrigger</c> 付きの <c>ThunderStormAI</c> 災害で、
-        /// これも <c>DisasterManager</c> のバッファごとセーブに入る。台風の最中に
-        /// 保存したセーブを開くと、**動かない雷雨**がその場に残り、
-        /// <c>m_activeDuration</c> を使い切るまで続く。
+        /// ④'s host is a <c>ThunderStormAI</c> disaster with <c>SelfTrigger</c>, and that
+        /// goes into the save along with the whole of <c>DisasterManager</c>'s buffer. Open
+        /// a save made during a typhoon and **a motionless thunderstorm** stays there,
+        /// continuing until it uses up <c>m_activeDuration</c>.
         ///
-        /// **これは直さない。** 直す手は「保存の前に <c>DeactivateNow</c> する」しか
-        /// 無く、それは<b>保存という操作がシミュレーションの状態を変える</b>ことを
-        /// 意味する（プレイヤーがセーブしただけで台風が消える）。残るのはバニラが
-        /// 自分で作れる正当な災害——強度の高い雷雨——であり、バニラのライフサイクルが
-        /// 期限どおり終わらせて <c>ReleaseDisaster</c> まで行う。天候だけを降ろすのは、
-        /// あちらが**災害に属さないグローバルな上書き**で、持ち主が居なくなっても
-        /// 誰も戻さないからである。この非対称は意図であり、設計書 §4.2 と
-        /// 実機チェックリストに書いてある。
+        /// **We do not fix this.** The only way to fix it would be "call
+        /// <c>DeactivateNow</c> before saving", and that would mean <b>the act of saving
+        /// changes the state of the simulation</b> (the typhoon disappears just because the
+        /// player saved). What remains is a legitimate disaster vanilla could have created
+        /// itself — a high-intensity thunderstorm — and vanilla's own lifecycle ends it on
+        /// schedule and goes all the way to <c>ReleaseDisaster</c>. We lower only the
+        /// weather because that side is **a global override that belongs to no disaster**,
+        /// and nobody puts it back once its owner is gone. This asymmetry is deliberate and
+        /// is written down in design doc §4.2 and the in-game checklist.
         ///
-        /// なお、その宿主の嵐がロード後もまだ Active なら、
-        /// <c>ThunderStormAI.SimulationStep</c> が 256 フレームに 1 回
-        /// <c>m_targetRain = 1</c> を書き直す（§A-1）。**それは正しい** ——
-        /// 雨は嵐が居るから降っているのであって、④の消し忘れではなくなる。
+        /// Note that if that host storm is still Active after the load,
+        /// <c>ThunderStormAI.SimulationStep</c> rewrites <c>m_targetRain = 1</c> once per
+        /// 256 frames (§A-1). **That is correct** — the rain is falling because the storm
+        /// is there, and it is no longer something ④ forgot to clear.
         /// </summary>
-        /// <returns>実際に降ろしたか（④が駆動中だったか）。</returns>
+        /// <returns>Whether we actually lowered anything (whether ④ was driving).</returns>
         public static bool SuspendForSave()
         {
             if (!_driving) return false;
@@ -461,13 +499,13 @@ namespace DisasterPlus.Game
                 var w = Singleton<WeatherManager>.instance;
                 w.m_targetRain = 0f;
                 w.m_targetCloud = 0f;
-                // ★★ 霧も降ろす。**セーブに焼き付く 5 値のうちの 1 つ**である
-                //    （WeatherManager+Data.Serialize の並び。クラス doc 8.）。
+                // ★★ Lower the fog too. **It is one of the five values that burn into the
+                //    save** (the ordering in WeatherManager+Data.Serialize. Class doc 8.).
                 w.m_targetFog = 0f;
-                // ★ ここでは m_forceWeatherOn も 0 にする（Release とは判断が違う）。
-                //   Release が触らないのは「台風が去った瞬間に雨が消える」のを
-                //   避けるためで、あれは**画面の見え方**の話である。セーブに
-                //   焼き付ける値の話ではない。
+                // ★ Here we zero m_forceWeatherOn as well (a different decision from
+                //   Release). Release leaves it alone to avoid "the rain vanishes the
+                //   instant the typhoon leaves", and that is a question of **how it looks on
+                //   screen**. It is not a question of what gets burnt into the save.
                 w.m_forceWeatherOn = 0f;
                 return true;
             }
@@ -483,19 +521,21 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <see cref="SuspendForSave"/> で降ろした上書きを戻す。
-        /// **<c>SimulationManager.AddAction</c> 経由で、セーブが終わってから呼ぶこと**
-        /// （<c>TyphoonFlood.ReapplyAfterSave</c> と同じ形。すぐ戻すと、バニラが
-        /// 配列を書く前に上書きし直すことになり漏れが再発する）。
+        /// Put back the overrides <see cref="SuspendForSave"/> lowered.
+        /// **Call it through <c>SimulationManager.AddAction</c>, after the save has
+        /// finished** (the same shape as <c>TyphoonFlood.ReapplyAfterSave</c>; put them back
+        /// immediately and we would be overwriting again before vanilla writes the arrays,
+        /// and the leak comes back).
         ///
-        /// **次の tick の <see cref="Drive"/> に任せない。** ポーズ中に保存した場合、
-        /// <c>TyphoonFeature.OnSimulationTick</c> のポーズガードが <see cref="Drive"/> を
-        /// 止めるので、ポーズを解くまで雨が 0 のままになる ——
-        /// プレイヤーから見ると「セーブしたら台風の雨だけ消えた」になる。
+        /// **Do not leave it to the next tick's <see cref="Drive"/>.** If the save was made
+        /// while paused, the pause guard in <c>TyphoonFeature.OnSimulationTick</c> stops
+        /// <see cref="Drive"/>, so the rain stays at 0 until the player unpauses — which
+        /// from the player's point of view is "I saved and the typhoon's rain alone
+        /// disappeared".
         /// </summary>
         public static void ReapplyAfterSave(bool wasDriving)
         {
-            // ④が保存中に台風を失っていたら書き直さない（_driving が落ちている）。
+            // Do not rewrite if ④ lost the typhoon during the save (_driving has dropped).
             if (!wasDriving || !_driving) return;
 
             try
@@ -513,16 +553,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **レベルアンロードで必ず呼ぶ。** アンロード中は sim スレッドが既に
-        /// 停止しているので、ここから <c>WeatherManager</c> を直接触ってよい
-        /// （<c>DisasterPlusLoading.OnLevelUnloading</c> の同じ注記）。
+        /// **Always call on level unload.** During unloading the sim thread has already
+        /// stopped, so it is fine to touch <c>WeatherManager</c> directly from here
+        /// (the same note is on <c>DisasterPlusLoading.OnLevelUnloading</c>).
         /// </summary>
         public static void Reset()
         {
             Release();
             _weatherDisabledByPlayer = false;
-            // ★ _errorLogged は戻さない（ゲームのビルドに対する事実であって
-            //    都市ごとの状態ではない。TyphoonReader と同じ扱い）。
+            // ★ _errorLogged is not reset (it is a fact about the game build, not per-city
+            //    state. Treated the same way as TyphoonReader).
         }
     }
 }

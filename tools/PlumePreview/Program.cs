@@ -6,16 +6,17 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.PlumePreview
 {
     /// <summary>
-    /// <see cref="PlumeParcels"/> の噴煙を、**ゲームを起動せずに**描いて確かめる
-    /// （2026-08-22、所有者の指摘「幾何的なものではなくもっと自然的なカオスな煙の
-    /// アニメーションを作ってほしい」）。
+    /// Draws and checks the eruption plume of <see cref="PlumeParcels"/> **without launching
+    /// the game** (2026-08-22, the owner's remark: "please make the smoke animation natural
+    /// and chaotic rather than geometric").
     ///
-    /// このプロジェクトの決まり「見た目の変更は自分でオフラインに描画・計測してから
-    /// 実機テストを頼む」のための道具である。<b>Core の実物をそのままコンパイルして
-    /// 呼ぶ</b>ので、書き直した近似ではない。
+    /// This is the tool for this project's rule that "visual changes are drawn and measured
+    /// offline by yourself before asking for a test in the game". It compiles and calls
+    /// <b>the real thing from Core</b> directly, so it is not a rewritten approximation.
     ///
-    /// 塊は<b>奥から手前へ</b>塗る（画家のアルゴリズム）。実機の
-    /// <c>ParticleSystem</c> も同じ順に重なるので、見え方はここで判断してよい。
+    /// The parcels are painted <b>from the back forwards</b> (the painter's algorithm). The
+    /// game's <c>ParticleSystem</c> layers them in the same order, so how it looks can be
+    /// judged here.
     ///
     ///   dotnet run --project tools/PlumePreview -- docs/images/volcano
     /// </summary>
@@ -24,10 +25,11 @@ namespace DisasterPlus.Tools.PlumePreview
         private const int Width = 900;
         private const int Height = 760;
 
-        /// <summary>横に見る範囲（m、片側）。</summary>
+        /// <summary>The horizontal extent shown (m, half-width).</summary>
         private const float ViewHalfWidth = 2400f;
 
-        /// <summary>成層火山・スライダー上端の火口（2928 × 0.12）。</summary>
+        /// <summary>The crater of a stratovolcano at the top of the slider
+        /// (2928 × 0.12).</summary>
         private const float VentRadius = 351f;
 
         private const float ColumnHeight = 1800f;
@@ -42,7 +44,8 @@ namespace DisasterPlus.Tools.PlumePreview
             string dir = args.Length > 0 ? args[0] : ".";
             Directory.CreateDirectory(dir);
 
-            // 3 枚。**同じ絵が出ないこと**（＝時間で動いていること）の確認でもある。
+            // Three images. Also a check that **the same picture does not come out twice**
+            // (i.e. that it moves over time).
             foreach (float t in new[] { 40f, 47f, 54f })
             {
                 string path = Path.Combine(dir, "plume-t" + ((int)t).ToString() + ".png");
@@ -55,9 +58,9 @@ namespace DisasterPlus.Tools.PlumePreview
         }
 
         /// <summary>
-        /// 目で見るだけにしない。**数で確かめる**もの:
-        /// 覆っている割合（すかすかでないか）と、時間で動いているか、
-        /// そして柱として細長いか（幅が高さを超えていないか）。
+        /// Do not just look at it. Things to **confirm with numbers**:
+        /// the fraction covered (is it too sparse), whether it moves over time,
+        /// and whether it is slender enough to be a column (does the width exceed the height).
         /// </summary>
         private static void Measure()
         {
@@ -112,7 +115,7 @@ namespace DisasterPlus.Tools.PlumePreview
             var rgb = new byte[Width * Height * 3];
             for (int i = 0; i < rgb.Length; i += 3)
             {
-                rgb[i] = 24; rgb[i + 1] = 32; rgb[i + 2] = 46;   // 空
+                rgb[i] = 24; rgb[i + 1] = 32; rgb[i + 2] = 46;   // the sky
             }
 
             int groundPy = YToPixel(0f);
@@ -125,7 +128,7 @@ namespace DisasterPlus.Tools.PlumePreview
                 }
             }
 
-            // 奥（Z が大きい）から手前へ。
+            // From the back (larger Z) to the front.
             var order = new int[PlumeParcels.Count];
             var depth = new float[PlumeParcels.Count];
             for (int i = 0; i < PlumeParcels.Count; i++)
@@ -154,7 +157,7 @@ namespace DisasterPlus.Tools.PlumePreview
             float pr = p.RadiusMetres / (ViewHalfWidth * 2f) * Width;
             if (pr < 1f) pr = 1f;
 
-            // 噴出口の近くは黒、上は日を受けた灰白。
+            // Black near the vent, sunlit grey-white higher up.
             float b = p.Brightness;
             float rr = 46f + 168f * b;
             float gg = 44f + 166f * b;
@@ -174,7 +177,7 @@ namespace DisasterPlus.Tools.PlumePreview
                     float d = (float)Math.Sqrt(dx * dx + dy * dy) / pr;
                     if (d >= 1f) continue;
 
-                    // 縁をぼかす（実機の雲テクスチャと同じ考え方）。
+                    // Soften the rim (the same idea as the game's cloud texture).
                     float soft = 1f - d * d;
                     float a = p.Alpha * soft * 0.55f;
                     if (a <= 0f) continue;
@@ -203,7 +206,8 @@ namespace DisasterPlus.Tools.PlumePreview
 
         private static int YToPixel(float metres)
         {
-            // 縦は横と同じ縮尺にする（引き伸ばすと形の判断を誤る）。
+            // Keep the vertical scale the same as the horizontal (stretch it and you misjudge
+            // the shape).
             float perPixel = ViewHalfWidth * 2f / Width;
             return (Height - 40) - (int)(metres / perPixel);
         }

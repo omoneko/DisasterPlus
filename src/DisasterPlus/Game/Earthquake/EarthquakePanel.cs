@@ -7,60 +7,66 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 地震パネル。**main スレッド専用。**
+    /// The earthquake panel. **Main thread only.**
     ///
-    /// 枠組みは①の <see cref="ForecastPanel"/> をそのまま踏襲する
-    /// （<c>UIView.AddUIComponent(Type)</c> の非総称オーバーロード、構築途中の例外で
-    /// 孤児 GameObject を残さない try/catch、<c>backgroundSprite = "MenuPanel2"</c>、
-    /// <c>Camera.main</c> のキャッシュ）。②が新しく導入するのは**層の分離機構**だけ。
+    /// The framework follows ①'s <see cref="ForecastPanel"/> exactly (the non-generic
+    /// <c>UIView.AddUIComponent(Type)</c> overload, the try/catch that leaves no orphan
+    /// GameObject when construction throws part way, <c>backgroundSprite = "MenuPanel2"</c>
+    /// and the <c>Camera.main</c> cache). The only new machinery ② introduces is
+    /// **the layer separation**.
     ///
-    /// ── 層の分離（本機能の中核的な誠実さの担保） ──────────────────
+    /// ── The layer separation (this feature's core guarantee of honesty) ──────
     ///
-    /// 第 1 層 = バニラ自身の式と定数だけから導いた量。第 2 層 = 本 MOD が発明した物理。
-    /// この 2 つを混ぜたら、この機能は存在価値を失う。担保の実体は
-    /// <see cref="EarthquakeRows"/> に移してある（ラベルを作れるのも <c>.text</c> を
-    /// 書けるのもあの型の中だけ）。**このファイルには <c>UILabel</c> の生成も
-    /// <c>.text</c> への代入も 1 つも無い。**
+    /// Layer 1 = quantities derived purely from vanilla's own formulae and constants.
+    /// Layer 2 = physics this mod invented. Mix the two and this feature loses its reason
+    /// to exist. The guarantee itself has been moved into
+    /// <see cref="EarthquakeRows"/> (only that type can make a label or write
+    /// <c>.text</c>). **This file contains not one <c>UILabel</c> creation and not one
+    /// assignment to <c>.text</c>.**
     ///
-    /// ── 縦の予算とタブ（本タスクの構造変更） ────────────────────
+    /// ── The vertical budget and tabs (this task's structural change) ────────
     ///
-    /// 第 1 層を作り終えた時点でパネルは約 1050 まで積み上がっており、UIView の
-    /// 高さ 1080 に対して余地がほぼ無かった。第 2 層は 3 つの節（Task 9〜11）を
-    /// 足すので、そのまま行を追記すれば説明文が画面外へ出る。
-    /// 第 1 層の内容を 2 枚のタブに分け（<see cref="EarthquakePanelTabs"/>）、
-    /// **第 2 層はタブの外・その下**に置くことで縦を作った。
-    /// タブを選んだ理由と他案を捨てた理由は <see cref="EarthquakePanelTabs"/> の doc。
+    /// By the time layer 1 was finished the panel had stacked up to about 1050, leaving
+    /// almost nothing against UIView's height of 1080. Layer 2 adds three sections
+    /// (Tasks 9-11), so simply appending rows would push the explanatory text off screen.
+    /// Vertical space was made by splitting layer 1's content across two tabs
+    /// (<see cref="EarthquakePanelTabs"/>) and putting **layer 2 outside the tabs, below
+    /// them**. Why tabs were chosen and the other options rejected is in
+    /// <see cref="EarthquakePanelTabs"/>'s doc.
     ///
-    /// 行の中身は 1 文字も変えていない。文中の「上の…」「下の…」という参照が
-    /// 壊れないよう、**互いを参照し合う行は同じタブに置いてある**:
-    ///   - <c>EarthquakeShakeNote</c> が「上の破壊半径」と言う → 破壊係数の行と同じタブ
-    ///   - <c>EarthquakeCursorModelsNote</c> が「上の破壊係数」「下のオーバーレイ」と
-    ///     言う → その 3 つが同じタブ
-    ///   - <c>EarthquakeOverlayLegend</c> が「上のバーと同じ 10 段」と言う → 同上
+    /// Not one character of the rows' content was changed. So that the references to
+    /// "above" and "below" in the text do not break, **rows that refer to each other are
+    /// kept on the same tab**:
+    ///   - <c>EarthquakeShakeNote</c> refers to "the destruction radius above" → same tab
+    ///     as the destruction-factor row
+    ///   - <c>EarthquakeCursorModelsNote</c> refers to "the destruction factor above" and
+    ///     "the overlay below" → all three on the same tab
+    ///   - <c>EarthquakeOverlayLegend</c> refers to "the same 10 steps as the bar above" →
+    ///     likewise
     ///
-    /// ── ハザードマップが空なのは「安全」ではない ────────────────────
+    /// ── An empty hazard map does not mean "safe" ──────────────────────
     ///
-    /// 地震のハザードマップは①の嵐と**バイト単位で同じ 2 段ゲート**を持つ
-    /// （<c>Located(4096)</c> と <c>Emerging|Active(12)</c>、IL 事実文書 §A-6）。
-    /// そして地震に <c>Located</c> を立てられるのは**地震計だけ**（§A-2 / §C-2）。
-    /// つまり地震計を建てていない都市では、地震が起きていてもこのビューは
-    /// **恒久的に真っ白**で、それが正常な状態である。
+    /// The earthquake hazard map has **the same two-stage gate, byte for byte**, as ①'s
+    /// storms (<c>Located(4096)</c> and <c>Emerging|Active(12)</c>, IL facts doc §A-6).
+    /// And **only a seismograph** can set <c>Located</c> on an earthquake (§A-2 / §C-2).
+    /// So in a city with no seismographs this view is **permanently blank** even with an
+    /// earthquake in progress, and that is the correct state.
     ///
-    /// ①はこの前提を取り違えて全ゼロのグリッドを「落雷: 0」と表示しており、
-    /// 全体レビューで「誤ったラベルではなく、誤った前提から到達した
-    /// 『確信を持って誤った数値』」と判定されて作り直された。②はその**修正後**の
-    /// 挙動を写す: 塗られている地震が 1 つも無いときは**数値を一切出さず、
-    /// 空である理由と、それを変えるのは地震計であることを書く**
-    /// （<c>Strings.EarthquakeNotLocated</c>）。
+    /// ① got this premise wrong and displayed an all-zero grid as "Lightning: 0"; the
+    /// whole-feature review judged it "not a wrong label but a confidently wrong number,
+    /// arrived at from a wrong premise", and it was rebuilt. ② copies the behaviour
+    /// **after** that fix: when no earthquake is painting anything, show **no number at
+    /// all, and write why it is empty and that a seismograph is what changes it**
+    /// (<c>Strings.EarthquakeNotLocated</c>).
     ///
-    /// ── 全体円盤と断層帯は別のモデル ──────────────────────────
+    /// ── The whole-quake disc and the fault band are different models ──────────
     ///
-    /// バニラは 1 ステップに 2 種類の破壊を走らせる（§A-3）。全体円盤は
-    /// <c>probability = 0.02</c> の線形ランプ（＝<see cref="SeismicIntensity"/> の s）、
-    /// 断層 4 円盤は <c>probability = 1</c> で毎ステップ位置が振り直される。
-    /// **s の高い状態として断層帯を出してはいけない。** 別行にし、
-    /// 「当たりうる範囲であって当たる場所ではない」注記を必ず添える
-    /// （<see cref="EarthquakeDamageRows"/>）。
+    /// Vanilla runs two kinds of destruction per step (§A-3). The whole-quake disc is a
+    /// linear ramp at <c>probability = 0.02</c> (i.e. <see cref="SeismicIntensity"/>'s s);
+    /// the four fault discs run at <c>probability = 1</c> and are re-positioned every
+    /// step. **Never present the fault band as a state where s is high.** Put it on its
+    /// own row and always attach the note that it is where damage could fall, not where
+    /// it will (<see cref="EarthquakeDamageRows"/>).
     /// </summary>
     public static class EarthquakePanel
     {
@@ -77,40 +83,43 @@ namespace DisasterPlus.Game
         private static UILabel _shakeLabel;
 
         /// <summary>
-        /// 地震の行を構築したか。Natural Disasters DLC が無い環境では構築せず、
-        /// 代わりに理由を 1 行出す（<see cref="Strings.EarthquakeNeedsDlc"/>）。
+        /// Whether the earthquake rows were built. Without the Natural Disasters DLC they
+        /// are not built and a one-line reason is shown instead
+        /// (<see cref="Strings.EarthquakeNeedsDlc"/>).
         ///
-        /// ①の <c>ForecastPanel._hazardRowsBuilt</c> と同じ扱い。DLC が無ければ
-        /// <c>EarthquakeAI</c> の DisasterInfo プレハブも地震計も存在しないので、
-        /// 地震は原理的に 1 個も起きない。にもかかわらず <c>Assumptions</c> の
-        /// 型の存在検査は通ってしまう（AI の**型**は DLC の有無に関わらず
-        /// Assembly-CSharp に同梱されている）ので、起動ログにもヒントは出ない。
+        /// Treated the same way as ①'s <c>ForecastPanel._hazardRowsBuilt</c>. Without the
+        /// DLC there is neither an <c>EarthquakeAI</c> DisasterInfo prefab nor a
+        /// seismograph, so not one earthquake can happen in principle. Yet
+        /// <c>Assumptions</c>' type-existence check passes anyway (the AI's **type** ships
+        /// in Assembly-CSharp regardless of the DLC), so the startup log gives no hint
+        /// either.
         /// </summary>
         private static bool _bodyBuilt;
 
         /// <summary>
-        /// 直近に <see cref="EarthquakeHub.PublishCursor"/> へ渡した有効フラグ。
+        /// The validity flag last passed to <see cref="EarthquakeHub.PublishCursor"/>.
         ///
-        /// パネルが閉じている間に「無効」を毎フレーム publish し直す意味は無いので、
-        /// 状態が変わるときだけロックを取る。**逆に、無効になったことは必ず 1 回
-        /// 伝える** —— 伝えないと sim 側は最後に見た座標を永久に調べ続け、
-        /// 閉じたパネルのために毎 tick 建物グリッドを走査することになる。
+        /// There is no point re-publishing "invalid" every frame while the panel is
+        /// closed, so the lock is only taken when the state changes. **Conversely, the
+        /// fact that it has become invalid must always be communicated once** — without
+        /// that, the sim side goes on probing the last position it saw forever, sweeping
+        /// the building grid every tick on behalf of a closed panel.
         /// </summary>
         private static bool _cursorPublishedValid;
 
-        /// <summary>左上。既定値は <see cref="InfoHub"/> が位置を決める前だけ使う。</summary>
+        /// <summary>The top-left corner. The default is only used before <see cref="InfoHub"/> sets the position.</summary>
         private static Vector3 _origin = new Vector3(600f, 150f);
 
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
 
-        /// <summary>このパネルの幅。<see cref="InfoHub"/> がタブ帯の幅を合わせるために読む。</summary>
+        /// <summary>This panel's width. <see cref="InfoHub"/> reads it to match the tab strip's width.</summary>
         internal static float Width { get { return EarthquakeRows.PanelWidth; } }
 
         /// <summary>
-        /// 左上を決める。**位置を決める主体は <see cref="InfoHub"/> 1 つだけである**
-        /// （<c>DisasterPanelBar</c> のクラス doc「位置を決める主体が複数ある限り、
-        /// この事故は形を変えて何度でも起きる」と同じ規律）。
-        /// ここで座標を発明しないこと。
+        /// Sets the top-left corner. **<see cref="InfoHub"/> is the single authority on
+        /// position** (the same discipline as <c>DisasterPanelBar</c>'s class doc: "as
+        /// long as more than one thing decides the position, this accident will keep
+        /// happening in new forms"). Never invent coordinates here.
         /// </summary>
         internal static void MoveTo(Vector3 origin)
         {
@@ -131,22 +140,23 @@ namespace DisasterPlus.Game
         public static void Hide()
         {
             if (_panel != null) _panel.Hide();
-            // 閉じた瞬間に sim 側の建物走査を止める。
+            // Stop the sim side's building sweep the instant it closes.
             PublishCursor(new Vec3(0f, 0f, 0f), false);
-            // ★ 震度分布オーバーレイも一緒に消す。凡例はこのパネルの中にしか
-            //    無いので、パネルを閉じたまま絵だけが地図に残ると
-            //    「何の量を見ているのか」を名乗るものが画面から消える
-            //    （EarthquakeOverlay.Disable の doc）。
+            // ★ Turn the intensity overlay off with it. The legend exists only inside
+            //    this panel, so if the picture stays on the map with the panel closed,
+            //    the only thing saying what quantity you are looking at disappears from
+            //    the screen (see EarthquakeOverlay.Disable's doc).
             EarthquakeOverlay.Disable();
         }
 
-        /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
+        /// <summary>Every frame, from the main thread. Updates the content only while visible.</summary>
         public static void Tick()
         {
-            // 設定で無効化されたときにパネルが開いたままだと、OnSimulationTick が
-            // publish を止めた古いスナップショットを永遠に出し続ける「凍りついたのに
-            // 生きて見える」パネルになり、閉じる手段のボタンも既に撤去済みで消せない
-            // （①のレビュー指摘）。ボタン側と同じガードをここにも置く。
+            // If the panel is left open when the feature is disabled in the settings, it
+            // becomes a panel that is frozen but looks alive — forever showing the stale
+            // snapshot from when OnSimulationTick stopped publishing — and it cannot be
+            // dismissed, because the button that would close it has already been removed
+            // (raised in ①'s review). The same guard as on the button side goes here too.
             if (!ModSettings.EarthquakeEnabled.value)
             {
                 if (IsVisible) Hide();
@@ -162,8 +172,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カーソル座標を sim 側へ渡す。**この 1 箇所からしか publish しない。**
-        /// 状態が変わらない「無効」の連投は握り潰す（<see cref="_cursorPublishedValid"/>）。
+        /// Passes the cursor position to the sim side. **This is the only place that
+        /// publishes.** Repeated "invalid" calls that do not change the state are
+        /// swallowed (<see cref="_cursorPublishedValid"/>).
         /// </summary>
         private static void PublishCursor(Vec3 pos, bool valid)
         {
@@ -172,20 +183,22 @@ namespace DisasterPlus.Game
             EarthquakeHub.PublishCursor(pos, valid);
         }
 
-        /// <summary>レベルアンロード時。**セッション状態を 1 つも持ち越さない。**</summary>
+        /// <summary>On level unload. **Carry over no session state whatsoever.**</summary>
         public static void Destroy()
         {
-            // ★ パネルの GameObject より先に。Texture2D は Component ではないので
-            //    親を Destroy しても道連れにならず、都市を読み込み直すたびに 1 枚ずつ
-            //    残る（③で実際に起きた「都市をまたいで静的キャッシュが腐る」形の
-            //    リーク版）。WaveformView.Destroy() が自分で Object.Destroy する。
+            // ★ Before the panel's GameObject. A Texture2D is not a Component, so
+            //    destroying the parent does not take it with it and one is left behind
+            //    every time a city is reloaded (the leak version of the "static cache
+            //    goes rotten across cities" shape that actually bit us in ③).
+            //    WaveformView.Destroy() calls Object.Destroy itself.
             WaveformView.Destroy();
-            // 参照を捨てるだけ。実体はパネルの GameObject と一緒に消える。
+            // Just drop the references; the objects go with the panel's GameObject.
             EarthquakeMapRows.Destroy();
             EarthquakeDamageRows.Destroy();
             EarthquakeSensorRows.Destroy();
             EarthquakeLayer2Rows.Destroy();
-            // 凡例ごとパネルが消えるので、絵も消す（Hide() と同じ理由）。
+            // The panel goes, and the legend with it, so turn the picture off too (the
+            // same reason as in Hide()).
             EarthquakeOverlay.Disable();
 
             if (_panel != null)
@@ -204,7 +217,8 @@ namespace DisasterPlus.Game
             _shakeLabel = null;
             _bodyBuilt = false;
             _cursorPublishedValid = false;
-            // 次の都市が前の都市のカーソル地点を 1 回でも返さないようにする。
+            // Make sure the next city never once returns the previous city's cursor
+            // position.
             EarthquakeCursorPicker.Reset();
         }
 
@@ -231,10 +245,11 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ①のレビュー指摘の再発防止: _panel への代入を構築の最後の 1 行にすると、
-            // 途中の例外で EnsureBuilt() の catch が呼ぶ Destroy() は _panel==null を見て
-            // 何もせず、UIView に取り付け済みの GameObject が孤児のまま残る
-            // （クリックのたびに 1 枚ずつ積み上がる）。
+            // Guarding against a recurrence of what ①'s review found: if the assignment
+            // to _panel is the last line of construction, then when something throws part
+            // way, the Destroy() called by EnsureBuilt()'s catch sees _panel==null and
+            // does nothing, leaving the GameObject already attached to UIView orphaned
+            // (one more piling up with every click).
             UIPanel panel = null;
             try
             {
@@ -256,8 +271,9 @@ namespace DisasterPlus.Game
             panel.width = EarthquakeRows.PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
-            // 位置は InfoHub が決める（MoveTo）。ここには既定値しか無い ——
-            // パネルは同時に 1 枚しか出ないので、互いに避ける座標はもう要らない。
+            // The position is decided by InfoHub (MoveTo). Only the default lives here —
+            // only one panel is ever shown at a time, so coordinates chosen to avoid each
+            // other are no longer needed.
             panel.relativePosition = _origin;
             panel.isVisible = false;
 
@@ -267,10 +283,12 @@ namespace DisasterPlus.Game
                 EarthquakeRows.PanelWidth - 44f, 24f);
             _titleLabel.textScale = 1.1f;
 
-            // ★ 閉じるボタンはここには無い。**タブ帯の X が 1 つだけ持つ**（InfoHub）。
+            // ★ There is no close button here. **The tab strip's single X owns that**
+            //   (InfoHub).
             y += 30f;
 
-            // DLC が無い環境では地震そのものが存在しない。行を出さずに理由を書く。
+            // Without the DLC, earthquakes do not exist at all. Show no rows and write
+            // the reason.
             _bodyBuilt = ModCompat.NaturalDisastersOwned;
             if (!_bodyBuilt)
             {
@@ -293,9 +311,10 @@ namespace DisasterPlus.Game
 
             _tabs.Finish(ref y);
 
-            // ★ 第 2 層（Task 9〜11）はタブの**外**、ここから下に足す
-            //    （計画の共通規則「第 2 層は第 1 層の下に構築し、実行時の
-            //    並べ替えはしない」）。どのタブを見ていても同じ場所に見える。
+            // ★ Layer 2 (Tasks 9-11) is added **outside** the tabs, below this point
+            //    (the plan's shared rule: "layer 2 is built below layer 1, with no
+            //    rearranging at runtime"). It is in the same place whichever tab you are
+            //    looking at.
             EarthquakeLayer2Rows.Build(panel, ref y);
 
             panel.height = y;
@@ -303,11 +322,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// パネルの高さを組み直す。第 2 層の節は設定で丸ごと消えるので
-        /// （<see cref="EarthquakeLayer2Rows"/>）、その切り替えの瞬間だけここを通る。
-        /// **毎フレーム呼んではいけない** —— <see cref="ClampToView"/> は
-        /// <c>relativePosition</c> を書き換えるので、毎フレーム走らせるとパネルが
-        /// 微妙に動き続ける。
+        /// Rebuilds the panel's height. Layer 2's sections disappear entirely depending on
+        /// the settings (<see cref="EarthquakeLayer2Rows"/>), so this is reached only at
+        /// the instant one of them is toggled. **Never call it every frame** —
+        /// <see cref="ClampToView"/> rewrites <c>relativePosition</c>, so running it every
+        /// frame makes the panel drift about slightly.
         /// </summary>
         internal static void Relayout()
         {
@@ -317,20 +336,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// タブ 1「地震・カーソル・地図」。震源そのものの値と、カーソル 1 点について
-        /// 2 つのモデルが出す数字、そして 2 種類の地図。
+        /// Tab 1, "Earthquake, cursor and maps": the values of the earthquake itself, the
+        /// numbers two models give for the single point under the cursor, and the two
+        /// kinds of map.
         ///
-        /// この並びは**注記の文面が要求している**。<c>EarthquakeShakeNote</c> は
-        /// 「上の破壊半径は別の量」と言い、<c>EarthquakeCursorModelsNote</c> は
-        /// 「上の破壊係数」と「下のオーバーレイ」の両方を指し、
-        /// <c>EarthquakeOverlayLegend</c> は「上のバーと同じ 10 段」と言う。
-        /// これらを別のタブへ割ると、注記が存在しない行を指すことになる。
+        /// **The notes' wording demands this arrangement.**
+        /// <c>EarthquakeShakeNote</c> says "the destruction radius above is a different
+        /// quantity", <c>EarthquakeCursorModelsNote</c> points at both "the destruction
+        /// factor above" and "the overlay below", and <c>EarthquakeOverlayLegend</c> says
+        /// "the same 10 steps as the bar above". Split these across tabs and the notes
+        /// point at rows that are not there.
         /// </summary>
         private static void BuildQuakePage(UIPanel p, ref float y)
         {
-            // ★★ **常設の説明は外した**（2026-08-22、所有者の依頼
-            //    「ゲーム性にかかわるところ以外は不要です」）。
-            //    内容は <c>EarthquakeFeature.WriteDiagnostics</c> の診断ダンプにある。
+            // ★★ **The permanent explanations were removed** (2026-08-22, at the owner's
+            //    request: "anything that does not bear on gameplay is unnecessary").
+            //    The content lives in <c>EarthquakeFeature.WriteDiagnostics</c>'
+            //    diagnostic dump.
 
             EarthquakeRows.AddSectionHeader(p, "Layer1Header", ref y, Strings.EarthquakeLayer1Header);
 
@@ -340,22 +362,24 @@ namespace DisasterPlus.Game
             _timeLabel = EarthquakeRows.AddLayer1Row(p, "TimeToShock", ref y);
             _cursorLabel = EarthquakeRows.AddLayer1Row(p, "AtCursor", ref y);
 
-            // ★ 揺れは倒壊ランプとは別の量である（§A-7）。以前は s の行が
-            //    「カーソル地点の揺れ」を名乗り、半径 R の外を「揺れていない」と
-            //    書いていたが、バニラの揺れの式には半径の打ち切りが無く、同じ
-            //    フレームで CameraShakeBooster は揺れを足し、SeismographRecorder は
-            //    非ゼロの変位を書き続けている。3 つの部品が同じ物理量について
-            //    食い違う主張をしていたので、揺れは揺れとして別行で出す。
+            // ★ The shaking is a different quantity from the collapse ramp (§A-7). The s
+            //    row used to call itself "shaking at the cursor" and write "not shaking"
+            //    outside radius R, but vanilla's shaking formula has no radius cut-off
+            //    at all, and on the same frame CameraShakeBooster is adding shake and
+            //    SeismographRecorder is writing non-zero displacement. Three components
+            //    were making contradictory claims about the same physical quantity, so
+            //    the shaking gets a row of its own, as shaking.
             _shakeLabel = EarthquakeRows.AddLayer1Row(p, "ShakeAtCursor", ref y);
 
             EarthquakeMapRows.Build(p, ref y);
         }
 
         /// <summary>
-        /// タブ 2「建物の被害・地震計」。断層帯と建物ごとの余裕度、地震計の効果、波形。
+        /// Tab 2, "Building damage and seismographs": the fault band and each building's
+        /// headroom, what a seismograph does, and the waveforms.
         ///
-        /// **見出しはタブ 1 と同じ「ゲームが実際に計算しているもの」を再掲する。**
-        /// 両方のタブが第 1 層であることを、どちらを開いても名乗らせるため。
+        /// **The heading repeats tab 1's "what the game actually computes".** That way
+        /// both tabs declare that they are layer 1, whichever one you open.
         /// </summary>
         private static void BuildDamagePage(UIPanel p, ref float y)
         {
@@ -367,20 +391,22 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// パネルの下端がビューからはみ出さない位置まで上げる。
+        /// Raises the panel until its bottom edge no longer runs off the view.
         ///
-        /// **行を足すたびにパネルは伸びる**。位置を決め打ちのままにしておくと、
-        /// いちばん下の行——注記や「空である理由」——が静かに画面外へ出る。
-        /// **説明を書いたのに読めない**のは、書いていないのと同じかそれより悪い。
+        /// **Every row added makes the panel taller.** Leave the position hard-coded and
+        /// the bottom rows — the notes and the "why it is empty" lines — quietly go off
+        /// screen. **Writing an explanation that cannot be read** is as bad as not
+        /// writing it, or worse.
         ///
-        /// IL 実測: <c>ColossalFramework.UI.UIView.fixedHeight</c> は
-        /// <c>Int32</c> の読み書き可能プロパティとして実在する（既定 1080、
-        /// <c>relativePosition</c> と同じ正規化座標系）。読めない環境や
-        /// 内容がビューより高い場合は上端に寄せる。
+        /// Measured in the IL: <c>ColossalFramework.UI.UIView.fixedHeight</c> really is a
+        /// readable and writable <c>Int32</c> property (default 1080, in the same
+        /// normalised coordinate system as <c>relativePosition</c>). Where it cannot be
+        /// read, or where the content is taller than the view, we align to the top.
         ///
-        /// **タブ導入後もこの警告は残す。** タブは縦の余裕を作ったが、行の高さは
-        /// 折り返しの実測ができないまま予約しているので、言語やフォント次第では
-        /// 依然としてはみ出しうる。黙って切れさせない。
+        /// **This warning stays even after the move to tabs.** Tabs made vertical room,
+        /// but row heights are reserved without measuring the actual wrapping, so
+        /// depending on the language and font it can still overflow. Never let it be cut
+        /// off silently.
         /// </summary>
         private static void ClampToView(UIPanel panel)
         {
@@ -399,86 +425,97 @@ namespace DisasterPlus.Game
                 }
                 if (top < Margin)
                 {
-                    // ★ ここに来たら**内容がビューより高い** ＝ 上端に寄せても
-                    //    いちばん下の行が画面外に出る。
-                    //    **黙って切れさせない。** 構築時の 1 回だけなのでスロットル不要。
+                    // ★ Getting here means **the content is taller than the view**: even
+                    //    aligned to the top, the bottom rows go off screen.
+                    //    **Never let it be cut off silently.** This happens once at
+                    //    construction, so no throttling is needed.
                     top = Margin;
                     Log.Warn("earthquake panel is taller than the view ("
                              + panel.height.ToString("F0") + " > " + viewHeight.ToString("F0")
                              + "); the bottom rows will be off-screen");
                 }
-                // ★★ **上へは <c>InfoHub</c> が指定した位置（＝タブ帯の真下）より上に出さない。**
-                //    （2026-08-22、実機報告「天気タブ・地震タブの中に X で閉じられない
-                //    タブがあり」の正体。）上の 2 つの寄せは下端を画面に収めるためだけに
-                //    パネルを上へ上げるので、背の高いパネルは**タブ帯をまるごと覆い隠して
-                //    いた** —— 閉じる手段そのものが押せなくなる。収まらないぶんは下へはみ出すが、
-                //    帯の左端を掴めば一緒に動かせる（<c>InfoHub</c> のドラッググリップ）。
+                // ★★ **Never let it rise above the position <c>InfoHub</c> specified
+                //    (i.e. directly below the tab strip).** (2026-08-22; this was the real
+                //    cause of the in-game report "there are tabs inside the weather and
+                //    earthquake tabs that the X will not close".) The two adjustments
+                //    above raise the panel purely to bring its bottom edge on screen, so
+                //    a tall panel **covered the whole tab strip** — the means of closing
+                //    it became unclickable. Whatever does not fit now runs off the bottom
+                //    instead, and grabbing the strip's left edge moves both together
+                //    (<c>InfoHub</c>'s drag grip).
                 if (top < _origin.y) top = _origin.y;
                 panel.relativePosition = new Vector3(pos.x, top);
             }
             catch (System.Exception e)
             {
-                // 位置の微調整で構築を失敗させない（構築時の 1 回だけなのでスロットル不要）。
+                // Do not let a positional tweak fail the whole construction (it happens
+                // once at construction, so no throttling is needed).
                 Log.Warn("earthquake panel clamp failed: " + e.GetType().Name);
             }
         }
 
-        // ── 内容の更新 ────────────────────────────────────
+        // ── Updating the content ──────────────────────────────
 
         private static void Refresh()
         {
             EarthquakeRows.SetPlain(_titleLabel, Strings.EarthquakeTitle);
 
-            // DLC が無い環境では説明の 1 行しか構築していない（_bodyBuilt の doc）。
+            // Without the DLC, only the one explanatory row was built (see _bodyBuilt's doc).
             if (!_bodyBuilt) return;
 
             var snapshot = EarthquakeHub.Latest;
             if (snapshot == null || !snapshot.Valid)
             {
-                // 読めていない間は sim 側に建物を探させない。
+                // While nothing can be read, do not have the sim side looking for buildings.
                 PublishCursor(new Vec3(0f, 0f, 0f), false);
                 ClearQuakeRows();
                 EarthquakeDamageRows.Clear();
                 EarthquakeSensorRows.ClearSensor();
                 EarthquakeSensorRows.ClearWaveform();
-                // 「まだ 1 回も読んでいない」と「読んだが読めなかった」を同じ文言に
-                // しないこと（①のレビュー指摘）。ロード直後にポーズしたままだと
-                // 前者が普通に起きる（最初の tick の deltaMinutes は必ず 0）。
+                // Do not give "we have not read once yet" and "we read and it could not
+                // be read" the same wording (raised in ①'s review). The first happens
+                // routinely if the game is left paused right after a load (the first
+                // tick's deltaMinutes is always 0).
                 EarthquakeRows.SetPlain(_countLabel, snapshot == null
                     ? Strings.ForecastWaiting
                     : Strings.EarthquakeUnavailable);
-                // ボタンの見た目だけは実状に合わせる（凡例は消さない）。
+                // Bring only the button's appearance into line with reality (the legend
+                // is not cleared).
                 EarthquakeMapRows.ShowUnavailable();
                 EarthquakeLayer2Rows.Refresh(snapshot);
                 return;
             }
 
-            // カーソル地点は 1 フレームに 1 回だけ求める。地形をかすめて外すレイでは
-            // 501 回の高さサンプリングが走るので、同じフレームで 2 回引いてはいけない
-            // （強度の行・ハザードの行・地震計の行で共有する）。実際にレイを引くのは
-            // 実際にレイを引くのは数フレームに 1 回だけで、残りのフレームは
-            // 直前の結果を返す（EarthquakeCursorPicker のクラス doc）。
+            // The cursor position is worked out once per frame. A ray that grazes the
+            // terrain and misses runs 501 height samples, so it must never be cast twice
+            // in the same frame (it is shared by the intensity row, the hazard row and
+            // the seismograph row). The ray is only actually cast once every few frames,
+            // and the remaining frames return the previous result (see
+            // EarthquakeCursorPicker's class doc).
             //
-            // **地震が 1 個も無くても引く。** カーソル地点の地震計カバレッジは
-            // 「この場所に地震計が届いているか」であって、地震の有無とは関係が無い
-            // （設計書 §3.4）。地震計を建てる場所の下見に使えることがこの行の値打ちで、
-            // 地震が起きている間しか読めないなら下見にならない。
-            // Task 6 の間引きが入るまでは、この「常に引く」は許容できなかった。
+            // **It is cast even with no earthquake at all.** The seismograph coverage at
+            // the cursor means "does a seismograph reach here", which has nothing to do
+            // with whether there is an earthquake (design doc §3.4). The value of this
+            // row is that you can use it to scout where to build a seismograph, and it is
+            // no use for scouting if it can only be read while a quake is happening.
+            // Until Task 6's throttle went in, this "always cast" was not acceptable.
             bool hazardViewOn =
                 InfoModeSwitch.IsShowingHazardFor(InfoManager.SubInfoMode.EarthquakeHazard);
             Vec3 cursor;
             bool haveCursor = EarthquakeCursorPicker.TryPick(out cursor);
 
-            // ★ 建物バッファは main スレッドから触らない。座標だけを sim 側へ渡し、
-            //    その下に何が建っているかは次の tick のスナップショットで受け取る
-            //    （BuildingProbe のクラス doc。1 tick ぶんの遅延はその設計上の代償）。
+            // ★ Never touch the building buffers from the main thread. Pass only the
+            //    position to the sim side and receive what stands under it in the next
+            //    tick's snapshot (see BuildingProbe's class doc; the one-tick lag is the
+            //    designed-in price of that).
             PublishCursor(cursor, haveCursor);
 
             var primary = RefreshQuakeRows(snapshot, haveCursor, cursor);
             EarthquakeSensorRows.RefreshSensor(snapshot, primary, haveCursor);
             EarthquakeSensorRows.RefreshWaveform(snapshot);
             EarthquakeMapRows.Refresh(snapshot, hazardViewOn, haveCursor, cursor);
-            // ★ 最後に呼ぶ。第 1 層を全部書き終えたあとに、本 MOD が足したものを書く。
+            // ★ Called last. Write what this mod added only after all of layer 1 is
+            //   written.
             EarthquakeLayer2Rows.Refresh(snapshot);
         }
 
@@ -490,12 +527,13 @@ namespace DisasterPlus.Game
             EarthquakeRows.SetPlain(_timeLabel, "");
             EarthquakeRows.SetPlain(_cursorLabel, "");
             EarthquakeRows.SetPlain(_shakeLabel, "");
-            // 注記は行が出ているときだけ（RefreshShakeRow が入れ直す）。
+            // The note only appears while the row does (RefreshShakeRow puts it back).
         }
 
         /// <summary>
-        /// 地震の行を書き、以後の行が指すべき地震（<see cref="SelectPrimary"/> の結果）を返す。
-        /// 地震が 1 個も無ければ null。
+        /// Writes the earthquake rows and returns the earthquake the rows below should
+        /// refer to (<see cref="SelectPrimary"/>'s result). Null when there are no
+        /// earthquakes at all.
         /// </summary>
         private static EarthquakeReading RefreshQuakeRows(EarthquakeSnapshot snapshot,
                                                           bool haveCursor, Vec3 cursor)
@@ -505,22 +543,24 @@ namespace DisasterPlus.Game
             {
                 ClearQuakeRows();
                 EarthquakeDamageRows.Clear();
-                // 「0」という裸の数字ではなく、文で言う。走査した結果なので第 1 層。
+                // Say it in a sentence rather than as a bare "0". It is the result of a
+                // sweep, so it is layer 1.
                 EarthquakeRows.SetLayer1(_countLabel, Strings.EarthquakeNoneActive);
                 return null;
             }
 
             var primary = SelectPrimary(quakes, haveCursor, cursor);
 
-            // 複数同時に起きている場合（§E-1 で可能と確定している）、以下の行が
-            // どの地震のものかを名乗る。災害バッファ上の添字なのでローカライズしない。
+            // With several running at once (§E-1 settles that this is possible), state
+            // which earthquake the rows below belong to. It is an index into the disaster
+            // buffer, so it is not localised.
             string count = Strings.EarthquakeCount + ": " + quakes.Count;
             if (quakes.Count > 1) count += "   (#" + primary.DisasterId + ")";
             EarthquakeRows.SetLayer1(_countLabel, count);
 
-            // 強度の表示は災害パネルと揃えて 1/10 にする（§A-2b の
-            // m_label.text = (value / 10).ToString("F1")）。生の byte を出すと
-            // ゲーム内の他の表示と 10 倍食い違う。
+            // The intensity is displayed at 1/10, matching the disaster panel (§A-2b's
+            // m_label.text = (value / 10).ToString("F1")). Show the raw byte and it
+            // disagrees with every other display in the game by a factor of 10.
             EarthquakeRows.SetLayer1(_intensityLabel,
                 Strings.EarthquakeIntensity + ": " + (primary.Intensity / 10f).ToString("F1")
                 + "    " + Strings.EarthquakeRadius + ": " + primary.Radius.ToString("F0") + " m");
@@ -543,8 +583,8 @@ namespace DisasterPlus.Game
                 case EarthquakePhase.Clearing: word = Strings.EarthquakePhaseClearing; break;
             }
 
-            // Finished / Unknown に当てる語は用意していない。名前を付けると
-            // 「進行中の位相のひとつ」に見えるので、行ごと出さない。
+            // There is no wording for Finished / Unknown. Giving them a name would make
+            // them look like "one of the phases in progress", so the whole row is omitted.
             EarthquakeRows.SetPlain(_phaseLabel, "");
             if (word != null)
             {
@@ -553,17 +593,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 「本震まで」。**これは予測ではなく予定表の読み上げである。**
+        /// "Time to the main shock". **This is reading out a schedule, not a prediction.**
         ///
-        /// ①は「あと何時間で来る」を禁じている（発生判定が乱数だから）。②のこの行は
-        /// 根拠が違う: <c>m_activationFrame</c> は <c>StartDisaster</c> が
-        /// <c>m_startFrame + m_emergingDuration</c> として**書き込んだ確定値**であり
-        /// （§A-1）、<c>IsStillEmerging</c> はそれと現在フレームを比べているだけである。
-        /// 設計書 §7-2 がこの区別を要求している。
+        /// ① forbids "it arrives in N hours" (because whether it happens is a random
+        /// draw). ②'s row rests on something different: <c>m_activationFrame</c> is a
+        /// **settled value written** by <c>StartDisaster</c> as
+        /// <c>m_startFrame + m_emergingDuration</c> (§A-1), and <c>IsStillEmerging</c>
+        /// merely compares it against the current frame. Design doc §7-2 requires this
+        /// distinction.
         ///
-        /// ただし <c>m_activationFrame == 0</c> は「今」ではなく「予定が無い」。
-        /// <c>SelfTrigger(64)</c> が立っていない地震はここが 0 のまま Emerging で
-        /// 永久に固まるので、そのまま引き算すると「あと 4739 年」のような数字になる。
+        /// Note, though, that <c>m_activationFrame == 0</c> means "nothing is scheduled",
+        /// not "now". An earthquake without <c>SelfTrigger(64)</c> stays at 0 here and
+        /// sits in Emerging forever, so subtracting naively gives a number like "4,739
+        /// years from now".
         /// </summary>
         private static void RefreshTimeRow(EarthquakeSnapshot snapshot, EarthquakeReading primary)
         {
@@ -580,8 +622,9 @@ namespace DisasterPlus.Game
 
             if (primary.ActivationFrame <= snapshot.CurrentFrame) return;
 
-            // 換算は必ず FeatureHost.FramesPerMinute から出す（定数を直書きして
-            // 4 倍ずれた前科がある。③、DAYTIME_FRAMES の取り違え）。
+            // Always derive the conversion from FeatureHost.FramesPerMinute (we once
+            // hard-coded the constant and came out a factor of 4 wrong: ③, mixing up
+            // DAYTIME_FRAMES).
             float framesPerMinute = FeatureHost.FramesPerMinute;
             if (framesPerMinute <= 0f) return;
 
@@ -591,33 +634,37 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カーソル地点の局所係数 s。**全体円盤（probability = 0.02）の倒壊・出火ランプ**
-        /// であって、揺れでも断層帯でもない（どちらも別行で出す）。
+        /// The local factor s at the cursor. It is **the whole-quake disc's
+        /// (probability = 0.02) collapse and fire ramp**, and it is neither the shaking
+        /// nor the fault band (both of which get rows of their own).
         ///
-        /// ── この行が名乗ってよいもの・いけないもの（全体レビュー C3）─────────
+        /// ── What this row may and may not claim (whole-feature review C3) ───────
         ///
-        /// 数字（<c>s = 1 - d/R</c>）はバニラの <c>fD</c> そのもので正しい。だが
-        /// 以前この行は「カーソル地点の揺れ」を名乗り、R の外を「揺れの範囲外」と
-        /// 書いていた。バニラの揺れは <c>amp = 0.3/(1 + dist*0.001)</c> で
-        /// **半径の打ち切りが一切無い**（§A-7）ので、それは同じフレームで
-        /// <c>CameraShakeBooster</c> が揺れを足し <c>SeismographRecorder</c> が
-        /// 非ゼロの変位を書いている地点についての、真っ向から反対の主張だった。
+        /// The number (<c>s = 1 - d/R</c>) is vanilla's <c>fD</c> exactly, and it is
+        /// correct. But this row used to call itself "shaking at the cursor" and write
+        /// "outside the range of the shaking" beyond R. Vanilla's shaking is
+        /// <c>amp = 0.3/(1 + dist*0.001)</c> with **no radius cut-off whatsoever** (§A-7),
+        /// so that was a flatly contradictory claim about a point where, on the same
+        /// frame, <c>CameraShakeBooster</c> was adding shake and
+        /// <c>SeismographRecorder</c> was writing non-zero displacement.
         ///
-        /// **区分名（弱い/強い…）も出さない。** あれはこの MOD が付けた名前であって、
-        /// バニラは probability の係数を計算しているだけである。<c>[measured]</c> の
-        /// 下に置くと、ゲームがそう判断していることになる（<c>Strings</c> の
-        /// <c>EarthquakeBandWeak</c> 付近のコメント）。
+        /// **Nor does it give a band name (weak / strong / …).** Those are names this mod
+        /// invented; vanilla is only computing a coefficient on a probability. Put them
+        /// under <c>[measured]</c> and it means the game is making that judgement (see
+        /// the comment near <c>EarthquakeBandWeak</c> in <c>Strings</c>).
         ///
-        /// 半径 R の外は「係数が 0」ではなく「バニラが判定すらしていない」なので、
-        /// <c>0.0</c> と出さずに「圏外」と書く（<see cref="SeismicIntensity.At"/> の doc）。
+        /// Outside radius R the factor is not 0; vanilla is not even making the check, so
+        /// we write "out of range" rather than <c>0.0</c> (see
+        /// <see cref="SeismicIntensity.At"/>'s doc).
         /// </summary>
         private static void RefreshCursorRow(EarthquakeReading primary, bool haveCursor, Vec3 cursor)
         {
-            // ★ 収束中（Clearing）の地震には破壊判定が走らない。全体円盤の
-            //    DestroyBuildings は SimulationStep の Active 分岐にしか無い（§A-3）ので、
-            //    ここで係数を出すと「もう起きないこと」の強さを名乗ることになる。
-            //    sim 側（QuakeSelection.SelectDamaging）が同じ理由で Clearing を
-            //    除いているので、表示側だけ含めていた食い違いを解消する。
+            // ★ A subsiding (Clearing) earthquake runs no destruction check. The
+            //    whole-quake disc's DestroyBuildings exists only in SimulationStep's
+            //    Active branch (§A-3), so printing a factor here would be stating the
+            //    strength of something that can no longer happen. The sim side
+            //    (QuakeSelection.SelectDamaging) excludes Clearing for that same reason,
+            //    so this removes the disagreement where only the display side included it.
             if (!QuakeSelection.RunsDamage(primary.Phase))
             {
                 EarthquakeRows.SetPlain(_cursorLabel,
@@ -645,27 +692,32 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **カーソル地点で地面が実際にどれだけ揺れているか。** 上の倒壊ランプとは
-        /// 別の量で、こちらが依頼文の「揺れ」に当たる。
+        /// **How hard the ground is actually shaking at the cursor.** A different quantity
+        /// from the collapse ramp above, and this is what the request meant by "the
+        /// shaking".
         ///
-        /// 出しているのは <c>EarthquakeAI.RenderInstance</c> の <c>amp</c>
-        /// （§A-7 IL_0069、包絡線を掛ける前）そのものである。バニラはこの距離を
-        /// **カメラから**測るが、ここは震央からの距離で評価する —— 波形グラフと
-        /// まったく同じ置き換えで、同じ式の別評価であって近似ではない（設計書 §3.5）。
+        /// What is shown is <c>EarthquakeAI.RenderInstance</c>'s <c>amp</c> exactly
+        /// (§A-7 IL_0069, before the envelope is applied). Vanilla measures that distance
+        /// **from the camera**, whereas here it is evaluated at the distance from the
+        /// epicentre — exactly the same substitution as the waveform graph, a different
+        /// evaluation of the same formula rather than an approximation (design doc §3.5).
         ///
-        /// **半径の打ち切りは無い。** 10 km 離れていても震央の 9% で揺れている。
-        /// それが常設の注記（<c>EarthquakeShakeNote</c>）の内容である。
+        /// **There is no radius cut-off.** Even 10 km away it is shaking at 9% of the
+        /// epicentre's amplitude. That is what the permanent note
+        /// (<c>EarthquakeShakeNote</c>) says.
         ///
-        /// 窓（<c>Emerging|Active</c> かつ <c>0 &lt; e &lt; m_activeDuration</c>）が
-        /// 開いていなければ数値を出さない。<c>m_activeDuration</c> はプレハブ値で
-        /// まだ誰も実測していないので、読めていないときも数値を出さない
-        /// （<c>CameraShakeBooster</c> / <c>SeismographRecorder</c> と同じ判断）。
+        /// No number is shown unless the window (<c>Emerging|Active</c> and
+        /// <c>0 &lt; e &lt; m_activeDuration</c>) is open. <c>m_activeDuration</c> is a
+        /// prefab value nobody has yet measured, so no number is shown when it cannot be
+        /// read either (the same judgement as <c>CameraShakeBooster</c> /
+        /// <c>SeismographRecorder</c>).
         /// </summary>
         private static void RefreshShakeRow(EarthquakeSnapshot snapshot, EarthquakeReading primary,
                                             bool haveCursor, Vec3 cursor)
         {
-            // 「半径による打ち切りが無い」ことは、数値が出ていない状態でこそ
-            // 誤解されうる（上の倒壊ランプが「圏外」と言っている隣なので）。
+            // "There is no radius cut-off" is most easily misread precisely when no number
+            // is shown (because it sits next to the collapse ramp above saying "out of
+            // range").
 
             if (!haveCursor)
             {
@@ -700,24 +752,29 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 表示の対象にする地震を 1 つ選ぶ。**全ての行が同じ地震を指すようにするため**で、
-        /// 「強度は地震 A、カーソルの揺れは地震 B」という混線を防ぐ（複数同時発生は
-        /// §E-1 で可能と確定している）。件数が 1 個の通常の場合は何も起きない。
+        /// Picks the one earthquake the display refers to. **So that every row refers to
+        /// the same earthquake**, preventing the crossed wires of "the intensity is
+        /// earthquake A's and the shaking at the cursor is earthquake B's" (§E-1 settles
+        /// that several can run at once). In the ordinary case of a single earthquake,
+        /// nothing happens here.
         ///
-        /// 優先順: 進行中 &gt; カーソル地点で強く効いている &gt; 強度が大きい &gt; 添字が小さい。
-        /// 「進行中」を先に見るのは、Finished の残骸を主役にしないため。
+        /// Priority: in progress &gt; acting strongly at the cursor &gt; higher intensity
+        /// &gt; lower index. "In progress" is checked first so that the remains of a
+        /// Finished quake never become the subject.
         ///
-        /// ── ここが <c>Clearing</c> を含むのは意図的である（全体レビュー I2）──────
+        /// ── Including <c>Clearing</c> here is deliberate (whole-feature review I2) ────
         ///
-        /// sim 側の <see cref="QuakeSelection.SelectDamaging"/> は <c>Clearing</c> を
-        /// 含めない（破壊判定が <c>Active</c> 分岐にしか無いため、§A-3）。こちらは
-        /// **件数・強度・位相**を出すための選定なので、収束中の地震も主役になれる
-        /// ——「余震処理中」と表示できないのはむしろ情報の欠落である。
+        /// The sim side's <see cref="QuakeSelection.SelectDamaging"/> does not include
+        /// <c>Clearing</c> (the destruction check exists only in the <c>Active</c> branch,
+        /// §A-3). This selection is for showing **the count, the intensity and the
+        /// phase**, so a subsiding earthquake can be the subject too — not being able to
+        /// display "aftershocks subsiding" would be a loss of information.
         ///
-        /// **代わりに、破壊が走らない位相では破壊由来の行を出さない。**
-        /// <see cref="RefreshCursorRow"/> と <see cref="EarthquakeDamageRows"/> が
-        /// <see cref="QuakeSelection.RunsDamage"/> で自分から降りる。以前は
-        /// この 2 行が収束中の地震について係数と「断層帯: 内側」を出していた。
+        /// **Instead, rows derived from destruction are not shown in phases where no
+        /// destruction runs.** <see cref="RefreshCursorRow"/> and
+        /// <see cref="EarthquakeDamageRows"/> bow out of their own accord via
+        /// <see cref="QuakeSelection.RunsDamage"/>. Those two rows used to print a factor
+        /// and "fault band: inside" for a subsiding earthquake.
         /// </summary>
         private static EarthquakeReading SelectPrimary(IList<EarthquakeReading> quakes,
                                                        bool haveCursor, Vec3 cursor)
@@ -756,11 +813,11 @@ namespace DisasterPlus.Game
             return Mathf.Sqrt(a.ToVec2().DistanceSquaredTo(b.ToVec2()));
         }
 
-        // 区分名（弱い/中程度/強い/非常に強い）をここで文字列に落とすヘルパーは
-        // 全体レビュー(C3)で撤去した。あれは**この MOD が付けた名前**であって、
-        // バニラが計算しているのは probability の係数だけである。[measured] の
-        // 接頭辞の下に置くと、ゲームがその判断をしていることになってしまう。
-        // SeismicScale.BandOf と Strings.EarthquakeBand* は、第 2 層が
-        // 自分の名前として名乗るときのために残してある。
+        // The helper that turned band names (weak / moderate / strong / very strong) into
+        // strings here was removed by the whole-feature review (C3). Those are **names
+        // this mod invented**, whereas what vanilla computes is only a coefficient on a
+        // probability. Put them under the [measured] prefix and it means the game is
+        // making that judgement. SeismicScale.BandOf and Strings.EarthquakeBand* are kept
+        // for when layer 2 declares them as names of its own.
     }
 }

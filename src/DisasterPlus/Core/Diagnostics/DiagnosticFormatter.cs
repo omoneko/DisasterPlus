@@ -3,11 +3,11 @@ using System.Collections.Generic;
 namespace DisasterPlus.Core.Diagnostics
 {
     /// <summary>
-    /// レポートをテキスト行に整形する。オーバーレイとダンプが共用するので、
-    /// 画面に見えているものとファイルの内容が食い違わない。
+    /// Formats a report into lines of text. The overlay and the dump share it, so what is
+    /// on screen and what is in the file cannot disagree.
     ///
-    /// 出力は ASCII のみ。IMGUI の既定フォントは日本語グリフを持たない
-    /// 可能性が高く、豆腐になるため。開発者向けツールなので翻訳しない。
+    /// The output is ASCII only, because IMGUI's default font most likely has no Japanese
+    /// glyphs and would render tofu. This is a developer tool, so it is not translated.
     /// </summary>
     public static class DiagnosticFormatter
     {
@@ -30,8 +30,9 @@ namespace DisasterPlus.Core.Diagnostics
                 outLines.Add("ASSUMPTIONS  " + report.PassedCount + " passed, "
                              + report.FailedCount + " FAILED");
 
-                // 通った前提は列挙しない。全部出すとオーバーレイが埋まって
-                // 肝心の FAIL が読みにくくなる。ダンプ側も同じ判断でよい。
+                // Assumptions that passed are not listed. Print them all and the overlay
+                // fills up, making the FAILs that matter hard to read. The dump side can
+                // take the same view.
                 for (int i = 0; i < report.Assumptions.Count; i++)
                 {
                     var a = report.Assumptions[i];
@@ -83,8 +84,9 @@ namespace DisasterPlus.Core.Diagnostics
         }
 
         /// <summary>
-        /// 改行と非 ASCII を潰し、長すぎる値を切る。
-        /// 1 行 = 1 要素の構造を、例外メッセージのような多行文字列でも崩さない。
+        /// Flattens newlines and non-ASCII, and cuts values that are too long.
+        /// Keeps the one-line-per-item structure intact even for multi-line strings such as
+        /// exception messages.
         /// </summary>
         private static string Sanitize(string s)
         {

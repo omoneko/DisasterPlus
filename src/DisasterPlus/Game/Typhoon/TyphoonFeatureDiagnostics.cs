@@ -3,25 +3,28 @@ using DisasterPlus.Core.Typhoon;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ④台風の**診断ダンプの行**（<c>Ctrl+F11</c> に出るもの）。
+    /// ④ Typhoon's **diagnostics dump lines** (what comes out under <c>Ctrl+F11</c>).
     ///
-    /// <see cref="TyphoonFeature"/> の partial である。分けたのは 800 行の上限に
-    /// 掛かったからで、境目は「ゲームの状態を進めるもの」と「読んで並べるだけの
-    /// もの」の間に引いてある —— このファイルには<b>状態を変える行が 1 つも無い</b>。
+    /// It is a partial of <see cref="TyphoonFeature"/>. The split was made because we hit
+    /// the 800-line limit, and the boundary is drawn between "things that advance game
+    /// state" and "things that only read and list" — <b>there is not one line in this file
+    /// that changes state</b>.
     ///
-    /// **main スレッド専用。** <c>DiagnosticsHub</c> が main から呼ぶ。
-    /// sim 側の static（<c>TyphoonGust</c> / <c>TyphoonCloud</c> …）から
-    /// int と bool を読む箇所があるが、これは④が前から取っている形である
-    /// （整列した 32bit の読みは裂けない。表示が 1 tick 古くても誰も困らない）。
-    /// **ここから sim 側の状態を書き換えないこと。**
+    /// **Main thread only.** <c>DiagnosticsHub</c> calls it from main.
+    /// There are places that read ints and bools from sim-side statics
+    /// (<c>TyphoonGust</c> / <c>TyphoonCloud</c> …), but that is the shape ④ has always
+    /// taken (an aligned 32-bit read does not tear, and nobody minds if the display is one
+    /// tick out of date).
+    /// **Do not write sim-side state from here.**
     /// </summary>
     public partial class TyphoonFeature
     {
         /// <summary>
-        /// ④が今どうなっているかを全部並べる。**倒壊 0 のときも、台風が居ないときも
-        /// 全部出す** —— 画面上は「設定で切っている」「近くに建物が無い」
-        /// 「上限で外縁まで届いていない」「全部ゲームに断られた」がどれも同じ顔
-        /// （何も起きない）になるので、切り分けはここでしかできない。
+        /// List everything about how ④ is doing. **Print it all even when 0 collapsed and
+        /// even when there is no typhoon** — on screen, "switched off in the settings",
+        /// "there are no buildings nearby", "the ceiling stopped it before it reached the
+        /// outer rim" and "the game refused all of them" all look identical (nothing
+        /// happens), so this is the only place they can be told apart.
         /// </summary>
         public void WriteDiagnostics(DiagnosticBuilder b)
         {
@@ -43,13 +46,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **設定画面から降ろした解説の行き場**（<c>Mod.OnSettingsUI</c> の doc の表）。
+        /// **Where the explanations taken off the settings screen went** (the table in
+        /// <c>Mod.OnSettingsUI</c>'s doc).
         ///
-        /// 風害・局所被害・氾濫の説明は④のパネルに同じ文が出る（<c>TyphoonEffectRows</c>）。
-        /// ここに置くのは、パネルにも設定画面にも無い**危険半円の理屈**だけである。
+        /// The explanations for wind damage, local damage and flooding appear word for word
+        /// on ④'s panel (<c>TyphoonEffectRows</c>). What goes here is only **the reasoning
+        /// behind the dangerous semicircle**, which is on neither the panel nor the
+        /// settings screen.
         ///
-        /// ★ ここは sim スレッドである（<c>DiagnosticDump</c> のクラス doc）。
-        ///   ゲームのバッファにも UI にも触らない、定数の行だけにすること。
+        /// ★ This is the sim thread (<c>DiagnosticDump</c>'s class doc).
+        ///   Keep it to lines of constants that touch neither the game's buffers nor the UI.
         /// </summary>
         private static void WriteNotes(DiagnosticBuilder b)
         {
@@ -61,31 +67,34 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// UI の状態。①②③⑤と同じ形（<see cref="DisasterPanelBar"/> に問い合わせるだけ）。
+        /// The UI state. The same shape as ①②③⑤ (it only asks
+        /// <see cref="DisasterPanelBar"/>).
         ///
-        /// **「①②のボタンと重なっていないか」はもう診断項目ではない。** 4 個の位置は
-        /// 1 本の並びに対する 1 回のループが決めるので、重なる経路が存在しない
-        /// （DisasterPanelBar のクラス doc）。ここで見るのは
-        /// 「④のボタンが実際に居るか」と「どこに居るか（バニラのパネルの中か、
-        /// 退避先の浮遊バーか）」だけである。
+        /// **"Does it overlap ① and ②'s buttons" is no longer a diagnostic item.** The
+        /// positions of the four are decided by a single loop over a single ordering, so no
+        /// route exists in which they overlap (DisasterPanelBar's class doc). All we look
+        /// at here is "is ④'s button actually there" and "where is it (inside vanilla's
+        /// panel, or on the fallback floating bar)".
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b)
         {
-            // ボタンは④専用ではなく DisasterPanelBar が 4 個まとめて置く。座標は
-            // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
+            // The button is not ④'s alone; DisasterPanelBar places all four together. This
+            // mod no longer decides the coordinates, so all we print is "is it there" and
+            // "where is it".
             b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdTyphoon)
                 ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "panel body", TyphoonPanel.IsVisible ? "shown" : "hidden");
-            // ★ タイルは配置カーソルを構える（バニラの災害ボタンと同じ約束）。
-            //   構えたまま指していないのか、指したのに何も起きないのかを見分ける。
+            // ★ The tile arms a placement cursor (the same contract as vanilla's disaster
+            //   buttons). This tells "armed but nothing pointed at yet" from "pointed at
+            //   something and nothing happened".
             b.Line(1, "placement tool", TyphoonPlacementTool.IsActive ? "active" : "idle");
         }
 
         /// <summary>
-        /// 台風そのもの。
+        /// The typhoon itself.
         ///
-        /// **<c>refusal</c> は必ず出す。** 「起こせなかった」を「何も起きていない」と
-        /// 見分ける手段がここにしか無い（計画 §3 Step 5）。
+        /// **Always print <c>refusal</c>.** This is the only means of telling "it could not
+        /// be raised" from "nothing is happening" (plan §3 Step 5).
         /// </summary>
         private static void WriteTyphoon(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
@@ -115,10 +124,11 @@ namespace DisasterPlus.Game
             b.Line(2, "radius", "storm " + snapshot.StormRadius.ToString("F0")
                                 + " m / gale " + snapshot.GaleRadius.ToString("F0") + " m");
 
-            // 「読めなかった」と「0 分後」を混ぜない。
-            // ★ 桁を主張しすぎない（全体レビュー）。上陸フレームの推定は
-            //   256 フレーム刻み（LandfallStepFrames ≒ ゲーム内 5.6 分）でしか
-            //   打っていないので、F1（0.1 分）は持っていない精度である。
+            // Do not mix "could not be read" up with "in 0 minutes".
+            // ★ Do not claim more digits than we have (whole-project review). The estimate
+            //   of the landfall frame is only stepped in units of 256 frames
+            //   (LandfallStepFrames ≈ 5.6 in-game minutes), so F1 (0.1 minutes) is
+            //   precision we do not have.
             b.Line(2, "landfall", snapshot.OverLand
                 ? "already over land"
                 : (snapshot.LandfallKnown
@@ -145,21 +155,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **台風が去ったあとに④が何も握っていないことの証明。**
+        /// **The proof that ④ is holding nothing once the typhoon has gone.**
         ///
-        /// 持ち主の指摘「台風が去ったら暴風雨や竜巻被害がなくなるように」に対して、
-        /// 「本当に止まったか」を画面から確かめる手段がここである。
-        /// **正常なら 5 行とも <c>released</c> / <c>0</c> になる。**
-        /// 1 つでもそうでなければ、その行が名指しで不具合を指している。
+        /// This is the means of confirming from the screen that it "really did stop", in
+        /// answer to the owner's note "when the typhoon leaves, the storm and the tornado
+        /// damage should stop".
+        /// **When all is well, all five lines read <c>released</c> / <c>0</c>.**
+        /// If even one does not, that line is naming the fault.
         ///
-        /// ★ <c>host thunderstorm</c> の行は**不具合ではない。** 宿主の
-        /// <c>ThunderStormAI</c> 災害はセーブから外さないと決めてある（設計書 §4.2）——
-        /// 外す手は保存の前に <c>DeactivateNow</c> する以外に無く、それは
-        /// 「セーブしただけで台風が消える」ことを意味するからである。
-        /// **台風の途中で保存して開き直すと、動かない雷雨がその場に残る。**
-        /// それは雨も風も被害も駆動していない抜け殻で、
-        /// <c>m_activeDuration</c> が尽きればバニラが自分で畳む。
-        /// この行が無いと、次にそれを見た人は④が後始末を忘れたと読む。
+        /// ★ The <c>host thunderstorm</c> line is **not a fault.** We decided not to take
+        /// the host <c>ThunderStormAI</c> disaster out of the save (design doc §4.2) — the
+        /// only way to do so would be to call <c>DeactivateNow</c> before saving, and that
+        /// would mean "saving alone destroys your typhoon".
+        /// **Save mid-typhoon and reopen it, and a motionless thunderstorm stays there.**
+        /// It is an empty shell driving neither rain, nor wind, nor damage, and vanilla
+        /// packs it away itself once <c>m_activeDuration</c> runs out.
+        /// Without this line, the next person to see it reads it as ④ forgetting to clean
+        /// up.
         /// </summary>
         private static void WriteShutdown(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
@@ -194,12 +206,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 巨大な回転雲（T9）。**バニラに流用できる雲は 1 つも無い**ので、
-        /// ここに出るのは全部④が自分で組んだものである（§C-1 / §C-2）。
+        /// The huge rotating cloud (T9). **There is not one vanilla cloud we can reuse**,
+        /// so everything that appears here is something ④ built itself (§C-1 / §C-2).
         ///
-        /// <c>vanilla sky boost</c> が <c>not available</c> なのは**不具合ではない** ——
-        /// <c>DayNightDynamicCloudsProperties</c> は DLC・グラフィック設定によっては
-        /// 存在しない（§C-2、PARTIAL）。④の自前の雲はそれに依存しない。
+        /// <c>vanilla sky boost</c> reading <c>not available</c> is **not a fault** —
+        /// <c>DayNightDynamicCloudsProperties</c> does not exist under some DLC and graphics
+        /// settings (§C-2, PARTIAL). ④'s own cloud does not depend on it.
         /// </summary>
         private static void WriteCloud(DiagnosticBuilder b)
         {
@@ -211,13 +223,13 @@ namespace DisasterPlus.Game
 
             b.Line(2, "cloud", CloudStateText());
 
-            // ★★ **どちらの経路で出しているかを必ず名乗る。** 本経路はバニラの
-            //    粒子エフェクトを借りた雲の粒で、メッシュはそれが取れなかった
-            //    ときの退避である。ここが唯一の見分け方になる。
+            // ★★ **Always name which route is drawing it.** The main route is cloud puffs
+            //    borrowed from vanilla's particle effects, and the mesh is the fallback for
+            //    when those could not be got. This is the only way to tell them apart.
             b.Line(3, "cloud puffs", TyphoonCloudFx.EffectDetail);
 
-            // ★ 退避経路のシェーダ。Standard へ落ちた／借りてきたことは
-            //   ここでしか分からない（③⑤と同じ扱い）。
+            // ★ The fallback route's shader. Whether we fell back to Standard or borrowed
+            //   one can only be seen here (treated the same way as ③ and ⑤).
             b.Line(3, "fallback mesh material", TyphoonCloud.ShaderDetail);
 
             if (!ModSettings.TyphoonVanillaCloudBoost.value)
@@ -233,8 +245,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 暴風雨の演出（横殴りの飛沫と吹き飛ばし）。
-        /// **どれも建物・道路・樹木には触れない**ので、被害の行とは分けて出す。
+        /// The storm presentation (sideways spray and the blow-away).
+        /// **None of it touches buildings, roads or trees**, so it is printed separately
+        /// from the damage lines.
         /// </summary>
         private static void WriteStormFx(DiagnosticBuilder b)
         {
@@ -251,8 +264,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 風の音。**何を借りたのか**を必ず名乗る —— 将来ゲームが更新されて
-        /// 音が消えたときの唯一の手がかりである。
+        /// The wind sound. **Always name what we borrowed** — it is the only clue should a
+        /// future game update make the sound disappear.
         /// </summary>
         private static void WriteStormSound(DiagnosticBuilder b)
         {
@@ -303,9 +316,9 @@ namespace DisasterPlus.Game
             switch (TyphoonCloud.State)
             {
                 case TyphoonCloudState.Puffs:
-                    // ★ 自前の白い雲（既定）と、借り物の粒子（退避）を
-                    //   **名前で区別する**。どちらで描いているのかが
-                    //   分からないと、「まだ煙に見える」の切り分けができない。
+                    // ★ **Distinguish by name** between our own white cloud (the default)
+                    //   and the borrowed particles (the fallback). Without knowing which is
+                    //   drawing, "it still looks like smoke" cannot be narrowed down.
                     if (TyphoonVortexPuffFx.Drawing)
                     {
                         return "own white cloud (" + TyphoonVortexPuffFx.PuffsPlaced
@@ -338,13 +351,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 竜巻並みの局所被害（パッチ）。**竜巻の実体は 1 つも作っていない。**
+        /// Tornado-grade local damage (the patches). **Not one actual tornado is
+        /// created.**
         ///
-        /// <c>active 0</c> は不具合ではない —— パッチは
-        /// <c>GustPatchPlan.SpawnIntervalFrames</c> ごとに 1 個生まれて
-        /// <c>LifetimeFrames</c> で消えるので、居ない瞬間がある。
-        /// **「今は無い」と「機能が死んでいる」を見分けられるのがここだけ**なので、
-        /// 倒壊 0 のときも走査回数と生存数を必ず出す。
+        /// <c>active 0</c> is not a fault — one patch is born every
+        /// <c>GustPatchPlan.SpawnIntervalFrames</c> and dies after
+        /// <c>LifetimeFrames</c>, so there are moments when there are none.
+        /// **This is the only place "there are none right now" and "the feature is dead"
+        /// can be told apart**, so the sweep count and the number alive are always printed,
+        /// even when 0 collapsed.
         /// </summary>
         private static void WriteGusts(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
@@ -369,7 +384,8 @@ namespace DisasterPlus.Game
                 + " / refused " + snapshot.GustLastRefused
                 + " / strength " + gustStrength);
 
-            // ★ 「今は無い」と「機能が死んでいる」を見分けられるのはここだけである。
+            // ★ This is the only place "there are none right now" and "the feature is dead"
+            //   can be told apart.
             b.Line(3, "patches",
                 "no tornado disaster and no funnel is created; up to "
                 + DisasterPlus.Core.Typhoon.GustPatchPlan.MaxActivePatches
@@ -382,7 +398,8 @@ namespace DisasterPlus.Game
                 + DisasterPlus.Core.Typhoon.GustPatchPlan.LifetimeFrames
                 + ". 0 alive is normal between spawns");
 
-            // 「壊れていない」と「壊せない」を取り違えさせない（風害と同じ）。
+            // Do not let "nothing broke" be mistaken for "it cannot break things" (same as
+            // wind damage).
             if (snapshot.GustLastRefused > 0)
             {
                 b.Line(3, "refused",
@@ -398,12 +415,12 @@ namespace DisasterPlus.Game
                     + "this pass");
             }
 
-            // ★★ NDR がいても**このパッチは影響を受けない**。かつての随伴竜巻は
-            //    DisasterHelpers.DestroyStuff を通っていたので NDR に丸ごと
-            //    置き換えられていたが、パッチは BuildingAI.CollapseBuilding を
-            //    直接呼ぶ（＝④の風害と同じ経路）。**その事実を名乗る** ——
-            //    退役した機能の注意書きが残っていると、次の担当者が
-            //    「まだ NDR に食われている」と読む。
+            // ★★ Even with NDR present, **these patches are unaffected**. The old
+            //    accompanying tornado went through DisasterHelpers.DestroyStuff and so was
+            //    replaced wholesale by NDR, but the patches call
+            //    BuildingAI.CollapseBuilding directly (i.e. the same route as ④'s wind
+            //    damage). **Say so** — leave a warning about a retired feature in place and
+            //    the next person reads it as "NDR is still eating this".
             if (ModCompat.NdrPresent)
             {
                 b.Line(3, "Natural Disasters Renewal",
@@ -415,10 +432,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 河川氾濫（T8）。
+        /// River flooding (T8).
         ///
-        /// **<c>natural sources</c> の個数は必ず出す。** マップ依存で未知（§D-4 /
-        /// 設計書 §6）なので、実機で初めて分かる数である。**0 は不具合ではない。**
+        /// **Always print the number of <c>natural sources</c>.** It is map-dependent and
+        /// unknown (§D-4 / design doc §6), so it is a figure only learned in the game.
+        /// **0 is not a fault.**
         /// </summary>
         private static void WriteFlood(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
@@ -441,7 +459,7 @@ namespace DisasterPlus.Game
                 + " / peak +" + snapshot.FloodPeakRiseMetres.ToString("F2") + " m"
                 + " / strength " + strength);
 
-            // ★ マップ依存で未知の数。実機の報告に必ず要る。
+            // ★ A map-dependent, unknown figure. Always needed in an in-game report.
             b.Line(3, "natural sources", snapshot.FloodNaturalSources
                 + (snapshot.FloodNaturalSources == 0
                     ? " (this map has none; no river can rise and NOTHING IS WRONG - the game "
@@ -456,9 +474,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 風害（T7）。**倒壊 0 のときも全部出す。** 画面上は「設定で切っている」
-        /// 「近くに建物が無い」「上限で外縁まで届いていない」「全部ゲームに断られた」が
-        /// どれも同じ顔（何も倒れない）になるので、切り分けはここでしかできない。
+        /// Wind damage (T7). **Print it all even when 0 collapsed.** On screen, "switched
+        /// off in the settings", "there are no buildings nearby", "the ceiling stopped it
+        /// before it reached the outer rim" and "the game refused all of them" all look
+        /// identical (nothing falls), so this is the only place they can be told apart.
         /// </summary>
         private static void WriteWind(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
@@ -483,8 +502,9 @@ namespace DisasterPlus.Game
                 + " / refused " + snapshot.WindLastRefused
                 + " / strength " + strength);
 
-            // ★★ プロップ（看板など）は建物とは別の走査である。**行を分ける** ——
-            //    まとめると「風害は出ている」で、看板が 1 つも飛んでいないのが隠れる。
+            // ★★ Props (signs and the like) are a separate sweep from buildings. **Give
+            //    them their own line** — roll them together and "wind damage is happening"
+            //    hides the fact that not one sign has blown away.
             b.Line(3, "props blown away",
                 TyphoonPropDamage.ScannedLastTick > 0
                     ? TyphoonPropDamage.TakenLastTick + " this pass (total "
@@ -501,9 +521,10 @@ namespace DisasterPlus.Game
                    + " m is never taken. Trees are NOT included - they belong to "
                    + "TreeManager, not PropManager. Released props do not come back");
 
-            // ★★ 危険半円がどちら側か。**左右が逆でもプレイヤーには気付けない**ので、
-            //    向きと上乗せの大きさをここで名乗る。数字は TrackBias が持っている
-            //    定数そのもので、ここに写した別の値ではない。
+            // ★★ Which side the dangerous semicircle is on. **The player cannot tell if we
+            //    have left and right the wrong way round**, so we name the side and the size
+            //    of the uplift here. The numbers are the very constants TrackBias holds, not
+            //    a separate copy made here.
             b.Line(3, "dangerous side",
                 (ModSettings.TyphoonSouthernHemisphere.value
                     ? "left of the track (southern hemisphere)"
@@ -512,10 +533,11 @@ namespace DisasterPlus.Game
                 + ", collapse chance x" + (1f + TrackBias.MaxChanceBoost).ToString("F2")
                 + " at its strongest; the other side is unchanged");
 
-            // 「壊れていない」と「壊せない」を取り違えさせない（§F-2）。
-            // ★ 送電柱・索道の支柱はここに入らない（全体レビュー）。あれらは
-            //   dry-run で false を返した直後に本物の倒壊を行うので、collapsed に
-            //   だけ積まれる。以前はこの行が refused を丸ごと防災施設に帰していた。
+            // Do not let "nothing broke" be mistaken for "it cannot break things" (§F-2).
+            // ★ Power poles and cable-car pylons do not belong here (whole-project review).
+            //   They return false to the dry run and then perform the real collapse, so they
+            //   only add to collapsed. This line used to attribute the whole of refused to
+            //   disaster response facilities.
             b.Line(3, "refused", snapshot.WindLastRefused == 0
                 ? "0"
                 : snapshot.WindLastRefused
@@ -524,7 +546,8 @@ namespace DisasterPlus.Game
                   + "Power poles and cable-car pylons are NOT counted here - they refuse the "
                   + "dry run and then collapse anyway, so they land in 'collapsed')");
 
-            // 高さは係数であって足切りではない（②の長周期と判断が違う）。
+            // The height is a coefficient, not a cut-off (a different decision from ②'s
+            // long-period damage).
             b.Line(3, "unknown height", snapshot.WindLastUnknownHeight == 0
                 ? "0"
                 : snapshot.WindLastUnknownHeight
@@ -533,11 +556,12 @@ namespace DisasterPlus.Game
 
             if (snapshot.WindLastCapped)
             {
-                // ★ 「次の走査で続きから」とは書かない（全体レビュー I1）。
-                //   眼は 1 走査（256 フレーム）のあいだに 64〜1536 m 動き、
-                //   グリッドのセルは 64 m なので、中心のセルはほぼ毎回変わって
-                //   走査位置は 0 に戻る。**次の走査もまた眼から始まる。**
-                //   打ち切りは安全側（判定しない ＝ 倒さない）に外れる。
+                // ★ Do not write "it continues from there on the next sweep" (whole-project
+                //   review I1). The eye moves 64-1536 m during one sweep (256 frames) and a
+                //   grid cell is 64 m, so the centre cell changes almost every time and the
+                //   sweep position resets to 0. **The next sweep starts from the eye
+                //   again.** Truncation errs on the safe side (not tested = not knocked
+                //   down).
                 b.Line(3, "capped",
                     "the sweep was truncated this pass, so the outer edge was not rolled. It "
                     + "does NOT resume where it stopped: the eye moves 64-1536 m per pass "
@@ -546,11 +570,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ④が書いている天候の**目標値**。上の <c>weather (measured)</c> は
-        /// <c>m_current*</c>（バニラの実測値）で、こちらは <c>m_target*</c>（本 MOD の量）。
-        /// **2 つを取り違えないこと。**
+        /// The **target** weather values ④ is writing. The <c>weather (measured)</c> above
+        /// is <c>m_current*</c> (vanilla's measurements); this is <c>m_target*</c> (this
+        /// mod's quantities).
+        /// **Do not confuse the two.**
         ///
-        /// 天候を切っている環境では note を出す。**黙って動かない状態を作らない。**
+        /// In an environment with the weather switched off we print a note. **Do not create
+        /// a state that silently does nothing.**
         /// </summary>
         private static void WriteWeatherDriving(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
@@ -573,8 +599,8 @@ namespace DisasterPlus.Game
                     + "tick to keep the storm visible");
             }
 
-            // 雨量 0.8 超はゲーム自身の環境落雷を呼ぶ。**意図した代償**なので隠さない
-            // （TyphoonWeather のクラス doc 6.）。
+            // Rainfall above 0.8 calls up the game's own ambient lightning. **It is a price
+            // we chose to pay**, so we do not hide it (TyphoonWeather's class doc, 6.).
             if (snapshot.DrivenRain > 0.8f)
             {
                 b.Line(3, "note",
@@ -586,10 +612,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 落雷（T6）。**撃った数が 0 のときも必ず全部出す**（③の「延焼が動いているか
-        /// 診断から一切見えなかった」失敗を繰り返さない）。画面上は
-        /// 「上限に当たって捨てられている」「宿主に全部譲っている」「そもそも撒いていない」が
-        /// どれも同じ顔（雷が少ない）になるので、切り分けはここでしかできない。
+        /// Lightning (T6). **Always print all of it, even when 0 were fired** (so as not to
+        /// repeat ③'s failure where "you could not tell from the diagnostics at all whether
+        /// fire spread was running"). On screen, "being thrown away against the ceiling",
+        /// "yielding everything to the host" and "never scattering any in the first place"
+        /// all look identical (little lightning), so this is the only place they can be told
+        /// apart.
         /// </summary>
         private static void WriteLightning(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
@@ -599,18 +627,21 @@ namespace DisasterPlus.Game
                 + " / vanilla reserve " + snapshot.LightningVanillaReserve
                 + " / cap " + DisasterPlus.Core.Typhoon.LightningBudget.QueueCapacity);
 
-            // ★ 0 以外は不具合の合図。上限に当たると、宿主の嵐や他 MOD の落雷まで
-            //   同じように捨てられる（IL 事実文書 §A-3）。
+            // ★ Anything other than 0 is a sign of a fault. Hit the ceiling and the host
+            //   storm's and other mods' lightning is thrown away just the same (IL facts
+            //   document §A-3).
             b.Line(3, "dropped by the game", snapshot.LightningRejected == 0
                 ? "0 (the queue cap was never hit)"
                 : snapshot.LightningRejected
                   + " — THE 20-STRIKE CAP WAS HIT; the host storm's own strikes are being "
                   + "thrown away too");
 
-            // ★ 「宿主に全部譲っていて④は 1 発も撃っていない」を名指しする
-            //   （全体レビュー I4）。強度 170 以上ではこれが恒常状態になり、
-            //   T6 の壁雲への偏りが消えて宿主の一様な円盤だけになる。
-            //   在庫（一時的に 0）ではなく**宿主の取り分だけ**を見る。
+            // ★ Name the case "we are yielding everything to the host and ④ has not fired a
+            //   single bolt" (whole-project review I4). At intensity 170 and above this
+            //   becomes the permanent state: T6's bias towards the eyewall disappears and
+            //   only the host's uniform disc is left.
+            //   Look at **the host's share**, not at the stock on hand (which can be 0
+            //   temporarily).
             if (DisasterPlus.Core.Typhoon.LightningBudget.YieldsCompletely(
                     snapshot.LightningVanillaReserve))
             {
@@ -622,7 +653,7 @@ namespace DisasterPlus.Game
                     + "designed yield, not a failure");
             }
 
-            // 環境落雷（雨 > 0.8 かつキューが空）を抑えているかどうか。
+            // Whether ambient lightning (rain > 0.8 and an empty queue) is being suppressed.
             b.Line(3, "environmental lightning", snapshot.LightningInFlight > 0
                 ? "suppressed (the queue is not empty)"
                 : "possible (the queue may be empty this tick; the game reuses this very "
@@ -647,16 +678,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 嵐プレハブの 3 実測値と、そこから導かれる 2 値。
+        /// The storm prefab's three measured values, and the two derived from them.
         ///
-        /// **読めないときは導出値の 2 行を出さない。** 行の有無そのものが
-        /// 「推測した半径や速度を表示していない」ことの証拠になる（設計書 §6）。
+        /// **When they cannot be read, do not print the two derived lines.** The presence or
+        /// absence of the lines is itself evidence that we are "not displaying a guessed
+        /// radius or speed" (design doc §6).
         /// </summary>
         private static void WriteStormPrefab(DiagnosticBuilder b, TyphoonPrefabFacts prefab)
         {
             if (!prefab.StormResolved)
             {
-                // DLC 非所持環境ではこれが正常。Assumptions 側の impact 文と同じ扱い。
+                // In an environment without the DLC this is normal. Treated the same way as
+                // the impact sentence on the Assumptions side.
                 b.Line(1, "prefab (ThunderStormAI)",
                     "NOT RESOLVED (expected when the Natural Disasters DLC is not owned)");
                 return;
@@ -672,15 +705,17 @@ namespace DisasterPlus.Game
 
             if (!prefab.Usable) return;
 
-            // 強度 100 は「バニラの円盤がちょうど m_radius になる」点なので基準に選んだ
-            // （R = m_radius * (0.25 + i * 0.0075)、§A-1 / §A-2）。
+            // Intensity 100 was chosen as the reference because it is the point at which
+            // vanilla's disc is exactly m_radius
+            // (R = m_radius * (0.25 + i * 0.0075), §A-1 / §A-2).
             b.Line(2, "derived storm radius",
                 TyphoonProfile.StormRadiusOf(100, prefab.StormRadius).ToString("F0")
                 + " m at intensity 100  [Disaster + model]");
 
-            // ★ 速度は**④の寿命**（宿主の持続時間 × LifetimeMultiplier）で割って出す。
-            //   プレハブの持続時間で割ると、実際より 4 倍速い数を名乗ることになる
-            //   （2026-08-22 に寿命を延ばしたとき、ここを直し忘れかけた）。
+            // ★ The speed is derived by dividing by **④'s lifetime** (the host's duration ×
+            //   LifetimeMultiplier). Divide by the prefab's duration and we would be naming
+            //   a figure four times faster than reality (when the lifetime was extended on
+            //   2026-08-22 we nearly forgot to fix this).
             b.Line(2, "derived travel speed",
                    TravelSpeedText(TyphoonTrack.LifetimeFramesFor(prefab.ActiveDuration)));
             b.Line(2, "lifetime", TyphoonTrack.LifetimeFramesFor(prefab.ActiveDuration)
@@ -690,8 +725,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 天候。**④で <c>(measured)</c> を名乗ってよい唯一の行**（設計書 §7-1）。
-        /// 読めなかったときに 0 を並べない。
+        /// The weather. **The only line in ④ allowed to claim <c>(measured)</c>** (design
+        /// doc §7-1). Do not line up zeroes when it could not be read.
         /// </summary>
         private static void WriteWeather(DiagnosticBuilder b, TyphoonSnapshot snapshot)
         {
@@ -711,8 +746,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 進行速度。<c>TyphoonTrack.SpeedFor</c> が 0 を返したら**それが答えである** ——
-        /// 推測せず、台風を 1 個も起こせないことをそのまま書く（設計書 §6）。
+        /// The travel speed. If <c>TyphoonTrack.SpeedFor</c> returns 0, **that is the
+        /// answer** — do not guess, and write plainly that not one typhoon can be raised
+        /// (design doc §6).
         /// </summary>
         private static string TravelSpeedText(uint activeDuration)
         {
@@ -730,10 +766,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// フレーム数を「そのままの値 ＋ ゲーム内時間」で出す。
+        /// Print a frame count as "the raw value plus in-game time".
         ///
-        /// 換算は必ず <see cref="FeatureHost.FramesPerMinute"/> から出すこと。
-        /// 定数を直書きして 4 倍ずれた前科がある（③、DAYTIME_FRAMES の取り違え）。
+        /// Always derive the conversion from <see cref="FeatureHost.FramesPerMinute"/>.
+        /// We have form for writing a constant inline and being out by a factor of four
+        /// (③, mistaking DAYTIME_FRAMES).
         /// </summary>
         private static string FramesWithHours(uint frames)
         {

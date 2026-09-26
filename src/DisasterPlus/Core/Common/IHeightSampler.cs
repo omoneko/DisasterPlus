@@ -1,8 +1,9 @@
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// 地形の高さを引く。Game 層が TerrainManager.SampleDetailHeight で実装する。
-    /// SampleDetailHeight は読み取り専用でどちらのスレッドからも安全。
+    /// Looks up the terrain height. The Game layer implements it with
+    /// TerrainManager.SampleDetailHeight. SampleDetailHeight is read-only and safe from
+    /// either thread.
     /// </summary>
     public interface IHeightSampler
     {

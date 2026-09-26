@@ -5,45 +5,45 @@ using UnityEngine;
 
 namespace DisasterPlus.Game
 {
-    /// <summary>どちらの合成を狙うか。取れなければ互いに落ちる。</summary>
+    /// <summary>Which blend mode to aim for. If one is unavailable it falls back to the other.</summary>
     public enum ShaderPreference
     {
-        /// <summary>加算（炎・噴煙・溶岩）。</summary>
+        /// <summary>Additive (flame, eruption plume, lava).</summary>
         Additive = 0,
 
-        /// <summary>アルファブレンド（雲）。</summary>
+        /// <summary>Alpha-blended (cloud).</summary>
         AlphaBlended = 1,
     }
 
     /// <summary>
-    /// <see cref="ShaderPool"/> が返した 1 件。**<c>Shader</c> が null なら「描かない」。**
+    /// One result returned by <see cref="ShaderPool"/>. **If <c>Shader</c> is null, do not draw.**
     /// </summary>
     public struct ShaderPick
     {
-        /// <summary>使うシェーダ。**null なら何も描かない。**</summary>
+        /// <summary>The shader to use. **If null, draw nothing.**</summary>
         public readonly UnityEngine.Shader Shader;
 
-        /// <summary>そのシェーダの名前（診断用）。取れなければ null。</summary>
+        /// <summary>That shader's name (for diagnostics). null if unavailable.</summary>
         public readonly string Name;
 
         /// <summary>
-        /// 粒子系（加算 / アルファブレンド / パーティクル）で解決したか。
-        /// **<c>Standard</c> はここに数えない** —— 数えた瞬間にこの旗は
-        /// 構造上 false になれなくなる（⑤ <c>VolcanoLavaFx</c> のクラス doc）。
+        /// Whether it resolved to something in the particle family (additive / alpha-blended /
+        /// particle). **<c>Standard</c> does not count here** — count it and this flag becomes
+        /// structurally incapable of being false (see ⑤'s <c>VolcanoLavaFx</c> class doc).
         /// </summary>
         public readonly bool Particle;
 
         /// <summary>
-        /// <c>Shader.Find</c> ではなく**読み込み済み <c>Material</c> から借りた**か。
-        /// 借りたのは<b>シェーダだけ</b>で、<c>Material</c> そのものではない
-        /// （<see cref="ShaderPool"/> のクラス doc の区別）。
+        /// Whether it was **borrowed from a loaded <c>Material</c>** rather than found with
+        /// <c>Shader.Find</c>. What was borrowed is <b>the shader only</b>, never the
+        /// <c>Material</c> itself (the distinction in the <see cref="ShaderPool"/> class doc).
         /// </summary>
         public readonly bool Borrowed;
 
         /// <summary>
-        /// <c>Standard</c> まで落ちたか。**このときだけ**呼び出し側が
-        /// <see cref="ShaderPool.MakeStandardTransparent"/> を掛ける
-        /// （既定の <c>Standard</c> は不透明なので、掛けないと不透明な板になる）。
+        /// Whether it fell all the way back to <c>Standard</c>. **Only then** does the caller
+        /// apply <see cref="ShaderPool.MakeStandardTransparent"/>
+        /// (<c>Standard</c> is opaque by default, so without it you get an opaque slab).
         /// </summary>
         public readonly bool StandardFallback;
 
@@ -57,10 +57,10 @@ namespace DisasterPlus.Game
             StandardFallback = standardFallback;
         }
 
-        /// <summary>マテリアルを作れるか。**破棄済み（fake-null）もここで弾く。**</summary>
+        /// <summary>Whether a material can be built. **A destroyed one (fake-null) is rejected here too.**</summary>
         public bool Usable { get { return Shader != null; } }
 
-        /// <summary>診断に出す 1 行ぶんの説明（**英語**）。</summary>
+        /// <summary>The one-line description for diagnostics (**in English**).</summary>
         public string Describe()
         {
             if (Shader == null) return "NONE (no shader resolved)";
@@ -81,81 +81,85 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// 自前の <c>Material</c> に載せるシェーダを 1 つ返す。**main スレッド専用。**
+    /// Returns one shader to put on our own <c>Material</c>. **Main thread only.**
     ///
-    /// ── なぜ <c>Shader.Find</c> だけでは足りないのか（13 回目の誤った「確認済み」）───
+    /// ── Why <c>Shader.Find</c> alone is not enough (the 13th mistaken "confirmed") ───
     ///
-    /// 実機テストで <c>Shader.Find</c> が**組み込みの <c>"Standard"</c> を含めて
-    /// 全ての名前に null を返した**。
-    /// 事前調査では出荷アセットをバイト走査して <c>globalgamemanagers</c> の中に
-    /// <c>Particles/Additive</c> と <c>Particles/Alpha Blended</c> の文字列を見つけていたが、
-    /// <b>アセットに名前が在ることと <c>Shader.Find</c> が解決することは別である</b> ——
-    /// Unity はビルドに含めなかったシェーダを剥がすし、<c>Shader.Find</c> は
-    /// **実際にロードされているシェーダしか返さない**。
+    /// In the game, <c>Shader.Find</c> **returned null for every name, including the built-in
+    /// <c>"Standard"</c>**.
+    /// Earlier investigation had scanned the shipped assets byte by byte and found the strings
+    /// <c>Particles/Additive</c> and <c>Particles/Alpha Blended</c> inside
+    /// <c>globalgamemanagers</c>, but <b>a name being present in an asset and
+    /// <c>Shader.Find</c> resolving it are two different things</b> — Unity strips shaders it
+    /// did not include in the build, and <c>Shader.Find</c> **only returns shaders that are
+    /// actually loaded**.
     ///
-    /// ── 借りるのは「シェーダ」であって「マテリアル」ではない ─────────────
+    /// ── What is borrowed is "the shader", not "the material" ─────────────
     ///
-    /// この 2 つは紛らわしいが、まったく別の話である:
+    /// The two are easy to confuse, but they are entirely separate matters:
     ///
     /// <code>
-    /// ✗ CS の Material を借りて自前の MeshRenderer / DrawMesh に載せる
-    ///     → 何も描画されないか真っ黒になる（③ 付録 A、火災旋風 §4.9）。
-    ///       CS のマテリアルはエンジンが供給する per-instance データ
-    ///       （VehicleManager.m_materialBlock の ID_TyreMatrix 等）を前提にしている。
+    /// ✗ Borrow a CS Material and put it on our own MeshRenderer / DrawMesh
+    ///     → nothing is drawn, or it comes out pitch black (③ appendix A, fire whirl §4.9).
+    ///       CS's materials assume per-instance data supplied by the engine
+    ///       (VehicleManager.m_materialBlock's ID_TyreMatrix and the like).
     ///
-    /// ✓ CS の Material から Shader だけを取り、new Material(thatShader) を自分で作る
-    ///     → 出荷済み Unity ゲームで名前が引けないときの定石。
-    ///       per-instance データを前提にした値は 1 つも引き継がない。
+    /// ✓ Take only the Shader from a CS Material and build new Material(thatShader) ourselves
+    ///     → the standard move when a name cannot be resolved in a shipped Unity game.
+    ///       Not one value that assumes per-instance data is carried over.
     /// </code>
     ///
-    /// **この型は借りた <c>Material</c> インスタンスを 1 度も返さない。**
-    /// 返すのは <c>Shader</c> だけで、<c>Material</c> は呼び出し側が自分で作り、
-    /// 自分で <c>Object.Destroy</c> する。
+    /// **This type never once returns a borrowed <c>Material</c> instance.**
+    /// It returns only the <c>Shader</c>; the caller builds its own <c>Material</c> and calls
+    /// <c>Object.Destroy</c> on it itself.
     ///
-    /// ── 費用（<c>Resources.FindObjectsOfTypeAll</c> は安くない）──────────────
+    /// ── Cost (<c>Resources.FindObjectsOfTypeAll</c> is not cheap) ──────────────
     ///
-    /// 走査は配列の確保と全オブジェクトの走査を伴い、さらに <c>Object.name</c> は
-    /// ネイティブ側から文字列を作るので**マテリアル 1 個につき 1 個の文字列を確保する**。
-    /// だから **1 セッションに 1 回**しか走らせない。解決できたら結果を持ち回し、以後は走査しない。
-    /// 1 つも解決できなかったときだけ <see cref="RetryFrames"/> 空けて再走査する
-    /// （将来のビルドでロードのタイミングが変わった場合の保険。
-    /// ④の <c>ApplyVanillaBoost</c> と同じ間引きで、こちらは走査が重いぶん長い）。
-    /// **毎フレームの経路から呼んでも走査は走らない。**
+    /// The sweep allocates an array and walks every object, and on top of that
+    /// <c>Object.name</c> builds a string from the native side, so it **allocates one string
+    /// per material**. That is why it runs **once per session**. Once resolved, the result is
+    /// carried around and no further sweeping happens.
+    /// Only when nothing at all could be resolved does it sweep again after
+    /// <see cref="RetryFrames"/> (insurance in case a future build changes the loading timing.
+    /// The same thinning as ④'s <c>ApplyVanillaBoost</c>, longer here because the sweep is
+    /// heavier).
+    /// **Calling it from a per-frame path does not trigger a sweep.**
     ///
-    /// ── 都市ごとの状態を持たない ────────────────────────────
+    /// ── Holds no per-city state ────────────────────────────
     ///
-    /// ここが抱えるのは<b>ゲームのビルドに対する事実</b>だけで、都市の状態も
-    /// <c>Material</c> も持たない。だからレベルアンロードで消す物が無い。
-    /// 万一シェーダが破棄されても <see cref="ShaderPick.Usable"/> が
-    /// <c>UnityEngine.Object</c> の <c>==</c> 多重定義で fake-null を弾き、
-    /// 次の呼び出しで解決し直す（**配列に入れないのはこの自己修復のためである**。
-    /// 火災旋風 §4.8）。
+    /// All this holds is <b>facts about the game build</b>; it holds neither city state nor a
+    /// <c>Material</c>. So there is nothing to clear on level unload.
+    /// If a shader were somehow destroyed, <see cref="ShaderPick.Usable"/> rejects the
+    /// fake-null through <c>UnityEngine.Object</c>'s <c>==</c> overload and it is resolved
+    /// again on the next call (**not putting them in an array is precisely what makes that
+    /// self-repair work**. Fire whirl §4.8).
     ///
-    /// ── 在庫をログに出す ──────────────────────────────────
+    /// ── Log the inventory ──────────────────────────────────
     ///
-    /// この環境に実際どんなシェーダが在るのかは**まだ誰も知らない**。
-    /// 次の実機テストが推測ではなく答えを持ち帰れるよう、走査した時点で
-    /// 相異なるシェーダ名を <c>Log.Info</c> に 1 度だけ出す（件数の上限つき）。
+    /// **Nobody yet knows** which shaders actually exist in this environment.
+    /// So that the next playtest can bring back an answer rather than a guess, the distinct
+    /// shader names are written to <c>Log.Info</c> once at the point of the sweep (with a cap
+    /// on how many).
     ///
-    /// 最初の 1 回はレベルロード中に走る —— <c>Assumptions</c> の③④⑤の検証が
-    /// ここを呼ぶからである。**それは意図してそうしてある**: 災害が 1 度も
-    /// 起きなかったセッションでも、在庫がログに残る。
+    /// The first one runs during the level load — because <c>Assumptions</c>' checks for ③④⑤
+    /// call in here. **That is deliberate**: the inventory ends up in the log even in a
+    /// session where no disaster ever happened.
     /// </summary>
     public static class ShaderPool
     {
-        /// <summary>1 つも解決しなかったときに再走査するまで空けるフレーム数。</summary>
+        /// <summary>How many frames to leave before sweeping again when nothing resolved.</summary>
         private const int RetryFrames = 1800;
 
-        /// <summary>ログに名前を出す上限（診断であってダンプではない）。</summary>
+        /// <summary>The cap on names written to the log (this is a diagnostic, not a dump).</summary>
         private const int InventoryLogMax = 60;
 
-        /// <summary>1 行に並べる名前の数。</summary>
+        /// <summary>How many names go on one line.</summary>
         private const int NamesPerLine = 6;
 
-        /// <summary>どの段でも借りないことを表す点数（低いほど良い）。</summary>
+        /// <summary>The score meaning "do not borrow at any tier" (lower is better).</summary>
         private const int NoScore = int.MaxValue;
 
-        /// <summary>加算を狙うときに <c>Shader.Find</c> へ渡す名前。**順序が優先順位である。**</summary>
+        /// <summary>The names passed to <c>Shader.Find</c> when aiming for additive. **The order is the priority.**</summary>
         private static readonly string[] AdditiveNames =
         {
             "Particles/Additive",
@@ -164,7 +168,7 @@ namespace DisasterPlus.Game
             "Legacy Shaders/Particles/Alpha Blended",
         };
 
-        /// <summary>アルファブレンドを狙うときの名前。**順序が優先順位である。**</summary>
+        /// <summary>The names when aiming for alpha-blended. **The order is the priority.**</summary>
         private static readonly string[] AlphaBlendedNames =
         {
             "Particles/Alpha Blended",
@@ -173,8 +177,8 @@ namespace DisasterPlus.Game
             "Legacy Shaders/Particles/Additive",
         };
 
-        // ★ 配列にしない。preference ごとに参照 1 個（struct のフィールド）で持ち、
-        //   毎回その参照そのものを != null で見る（クラス doc の自己修復）。
+        // ★ Not an array. Hold one reference per preference (a field of the struct) and test
+        //   that reference itself with != null every time (the self-repair in the class doc).
         private static ShaderPick _additive;
         private static ShaderPick _alphaBlended;
 
@@ -183,12 +187,12 @@ namespace DisasterPlus.Game
         private static bool _errorLogged;
 
         /// <summary>
-        /// 使えるシェーダを 1 つ返す。**main スレッド専用**（<c>Shader</c> /
-        /// <c>Resources</c> に触る）。**毎フレーム呼んでよい** —— 解決済みなら
-        /// キャッシュを返すだけで、走査には間引きが掛かっている。
+        /// Returns one usable shader. **Main thread only** (it touches <c>Shader</c> /
+        /// <c>Resources</c>). **Safe to call every frame** — once resolved it just returns the
+        /// cache, and the sweep is thinned out.
         ///
-        /// <b>返り値の <see cref="ShaderPick.Usable"/> を必ず見ること。</b>
-        /// false は「この環境では描けない」であって、例外ではない。
+        /// <b>Always check <see cref="ShaderPick.Usable"/> on the return value.</b>
+        /// false means "nothing can be drawn in this environment", not an exception.
         /// </summary>
         public static ShaderPick Resolve(ShaderPreference preference)
         {
@@ -198,8 +202,9 @@ namespace DisasterPlus.Game
             }
             catch (Exception e)
             {
-                // ★ ここで throw させない。呼び出し元はどれも毎フレームの描画経路で、
-                //   例外を上げるとフレームごとにログが埋まる（③が 6,938 行で踏んだ形）。
+                // ★ Do not let this throw. Every caller is on a per-frame rendering path, and
+                //   raising an exception fills the log frame by frame (the shape ③ hit at
+                //   6,938 lines).
                 if (!_errorLogged)
                 {
                     _errorLogged = true;
@@ -212,12 +217,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>Standard</c> を透過モードにする。**<see cref="ShaderPick.StandardFallback"/> が
-        /// 立っているときだけ**呼ぶこと。Unity 5.6 の StandardShaderGUI が Transparent
-        /// モードで入れるのと同じ設定である。
+        /// Puts <c>Standard</c> into transparent mode. **Call it only when
+        /// <see cref="ShaderPick.StandardFallback"/> is set.** These are the same settings
+        /// Unity 5.6's StandardShaderGUI applies for Transparent mode.
         ///
-        /// 借りてきた別のシェーダに掛けてはいけない —— <c>_Mode</c> も <c>_SrcBlend</c> も
-        /// <c>Standard</c> の契約であって、他のシェーダでは無意味か有害になる。
+        /// Never apply it to some other borrowed shader — <c>_Mode</c> and <c>_SrcBlend</c>
+        /// are <c>Standard</c>'s contract, and on another shader they are meaningless or
+        /// harmful.
         /// </summary>
         public static void MakeStandardTransparent(Material m)
         {
@@ -232,23 +238,25 @@ namespace DisasterPlus.Game
             m.EnableKeyword("_ALPHAPREMULTIPLY_ON");
         }
 
-        // ── 解決 ───────────────────────────────────────────
+        // ── Resolution ───────────────────────────────────────────
 
         /// <summary>
-        /// 両方の preference を**まとめて**解決する。走査が 1 回で済むからである。
-        /// 既に両方取れていれば即座に戻る（＝毎フレームの呼び出しはここで終わる）。
+        /// Resolves both preferences **together**, because that way the sweep only happens
+        /// once. Returns immediately if both are already resolved (i.e. this is where the
+        /// per-frame calls end).
         /// </summary>
         private static void EnsureResolved()
         {
             if (_additive.Usable && _alphaBlended.Usable) return;
 
-            // ★ 走査の間引き。1 度走査したあとは RetryFrames 空けるまで走らせない。
+            // ★ Thinning out the sweep. After one sweep, do not run another until RetryFrames
+            //   have passed.
             if (_scanned && Time.frameCount < _nextScanFrame) return;
             _nextScanFrame = Time.frameCount + RetryFrames;
 
             Catalog catalog = ScanCatalog();
 
-            // ★ 在庫のログはセッションに 1 回だけ（次の実機テストへの答え）。
+            // ★ The inventory is logged once per session (the answer for the next playtest).
             if (!_scanned)
             {
                 _scanned = true;
@@ -260,13 +268,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 件を決める。**この順序が仕様である**:
+        /// Decides one result. **This order is the specification**:
         /// <code>
-        /// ① Shader.Find(粒子系の名前)      安い。名前が通る環境ならここで終わる
-        /// ② 読み込み済み Material から借用  出荷済みゲームで名前が引けないときの定石
-        /// ③ Shader.Find("Standard")        不透明。呼び出し側が透過へ落とす
-        /// ④ 在庫の中の "Standard"          Shader.Find 自体が壊れている環境の保険
-        /// ⑤ null                           **描かない**
+        /// ① Shader.Find(a particle-family name)   cheap. In an environment where the name
+        ///                                         resolves, it ends here
+        /// ② borrow from a loaded Material         the standard move when a name cannot be
+        ///                                         resolved in a shipped game
+        /// ③ Shader.Find("Standard")               opaque. The caller drops it to transparent
+        /// ④ "Standard" from the inventory         insurance for an environment where
+        ///                                         Shader.Find itself is broken
+        /// ⑤ null                                  **do not draw**
         /// </code>
         /// </summary>
         private static ShaderPick Choose(ShaderPreference preference, Catalog catalog)
@@ -274,14 +285,14 @@ namespace DisasterPlus.Game
             string[] names = preference == ShaderPreference.AlphaBlended
                 ? AlphaBlendedNames : AdditiveNames;
 
-            // ① 判定は必ず != null（?? は fake-null を素通しする）。
+            // ① Always test with != null (?? lets a fake-null straight through).
             for (int i = 0; i < names.Length; i++)
             {
                 UnityEngine.Shader s = UnityEngine.Shader.Find(names[i]);
                 if (s != null) return new ShaderPick(s, true, false, false);
             }
 
-            // ② シェーダ**だけ**を借りる（Material は借りない。クラス doc）。
+            // ② Borrow the shader **only** (never the Material. See the class doc).
             UnityEngine.Shader borrowed = preference == ShaderPreference.AlphaBlended
                 ? catalog.AlphaBlended : catalog.Additive;
             if (borrowed != null)
@@ -291,20 +302,21 @@ namespace DisasterPlus.Game
                 return new ShaderPick(borrowed, particle, true, false);
             }
 
-            // ③ 粒子系が 1 つも無い環境の受け皿。
+            // ③ The catch-all for an environment with no particle shader at all.
             UnityEngine.Shader standard = UnityEngine.Shader.Find("Standard");
             if (standard != null) return new ShaderPick(standard, false, false, true);
 
-            // ④ Shader.Find が組み込みにさえ null を返す環境（実機で観測済み）。
+            // ④ An environment where Shader.Find returns null even for a built-in (observed
+            //    in the game).
             if (catalog.Standard != null) return new ShaderPick(catalog.Standard, false, true, true);
 
-            // ⑤ 何も無い。**描かない**（借り物の Material で誤魔化さない）。
+            // ⑤ Nothing at all. **Do not draw** (do not paper over it with a borrowed Material).
             return new ShaderPick(null, false, false, false);
         }
 
-        // ── 在庫の走査 ─────────────────────────────────────
+        // ── Sweeping the inventory ─────────────────────────────────────
 
-        /// <summary>1 回の走査で分かったこと。**静的には持たない**（その場で使い切る）。</summary>
+        /// <summary>What one sweep found. **Not held statically** (used up on the spot).</summary>
         private struct Catalog
         {
             public UnityEngine.Shader Additive;
@@ -323,9 +335,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 読み込み済みの <c>Material</c> を 1 度だけ全走査し、そこに載っている
-        /// <c>Shader</c> を集める。**確保を伴うので <see cref="EnsureResolved"/> 以外から
-        /// 呼ばないこと。**
+        /// Sweeps every loaded <c>Material</c> exactly once and collects the <c>Shader</c>s
+        /// riding on them. **It allocates, so do not call it from anywhere but
+        /// <see cref="EnsureResolved"/>.**
         /// </summary>
         private static Catalog ScanCatalog()
         {
@@ -336,9 +348,9 @@ namespace DisasterPlus.Game
 
             var seen = new HashSet<string>();
 
-            // Resources.FindObjectsOfTypeAll は非アクティブもアセットも返す
-            // （SceneObjects のクラス doc で確認済みの挙動）。シェーダが欲しいので
-            // ここでは絞り込まない。
+            // Resources.FindObjectsOfTypeAll returns inactive objects and assets too
+            // (behaviour confirmed in the SceneObjects class doc). We want shaders, so no
+            // narrowing happens here.
             Material[] materials = Resources.FindObjectsOfTypeAll<Material>();
             if (materials == null) return catalog;
 
@@ -347,14 +359,14 @@ namespace DisasterPlus.Game
             for (int i = 0; i < materials.Length; i++)
             {
                 Material m = materials[i];
-                if (m == null) continue;   // fake-null（破棄済み）
+                if (m == null) continue;   // fake-null (destroyed)
 
                 UnityEngine.Shader s = m.shader;
                 if (s == null) continue;
 
                 string name = s.name;
                 if (string.IsNullOrEmpty(name)) continue;
-                if (!seen.Add(name)) continue;   // 同じシェーダは 1 回だけ見る
+                if (!seen.Add(name)) continue;   // look at the same shader only once
 
                 catalog.Names.Add(name);
 
@@ -367,7 +379,7 @@ namespace DisasterPlus.Game
             return catalog;
         }
 
-        /// <summary>1 つのシェーダを両方の preference の候補として採点する。</summary>
+        /// <summary>Scores one shader as a candidate for both preferences.</summary>
         private static void Consider(ref Catalog catalog, UnityEngine.Shader s, string name)
         {
             string lower = name.ToLowerInvariant();
@@ -392,9 +404,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 新しい候補が今の最良より良いか。同点なら名前の序数比較で決める ——
-        /// <c>Resources.FindObjectsOfTypeAll</c> の順序は保証されないので、
-        /// **同点を先着で決めると起動ごとに違うシェーダが当たる**（＝再現しない見た目）。
+        /// Whether the new candidate beats the current best. A tie is settled by ordinal name
+        /// comparison — the order of <c>Resources.FindObjectsOfTypeAll</c> is not guaranteed,
+        /// so **settling a tie by first-come means a different shader wins on each launch**
+        /// (i.e. an appearance that does not reproduce).
         /// </summary>
         private static bool Better(int score, int bestScore, string name,
                                    UnityEngine.Shader best)
@@ -407,15 +420,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 借りる価値の点数（**低いほど良い**）。<see cref="NoScore"/> は「借りない」。
+        /// How worthwhile it is to borrow this one (**lower is better**).
+        /// <see cref="NoScore"/> means "do not borrow".
         ///
-        /// <paramref name="particle"/> は粒子系として数えてよいかで、
-        /// 「半透明だが粒子系ではない」段では false になる。
+        /// <paramref name="particle"/> says whether it may be counted as particle family; it
+        /// is false at the tier of "translucent but not particle family".
         ///
-        /// ★ 同じ段では <c>Custom/</c> で始まる名前を後ろへ回す。CS 自身のシェーダは
-        ///   エンジンが供給する per-instance データを前提にしていることがあり
-        ///   （クラス doc の区別）、素の <c>Material</c> に載せると期待どおりに
-        ///   ならない可能性がそのぶん高い。
+        /// ★ Within a tier, names starting with <c>Custom/</c> go to the back. CS's own
+        ///   shaders sometimes assume per-instance data supplied by the engine (the
+        ///   distinction in the class doc), so putting one on a plain <c>Material</c> is that
+        ///   much more likely not to come out as expected.
         /// </summary>
         private static int ScoreFor(string lower, ShaderPreference preference, out bool particle)
         {
@@ -423,10 +437,10 @@ namespace DisasterPlus.Game
             bool alphaBlended = lower.Contains("alpha blended") || lower.Contains("alphablended");
             bool isParticle = lower.Contains("particle");
 
-            // ★ "unlit" だけでは半透明の証拠にならない（"Unlit/Color" は不透明である）。
-            //   借りたシェーダには Standard の透過設定を掛けないので、ここで
-            //   不透明なものを拾うと**色の付いた不透明な板**になる。
-            //   "Unlit/Transparent" は下の "transparent" で拾える。
+            // ★ "unlit" alone is no evidence of translucency ("Unlit/Color" is opaque).
+            //   Standard's transparency settings are not applied to a borrowed shader, so
+            //   picking up an opaque one here gives you **a coloured opaque slab**.
+            //   "Unlit/Transparent" is caught by the "transparent" test below.
             bool transparent = lower.Contains("transparent");
 
             bool wantAdditive = preference == ShaderPreference.Additive;
@@ -439,8 +453,8 @@ namespace DisasterPlus.Game
             else if (transparent) tier = 4;
             else
             {
-                // 不透明なシェーダは借りない。載せると板の群れになるだけで、
-                // Standard を透過モードへ落とした方がまだ見られる。
+                // Do not borrow an opaque shader. Putting one on only gives you a flock of
+                // slabs, and dropping Standard into transparent mode is more watchable.
                 particle = false;
                 return NoScore;
             }
@@ -449,12 +463,13 @@ namespace DisasterPlus.Game
             return tier * 2 + (lower.StartsWith("custom/", StringComparison.Ordinal) ? 1 : 0);
         }
 
-        // ── 在庫のログ ─────────────────────────────────────
+        // ── Logging the inventory ─────────────────────────────────────
 
         /// <summary>
-        /// この環境に何が在るのかを 1 度だけ名乗る。**件数に上限を付ける**
-        /// （診断であってダンプではない。最大 12 行）。
-        /// 粒子系・半透明らしい名前を先に並べるので、頭の数行を読めば答えが分かる。
+        /// States once what exists in this environment. **Caps how many are listed**
+        /// (this is a diagnostic, not a dump. 12 lines at most).
+        /// Particle-family and translucent-looking names come first, so the answer is in the
+        /// first few lines.
         /// </summary>
         private static void LogInventory(Catalog catalog)
         {
@@ -483,7 +498,7 @@ namespace DisasterPlus.Game
                 if ((i + 1) % NamesPerLine == 0 || i == shown - 1)
                 {
                     Log.Info("shader inventory: " + line);
-                    line.Length = 0;   // .NET 3.5 に StringBuilder.Clear は無い
+                    line.Length = 0;   // .NET 3.5 has no StringBuilder.Clear
                 }
             }
 
@@ -494,7 +509,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>粒子系・半透明らしい名前を先に、そのあとは序数順に並べる。</summary>
+        /// <summary>Particle-family and translucent-looking names first, then ordinal order.</summary>
         private static int CompareInventory(string a, string b)
         {
             int ra = InterestRank(a);

@@ -62,14 +62,15 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void OutsideRadius_IsNeverSelected()
         {
-            // 半径 100m に対して 400m 先の建物は対象外
+            // With a radius of 100 m, a building 400 m away is out of scope
             Assert.Equal(0, CountOverTicks(Ring(50, 400f), 10, 200, radius: 100f));
         }
 
         [Fact]
         public void CloserBuildings_IgniteMoreOften()
         {
-            // 距離減衰があること。旋風のすぐ脇の方が燃えやすい。
+            // There must be a falloff with distance. Right beside the whirl catches fire
+            // more readily.
             int close = CountOverTicks(Ring(40, 20f), 6, 400, radius: 200f);
             int far = CountOverTicks(Ring(40, 190f), 6, 400, radius: 200f);
             Assert.True(close > far, "close=" + close + " far=" + far);
@@ -89,7 +90,7 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void DifferentTicks_ProduceDifferentResults()
         {
-            // 毎 tick 同じ建物だけが選ばれると、延焼が広がらない。
+            // If only the same buildings are picked every tick, the fire never spreads.
             var near = Ring(60, 50f);
             var seen = new HashSet<ushort>();
             var into = new List<ushort>();

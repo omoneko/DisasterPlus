@@ -1,23 +1,26 @@
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// (tick, id) から再現可能な乱数を作る。
-    /// System.Random を使うと、セーブ・ロード・ユニットテストで同じ結果にならない。
+    /// Makes a reproducible random number out of (tick, id).
+    /// Use System.Random and you will not get the same result across a save, a load and a
+    /// unit test.
     ///
-    /// **Core/Earthquake/VanillaRandomizer とは別物。取り違えないこと。**
-    /// こちらは状態を持たないハッシュで、**この MOD が自分で決めること**
-    /// （③の延焼選定、②第 2 層の被害選定）に使う。中身はこの MOD の内部仕様なので
-    /// 変えてよい。あちらはゲームの ColossalFramework.Math.Randomizer を
-    /// ビット単位で写したもので、**バニラが引く値を先読みする**ためだけにあり、
-    /// 1 ビットも変えてはいけない。
+    /// **This is a different thing from Core/Earthquake/VanillaRandomizer. Do not confuse
+    /// the two.** This one is a stateless hash, used for **things this mod decides for
+    /// itself** (fire spread selection in ③, second-layer damage selection in ②). Its
+    /// innards are this mod's own business, so they may be changed. The other one is a
+    /// bit-for-bit copy of the game's ColossalFramework.Math.Randomizer, exists solely to
+    /// **predict the values vanilla is about to draw**, and must not be changed by a
+    /// single bit.
     ///
-    /// 判別の規則:
-    ///   その数字が「この MOD が発明した判断」を決めるなら DeterministicRandom。
-    ///   「バニラが引く値と一致しなければならない」なら VanillaRandomizer。
+    /// The rule for telling them apart:
+    ///   if the number decides "a judgement this mod invented", it is DeterministicRandom;
+    ///   if it "has to match the value vanilla draws", it is VanillaRandomizer.
     /// </summary>
     public static class DeterministicRandom
     {
-        /// <summary>32bit の混合関数（MurmurHash3 の finalizer を 2 入力に拡張したもの）。</summary>
+        /// <summary>A 32-bit mixing function (MurmurHash3's finalizer extended to two
+        /// inputs).</summary>
         public static uint Hash(uint a, uint b)
         {
             unchecked
@@ -33,10 +36,11 @@ namespace DisasterPlus.Core.Common
             }
         }
 
-        /// <summary>[0, 1) の一様乱数。</summary>
+        /// <summary>A uniform random number in [0, 1).</summary>
         public static float Unit(uint a, uint b)
         {
-            // 上位 24bit を使う。float の仮数は 24bit なので、これ以上使っても精度が出ない。
+            // Use the top 24 bits. A float's mantissa is 24 bits, so taking any more buys
+            // no extra precision.
             return (Hash(a, b) >> 8) * (1.0f / 16777216.0f);
         }
     }

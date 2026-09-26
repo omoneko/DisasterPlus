@@ -20,15 +20,17 @@ namespace DisasterPlus.Core.Tests.Typhoon
         {
             Assert.True(SpiralMesh.VertexCount > 0);
             Assert.Equal(0, SpiralMesh.TriangleIndexCount % 3);
-            // 竜巻の 16250 頂点より 1 桁小さいこと。台風の雲は上空に 1 枚あればよい。
+            // It must be an order of magnitude smaller than the tornado's 16250 vertices.
+            // One sheet high up is enough for the typhoon's cloud.
             Assert.True(SpiralMesh.VertexCount < 16250);
         }
 
         [Fact]
         public void EveryTriangleIndexPointsAtARealVertex()
         {
-            // ★ 範囲外の索引は Unity 側で例外にならず、**何も描画されない**か
-            //   ジオメトリが壊れるだけで済むことがある。ここで固定する。
+            // ★ An out-of-range index does not raise an exception on the Unity side; it can
+            //   get away with merely **drawing nothing** or corrupting the geometry. Pin it
+            //   down here.
             Vec3[] v; float[] uv; int[] tri;
             BuildInto(200f, 2000f, 120f, out v, out uv, out tri);
             for (int i = 0; i < tri.Length; i++)
@@ -40,8 +42,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void NoTriangleIsDegenerate()
         {
-            // 3 頂点のうち 2 つが同じ索引だと面積 0 の三角形になり、
-            // 「頂点はあるのに何も見えない」という最も調べにくい形になる。
+            // If two of the three vertices have the same index it becomes a zero-area
+            // triangle, which takes the form hardest of all to investigate: "the vertices
+            // are there but nothing is visible".
             Vec3[] v; float[] uv; int[] tri;
             BuildInto(200f, 2000f, 120f, out v, out uv, out tri);
             for (int i = 0; i + 2 < tri.Length; i += 3)
@@ -102,7 +105,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheGeometryIsDeterministicAndHasNoNaN()
         {
-            // 「都市を読み直したら雲の形が変わった」を起こさない。
+            // Do not let "the cloud changed shape after reloading the city" happen.
             Vec3[] a; float[] uvA; int[] triA;
             Vec3[] b; float[] uvB; int[] triB;
             BuildInto(200f, 2000f, 120f, out a, out uvA, out triA);

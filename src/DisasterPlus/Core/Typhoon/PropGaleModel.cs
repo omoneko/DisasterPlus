@@ -3,59 +3,62 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Typhoon
 {
     /// <summary>
-    /// 暴風がプロップ（看板・標識・パラソル・街灯…）を持っていくかどうか。
-    /// **エンジン非依存の純関数だけ。**
+    /// Whether a gale carries off a prop (a sign, a road sign, a parasol, a street light…).
+    /// **Pure engine-free functions only.**
     ///
-    /// ── 所有者の依頼（2026-08-22）─────────────────────────────────
+    /// ── The owner's request (2026-08-22) ─────────────────────────────────
     ///
-    /// &gt; 街に暴風および大雨による小さな建物の破壊や看板プロップの破壊、
-    /// &gt; 局所的な洪水を発生させることです。
+    /// &gt; …to make the gale and the heavy rain destroy small buildings and signage props
+    /// &gt; around the city, and cause local flooding.
     ///
-    /// 建物と洪水は既にある（<c>TyphoonWind.Gale</c> / <c>TyphoonFlood</c>）。
-    /// <b>プロップだけが 1 つも壊れていなかった</b>ので、ここで足す。
+    /// The buildings and the flooding already exist (<c>TyphoonWind.Gale</c> /
+    /// <c>TyphoonFlood</c>). <b>Props were the one thing where nothing was being destroyed
+    /// at all</b>, so this adds them.
     ///
-    /// ── ★★ 何を壊し、何を壊さないか ────────────────────────────────
+    /// ── ★★ What gets destroyed and what does not ────────────────────────────────
     ///
-    /// 壊れるのは<b>小さくて軽いもの</b>である。判定は
-    /// <see cref="FragilityOf"/> —— プロップの<b>寸法</b>から出す。
+    /// What breaks is <b>whatever is small and light</b>. The test is
+    /// <see cref="FragilityOf"/> — derived from the prop's <b>size</b>.
     ///
     /// <list type="bullet">
-    /// <item>看板・標識・ゴミ箱・パラソル（〜3 m）… 飛ぶ</item>
-    /// <item>街灯・電柱（〜8 m）… 強い風でだけ折れる</item>
-    /// <item>それより大きいもの（給水塔・煙突など）… 飛ばさない</item>
+    /// <item>Signs, road signs, bins, parasols (up to ~3 m) … carried off</item>
+    /// <item>Street lights, telegraph poles (up to ~8 m) … snap only in a strong wind</item>
+    /// <item>Anything bigger (water towers, chimneys and so on) … never carried off</item>
     /// </list>
     ///
-    /// ★★ <b>木は対象外である。</b> 木は <c>TreeManager</c> の持ち物で、
-    ///   <c>PropManager</c> には入っていない。倒木をやるなら別の型になる
-    ///   ——**ここで「木も入っているつもり」にならないこと。**
+    /// ★★ <b>Trees are out of scope.</b> Trees belong to <c>TreeManager</c> and are not in
+    ///   <c>PropManager</c>. Doing fallen trees would need a different type
+    ///   — **do not come away thinking trees are covered here.**
     ///
-    /// ★★ <b>飛ばした数は戻せない。</b> <c>PropManager.ReleaseProp</c> は
-    ///   取り消せないので、しきい値は<b>渋め</b>にしてある。
-    ///   「台風が来たら看板が全部消える」は、直せない壊れ方である。
+    /// ★★ <b>What you carry off cannot be put back.</b> <c>PropManager.ReleaseProp</c>
+    ///   cannot be undone, so the thresholds are deliberately <b>stingy</b>.
+    ///   "Every sign in the city vanishes when a typhoon arrives" is a kind of breakage
+    ///   that cannot be repaired.
     /// </summary>
     public static class PropGaleModel
     {
-        /// <summary>これより弱い風では 1 つも飛ばない（m/秒）。</summary>
+        /// <summary>Below this wind, nothing is carried off at all (m/s).</summary>
         public const float MinWindMetresPerSecond = 24f;
 
-        /// <summary>この風速で、いちばん壊れやすいものが必ず飛ぶ（m/秒）。</summary>
+        /// <summary>At this wind speed, the most fragile things are certain to go (m/s).</summary>
         public const float FullWindMetresPerSecond = 62f;
 
-        /// <summary>この寸法までは「いちばん壊れやすい」（m）。看板・標識の大きさ。</summary>
+        /// <summary>Up to this size, a prop counts as "the most fragile" (m). The size of a
+        /// sign or a road sign.</summary>
         public const float FragileSizeMetres = 3f;
 
-        /// <summary>この寸法より大きいものは飛ばさない（m）。</summary>
+        /// <summary>Anything larger than this size is never carried off (m).</summary>
         public const float SturdySizeMetres = 9f;
 
         /// <summary>
-        /// 1 回の判定で飛ぶ割合の上限。**1 にしない** ——
-        /// 1 にすると、暴風域に入った瞬間にその一帯の看板が全部消える。
+        /// The cap on the fraction carried off in one pass. **Never 1** —
+        /// at 1, every sign in the area disappears the instant the gale radius reaches it.
         /// </summary>
         public const float MaxTakeRatio = 0.55f;
 
         /// <summary>
-        /// プロップの壊れやすさ <c>[0,1]</c>。1 が看板、0 が「飛ばさない」。
-        /// <paramref name="sizeMetres"/> は当たり判定の代表寸法。
+        /// How fragile a prop is, <c>[0,1]</c>. 1 is a sign, 0 is "never carried off".
+        /// <paramref name="sizeMetres"/> is the representative size of its collision bounds.
         /// </summary>
         public static float FragilityOf(float sizeMetres)
         {
@@ -68,7 +71,8 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// この風とこの壊れやすさで、飛ぶ確率 <c>[0, <see cref="MaxTakeRatio"/>]</c>。
+        /// The probability of being carried off at this wind and this fragility,
+        /// <c>[0, <see cref="MaxTakeRatio"/>]</c>.
         /// </summary>
         public static float TakeChance(float windMetresPerSecond, float fragility)
         {
@@ -82,18 +86,20 @@ namespace DisasterPlus.Core.Typhoon
                       / (FullWindMetresPerSecond - MinWindMetresPerSecond);
             w = Clamp01(w);
 
-            // 風の効きは線形ではない（力は速度の 2 乗）。
+            // Wind does not act linearly (force goes as the square of the speed).
             return MaxTakeRatio * w * w * f;
         }
 
         /// <summary>
-        /// このプロップは飛ぶか。**決定論的** ——
-        /// <paramref name="propId"/> と <paramref name="round"/> が同じなら
-        /// 何度呼んでも同じ答えになる（この MOD の乱数の規律）。
+        /// Does this prop get carried off? **Deterministic** —
+        /// with the same <paramref name="propId"/> and <paramref name="round"/> you get the
+        /// same answer however many times you call it (this mod's discipline about random
+        /// numbers).
         /// </summary>
         /// <param name="round">
-        /// 判定の回。**毎回同じ値を渡さないこと** —— 渡すと、1 度助かった看板は
-        /// 二度と飛ばない（風が強くなっても）。
+        /// Which pass this is. **Do not pass the same value every time** — do that and a
+        /// sign that survived once will never be carried off again (however much the wind
+        /// picks up).
         /// </param>
         public static bool Takes(ushort propId, uint round, float windMetresPerSecond,
                                  float fragility, uint seed)

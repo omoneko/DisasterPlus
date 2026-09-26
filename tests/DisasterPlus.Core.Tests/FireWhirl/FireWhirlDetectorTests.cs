@@ -16,7 +16,7 @@ namespace DisasterPlus.Core.Tests.FireWhirl
             return c;
         }
 
-        /// <summary>半径 r の円内に n 棟を等間隔で並べる。</summary>
+        /// <summary>Lay out n buildings evenly spaced within a circle of radius r.</summary>
         private static List<BurningBuilding> Cluster(int n, Vec2 center, float r, ushort startId)
         {
             var list = new List<BurningBuilding>();
@@ -34,7 +34,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Detect_DenseCluster_ProducesCandidate()
         {
-            // 半径 40m の円周上に 12 棟 → どの棟から見ても R=150m 以内に 12 棟ある
+            // 12 buildings on a circle of radius 40 m → seen from any of them there are
+            // 12 buildings within R=150 m
             var burning = Cluster(12, new Vec2(1000f, 1000f), 40f, 1);
             var result = FireWhirlDetector.Detect(burning, Config(), new List<Vec2>());
             Assert.Single(result);
@@ -46,7 +47,7 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Detect_ScatteredBuildings_ProducesNothing()
         {
-            // 同じ 12 棟でも 2km 間隔で散らばっていれば発生しない
+            // The same 12 buildings do not trigger anything if they are scattered 2 km apart
             var burning = new List<BurningBuilding>();
             for (ushort i = 0; i < 12; i++)
                 burning.Add(new BurningBuilding((ushort)(i + 1), new Vec2(i * 2000f, 0f)));
@@ -72,11 +73,13 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Detect_JustOutsideRadius_DoesNotCount()
         {
-            // 中心に 1 棟、R をわずかに超えた位置に 11 棟。中心棟から見ると近傍は自分だけ。
+            // One building at the centre, 11 buildings just beyond R. Seen from the
+            // centre building, the only neighbour is itself.
             var burning = new List<BurningBuilding> { new BurningBuilding(1, new Vec2(0f, 0f)) };
             var far = Cluster(11, new Vec2(0f, 0f), 150.5f, 2);
             burning.AddRange(far);
-            // 外周の 11 棟同士は互いに近いので、そこで 11 棟クラスタになるが閾値 12 に届かない
+            // The 11 on the ring are close to one another, so they form an 11-building
+            // cluster there, but that falls short of the threshold of 12
             Assert.Empty(FireWhirlDetector.Detect(burning, Config(count: 12), new List<Vec2>()));
         }
 
@@ -92,7 +95,7 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Detect_NearbyCandidates_AreMergedByMinSeparation()
         {
-            // 250m 離れた 2 クラスタ。MinSeparation = 300m なので 1 つに統合される。
+            // Two clusters 250 m apart. MinSeparation = 300 m, so they merge into one.
             var burning = Cluster(12, new Vec2(0f, 0f), 30f, 1);
             burning.AddRange(Cluster(12, new Vec2(250f, 0f), 30f, 100));
             var result = FireWhirlDetector.Detect(burning, Config(sep: 300f), new List<Vec2>());
@@ -103,14 +106,14 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         public void Detect_SuppressedNearExistingWhirl()
         {
             var burning = Cluster(12, new Vec2(0f, 0f), 40f, 1);
-            var existing = new List<Vec2> { new Vec2(100f, 0f) };  // MinSeparation=300m 以内
+            var existing = new List<Vec2> { new Vec2(100f, 0f) };  // within MinSeparation=300m
             Assert.Empty(FireWhirlDetector.Detect(burning, Config(sep: 300f), existing));
         }
 
         [Fact]
         public void Detect_StrongestClusterWins_WhenMerged()
         {
-            // 統合されるとき、燃焼棟数の多い側が残ること
+            // When they merge, the side with more burning buildings must be the one left
             var burning = Cluster(12, new Vec2(0f, 0f), 30f, 1);
             burning.AddRange(Cluster(20, new Vec2(200f, 0f), 30f, 100));
             var result = FireWhirlDetector.Detect(burning, Config(sep: 300f), new List<Vec2>());
@@ -135,8 +138,9 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Detect_DenseCluster_AtNegativeCoordinates_ProducesCandidate()
         {
-            // CS のマップは原点が中心で、半分は負座標。GridVote のセルキー詰めが
-            // 負で壊れるとマップの片側だけ旋風が出ない、という壊れ方をする。
+            // CS maps have the origin at the centre, so half of the map is in negative
+            // coordinates. If GridVote's cell-key packing breaks for negative values, the
+            // failure looks like fire whirls never appearing on one half of the map.
             var burning = Cluster(12, new Vec2(-4000f, -3000f), 40f, 1);
             var result = FireWhirlDetector.Detect(burning, Config(), new List<Vec2>());
             Assert.Single(result);
@@ -148,7 +152,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Detect_ClusterStraddlingTheOrigin_ProducesCandidate()
         {
-            // 原点をまたぐと符号の違うセルに分かれる。セル境界で分断されないこと。
+            // Straddling the origin splits it across cells of opposite sign. It must not
+            // be cut in two at the cell boundary.
             var burning = Cluster(12, new Vec2(0f, 0f), 40f, 1);
             var result = FireWhirlDetector.Detect(burning, Config(), new List<Vec2>());
             Assert.Single(result);
@@ -158,8 +163,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Detect_MirroredClusters_AreNotConfused()
         {
-            // (-x, +z) と (+x, -z) はセルキーが畳まれると同一視されうる組み合わせ。
-            // 別々の候補として出ること。
+            // (-x, +z) and (+x, -z) are a combination that could be treated as the same
+            // if the cell key gets folded. They must come out as separate candidates.
             var burning = Cluster(12, new Vec2(-2000f, 2000f), 40f, 1);
             burning.AddRange(Cluster(12, new Vec2(2000f, -2000f), 40f, 100));
 

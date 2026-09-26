@@ -7,89 +7,95 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 斜面を駆け下りる灰色の土煙の帯。**main スレッド専用、毎フレーム。**
+    /// The bands of grey dust racing down the flanks. **Main thread only, every frame.**
     ///
-    /// ── ★★ これは火砕流ではない。名乗り方を間違えないこと ─────────────
+    /// ── ★★ this is not a pyroclastic flow. Do not describe it wrongly ─────────────────────
     ///
-    /// <b>バニラに火砕流は無い。</b> 出荷アセットの <c>EffectInfo</c> を全数
-    /// （277 個。基本 234 ＋ DLC 43）調べても「地面を這って高速で流れ下る濃密な雲」に
-    /// 当たるものは基本ゲームにも DLC にも 1 つも無い。
+    /// <b>Vanilla has no pyroclastic flow.</b> Going through every <c>EffectInfo</c> in the
+    /// shipped assets (277 of them; 234 base + 43 DLC), not one in the base game or the DLC
+    /// corresponds to "a dense cloud hugging the ground and racing downhill".
     ///
-    /// ⑤が出しているのは <b><c>Collapse Particles</c>（建物が崩れるときの粉塵）</b>を
-    /// 溶岩の経路に沿ったベジェ帯へ湧かせ、<c>RenderEffect</c> の <c>velocity</c> 引数で
-    /// 下り方向へ押したものである。見えるのは
-    /// **「谷筋を下っていく、幅 50〜180 m の灰色の土煙の帯」** ——
-    /// 火砕流の再現ではなく、それらしく見える代用品である。
-    /// パネルの注記（<c>Strings.VolcanoPyroclasticNote</c>）と設計書 §4.4 も**そう書く**。
+    /// What ⑤ emits is <b><c>Collapse Particles</c> (the dust of a building collapsing)</b> welled
+    /// up in a bezier band following the lava's path, pushed downhill via <c>RenderEffect</c>'s
+    /// <c>velocity</c> argument. What you see is
+    /// **"a 50–180 m wide band of grey dust going down the valleys"** —
+    /// not a reproduction of a pyroclastic flow but a stand-in that looks the part.
+    /// The panel's note (<c>Strings.VolcanoPyroclasticNote</c>) and design doc §4.4 **say so too**.
     ///
-    /// ── ★ 何も壊さない ─────────────────────────────────
+    /// ── ★ it destroys nothing ─────────────────────────────────────────────────────────────
     ///
-    /// この型は<b>ゲームの状態を 1 バイトも変えない</b>。建物にも木にも地面にも触らない
-    /// （触るとしたら <c>BuildingAI.BurnBuilding</c> / <c>CollapseBuilding</c> を
-    /// 直に呼ぶ経路になるが、**燃やすのは溶岩の仕事**であり、
-    /// 同じ経路を 2 本にすると「どちらが燃やしたか」が誰にも分からなくなる）。
-    /// <c>Building.m_fireIntensity</c> は**決して直接書かない**。
+    /// This type <b>changes not one byte of game state</b>. It touches no building, tree or
+    /// ground (doing so would mean a path calling <c>BuildingAI.BurnBuilding</c> /
+    /// <c>CollapseBuilding</c> directly, but **burning is the lava's job**, and having two paths
+    /// for the same thing would make it impossible for anyone to tell which one did the burning).
+    /// <c>Building.m_fireIntensity</c> is **never written directly**.
     ///
-    /// ── ★★ 扇である。溶岩の上のリボンではない（2026-08-22、実機の指摘⑤）───────
+    /// ── ★★ it is a fan, not a ribbon on top of the lava (2026-08-22, live report ⑤) ───────
     ///
-    /// > 火砕流については溶岩流の上だけを今は流れ落ちていますが、実際はもっと裾野に
-    /// > 広がっていくはずです。
+    /// > The pyroclastic flow currently only runs down on top of the lava flow, but really it
+    /// > ought to spread out much more over the lower slopes.
     ///
-    /// 以前は**溶岩の軌跡そのもの**を経路にしていた。溶岩と同じ谷を下るのは正しいが、
-    /// **火砕流は溶岩の幅では流れない** —— 重い雲であって流体の筋ではないので、
-    /// 下るにつれて横へ広がり、裾野いっぱいに扇を作る。地形に完全には従わず、
-    /// 源に近いところでは尾根を越える。
+    /// The path used to be **the lava's trail itself**. Going down the same valley as the lava is
+    /// right, but **a pyroclastic flow does not run at the lava's width** — it is a heavy cloud,
+    /// not a thread of fluid, so it widens sideways as it descends and fans out across the whole
+    /// lower slope. It does not follow the terrain completely, and near the source it goes over
+    /// ridges.
     ///
-    /// いまは <see cref="PyroclasticSurge"/>（Core、テスト付き）が扇そのものを組む ——
-    /// 火口のまわりに <c>LobeCount</c> 本の舌を配り、裾へ行くほど幅を広げ（最大 260 m）、
-    /// **裾へ行くほどだけ**谷（＝溶岩が下った向き）へ引かれる。
-    /// 溶岩の軌跡はここで「谷がどこにあるか」を知る手がかりとしてだけ使い、
-    /// 方位を 1 本ずつ取り出して Core へ渡す（<see cref="_bearings"/>）。
+    /// Now <see cref="PyroclasticSurge"/> (Core, with tests) builds the fan itself — it
+    /// distributes <c>LobeCount</c> lobes around the crater, widens them towards the foot (up to
+    /// 260 m), and pulls them towards the valley (i.e. the direction the lava went) **only as
+    /// they approach the foot**.
+    /// The lava's trail is used here purely as a clue to "where the valleys are": the bearings are
+    /// extracted one by one and handed to Core (<see cref="_bearings"/>).
     ///
-    /// ── ベジェ帯の落とし穴（IL 実測）──────────────────────────
+    /// ── the trap in the bezier band (measured in IL) ───────────────────────────────────────
     ///
     /// <code>
     /// SpawnArea(Bezier3 bezier, float halfWidth, float halfHeight)
-    ///   → EmitParticles は **halfHeight（第 4 引数）を帯の半幅として使い**、
-    ///     halfWidth（第 3 引数）は読まない。引数名と実装がずれている。
-    ///   → 初速は**上向き成分にしか入らない**。横へ流すのは velocity 引数のほう。
+    ///   → EmitParticles **uses halfHeight (the 4th argument) as the band's half-width** and
+    ///     never reads halfWidth (the 3rd argument). The parameter names and the implementation
+    ///     disagree.
+    ///   → The initial velocity **only goes into the upward component**. Pushing sideways is what
+    ///     the velocity argument is for.
     /// </code>
     ///
-    /// したがって半幅は**両方に同じ値**を入れ、押すのは <c>velocity</c> で行う。
+    /// So put **the same value in both** for the half-width, and do the pushing with
+    /// <c>velocity</c>.
     ///
-    /// ── 毎フレームの費用 ─────────────────────────────────
+    /// ── the per-frame cost ─────────────────────────────────────────────────────────────────
     ///
-    /// 帯は <c>PyroclasticSurge.LobeCount</c> 本（2 → 6）。1 本あたり
-    /// <c>SampleDetailHeight</c> 4 回（読み取り。<c>TerrainHeightSampler</c> の doc）と
-    /// <c>RenderEffect</c> 1 回。<c>Bezier3</c> / <c>SpawnArea</c> / <c>Vector3</c> は
-    /// すべて struct で、方位の配列は**開始時に 1 本だけ確保して使い回す**ので
-    /// **ヒープ確保は 0 バイト**である。
+    /// There are <c>PyroclasticSurge.LobeCount</c> bands (2 → 6). Each costs four
+    /// <c>SampleDetailHeight</c> calls (reads; see the doc of <c>TerrainHeightSampler</c>) and one
+    /// <c>RenderEffect</c>. <c>Bezier3</c> / <c>SpawnArea</c> / <c>Vector3</c> are all structs,
+    /// and the bearings array is **allocated once at start and reused**, so
+    /// **heap allocation is zero bytes**.
     ///
-    /// ★ 粒子の総量は増えない。<c>PyroclasticSurge.Magnitude</c> が帯の面積で
-    ///   正規化するので、**扇ぜんぶで従来の 2 本ぶんと同じ量**に収まる。
+    /// ★ The total number of particles does not go up. <c>PyroclasticSurge.Magnitude</c>
+    ///   normalises by the band's area, so **the whole fan comes to the same amount as the old two
+    ///   bands**.
     ///
-    /// ── この型は sim スレッドから 1 度も呼ばれない ────────────────────
+    /// ── this type is never called from the sim thread ──────────────────────────────────────
     /// </summary>
     public static class VolcanoPyroclasticFx
     {
-        /// <summary>帯を地面からどれだけ浮かせるか（m）。</summary>
+        /// <summary>How far above the ground the band floats (m).</summary>
         private const float LiftMetres = 5f;
 
         /// <summary>
-        /// 溶岩が下った向き（ラジアン）。**谷がどこにあるかの手がかり**で、
-        /// 経路そのものではない（クラス doc）。
+        /// The directions the lava went (radians). **A clue to where the valleys are**, not the
+        /// path itself (class doc).
         ///
-        /// ★ 配列は 1 本だけ確保して使い回す。毎フレーム作ると 60 fps で
-        ///   1 秒に 60 個のごみになる（この型は毎フレーム走る）。
-        ///   <c>float[]</c> なので Unity の fake-null は関係が無い
-        ///   （**あの罠は <c>UnityEngine.Object</c> の配列の話である**）。
+        /// ★ The array is allocated once and reused. Build it every frame and at 60 fps that is
+        ///   60 pieces of garbage a second (this type runs every frame).
+        ///   It is a <c>float[]</c>, so Unity's fake-null is irrelevant
+        ///   (**that trap is about arrays of <c>UnityEngine.Object</c>**).
         /// </summary>
         private static readonly float[] _bearings = new float[VolcanoLava.MaxFlows];
 
         /// <summary>
-        /// バニラの効果時計（秒）。<c>EffectManager</c> 自身が描画 1 フレームごとに
-        /// <c>m_simulationTimeDelta</c> を足しているので、⑤も同じ足し方をする。
-        /// **一時停止で止まり、ゲーム速度に追随する。**
+        /// The vanilla effect clock (seconds). <c>EffectManager</c> itself adds
+        /// <c>m_simulationTimeDelta</c> once per rendered frame, so ⑤ adds it the same way.
+        /// **It stops when paused and follows the game speed.**
         /// </summary>
         private static float _clockSeconds;
 
@@ -97,28 +103,31 @@ namespace DisasterPlus.Game
         private static int _bandsDrawn;
 
         /// <summary>
-        /// 直近に噴いていたときの強さ <c>[0,1]</c>。**噴火が終わったあとの濃さの上限**である。
+        /// The strength <c>[0,1]</c> when it was last erupting. **It is the ceiling on the density
+        /// after the eruption has finished.**
         ///
-        /// ★★ <c>LavaCoolUnit</c> は流れが 1 本でも動いているあいだ **1 のまま**なので、
-        ///   これを掛けないと<b>弱い噴火（強さ 0.2）でも、溶岩が流れているあいだずっと
-        ///   最大の濃さの土煙が出る</b>。しかも溶岩の前進は噴火より長い。
+        /// ★★ <c>LavaCoolUnit</c> stays at **1** for as long as even one flow is still moving, so
+        ///   without multiplying by this, <b>even a weak eruption (strength 0.2) would emit dust
+        ///   at full density for the whole time the lava flows</b>. And the lava's advance lasts
+        ///   longer than the eruption.
         /// </summary>
         private static float _lastIntensity;
 
-        /// <summary>今フレームに出した帯の本数（診断用）。</summary>
+        /// <summary>The number of bands emitted this frame (for diagnostics).</summary>
         public static int BandsDrawn { get { return _bandsDrawn; } }
 
         /// <summary>
-        /// 土煙のエフェクトを直近に引けていたか。**診断専用の平の読み取り。**
+        /// Whether the dust effect was looked up most recently. **A plain read for diagnostics
+        /// only.**
         ///
-        /// ★★ ここから解決を走らせないこと。診断は sim スレッドから組み立てられる
-        ///   （<c>FeatureHost.BuildReport</c>）ので、Unity のオブジェクトには
-        ///   参照比較ですら触れない。<see cref="Step"/> が main スレッドで
-        ///   引いた結果を読むだけである。
+        /// ★★ Do not run a resolution from here. The diagnostics are assembled from the sim thread
+        ///   (<c>FeatureHost.BuildReport</c>), so Unity objects must not be touched — not even
+        ///   with a reference comparison. All it does is read the result <see cref="Step"/> looked
+        ///   up on the main thread.
         /// </summary>
         public static bool DustResolved { get { return VolcanoVanillaFx.DustResolvedCached; } }
 
-        /// <summary>**main スレッド、毎フレーム。**</summary>
+        /// <summary>**Main thread, every frame.**</summary>
         public static void Update(VolcanoSnapshot snapshot)
         {
             try
@@ -137,9 +146,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッド。** 設定で切ったときとレベルアンロードで呼ぶ。
-        /// 借りているエフェクトは <see cref="VolcanoVanillaFx"/> が持っているので、
-        /// ここで畳むのは⑤自身の時計だけ。冪等。
+        /// **Main thread.** Call when turned off in the settings and on level unload.
+        /// The borrowed effects are held by <see cref="VolcanoVanillaFx"/>, so all that is folded
+        /// away here is ⑤'s own clock. Idempotent.
         /// </summary>
         public static void Destroy()
         {
@@ -158,11 +167,11 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ **位相で門にする。** 経路を溶岩の軌跡から外した（扇にした）ので、
-            //    「軌跡が空なら描かない」という以前の門はもう働かない。
-            //    <c>VolcanoLava.CoolUnit</c> は火山が 1 つも無いとき **1 を返す**
-            //    （AllStopped が false ＝「まだ止まっていない」）ので、位相を見ないと
-            //    **山が無いところで土煙が全力で出る**。
+            // ★★ **Gate on the phase.** The path was taken off the lava's trail (it became a
+            //    fan), so the old gate of "do not draw if the trail is empty" no longer works.
+            //    <c>VolcanoLava.CoolUnit</c> **returns 1** when there is no volcano at all
+            //    (AllStopped is false = "it has not stopped yet"), so without checking the phase
+            //    **dust would pour out at full strength where there is no mountain**.
             if (!snapshot.EruptionActive
                 && snapshot.Phase != VolcanoPhase.Flowing
                 && snapshot.Phase != VolcanoPhase.Cooling)
@@ -172,11 +181,13 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 噴火が続いているあいだはその強さ、終わったあとは
-            // **その噴火の強さを上限にして**溶岩の冷え具合で薄れる。
-            // ★ 冷え具合だけで決めると、流れが 1 本でも動いているあいだ CoolUnit は 1 な
-            //   ので、弱い噴火でも最大の濃さの土煙が出続ける（_lastIntensity の doc）。
-            // **どちらも 0 になったら 1 粒も出さない**（止まった谷に灰が残り続けない）。
+            // While the eruption continues, use its strength; after it ends, fade with the lava's
+            // cooling, **capped at that eruption's strength**.
+            // ★ Decide it from the cooling alone and, because CoolUnit is 1 for as long as even
+            //   one flow is moving, a weak eruption would keep emitting dust at full density
+            //   (the doc of _lastIntensity).
+            // **When both reach 0, emit not one particle** (so ash does not linger in a stopped
+            // valley).
             float unit;
             if (snapshot.EruptionActive)
             {
@@ -201,7 +212,8 @@ namespace DisasterPlus.Game
             if (dt <= 0f) return;
             _clockSeconds += dt;
 
-            // ★ 扇は火口から出る。噴出口（火口の底）の水平位置をそのまま使う。
+            // ★ The fan comes out of the crater. Use the vent's (the crater floor's) horizontal
+            //   position as is.
             var vent = new Vec2(snapshot.VentWorld.X, snapshot.VentWorld.Z);
 
             int channels = ReadBearings(snapshot, vent);
@@ -210,9 +222,11 @@ namespace DisasterPlus.Game
                 unchecked((uint)Mathf.RoundToInt(snapshot.Footprint.Centre.X)),
                 unchecked((uint)Mathf.RoundToInt(snapshot.Footprint.Centre.Z)));
 
-            // ★ 扇は**今そこに在る山の大きさ**までしか下れない。隆起の途中に
-            //   出来上がりの半径を渡すと、まだ平らな地面の上を土煙が走る。
-            //   短くなりすぎた舌は PyroclasticSurge.MinPathMetres で自然に消える。
+            // ★ The fan can only descend as far as **the mountain that is actually there right
+            //   now**. Hand it the finished radius partway through the uplift and the dust runs
+            //   across ground that is still flat.
+            //   A lobe that ends up too short disappears naturally at
+            //   PyroclasticSurge.MinPathMetres.
             float reachRadius = snapshot.UpliftComplete
                 ? snapshot.Footprint.RadiusMetres
                 : snapshot.Footprint.RadiusMetres * Clamp01(snapshot.ProgressUnit);
@@ -227,8 +241,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 溶岩の軌跡から「谷の向き」を <see cref="_bearings"/> へ取り出す。
-        /// **溶岩が 1 本も流れていなくてもよい**（0 を返し、扇は谷に引かれないだけ）。
+        /// Extract "the direction of the valley" from the lava's trail into
+        /// <see cref="_bearings"/>.
+        /// **It is fine for no lava to be flowing at all** (it returns 0, and the fan simply is
+        /// not pulled towards a valley).
         /// </summary>
         private static int ReadBearings(VolcanoSnapshot snapshot, Vec2 vent)
         {
@@ -259,7 +275,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 舌 1 本ぶんの帯。出せなければ <c>false</c> を返すだけで、例外は投げない。
+        /// The band for one lobe. If it cannot be emitted it merely returns <c>false</c>; no
+        /// exception is thrown.
         /// </summary>
         private static bool RenderLobe(ParticleEffect effect, RenderManager.CameraInfo camera,
                                        Vec2 vent, uint seed, int index, int channels,
@@ -270,13 +287,14 @@ namespace DisasterPlus.Game
 
             float azimuth = PyroclasticSurge.LobeAzimuth(seed, index, PyroclasticSurge.LobeCount);
 
-            // ★ 谷の手がかり。1 本も無ければ引かれないだけで、扇そのものは出る。
+            // ★ The valley clue. If there is not one, it simply is not pulled; the fan itself
+            //   still appears.
             bool found;
             float channel = PyroclasticSurge.NearestChannel(azimuth, _bearings, channels,
                                                             out found);
             if (!found) channel = azimuth;
 
-            // ★ 舌ごとに位相をずらす（舌が隊列を組んで走らないため）。
+            // ★ Offset the phase per lobe (so the lobes do not run in formation).
             float clock = _clockSeconds
                           + PyroclasticSurge.LobePhaseSeconds(index, PyroclasticSurge.LobeCount,
                                                               reach);
@@ -298,12 +316,12 @@ namespace DisasterPlus.Game
             Vector3 pc = OnGround(c);
             Vector3 pd = OnGround(d);
 
-            // ★ 第 3 引数は読まれない（IL 実測）。両方に同じ値を入れておく。
+            // ★ The third argument is never read (measured in IL). Put the same value in both.
             var area = new EffectInfo.SpawnArea(new Bezier3(pa, pb, pc, pd),
                                                 halfWidth, halfWidth);
 
-            // ★ 這わせるのはこの velocity である（ベジェ経路では初速が
-            //   上向き成分にしか入らない）。尾 → 頭の向きへ押す。
+            // ★ This velocity is what makes it hug the ground (on a bezier path the initial
+            //   velocity only goes into the upward component). Push from tail towards head.
             Vector3 push = pd - pa;
             push.y = 0f;
             float length = push.magnitude;
@@ -318,7 +336,7 @@ namespace DisasterPlus.Game
 
             effect.RenderEffect(default(InstanceID), area, push, 0f,
                                 magnitude,
-                                -1f,   // ★ 継続モード
+                                -1f,   // ★ continuous mode
                                 dt, camera);
             return true;
         }
@@ -330,9 +348,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 地面の高さに乗せた点。読めなければ 0 を使う（**帯が消えるより良い**）。
-        /// <c>SampleDetailHeight</c> は読み取りなのでどちらのスレッドからでも安全
-        /// （<see cref="TerrainHeightSampler"/> の doc）。
+        /// A point placed at the ground's height. If it cannot be read, use 0 (**better than the
+        /// band disappearing**).
+        /// <c>SampleDetailHeight</c> is a read, so it is safe from either thread
+        /// (the doc of <see cref="TerrainHeightSampler"/>).
         /// </summary>
         private static Vector3 OnGround(Vec2 point)
         {

@@ -4,55 +4,60 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>台風の下で木を激しく揺らす。</b>**描画スレッドから毎木呼ばれる。**
+    /// <b>Shake the trees hard under a typhoon.</b> **Called per tree from the render
+    /// thread.**
     ///
-    /// ── なぜ格子をいじる手では足りなかったのか（2026-09-02）──────────────
+    /// ── Why poking the grid was not enough (2026-09-02) ────────────────────
     ///
-    /// 木の揺れは <c>TreeInstance.RenderInstance</c> が
+    /// Tree sway comes out of <c>TreeInstance.RenderInstance</c> as
     ///
     /// <code>
     /// color.a = WeatherManager.GetWindSpeed(position);
     /// materialBlock.SetColor(TreeManager.ID_Color, color);
     /// </code>
     ///
-    /// として<b>色のアルファに載せた風速</b>で、木のシェーダはそれを揺れ量に使う。
-    /// そして <c>GetWindSpeed</c> の中身は
+    /// — <b>wind speed carried in the alpha of the colour</b>, which the tree shader
+    /// uses as the amount of sway. And the body of <c>GetWindSpeed</c> is
     ///
     /// <code>
     /// exposure = pos.y - m_windGrid[cell].m_totalHeight / 64
     /// return Mathf.Clamp(exposure * 0.02 + 1, 0, 2)
     /// </code>
     ///
-    /// ★★ **末尾の <c>Clamp(…, 0, 2)</c> が全てだった。**
-    ///   最初は <c>m_totalHeight</c> を下げて <c>exposure</c> を稼いだが、
-    ///   それでは<b>どれだけ下げても 2.0 で頭打ち</b>になる ——
-    ///   平常が 1.0 なので、<b>上限まで行っても 2 倍にしかならない</b>。
-    ///   「もっと激しく」には足りなかった。
+    /// ★★ **That trailing <c>Clamp(…, 0, 2)</c> was the whole story.**
+    ///   The first attempt lowered <c>m_totalHeight</c> to buy more <c>exposure</c>,
+    ///   but <b>however far you lower it the result tops out at 2.0</b> — calm is 1.0,
+    ///   so <b>even at the ceiling you only ever get twice the sway</b>. Not enough
+    ///   for "make it wilder".
     ///
-    /// ── ここを後置きで越える ────────────────────────────────────
+    /// ── Getting past it from behind ───────────────────────────────────────
     ///
-    /// <c>GetWindSpeed</c> は public なので、Harmony の Postfix が
-    /// <b>クランプの外側</b>で結果を掛けられる。利点は 3 つ:
+    /// <c>GetWindSpeed</c> is public, so a Harmony Postfix can multiply the result
+    /// <b>outside the clamp</b>. Three advantages:
     ///
     /// <list type="bullet">
-    /// <item><b>上限が無い。</b>2.0 の壁の外で掛けるので、いくらでも強くできる。</item>
-    /// <item><b>セーブに何も残らない。</b><c>m_windGrid</c> を 1 バイトも書かない ——
-    ///   あれは <c>WeatherManager+Data.Serialize</c> が保存する配列で、
-    ///   戻し損ねると都市に狂った遮蔽図が残る。触らなければその危険は<b>消える</b>。</item>
-    /// <item><b>風力発電に響かない。</b>風車は <c>SampleWindSpeed</c> という
-    ///   別のメソッドを通る。格子をいじる手では、そちらまで一緒に強くなっていた。</item>
+    /// <item><b>No ceiling.</b> We multiply beyond the 2.0 wall, so it can go as
+    ///   strong as we like.</item>
+    /// <item><b>Nothing is left in the save.</b> We do not write a single byte of
+    ///   <c>m_windGrid</c> — that array is saved by <c>WeatherManager+Data.Serialize</c>,
+    ///   and failing to restore it leaves a deranged shelter map in the city. Leave it
+    ///   alone and that risk <b>disappears</b>.</item>
+    /// <item><b>Wind power is unaffected.</b> Wind turbines go through a different
+    ///   method, <c>SampleWindSpeed</c>. Poking the grid strengthened that too.</item>
     /// </list>
     ///
-    /// ── 速さの制約 ────────────────────────────────────────────
+    /// ── Speed constraints ─────────────────────────────────────────────────
     ///
-    /// ★★ ここは<b>描画される木 1 本につき毎フレーム 1 回</b>呼ばれる。
-    ///   何万回にもなるので、<b>確保も、Singleton の解決も、ロックもしない</b>。
-    ///   見るのは静的な float 4 個と距離の二乗だけである。
-    ///   台風が居ないときは <c>_active</c> の 1 回の読みで即座に戻る。
+    /// ★★ This is called <b>once per frame for every tree that is drawn</b>. That runs
+    ///   into the tens of thousands, so we <b>allocate nothing, resolve no Singleton
+    ///   and take no lock</b>. All it looks at is four static floats and a squared
+    ///   distance. With no typhoon about, a single read of <c>_active</c> returns
+    ///   immediately.
     ///
-    /// ★ 状態は sim スレッドが <see cref="SetStorm"/> で書き、描画スレッドが読む。
-    ///   <c>volatile</c> にしてあるが、**古い値を 1 フレーム読んでも何も壊れない**
-    ///   （揺れの量が 1 フレーム前のものになるだけ）ので、錠は要らない。
+    /// ★ The state is written by the sim thread through <see cref="SetStorm"/> and read
+    ///   by the render thread. It is <c>volatile</c>, but **reading a stale value for
+    ///   one frame breaks nothing** (the sway is simply one frame out of date), so no
+    ///   lock is needed.
     /// </summary>
     [HarmonyPatch(typeof(WeatherManager), "GetWindSpeed", new[] { typeof(Vector3) })]
     public static class TyphoonTreeWindPatch
@@ -64,16 +69,19 @@ namespace DisasterPlus.Game
         private static float _gain;
 
         /// <summary>
-        /// いま掛けている最大の倍率（診断）。1 なら効いていない。
+        /// The largest multiplier currently applied (diagnostics). 1 means it is doing
+        /// nothing.
         /// </summary>
         public static float Gain { get { return _active ? _gain : 1f; } }
 
         /// <summary>
-        /// 台風の位置と強さを教える。**sim スレッド。** 毎 tick 呼んでよい。
+        /// Tell it where the typhoon is and how strong it is. **Sim thread.** May be
+        /// called every tick.
         /// </summary>
         /// <param name="gain">
-        /// 中心での倍率。1 で素通し。<b>2.0 の壁の外で掛かる</b>ので、
-        /// 3 なら平常の 3 倍まで揺れる。
+        /// The multiplier at the centre. 1 passes through untouched. <b>It is applied
+        /// outside the 2.0 wall</b>, so 3 means the trees sway up to three times as much
+        /// as normal.
         /// </param>
         public static void SetStorm(float centreX, float centreZ, float radiusMetres,
                                     float gain)
@@ -87,7 +95,7 @@ namespace DisasterPlus.Game
             _active = true;
         }
 
-        /// <summary>台風が終わった／都市を出た。**必ず呼ぶ。**</summary>
+        /// <summary>The typhoon has ended or left the city. **Always call this.**</summary>
         public static void Clear()
         {
             _active = false;
@@ -95,10 +103,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>WeatherManager.GetWindSpeed(Vector3)</c> の後置き。
-        /// **クランプの外側**で倍率を掛ける（クラス doc の ★★）。
+        /// Postfix for <c>WeatherManager.GetWindSpeed(Vector3)</c>.
+        /// Applies the multiplier **outside the clamp** (the ★★ in the class doc).
         /// </summary>
-        /// <summary>1 度だけ実測を出す（効いているかを推測で語らないため）。</summary>
+        /// <summary>Report a real measurement once, so we never guess aloud at whether
+        /// this is working.</summary>
         private static bool _reported;
 
         public static void Postfix(Vector3 position, ref float __result)
@@ -124,7 +133,8 @@ namespace DisasterPlus.Game
 
             if (distanceSquared >= _radiusSquared) return;
 
-            // ★ 中心で最大、縁で 1 倍へ落とす。境目で揺れが跳ばないように。
+            // ★ Strongest at the centre, easing back to 1x at the rim, so the sway does
+            //   not jump at the boundary.
             float t = 1f - distanceSquared / _radiusSquared;
             __result *= 1f + (_gain - 1f) * t;
         }

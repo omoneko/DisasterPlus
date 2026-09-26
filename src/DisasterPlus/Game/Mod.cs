@@ -11,52 +11,55 @@ namespace DisasterPlus.Game
         public string Description { get { return Strings.ModDescription; } }
 
         /// <summary>
-        /// メインメニューの起動中に 1 回だけ呼ばれる（言語切替でも再実行される）。
-        /// レベルロード後にしか分からない情報からオプションを組み立ててはいけない。
+        /// Called exactly once while the main menu is up (and re-run on a language change).
+        /// Never build the options out of information that is only known after a level load.
         ///
-        /// ── ★★ この画面に文章を足す前に読むこと ────────────────────
+        /// ── ★★ Read this before adding prose to this screen ────────────────────
         ///
-        /// 所有者の指示は「Option 画面も説明書きが長すぎます。もっとシンプルに」である。
-        /// 線引きはこう決めた:
+        /// The owner's instruction is "the Options screen has far too much explanation. Make
+        /// it simpler." The line was drawn like this:
         ///
-        /// | ここに出す | 例 |
+        /// | goes here | example |
         /// |---|---|
-        /// | **選ぶために要ること** | つまみのラベル、範囲、既定値の意味 |
-        /// | **使えない理由** | 「Natural Disasters DLC が必要です」 |
-        /// | **取り返しがつかないこと** | 火山の地形変更は戻せない |
-        /// | **設定が消えた告知** | 退役した項目（.cgs は公開契約である） |
+        /// | **what you need in order to choose** | a knob's label, its range, what the default means |
+        /// | **why something is unavailable** | "the Natural Disasters DLC is required" |
+        /// | **what cannot be undone** | the volcano's terrain change is irreversible |
+        /// | **notice that a setting has gone** | retired entries (the .cgs is a public contract) |
         ///
-        /// | ここに出さない | 行き先 |
+        /// | does not go here | where it goes instead |
         /// |---|---|
-        /// | 「バニラはこうしている」の解説 | 診断ダンプ（<c>WriteNotes</c>） |
-        /// | 機能の仕組みの説明 | その機能のパネル（左上のショートカット） |
-        /// | テスターが切り分けに使う事実 | 診断ダンプ |
+        /// | an explanation of "this is what vanilla does" | the diagnostic dump (<c>WriteNotes</c>) |
+        /// | an explanation of how a feature works | that feature's panel (the top-left shortcut) |
+        /// | facts a tester uses to narrow things down | the diagnostic dump |
         ///
-        /// **落としたのは説明であって、情報ではない。** 説明の 1 行を消すときは、
-        /// その内容がダンプかパネルのどちらにあるかを確かめてから消すこと。
+        /// **What was dropped is explanation, not information.** When deleting a line of
+        /// explanation, first confirm whether its content lives in the dump or in a panel.
         ///
-        /// ★ ラベルに畳めるものはラベルに畳む。1 行の注記より、選ぶ対象の名前に
-        ///   書いてあるほうが短くて確実である（例: 危険半円がどちら側か）。
+        /// ★ Fold into the label whatever can be folded into the label. Writing it in the name
+        ///   of the thing being chosen is shorter and surer than a line of annotation
+        ///   (for example, which side the dangerous semicircle is on).
         /// </summary>
         public void OnSettingsUI(UIHelperBase helper)
         {
-            // 言語切替でもこのメソッドは再実行される。ここで読み直せばオプション画面が追従する。
-            // ただしゲーム内ボタンのツールチップはレベルロード時に一度設定されるだけなので、
-            // 次のロードまで前の言語のままになる。
+            // This method is re-run on a language change too. Re-reading here keeps the
+            // options screen in step. Note that the tooltips on the in-game buttons are set
+            // once at level load, so they stay in the previous language until the next load.
             LocaleLoader.Apply();
             ModSettings.Ensure();
 
-            // Assumptions はレベルロード後に走るので、初回起動時はまだ空。
-            // つまり警告は「一度都市を読み込んだ後、次にオプションを開いたとき」に出る。
-            // OnSettingsUI はメインメニュー起動時に 1 回しか走らないため、これは避けられない。
+            // Assumptions runs after a level load, so it is still empty on first startup.
+            // That is, the warnings appear "once a city has been loaded, the next time the
+            // options are opened". OnSettingsUI only runs once, when the main menu comes up,
+            // so this is unavoidable.
             //
-            // これが成立するのは Assumptions.Reset()（レベルアンロード時）が結果を
-            // 消さないから。ここは必ずアンロードより後に走るので、Reset() でクリアすると
-            // LastResults は常に空になり、この警告は原理的に出せなくなる。
-            // ★ **DLC 非所持環境で正常に FAIL する 5 件は出さない**（全体レビュー）。
-            //   出すと、バニラのままの環境ではこの群が永久に表示され続け、
-            //   本当の前提破れが起きたときにその 1 件が見慣れた群に紛れて読まれない。
-            //   何が外れているかは Assumptions.UnexpectedFailures の doc にある。
+            // This works because Assumptions.Reset() (on level unload) does not clear the
+            // results. This always runs after the unload, so clearing in Reset() would make
+            // LastResults always empty and make these warnings impossible in principle.
+            // ★ **Do not show the five that FAIL normally in an environment without the DLC**
+            //   (overall review). Show them and a plain vanilla environment displays that
+            //   block forever, so when a real broken assumption turns up, that one entry is
+            //   lost in a block people have long since stopped reading.
+            //   What is excluded is described in the Assumptions.UnexpectedFailures doc.
             var failures = Assumptions.UnexpectedFailures();
 
             if (failures.Count > 0)
@@ -75,18 +78,19 @@ namespace DisasterPlus.Game
                 fw.AddCheckbox(Strings.FireWhirlEnabled, ModSettings.FireWhirlEnabled.value,
                     v => ModSettings.FireWhirlEnabled.value = v);
 
-                // ★★ **帯を広げた（2026-08-22）。** 既定を 450 m / 108 棟へ上げたのに
-                //    スライダーが 400 / 40 で止まっていると、**触った瞬間に既定より
-                //    小さい値へ落ちる**（しかも下がったことは画面に出ない）。
-                //    設定の既定値を変えたら、必ずその値を含む帯にすること。
+                // ★★ **The ranges were widened (2026-08-22).** With the defaults raised to
+                //    450 m / 108 buildings but the sliders still stopping at 400 / 40, the
+                //    value **drops below the default the moment you touch it** (and nothing
+                //    on screen says it went down).
+                //    Whenever a setting's default changes, make sure the range contains it.
                 OptionsSlider.Add(fw, Strings.DetectRadius, null, 50f, 900f, 25f, ModSettings.DetectRadius.value,
                     v => ModSettings.DetectRadius.value = (int)v);
 
                 OptionsSlider.Add(fw, Strings.DetectCount, null, 4f, 200f, 4f, ModSettings.DetectCount.value,
                     v => ModSettings.DetectCount.value = (int)v);
 
-                // ★ バニラ（DLC）の竜巻を止める。火災旋風の渦には影響しない
-                //   （VanillaTornadoSuppressor のクラス doc）。
+                // ★ Stops vanilla's (the DLC's) tornado. Has no effect on the fire whirl's
+                //   vortex (see the VanillaTornadoSuppressor class doc).
                 fw.AddCheckbox(Strings.NoVanillaTornado, ModSettings.NoVanillaTornado.value,
                     v => ModSettings.NoVanillaTornado.value = v);
 
@@ -102,26 +106,30 @@ namespace DisasterPlus.Game
             else
             {
                 helper.AddGroup(Strings.GroupFireWhirl).AddSpace(4);
-                // グループ名の下に理由を出す。設定が「消えた」ように見えないようにする。
+                // Put the reason under the group name, so the settings do not look as though
+                // they have "gone".
                 helper.AddGroup(Strings.FireWhirlNeedsDlc);
             }
 
             var forecast = helper.AddGroup(Strings.GroupForecast);
             forecast.AddCheckbox(Strings.ForecastEnabled, ModSettings.ForecastEnabled.value,
                 v => ModSettings.ForecastEnabled.value = v);
-            // ★ 「ボタン位置をリセット」は①②④⑤の 4 つとも撤去した。ボタンは
-            //    バニラの災害パネルの中に置かれるようになり、位置はパネルの
-            //    autolayout が決めるので（DisasterPanelBar）、押しても何も起きない
-            //    死んだボタンになる。保存キー（forecastButtonX/Y 等）は .cgs の
-            //    公開契約なので ModSettings 側に残してあるが、**別の意味で
-            //    再利用してはいけない**（ModSettings の当該コメント参照）。
+            // ★ "Reset button position" was removed for all four of ①②④⑤. The buttons are
+            //    now placed inside vanilla's disaster panel, and the panel's autolayout
+            //    decides their positions (DisasterPanelBar), so it would be a dead button
+            //    that does nothing when pressed. The saved keys (forecastButtonX/Y and so on)
+            //    are part of the .cgs public contract and remain on the ModSettings side, but
+            //    **they must not be reused for a different meaning** (see the relevant
+            //    comment in ModSettings).
 
-            // 予報パネルの気象・傾向の行は DLC 無しでも正しく動くので、機能そのものは
-            // 隠さない。ただしハザードの 2 行（落雷・竜巻の「マップに表示」とカーソル
-            // 位置の数値）は DLC が無いと prefab も気象レーダーも存在せず、永久に
-            // 空のビューと 0 になる。パネル側では行ごと出さないようにしてあるが
-            // （ForecastPanel._hazardRowsBuilt）、設定画面にも理由を書いておかないと
-            // 「機能の一部が黙って無い」ように見える。FireWhirlNeedsDlc と同じ扱い。
+            // The weather and trend rows of the forecast panel work correctly without the DLC,
+            // so the feature itself is not hidden. The two hazard rows (the "show on map" for
+            // lightning/tornado and the value at the cursor) are different: without the DLC
+            // neither the prefab nor the weather radar exists, so they are an empty view and 0
+            // forever. The panel already omits those rows entirely
+            // (ForecastPanel._hazardRowsBuilt), but without the reason on the settings screen
+            // too it looks as though "part of the feature is quietly missing". The same
+            // treatment as FireWhirlNeedsDlc.
             if (!ModCompat.NaturalDisastersOwned)
             {
                 helper.AddGroup(Strings.ForecastHazardNeedsDlc);
@@ -133,19 +141,20 @@ namespace DisasterPlus.Game
             earthquake.AddCheckbox(Strings.EarthquakeShakeBoost, ModSettings.EarthquakeShakeBoost.value,
                 v => ModSettings.EarthquakeShakeBoost.value = v);
 
-            // ── 第 2 層（Disaster + が足した挙動。バニラにはありません）──────────
+            // ── The second layer (behaviour Disaster + added. Not in vanilla) ──────────
             //
-            // **既定 OFF。** 海中の地震から津波を起こすのはバニラの挙動ではないので、
-            // 既定で入れるとプレイヤーは「地震のあと勝手に津波が来る」原因が MOD だと
-            // 気付く手段を持たない（ModSettings.EarthquakeTsunamiChain の doc）。
+            // **OFF by default.** Raising a tsunami from an undersea earthquake is not
+            // vanilla behaviour, so turning it on by default would leave the player with no
+            // way of realising that "a tsunami arrives by itself after an earthquake" comes
+            // from a mod (see the ModSettings.EarthquakeTsunamiChain doc).
             //
-            // DLC が無い環境では出さない。TsunamiAI のプレハブが存在しないので
-            // （§B-5）、この設定は何も制御しない死んだチェックボックスになる。
+            // Not shown in an environment without the DLC. The TsunamiAI prefab does not exist
+            // (§B-5), so the setting would be a dead checkbox controlling nothing.
             if (ModCompat.NaturalDisastersOwned)
             {
-                // ★★ 海溝型地震のタイル（2026-08-22、所有者の依頼）。
-                //    **津波が付くのはこの地震だけ**なので、下の「津波」の
-                //    チェックより先に置く —— 順序が説明になっている。
+                // ★★ The trench earthquake tile (2026-08-22, the owner's request).
+                //    **This is the only earthquake that comes with a tsunami**, so it goes
+                //    before the "tsunami" checkbox below — the order is the explanation.
                 earthquake.AddCheckbox(Strings.TrenchQuakeEnabled,
                     ModSettings.TrenchQuakeEnabled.value,
                     v => ModSettings.TrenchQuakeEnabled.value = v);
@@ -157,38 +166,44 @@ namespace DisasterPlus.Game
                     ModSettings.EarthquakeTsunamiDelayMinutes.value,
                     v => ModSettings.EarthquakeTsunamiDelayMinutes.value = (int)v);
 
-                // ★ 長周期地震動。**既定 OFF。** 津波と違い、これは
-                //    「バニラなら倒れなかった建物を倒す」ので、チェックボックスの
-                //    ラベル自体にその事実を書く（Strings.EarthquakeLongPeriodEnabled）。
+                // ★ Long-period ground motion. **OFF by default.** Unlike the tsunami, this
+                //    "collapses buildings that vanilla would have left standing", so the fact
+                //    is written into the checkbox label itself
+                //    (Strings.EarthquakeLongPeriodEnabled).
                 OptionsSlider.Add(earthquake, Strings.EarthquakeLongPeriodStrength, Strings.EarthquakeLongPeriodStrengthTip, 0f, 10f, 1f,
                     ModSettings.EarthquakeLongPeriodStrength.value,
                     v => ModSettings.EarthquakeLongPeriodStrength.value = (int)v);
 
-                // ★ 海溝型の遠地被害。**チェックボックスは無い** —— 海溝型地震
-                //   そのものが本 MOD の機能なので、その強さを 0 にできれば足りる。
+                // ★ The trench quake's distant damage. **There is no checkbox** — the trench
+                //   earthquake is itself a feature of this mod, so being able to set its
+                //   strength to 0 is enough.
                 OptionsSlider.Add(earthquake, Strings.EarthquakeTrenchDamageStrength, Strings.EarthquakeTrenchDamageStrengthTip, 0f, 10f, 1f,
                     ModSettings.EarthquakeTrenchDamageStrength.value,
                     v => ModSettings.EarthquakeTrenchDamageStrength.value = (int)v);
 
-                // ★ 合成記象（P 波・S 波・コーダ）。**既定 OFF。**
-                //   こちらは建物を 1 軒も壊さないが、**カメラの揺れの形をバニラから
-                //   変える**ので、やはり第 2 層である。上の EarthquakeShakeBoost が
-                //   既定 ON にできるのは強度 55 で追加分が厳密に 0 になるからで
-                //   （ShakeWaveform.IntensityFactor）、こちらにその逃げ道は無い。
+                // ★ The synthetic seismogram (P wave, S wave, coda). **OFF by default.**
+                //   This destroys not one building, but it **changes the shape of the camera
+                //   shake from vanilla's**, so it too is second layer. EarthquakeShakeBoost
+                //   above can be ON by default because at intensity 55 its addition is
+                //   exactly 0 (ShakeWaveform.IntensityFactor); this one has no such escape.
                 earthquake.AddCheckbox(Strings.EarthquakeSeismogramEnabled,
                     ModSettings.EarthquakeSeismogram.value,
                     v => ModSettings.EarthquakeSeismogram.value = v);
             }
 
-            // ★ ②の解説 3 本（揺れの補正・長周期・合成記象）はこの画面から降ろした。
-            //   - 何をする設定かは**チェックボックスのラベル**が名乗っている
-            //     （「バニラには無い被害を足します」等）
-            //   - 「バニラはこうしている」の解説は診断ダンプ（EarthquakeFeature.WriteNotes）
-            //   - 長周期の注記は②のパネルにも同じ文が出る（EarthquakeLayer2Rows）
-            //   消したのは説明であって、情報ではない（このメソッドの doc の表）。
+            // ★ ②'s three explanations (shake correction, long-period, synthetic seismogram)
+            //   were taken off this screen.
+            //   - what each setting does is stated by **the checkbox label** ("adds damage
+            //     vanilla does not have", and so on)
+            //   - the "this is what vanilla does" explanation is in the diagnostic dump
+            //     (EarthquakeFeature.WriteNotes)
+            //   - the long-period note appears verbatim in ②'s panel too
+            //     (EarthquakeLayer2Rows)
+            //   What was deleted is explanation, not information (see the table in this
+            //   method's doc).
 
-            // ②は機能そのものが DLC 依存（EarthquakeAI のプレハブが存在しない）。
-            // ForecastHazardNeedsDlc / FireWhirlNeedsDlc と同じ形で理由を書く。
+            // ② depends on the DLC as a feature (the EarthquakeAI prefab does not exist).
+            // Give the reason in the same shape as ForecastHazardNeedsDlc / FireWhirlNeedsDlc.
             if (!ModCompat.NaturalDisastersOwned)
             {
                 helper.AddGroup(Strings.EarthquakeNeedsDlc);
@@ -200,69 +215,79 @@ namespace DisasterPlus.Game
             OptionsSlider.Add(typhoon, Strings.TyphoonIntensity, Strings.TyphoonIntensityTip, 10f, 255f, 5f,
                 ModSettings.TyphoonIntensity.value,
                 v => ModSettings.TyphoonIntensity.value = (int)v);
-            // ★★ **チェックボックスは置かない。** 強さ 0 が「切る」である
-            //    （ModSettings.MigrateEnableFlagsIntoStrength）。氾濫・局所被害・
-            //    長周期も同じ形にしてある。
+            // ★★ **No checkbox here.** A strength of 0 is "off"
+            //    (ModSettings.MigrateEnableFlagsIntoStrength). Flooding, local damage and
+            //    long-period are all shaped the same way.
             OptionsSlider.Add(typhoon, Strings.TyphoonWindStrength, Strings.TyphoonWindStrengthTip, 0f, 10f, 1f,
                 ModSettings.TyphoonWindStrength.value,
                 v => ModSettings.TyphoonWindStrength.value = (int)v);
-            // ★ 危険半円の向き。既定は北半球（＝進行方向の右が強い）。
+            // ★ Which side the dangerous semicircle is on. The default is the northern
+            //   hemisphere (i.e. stronger to the right of the direction of travel).
             typhoon.AddCheckbox(Strings.TyphoonSouthernHemisphere,
                 ModSettings.TyphoonSouthernHemisphere.value,
                 v => ModSettings.TyphoonSouthernHemisphere.value = v);
-            // ★ 河川氾濫も既定 ON。**セーブに焼き付く状態を触る唯一の機能**なので、
-            //    水位は台風の終了時・都市を出るとき・保存のたびに元へ戻す。
+            // ★ River flooding is ON by default too. It is **the only feature that touches
+            //    state which gets burnt into the save**, so the water level is put back when
+            //    the typhoon ends, when the city is left, and on every save.
             OptionsSlider.Add(typhoon, Strings.TyphoonFloodStrength, Strings.TyphoonFloodStrengthTip, 0f, 10f, 1f,
                 ModSettings.TyphoonFloodStrength.value,
                 v => ModSettings.TyphoonFloodStrength.value = (int)v);
-            // ★ 竜巻並みの局所被害。**竜巻の実体は 1 つも作らない**（既定 ON）。
-            //    随伴竜巻（バニラの竜巻災害を借りる機能）は撤去された ——
-            //    その代わりがこれである。強さ 0 で完全に無効になる。
+            // ★ Tornado-strength local damage. **It creates not one actual tornado**
+            //    (ON by default). The accompanying tornado (the feature that borrowed
+            //    vanilla's tornado disaster) was removed — this is what replaced it.
+            //    A strength of 0 disables it completely.
             OptionsSlider.Add(typhoon, Strings.TyphoonGustStrength, Strings.TyphoonGustStrengthTip, 0f, 10f, 1f,
                 ModSettings.TyphoonGustStrength.value,
                 v => ModSettings.TyphoonGustStrength.value = (int)v);
-            // ★ 雲は既定 ON。**見た目だけの機能**で、切っても他の 5 要素はそのまま動く
-            //    （TyphoonCloud のクラス doc の独立性）。
+            // ★ The cloud is ON by default. It is **a purely visual feature**, and switching
+            //    it off leaves the other five elements running unchanged (see the
+            //    independence described in the TyphoonCloud class doc).
             typhoon.AddCheckbox(Strings.TyphoonCloudEnabled,
                 ModSettings.TyphoonCloudEnabled.value,
                 v => ModSettings.TyphoonCloudEnabled.value = v);
             typhoon.AddCheckbox(Strings.TyphoonVanillaCloudBoost,
                 ModSettings.TyphoonVanillaCloudBoost.value,
                 v => ModSettings.TyphoonVanillaCloudBoost.value = v);
-            // ★ 暴風雨の演出。風害とは別のつまみである（ModSettings.TyphoonStormFx の doc）。
+            // ★ The storm visuals. A separate knob from wind damage (see the
+            //   ModSettings.TyphoonStormFx doc).
             typhoon.AddCheckbox(Strings.TyphoonStormFx,
                 ModSettings.TyphoonStormFx.value,
                 v => ModSettings.TyphoonStormFx.value = v);
-            // ★ 風の音。EffectGroup へ流すので効果音スライダーとミュートは効く。
+            // ★ The sound of the wind. It goes through EffectGroup, so the effects volume
+            //   slider and mute both apply.
             typhoon.AddCheckbox(Strings.TyphoonStormSound,
                 ModSettings.TyphoonStormSound.value,
                 v => ModSettings.TyphoonStormSound.value = v);
-            // ★ ④の解説 5 本もこの画面から降ろした。
-            //   - 強度の目安（バニラの嵐は 55）は**スライダーのラベル**に畳んだ
-            //   - 危険半円がどちら側かは**チェックボックスのラベル**が名乗っている
-            //   - 風害・局所被害・氾濫の説明は④のパネルに同じ文が出る
-            //     （TyphoonEffectRows。左上のショートカットから 1 クリック）
-            //   - 危険半円の理屈は診断ダンプ（TyphoonFeatureDiagnostics.WriteNotes）
+            // ★ ④'s five explanations came off this screen too.
+            //   - the guide to intensity (a vanilla storm is 55) was folded into **the
+            //     slider's label**
+            //   - which side the dangerous semicircle is on is stated by **the checkbox
+            //     label**
+            //   - the explanations of wind damage, local damage and flooding appear verbatim
+            //     in ④'s panel (TyphoonEffectRows. One click from the top-left shortcut)
+            //   - the reasoning behind the dangerous semicircle is in the diagnostic dump
+            //     (TyphoonFeatureDiagnostics.WriteNotes)
             //
-            // ④は機能そのものが DLC 依存（ThunderStormAI のプレハブが存在しない）。
-            // FireWhirlNeedsDlc / EarthquakeNeedsDlc と同じ形で理由を書く。
+            // ④ depends on the DLC as a feature (the ThunderStormAI prefab does not exist).
+            // Give the reason in the same shape as FireWhirlNeedsDlc / EarthquakeNeedsDlc.
             if (!ModCompat.NaturalDisastersOwned)
             {
                 helper.AddGroup(Strings.TyphoonNeedsDlc);
             }
 
-            // ★★ ⑤火山には「Natural Disasters が必要です」の群を**置かない**。
-            //    ⑤は DLC を要らない（設計書 §1.4）—— 災害スロットに載らず、
-            //    RawHeights を自分で書き、MakeCrater / BurnGround にも DLC ゲートは
-            //    無い（IL 事実文書 §C-8 / §B-7b）。分岐するのは樹木の着火だけ
-            //    （TreeManager.BurnTree、§B-7c）で、それは T8 が
-            //    FeatureHost.NoteDegraded で名乗る。ここに DLC の注記を置くと嘘になる。
+            // ★★ **Do not put** a "Natural Disasters is required" block on the ⑤ volcano.
+            //    ⑤ does not need the DLC (design doc §1.4) — it does not occupy a disaster
+            //    slot, it writes RawHeights itself, and neither MakeCrater nor BurnGround has
+            //    a DLC gate (IL findings document §C-8 / §B-7b). The only thing that branches
+            //    is igniting trees (TreeManager.BurnTree, §B-7c), and T8 states that through
+            //    FeatureHost.NoteDegraded. A DLC note here would be a lie.
             var volcano = helper.AddGroup(Strings.GroupVolcano);
             volcano.AddCheckbox(Strings.VolcanoEnabled, ModSettings.VolcanoEnabled.value,
                 v => ModSettings.VolcanoEnabled.value = v);
 
-            // ラベル配列は static readonly にしてはいけない。型初期化時の言語で凍結する。
-            // 毎回組み直すことで言語切替に追従する（このファイルの他の 2 箇所と同じ）。
+            // The label array must not be static readonly: it would freeze in the language as
+            // of type initialisation. Rebuilding it every time keeps it in step with a
+            // language change (the same as the other two places in this file).
             string[] volcanoShapes =
             {
                 Strings.VolcanoFormShield, Strings.VolcanoFormStrato, Strings.VolcanoFormDome
@@ -275,109 +300,123 @@ namespace DisasterPlus.Game
             volcano.AddDropdown(Strings.VolcanoShapeSetting, volcanoShapes, currentShape,
                 v => ModSettings.VolcanoShapeSetting.value = v);
 
-            // ★★ **半径と最終高のスライダーは撤去した**（2026-08-22）。
-            //    大きさを決めるつまみは**災害パネルの強度スライダー 1 本だけ**である。
-            //    基準は形態ごとの推奨値（<c>VolcanoShape.DefaultRadiusOf</c> /
-            //    <c>DefaultHeightOf</c>）。経緯は <c>VolcanoSizeScale</c> のクラス doc。
-            //    .cgs の volcanoRadius / volcanoHeight は**退役**であり、
-            //    別の意味で使い回さないこと（<c>ModSettings</c> の退役の覚書）。
+            // ★★ **The radius and final-height sliders were removed** (2026-08-22).
+            //    The only knob that decides the size is **the disaster panel's intensity
+            //    slider**. The baseline is the recommended value per form
+            //    (<c>VolcanoShape.DefaultRadiusOf</c> / <c>DefaultHeightOf</c>). The history
+            //    is in the <c>VolcanoSizeScale</c> class doc.
+            //    volcanoRadius / volcanoHeight in the .cgs are **retired** and must not be
+            //    recycled for another meaning (see the retirement notes in
+            //    <c>ModSettings</c>).
 
-            // ★ 準備が隆起より先行する距離（T5）。**下限は 0 ではなく 16 m** ——
-            //    0 だと「何も壊さない → 何も上がらない → 進捗が動かない」の輪から
-            //    出られなくなる（VolcanoClearing.LeadMetres）。使う側でも
-            //    同じ下限へクランプするので、.cgs を手で書き換えても止まらない。
+            // ★ How far the clearing runs ahead of the uplift (T5). **The lower bound is
+            //    16 m, not 0** — at 0 you cannot escape the loop of "nothing is cleared →
+            //    nothing rises → progress does not move" (VolcanoClearing.LeadMetres).
+            //    The consuming side clamps to the same lower bound, so editing the .cgs by
+            //    hand cannot stall it either.
             OptionsSlider.Add(volcano, Strings.VolcanoClearingLead, Strings.VolcanoClearingLeadTip, 16f, 400f, 16f,
                 ModSettings.VolcanoClearingLeadMetres.value,
                 v => ModSettings.VolcanoClearingLeadMetres.value = (int)v);
 
-            // ★ 隆起にかけるゲーム内分（T6）。長すぎる値を入れても
-            //    UpliftSchedule.TotalTicksFor が「山頂が毎 tick 1/64 m 以上動く」上限で
-            //    切り詰めるので、**無言で隆起が止まることは無い**（罠 2）。
+            // ★ The in-game minutes spent on the uplift (T6). Even with an excessive value,
+            //    UpliftSchedule.TotalTicksFor trims it at the ceiling of "the summit moves at
+            //    least 1/64 m per tick", so **the uplift never stops silently** (trap 2).
             OptionsSlider.Add(volcano, Strings.VolcanoUpliftMinutes, Strings.VolcanoUpliftMinutesTip, 5f, 240f, 5f,
                 ModSettings.VolcanoUpliftMinutes.value,
                 v => ModSettings.VolcanoUpliftMinutes.value = (int)v);
 
-            // ★ 山肌の凹凸の強さ（%）。**0 で今日どおりの滑らかな円錐**に戻る。
-            //   形態ごとの性格（谷の本数・波長・粗さ）は Core/Volcano/VolcanoRelief が
-            //   持っていて、ここはその全体倍率 1 本だけである（つまみを増やさない）。
-            //   起伏は半径 R と最終高 H を決して超えない —— 掛け算だけで作ってあり、
-            //   実効半径は縮む向きにしか動かない（VolcanoRelief のクラス doc）。
+            // ★ The strength of the relief on the mountainside (%). **At 0 it returns to
+            //   today's smooth cone.** The character of each form (the number of gullies,
+            //   the wavelength, the roughness) lives in Core/Volcano/VolcanoRelief, and this
+            //   is the single overall multiplier on it (do not add more knobs).
+            //   The relief never exceeds the radius R or the final height H — it is built
+            //   from multiplication alone, and the effective radius only ever moves in the
+            //   direction of shrinking (see the VolcanoRelief class doc).
             OptionsSlider.Add(volcano, Strings.VolcanoReliefStrength, Strings.VolcanoReliefStrengthTip,
                 0f, VolcanoRelief.MaxStrengthUnit * 100f, 10f,
                 ModSettings.VolcanoReliefStrength.value,
                 v => ModSettings.VolcanoReliefStrength.value = (int)v);
 
-            // ★ 噴煙を描くか（T7）。**描画は main スレッドだけの機能**なので、
-            //    切っても隆起は同じように進む（実機チェックリストの項目でもある）。
+            // ★ Whether to draw the eruption plume (T7). **Drawing is a main-thread-only
+            //    feature**, so switching it off leaves the uplift progressing just the same
+            //    (this is also an item on the playtest checklist).
             volcano.AddCheckbox(Strings.VolcanoEruptionFx, ModSettings.VolcanoEruptionFx.value,
                 v => ModSettings.VolcanoEruptionFx.value = v);
-            // ★ 火山雷。噴煙の中でしか光らないので、噴煙を切ればこれも出ない。
-            //   別の設定にしてあるのは、閃光が苦手な人に噴煙ごと切らせないためである。
+            // ★ Volcanic lightning. It only flashes inside the plume, so switching the plume
+            //   off removes this as well. It is a separate setting so that someone who
+            //   dislikes the flashes does not have to switch off the plume with it.
             volcano.AddCheckbox(Strings.VolcanoLightningSetting,
                 ModSettings.VolcanoLightningFx.value,
                 v => ModSettings.VolcanoLightningFx.value = v);
 
-            // ★ 斜面を下る土煙の帯（「火砕流」の代用）。**切っても噴火も溶岩も変わらない**
-            //   —— この帯は何も壊さないし、ゲームに火砕流のエフェクトは 1 つも無い
-            //   （Strings.VolcanoPyroclasticNote がそう名乗る）。
-            //   噴火の描画とは別のつまみにしてあるのは、帯 1 本の粒子数が大きく、
-            //   これだけ切りたい人が居る見た目だからである。
+            // ★ The band of dust running down the slope (the stand-in for a "pyroclastic
+            //   flow"). **Switching it off changes neither the eruption nor the lava** —
+            //   the band destroys nothing, and the game has no pyroclastic flow effect at all
+            //   (Strings.VolcanoPyroclasticNote says as much).
+            //   It is a separate knob from the eruption visuals because a single band uses a
+            //   lot of particles, and it is the sort of effect some people want to switch off
+            //   on its own.
             volcano.AddCheckbox(Strings.VolcanoPyroclasticSetting,
                 ModSettings.VolcanoPyroclasticFx.value,
                 v => ModSettings.VolcanoPyroclasticFx.value = v);
 
-            // ★ 噴火の音。**切っても隆起も溶岩も噴煙も変わらない**（音も main スレッド
-            //   だけの機能である）。音量つまみはここに置かない ——
-            //   ゲーム本体の効果音スライダーとミュートがそのまま効くので、
-            //   2 本目を作ると「どちらが効いているのか」が分からなくなる。
+            // ★ The sound of the eruption. **Switching it off changes neither the uplift, the
+            //   lava, nor the plume** (sound is also a main-thread-only feature). No volume
+            //   knob goes here — the game's own effects slider and mute apply directly, and a
+            //   second one would leave nobody able to tell "which of the two is in effect".
             volcano.AddCheckbox(Strings.VolcanoEruptionSound,
                 ModSettings.VolcanoEruptionSound.value,
                 v => ModSettings.VolcanoEruptionSound.value = v);
 
-            // ★ 溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
-            //    上限は VolcanoLava.MaxFlows と同じ 8 —— 1 tick あたりの仕事量が
-            //    「本数 × 2 歩」で決まるので、ここが費用の上限そのものである。
+            // ★ The number of lava flows (T8). **0 disables it completely** (no lava and no
+            //    ignition). The ceiling is 8, the same as VolcanoLava.MaxFlows — the work per
+            //    tick is "flows × 2 steps", so this is the cost ceiling itself.
             OptionsSlider.Add(volcano, Strings.VolcanoLavaFlowsSetting, Strings.VolcanoLavaFlowsSettingTip, 0f, VolcanoLava.MaxFlows, 1f,
                 ModSettings.VolcanoLavaFlows.value,
                 v => ModSettings.VolcanoLavaFlows.value = (int)v);
 
-            // ★ 着火を切っても溶岩は流れる（見た目だけになる）。
+            // ★ Switching ignition off still leaves the lava flowing (it becomes purely visual).
             volcano.AddCheckbox(Strings.VolcanoLavaFireSetting, ModSettings.VolcanoLavaFire.value,
                 v => ModSettings.VolcanoLavaFire.value = v);
 
-            // ★ 溶岩の面を描くか（T9）。**切っても溶岩は流れ、地面を焦がし、
-            //    建物に火を付ける** —— T9 は他のどのタスクからも依存されていない。
+            // ★ Whether to draw the lava surface (T9). **Switch it off and the lava still
+            //    flows, still scorches the ground and still sets buildings on fire** — no
+            //    other task depends on T9.
             volcano.AddCheckbox(Strings.VolcanoLavaRenderSetting,
                 ModSettings.VolcanoLavaRender.value,
                 v => ModSettings.VolcanoLavaRender.value = v);
 
-            // ★ 火山性地震。②の設定とは無関係に効く（VolcanoTremorShake のクラス doc）。
-            //   ラベルに「揺れるだけ」と畳んである —— 説明の 1 行より、選ぶ対象の
-            //   名前に書いてあるほうが短くて確実である（このメソッドの doc の規律）。
+            // ★ Volcanic tremors. They apply independently of ②'s settings (see the
+            //   VolcanoTremorShake class doc).
+            //   "It only shakes" is folded into the label — writing it in the name of the
+            //   thing being chosen is shorter and surer than a line of explanation (the
+            //   discipline in this method's doc).
             volcano.AddCheckbox(Strings.VolcanoQuakeSetting,
                 ModSettings.VolcanoQuake.value,
                 v => ModSettings.VolcanoQuake.value = v);
 
-            // ★★ 設定画面でも不可逆であることを名乗る（設計書 §7.1）。
-            //    パネルの警告はパネルを開いた人しか読まない。
+            // ★★ State the irreversibility on the settings screen too (design doc §7.1).
+            //    The warning in the panel is only read by people who open the panel.
             helper.AddGroup(Strings.VolcanoIrreversibleWarning);
 
             var general = helper.AddGroup(Strings.GroupGeneral);
             general.AddCheckbox(Strings.IntensityUnlock, ModSettings.IntensityUnlock.value,
                 v => ModSettings.IntensityUnlock.value = v);
 
-            // 競合MOD が居るときだけ出す。居ないときはこの設定に意味が無く、
-            // 値は保存したまま既定動作（Disaster + が担当）に戻る。
+            // Shown only when a conflicting mod is present. Without one the setting means
+            // nothing, and the value is kept while behaviour returns to the default
+            // (Disaster + is in charge).
             if (ModCompat.NdrPresent)
             {
-                // 強度解放が既定 OFF になっている理由を明示する（仕様 3.3(a)）。
-                // 黙って OFF だと「設定が効いていない」と見える。
+                // State why the intensity unlock is OFF by default (spec 3.3(a)).
+                // Silently OFF looks like "the setting is not working".
                 helper.AddGroup(Strings.IntensityUnlockHandledByOther);
 
                 var compat = helper.AddGroup(Strings.NdrDetected);
 
-                // ラベル配列は static readonly にしてはいけない。型初期化時の言語で凍結する。
-                // 毎回組み直すことで言語切替に追従する。
+                // The label array must not be static readonly: it would freeze in the language
+                // as of type initialisation. Rebuilding it every time keeps it in step with a
+                // language change.
                 string[] owners = { Strings.EarthquakeOwnerOther, Strings.EarthquakeOwnerSelf };
 
                 int current = ModSettings.EarthquakeDamageOwner.value;
@@ -391,7 +430,8 @@ namespace DisasterPlus.Game
             dbg.AddCheckbox(Strings.OverlayEnabled, ModSettings.OverlayEnabled.value,
                 v => ModSettings.OverlayEnabled.value = v);
 
-            // ラベル配列は static にしないこと。型初期化時の言語で凍結する。
+            // Do not make the label array static: it would freeze in the language as of type
+            // initialisation.
             string[] keys = { "F9", "F10", "F11", "F12" };
             int[] codes = { (int)UnityEngine.KeyCode.F9, (int)UnityEngine.KeyCode.F10,
                             (int)UnityEngine.KeyCode.F11, (int)UnityEngine.KeyCode.F12 };
@@ -401,20 +441,24 @@ namespace DisasterPlus.Game
 
             dbg.AddDropdown(Strings.OverlayHotkey, keys, current2,
                 v => ModSettings.OverlayHotkey.value = codes[v]);
-            // ★ 診断ダンプの出し方はもうここに書かない。左上のショートカットの
-            //   「診断」タブに**押せるボタン**がある（DiagnosticsPanel）——
-            //   説明を減らすというのは、出し方ごと隠すことではない。
+            // ★ How to produce the diagnostic dump is no longer written here. There is
+            //   **a button you can press** on the "Diagnostics" tab of the top-left shortcut
+            //   (DiagnosticsPanel) — reducing the explanation does not mean hiding the way to
+            //   do it as well.
 
-            // Assembly-CSharp にも同名の LogChannel (ゲーム側の別物) があるため、
-            // using を足すと解決が衝突する。常に完全修飾で参照する。
+            // Assembly-CSharp also has a LogChannel of the same name (a different thing on the
+            // game's side), so adding a using would make resolution clash. Always reference it
+            // fully qualified.
             //
-            // ここに出すのは「実際にそのチャンネルのログを出している機能」だけにする。
-            // Log.Diag(key, msg) は General へ委譲されるので General は本物のスイッチだが、
-            // FireWhirl チャンネルを付けた呼び出しは 1 件も無い（設計書 5.2 が本フェーズでの
-            // 移行を禁じている: 移行すると既定 OFF になり docs/playtest-checklist.md の
-            // 手順が壊れる）。チェックボックスだけ置くと「切っても何も変わらない」
-            // 死んだ設定になるので、②〜⑤がチャンネル付きログを出すまで UI から外す。
-            // ビットと保存キーは公開契約なので消さない（LogChannel.FireWhirl は据え置き）。
+            // Only put a channel here when some feature actually emits logs on it.
+            // Log.Diag(key, msg) delegates to General, so General is a real switch, but there
+            // is not one single call carrying the FireWhirl channel (design doc 5.2 forbids
+            // migrating in this phase: migrating would turn them OFF by default and break the
+            // procedure in docs/playtest-checklist.md). A checkbox on its own would be a dead
+            // setting where "switching it off changes nothing", so it is kept out of the UI
+            // until ② to ⑤ emit logs with a channel.
+            // The bit and the saved key are a public contract and are not removed
+            // (LogChannel.FireWhirl stays as it is).
             var channels = dbg.AddGroup(Strings.LogChannels);
             channels.AddCheckbox(Strings.LogChannelGeneral,
                 DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
@@ -423,8 +467,8 @@ namespace DisasterPlus.Game
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.General)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.General));
 
-            // FireWhirl と違い、Forecast チャンネル付きの Log.Diag 呼び出しが実在する
-            // （ForecastFeature.OnSimulationTick）。このチェックボックスは死んだ設定ではない。
+            // Unlike FireWhirl, calls to Log.Diag carrying the Forecast channel really do exist
+            // (ForecastFeature.OnSimulationTick). This checkbox is not a dead setting.
             channels.AddCheckbox(Strings.LogChannelForecast,
                 DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
                     DisasterPlus.Core.Diagnostics.LogChannel.Forecast, ModSettings.LogChannelMask.value),
@@ -432,8 +476,8 @@ namespace DisasterPlus.Game
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Forecast)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Forecast));
 
-            // Forecast と同じく、Earthquake チャンネル付きの Log.Diag 呼び出しが実在する
-            // （EarthquakeFeature.OnSimulationTick）。死んだ設定ではない。
+            // As with Forecast, calls to Log.Diag carrying the Earthquake channel really do
+            // exist (EarthquakeFeature.OnSimulationTick). Not a dead setting.
             channels.AddCheckbox(Strings.LogChannelEarthquake,
                 DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
                     DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, ModSettings.LogChannelMask.value),
@@ -441,8 +485,8 @@ namespace DisasterPlus.Game
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Earthquake)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Earthquake));
 
-            // Forecast / Earthquake と同じく、Typhoon チャンネル付きの Log.Diag 呼び出しが
-            // 実在する（TyphoonFeature.OnSimulationTick）。死んだ設定ではない。
+            // As with Forecast / Earthquake, calls to Log.Diag carrying the Typhoon channel
+            // really do exist (TyphoonFeature.OnSimulationTick). Not a dead setting.
             channels.AddCheckbox(Strings.LogChannelTyphoon,
                 DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
                     DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, ModSettings.LogChannelMask.value),
@@ -450,9 +494,9 @@ namespace DisasterPlus.Game
                      v ? (ModSettings.LogChannelMask.value | DisasterPlus.Core.Diagnostics.LogChannel.Typhoon)
                        : (ModSettings.LogChannelMask.value & ~DisasterPlus.Core.Diagnostics.LogChannel.Typhoon));
 
-            // Volcano チャンネル（= 32）は⑤の Task 2 まで**定義済み・未使用**だった。
-            // VolcanoFeature.OnSimulationTick がこのチャンネル付きの Log.Diag を出すので、
-            // ここで初めて死んだ設定ではなくなる。
+            // The Volcano channel (= 32) was **defined but unused** up to ⑤'s Task 2.
+            // VolcanoFeature.OnSimulationTick emits Log.Diag carrying this channel, so as of
+            // now it stops being a dead setting.
             channels.AddCheckbox(Strings.LogChannelVolcano,
                 DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(
                     DisasterPlus.Core.Diagnostics.LogChannel.Volcano, ModSettings.LogChannelMask.value),

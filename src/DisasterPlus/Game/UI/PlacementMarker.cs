@@ -4,36 +4,38 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 地点を指すときの**バニラと同じ的（まと）**を出す。main スレッド専用。
+    /// Shows **the same target marker as vanilla** when pointing at a spot. Main thread only.
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── The request (2026-08-22) ─────────────────────────────────
     ///
-    /// &gt; 台風・火山それぞれ場所を指定するときにほかの災害と同様の
-    /// &gt; ターゲティングマークを使いたいです。
+    /// &gt; When picking a spot for the typhoon and the volcano, I'd like to use the same
+    /// &gt; targeting mark as the other disasters.
     ///
-    /// ── ★★ 描き直さない。**バニラのメソッドをそのまま呼ぶ** ─────────────────
+    /// ── ★★ Do not redraw it. **Call vanilla's method as-is** ─────────────────
     ///
-    /// <c>DisasterTool.RenderOverlay(CameraInfo, DisasterInfo, Vector3, float, Color)</c> は
-    /// <b><c>public static</c></b> である（IL 実測）。バニラの災害が的を出しているのは
-    /// この 1 本で、⑤と④のツールからも同じものを呼べる。
-    /// **同じ絵になることが保証される**のが要点で、似せて描くのとは違う。
+    /// <c>DisasterTool.RenderOverlay(CameraInfo, DisasterInfo, Vector3, float, Color)</c> is
+    /// <b><c>public static</c></b> (measured from the IL). This one method is what draws the
+    /// marker for vanilla's disasters, and ⑤'s and ④'s tools can call the very same thing.
+    /// The point is that **the picture is guaranteed to be identical**, which is not the same
+    /// as drawing something that looks similar.
     ///
-    /// 中身も読んである:
+    /// The body has been read too:
     ///
     /// <code>
-    /// if (info == null) return;                       ← info は**これだけにしか使わない**
-    /// if (ToolController.m_mode &amp; 16) → DrawCircle(半径 100)          （情報ビュー）
+    /// if (info == null) return;                       ← info is used for **nothing else**
+    /// if (ToolController.m_mode &amp; 16) → DrawCircle(radius 100)        (info view)
     /// else if (m_mode &amp; 1)          → DrawQuad(400×400,
-    ///                                     DisasterProperties.m_targetTexture) （通常）
+    ///                                     DisasterProperties.m_targetTexture) (normal)
     /// </code>
     ///
-    /// ★★ <b><c>info</c> は null 検査にしか使われない。</b>
-    ///   だから「⑤にふさわしい <c>DisasterInfo</c>」を探す必要は無く、
-    ///   読み込まれているものを 1 つ借りれば的の絵は同じである
-    ///   （<see cref="AnyDisasterInfo"/>）。**推測ではなく IL で確かめてある。**
+    /// ★★ <b><c>info</c> is used only for the null check.</b>
+    ///   So there is no need to hunt for "the <c>DisasterInfo</c> that suits ⑤"; borrow any
+    ///   one that is loaded and the marker looks the same
+    ///   (<see cref="AnyDisasterInfo"/>). **Confirmed in the IL, not guessed.**
     ///
-    /// ★ 1 つも読み込まれていない環境（ND DLC 非所持など）では的が出ない。
-    ///   そのときも<b>クリックそのものは効く</b> —— 的は目印であって、門ではない。
+    /// ★ In an environment where none is loaded (ND DLC not owned, and so on) no marker
+    ///   appears. <b>The click itself still works</b> even then — the marker is a guide,
+    ///   not a gate.
     /// </summary>
     public static class PlacementMarker
     {
@@ -42,13 +44,13 @@ namespace DisasterPlus.Game
         private static bool _missLogged;
 
         /// <summary>
-        /// 的を 1 つ描く。<paramref name="position"/> は世界座標。
-        /// **描けない環境では黙って何もしない**（クラス doc）。
+        /// Draw one marker. <paramref name="position"/> is in world coordinates.
+        /// **Quietly does nothing where it cannot be drawn** (see the class doc).
         /// </summary>
         /// <param name="color">
-        /// 的の色。**呼び出し元が <c>ToolBase.GetToolColor</c> で作ること** ——
-        /// あれは <c>protected</c> なので、<c>ToolBase</c> を継いでいるツールからしか
-        /// 呼べない（この型はツールでは無い）。
+        /// The marker colour. **The caller must produce it with <c>ToolBase.GetToolColor</c>** —
+        /// that is <c>protected</c>, so it can only be called from a tool deriving from
+        /// <c>ToolBase</c> (this type is not a tool).
         /// </param>
         public static void Render(RenderManager.CameraInfo cameraInfo, Vector3 position,
                                   Color color)
@@ -61,19 +63,19 @@ namespace DisasterPlus.Game
             DisasterTool.RenderOverlay(cameraInfo, info, position, 0f, color);
         }
 
-        /// <summary>レベルアンロード時。**参照を持ち越さない。**</summary>
+        /// <summary>On level unload. **Do not carry the reference over.**</summary>
         public static void Reset()
         {
             _cached = null;
             _searched = false;
-            // _missLogged は戻さない（この環境に対する事実である）。
+            // _missLogged is not reset (it is a fact about this environment).
         }
 
         /// <summary>
-        /// 読み込まれている <c>DisasterInfo</c> を 1 つ。**どれでもよい**
-        /// （クラス doc の IL 実測 —— null 検査にしか使われない）。
+        /// Any one loaded <c>DisasterInfo</c>. **It does not matter which**
+        /// (measured from the IL in the class doc — it is used only for the null check).
         ///
-        /// 探すのは 1 度だけ。<c>PrefabCollection</c> の走査を毎フレームやらない。
+        /// The search happens only once. Do not sweep <c>PrefabCollection</c> every frame.
         /// </summary>
         private static DisasterInfo AnyDisasterInfo()
         {

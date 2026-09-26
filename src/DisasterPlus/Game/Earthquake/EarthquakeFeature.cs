@@ -3,20 +3,23 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ②地震。バニラが既に持っている決定論的な強度モデル（震央距離の線形ランプと、
-    /// 建物ごとに固定された乱数しきい値）を**そのまま可視化**する機能。
+    /// Feature ②, earthquakes. It **visualises as it stands** the deterministic intensity
+    /// model vanilla already has (a linear ramp in epicentral distance, plus a random
+    /// threshold fixed per building).
     ///
-    /// このタスク（Task 3）の時点では**パネルの無い機能**である。やることは
-    /// sim スレッドで読んで <see cref="EarthquakeHub"/> へ publish することと、
-    /// **プレハブ 4 値を診断ダンプに出すこと**だけ。その 4 値
-    /// （<c>m_crackLength</c> / <c>m_crackWidth</c> / <c>m_emergingDuration</c> /
-    /// <c>m_activeDuration</c>）は **DLL に実数値が無く**（IL 事実文書 §A-0）、
-    /// ②の以後の持続時間の設計が全てその上に乗るので、先に実機で 1 回測る。
+    /// As of this task (Task 3) it is **a feature with no panel**. All it does is read on
+    /// the sim thread, publish to <see cref="EarthquakeHub"/>, and **print the four prefab
+    /// values in the diagnostic dump**. Those four (<c>m_crackLength</c>,
+    /// <c>m_crackWidth</c>, <c>m_emergingDuration</c>, <c>m_activeDuration</c>) have
+    /// **no actual values anywhere in the DLL** (IL facts doc §A-0), and every later
+    /// duration design in ② rests on them, so we measure them once in the running game
+    /// first.
     ///
-    /// <see cref="IPausedTickFeature"/> を実装しているのは①と同じ理由
-    /// （ロード直後にポーズしたままパネルを開くと全行が「読み取れません」になる）。
-    /// **ただし②はやがてゲームの状態を進める**（Task 9 の津波生成、Task 10 の追加被害）。
-    /// その契約を守る仕掛けは <see cref="OnSimulationTick"/> の中にある。
+    /// It implements <see cref="IPausedTickFeature"/> for the same reason as ① (opening
+    /// the panel while still paused right after a load would make every row say "cannot
+    /// be read"). **But ② will eventually advance game state** (Task 9's tsunami and
+    /// Task 10's extra damage). The machinery that keeps that contract is inside
+    /// <see cref="OnSimulationTick"/>.
     /// </summary>
     public class EarthquakeFeature : IDisasterFeature, IPausedTickFeature
     {
@@ -30,100 +33,114 @@ namespace DisasterPlus.Game
             EarthquakeReader.Reset();
             CameraShakeBooster.Reset();
             SeismographRecorder.Reset();
-            // ★ 予約は都市をまたいで残らない（第 2 層はセッション状態で、セーブにも入れない）。
+            // ★ A schedule never survives from one city to the next (layer 2 is session
+            //   state and is not put in the save either).
             TsunamiChain.Reset();
-            // ★★ 海溝型地震の災害 ID も持ち越さない。持ち越すと、次の都市で
-            //    同じ番号を取ったバニラの地震が「海溝型」と誤認され、津波が付く。
+            // ★★ Do not carry the trench earthquake's disaster ID over either. Carry it
+            //    and in the next city a vanilla earthquake that takes the same number is
+            //    mistaken for a trench quake and gets a tsunami.
             TrenchQuakeSlot.Reset();
-            // ★★ **置いた水波を必ず解放する。** WaterWave は Serialize を持ち
-            //    DisasterData.m_waveIndex で持たれる ＝ セーブに焼き付くので、
-            //    残すと MOD を外しても都市に残り続ける（TsunamiWave のクラス doc）。
+            // ★★ **Always release any water waves placed.** A WaterWave has a Serialize
+            //    and is held by DisasterData.m_waveIndex, i.e. it is baked into the save,
+            //    so one left behind stays in the city even after the mod is removed (see
+            //    TsunamiWave's class doc).
             TsunamiWave.Reset();
             TsunamiRing.Reset();
             SeaWatch.Reset();
             LongPeriodDamage.Reset();
             TrenchQuakeDistantDamage.Reset();
 
-            // ★★ **ToolController は都市ごとに作り直される**ので、毎レベルロードで
-            //    登録し直す。忘れると「タイルは押せるのにカーソルが変わらない」
-            //    という、例外の出ない壊れ方をする
-            //    （<c>TrenchQuakePlacementTool</c> / ⑤のクラス doc）。
+            // ★★ **ToolController is rebuilt for every city**, so re-register on every
+            //    level load. Forget to and you get a breakage with no exception: "the
+            //    tile can be clicked but the cursor never changes" (see
+            //    <c>TrenchQuakePlacementTool</c> / ⑤'s class doc).
             ToolRegistration.Register<TrenchQuakePlacementTool>();
 
-            // ★★ 海溝型地震は Harmony パッチに依存している
-            //    （<c>TrenchQuakeNoCrackPatch</c>: 地面を割らない）。
-            //    <c>Install</c> は冪等なので、③と重ねて呼んでよい ——
-            //    **③を外した日に②が黙って壊れないように、ここでも呼ぶ。**
+            // ★★ The trench earthquake depends on a Harmony patch
+            //    (<c>TrenchQuakeNoCrackPatch</c>: do not crack the ground).
+            //    <c>Install</c> is idempotent, so calling it here as well as in ③ is fine
+            //    — **we call it here so that ② does not silently break the day ③ is
+            //    removed.**
             HarmonyBootstrap.Install();
 
-            // 震度分布オーバーレイ。**main スレッド。** 登録は
-            // RenderManager の静的リストへの追加で、外す API が存在しない
-            // （OverlayRenderable のクラス doc）ので、この呼び出しは
-            // プロセスにつき 1 回しか効かない。以後の都市では
-            // 「このセッションでは描いてよい」を立て直すだけになる。
+            // The seismic-intensity overlay. **Main thread.** Registering adds to a static
+            // list on RenderManager, and there is no API to remove one (see
+            // OverlayRenderable's class doc), so this call only has an effect once per
+            // process. In later cities it only re-raises "drawing is allowed in this
+            // session".
             EarthquakeOverlay.EnsureRegistered();
         }
 
         /// <summary>
-        /// sim スレッド。<c>DisasterManager</c> / <c>ImmaterialResourceManager</c> /
-        /// <c>SimulationManager</c> の読み取りは必ずここで行う。
+        /// Sim thread. Reads of <c>DisasterManager</c>,
+        /// <c>ImmaterialResourceManager</c> and <c>SimulationManager</c> always happen
+        /// here.
         ///
-        /// ポーズ中（deltaMinutes == 0）にも呼ばれる（<see cref="IPausedTickFeature"/>）。
+        /// It is called while paused too (deltaMinutes == 0; see
+        /// <see cref="IPausedTickFeature"/>).
         /// </summary>
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
-            // ★★ **津波の外力だけは、設定より先に必ず進める。**（2026-08-30、最終検証）
-            //    ここより下に置くと、津波の最中に設定を切られたときに
-            //    <c>TsunamiWave.Tick</c> が呼ばれなくなる。書き換えが止まると
-            //    ソルバが 3 水ステップで水波を解放し、こちらの台帳だけが
-            //    生きたハンドルを持ったまま残る —— その枠は
-            //    <c>SplashWater</c>（隕石・地震の水柱）に再利用されるので、
-            //    次に書いたときに<b>他人の波を踏む</b>。
-            //    走っていなければ即 return するので、ただの空振りである。
-            // ★ 旧 TYPE_IMPACT の波は誰も Begin しないので、Tick は永久に空振りする。
-            //   呼ぶのをやめる（TsunamiWave のクラス doc: 残しているのは
-            //   DepthAt と、旧版の波が残る都市のための Reset だけである）。
+            // ★★ **The tsunami's force alone is always advanced before the settings are
+            //    consulted.** (2026-08-30, final verification) Put it below this point and
+            //    <c>TsunamiWave.Tick</c> stops being called if the setting is switched off
+            //    mid-tsunami. Once the rewriting stops, the solver releases the water wave
+            //    within 3 water steps, leaving our register alone holding what it thinks
+            //    is a live handle — and that slot gets reused by <c>SplashWater</c> (the
+            //    water plumes from meteors and earthquakes), so the next write <b>tramples
+            //    somebody else's wave</b>.
+            //    It returns immediately when nothing is running, so it is a no-op.
+            // ★ Nobody calls Begin on the old TYPE_IMPACT wave, so its Tick would swing at
+            //   nothing forever. We stop calling it (see TsunamiWave's class doc: all that
+            //   is kept there is DepthAt, and Reset for cities where the old version's
+            //   waves survive).
 
-            // ★★ **震源から同心円に立つ本体。**（2026-08-31、所有者の指示）
-            //    <c>TsunamiWave</c>（TYPE_IMPACT の丘）と違い、これは
-            //    <b>水を作る</b>ので波が遠くまで落ちない。上と同じ理由で
-            //    設定より先に必ず進める —— 止めると水源が置きっぱなしになり、
-            //    <b>セーブに焼き付いて永久に水が湧く</b>（TsunamiRing のクラス doc）。
+            // ★★ **The real thing that rises in circles from the hypocentre.**
+            //    (2026-08-31, the owner's instruction) Unlike <c>TsunamiWave</c>
+            //    (TYPE_IMPACT's hill), this one <b>creates water</b>, so the wave does not
+            //    collapse before it gets far. It is advanced before the settings for the
+            //    same reason as above — stop it and the water source is left in place,
+            //    <b>baked into the save and pouring water out forever</b> (see
+            //    TsunamiRing's class doc).
             TsunamiRing.Tick(frameIndex);
 
-            // ★★ **海全体の物差し。**（2026-08-31、所有者の提案）
-            //    バニラの津波でもこちらの波でも<b>同じ 1 行</b>が出る。
-            //    設定にも機能にも紐づけない —— 比べることが目的だからである。
+            // ★★ **The ruler for the whole sea.** (2026-08-31, the owner's suggestion)
+            //    It prints <b>the same one line</b> for vanilla's tsunami and for ours.
+            //    It is tied to no setting and no feature — comparison is the whole point.
             SeaWatch.Tick(frameIndex);
 
-            // ★★ **終わった海溝型は忘れる。**（2026-08-30、第 4 回検証）
-            //    <c>IsTrenchQuake</c> はスロットが空いていたら自分で忘れるが、
-            //    それを呼ぶのは Harmony の前置きと <c>TsunamiChain</c> だけで、
-            //    どちらも<b>生きている災害しか見ない</b>。だから
-            //    <c>LastId</c> はセッションのあいだ 0 に戻らず、
-            //    診断が「海溝型のために走っている」と言い続けていた。
-            //    毎 tick 1 回だけ確かめる（配列 1 読みなのでただ同然）。
+            // ★★ **Forget a trench quake that has ended.** (2026-08-30, fourth round of
+            //    verification) <c>IsTrenchQuake</c> forgets of its own accord once the
+            //    slot is free, but the only callers are the Harmony prefix and
+            //    <c>TsunamiChain</c>, and <b>both of them only look at live disasters</b>.
+            //    So <c>LastId</c> never returned to 0 for the rest of the session, and the
+            //    diagnostics went on saying "running for a trench quake".
+            //    Check it once per tick (one array read, so effectively free).
             TrenchQuakeSlot.IsTrenchQuake(TrenchQuakeSlot.LastId);
 
-            // ★★ **海溝型を置いたあとは、パネルの設定で止めない。**（第 3 回検証）
-            //    <c>EarthquakeEnabled</c> は「地震パネルを出すか」の設定だが、
-            //    ここで早期 return すると <c>TsunamiChain.Tick</c> まで飛ぶ。
-            //    一方タイル（<c>DisasterPanelBar</c>）は <c>TrenchQuakeEnabled</c> しか
-            //    見ていないので、<b>タイルは押せる・地震は起きる・断層は抑止される・
-            //    でも津波だけ永久に来ない</b>という、説明の出ない壊れ方になっていた。
+            // ★★ **Once a trench quake has been placed, the panel's setting must not
+            //    stop it.** (third round of verification) <c>EarthquakeEnabled</c> is the
+            //    setting for "show the earthquake panel", but returning early here also
+            //    skips right past <c>TsunamiChain.Tick</c>. The tile
+            //    (<c>DisasterPanelBar</c>), meanwhile, only looks at
+            //    <c>TrenchQuakeEnabled</c>, so you got an unexplained breakage: <b>the
+            //    tile works, the earthquake happens, the fault is suppressed — and the
+            //    tsunami alone never comes.</b>
             if (!ModSettings.EarthquakeEnabled.value && TrenchQuakeSlot.LastId == 0) return;
 
-            // ここまでが「読んで publish するだけ」。ポーズ中もここは通る。
+            // Everything up to here is "just read and publish". This is reached while
+            // paused too.
             var snapshot = EarthquakeReader.Read();
             EarthquakeHub.Publish(snapshot);
 
-            // Earthquake チャンネルは既定 OFF。この if が無いと、下の ToString と
-            // 文字列連結が毎 sim tick（通常速度でおよそ 50 回/秒）実行されてから
-            // Log.Diag に捨てられる——C# は引数を呼び出し前に評価し切るので、
-            // Diag の内側のマスク判定では手遅れになる。
+            // The Earthquake channel is off by default. Without this `if`, the ToString
+            // calls and string concatenation below run every sim tick (roughly 50 times a
+            // second at normal speed) and are then thrown away by Log.Diag — C# evaluates
+            // the arguments fully before the call, so the mask check inside Diag comes too
+            // late.
             //
-            // ①の ForecastFeature と違い、ここは early-return にしてはいけない。
-            // 下のポーズガードと第 2 層の処理を丸ごと飛ばすことになる。
+            // Unlike ①'s ForecastFeature, this must not be an early return. That would
+            // skip the pause guard below and all of layer 2's processing.
             if (Log.DiagEnabled(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake))
             {
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "earthquake",
@@ -134,64 +151,74 @@ namespace DisasterPlus.Game
                         : "snapshot invalid");
             }
 
-            // ★ ここから下は状態を進める。ポーズ中（deltaMinutes == 0）は絶対に通さない。
-            //    Task 9 / Task 10 が足す処理は必ずこの行より下に置くこと。
-            //    このコメントを消すと「ポーズ中に地震の被害が進む」が起きる。
+            // ★ Everything below this advances state. Never let it through while paused
+            //    (deltaMinutes == 0). Anything Tasks 9 and 10 add must go below this line.
+            //    Delete this comment and you get "earthquake damage advances while the
+            //    game is paused".
             if (deltaMinutes <= 0f) return;
 
-            // 地震計の位置で 1 サンプル取る。**必ずポーズガードより下**。
-            // ポーズ中はゲーム内時間が進んでいないので地動も進んでおらず、
-            // ここで貯め続けると波形だけが伸びる嘘になる。
+            // Take one sample at each seismograph's position. **Always below the pause
+            // guard.** No game time passes while paused, so no ground motion does either,
+            // and accumulating here would make the waveform alone grow — a lie.
             SeismographRecorder.Sample(snapshot, frameIndex);
 
-            // ★ 第 2 層。**既定 OFF**（ModSettings.EarthquakeTsunamiChain の doc）。
-            //    設定を見てから呼ぶことで、OFF のときは TsunamiChain の状態が
-            //    Idle のまま一切進まない＝パネルにも節が出ない。
-            // ★★ **海溝型地震は設定に関係なく必ず連鎖させる。**（2026-08-25、実機報告
-            //    「海溝型地震の後に津波がすぐに発生してほしいのですが発生しません」）
+            // ★ Layer 2. **Off by default** (see ModSettings.EarthquakeTsunamiChain's
+            //    doc). Checking the setting before calling means that when it is off,
+            //    TsunamiChain's state stays Idle and never advances at all, so no section
+            //    appears in the panel either.
+            // ★★ **A trench earthquake always chains, regardless of the setting.**
+            //    (2026-08-25, from the game: "I want the tsunami to happen right after a
+            //    trench earthquake, but it does not")
             //
-            //    <c>eqTsunamiChain</c> は<b>既定 OFF</b> である。あれは
-            //    「バニラの地震にも津波を付けるか」という設定だった頃のもので、
-            //    そのままにしていたので**新設した海溝型地震まで黙って止めていた。**
+            //    <c>eqTsunamiChain</c> is <b>off by default</b>. That dates from when it
+            //    was the setting for "should vanilla earthquakes get a tsunami too", and
+            //    leaving it as it was meant **it was silently stopping the newly added
+            //    trench earthquake as well.**
             //
-            //    海溝型地震は<b>津波を起こすためだけに在る災害</b>である。
-            //    そこに「既定でオフのスイッチ」を挟んだら、タイルを押しても
-            //    何も起きないのが既定の挙動になる —— それは設計として壊れている。
+            //    A trench earthquake is <b>a disaster that exists solely to bring a
+            //    tsunami</b>. Put a switch that is off by default in front of that and the
+            //    default behaviour becomes "click the tile and nothing happens" — which is
+            //    broken as a design.
             //
-            //    ★ 旧設定は**バニラの地震には今も効かない**（TsunamiChain の
-            //      PickCandidate が海溝型しか採らない）。残してあるのは
-            //      「海溝型でも津波を切りたい」人のための口としてである。
+            //    ★ The old setting **still has no effect on vanilla earthquakes**
+            //      (TsunamiChain's PickCandidate only picks trench quakes). It is kept as
+            //      a way out for anyone who wants to turn the tsunami off even for trench
+            //      quakes.
             if (ModSettings.EarthquakeTsunamiChain.value
                 || TrenchQuakeSlot.LastId != 0)
             {
                 TsunamiChain.Tick(snapshot, frameIndex);
             }
 
-            // ★ 第 2 層その 2。**既定 OFF**（ModSettings.EarthquakeLongPeriod の doc）。
-            //    これは津波と違い、**バニラなら倒れなかった建物を実際に倒す**。
-            //    設定を見てから呼ぶので、OFF のときは走査そのものが 1 回も走らない。
+            // ★ Layer 2, part 2. **Off by default** (see
+            //    ModSettings.EarthquakeLongPeriod's doc). Unlike the tsunami, this
+            //    **actually brings down buildings that would have survived in vanilla**.
+            //    The setting is checked before calling, so when it is off the sweep never
+            //    runs even once.
             if (ModSettings.EarthquakeLongPeriodStrength.value > 0)
             {
                 LongPeriodDamage.Apply(snapshot, deltaMinutes);
             }
 
-            // ★★ 海溝型の遠地被害。**海溝型地震にしか効かない**ので、
-            //    設定のチェックボックスは持たず強さのスライダーだけで抑える
-            //    （ModSettings.EarthquakeTrenchDamageStrength の doc）。
-            //    0 のときは走査そのものが 1 回も走らない。
+            // ★★ The trench quake's distant damage. **It only affects trench
+            //    earthquakes**, so it has no checkbox of its own and is controlled by the
+            //    strength slider alone (see
+            //    ModSettings.EarthquakeTrenchDamageStrength's doc).
+            //    At 0 the sweep never runs even once.
             TrenchQuakeDistantDamage.Apply(snapshot, deltaMinutes);
         }
 
-        /// <summary>main スレッド。パネル・ボタンの設置と、表示中のみの内容更新はここから。</summary>
+        /// <summary>Main thread. Creating the panel and buttons, and updating content only while visible, all start here.</summary>
         public void OnMainThreadUpdate()
         {
-            // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
+            // The buttons are owned as a set of four by DisasterPanelBar (called by
+            // FeatureHost).
             EarthquakePanel.Tick();
 
-            // ★ パネルが閉じていても必ず呼ぶ。カメラの揺れはパネルの表示物ではなく、
-            //    ゲーム側が毎フレーム消費してリセットする値なので（§A-7、
-            //    CameraController.LateUpdate の最後の 1 行が Vector3.zero を書く）、
-            //    毎フレーム足し続けない限り効かない。
+            // ★ Always call this, even with the panel closed. The camera shake is not
+            //    something the panel displays; it is a value the game consumes and resets
+            //    every frame (§A-7: the last line of CameraController.LateUpdate writes
+            //    Vector3.zero), so it has no effect unless we keep adding every frame.
             CameraShakeBooster.Update();
         }
 
@@ -199,49 +226,57 @@ namespace DisasterPlus.Game
         {
             EarthquakeHub.Clear();
             EarthquakeReader.Reset();
-            // 揺れの加算を止める。バニラが毎フレーム m_cameraShake をゼロに戻すので、
-            // ここで止めれば残留オフセットは残らない（§A-7）。
+            // Stop adding shake. Vanilla resets m_cameraShake to zero every frame, so
+            // stopping here leaves no residual offset (§A-7).
             CameraShakeBooster.Reset();
-            // 波形は**セーブにも次の都市にも持ち越さない**（設計書 §3.5）。
+            // The waveforms are **carried over neither into the save nor into the next
+            // city** (design doc §3.5).
             SeismographRecorder.Reset();
-            // ★ 予約したまま撃っていない津波を、都市をまたいで持ち越さない。
-            //    ここを忘れると 2 つ目の都市で、起きてもいない地震の津波が来る。
+            // ★ Do not carry a tsunami that was scheduled and never fired across cities.
+            //    Forget this and the second city gets a tsunami from an earthquake that
+            //    never happened.
             TsunamiChain.Reset();
-            // ★ 走査の途中状態と診断カウンタ、そして Degraded の自己申告を下ろす。
+            // ★ Clear the sweep's partial state, the diagnostic counters, and the
+            //   self-reported degraded state.
             LongPeriodDamage.Reset();
             TrenchQuakeDistantDamage.Reset();
-            // ★ オーバーレイを止める。登録は外せないので、描かないことを
-            //    こちらの状態で保証する（EarthquakeOverlay.Reset の doc）。
-            //    これを忘れると、都市を出た直後の数フレームに前の都市の
-            //    震央が地図に描かれる。
+            // ★ Stop the overlay. The registration cannot be removed, so we guarantee it
+            //    draws nothing through our own state (see EarthquakeOverlay.Reset's doc).
+            //    Forget this and the previous city's epicentre is drawn on the map for
+            //    the first few frames after leaving it.
             EarthquakeOverlay.Reset();
-            // ★ 海溝型地震の災害 ID を持ち越さない。持ち越すと、次の都市で
-            //   同じ番号を取ったバニラの地震が「海溝型」と誤認され、津波が付く。
+            // ★ Do not carry the trench earthquake's disaster ID over. Carry it and in the
+            //   next city a vanilla earthquake that takes the same number is mistaken for
+            //   a trench quake and gets a tsunami.
             TrenchQuakeSlot.Reset();
-            // ★★ **ここが最後の砦である。** 置いた水波を解放しないとセーブに残る。
+            // ★★ **This is the last line of defence.** Without releasing the water waves
+            //    placed, they stay in the save.
             TsunamiWave.Reset();
-            // ★★ 水源はもっと重い —— WaterWave と違い**寿命が無い**ので、
-            //    残すとその都市で永久に水が湧く（TsunamiRing のクラス doc §3）。
+            // ★★ The water source is worse still — unlike a WaterWave it **has no
+            //    lifetime**, so one left behind pours water into that city forever (see
+            //    TsunamiRing's class doc §3).
             TsunamiRing.Reset();
             SeaWatch.Reset();
-            // 2 つ目の都市が、ボタン 1 個・パネル 1 枚で始まるようにする。
-            // EarthquakePanel.Destroy() が波形テクスチャ（Texture2D）も破棄する
-            // —— GameObject と違って Unity は勝手に回収しないので、これを
-            // 忘れると都市をまたぐたびに 320x80 のテクスチャが 1 枚ずつ残る。
-            // ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
+            // Make sure the second city starts with one button and one panel.
+            // EarthquakePanel.Destroy() also destroys the waveform texture (a Texture2D) —
+            // unlike a GameObject, Unity does not collect it by itself, so forgetting this
+            // leaves one more 320x80 texture behind with every city change.
+            // The button is removed by FeatureHost.LevelUnloading via
+            // DisasterPanelBar.Remove.
             EarthquakePanel.Destroy();
         }
 
         /// <summary>
-        /// **このタスクの主目的。** プレハブ 4 値と sim スレッドの時計、そして
-        /// 進行中の地震の生の値を、そのままダンプに出す。
+        /// **This task's main purpose.** Prints the four prefab values, the sim thread's
+        /// clock and the raw values of the earthquakes in progress, all as they stand.
         /// </summary>
         public void WriteDiagnostics(DiagnosticBuilder b)
         {
             b.Line(1, "enabled", ModSettings.EarthquakeEnabled.value ? "yes" : "no");
 
-            // ★★ **津波が付くのは海溝型だけ**であることを診断で名乗る。
-            //    名乗らないと「地震を起こしたのに津波が来ない」を不具合と読まれる。
+            // ★★ Say in the diagnostics that **only a trench quake brings a tsunami**.
+            //    Without saying so, "I raised an earthquake but no tsunami came" is read
+            //    as a fault.
             b.Line(1, "trench quake", ModSettings.TrenchQuakeEnabled.value
                 ? (TrenchQuakeSlot.LastId != 0
                     ? "last raised as disaster " + TrenchQuakeSlot.LastId + " at ("
@@ -254,16 +289,18 @@ namespace DisasterPlus.Game
                      ? "  (last refusal: " + TrenchQuakeSlot.Detail + ")" : "")
                 : "off (setting)");
 
-            // ★ 地面を割らないのは**意図**である。名乗らないと「断層が出ない」を
-            //   不具合と読まれる（逆に、出てしまったときはここが 0 のままになる）。
+            // ★ Not cracking the ground is **deliberate**. Without saying so, "no fault
+            //   line appears" is read as a fault (and conversely, when one does appear,
+            //   this number stays at 0).
             b.Line(2, "terrain crack", HarmonyBootstrap.Installed
                 ? "suppressed for trench quakes (" + TrenchQuakeStepPatch.SuppressedCracks
                   + " skipped so far); the game's own earthquakes still crack normally"
                 : "NOT SUPPRESSED - Harmony is not installed, so a trench quake will "
                   + "open a fissure like a fault quake");
 
-            // ★★ 津波は DLC の TsunamiAI ではなく、震源に置いた WaterSource
-            //    （TYPE_NATURAL）である。**どちらが動いているか**を名乗らないと調査できない。
+            // ★★ The tsunami is not the DLC's TsunamiAI but a WaterSource (TYPE_NATURAL)
+            //    placed on the hypocentre. Without saying **which of the two is running**,
+            //    nobody can investigate it.
             b.Line(2, "tsunami", TsunamiRing.Running
                 ? "the sea over the epicentre is being held "
                   + TsunamiRing.OffsetMetres.ToString("F1")
@@ -295,8 +332,9 @@ namespace DisasterPlus.Game
             var snapshot = EarthquakeHub.Latest;
             b.Line(1, "snapshot", snapshot == null ? "none yet" : (snapshot.Valid ? "valid" : "INVALID"));
 
-            // UI の状態は snapshot の有無に関わらず出す。「パネルが開かない」
-            // 「ボタンが予報ボタンに重なった」の調査に、地震が起きている必要は無い。
+            // The UI state is printed whether or not there is a snapshot. Investigating
+            // "the panel does not open" or "the button ended up on top of the forecast
+            // button" does not need an earthquake to be happening.
             WriteUiState(b, snapshot);
 
             if (snapshot == null || !snapshot.Valid) return;
@@ -314,15 +352,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **設定画面から降ろした解説の行き場**（<c>Mod.OnSettingsUI</c> の doc の表）。
+        /// **Where the explanations taken off the settings screen ended up** (the table in
+        /// <c>Mod.OnSettingsUI</c>'s doc).
         ///
-        /// 所有者の指示は「Option 画面も説明書きが長すぎます」だった。何をする設定かは
-        /// チェックボックスのラベルが名乗っているので、**「バニラはこうしている」という
-        /// 事実**だけがここへ来る。テスターと不具合報告が読むのはこのファイルであり、
-        /// 設定を選ぼうとしている人が読む場所ではない。
+        /// The owner's instruction was "the Options screen has too much explanatory text
+        /// as well". What a setting does is already named by the checkbox's label, so only
+        /// **the facts of the form "this is what vanilla does"** come here. This file is
+        /// what testers and fault reports read; it is not where somebody choosing a
+        /// setting reads.
         ///
-        /// ★ ここは sim スレッドである（<c>DiagnosticDump</c> のクラス doc）。
-        ///   ゲームのバッファにも UI にも触らない、定数の行だけにすること。
+        /// ★ This is the sim thread (<c>DiagnosticDump</c>'s class doc). Touch neither the
+        ///   game's buffers nor the UI — keep it to lines of constants only.
         /// </summary>
         private static void WriteNotes(DiagnosticBuilder b)
         {
@@ -343,18 +383,22 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 第 2 層（長周期地震動）の状態。**「建物が余分に倒れたか」の切り分けは
-        /// ここでしかできない。** 倒れない理由は 6 通りあり（設定が OFF ／強さ 0 ／
-        /// 進行中の地震が Active でない ／範囲内に高層が無い ／高さが読めない ／
-        /// バニラが倒壊を断った）、画面上はどれも「何も起きない」で同じ顔になる。
+        /// The state of layer 2 (long-period ground motion). **Telling "did extra
+        /// buildings come down" apart can only be done here.** There are six reasons
+        /// nothing falls (the setting is off / strength 0 / the quake in progress is not
+        /// Active / there are no tall buildings in range / the height cannot be read /
+        /// vanilla refused the collapse), and on screen every one of them wears the same
+        /// face: "nothing happens".
         ///
-        /// **倒壊 0 のときも必ず全数字を出す**（③で「延焼が動いているか診断から
-        /// 一切見えなかった」失敗を繰り返さない）。
+        /// **Always print every number, including when the collapse count is 0** (so as
+        /// not to repeat ③'s failure, where "is the fire spread working" was completely
+        /// invisible from the diagnostics).
         /// </summary>
         /// <summary>
-        /// 海溝型の遠地被害。**倒壊も出火も 0 のときに全数字を出す**のがこの節の
-        /// 存在理由である —— 「機能が死んでいる」と「範囲に建物が無い」は、
-        /// 画面上ではどちらも「何も起きない」で同じ顔になる。
+        /// The trench quake's distant damage. **Printing every number when both the
+        /// collapses and the fires are 0** is the reason this section exists — "the
+        /// feature is dead" and "there are no buildings in range" both wear the same face
+        /// on screen: "nothing happens".
         /// </summary>
         private static void WriteTrenchDistant(DiagnosticBuilder b)
         {
@@ -411,9 +455,9 @@ namespace DisasterPlus.Game
                    / LongPeriodResponse.PeriodFramesPerMetre).ToString("F0")
                 + " m, range = " + LongPeriodResponse.RangeFactor.ToString("F0")
                 + "x the vanilla disc, ceiling "
-                // ★ 0.25 とだけ書かない。時間帯係数はモデルのクランプの**後**に
-                //    掛かるので、実際に使われる上限は 0.25 x 1.15 である
-                //    （LongPeriodResponse.MaxExtraChance の doc / 第 2 層レビュー M8）。
+                // ★ Do not write just 0.25. The time-of-day factor is applied **after**
+                //    the model's clamp, so the ceiling actually used is 0.25 x 1.15
+                //    (LongPeriodResponse.MaxExtraChance's doc / layer 2 review M8).
                 + (LongPeriodResponse.MaxExtraChance * 100f).ToString("F1") + "% x up to "
                 + TimeOfDayFactor.NightFactor.ToString("F2") + " time-of-day = "
                 + (LongPeriodResponse.MaxExtraChance * TimeOfDayFactor.NightFactor * 100f)
@@ -430,7 +474,8 @@ namespace DisasterPlus.Game
                 + (LongPeriodDamage.LastCapped ? "  (capped; resumes next pass)" : ""));
             b.Line(2, "total collapsed", LongPeriodDamage.TotalCollapsed.ToString());
 
-            // 高さが読めない建物には何もしていない。0 でないこと自体が合図。
+            // Nothing is done to a building whose height cannot be read. That this is not
+            // 0 is itself the signal.
             b.Line(2, "unreadable height", LongPeriodDamage.LastUnknownHeight
                 + (LongPeriodDamage.LastUnknownHeight > 0
                     ? "  (these buildings were skipped entirely; the mod never guesses a height)"
@@ -444,14 +489,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 時間帯係数（第 2 層その 3）。長周期の追加被害にだけ掛かるので、
-        /// <see cref="WriteLongPeriod"/> の中から呼ぶ（独立した設定は無い）。
+        /// The time-of-day factor (layer 2, part 3). It applies only to the long-period
+        /// extra damage, so it is called from inside <see cref="WriteLongPeriod"/> (it has
+        /// no setting of its own).
         ///
-        /// **日夜サイクル OFF を隠さない。** その設定では sim スレッドの時刻が
-        /// 永久に 12.0 に固定され（§F-1）、係数は黙って 1.00 の定数になる。
-        /// これは前提の破れではなくプレイヤーの正当な設定なので <c>Assumptions</c> の
-        /// FAIL にはしないが、**黙って無効になったことは必ず名乗る**。
-        /// 「係数 1.00」だけを出すと、それは読めた値に見える。
+        /// **Do not hide the day/night cycle being off.** With that setting the sim
+        /// thread's hour is pinned at 12.0 forever (§F-1) and the factor quietly becomes a
+        /// constant 1.00. That is not a broken assumption but a valid player setting, so
+        /// it is not made an <c>Assumptions</c> FAIL — but **always say that it has
+        /// silently been disabled**. Print "factor 1.00" on its own and it looks like a
+        /// value that was read.
         /// </summary>
         private static void WriteTimeOfDay(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
@@ -474,19 +521,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 第 2 層（津波連鎖）の状態。**「津波が来ない」の切り分けはここでしかできない。**
-        /// 来ない理由は 5 通りあり（設定が OFF ／震源が陸 ／DLC 無し ／海側外周が足りない ／
-        /// 災害スロット満杯）、画面上はどれも「何も起きない」で同じ顔になる。
+        /// The state of layer 2 (the tsunami chain). **Telling "no tsunami came" apart can
+        /// only be done here.** There are five reasons it does not come (the setting is
+        /// off / the hypocentre is on land / no DLC / not enough sea on the outer ring /
+        /// the disaster slots are full), and on screen every one of them wears the same
+        /// face: "nothing happens".
         ///
-        /// **内陸マップの <c>NoSea</c> は失敗ではない**ことを、ここでも文で名乗る（§B-3）。
+        /// Say here too, in words, that **<c>NoSea</c> on an inland map is not a failure**
+        /// (§B-3).
         /// </summary>
         private static void WriteTsunamiChain(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
-            // ★★ **tick と同じ式で判定する。**（2026-08-30、第 3 回検証）
-            //    ここだけ設定を見ていたので、<b>既定の構成では
-            //    「off」と書きながら実際には走っていた</b> ——
-            //    海溝型地震は設定に関係なく連鎖するからである（:132 の ★★）。
-            //    「動いているのに off と書く」は、この MOD がいちばん嫌う出力である。
+            // ★★ **Decide it with the same expression as the tick.** (2026-08-30, third
+            //    round of verification) Here alone the setting was the only thing looked
+            //    at, so <b>in the default configuration it wrote "off" while it was
+            //    actually running</b> — because a trench earthquake chains regardless of
+            //    the setting (the ★★ at :132).
+            //    "Writing off while it is running" is the output this mod hates most.
             if (!ModSettings.EarthquakeTsunamiChain.value
                 && TrenchQuakeSlot.LastId == 0)
             {
@@ -513,11 +564,12 @@ namespace DisasterPlus.Game
                     state = "raised (a wave was actually created)";
                     break;
                 case TsunamiChainState.NoSea:
-                    // ★★ **理由は必ず名指しする。**（2026-08-31、相互検証）
-                    //    ここは長らく <c>TsunamiWave.Detail</c> を読んでいたが、
-                    //    その経路はもう誰も呼ばないので<b>常に null</b> になり、
-                    //    どんな原因でも「内陸マップです」と言い続けていた ——
-                    //    沖の深海で断られた人を正反対の方向へ送る、最悪の 1 行だった。
+                    // ★★ **Always name the reason.** (2026-08-31, cross-verification)
+                    //    For a long time this read <c>TsunamiWave.Detail</c>, but nobody
+                    //    calls that path any more, so it was <b>always null</b> and it
+                    //    went on saying "this is an inland map" whatever the cause — the
+                    //    worst line in the file, sending somebody who was refused out in
+                    //    deep water offshore in exactly the opposite direction.
                     state = "no wave: " + (TsunamiRing.Detail
                             ?? "the wave could not be raised")
                             + ". Only 'the epicentre is not in the sea' means an inland "
@@ -550,15 +602,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 波形の観測状態。**「グラフが出ない」の切り分けはここでしかできない。**
-        /// 出ない理由は 4 通りあり（記録対象の地震が無い／地震計が 0 個／
-        /// サンプルがまだ 0 件／描画経路が使えない）、画面上はどれも「絵が無い」で
-        /// 同じ顔になる。
+        /// The waveform's recording state. **Telling "no graph appears" apart can only be
+        /// done here.** There are four reasons it does not appear (there is no earthquake
+        /// to record / there are 0 seismographs / there are still 0 samples / the drawing
+        /// path is unusable), and on screen every one of them wears the same face: "there
+        /// is no picture".
         ///
-        /// <c>rendering</c> の行は main スレッドが書いた値をここ（sim スレッド）で
-        /// 読んでいる。構築時に 1 回決まったきり変わらない bool なので、
-        /// スナップショット経路には載せていない（<c>CameraShakeBooster.LastAdded</c>
-        /// と同じ判断）。
+        /// The <c>rendering</c> line reads here (on the sim thread) a value the main
+        /// thread wrote. It is a bool that is decided once at build time and never
+        /// changes again, so it is not put on the snapshot path (the same judgement as
+        /// <c>CameraShakeBooster.LastAdded</c>).
         /// </summary>
         private static void WriteWaveform(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
@@ -573,9 +626,10 @@ namespace DisasterPlus.Game
                         + "of its own, so there is nothing else to plot)"
                       : ""));
 
-            // ★ 2 本目の線があるかどうか。**「橙の線が出ない」の切り分けはここだけ。**
-            //   理由は 2 つあり（設定が OFF／記録はしているがまだ 0 件）、
-            //   画面上はどちらも「線が 1 本しか無い」で同じ顔になる。
+            // ★ Whether there is a second line. **Telling "the orange line does not
+            //   appear" apart can only be done here.** There are two reasons (the setting
+            //   is off / it is recording but there are still 0 samples), and on screen
+            //   both wear the same face: "there is only one line".
             b.Line(2, "synthesized line",
                 !ModSettings.EarthquakeSeismogram.value
                     ? "off (setting)"
@@ -583,10 +637,12 @@ namespace DisasterPlus.Game
                         ? "on, " + traces[0].Count + " sample(s)  [Disaster + model, not measured]"
                         : "on, but nothing recorded yet"));
 
-            // ★ 「まだ作っていない」を「使えない」と書かない（全体レビュー I6）。
-            //    以前は bool 1 個だったので、パネルを一度も開いていない起動直後の
-            //    ダンプが「描画不可（最大振幅の行で代替）」と主張していた。
-            //    切り分けの手掛かりはこの 1 行しかないので、4 状態のまま出す。
+            // ★ Do not write "not built yet" as "unusable" (whole-mod review I6).
+            //    It used to be a single bool, so a dump taken right after start-up, with
+            //    the panel never once opened, claimed "cannot draw (falls back to the peak
+            //    amplitude row)".
+            //    This one line is the only clue for telling them apart, so all four states
+            //    are printed as they are.
             string rendering;
             switch (WaveformView.State)
             {
@@ -618,13 +674,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カーソル地点の地震計カバレッジ。**震央のカバレッジとは別物**で、
-        /// 警報リードタイムを決めるのは震央のほうである（§A-2）。震央の値と
-        /// そこから決まるリードタイムは <see cref="WriteQuakes"/> が地震ごとに出す。
+        /// The seismograph coverage at the cursor. **It is a different thing from the
+        /// coverage at the epicentre**, and it is the epicentre's that decides the warning
+        /// lead time (§A-2). The epicentre's value, and the lead time that follows from
+        /// it, are printed per earthquake by <see cref="WriteQuakes"/>.
         ///
-        /// 「読めなかった」を 0 と混ぜない。カバレッジ 0 は「ここに地震計が届いて
-        /// いない」という意味のある実測値で、これがハザードマップが空である理由を
-        /// 説明する唯一の根拠になる。
+        /// Do not mix "could not be read" in with 0. A coverage of 0 is a meaningful
+        /// measured value — "no seismograph reaches here" — and it is the only grounds
+        /// there are for explaining why the hazard map is empty.
         /// </summary>
         private static void WriteSensorCoverage(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
@@ -634,15 +691,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カメラシェイク補正の状態。**実機で効いているかを確かめる唯一の手段。**
-        /// 画面の揺れは目で見ても「強度が入った揺れ」と「バニラの揺れ」を区別できず、
-        /// しかも強度 55 では追加分が厳密に 0 になるのが**正しい**——つまり
-        /// 「何も起きない」が仕様である状態と、機能が黙って死んでいる状態が、
-        /// 見た目では完全に同じになる。だから数値で名乗る。
+        /// The state of the camera shake boost. **The only way to confirm it is working in
+        /// the real game.** Watching the screen shake, the eye cannot tell "shaking with
+        /// the intensity in it" from "vanilla's shaking", and on top of that, at intensity
+        /// 55 the addition being exactly 0 is **correct** — that is, the state where
+        /// "nothing happens" is the specification and the state where the feature is
+        /// silently dead look completely identical. So it says so with a number.
         ///
-        /// <c>added</c> は main スレッドが書いた値をここ（sim スレッド）で読んでいる。
-        /// 表示専用の float 1 個で、遅れて読めても意味が壊れないため、
-        /// スナップショット経路には載せていない。
+        /// <c>added</c> reads here (on the sim thread) a value the main thread wrote. It
+        /// is a single display-only float, and reading it late does not break its meaning,
+        /// so it is not put on the snapshot path.
         /// </summary>
         private static void WriteShakeBoost(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
@@ -652,7 +710,7 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // DisasterManager は sim スレッドの持ち物なので、ここで読むのが正しい。
+            // DisasterManager belongs to the sim thread, so reading it here is right.
             string state = "on";
             if (ColossalFramework.Singleton<DisasterManager>.exists
                 && ColossalFramework.Singleton<DisasterManager>.instance.m_disableCameraShake)
@@ -668,10 +726,11 @@ namespace DisasterPlus.Game
             b.Line(1, "camera shake boost", state);
             b.Line(2, "added last frame", CameraShakeBooster.LastAdded.ToString("F3"));
 
-            // ★ 合成記象は**カメラの揺れの形そのもの**を差し替える（バニラの項を
-            //   打ち消して自分の項を足す）。ON か OFF かで "added last frame" の
-            //   意味が変わるので、必ず隣に出す —— 強度 55 で 0 にならないのは
-            //   不具合ではなく、この設定が ON だからである、を切り分けられるように。
+            // ★ The synthesized record replaces **the shape of the camera shake itself**
+            //   (it cancels vanilla's term out and adds its own). Whether it is on or off
+            //   changes what "added last frame" means, so always print it alongside — so
+            //   that "it is not 0 at intensity 55" can be told to be this setting being
+            //   on rather than a fault.
             b.Line(2, "seismogram model",
                 ModSettings.EarthquakeSeismogram.value
                     ? "on: the camera follows a synthesized P/S/coda record instead of the "
@@ -680,37 +739,42 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ボタンの配置経緯とハザードビューの状態。
+        /// How the button came to be placed where it is, and the state of the hazard view.
         ///
-        /// <c>painting quakes</c> の行が**このセクションでいちばん重要**。
-        /// 地震のハザードマップも <c>Located &amp;&amp; (Emerging|Active)</c> の 2 段ゲートを持ち
-        /// （§A-6）、地震に <c>Located</c> を立てられるのは地震計だけ（§A-2）なので、
-        /// ヒートマップが真っ白なとき「地震計が無い（正常）」のか「本当に地震が無い」のか
-        /// を切り分ける手段がこれ以外に無い。
+        /// The <c>painting quakes</c> line is **the most important one in this section**.
+        /// The earthquake hazard map also has the two-stage gate
+        /// <c>Located &amp;&amp; (Emerging|Active)</c> (§A-6), and only a seismograph can
+        /// raise <c>Located</c> on an earthquake (§A-2), so when the heat map is blank
+        /// there is no other way to tell "there is no seismograph (normal)" from "there
+        /// really is no earthquake".
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
-            // ★ ①②のタイルは災害パネルから撤去された（読むだけのものは
-            //   左上のショートカットから開く。InfoHub のクラス doc）。
-            //   出すのは「ボタンが居るか」と「どこに居るか」だけである。
-            //   **ここは sim スレッドだが、読むのは Unity オブジェクトの
-            //   ネイティブポインタ比較と文字列だけで、UI には触らない**
-            //   （DisasterPanelBar.IsInstalled と同じ扱い）。
+            // ★ ①'s and ②'s tiles were taken out of the disaster panel (things that only
+            //   read are opened from the shortcut at the top left; InfoHub's class doc).
+            //   All this prints is "is the button there" and "where is it".
+            //   **This is the sim thread, but all it reads is a native-pointer comparison
+            //   on a Unity object and a string; it does not touch the UI**
+            //   (the same treatment as DisasterPanelBar.IsInstalled).
             b.Line(1, "info button", (InfoHub.IsInstalled ? "installed" : "not installed")
                 + "  (" + InfoHub.Placement + ")");
 
-            // sim スレッドから main の持ち物を読んでいるが、これは InfoModeSwitch の
-            // クラス doc が IL 実測つきで明示的に許可している唯一の例外である
-            // （get_CurrentMode は単一フィールドの読み出しで、最悪でも 1 tick 古い値）。
+            // This reads something the main thread owns from the sim thread, but it is the
+            // one exception InfoModeSwitch's class doc explicitly permits, backed by IL
+            // measurements (get_CurrentMode is a single field read, and at worst the value
+            // is one tick old).
             b.Line(1, "showing hazard view", InfoModeSwitch.IsShowingHazard ? "yes" : "no");
 
-            // 震度分布オーバーレイ。**「絵が出ない」の切り分けはここでしかできない。**
-            // 出ない理由は 4 通りあり（登録に失敗／トグルが OFF／描くべき地震が無い／
-            // 予算切れ）、画面上はどれも「何も出ない」で同じ顔になる。
+            // The seismic-intensity overlay. **Telling "no picture appears" apart can only
+            // be done here.** There are four reasons it does not appear (registration
+            // failed / the toggle is off / there is no earthquake to draw / the budget ran
+            // out), and on screen every one of them wears the same face: "nothing
+            // appears".
             //
-            // 数値は main スレッド（描画）が書いたものをここ（sim スレッド）で
-            // 読んでいる。表示専用の int / bool で、遅れて読めても意味が壊れない
-            // （CameraShakeBooster.LastAdded / WaveformView.State と同じ扱い）。
+            // The numbers are read here (on the sim thread) from what the main thread
+            // (drawing) wrote. They are display-only ints and bools, and reading them late
+            // does not break their meaning (the same treatment as
+            // CameraShakeBooster.LastAdded / WaveformView.State).
             string overlay;
             if (!EarthquakeOverlay.Registered)
             {
@@ -732,7 +796,8 @@ namespace DisasterPlus.Game
             }
             b.Line(1, "intensity overlay", overlay);
 
-            // DLC が無い環境ではパネル本体を構築していない（EarthquakePanel._bodyBuilt）。
+            // Where the DLC is not owned the panel body is never built
+            // (EarthquakePanel._bodyBuilt).
             b.Line(1, "panel body", ModCompat.NaturalDisastersOwned
                 ? "shown"
                 : "hidden (Natural Disasters DLC not owned)");
@@ -759,7 +824,8 @@ namespace DisasterPlus.Game
         {
             if (!prefab.Resolved)
             {
-                // DLC 非所持環境ではこれが正常。Assumptions 側の impact 文と同じ扱い。
+                // Where the DLC is not owned this is normal. The same treatment as the
+                // impact sentence on the Assumptions side.
                 b.Line(1, "prefab (EarthquakeAI)",
                     "NOT RESOLVED (expected when the Natural Disasters DLC is not owned)");
                 return;
@@ -774,9 +840,9 @@ namespace DisasterPlus.Game
 
         private static void WriteSimClock(DiagnosticBuilder b, EarthquakeSnapshot snapshot)
         {
-            // 日夜サイクル OFF は前提の破れではなくプレイヤーの正当な設定なので
-            // Assumptions の FAIL にはしない（偽 FAIL を出さない）。代わりに
-            // 「12.0 という数字がどこから来ているか」をここで必ず名乗る。
+            // The day/night cycle being off is not a broken assumption but a valid player
+            // setting, so it is not made an Assumptions FAIL (no false FAILs). Instead,
+            // always say here where the number 12.0 comes from.
             string clock = "hour=" + snapshot.HourOfDay.ToString("F1")
                 + "  dayNight=" + (snapshot.DayNightEnabled ? "on" : "off");
             if (!snapshot.DayNightEnabled)
@@ -802,17 +868,20 @@ namespace DisasterPlus.Game
                     + " coverage=" + (q.CoverageKnown ? q.CoverageAtEpicentre.ToString() : "unreadable")
                     + " R=" + q.Radius.ToString("F1"));
 
-                // m_activationFrame == 0 は「今」ではなく「未定」。SelfTrigger(64) が
-                // 立っていない地震はここが 0 のまま Emerging で永久に固まる（§A-1）。
+                // m_activationFrame == 0 means "not decided yet", not "now". An earthquake
+                // without SelfTrigger(64) raised stays stuck here at 0, Emerging forever
+                // (§A-1).
                 string activation = q.ActivationScheduled
                     ? q.ActivationFrame.ToString()
                     : "0 (not scheduled - SelfTrigger was never set)";
                 b.Line(3, "frames", "start=" + q.StartFrame + " activation=" + activation);
 
-                // 警報リードタイム。カバレッジが読めていないときに 1755（＝カバレッジ 0）を
-                // 出すと、それは「地震計が無い」という断定になる。読めていなければ出さない。
-                // 換算の guard も含めて FramesWithHours に任せる（カバレッジ 100 なら
-                // ちょうど 3.00 in-game hours になるはずで、そこが合っているかを見る行）。
+                // The warning lead time. Printing 1755 (i.e. coverage 0) when the coverage
+                // could not be read would be asserting "there is no seismograph". If it
+                // cannot be read, do not print it.
+                // The conversion, guard included, is left to FramesWithHours (at coverage
+                // 100 it should come to exactly 3.00 in-game hours, and this is the line
+                // that shows whether that holds).
                 b.Line(3, "warning lead", q.CoverageKnown
                     ? FramesWithHours((uint)WarningLeadTime.FramesFor(q.CoverageAtEpicentre))
                     : "unknown (the coverage at the epicentre could not be read)");
@@ -824,10 +893,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// フレーム数を「そのままの値 ＋ ゲーム内時間」で出す。
+        /// Print a frame count as "the raw value plus the game time".
         ///
-        /// 換算は必ず <see cref="FeatureHost.FramesPerMinute"/> から出すこと。
-        /// 定数を直書きして 4 倍ずれた前科がある（③、DAYTIME_FRAMES の取り違え）。
+        /// Always derive the conversion from <see cref="FeatureHost.FramesPerMinute"/>.
+        /// There is a previous conviction for writing the constant in by hand and being
+        /// out by a factor of 4 (③, mistaking DAYTIME_FRAMES for something else).
         /// </summary>
         private static string FramesWithHours(uint frames)
         {

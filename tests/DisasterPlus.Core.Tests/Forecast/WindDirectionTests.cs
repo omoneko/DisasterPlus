@@ -47,7 +47,8 @@ namespace DisasterPlus.Core.Tests.Forecast
         [Fact]
         public void BoundariesRoundToNearestSector()
         {
-            // セクタ幅は 22.5 度。境界の 11.25 度で次のセクタに入る。
+            // The sector width is 22.5 degrees. At the 11.25 degree boundary it enters
+            // the next sector.
             Assert.Equal("N", WindDirection.LabelOf(11.24f));
             Assert.Equal("NNE", WindDirection.LabelOf(11.26f));
         }

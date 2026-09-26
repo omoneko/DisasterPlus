@@ -4,117 +4,126 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// カーソル直下の建物を探した**結果の種類**。
+    /// **The kind of result** you get from looking for the building under the cursor.
     ///
-    /// **「建物が無かった」と「調べられなかった」を同じ顔にしないためだけに存在する。**
-    /// 以前は両方が <see cref="BuildingMargin.None"/> になり、表示側が区別できずに
-    /// 「カーソルの下に建物がありません」と書いていた —— 読み取り失敗が
-    /// 意味のあるゼロの顔をして出てくる、この機能が他の全ての行で禁じている壊れ方
-    /// そのものである（<c>EarthquakeReading.CoverageKnown</c> /
-    /// <c>EarthquakeSnapshot.CursorCoverageValid</c> と同じ理由）。
+    /// **It exists for one reason: so "there was no building" and "we could not look" do
+    /// not wear the same face.** Both used to come out as <see cref="BuildingMargin.None"/>,
+    /// which the display side could not tell apart, so it wrote "there is no building
+    /// under the cursor" — a failed read appearing with the face of a meaningful zero,
+    /// exactly the breakage this feature forbids in every other row (the same reason as
+    /// <c>EarthquakeReading.CoverageKnown</c> /
+    /// <c>EarthquakeSnapshot.CursorCoverageValid</c>).
     /// </summary>
     public enum BuildingProbeOutcome
     {
-        /// <summary>そもそも調べていない（カーソルが無効、対象の地震が無い等）。</summary>
+        /// <summary>We never looked at all (invalid cursor, no earthquake to work with, etc.).</summary>
         NotProbed,
 
-        /// <summary>調べて、建物が 1 個見つかった。</summary>
+        /// <summary>We looked and found one building.</summary>
         Found,
 
-        /// <summary>調べて、<c>PickRadius</c> 以内に候補が 1 個も無かった。**これは実測値である。**</summary>
+        /// <summary>We looked and there was not a single candidate within <c>PickRadius</c>. **This is a measured result.**</summary>
         Empty,
 
         /// <summary>
-        /// 調べられなかった。<c>BuildingManager</c> / バッファ / グリッドが取れないか、
-        /// 走査が例外を投げた。**この状態で建物の有無を名乗ってはいけない。**
+        /// We could not look. <c>BuildingManager</c>, its buffers or the grid were
+        /// unavailable, or the sweep threw. **Never assert anything about whether a
+        /// building is there while in this state.**
         /// </summary>
         Failed,
     }
 
     /// <summary>
-    /// カーソル直下の建物を 1 個特定し、その建物の余裕度を出す。**sim スレッド専用。**
+    /// Identifies the one building under the cursor and works out its headroom.
+    /// **Sim thread only.**
     ///
-    /// ── なぜカーソルの建物特定を sim スレッドでやるのか ──────────────
+    /// ── Why the cursor's building is identified on the sim thread ──────
     ///
-    /// <c>BuildingManager.m_buildings.m_buffer</c> と <c>m_buildingGrid</c> は
-    /// **sim スレッドが所有する**。一方カーソル座標は <c>Input.mousePosition</c> と
-    /// <c>Camera.main</c> から来るので **main スレッドでしか取れない**。したがって:
+    /// <c>BuildingManager.m_buildings.m_buffer</c> and <c>m_buildingGrid</c> are
+    /// **owned by the sim thread**. The cursor position, on the other hand, comes from
+    /// <c>Input.mousePosition</c> and <c>Camera.main</c>, so it **can only be read on the
+    /// main thread**. Hence:
     ///
     /// <code>
-    /// main（EarthquakePanel.Tick）
-    ///   → 地形との交点を出す（既存の TryPickCursorGround）
+    /// main (EarthquakePanel.Tick)
+    ///   → work out the intersection with the terrain (the existing TryPickCursorGround)
     ///   → EarthquakeHub.PublishCursor(worldPos, valid)
-    /// sim（EarthquakeReader.Read）
+    /// sim (EarthquakeReader.Read)
     ///   → EarthquakeHub.TakeCursor(out pos)
-    ///   → BuildingProbe.ProbeAt(...)  ← ここで初めて建物バッファに触る
-    ///   → snapshot.CursorBuilding に載せる
-    /// main（EarthquakePanel.Refresh）
-    ///   → snapshot.CursorBuilding を描くだけ
+    ///   → BuildingProbe.ProbeAt(...)  ← only here do we touch the building buffers
+    ///   → put it on snapshot.CursorBuilding
+    /// main (EarthquakePanel.Refresh)
+    ///   → just draw snapshot.CursorBuilding
     /// </code>
     ///
-    /// **1 tick ぶん（最大 1/50 秒相当）の遅延が出る。** カーソルを速く動かすと表示が
-    /// 1 フレーム遅れて追従する。これは正しい代償であり、遅延を消すために main から
-    /// 建物バッファを読んではいけない。破ると、スタックトレースの無い
-    /// <c>IndexOutOfRangeException</c> が後になってバニラのコードの中で出て、
-    /// この MOD の try/catch では捕まえられない。
+    /// **This costs one tick of lag (up to 1/50 s).** Move the cursor quickly and the
+    /// readout follows a frame behind. That is the right price to pay, and the building
+    /// buffers must never be read from the main thread to get rid of it. Break this and
+    /// an <c>IndexOutOfRangeException</c> with no stack trace turns up later, inside
+    /// vanilla's own code, where this mod's try/catch cannot catch it.
     ///
-    /// 走査は <c>FireWhirlDamage.CollectNearby</c> をそのまま手本にしている
-    /// （セル 64、オフセット 135、<c>[0,269]</c> クランプ、<c>m_nextGridBuilding</c> 連結、
-    /// <c>guard &gt; 32768</c> の保険）。
+    /// The sweep follows <c>FireWhirlDamage.CollectNearby</c> exactly (cell size 64,
+    /// offset 135, clamped to <c>[0,269]</c>, the <c>m_nextGridBuilding</c> chain, and
+    /// the <c>guard &gt; 32768</c> safety net).
     /// </summary>
     public static class BuildingProbe
     {
         /// <summary>
-        /// カーソル座標からこの距離までの建物を候補にする（建物グリッド 1 セルぶん）。
-        /// 建物の当たり判定そのものではないので、これは「だいたいこの辺を指している」の意味。
+        /// Buildings within this distance of the cursor position are candidates (one
+        /// building-grid cell). It is not the building's own hit test, so it means
+        /// roughly "you are pointing around here".
         /// </summary>
         public const float PickRadius = 64f;
 
         /// <summary>
-        /// 候補にするフラグ条件。**バニラの <c>DestroyBuildings</c> の一次カリングと
-        /// 同じマスク・同じ比較にする**（§A-3）:
+        /// The flag condition for being a candidate. **The same mask and the same
+        /// comparison as vanilla's first-pass cull in <c>DestroyBuildings</c>** (§A-3):
         ///
         /// <code>if ((m_flags &amp; 524307 /* 0x80013 */) != 1) continue;</code>
         ///
-        /// 0x80013 = <c>Created | Deleted | Untouchable | Demolishing</c>（4 つの名前が
-        /// 実際にこの値であることは <c>Assembly-CSharp</c> をリフレクションで実測済み）。
-        /// つまり「Created が立っていて、残る 3 つがどれも立っていない」建物だけを
-        /// バニラは判定する。ここを緩めると、バニラが見向きもしない建物について
-        /// 「倒壊します」と断定することになる。
+        /// 0x80013 = <c>Created | Deleted | Untouchable | Demolishing</c> (that those
+        /// four names really do add up to this value was measured by reflecting over
+        /// <c>Assembly-CSharp</c>). So vanilla only considers buildings that have Created
+        /// set and none of the other three. Loosen this and we end up declaring "this
+        /// will collapse" about buildings vanilla would not even look at.
         ///
-        /// **<c>Collapsed</c>（0x400000）はこのマスクに入っていない。** バニラも
-        /// 弾いていないし、こちらも弾いてはいけない —— 弾くと瓦礫の上で
-        /// 「カーソルの下に建物がありません」という**誤った**説明が出る。
-        /// 倒壊・炎上は候補から外すのではなく <c>alreadyDown</c> として
-        /// <see cref="BuildingMargin.Evaluate"/> へ渡し、結論の側で名乗らせる。
+        /// **<c>Collapsed</c> (0x400000) is not in this mask.** Vanilla does not exclude
+        /// it, and neither must we — exclude it and standing over rubble produces the
+        /// **wrong** explanation, "there is no building under the cursor". A collapsed or
+        /// burning building is not dropped from the candidates; it is passed to
+        /// <see cref="BuildingMargin.Evaluate"/> as <c>alreadyDown</c> and declared on
+        /// the conclusion side instead.
         ///
-        /// （<c>FireWhirlDamage.CollectMask</c> が Collapsed を弾くのは、あちらが
-        ///  「これから燃やす候補」を選んでいるからで、目的が違う。）
+        /// (<c>FireWhirlDamage.CollectMask</c> does exclude Collapsed, because it is
+        ///  choosing candidates to set alight — a different purpose.)
         /// </summary>
         private const Building.Flags CandidateMask =
             Building.Flags.Created | Building.Flags.Deleted
             | Building.Flags.Untouchable | Building.Flags.Demolishing;
 
-        /// <summary>走査中の想定外例外を 1 回だけ大きく鳴らしたか。</summary>
+        /// <summary>Whether an unexpected exception during the sweep has been shouted about once.</summary>
         private static bool _probeErrorLogged;
 
         /// <summary>
-        /// カーソル直下の建物 1 個の余裕度。
-        /// <paramref name="outcome"/> が <see cref="BuildingProbeOutcome.Found"/> の
-        /// ときだけ戻り値に意味がある。
+        /// The headroom of the one building under the cursor.
+        /// The return value only means anything when <paramref name="outcome"/> is
+        /// <see cref="BuildingProbeOutcome.Found"/>.
         ///
-        /// **3 状態を返すこと自体が仕様である**（<see cref="BuildingProbeOutcome"/> の doc）。
-        /// 「調べたが空だった」と「調べられなかった」を混ぜると、読み取り失敗が
-        /// 「カーソルの下に建物がありません」という実測値の顔で出てくる。
+        /// **Returning three states is itself the specification** (see
+        /// <see cref="BuildingProbeOutcome"/>'s doc). Conflate "we looked and it was
+        /// empty" with "we could not look" and a failed read comes out wearing the face
+        /// of a measurement: "there is no building under the cursor".
         ///
-        /// **例外を出さない。** sim スレッドの <c>IndexOutOfRangeException</c> は
-        /// スタックトレース無しのポップアップになるので、添字は必ず配列長で守る。
+        /// **It never throws.** An <c>IndexOutOfRangeException</c> on the sim thread
+        /// becomes a popup with no stack trace, so every index is guarded by the array's
+        /// length.
         /// </summary>
         /// <param name="heightMetres">
-        /// 見つかった建物の高さ（m）。**第 2 層（長周期地震動）専用**で、
-        /// 第 1 層の余裕度は高さを一切使わない —— バニラが使っていないからである
-        /// （§A-3 は <c>m_position</c> の距離しか見ない）。
-        /// **0 は「低い」ではなく「読めなかった」**（<see cref="BuildingHeight.MetresOf"/>）。
+        /// The height of the building found (m). **For layer 2 (long-period ground
+        /// motion) only**; layer 1's headroom does not use height at all, because vanilla
+        /// does not (§A-3 looks only at the distance from <c>m_position</c>).
+        /// **0 means "could not be read", not "short"**
+        /// (<see cref="BuildingHeight.MetresOf"/>).
         /// </param>
         public static BuildingMargin ProbeAt(Vec3 worldPos, EarthquakeReading quake,
                                              FaultBand band, bool damageModelReplaced,
@@ -145,7 +154,8 @@ namespace DisasterPlus.Game
                 ushort best = FindNearest(buildings, grid, worldPos);
                 if (best == 0)
                 {
-                    // ★ ここだけが「調べて、無かった」。走査は最後まで走っている。
+                    // ★ This is the only place that means "we looked and there was
+                    //   nothing". The sweep ran to completion.
                     outcome = BuildingProbeOutcome.Empty;
                     return BuildingMargin.None();
                 }
@@ -155,7 +165,8 @@ namespace DisasterPlus.Game
                 bool alreadyDown = (flags & Building.Flags.Collapsed) != Building.Flags.None
                                    || buildings[best].m_fireIntensity != 0;
 
-                // 第 2 層が使う量。第 1 層の結論（BuildingMargin）には入れない。
+                // A quantity layer 2 uses. It goes nowhere near layer 1's conclusion
+                // (BuildingMargin).
                 heightMetres = BuildingHeight.MetresOf(ref buildings[best]);
 
                 outcome = BuildingProbeOutcome.Found;
@@ -166,9 +177,9 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // Log.Warn / Log.Error はスロットルされない。ここは毎 sim tick の経路なので、
-                // 1 回だけ大きく鳴らして以後はキー単位スロットルへ落とす
-                // （EarthquakeReader._readErrorLogged と同じ形）。
+                // Log.Warn / Log.Error are not throttled. This path runs every sim tick,
+                // so shout once and then drop down to the per-key throttle
+                // (the same shape as EarthquakeReader._readErrorLogged).
                 if (!_probeErrorLogged)
                 {
                     _probeErrorLogged = true;
@@ -185,11 +196,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <see cref="PickRadius"/> 以内でカーソルにいちばん近い建物。無ければ 0。
+        /// The building nearest the cursor within <see cref="PickRadius"/>, or 0 if there
+        /// is none.
         /// </summary>
         private static ushort FindNearest(Building[] buildings, ushort[] grid, Vec3 worldPos)
         {
-            // 建物グリッドは 1 セル 64m、270x270。境界をはみ出さないようクランプする。
+            // The building grid is 270x270 cells of 64 m. Clamp so we never run off the edge.
             int minX = Clamp((int)((worldPos.X - PickRadius) / 64f + 135f));
             int maxX = Clamp((int)((worldPos.X + PickRadius) / 64f + 135f));
             int minZ = Clamp((int)((worldPos.Z - PickRadius) / 64f + 135f));
@@ -211,8 +223,9 @@ namespace DisasterPlus.Game
 
                     while (id != 0 && id < buildings.Length)
                     {
-                        // バニラは `!= 1 -> continue`。読みやすい書き方に直さず、
-                        // 比較演算子ごとそのまま写す。
+                        // Vanilla writes `!= 1 -> continue`. Do not tidy it into
+                        // something more readable; copy it across comparison operator
+                        // and all.
                         if ((buildings[id].m_flags & CandidateMask) == Building.Flags.Created)
                         {
                             var p = buildings[id].m_position;
@@ -226,7 +239,8 @@ namespace DisasterPlus.Game
 
                         id = buildings[id].m_nextGridBuilding;
 
-                        // 連結リストが壊れている保存データで無限ループしないための保険。
+                        // Insurance against looping forever on a save whose linked list
+                        // is corrupt.
                         if (++guard > 32768) break;
                     }
                 }

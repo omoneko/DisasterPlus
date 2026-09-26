@@ -4,91 +4,98 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 火山パネル。**main スレッド専用。**
+    /// The volcano panel. **Main thread only.**
     ///
-    /// 枠組みは②の <c>EarthquakePanel</c>・④の <see cref="TyphoonPanel"/> をそのまま踏襲する
-    /// （<c>UIView.AddUIComponent(Type)</c> の**非総称**オーバーロード、
-    /// 構築途中の例外で孤児 GameObject を残さない try/catch、
-    /// <c>backgroundSprite = "MenuPanel2"</c>、本体を組まない <see cref="_bodyBuilt"/>、
-    /// <c>Tick()</c> の先頭で設定を見るガード）。
+    /// The framework follows ②'s <c>EarthquakePanel</c> and ④'s <see cref="TyphoonPanel"/>
+    /// exactly (the **non-generic** overload of <c>UIView.AddUIComponent(Type)</c>, the try/catch
+    /// that leaves no orphan GameObject when construction throws partway,
+    /// <c>backgroundSprite = "MenuPanel2"</c>, <see cref="_bodyBuilt"/> for not building the body,
+    /// and the guard that checks the setting at the top of <c>Tick()</c>).
     ///
-    /// ── ★★ 出所の見出しと常設の不可逆警告は外した（2026-08-22）──────
+    /// ── ★★ the provenance heading and the permanent irreversibility warning were removed (2026-08-22) ──
     ///
-    /// 所有者の依頼「D＋タブ内の火山の細かい説明やデバッグは
-    /// ゲーム内では表示不要」による。代わりに:
+    /// Following the owner's request, "the detailed volcano explanations and debug info do not
+    /// need showing in-game inside the D+ tab". Instead:
     ///
-    ///   - 出所 … 影響範囲の行に付く <c>[実測]</c> の印（<b>印の仕組みは
-    ///     1 バイトも変えていない</b>）と、診断ダンプ・オプション画面
-    ///   - 不可逆 … オプション画面の見出し（<c>Strings.VolcanoIrreversibleWarning</c>）
-    ///     と診断ダンプ
+    ///   - provenance … the <c>[measured]</c> marker on the affected-range row (<b>the marker
+    ///     machinery has not changed by a single byte</b>), plus the diagnostic dump and the
+    ///     options screen
+    ///   - irreversibility … the heading on the options screen
+    ///     (<c>Strings.VolcanoIrreversibleWarning</c>) and the diagnostic dump
     ///
-    /// **行ごとの印を付けない規律そのものは生きている。**
+    /// **The discipline of not putting a marker on every row is still in force.**
     ///
-    /// 担保の実体は <see cref="VolcanoRows"/> に置いてある。
-    /// **このファイルには <c>UILabel</c> の生成も <c>.text</c> への代入も 1 つも無い。**
+    /// The substance of the guarantee lives in <see cref="VolcanoRows"/>.
+    /// **There is not one <c>UILabel</c> construction or <c>.text</c> assignment in this file.**
     ///
-    /// ── 本体を組まない条件は「地形を書けるか」そのものである ──────────────
+    /// ── the condition for not building the body is precisely "can it write terrain" ────────
     ///
-    /// ④は DLC の有無で本体を組むかどうかを決めた。⑤は DLC を要らない（設計書 §1.4）。
-    /// ⑤が組めない唯一の条件は<b>地形の書き込み経路が解決できないこと</b>で、
-    /// その述語は <see cref="VolcanoTerrainFacts.Usable"/> ——
-    /// つまり<b>⑤の機能そのものが門にしている式と同じ式</b>である。
-    /// 「フィールドが解決した」を述語にすると、値が使えない環境でパネルだけが
-    /// 動いて見える（②④のレビューが同じ欠陥を見つけている）。
+    /// ④ decided whether to build the body from whether the DLC was owned. ⑤ does not need the
+    /// DLC (design doc §1.4).
+    /// The only condition under which ⑤ cannot build is <b>the terrain write path not
+    /// resolving</b>, and its predicate is <see cref="VolcanoTerrainFacts.Usable"/> —
+    /// that is, <b>the same expression ⑤'s feature itself gates on</b>.
+    /// Use "did the field resolve" as the predicate and in an environment where the value is
+    /// unusable the panel alone appears to work (②'s and ④'s reviews found the same defect).
     ///
-    /// ── パネルの位置（①②④と重なる範囲を明示する）─────────────────
+    /// ── the panel's position (stating explicitly where it overlaps ①, ② and ④) ───────────
     ///
-    /// UIView の座標系は高さ 1080 に正規化され、16:9 なら幅はおよそ 1920 になる。
-    /// ①は (200,150) 幅 380、②は (600,150) 幅 640、④は (1260,120) 幅 640 なので、
-    /// **640 幅のパネルを横に置ける空きはもう無い。** ⑤は (620, 60) に置く:
+    /// UIView's coordinate system is normalised to a height of 1080, so at 16:9 the width is
+    /// about 1920. ① is at (200,150) with width 380, ② at (600,150) with width 640 and ④ at
+    /// (1260,120) with width 640, so **there is no longer room to put a 640-wide panel
+    /// alongside.** ⑤ goes at (620, 60):
     ///
-    ///   - ①（200〜580）とは重ならない
-    ///   - ④（1260〜1900）とも重ならない（右端がちょうど 1260 で接する）
-    ///   - ②（600〜1240 / y 150 以降）とは横に重なるが、**上端 90 px は②より上**に
-    ///     出るので、②を開いたままでも⑤の見出しと閉じるボタンは必ず押せる
+    ///   - it does not overlap ① (200–580)
+    ///   - it does not overlap ④ (1260–1900) either (its right edge just meets 1260)
+    ///   - it does overlap ② (600–1240 / y 150 onwards) horizontally, but **its top 90 px sit
+    ///     above ②**, so ⑤'s heading and close button can always be clicked even with ② open
     ///
-    /// **「重ならない」と嘘を書かないこと。** 実際に重なるのは②だけで、
-    /// その重なり方まで書いてある。<see cref="ClampToView"/> は縦だけ寄せる。
+    /// **Do not write the lie "it does not overlap".** The only thing it actually overlaps is ②,
+    /// and the way it overlaps is written down too. <see cref="ClampToView"/> only nudges it
+    /// vertically.
     /// </summary>
     public static class VolcanoPanel
     {
         private const string PanelName = FreeSlotFinder.SelfPrefix + "VolcanoPanel";
 
         /// <summary>
-        /// パネルの左上。**決めるのは <see cref="InfoHub"/> 1 つだけ**で、
-        /// ここにあるのは位置が決まる前の既定値である
-        /// （<c>DisasterPanelBar</c> のクラス doc と同じ規律）。
-        /// <see cref="ClampToView"/> が縦だけ寄せる。
+        /// The panel's top-left. **Only <see cref="InfoHub"/> decides it**; what is here is the
+        /// default from before the position is decided
+        /// (the same discipline as the class doc of <c>DisasterPanelBar</c>).
+        /// <see cref="ClampToView"/> only nudges it vertically.
         /// </summary>
         private static Vector3 _origin = new Vector3(620f, 60f);
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
 
-        /// <summary>最後に <see cref="ApplyHeight"/> が入れた高さ（<c>-1</c> = まだ入れていない）。</summary>
+        /// <summary>The height <see cref="ApplyHeight"/> last set (<c>-1</c> = not set yet).</summary>
         private static float _appliedHeight = -1f;
 
         /// <summary>
-        /// 火山の行を構築したか。地形の書き込み経路が解決できない環境では
-        /// ⑤は 1 メートルも山を上げられないので、行を組まずに理由を 1 行だけ出す
-        /// （②の <c>EarthquakePanel._bodyBuilt</c>・④の <c>TyphoonPanel._bodyBuilt</c> と同じ）。
+        /// Whether the volcano rows were built. In an environment where the terrain write path
+        /// does not resolve, ⑤ cannot raise the ground by a single metre, so the rows are not
+        /// built and only one line of explanation is shown
+        /// (the same as ②'s <c>EarthquakePanel._bodyBuilt</c> and ④'s
+        /// <c>TyphoonPanel._bodyBuilt</c>).
         /// </summary>
         private static bool _bodyBuilt;
 
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
 
-        /// <summary>このパネルの幅。<see cref="InfoHub"/> がタブ帯の幅を合わせるために読む。</summary>
+        /// <summary>This panel's width. <see cref="InfoHub"/> reads it to match the tab bar's width.</summary>
         internal static float Width { get { return VolcanoRows.PanelWidth; } }
 
         /// <summary>
-        /// 左上を決める。**位置を決める主体は <see cref="InfoHub"/> 1 つだけである。**
-        /// ここで座標を発明しないこと。
+        /// Set the top-left. **There is exactly one authority on the position,
+        /// <see cref="InfoHub"/>.** Do not invent coordinates here.
         /// </summary>
         internal static void MoveTo(Vector3 origin)
         {
             _origin = origin;
             if (_panel == null) return;
-            // ★ 高さの再適用と同じ経路を通す（既定の左上へ戻してから寄せ直す）。
+            // ★ Go through the same path as re-applying the height (return to the default
+            //   top-left, then nudge again).
             _panel.relativePosition = _origin;
             ClampToView(_panel);
         }
@@ -106,13 +113,14 @@ namespace DisasterPlus.Game
             if (_panel != null) _panel.Hide();
         }
 
-        /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
+        /// <summary>Every frame from the main thread. Updates the content only while it is shown.</summary>
         public static void Tick()
         {
-            // 設定で無効化されたときにパネルが開いたままだと、OnSimulationTick が
-            // publish を止めた古いスナップショットを永遠に出し続ける「凍りついたのに
-            // 生きて見える」パネルになり、閉じる手段のボタンも既に撤去済みで消せない
-            // （①のレビュー指摘。②④も同じガードを持っている）。
+            // If the panel were left open when the feature is disabled in the settings, it would
+            // show for ever the stale snapshot that OnSimulationTick stopped publishing — a panel
+            // that is frozen but looks alive — and since the close button has already been
+            // removed, there would be no way to get rid of it
+            // (①'s review point. ② and ④ carry the same guard).
             if (!ModSettings.VolcanoEnabled.value)
             {
                 if (IsVisible) Hide();
@@ -123,10 +131,10 @@ namespace DisasterPlus.Game
             Refresh();
         }
 
-        /// <summary>レベルアンロード時。**セッション状態を 1 つも持ち越さない。**</summary>
+        /// <summary>On level unload. **Do not carry over a single piece of session state.**</summary>
         public static void Destroy()
         {
-            // 参照を捨てるだけ。実体はパネルの GameObject と一緒に消える。
+            // Just drop the references. The objects themselves go with the panel's GameObject.
             VolcanoStatusRows.Destroy();
             VolcanoEffectRows.Destroy();
 
@@ -164,10 +172,10 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ _panel への代入は構築の最後の 1 行にしない。途中の例外で
-            //    EnsureBuilt() の catch が呼ぶ Destroy() は _panel==null を見て何もせず、
-            //    UIView に取り付け済みの GameObject が孤児のまま残る
-            //    （クリックのたびに 1 枚ずつ積み上がる。①のレビュー指摘）。
+            // ★ Do not make the assignment to _panel the last line of construction. If something
+            //    throws partway, the Destroy() that EnsureBuilt()'s catch calls sees _panel==null
+            //    and does nothing, leaving the GameObject already attached to UIView orphaned
+            //    (one more piles up on every click. ①'s review point).
             UIPanel panel = null;
             try
             {
@@ -189,8 +197,9 @@ namespace DisasterPlus.Game
             panel.width = VolcanoRows.PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
-            // 位置は InfoHub が決める（MoveTo）。ここには既定値しか無い ——
-            // パネルは同時に 1 枚しか出ないので、互いに避ける座標はもう要らない。
+            // The position is decided by InfoHub (MoveTo). All that is here is the default —
+            // only one panel is shown at a time, so coordinates that dodge each other are no
+            // longer needed.
             panel.relativePosition = _origin;
             panel.isVisible = false;
 
@@ -200,12 +209,12 @@ namespace DisasterPlus.Game
                 VolcanoRows.PanelWidth - 44f, 24f);
             _titleLabel.textScale = 1.1f;
 
-            // ★ 閉じるボタンはここには無い。**タブ帯の X が 1 つだけ持つ**（InfoHub）。
+            // ★ There is no close button here. **The X on the tab bar is the only one** (InfoHub).
             y += 30f;
 
-            // ★ 述語は⑤の機能そのものの門と同じ式（クラス doc）。
-            //   VolcanoReader.ScanTerrainFacts はキャッシュを触らない純粋な走査なので
-            //   main スレッドから呼んでよい（あちらのクラス doc）。
+            // ★ The predicate is the same expression ⑤'s feature itself gates on (class doc).
+            //   VolcanoReader.ScanTerrainFacts is a pure probe that touches no cache, so it may be
+            //   called from the main thread (its own class doc).
             _bodyBuilt = VolcanoReader.ScanTerrainFacts().Usable;
             if (!_bodyBuilt)
             {
@@ -215,37 +224,39 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ **出所を名乗る 2 行も外した**（2026-08-22）。
-            //    ⑤の数値がゲームの実測ではないことは、影響範囲の行に付く
-            //    [実測] の印と、診断ダンプとオプション画面が引き続き名乗る。
-            //    印の仕組みそのもの（<c>VolcanoRows</c>）は 1 バイトも変えていない。
+            // ★★ **The two rows stating provenance were removed as well** (2026-08-22).
+            //    That ⑤'s numbers are not measurements from the game is still stated by the
+            //    [measured] marker on the affected-range row, and by the diagnostic dump and the
+            //    options screen.
+            //    The marker machinery itself (<c>VolcanoRows</c>) has not changed by a single byte.
 
-            // ★★ **火山を設置するボタンはここには無い。** 置くのは災害パネルの
-            //    ⑤タイル（バニラの災害ボタンと同じ 3 手）だけである。このパネルは
-            //    <b>読むための場所</b>で、起こす場所ではない。
+            // ★★ **There is no button here for placing a volcano.** The only place it sits is the
+            //    ⑤ tile on the disaster panel (the same three steps as a vanilla disaster button).
+            //    This panel is <b>a place to read</b>, not a place to trigger things.
             VolcanoStatusRows.Build(panel, ref y);
 
-            // ★ 確認の一式はもうどこにも無い（2026-08-21 に撤去）。
-            //   進行中の各段の行がいちばん下で、出していないときはパネルを
-            //   その手前まで縮めるので空白が残らない。
+            // ★ The confirmation set no longer exists anywhere (removed on 2026-08-21).
+            //   The rows for each in-progress stage are at the bottom, and when they are not shown
+            //   the panel is shrunk to just above them so no blank space is left.
             VolcanoEffectRows.Build(panel, ref y);
 
             ApplyHeight(panel, VolcanoEffectRows.BlockTop + 8f);
         }
 
         /// <summary>
-        /// 高さを入れ直し、ビューに収まる位置へ寄せ直す。**必ず既定の左上へ戻してから
-        /// 寄せる** —— 前回の寄せの結果から寄せ直すと、開閉のたびに上へずれていく。
+        /// Set the height again and nudge it back to a position that fits in the view.
+        /// **Always return to the default top-left before nudging** — nudge from the result of the
+        /// last nudge and it creeps upwards every time the panel is opened and closed.
         /// </summary>
         private static void ApplyHeight(UIPanel panel, float height)
         {
             if (panel == null) return;
 
-            // ★ 比較には**自分が最後に入れた値**を使う。<c>panel.height</c> を読み返して
-            //   比べると、UI 側が丸めた場合に毎フレーム「違う」と判定され、
-            //   ClampToView が毎フレーム走る —— あそこには Log.Warn があるので、
-            //   内容がビューより高い環境で**毎フレーム 1 行**ログを吐くことになる
-            //   （Log.Warn はスロットルされない）。
+            // ★ Compare against **the value we last set ourselves**. Read <c>panel.height</c> back
+            //   and compare and, if the UI rounded it, every frame is judged "different" and
+            //   ClampToView runs every frame — and that has a Log.Warn in it, so in an environment
+            //   where the content is taller than the view it would emit **one line per frame**
+            //   (Log.Warn is not throttled).
             if (_appliedHeight == height) return;
             _appliedHeight = height;
 
@@ -255,9 +266,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// パネルの下端がビューからはみ出さない位置まで上げる。②④の同名メソッドと同じで、
-        /// **行を足すたびにパネルは伸びる**。いちばん下の行——警告や確認のボタン——が
-        /// 静かに画面外へ出るのを黙って許さない。
+        /// Raise the panel until its bottom edge no longer runs off the view. The same as the
+        /// method of this name in ② and ④: **the panel grows every time a row is added**.
+        /// Do not silently allow the bottom row — a warning or a confirmation button — to slip off
+        /// the screen.
         /// </summary>
         private static void ClampToView(UIPanel panel)
         {
@@ -276,20 +288,23 @@ namespace DisasterPlus.Game
                 }
                 if (top < Margin)
                 {
-                    // ★ ここに来たら**内容がビューより高い**。上端に寄せても
-                    //    いちばん下の行が画面外に出る。**黙って切れさせない。**
-                    //    構築時の 1 回だけなのでスロットル不要。
+                    // ★ Getting here means **the content is taller than the view**. Even pushed to
+                    //    the top edge, the bottom row runs off the screen. **Do not let it be cut
+                    //    off silently.** This happens once at build time, so no throttling is
+                    //    needed.
                     top = Margin;
                     Log.Warn("volcano panel is taller than the view ("
                              + panel.height.ToString("F0") + " > " + viewHeight.ToString("F0")
                              + "); the bottom rows will be off-screen");
                 }
-                // ★★ **上へは <c>InfoHub</c> が指定した位置（＝タブ帯の真下）より上に出さない。**
-                //    （2026-08-22、実機報告「天気タブ・地震タブの中に X で閉じられない
-                //    タブがあり」の正体。）上の 2 つの寄せは下端を画面に収めるためだけに
-                //    パネルを上へ上げるので、背の高いパネルは**タブ帯をまるごと覆い隠して
-                //    いた** —— 閉じる手段そのものが押せなくなる。収まらないぶんは下へはみ出すが、
-                //    帯の左端を掴めば一緒に動かせる（<c>InfoHub</c> のドラッググリップ）。
+                // ★★ **Never push it above the position <c>InfoHub</c> specified (= just below
+                //    the tab bar).** (2026-08-22, the live report "there are tabs inside the
+                //    weather and earthquake tabs that cannot be closed with the X" — this was it.)
+                //    The two nudges above raise the panel purely to keep its bottom edge on
+                //    screen, so a tall panel **was covering the whole tab bar** — the means of
+                //    closing it became unclickable. Whatever does not fit now runs off the bottom,
+                //    but grabbing the left end of the bar moves it all together
+                //    (<c>InfoHub</c>'s drag grip).
                 if (top < _origin.y) top = _origin.y;
                 panel.relativePosition = new Vector3(pos.x, top);
             }
@@ -303,15 +318,16 @@ namespace DisasterPlus.Game
         {
             VolcanoRows.SetPlain(_titleLabel, Strings.VolcanoTitle);
 
-            // 地形が書けない環境では説明の 1 行しか構築していない（_bodyBuilt の doc）。
+            // In an environment where terrain cannot be written, only the one explanatory row was
+            // built (the doc of _bodyBuilt).
             if (!_bodyBuilt) return;
 
-            // ★ スナップショットは 1 フレームに 1 回だけ取る（ロックを 2 回取らない）。
+            // ★ Take the snapshot only once per frame (do not take the lock twice).
             var snapshot = VolcanoHub.Latest;
             VolcanoStatusRows.Refresh(snapshot);
             VolcanoEffectRows.Refresh(snapshot);
 
-            // 進行中の行を出していないときは、そのぶんだけパネルを縮める。
+            // When the in-progress rows are not shown, shrink the panel by that much.
             float bottom = VolcanoEffectRows.IsShowing
                 ? VolcanoEffectRows.BlockBottom
                 : VolcanoEffectRows.BlockTop;

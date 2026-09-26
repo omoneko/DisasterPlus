@@ -5,20 +5,22 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 建物の高さ（m）を読む唯一の場所。**読めなければ 0 を返す。**
+    /// The only place a building's height (m) is read. **Returns 0 if it cannot be read.**
     ///
-    /// ── IL で確定させたこと（Task 10 Step 1。設計書 付録の未確定項目） ─────────
+    /// ── What was pinned down in the IL (Task 10 Step 1; an open item in the design
+    ///    doc's appendix) ─────────
     ///
-    /// 設計書は「建物高さは <c>Building.Info.m_generatedInfo</c> 系から取る。
-    /// **具体的なフィールド名を IL で確定してから書く**」としていた。実測した結果:
+    /// The design doc said "building height comes from the
+    /// <c>Building.Info.m_generatedInfo</c> family. **Pin the exact field name down in
+    /// the IL before writing it.**" Measured:
     ///
     /// ```
-    /// Building（構造体）に高さのフィールドは無い。
-    ///   実在するのは m_baseHeight（Byte、地形側の基準高）、
-    ///   m_width / m_length（Byte、8 m セル数）。**m_height は存在しない。**
+    /// Building (the struct) has no height field.
+    ///   What exists is m_baseHeight (Byte, the terrain-side reference height) and
+    ///   m_width / m_length (Byte, counts of 8 m cells). **There is no m_height.**
     ///
-    /// 高さはプレハブ側にある:
-    ///   BuildingInfoGen.m_size / m_min / m_max : Vector3   （メッシュ境界、m）
+    /// The height is on the prefab side:
+    ///   BuildingInfoGen.m_size / m_min / m_max : Vector3   (mesh bounds, m)
     ///   BuildingInfo.m_size                    : Vector3
     ///   BuildingInfo.m_collisionHeight         : Single
     ///
@@ -28,102 +30,111 @@ namespace DisasterPlus.Game
     ///   IL_0AC2  m_collisionHeight = m_size.y
     /// BuildingInfo.CheckReferences
     ///   IL_0019  m_collisionHeight = m_size.y
-    ///   IL_02E8  m_collisionHeight = Max(m_collisionHeight, プロップ上端)   ※ サブ建物ぶんも同様
+    ///   IL_02E8  m_collisionHeight = Max(m_collisionHeight, top of prop)   // likewise for sub-buildings
     /// ```
     ///
-    /// **単位がメートルであることの決め手**（<c>CommonBuildingAI.CollapseIfFlooded</c>、IL_0031–0053）:
+    /// **What settles that the unit is metres**
+    /// (<c>CommonBuildingAI.CollapseIfFlooded</c>, IL_0031-0053):
     ///
     /// ```
     /// if (TerrainManager.WaterLevel(XZ(m_position)) > m_position.y + Mathf.Max(4f, m_info.m_collisionHeight))
-    ///     ... 水没で倒壊
+    ///     ... collapse from flooding
     /// ```
     ///
-    /// <c>m_position.y</c> はワールド座標（m）、<c>4f</c> もメートルなので、
-    /// <c>m_collisionHeight</c> は**建物の基準面からの高さ（m）**で確定である。
-    /// <c>BuildingInfo.IsMeshSmallOrMissing</c> が <c>m_min</c> / <c>m_max</c> を
-    /// <c>m_cellWidth * 4</c>（＝ 8 m セルの半分）でクランプしていることも、
-    /// この Vector3 がメートル系であることを裏づける。
+    /// <c>m_position.y</c> is a world coordinate (m) and <c>4f</c> is metres too, so
+    /// <c>m_collisionHeight</c> is settled as **a height above the building's base plane,
+    /// in metres**. That <c>BuildingInfo.IsMeshSmallOrMissing</c> clamps <c>m_min</c> /
+    /// <c>m_max</c> by <c>m_cellWidth * 4</c> (half of an 8 m cell) corroborates that this
+    /// Vector3 is in metres.
     ///
-    /// **信頼性:** <c>InitializePrefab</c> が <c>m_generatedInfo.m_size == zero</c> で
-    /// <c>PrefabException</c> を投げるので、**初期化に成功した BuildingInfo は
-    /// 必ず非ゼロの大きさを持つ**。ただし y はもともと低い建物（公園・装飾）では
-    /// 小さく、それは読み取り失敗ではなく実測値である。
-    /// <see cref="LongPeriodResponse.MinHeightMetres"/> 未満は対象外になる。
+    /// **Reliability:** <c>InitializePrefab</c> throws a <c>PrefabException</c> when
+    /// <c>m_generatedInfo.m_size == zero</c>, so **any BuildingInfo that initialised
+    /// successfully has a non-zero size**. The y can still be small for buildings that are
+    /// genuinely low (parks, decorations), and that is a measurement, not a failed read.
+    /// Anything below <see cref="LongPeriodResponse.MinHeightMetres"/> falls outside the
+    /// feature's scope.
     ///
-    /// ── **どちらを採るか（第 2 層レビュー I2 で入れ替えた）** ──────────────
+    /// ── **Which one to use (swapped over in layer-2 review I2)** ──────────────
     ///
-    /// 当初は「ゲーム自身が建物の高さとして使っている値」という理由で
-    /// <c>m_collisionHeight</c> を主にしていた。**それは誤りだった。**
-    /// <c>CheckReferences</c> は敷地上の<b>樹木</b>の高さまで取り込んでいる
-    /// （本修正で IL 実測）:
+    /// Originally <c>m_collisionHeight</c> was preferred, on the grounds that it is "the
+    /// value the game itself uses as a building's height". **That was wrong.**
+    /// <c>CheckReferences</c> folds in the height of the <b>trees</b> on the lot
+    /// (measured in the IL for this fix):
     ///
     /// ```
     /// BuildingInfo::CheckReferences
-    ///   IL_0019-0025  m_collisionHeight = m_size.y                （出発点）
+    ///   IL_0019-0025  m_collisionHeight = m_size.y                (the starting point)
     ///   IL_0270-02F6  h = prop.m_generatedInfo.m_center.y
     ///                     + prop.m_generatedInfo.m_size.y * 0.5
     ///                 h *= prop.m_maxScale
     ///                 if (m_props[i].m_fixedHeight) h += m_props[i].m_position.y
-    ///                 m_collisionHeight = Mathf.Max(m_collisionHeight, h)   ※プロップ
-    ///   IL_03EA-0470  同じ式を **TreeInfo** について繰り返す（m_finalTree /
-    ///                 TreeInfoGen::m_center・m_size / TreeInfo::m_maxScale）  ※樹木
+    ///                 m_collisionHeight = Mathf.Max(m_collisionHeight, h)   // props
+    ///   IL_03EA-0470  the same expression repeated for **TreeInfo** (m_finalTree /
+    ///                 TreeInfoGen::m_center and m_size / TreeInfo::m_maxScale)  // trees
     /// ```
     ///
-    /// バニラの低密度住宅の敷地には樹木プロップが載っており、
-    /// <c>TreeInfoGen.m_size.y</c> は <c>m_maxScale</c> を掛ける前で 15〜25 m に
-    /// 達しうる。つまり<b>平屋が 20 m 以上を名乗り、長周期の候補になってしまう</b>。
-    /// この機能の前提そのもの（「高層ほど倒れる」）と、実機チェックリスト項目 82
-    /// （同じ距離で高層が低層より多く倒れること）が、**樹木がでっち上げた高さ**で
-    /// 測られることになる。
+    /// Vanilla's low-density residential lots carry tree props, and
+    /// <c>TreeInfoGen.m_size.y</c> can reach 15-25 m before <c>m_maxScale</c> is even
+    /// applied. In other words <b>a bungalow claims 20 m or more and becomes a candidate
+    /// for long-period damage</b>. The feature's own premise ("the taller it is, the more
+    /// likely it is to fall") and in-game checklist item 82 (that at the same distance,
+    /// tall buildings fall more often than short ones) would both be measured against
+    /// **a height fabricated by trees**.
     ///
-    /// **したがって主は <c>BuildingInfo.m_size.y</c>（メッシュ境界）にする。**
-    /// この値が汚れていないことも IL で確定させた:
+    /// **So the primary source is <c>BuildingInfo.m_size.y</c> (the mesh bounds).** That
+    /// this value is uncontaminated was also pinned down in the IL:
     ///
     /// ```
     /// BuildingInfo::InitializePrefab  IL_09BE  m_size = m_generatedInfo.m_size
     /// BuildingInfoBase::CalculateGeneratedInfo(MeshFilter[], SkinnedMeshRenderer[])
-    ///   IL_0135-014A  y = Mathf.Max(y, mesh.vertices[k].y)   ← メッシュ頂点だけ
+    ///   IL_0135-014A  y = Mathf.Max(y, mesh.vertices[k].y)   ← mesh vertices only
     ///   IL_05E6       m_generatedInfo.m_size = new Vector3(x*2, y, z*2)
-    /// アセンブリ全体で BuildingInfo::m_size に stfld するのは InitializePrefab だけ、
-    /// BuildingInfoGen::m_size に stfld するのは CalculateGeneratedInfo だけ（全走査で確認）。
+    /// Across the whole assembly, the only stfld to BuildingInfo::m_size is in
+    /// InitializePrefab, and the only stfld to BuildingInfoGen::m_size is in
+    /// CalculateGeneratedInfo (confirmed by scanning everything).
     /// ```
     ///
-    /// **<c>m_collisionHeight</c> へは退避しない。** 退避が要るのは
-    /// <c>m_size.y</c> が使えないときだけで、その状況では <c>m_collisionHeight</c> の
-    /// 出発点（IL_0019）も同じ使えない値なので、そこから <c>Max</c> で残るのは
-    /// **プロップと樹木がでっち上げた高さそのもの**になる。つまり退避が効く唯一の
-    /// 場面で、退避先が返すのは嘘である。読めなければ 0（＝不明）を返し、
-    /// 呼び出し側は何もしない。
+    /// **Never fall back to <c>m_collisionHeight</c>.** A fallback is only needed when
+    /// <c>m_size.y</c> is unusable, and in that situation <c>m_collisionHeight</c>'s
+    /// starting point (IL_0019) is that same unusable value, so what survives the
+    /// <c>Max</c> from there is **precisely the height fabricated by props and trees**. In
+    /// other words, in the one situation where a fallback would matter, the fallback
+    /// returns a lie. If it cannot be read, return 0 (meaning unknown) and the caller does
+    /// nothing.
     ///
-    /// **副作用（引き受ける）:** <c>m_size.y</c> はサブ建物を含まないので、
-    /// 本体メッシュが低くサブ建物で高さを出しているプレハブは低く出る。
-    /// 過小評価は「被害を与えない」側に倒れるので、過大評価より安全である。
+    /// **A side effect we accept:** <c>m_size.y</c> does not include sub-buildings, so a
+    /// prefab whose main mesh is low and whose height comes from sub-buildings reads low.
+    /// Under-estimating errs on the side of doing no damage, which is safer than
+    /// over-estimating.
     ///
-    /// 計画は <c>MetresOf(ushort id, ref Building b)</c> という形を指定していたが、
-    /// <b>高さはプレハブ側にしか無く、建物 ID は 1 度も要らない</b>ことが上の実測で
-    /// 確定したので、使わない引数は置いていない。
+    /// The plan specified the form <c>MetresOf(ushort id, ref Building b)</c>, but since
+    /// the measurements above settled that <b>the height exists only on the prefab side
+    /// and the building ID is never needed</b>, the unused parameter is not there.
     /// </summary>
     public static class BuildingHeight
     {
         /// <summary>
-        /// この建物の高さ（m）。**読めなければ 0。** 呼び出し側は 0 を
-        /// 「低い」ではなく「不明」として扱い、被害を一切与えないこと。
+        /// This building's height (m). **0 if it cannot be read.** The caller must treat
+        /// 0 as "unknown", not "short", and apply no damage at all.
         /// </summary>
         public static float MetresOf(ref Building b)
         {
             try
             {
                 var info = b.Info;
-                // UnityEngine.Object の == オーバーロードで破棄済み(fake-null)も弾く。
+                // UnityEngine.Object's == overload also rejects a destroyed (fake-null)
+                // object.
                 if (info == null) return 0f;
 
-                // ★ メッシュ境界の高さ。**m_collisionHeight は使わない**
-                //   （クラス doc「どちらを採るか」。敷地の樹木で膨らむ）。
+                // ★ The mesh bounds' height. **m_collisionHeight is not used** (see
+                //   "Which one to use" in the class doc; it is inflated by the lot's
+                //   trees).
                 float meshHeight = info.m_size.y;
                 if (!float.IsNaN(meshHeight) && meshHeight > 0f) return meshHeight;
 
-                // 予備経路は m_size の出所そのもの（InitializePrefab IL_09BE）だけ。
-                // m_size が書かれていないプレハブでも、生成情報が残っていれば読める。
+                // The only fallback is m_size's own source (InitializePrefab IL_09BE).
+                // Even on a prefab where m_size was never written, it can be read as long
+                // as the generated info survives.
                 var generated = info.m_generatedInfo;
                 if (generated == null) return 0f;
 
@@ -139,139 +150,155 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// **第 2 層の 2 つ目。長周期地震動で高層建物を追加で倒す。**
-    /// <b>sim スレッド専用。</b>既定 OFF。
+    /// **The second part of layer 2. Long-period ground motion brings down tall buildings
+    /// that would otherwise have survived.** <b>Sim thread only.</b> Off by default.
     ///
-    /// ── これは可視化ではない ─────────────────────────────────
+    /// ── This is not a visualisation ──────────────────────────────
     ///
-    /// <see cref="LongPeriodResponse"/> のクラス doc のとおり、バニラの揺れには
-    /// 長周期成分が無く、建物の高さは揺れにも被害にも入っていない（§A-7 / §A-3）。
-    /// ここで倒れる建物は**バニラなら倒れなかった建物**である。だから既定 OFF で、
-    /// 表示は必ず第 2 層（<c>Strings.SourceModel</c>）、強さのスライダーで 0 にできる。
+    /// As <see cref="LongPeriodResponse"/>'s class doc explains, vanilla's shaking has no
+    /// long-period component, and building height enters neither the shaking nor the
+    /// damage (§A-7 / §A-3). The buildings that fall here are **buildings that would not
+    /// have fallen in vanilla**. That is why it is off by default, why it is always
+    /// displayed as layer 2 (<c>Strings.SourceModel</c>), and why the strength slider can
+    /// take it to 0.
     ///
-    /// ── 足すだけ。抑えない ─────────────────────────────────
+    /// ── Additive only. Nothing is suppressed ─────────────────────
     ///
-    /// バニラの破壊にはパッチも介入もしない。既に倒壊している建物は
-    /// <c>CollapseBuilding</c> 自身が弾く（<c>CommonBuildingAI.CollapseBuilding</c>
-    /// IL_0007: <c>m_flags &amp; 0x400000</c> で即 false）ので二重被害にはならない。
+    /// Vanilla's destruction is neither patched nor interfered with. A building that has
+    /// already collapsed is rejected by <c>CollapseBuilding</c> itself
+    /// (<c>CommonBuildingAI.CollapseBuilding</c> IL_0007: immediately false on
+    /// <c>m_flags &amp; 0x400000</c>), so there is no double damage.
     ///
-    /// ── <c>DisasterHelpers</c> を経由しない（§E-2）───────────────────
+    /// ── We do not go through <c>DisasterHelpers</c> (§E-2) ────────────────
     ///
-    /// Natural Disasters Renewal は <c>DisasterHelpers.DestroyBuildings</c> を
-    /// Prefix で完全置換する。<c>BuildingAI.CollapseBuilding</c> を直接呼べば
-    /// NDR のパッチ面 2 つを**完全に迂回できる**ので、あちらの破壊設定に
-    /// 左右されずにこの機能だけが動く（③の火災旋風と同じ判断）。
+    /// Natural Disasters Renewal replaces <c>DisasterHelpers.DestroyBuildings</c>
+    /// wholesale with a Prefix. Calling <c>BuildingAI.CollapseBuilding</c> directly
+    /// **routes around both of NDR's patch surfaces entirely**, so this feature runs on
+    /// its own terms regardless of that mod's destruction settings (the same judgement as
+    /// ③'s fire whirl).
     ///
-    /// **<c>Building.m_fireIntensity</c> は絶対に直接書かない。** このフィールドを
-    /// 消費するのは <c>CommonBuildingAI</c> の系だけで、それ以外の AI に書き込むと
-    /// 誰も消さない永久の幽霊火災になり、**バニラの建物配列に入るのでセーブに焼き付き、
-    /// MOD を外しても残る**。本プロジェクトは一度これを出荷している。
-    /// ここで渡す <c>burnAmount</c> は <b>0</b>（長周期は「揺すられて潰れる」であって
-    /// 焼損ではない）で、火勢の面倒はバニラ側が見る。
+    /// **Never write <c>Building.m_fireIntensity</c> directly.** The only family that
+    /// consumes that field is <c>CommonBuildingAI</c>'s; write it on any other AI and you
+    /// get a permanent ghost fire that nobody puts out, and because **it lives in
+    /// vanilla's building array it is baked into the save and survives removing the
+    /// mod**. This project shipped exactly that once. The <c>burnAmount</c> passed here
+    /// is <b>0</b> (long-period damage is "shaken until it collapses", not burning), and
+    /// vanilla looks after the fire intensity.
     ///
-    /// ── 1 tick あたりの仕事量の上限（明示する）──────────────────────
+    /// ── The ceiling on work per tick (stated explicitly) ──────────────────
     ///
-    /// 走査が走るのは**地震が Active の間だけ**で、間隔は
-    /// <see cref="IntervalFrames"/> フレームぶんの**経過ゲーム内時間**である
-    /// （<c>frameIndex % N</c> にしない —— <c>m_currentFrameIndex</c> は 1 tick で
-    /// <c>FinalSimulationSpeed</c>（1/3/9）進むので、剰余だとゲーム速度で
-    /// 判定がまばらになる。火災旋風 設計書 付録 A-4）。
+    /// The sweep only runs **while the earthquake is Active**, and its interval is the
+    /// **elapsed game time** corresponding to <see cref="IntervalFrames"/> frames (never
+    /// <c>frameIndex % N</c> — <c>m_currentFrameIndex</c> advances by
+    /// <c>FinalSimulationSpeed</c> (1/3/9) per tick, so a modulo makes the check fire
+    /// erratically with game speed. Fire whirl design doc, appendix A-4).
     ///
-    /// 1 回の走査の上限は <b>グリッドセル <see cref="MaxCellsPerPass"/> 個</b>と
-    /// <b>建物 <see cref="MaxBuildingsPerPass"/> 棟</b>。到達範囲は最大
-    /// 2 × 7100 m ＝ 建物グリッド（270×270、1 セル 64 m）の全域になりうるので、
-    /// 上限に達したら**そこで打ち切り、次の走査は続きから**再開する
-    /// （<see cref="_cursorOrdinal"/>）。選定は (地震, 建物) だけで決まり
-    /// フレームを混ぜないので、途中で切っても結論は変わらない。
+    /// One sweep is capped at <b><see cref="MaxCellsPerPass"/> grid cells</b> and
+    /// <b><see cref="MaxBuildingsPerPass"/> buildings</b>. The reach can be up to
+    /// 2 × 7100 m, i.e. the whole building grid (270×270 cells of 64 m), so on hitting
+    /// the cap we **stop there and the next sweep resumes where we stopped**
+    /// (<see cref="_cursorOrdinal"/>). The selection depends on (quake, building) alone
+    /// with no frame mixed in, so cutting off part way does not change the conclusion.
     ///
-    /// **走査の順序は震央から外側へ**（<see cref="OutwardCellOrder"/>）。行優先だと
-    /// 最初に見るのが矩形の角＝震央からいちばん遠い＝確率がほぼ 0 の場所になり、
-    /// 上限が**いちばん壊れやすい建物を切り捨てる**（第 2 層レビュー I1。
-    /// 順序を発明した理由の全文は <see cref="OutwardCellOrder"/> のクラス doc）。
+    /// **The sweep order runs outwards from the epicentre**
+    /// (<see cref="OutwardCellOrder"/>). In row-major order the first thing you look at
+    /// is the corner of the rectangle — the furthest point from the epicentre, where the
+    /// probability is near 0 — so the cap would **throw away the buildings most likely to
+    /// fall** (layer-2 review I1. The full reasoning behind inventing the order is in
+    /// <see cref="OutwardCellOrder"/>'s class doc).
     ///
-    /// 参考: バニラ自身の全体円盤は <c>preRadius + 72</c> ＝ 最大 7172 m の
-    /// グリッド走査を **1 シミュレーションステップごとに**、上限なしで行う（§A-3）。
-    /// ここの上限はそれよりはるかに保守的である。
+    /// For reference: vanilla's own whole-quake disc sweeps a grid of
+    /// <c>preRadius + 72</c>, up to 7,172 m, **on every simulation step**, with no cap at
+    /// all (§A-3). The cap here is far more conservative than that.
     ///
-    /// **地震が変わった直後の 1 tick は走らせない。** <c>SeismographRecorder.Rescan</c> が
-    /// 地震の開始 tick に建物バッファの全スロット走査を行うので、そこへ重ねない。
-    /// ただし<b>間隔の累積（<see cref="_minutesSincePass"/>）は巻き戻さない</b> ——
-    /// 地震が複数同時に進行して <c>SelectDamaging</c> の選定が入れ替わり続けると、
-    /// 巻き戻す実装では累積が毎回 0 に戻り、**走査が 1 度も走らない**（第 2 層レビュー I3）。
+    /// **Do not sweep on the tick right after the earthquake changed.**
+    /// <c>SeismographRecorder.Rescan</c> walks every slot of the building buffer on an
+    /// earthquake's starting tick, so do not pile on top of it. But <b>do not wind the
+    /// interval accumulator (<see cref="_minutesSincePass"/>) back</b> — with several
+    /// earthquakes running at once and <c>SelectDamaging</c>'s choice switching back and
+    /// forth, an implementation that winds it back resets the accumulator to 0 every time
+    /// and **the sweep never runs at all** (layer-2 review I3).
     ///
-    /// ── 対象は「今いちばん強い地震」1 個だけ（明示する）─────────────────
+    /// ── Only one earthquake, "the strongest right now" (stated explicitly) ──────
     ///
-    /// <c>QuakeSelection.SelectDamaging</c> が選ぶ 1 個だけを追う。同時に 2 個以上の
-    /// 地震が Active でも、追加被害を受けるのは選ばれた 1 個の周りだけである
-    /// （<c>TsunamiChain</c> と同じ制限で、あちらと同じくクラス doc で名乗る）。
-    /// 選定が入れ替わったときは走査の位置（<see cref="_cursorOrdinal"/>）を捨てて
-    /// 新しい震央から測り直し、その事実を診断へ 1 行出す。
+    /// It tracks only the one <c>QuakeSelection.SelectDamaging</c> picks. Even with two
+    /// or more earthquakes Active at once, only the area around that one takes extra
+    /// damage (the same limit as <c>TsunamiChain</c>, and as there it is declared in the
+    /// class doc). When the choice switches, the sweep position
+    /// (<see cref="_cursorOrdinal"/>) is discarded, measurement restarts from the new
+    /// epicentre, and the fact is logged in one diagnostic line.
     ///
-    /// ── 診断（③の失敗を繰り返さない）───────────────────────────
+    /// ── Diagnostics (not repeating ③'s failure) ──────────────────────────
     ///
-    /// ③では「延焼が動いているか診断から一切見えない」まま欠陥を出荷した。
-    /// ここは <c>scanned</c> / <c>selected</c> / <c>attempted</c> / <c>refused</c> /
-    /// <c>collapsed</c> を必ず持ち、**倒壊 0 のときも 1 行出す** ——
-    /// 「壊れていない」と「近くに対象が無い」がログで区別できなくなるからである。
+    /// In ③ we shipped a defect with "no way whatsoever to see from the diagnostics
+    /// whether fire spread was running". Here we always carry <c>scanned</c>,
+    /// <c>selected</c>, <c>attempted</c>, <c>refused</c> and <c>collapsed</c>, and
+    /// **print a line even when nothing collapsed** — otherwise "it is broken" and "there
+    /// is nothing nearby to act on" become indistinguishable in the log.
     /// </summary>
     public static class LongPeriodDamage
     {
         /// <summary>
-        /// 走査の間隔（フレーム相当のゲーム内時間）。バニラの災害 1 個あたりの
-        /// <c>SimulationStep</c> 間隔と揃えてある。
+        /// The interval between sweeps (in game time equivalent to frames). It matches
+        /// vanilla's <c>SimulationStep</c> interval per disaster.
         /// </summary>
         private const int IntervalFrames = 256;
 
-        /// <summary>1 回の走査で見るグリッドセルの上限。到達範囲は全域になりうる。</summary>
+        /// <summary>The maximum grid cells looked at in one sweep. The reach can cover the whole grid.</summary>
         private const int MaxCellsPerPass = 32768;
 
-        /// <summary>1 回の走査で調べる建物の上限。</summary>
+        /// <summary>The maximum buildings examined in one sweep.</summary>
         private const int MaxBuildingsPerPass = 2048;
 
-        /// <summary>建物グリッドの 1 辺のセル数（1 セル 64 m）。</summary>
+        /// <summary>The building grid's side length in cells (each cell is 64 m).</summary>
         private const int GridSide = 270;
 
         /// <summary>
-        /// 1 セルの連結リストを辿る回数の上限（壊れた保存データ対策）。
-        /// バニラの <c>DisasterHelpers.DestroyBuildings</c> の内側ループと同じ
-        /// 49152 ＝ 建物バッファの大きさ（IL_0521 の <c>ldc.i4 49152</c>）。
+        /// The maximum number of hops along one cell's linked list (insurance against a
+        /// corrupt save). The same 49152 as the inner loop of vanilla's
+        /// <c>DisasterHelpers.DestroyBuildings</c>, i.e. the size of the building buffer
+        /// (the <c>ldc.i4 49152</c> at IL_0521).
         /// </summary>
         private const int GridChainGuard = 49152;
 
         /// <summary>
-        /// 候補にするフラグ条件。**バニラの <c>DestroyBuildings</c> の一次カリングと
-        /// 同じマスク・同じ比較**（§A-3、<c>(m_flags &amp; 0x80013) != 1</c>）に、
-        /// <c>Collapsed</c> の除外を足したもの。
+        /// The flag condition for being a candidate. **The same mask and the same
+        /// comparison as vanilla's first-pass cull in <c>DestroyBuildings</c>**
+        /// (§A-3, <c>(m_flags &amp; 0x80013) != 1</c>), plus the exclusion of
+        /// <c>Collapsed</c>.
         ///
-        /// <c>Collapsed</c> を弾くのは <c>CollapseBuilding</c> が必ず false を返すからで、
-        /// 弾かないと成功した跡地の瓦礫が毎回 refused に積まれ、診断の数字が読めなくなる
-        /// （<c>FireWhirlDamage.CollectMask</c> と同じ理由）。
+        /// <c>Collapsed</c> is excluded because <c>CollapseBuilding</c> always returns
+        /// false for it; without the exclusion, the rubble left where we already succeeded
+        /// piles into `refused` every pass and the diagnostic numbers become unreadable
+        /// (the same reason as <c>FireWhirlDamage.CollectMask</c>).
         ///
-        /// **炎上中は弾かない。** <c>CommonBuildingAI.CollapseBuilding</c> は火勢を見ずに
-        /// 倒壊させる（IL 実測）。燃えている高層が長周期で潰れるのは、この機能が
-        /// 表現したい挙動そのものである。
+        /// **A burning building is not excluded.**
+        /// <c>CommonBuildingAI.CollapseBuilding</c> collapses it without looking at the
+        /// fire intensity (measured in the IL). A burning tower crushed by long-period
+        /// motion is exactly the behaviour this feature exists to express.
         /// </summary>
         private const Building.Flags CandidateMask =
             Building.Flags.Created | Building.Flags.Deleted
             | Building.Flags.Untouchable | Building.Flags.Demolishing
             | Building.Flags.Collapsed;
 
-        /// <summary>Degraded の自己申告キー（<c>FeatureHost.NoteDegraded</c>）。</summary>
+        /// <summary>The key for self-reporting a degraded state (<c>FeatureHost.NoteDegraded</c>).</summary>
         private const string HeightNoteKey = "eqLongPeriodHeight";
 
         private static float _minutesSincePass;
         private static ushort _quakeId;
 
         /// <summary>
-        /// 次に見るセルの序数（<see cref="OutwardCellOrder"/> の順序）。0 が震央のセル。
-        /// 上限で打ち切られたときだけ 0 以外で残る。
+        /// The ordinal of the next cell to look at (in <see cref="OutwardCellOrder"/>'s
+        /// order). 0 is the epicentre's cell. It stays non-zero only when the sweep was
+        /// cut off at the cap.
         /// </summary>
         private static int _cursorOrdinal;
 
         private static bool _heightNotePosted;
         private static bool _errorLogged;
 
-        // ── 診断カウンタ（全て sim スレッドからのみ読み書きする）──────────────
+        // ── Diagnostic counters (all read and written from the sim thread only) ─────
         private static int _passes;
         private static int _lastScanned;
         private static int _lastSelected;
@@ -282,37 +309,38 @@ namespace DisasterPlus.Game
         private static bool _lastCapped;
         private static int _totalCollapsed;
 
-        /// <summary>これまでに走った走査の回数（セッション累計）。</summary>
+        /// <summary>How many sweeps have run so far (session total).</summary>
         public static int Passes { get { return _passes; } }
 
-        /// <summary>直近 1 回で調べた建物数（候補マスクを通り、範囲内にあったもの）。</summary>
+        /// <summary>Buildings examined in the last sweep (those that passed the candidate mask and were in range).</summary>
         public static int LastScanned { get { return _lastScanned; } }
 
-        /// <summary>直近 1 回で確率選定を通った棟数。</summary>
+        /// <summary>Buildings that won the probability draw in the last sweep.</summary>
         public static int LastSelected { get { return _lastSelected; } }
 
-        /// <summary>直近 1 回で「バニラが dry-run で受け付ける」と答えた棟数。</summary>
+        /// <summary>Buildings vanilla's dry run said it would accept, in the last sweep.</summary>
         public static int LastAttempted { get { return _lastAttempted; } }
 
-        /// <summary>直近 1 回で「バニラが設計上断る」と答えた棟数。</summary>
+        /// <summary>Buildings vanilla said it refuses by design, in the last sweep.</summary>
         public static int LastRefused { get { return _lastRefused; } }
 
-        /// <summary>直近 1 回で実際に倒壊した棟数。</summary>
+        /// <summary>Buildings that actually collapsed in the last sweep.</summary>
         public static int LastCollapsed { get { return _lastCollapsed; } }
 
         /// <summary>
-        /// 直近 1 回で**高さが読めなかった**棟数。0 でないこと自体が異常の合図で、
-        /// この建物には追加被害を一切与えていない。
+        /// Buildings in the last sweep **whose height could not be read**. A non-zero
+        /// value is itself a sign something is wrong, and no extra damage at all was
+        /// applied to those buildings.
         /// </summary>
         public static int LastUnknownHeight { get { return _lastUnknownHeight; } }
 
-        /// <summary>直近 1 回が上限で打ち切られたか（続きは次回）。</summary>
+        /// <summary>Whether the last sweep was cut off at the cap (it resumes next time).</summary>
         public static bool LastCapped { get { return _lastCapped; } }
 
-        /// <summary>セッション累計の倒壊棟数。</summary>
+        /// <summary>Session total of buildings collapsed.</summary>
         public static int TotalCollapsed { get { return _totalCollapsed; } }
 
-        /// <summary>**レベルアンロードで必ず呼ぶ。** 都市をまたいで何も持ち越さない。</summary>
+        /// <summary>**Always call this on level unload.** Carry nothing across cities.</summary>
         public static void Reset()
         {
             _minutesSincePass = 0f;
@@ -332,15 +360,15 @@ namespace DisasterPlus.Game
                 _heightNotePosted = false;
                 FeatureHost.ClearDegraded(EarthquakeFeature.FeatureName, HeightNoteKey);
             }
-            // _errorLogged は戻さない。「投げる」はこの DLL が参照しているゲームの
-            // ビルドに対する事実であって、都市ごとの状態ではない
-            // （EarthquakeReader._readErrorLogged と同じ判断）。
+            // _errorLogged is not reset. "It throws" is a fact about the game build this
+            // DLL is referencing, not per-city state (the same judgement as
+            // EarthquakeReader._readErrorLogged).
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>EarthquakeFeature.OnSimulationTick</c> の
-        /// ポーズガードより下から呼ぶこと**（ポーズ中に建物が倒れる）。
-        /// 設定が OFF のときは呼び出し側が呼ばない。
+        /// Sim thread. **Always call it below the pause guard in
+        /// <c>EarthquakeFeature.OnSimulationTick</c>** (otherwise buildings collapse while
+        /// the game is paused). When the setting is off, the caller does not call it.
         /// </summary>
         public static void Apply(EarthquakeSnapshot snapshot, float deltaMinutes)
         {
@@ -367,23 +395,26 @@ namespace DisasterPlus.Game
 
         private static void Step(EarthquakeSnapshot snapshot, float deltaMinutes)
         {
-            // ★ 間隔の累積は**対象の地震より先に**進める。地震が入れ替わっても、
-            //    無くなっても、時間は流れているという扱いにする。ここを地震ごとの
-            //    状態にすると、複数の地震が Emerging/Active を出入りするたびに
-            //    累積が 0 に戻り、走査が永久に走らなくなる（第 2 層レビュー I3）。
+            // ★ Advance the interval accumulator **before** looking for the target
+            //    earthquake. Whether the earthquake changes or disappears, time is
+            //    treated as continuing to pass. Make this per-earthquake state and the
+            //    accumulator resets to 0 every time several earthquakes move in and out
+            //    of Emerging/Active, so the sweep never runs at all (layer-2 review I3).
             float framesPerMinute = FeatureHost.FramesPerMinute;
             float interval = framesPerMinute > 0f ? IntervalFrames / framesPerMinute : 0f;
 
             if (deltaMinutes > 0f) _minutesSincePass += deltaMinutes;
 
-            // 累積は間隔ぶんで頭打ちにする。地震が 1 個も無い時間が何時間続いても
-            // 値が伸び続けない（float の桁を食わせない）。頭打ちにしても
-            // 「間隔に達している」という結論は変わらない。
+            // Cap the accumulator at the interval, so that however many hours pass with
+            // no earthquake at all the value does not keep growing (and does not eat
+            // float precision). Capping it does not change the conclusion "the interval
+            // has been reached".
             if (interval > 0f && _minutesSincePass > interval) _minutesSincePass = interval;
 
-            // 破壊が実際に走っている地震だけを対象にする。バニラの全体円盤の
-            // DestroyBuildings は SimulationStep の **Active 分岐にしか無い**（§A-3）ので、
-            // 本震前（Emerging）に建物を潰すと、揺れる前に倒れることになる。
+            // Only consider an earthquake whose destruction is actually running. Vanilla's
+            // whole-quake DestroyBuildings exists **only in SimulationStep's Active
+            // branch** (§A-3), so flattening buildings before the main shock (Emerging)
+            // would mean they fall before the ground shakes.
             var quake = QuakeSelection.SelectDamaging(snapshot.Quakes);
             if (quake == null || quake.Phase != EarthquakePhase.Active)
             {
@@ -393,53 +424,62 @@ namespace DisasterPlus.Game
 
             if (quake.DisasterId != _quakeId)
             {
-                // ★ 地震が変わった tick は走らせない。SeismographRecorder.Rescan が
-                //    同じ tick で建物バッファの全スロット走査を行うので、そこへ重ねない。
-                //    **累積は巻き戻さない**（上のコメント）。走査の位置だけ捨てる ——
-                //    震央が変われば矩形もリングの中心も別物なので、続きから再開する
-                //    意味が無い。
+                // ★ Do not sweep on the tick where the earthquake changed.
+                //    SeismographRecorder.Rescan walks every slot of the building buffer
+                //    on that same tick, so do not pile on top of it.
+                //    **Do not wind the accumulator back** (see the comment above). Only
+                //    the sweep position is discarded — with a different epicentre, both
+                //    the rectangle and the rings' centre are different things, so there
+                //    is no sense in resuming where we stopped.
                 ushort previous = _quakeId;
                 Forget();
                 _quakeId = quake.DisasterId;
 
-                // 黙って乗り換えない。「対象は 1 個だけ」という制限（クラス doc）が
-                // 効いた瞬間はログに残す。Log.Diag はキーごとにスロットルされる。
+                // Never switch silently. Log the moment the "only one target" limit (see
+                // the class doc) actually bites. Log.Diag is throttled per key.
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "longPeriodSwitch",
                     "damaging quake changed #" + previous + " -> #" + quake.DisasterId
                     + "; sweep position discarded, interval carried over");
                 return;
             }
 
-            // 換算が取れないときは走らない（間隔が決まらない）。累積は上で
-            // 進んでいるので、取れるようになった tick からふつうに動き出す。
+            // If the conversion is unavailable we do not run (the interval is undefined).
+            // The accumulator has advanced above, so we start working normally from the
+            // tick where it becomes available.
             if (framesPerMinute <= 0f) return;
             if (_minutesSincePass < interval) return;
 
-            // 余りを繰り越さない。ロード直後などに大きな deltaMinutes が来ても
-            // 次 tick に連続発火せず「間隔ごとに 1 回」を保つ（FireWhirlDamage と同じ）。
+            // Do not carry the remainder over. Even if a large deltaMinutes arrives (just
+            // after a load, say), we do not fire again on the next tick and keep to "once
+            // per interval" (the same as FireWhirlDamage).
             _minutesSincePass = 0f;
 
             int strength = ModSettings.EarthquakeLongPeriodStrength.value;
             if (strength < 0) strength = 0;
 
-            // ★ 時間帯係数（Task 11）。**第 2 層の追加被害にだけ掛かる唯一の適用点**で、
-            //    バニラの被害にも第 1 層の表示にも触れない（TimeOfDayFactor のクラス doc）。
-            //    時刻は sim スレッドの m_dayTimeFrame 由来で、main スレッドが書く
-            //    m_currentDayTimeHour ではない（§F-1。EarthquakeReader が読んでいる）。
+            // ★ The time-of-day factor (Task 11). **This is the one and only point where
+            //    it is applied, and it applies only to layer 2's extra damage**; it
+            //    touches neither vanilla's damage nor layer 1's display (see
+            //    TimeOfDayFactor's class doc). The time comes from the sim thread's
+            //    m_dayTimeFrame, not the m_currentDayTimeHour the main thread writes
+            //    (§F-1; EarthquakeReader is the one reading it).
             //
-            //    **日夜サイクル OFF でも式は変えない。** 時刻が 12.0 に固定される
-            //    （§F-1）ので係数は自然に 1.0 になる。特別扱いの分岐を足すと
-            //    「日夜 OFF のときだけ別の道を通る」という検証しにくい経路が増える。
-            //    その事実はパネルと診断ダンプが名乗る（Strings.EarthquakeNoDayNight）。
+            //    **The formula does not change when the day/night cycle is off.** The
+            //    clock is pinned at 12.0 (§F-1), so the factor naturally comes out as
+            //    1.0. Adding a special-case branch would add a path that only runs with
+            //    day/night off, which is hard to verify. The panel and the diagnostic
+            //    dump state the fact instead (Strings.EarthquakeNoDayNight).
             float timeFactor = TimeOfDayFactor.Of(snapshot.HourOfDay);
 
             Sweep(quake, strength, timeFactor);
         }
 
         /// <summary>
-        /// 監視をやめる。**間隔の累積（<see cref="_minutesSincePass"/>）は触らない**
-        /// —— あれは地震ではなく時間の状態で、地震の出入りで巻き戻すと走査が
-        /// 走らなくなる（クラス doc / 第 2 層レビュー I3）。カウンタは診断のために残す。
+        /// Stops tracking. **The interval accumulator
+        /// (<see cref="_minutesSincePass"/>) is left alone** — it is state about time, not
+        /// about the earthquake, and winding it back as earthquakes come and go stops the
+        /// sweep running at all (see the class doc / layer-2 review I3). The counters are
+        /// kept for diagnostics.
         /// </summary>
         private static void Forget()
         {
@@ -448,19 +488,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 回ぶんの走査。上限に達したら打ち切り、次回は <see cref="_cursorOrdinal"/> から
-        /// 再開する（クラス doc の「1 tick あたりの仕事量の上限」）。
+        /// One sweep. On hitting the cap it stops, and the next one resumes from
+        /// <see cref="_cursorOrdinal"/> (see "the ceiling on work per tick" in the class
+        /// doc).
         ///
-        /// **セルを見る順序は震央から外側へ**（<see cref="OutwardCellOrder"/>）。
-        /// 1 周し終えたら序数を 0 に戻して震央から測り直す —— <see cref="IsSelected"/> は
-        /// フレームもセル順も混ぜないので同じ建物は同じ結論になり、倒れた建物は
-        /// <see cref="CandidateMask"/> の <c>Collapsed</c> で落ちる。
+        /// **Cells are visited outwards from the epicentre**
+        /// (<see cref="OutwardCellOrder"/>). Once a circuit completes, the ordinal returns
+        /// to 0 and measurement restarts from the epicentre — <see cref="IsSelected"/>
+        /// mixes in neither the frame nor the cell order, so the same building gives the
+        /// same conclusion, and a building that has fallen is dropped by
+        /// <see cref="CandidateMask"/>'s <c>Collapsed</c>.
         /// </summary>
         private static void Sweep(EarthquakeReading quake, int strength, float timeFactor)
         {
-            // ★ Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-            //    new GameObject を走らせる main スレッド専用 API なので、exists で先に
-            //    確認する（Log.CurrentFrame と同じ理由。TsunamiChain / EarthquakeReader も同様）。
+            // ★ When sInstance is null, Singleton<T>.instance runs FindObjectOfType and
+            //    new GameObject, which is a main-thread-only API, so check `exists` first
+            //    (the same reason as Log.CurrentFrame; likewise in TsunamiChain and
+            //    EarthquakeReader).
             if (!Singleton<BuildingManager>.exists) return;
 
             var bm = Singleton<BuildingManager>.instance;
@@ -473,8 +517,9 @@ namespace DisasterPlus.Game
             float range = LongPeriodResponse.RangeOf(quake.Intensity);
             var epicentre = quake.Epicentre.ToVec2();
 
-            // 建物グリッドは 1 セル 64m、270x270。境界をはみ出さないようクランプする
-            // （バニラの DestroyBuildings と同じセル 64・オフセット 135・[0,269]）。
+            // The building grid is 270x270 cells of 64 m. Clamp so we never run off the
+            // edge (the same cell size of 64, offset of 135 and [0,269] as vanilla's
+            // DestroyBuildings).
             int minX = Clamp((int)((epicentre.X - range) / 64f + 135f));
             int maxX = Clamp((int)((epicentre.X + range) / 64f + 135f));
             int minZ = Clamp((int)((epicentre.Z - range) / 64f + 135f));
@@ -483,8 +528,9 @@ namespace DisasterPlus.Game
             int cellCount = (maxX - minX + 1) * (maxZ - minZ + 1);
             if (cellCount <= 0) return;
 
-            // リングの中心は震央のセル。矩形と同じクランプを掛けるので、震央が
-            // マップの外でも中心は必ずグリッドの中に落ちる。
+            // The rings are centred on the epicentre's cell. The same clamp as the
+            // rectangle is applied, so even with the epicentre outside the map the centre
+            // always lands inside the grid.
             int centreX = Clamp((int)(epicentre.X / 64f + 135f));
             int centreZ = Clamp((int)(epicentre.Z / 64f + 135f));
             int ordinalCount = OutwardCellOrder.OrdinalCount(
@@ -516,9 +562,10 @@ namespace DisasterPlus.Game
                 int x = centreX + dx;
                 int z = centreZ + dz;
 
-                // ★ 矩形の外は**数えずに飛ばす**（OutwardCellOrder のクラス doc）。
-                //    数えると上限がはみ出しぶんだけ目減りし、診断の cells が
-                //    「実際に見たセル数」でなくなる。
+                // ★ Cells outside the rectangle are **skipped without being counted**
+                //    (see OutwardCellOrder's class doc). Counting them eats into the cap
+                //    by however much lies outside, and the diagnostic's `cells` stops
+                //    being "the number of cells actually looked at".
                 if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
 
                 cells++;
@@ -531,14 +578,15 @@ namespace DisasterPlus.Game
 
                 while (id != 0 && id < buildings.Length)
                 {
-                    // ★ 次の ID は**行動する前に**控える。バニラの
-                    //    DisasterHelpers.DestroyBuildings も同じ形で、ループの先頭
-                    //    （IL_00E2）で m_nextGridBuilding をローカルへ写し、
-                    //    CollapseBuilding を 2 回呼んだ後の IL_0516 でそれを使う。
-                    //    バニラの CollapseBuilding 実装に ReleaseBuilding を呼ぶものは
-                    //    無いので今日は同値だが、倒壊で建物を解放するサードパーティの
-                    //    AI が居ると buildings[id] が 0 で埋まり、**このセルの残りが
-                    //    黙って飛ぶ**。ローカル 1 個で塞げる。
+                    // ★ Take the next ID **before** doing anything. Vanilla's
+                    //    DisasterHelpers.DestroyBuildings has the same shape: it copies
+                    //    m_nextGridBuilding into a local at the top of the loop (IL_00E2)
+                    //    and uses it at IL_0516, after calling CollapseBuilding twice.
+                    //    No vanilla CollapseBuilding implementation calls ReleaseBuilding,
+                    //    so today the two are equivalent, but with a third-party AI that
+                    //    releases the building on collapse, buildings[id] is zeroed and
+                    //    **the rest of this cell is silently skipped**. One local closes
+                    //    that off.
                     ushort next = buildings[id].m_nextGridBuilding;
 
                     if ((buildings[id].m_flags & CandidateMask) == Building.Flags.Created)
@@ -551,9 +599,10 @@ namespace DisasterPlus.Game
                             float metres = BuildingHeight.MetresOf(ref buildings[id]);
                             if (metres <= 0f)
                             {
-                                // ★ 高さが分からない建物には**何もしない**。
-                                //    推測した高さで「高層ほど壊れる」を適用したら、
-                                //    それはこの MOD が最も嫌う形の嘘になる。
+                                // ★ **Do nothing** to a building whose height is unknown.
+                                //    Applying "the taller it is, the more likely it is to
+                                //    fall" using a guessed height would be exactly the
+                                //    kind of lie this mod hates most.
                                 unknownHeight++;
                             }
                             else if (IsSelected(quake, id, metres, d, strength, timeFactor))
@@ -568,14 +617,16 @@ namespace DisasterPlus.Game
 
                     id = next;
 
-                    // 連結リストが壊れている保存データで無限ループしないための保険。
-                    // 上限はバニラの内側ループと同じ 49152（＝建物バッファの大きさ。
-                    // DestroyBuildings IL_0521）。1 セルにそれ以上並ぶことはありえない。
+                    // Insurance against looping forever on a save whose linked list is
+                    // corrupt. The limit is the same 49152 as vanilla's inner loop (the
+                    // size of the building buffer; DestroyBuildings IL_0521). More than
+                    // that cannot possibly be chained in one cell.
                     if (++guard > GridChainGuard) break;
                 }
             }
 
-            // 1 周し終えていれば次回は震央から。打ち切りなら続きから。
+            // If a circuit completed, start from the epicentre next time. If we were cut
+            // off, resume where we stopped.
             _cursorOrdinal = ordinal >= ordinalCount ? 0 : ordinal;
             _passes++;
             _lastScanned = scanned;
@@ -589,17 +640,19 @@ namespace DisasterPlus.Game
 
             UpdateHeightNote(scanned, unknownHeight);
 
-            // ★ collapsed > 0 で囲ってはいけない。「機能が死んでいる」と
-            //    「近くに高層が無い」がログ上で区別できなくなる（③で実際に起きた形）。
-            //    Log.Diag はキーごとにスロットルされるので毎回書いても溢れない。
+            // ★ Never wrap this in `collapsed > 0`. That makes "the feature is dead" and
+            //    "there are no tall buildings nearby" indistinguishable in the log (the
+            //    exact shape that bit us in ③). Log.Diag is throttled per key, so writing
+            //    it every time does not flood anything.
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "longPeriod",
                 "pass#" + _passes + " quake#" + quake.DisasterId
                 + " strength=" + strength
                 + " timeFactor=" + timeFactor.ToString("F2")
                 + " range=" + range.ToString("F0")
                 + " cells=" + cells + "/" + cellCount
-                // 走査は震央のセル（序数 0）から外へ。次回の再開点も出す
-                // ——「震央まで届いていない」を診断から見えるようにするため。
+                // The sweep runs outwards from the epicentre's cell (ordinal 0). The next
+                // resume point is printed too, so that "it never reached the epicentre"
+                // is visible from the diagnostics.
                 + " ringOrder=" + startOrdinal + ".." + (ordinal - 1)
                 + " next=" + _cursorOrdinal
                 + " scanned=" + scanned + " selected=" + selected
@@ -610,13 +663,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// この建物を選ぶか。**乱数は <see cref="DeterministicRandom"/>**
-        /// （<c>VanillaRandomizer</c> ではない）——これは**この MOD が発明した判断**で、
-        /// バニラが引く値と一致する必要が無い。むしろ一致させると、第 1 層で
-        /// 先読みしたしきい値と混ざって、どちらの層の結論なのかが追えなくなる。
+        /// Whether to select this building. **The randomness is
+        /// <see cref="DeterministicRandom"/>**, not <c>VanillaRandomizer</c> — this is
+        /// **a judgement this mod invented**, and it need not agree with the values
+        /// vanilla draws. Making them agree would be worse: it would blend into the
+        /// threshold layer 1 reads ahead, and you could no longer tell which layer a
+        /// conclusion came from.
         ///
-        /// **フレームを混ぜない。** 混ぜると同じ建物が走査のたびに抽選し直され、
-        /// 時間とともに壊れる建物が際限なく増える。
+        /// **Never mix in the frame.** Mix it in and the same building is re-drawn on
+        /// every sweep, so the number of buildings destroyed grows without limit over
+        /// time.
         /// </summary>
         private static bool IsSelected(EarthquakeReading quake, ushort buildingId,
                                        float heightMetres, float distance, int strength,
@@ -624,9 +680,10 @@ namespace DisasterPlus.Game
         {
             float chance = LongPeriodResponse.ExtraCollapseChance(
                 heightMetres, distance, quake.Intensity, strength);
-            // 時間帯係数は上限（MaxExtraChance）の**後**に掛かる。上限は
-            // 「このモデル自身が出す最大値」という意味のままにしておきたいので、
-            // ここで再クランプはしない（最大 0.25 x 1.15 = 0.2875）。
+            // The time-of-day factor is applied **after** the cap (MaxExtraChance). We
+            // want the cap to keep meaning "the largest value this model itself
+            // produces", so there is no re-clamp here (the maximum is
+            // 0.25 x 1.15 = 0.2875).
             chance *= timeFactor;
             if (chance <= 0f) return false;
 
@@ -635,20 +692,21 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 実際に倒す。**<c>DisasterHelpers</c> を経由しない**（クラス doc）。
+        /// Actually brings it down. **It does not go through <c>DisasterHelpers</c>** (see
+        /// the class doc).
         ///
-        /// dry-run（<c>testOnly: true</c>）は副作用の無い問い合わせである
-        /// （<c>CommonBuildingAI.CollapseBuilding</c> IL_0013: <c>testOnly</c> なら
-        /// 書き込みの手前で <c>ldc.i4.1; ret</c>）。**ただし dry-run が false でも
-        /// 本番は呼ぶ** —— <c>PowerPoleAI.CollapseBuilding</c> は
-        /// <c>if (testOnly) return false;</c> の直後に本物の倒壊を行う（IL 実測）ので、
-        /// dry-run を信じて呼ばないと本物の倒壊を握り潰すことになる
-        /// （<c>FireWhirlDamage.Ignite</c> と同じ判断）。
+        /// The dry run (<c>testOnly: true</c>) is a side-effect-free query
+        /// (<c>CommonBuildingAI.CollapseBuilding</c> IL_0013: on <c>testOnly</c> it does
+        /// <c>ldc.i4.1; ret</c> before any write). **But we make the real call even when
+        /// the dry run returns false** — <c>PowerPoleAI.CollapseBuilding</c> performs the
+        /// actual collapse right after <c>if (testOnly) return false;</c> (measured in the
+        /// IL), so trusting the dry run and not calling would swallow a real collapse
+        /// (the same judgement as <c>FireWhirlDamage.Ignite</c>).
         /// </summary>
         /// <param name="accepted">
-        /// バニラ自身が dry-run に「受け付ける」と答えたか。
-        /// <c>FireWhirlDamage</c> の attempted と同じ定義で、空振り検出の証拠に
-        /// なるのはこの数だけである。
+        /// Whether vanilla itself answered the dry run with "I will accept this". The
+        /// same definition as <c>FireWhirlDamage</c>'s `attempted`, and this count is the
+        /// only evidence that lets us detect the feature swinging at nothing.
         /// </param>
         private static bool Collapse(Building[] buildings, ushort id,
                                      InstanceManager.Group group, out bool accepted)
@@ -660,24 +718,26 @@ namespace DisasterPlus.Game
 
             var ai = info.m_buildingAI;
 
-            // demolish: false（瓦礫を残す）、burnAmount: 0（揺すられて潰れるのであって
-            // 焼損ではない）。m_fireIntensity には触れない。
+            // demolish: false (leave the rubble), burnAmount: 0 (it is shaken until it
+            // collapses, not burnt). m_fireIntensity is never touched.
             accepted = ai.CollapseBuilding(id, ref buildings[id], group, true, false, 0);
             return ai.CollapseBuilding(id, ref buildings[id], group, false, false, 0);
         }
 
         /// <summary>
-        /// 災害グループ。渡すとバニラ側の集計（災害ごとの被害棟数）が正しく積まれる。
-        /// <c>InstanceManager</c> がまだ居なければ <c>null</c>（<c>Group</c> は参照型で、
-        /// バニラ自身も <c>null</c> を渡す経路を持つ。集計が積まれないだけで倒壊は走る）。
-        /// <c>DisasterAI.CreateDisaster</c> が <c>m_ownerInstance.Disaster = 災害ID</c> で
-        /// 作って <c>InstanceManager</c> に登録している（③で IL 確認済み）。
+        /// The disaster group. Passing it makes vanilla's own tallies (buildings damaged
+        /// per disaster) add up correctly. <c>null</c> if <c>InstanceManager</c> is not
+        /// there yet (<c>Group</c> is a reference type and vanilla itself has paths that
+        /// pass <c>null</c>; only the tally is lost, and the collapse still happens).
+        /// <c>DisasterAI.CreateDisaster</c> creates it with
+        /// <c>m_ownerInstance.Disaster = the disaster ID</c> and registers it with
+        /// <c>InstanceManager</c> (confirmed in the IL during ③).
         /// </summary>
         private static InstanceManager.Group GroupOf(ushort disasterId)
         {
-            // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-            // new GameObject を走らせる main スレッド専用 API（Log.CurrentFrame の doc）。
-            // ここは sim スレッドなので exists で先に確認する。
+            // When sInstance is null, Singleton<T>.instance runs FindObjectOfType and
+            // new GameObject, which is a main-thread-only API (see Log.CurrentFrame's
+            // doc). This is the sim thread, so check `exists` first.
             if (!Singleton<InstanceManager>.exists) return null;
 
             var groupId = InstanceID.Empty;
@@ -686,9 +746,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 「高さが 1 棟も読めなかった」を自己申告する。**黙って何もしない状態を作らない。**
-        /// 高さが読めない環境ではこの機能は正しく何もしないが、それは
-        /// 「効いていない」と見分けが付かないので、必ず名乗る。
+        /// Self-reports "not one building's height could be read". **Never create a state
+        /// where it silently does nothing.** In an environment where heights cannot be
+        /// read this feature correctly does nothing, but that is indistinguishable from
+        /// "it is not working", so it always declares itself.
         /// </summary>
         private static void UpdateHeightNote(int scanned, int unknownHeight)
         {

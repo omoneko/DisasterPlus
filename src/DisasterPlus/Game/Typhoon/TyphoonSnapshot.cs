@@ -4,40 +4,46 @@ using DisasterPlus.Core.Typhoon;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <c>ThunderStormAI</c> のプレハブに焼き込まれている 3 つの調整値。
+    /// The three tuning values burnt into the <c>ThunderStormAI</c> prefab.
     ///
-    /// ★ **かつてここには <c>VortexAI</c> の 3 値も載っていた**（随伴竜巻の破壊半径と
-    /// 渦車両の <c>m_maxSpeed</c>）。随伴竜巻は退役し、竜巻並みの被害は
-    /// <c>TyphoonGust</c> が自前で出すようになったので、**読む場所が 1 つも無くなった
-    /// 値をここに置き続けない** —— 使われない数字が診断に並ぶと、次の担当者が
-    /// 「これは効いている」と読む。
+    /// ★ **This once also carried <c>VortexAI</c>'s three values** (the accompanying
+    /// tornado's destruction radii and the vortex vehicle's <c>m_maxSpeed</c>). The
+    /// accompanying tornado was retired and tornado-grade damage is now produced by
+    /// <c>TyphoonGust</c> itself, so **do not keep values here that not one place reads
+    /// any more** — an unused number sitting in the diagnostics gets read by the next
+    /// person as "this is having an effect".
     ///
-    /// **この 6 個の実数値は DLL に存在しない**（IL 事実文書 §A-0 と §B-1。どちらも
-    /// PARTIAL 判定）。プレハブのシリアライズ値なので IL 逆アセンブルでは見えず、
-    /// **実行時に <c>DisasterManager.FindDisasterInfo&lt;T&gt;()</c> から読んで診断ダンプに
-    /// 出すのが唯一の入手経路**であり、それが Task 2 の主目的である。
-    /// ④の以後の持続時間・落雷本数・破壊半径・移動速度は全てこの上に乗る。
+    /// **The actual values of these six do not exist in the DLL** (IL facts document §A-0
+    /// and §B-1, both judged PARTIAL). They are prefab serialised values, so IL
+    /// disassembly cannot see them, and **reading them at runtime through
+    /// <c>DisasterManager.FindDisasterInfo&lt;T&gt;()</c> and putting them in the
+    /// diagnostics dump is the only way to obtain them** — which is the main purpose of
+    /// Task 2. Everything ④ does later — duration, number of strikes, destruction radius,
+    /// travel speed — rides on top of them.
     ///
-    /// struct にしているのは、キャッシュしても Unity の fake-null 自己修復問題を
-    /// 持ち込まないため（float / uint しか持たないので <c>DisasterInfo</c> や
-    /// <c>VehicleInfo</c> の参照を抱え込まずに済む）。既定値は両方 false ＝
-    /// 「まだ／もう読めていない」。
+    /// It is a struct so that caching it brings none of Unity's fake-null self-repair
+    /// problem with it (holding nothing but floats and uints, it never has to keep a
+    /// reference to a <c>DisasterInfo</c> or a <c>VehicleInfo</c>). Both defaults are
+    /// false, i.e. "not read yet / no longer readable".
     /// </summary>
     public struct TyphoonPrefabFacts
     {
-        /// <summary>嵐側の 3 値を読めたか。false のとき下の 3 つは 0 で意味を持たない。</summary>
+        /// <summary>Whether the storm's three values could be read. When false the three
+        /// below are 0 and mean nothing.</summary>
         public readonly bool StormResolved;
 
-        /// <summary><c>ThunderStormAI.m_radius</c>。落雷散布半径とハザード円盤の基準（§A-1 / §A-2）。</summary>
+        /// <summary><c>ThunderStormAI.m_radius</c>. The basis for the lightning scatter
+        /// radius and the hazard disc (§A-1 / §A-2).</summary>
         public readonly float StormRadius;
 
-        /// <summary><c>ThunderStormAI.m_emergingDuration</c>（フレーム）。</summary>
+        /// <summary><c>ThunderStormAI.m_emergingDuration</c> (frames).</summary>
         public readonly uint EmergingDuration;
 
         /// <summary>
-        /// <c>ThunderStormAI.m_activeDuration</c>（フレーム）。
-        /// **台風はこれより長生きできない**（<c>IsStillActive</c>、§A-1）。
-        /// 進行速度はこの値からしか出せない（<c>TyphoonTrack.SpeedFor</c>）。
+        /// <c>ThunderStormAI.m_activeDuration</c> (frames).
+        /// **A typhoon cannot outlive this** (<c>IsStillActive</c>, §A-1).
+        /// The travel speed can only be derived from this value
+        /// (<c>TyphoonTrack.SpeedFor</c>).
         /// </summary>
         public readonly uint ActiveDuration;
 
@@ -51,12 +57,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 台風を 1 個でも起こしてよいか。
+        /// Whether we may raise a typhoon at all.
         ///
-        /// 半径が 0 だと暴風域も強風域も 0 になり（<c>TyphoonProfile.StormRadiusOf</c>）、
-        /// 持続時間が 0 だと速度が 0 になる（<c>TyphoonTrack.SpeedFor</c>）。
-        /// **どちらも「推測した値で代替しない」ことを構造で保証している場所**なので、
-        /// ここが false のとき呼び出し側は台風を起こさず、理由を診断に出す（設計書 §6）。
+        /// With a radius of 0 both the storm radius and the gale radius come out 0
+        /// (<c>TyphoonProfile.StormRadiusOf</c>), and with a duration of 0 the speed comes
+        /// out 0 (<c>TyphoonTrack.SpeedFor</c>).
+        /// **Both are places where "never substitute a guessed value" is guaranteed
+        /// structurally**, so when this is false the caller raises no typhoon and puts the
+        /// reason in the diagnostics (design doc §6).
         /// </summary>
         public bool Usable
         {
@@ -65,87 +73,98 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// sim スレッドで作り main スレッドで読む不変スナップショット。
-    /// ①の <c>WeatherSnapshot</c>・②の <see cref="EarthquakeSnapshot"/> と同じ規律で、
-    /// **一度作ったら書き換えない**。
+    /// An immutable snapshot built on the sim thread and read on the main thread.
+    /// Same discipline as ①'s <c>WeatherSnapshot</c> and ②'s
+    /// <see cref="EarthquakeSnapshot"/>: **once built, never rewritten**.
     ///
-    /// **T3 以降がフィールドを足していく。追加は必ず ctor の末尾に付けること**
-    /// （既存の呼び出し側を全部直させないため）。
+    /// **T3 onwards add fields. Always append them at the end of the ctor** (so existing
+    /// call sites do not all have to be changed).
     ///
-    /// ④の表示規約: ここに載る値のうち **<see cref="Rain"/> / <see cref="Cloud"/> /
-    /// <see cref="Fog"/> / <see cref="WindDirectionDegrees"/> だけがバニラの実測値**で、
-    /// それ以外は全て本 MOD が決めた量である（設計書 §1.2 / §7）。
+    /// ④'s display convention: of the values here, **only <see cref="Rain"/> /
+    /// <see cref="Cloud"/> / <see cref="Fog"/> / <see cref="WindDirectionDegrees"/> are
+    /// vanilla measurements**; everything else is a quantity this mod decided
+    /// (design doc §1.2 / §7).
     /// </summary>
     public class TyphoonSnapshot
     {
-        /// <summary>読み取りに成功したか。false なら表示側は「読み取れません」と出す。</summary>
+        /// <summary>Whether the read succeeded. If false the display side shows "cannot be
+        /// read".</summary>
         public readonly bool Valid;
 
         public readonly TyphoonPrefabFacts Prefab;
 
-        /// <summary><c>SimulationManager.m_currentFrameIndex</c>。</summary>
+        /// <summary><c>SimulationManager.m_currentFrameIndex</c>.</summary>
         public readonly uint CurrentFrame;
 
         /// <summary>
-        /// <c>WeatherManager.m_currentRain</c>。**④で <c>[measured]</c> を名乗ってよい 2 値の 1 つ。**
-        /// <see cref="WeatherReadable"/> が false のときこの値は無意味（0 と混ぜない）。
+        /// <c>WeatherManager.m_currentRain</c>. **One of the two values in ④ allowed to
+        /// claim <c>[measured]</c>.**
+        /// When <see cref="WeatherReadable"/> is false this value is meaningless (do not
+        /// mix it up with 0).
         /// </summary>
         public readonly float Rain;
 
-        /// <summary><c>WeatherManager.m_currentCloud</c>。もう 1 つの <c>[measured]</c>。</summary>
+        /// <summary><c>WeatherManager.m_currentCloud</c>. The other
+        /// <c>[measured]</c>.</summary>
         public readonly float Cloud;
 
-        /// <summary><c>WeatherManager.m_currentFog</c>。診断専用（パネルには出さない）。</summary>
+        /// <summary><c>WeatherManager.m_currentFog</c>. Diagnostics only (not shown on the
+        /// panel).</summary>
         public readonly float Fog;
 
-        /// <summary><c>WeatherManager.m_windDirection</c>（度、-180〜180 に正規化済み）。</summary>
+        /// <summary><c>WeatherManager.m_windDirection</c> (degrees, normalised to
+        /// -180 to 180).</summary>
         public readonly float WindDirectionDegrees;
 
         /// <summary>
-        /// <c>WeatherManager.m_enableWeather</c>。
+        /// <c>WeatherManager.m_enableWeather</c>.
         ///
-        /// **false は不具合ではなくプレイヤーの正当な設定**である。ただしその環境では
-        /// <c>m_forceWeatherOn</c> を毎 tick 書かない限り雨も雲も 0 へ潰される（§A-4）ので、
-        /// T4 の天候駆動はこの値を見て振る舞いを変える。表示側は隠さないこと。
+        /// **false is not a fault but a legitimate player setting.** Note though that in
+        /// such an environment both rain and cloud are crushed to 0 unless
+        /// <c>m_forceWeatherOn</c> is written every tick (§A-4), so T4's weather driving
+        /// looks at this value and behaves differently. The display side must not hide it.
         /// </summary>
         public readonly bool WeatherEnabled;
 
         /// <summary>
-        /// 天候の 4 値を実際に読めたか。
-        /// **読めなかった 0 と、本当に 0 だった 0 を混ぜないための旗**
-        /// （①②が繰り返し確立した規律）。
+        /// Whether the four weather values could actually be read.
+        /// **The flag that keeps a 0 we failed to read apart from a 0 that really was 0**
+        /// (a discipline ① and ② established over and over).
         /// </summary>
         public readonly bool WeatherReadable;
 
-        // ── T3: 台風そのものの状態 ──────────────────────────────────
+        // ── T3: the state of the typhoon itself ─────────────────────────────
         //
-        // **これは前 tick の状態である。** TyphoonReader.Read() は
-        // TyphoonFeature.OnSimulationTick の先頭（＝ TyphoonController.Tick の前）で
-        // 走るので、ここに載るのは 1 tick 前の値になる。パネルの表示としては
-        // 差が出ないが、**sim 側のコードがこのスナップショットを「今の状態」として
-        // 使ってはいけない**（sim 側は TyphoonController の static を直接読むこと）。
+        // **This is the previous tick's state.** TyphoonReader.Read() runs at the top of
+        // TyphoonFeature.OnSimulationTick (i.e. before TyphoonController.Tick), so what
+        // goes in here is the value from one tick ago. It makes no visible difference on
+        // the panel, but **sim-side code must not use this snapshot as "the current
+        // state"** (the sim side reads TyphoonController's statics directly).
 
-        /// <summary>④の台風が動いているか。</summary>
+        /// <summary>Whether ④'s typhoon is running.</summary>
         public readonly bool Active;
 
-        /// <summary>④が掴んでいる災害スロットの添字。<see cref="Active"/> のときだけ意味を持つ。</summary>
+        /// <summary>The index of the disaster slot ④ holds. Only meaningful when
+        /// <see cref="Active"/>.</summary>
         public readonly ushort TyphoonId;
 
-        /// <summary>**クランプ前の**真の中心（マップ外にもなる）。</summary>
+        /// <summary>The true centre, **before clamping** (it can be off the map).</summary>
         public readonly Vec3 Centre;
 
-        /// <summary>進行方位（rad、[0, 2π)）。</summary>
+        /// <summary>Heading (rad, [0, 2π)).</summary>
         public readonly float HeadingRadians;
 
-        /// <summary>今の強度（0〜255）。設定した最大値ではなく、包絡線と上陸減衰の後の値。</summary>
+        /// <summary>The current intensity (0-255). Not the configured maximum, but the
+        /// value after the envelope and the landfall decay.</summary>
         public readonly byte Intensity;
 
         public readonly float StormRadius;
         public readonly float GaleRadius;
 
         /// <summary>
-        /// 経路を<b>これから先まで</b>引くための値（<see cref="TyphoonTrackPlan"/>）。
-        /// 予報パネルの「進路」がこれを使う。<c>Usable</c> が false なら描かない。
+        /// The values needed to draw the track <b>on into the future</b>
+        /// (<see cref="TyphoonTrackPlan"/>). The forecast panel's "track" uses this. Do
+        /// not draw it if <c>Usable</c> is false.
         /// </summary>
         public readonly TyphoonTrackPlan Track;
 
@@ -155,136 +174,157 @@ namespace DisasterPlus.Game
         public readonly bool OverLand;
 
         /// <summary>
-        /// 上陸予測が立っているか。**false は「0 分後」ではなく「このまま海上を
-        /// 通過する」である。** 0 と混ぜないこと（①②が繰り返し確立した規律）。
+        /// Whether a landfall forecast exists. **false means "it will pass out at sea",
+        /// not "in 0 minutes".** Do not mix it up with 0 (a discipline ① and ②
+        /// established over and over).
         /// </summary>
         public readonly bool LandfallKnown;
 
-        /// <summary>上陸までのゲーム内分。<see cref="LandfallKnown"/> のときだけ意味を持つ。</summary>
+        /// <summary>In-game minutes to landfall. Only meaningful when
+        /// <see cref="LandfallKnown"/>.</summary>
         public readonly float MinutesToLandfall;
 
         /// <summary>
-        /// 台風を起こせなかった／手放した理由（英語、診断用。無ければ null）。
-        /// **「起こせなかった」を「何も起きていない」と見分ける手段がここにしか無い。**
+        /// Why a typhoon could not be raised, or was let go of (English, for diagnostics;
+        /// null if there is none).
+        /// **This is the only means of telling "it could not be raised" from "nothing is
+        /// happening".**
         /// </summary>
         public readonly string Refusal;
 
-        // ── T4: ④が書いている天候の**目標値** ──────────────────────────
+        // ── T4: the **target** weather values ④ is writing ──────────────────
         //
-        // ★ 上の Rain / Cloud（WeatherManager の m_currentRain / m_currentCloud）とは
-        //   別物である。あちらはバニラの実測値で [measured] を名乗ってよい唯一の 2 値、
-        //   こちらは④が毎 tick 書き込んでいる目標値で、本 MOD の量である。
-        //   **表示側でこの 2 組を取り違えないこと。**
+        // ★ These are a different thing from Rain / Cloud above (WeatherManager's
+        //   m_currentRain / m_currentCloud). Those are vanilla measurements and the only
+        //   two values allowed to claim [measured]; these are the targets ④ writes every
+        //   tick, and are this mod's quantities.
+        //   **Do not confuse the two sets on the display side.**
 
-        /// <summary>④が天候を駆動しているか。</summary>
+        /// <summary>Whether ④ is driving the weather.</summary>
         public readonly bool WeatherDriving;
 
-        /// <summary>④が書いた <c>m_targetRain</c>。</summary>
+        /// <summary>The <c>m_targetRain</c> ④ wrote.</summary>
         public readonly float DrivenRain;
 
-        /// <summary>④が書いた <c>m_targetCloud</c>。</summary>
+        /// <summary>The <c>m_targetCloud</c> ④ wrote.</summary>
         public readonly float DrivenCloud;
 
-        /// <summary>④が書いた <c>m_targetDirection</c>（度、0 = +Z / 90 = +X）。</summary>
+        /// <summary>The <c>m_targetDirection</c> ④ wrote (degrees, 0 = +Z /
+        /// 90 = +X).</summary>
         public readonly float DrivenDirectionDegrees;
 
-        // ── T6: 落雷 ────────────────────────────────────────
+        // ── T6: lightning ───────────────────────────────────────────
         //
-        // 4 つとも**④が数えた／見積もった量**であって、ゲームが公開している値ではない
-        // （<c>m_lightningQueue</c> は private で読めない。IL 事実文書 §A-3）。
-        // したがって表示側で <c>[measured]</c> を付けてはいけない。
+        // All four are **quantities ④ counted or estimated**, not values the game
+        // publishes (<c>m_lightningQueue</c> is private and cannot be read. IL facts
+        // document §A-3). So the display side must not put <c>[measured]</c> on them.
 
-        /// <summary>④がキューに載せている数（予定 + 45 フレームで落ちる）。</summary>
+        /// <summary>How many ④ has in the queue (they drop at scheduled + 45
+        /// frames).</summary>
         public readonly int LightningInFlight;
 
-        /// <summary>この台風で④が積んだ累計。台風ごとに 0 から数え直す。</summary>
+        /// <summary>The cumulative count ④ queued during this typhoon. It counts from 0
+        /// again for each typhoon.</summary>
         public readonly int LightningTotal;
 
         /// <summary>
-        /// この台風でゲームに捨てられた累計。**0 以外なら上限 20 に当たっている**
-        /// ＝宿主の嵐や他 MOD の落雷まで消えている。
+        /// The cumulative count the game threw away during this typhoon. **Anything other
+        /// than 0 means we are hitting the ceiling of 20**, i.e. the host storm's and
+        /// other mods' lightning is being wiped out too.
         /// </summary>
         public readonly int LightningRejected;
 
         /// <summary>
-        /// 宿主のバニラ雷雨のために空けている枠（<c>LightningBudget.VanillaMaxStrikes</c>
-        /// の見積り）。強度が高いほど大きくなり、④の取り分は減る。
+        /// The slots kept free for the host vanilla thunderstorm (the
+        /// <c>LightningBudget.VanillaMaxStrikes</c> estimate). The higher the intensity
+        /// the larger it gets, and the smaller ④'s share.
         /// </summary>
         public readonly int LightningVanillaReserve;
 
-        // ── T7: 風害 ────────────────────────────────────────
+        // ── T7: wind damage ─────────────────────────────────────────
         //
-        // 5 つとも**④が数えた量**である。バニラには風による破壊機構が 1 つも無く
-        // （§A-5 / §B5）、ここに対応するゲーム側の集計は存在しない。
-        // したがって表示側で <c>[measured]</c> を付けてはいけない。
+        // All five are **quantities ④ counted**. Vanilla has no wind destruction
+        // mechanism at all (§A-5 / §B5), and there is no corresponding tally on the game's
+        // side. So the display side must not put <c>[measured]</c> on them.
 
-        /// <summary>これまでに走った風害の走査回数（セッション累計）。</summary>
+        /// <summary>How many wind sweeps have run so far (cumulative for the
+        /// session).</summary>
         public readonly int WindPasses;
 
-        /// <summary>直近 1 回の走査で倒壊した棟数。</summary>
+        /// <summary>How many buildings collapsed in the most recent sweep.</summary>
         public readonly int WindLastCollapsed;
 
-        /// <summary>セッション累計の倒壊棟数。</summary>
+        /// <summary>Buildings collapsed, cumulative for the session.</summary>
         public readonly int WindTotalCollapsed;
 
-        /// <summary>直近 1 回で調べた棟数（候補マスクを通り、強風域内にあったもの）。</summary>
+        /// <summary>How many buildings the most recent sweep examined (those that passed
+        /// the candidate mask and were inside the gale radius).</summary>
         public readonly int WindLastScanned;
 
         /// <summary>
-        /// 直近 1 回で**バニラが設計上断った**棟数。
-        /// **0 でないのは正常** —— 防災施設は台風で壊れない（§F-2）。
+        /// How many buildings **vanilla refused by design** in the most recent sweep.
+        /// **Non-zero is normal** — disaster response facilities are not destroyed by a
+        /// typhoon (§F-2).
         /// </summary>
         public readonly int WindLastRefused;
 
-        /// <summary>直近 1 回が上限で打ち切られたか（外縁はまだ判定されていない）。</summary>
+        /// <summary>Whether the most recent sweep was cut short at its ceiling (the outer
+        /// rim has not been checked yet).</summary>
         public readonly bool WindLastCapped;
 
         /// <summary>
-        /// 直近 1 回で高さが読めなかった棟数。**②と違い対象からは外れていない**
-        /// （高さボーナスを辞退しただけ。<c>WindDamageModel</c> の doc）。
+        /// How many buildings the most recent sweep could not read a height for.
+        /// **Unlike ②, they are not excluded from consideration** (they merely forgo the
+        /// height bonus. <c>WindDamageModel</c>'s doc).
         /// </summary>
         public readonly int WindLastUnknownHeight;
 
-        // ── T8: 河川氾濫 ─────────────────────────────────────
+        // ── T8: river flooding ──────────────────────────────────────
         //
-        // ここも④の量である。バニラに洪水災害は無く（§D-1）、
-        // 「川がどれだけ増水したか」を公開しているゲーム側の値も無い。
+        // These are ④'s quantities too. Vanilla has no flood disaster (§D-1), and there is
+        // no value on the game's side publishing "how far the river has risen".
 
         /// <summary>
-        /// 氾濫の状態。**<see cref="TyphoonFloodState.NoSources"/> は不具合ではない**
-        /// （設計書 §7.4）。表示側はその理由を出すこと。
+        /// The flooding state. **<see cref="TyphoonFloodState.NoSources"/> is not a
+        /// fault** (design doc §7.4). The display side must give the reason.
         /// </summary>
         public readonly TyphoonFloodState FloodState;
 
         /// <summary>
-        /// マップ全体の <c>TYPE_NATURAL</c> 水源の数。**マップ依存で未知**（§D-4）。
-        /// 0 は「このマップには川を流している自然水源が無い」であって異常ではない。
+        /// The number of <c>TYPE_NATURAL</c> water sources across the whole map.
+        /// **Map-dependent and unknown** (§D-4). 0 means "this map has no natural water
+        /// source feeding a river", which is not an anomaly.
         /// </summary>
         public readonly int FloodNaturalSources;
 
-        /// <summary>今④が水位を持ち上げている水源の数。</summary>
+        /// <summary>How many water sources ④ is currently raising.</summary>
         public readonly int FloodTouched;
 
-        /// <summary>直近の走査で中心に適用した上げ幅（m）。</summary>
+        /// <summary>The rise applied at the centre in the most recent sweep (m).</summary>
         public readonly float FloodPeakRiseMetres;
 
-        // ── 竜巻並みの局所被害（パッチ）──────────────────────────
+        // ── Tornado-grade local damage (patches) ────────────────────────────
         //
-        // 4 つとも④が数えた量である。**竜巻の実体は 1 つも作っていない**ので、
-        // 対応するゲーム側の集計も存在しない。
+        // All four are quantities ④ counted. **Not one actual tornado is created**, so
+        // there is no corresponding tally on the game's side either.
 
-        /// <summary>今生きているパッチの数。**0 は「今は無い」で不具合ではない。**</summary>
+        /// <summary>How many patches are alive now. **0 means "there are none right now"
+        /// and is not a fault.**</summary>
         public readonly int GustActive;
 
-        /// <summary>直近の走査でパッチが倒した棟数。</summary>
+        /// <summary>How many buildings the patches knocked down in the most recent
+        /// sweep.</summary>
         public readonly int GustLastCollapsed;
 
-        /// <summary>セッション累計でパッチが倒した棟数。</summary>
+        /// <summary>How many buildings the patches knocked down, cumulative for the
+        /// session.</summary>
         public readonly int GustTotalCollapsed;
 
         /// <summary>
-        /// 直近の走査でパッチが**バニラに設計上断られた**棟数。
-        /// **0 でないのは正常** —— 防災施設は竜巻でも壊れない。
+        /// How many buildings **vanilla refused by design** for the patches in the most
+        /// recent sweep.
+        /// **Non-zero is normal** — disaster response facilities are not destroyed by
+        /// tornadoes either.
         /// </summary>
         public readonly int GustLastRefused;
 

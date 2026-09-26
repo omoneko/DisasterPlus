@@ -3,66 +3,76 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Typhoon
 {
     /// <summary>
-    /// 渦の粒がどの層に属するか。<b>層ごとに別の複製（<c>ParticleSystem</c>）で描く。</b>
+    /// Which tier a vortex puff belongs to. <b>Each tier is drawn by its own clone (its own
+    /// <c>ParticleSystem</c>).</b>
     ///
-    /// 分けるのは好みではなく**制約**である —— <c>startColor</c> と <c>startSize</c> は
-    /// <c>ParticleSystem</c> 側の共有状態で、<c>RenderEffect</c> の呼び出しごとには
-    /// 変えられない（エフェクト実測文書 §B-4）。色と粒径を変えたい単位が
-    /// そのまま複製の数になる。
+    /// Splitting them is not a preference but **a constraint** — <c>startColor</c> and
+    /// <c>startSize</c> are shared state on the <c>ParticleSystem</c> and cannot be varied
+    /// per <c>RenderEffect</c> call (effects measurement doc §B-4). The units over which we
+    /// want to vary colour and particle size become, one for one, the number of clones.
     /// </summary>
     public enum VortexCloudLayer
     {
-        /// <summary>雲底。**暗く・平たく・大きい。** 入道雲の下面である。</summary>
+        /// <summary>The cloud base. **Dark, flat and large.** The underside of a
+        /// cumulonimbus.</summary>
         Deck = 0,
 
-        /// <summary>塔。**明るく・小さめ・もこもこ。** 入道雲の本体（cauliflower）。</summary>
+        /// <summary>The tower. **Bright, smaller and billowing.** The cumulonimbus's body (the
+        /// cauliflower).</summary>
         Tower = 1,
 
-        /// <summary>かなとこ（天蓋）。**いちばん明るく・いちばん大きく・薄い。**</summary>
+        /// <summary>The anvil (the canopy). **The brightest, the largest and the
+        /// thinnest.**</summary>
         Canopy = 2,
     }
 
     /// <summary>
-    /// 渦の粒 1 つぶんの置き場所と流れ方。**全部「渦の外周半径に対する比」**で、
-    /// ワールド座標へ直すのは <c>Game/Typhoon/TyphoonCloudFx</c> の仕事である
-    /// （この型は Unity にもゲームにも触れない）。
+    /// Where one vortex puff is placed and how it flows. **Everything is "as a fraction of
+    /// the vortex's outer radius"**, and converting to world coordinates is the job of
+    /// <c>Game/Typhoon/TyphoonCloudFx</c> (this type touches neither Unity nor the game).
     /// </summary>
     public struct VortexPuff
     {
-        /// <summary>中心から見た方位（rad、[0, 2π)）。渦の回転はここに足される。</summary>
+        /// <summary>The bearing seen from the centre (rad, [0, 2π)). The vortex's rotation is
+        /// added to this.</summary>
         public readonly float AngleRadians;
 
-        /// <summary>中心からの距離 ÷ 渦の外周半径。</summary>
+        /// <summary>Distance from the centre ÷ the vortex's outer radius.</summary>
         public readonly float RadiusFraction;
 
-        /// <summary>雲の厚みのどこに置くか [0, 1]（1 が上）。</summary>
+        /// <summary>Where in the cloud's thickness it sits, [0, 1] (1 is the top).</summary>
         public readonly float HeightFraction;
 
-        /// <summary>粒をばらまく円盤の半径 ÷ 渦の外周半径。</summary>
+        /// <summary>The radius of the disc the particles are scattered over ÷ the vortex's
+        /// outer radius.</summary>
         public readonly float DiscFraction;
 
         /// <summary>
-        /// 円盤を上へどれだけ引き伸ばすか ÷ 雲の厚み。
-        /// <c>SpawnArea</c> の第 4 引数（<c>halfHeight</c>）は
-        /// <b>[0, halfHeight] の一様乱数で上へだけ</b>散らす（IL 実測 §B-4）ので、
-        /// <see cref="HeightFraction"/> を段の下端にすれば段がちょうど積み上がる。
-        /// **雲底は薄く、塔は厚い** —— これが「下は平ら・上はもこもこ」の実体である。
+        /// How far the disc is stretched upwards ÷ the cloud's thickness.
+        /// <c>SpawnArea</c>'s fourth argument (<c>halfHeight</c>) scatters
+        /// <b>upwards only, uniformly over [0, halfHeight]</b> (measured from IL, §B-4), so
+        /// making <see cref="HeightFraction"/> the bottom of the tier stacks the tiers
+        /// exactly.
+        /// **The cloud base is thin and the tower is thick** — that is the substance of
+        /// "flat underneath, billowing on top".
         /// </summary>
         public readonly float BandFraction;
 
-        /// <summary>粒の濃さの比 [0, 1]（<c>magnitude</c> に掛かる）。</summary>
+        /// <summary>The puff's density fraction, [0, 1] (it multiplies <c>magnitude</c>).</summary>
         public readonly float DensityFraction;
 
-        /// <summary>接線方向（渦の回る向き）の速さの比 [0, 1]。</summary>
+        /// <summary>The tangential speed fraction (the direction the vortex turns), [0,
+        /// 1].</summary>
         public readonly float SwirlFraction;
 
-        /// <summary>半径方向の速さの比。**負が吸い込み、正が吹き出し。**</summary>
+        /// <summary>The radial speed fraction. **Negative is inflow, positive is
+        /// outflow.**</summary>
         public readonly float RadialFraction;
 
-        /// <summary>鉛直方向の速さの比 [0, 1]（上向き）。</summary>
+        /// <summary>The vertical speed fraction, [0, 1] (upwards).</summary>
         public readonly float RiseFraction;
 
-        /// <summary>どの複製で描くか。</summary>
+        /// <summary>Which clone draws it.</summary>
         public readonly VortexCloudLayer Layer;
 
         public VortexPuff(float angleRadians, float radiusFraction, float heightFraction,
@@ -84,118 +94,132 @@ namespace DisasterPlus.Core.Typhoon
     }
 
     /// <summary>
-    /// 台風の渦を**入道雲（積乱雲）の並び**として置くための純データ。
-    /// <b>Core なのでエンジンには一切触らない。</b>
+    /// Pure data for laying the typhoon's vortex out as **an arrangement of cumulonimbus**.
+    /// <b>This is Core, so it touches the engine not at all.</b>
     ///
-    /// ── なぜ作り直したのか（2026-08-22、持ち主の指摘）────────────────────
+    /// ── Why it was rebuilt (2026-08-22, the owner's report) ────────────────────
     ///
-    /// &gt; 雲のエフェクトが煙になっているので見た目がとても変です。
-    /// &gt; 渦を巻く入道雲をイメージして作り直してください。
+    /// &gt; The cloud effect has turned into smoke, so it looks very odd.
+    /// &gt; Please rebuild it with swirling cumulonimbus in mind.
     ///
-    /// **指摘は正しく、原因も 2 つに割れている。**
+    /// **The report is correct, and the cause splits into two.**
     ///
-    /// 1. <b>素材</b>。旧実装は <c>Factory Smoke</c> を第 1 候補にしていた。
-    ///    出荷アセットを直接読むと、その粒子マテリアル <c>Smoke</c> のテクスチャは
-    ///    <b>平均 RGB (75, 78, 80) ＝ 暗い煤色の丸い塊</b>（火の粉の点まで入っている）で、
-    ///    どう色を掛けても煙にしか見えない。素材の選び方は
-    ///    <c>Game/Typhoon/TyphoonCloudFx</c> の doc に測った数字ごと書いた。
-    /// 2. <b>形</b>。旧実装は「腕 3 本 ＋ 環」を**平らに 1 段**置いていた。
-    ///    入道雲は<b>鉛直に伸びる塔</b>で、上は日に照らされて白く盛り上がり
-    ///    （cauliflower）、下は平たく暗い。1 段では雲にならない。
+    /// 1. <b>The material</b>. The old implementation had <c>Factory Smoke</c> as its first
+    ///    choice. Reading the shipped assets directly, the texture of its particle material
+    ///    <c>Smoke</c> is <b>a round blob of dark soot at a mean RGB of (75, 78, 80)</b>
+    ///    (right down to the specks of embers in it), and no amount of tinting makes it look
+    ///    like anything but smoke. How the material is chosen, complete with the measured
+    ///    figures, is written in <c>Game/Typhoon/TyphoonCloudFx</c>'s doc.
+    /// 2. <b>The shape</b>. The old implementation laid "three arms + a ring" out **flat, in
+    ///    a single tier**. A cumulonimbus is <b>a tower extending vertically</b>, billowing
+    ///    white in the sunlight on top (the cauliflower) and flat and dark underneath.
+    ///    A single tier does not make a cloud.
     ///
-    /// ── 積乱雲の構造（これがこの型の形そのものである）─────────────────────
+    /// ── The structure of a cumulonimbus (this is the shape of this type itself) ────────────
     ///
     /// <code>
-    ///        ~~~~~~~~~~~~   Canopy  かなとこ … いちばん明るい。広く薄く、外へ吹き出す
-    ///         (  )(  )(  )  Tower   塔     … 明るい。もこもこ盛り上がる（2 段）
-    ///        ____________   Deck    雲底   … 暗く平ら。低く、内へ吸い込まれる
+    ///        ~~~~~~~~~~~~   Canopy  the anvil … the brightest. Broad, thin, and blowing outwards
+    ///         (  )(  )(  )  Tower   the tower … bright. Billowing upwards (two tiers)
+    ///        ____________   Deck    the base  … dark and flat. Low, and drawn inwards
     /// </code>
     ///
-    /// 台風はこの塔が<b>眼を囲む環（眼の壁雲）</b>として並び、そこから
-    /// <b>渦巻きの腕（スパイラルバンド）</b>として外へ流れる。中心へ行くほど背が高い。
+    /// In a typhoon these towers line up as <b>a ring around the eye (the eyewall)</b> and
+    /// flow outwards from it as <b>spiral arms (the rainbands)</b>. The closer to the
+    /// centre, the taller.
     ///
-    /// ── 置き方 ────────────────────────────────────────
+    /// ── How they are laid out ────────────────────────────────────────
     ///
-    /// <see cref="ColumnCount"/> 本の**柱**（眼の壁雲 <see cref="EyeWallColumns"/> 本 ＋
-    /// 腕 <see cref="ArmCount"/> 本 × <see cref="ColumnsPerArm"/> 本）を置き、
-    /// 柱 1 本につき <see cref="LevelsPerColumn"/> 個の粒を高さ違いで積む。
-    /// 合計は <see cref="PuffCount"/> 個で、**これが毎フレームの
-    /// <c>RenderEffect</c> の本数である**（旧実装の 30 本から増えている）。
+    /// <see cref="ColumnCount"/> **columns** are placed (<see cref="EyeWallColumns"/> for
+    /// the eyewall plus <see cref="ArmCount"/> arms × <see cref="ColumnsPerArm"/>), and each
+    /// column stacks <see cref="LevelsPerColumn"/> puffs at different heights.
+    /// The total is <see cref="PuffCount"/>, and **that is the number of
+    /// <c>RenderEffect</c> calls per frame** (up from the old implementation's 30).
     ///
-    /// ── ★ 眼が穴として読めるための条件（この型が自分で守る）─────────────────
+    /// ── ★ The condition for the eye reading as a hole (this type enforces it itself) ───────
     ///
-    /// **旧実装はこの約束を Game 側に預けていて、実際に 1 度埋めた。**
-    /// 粒は点ではなく、円盤の半径ぶんばらまかれ、粒径の半分だけ外へ広がる。
-    /// いまは<b>円盤の半径（<see cref="VortexPuff.DiscFraction"/>）も粒径
-    /// （<see cref="SizeFractionOf"/>）もこの型が宣言している</b>ので、
-    /// 「粒がどこまで内側へ届くか」をこの型が計算できる:
+    /// **The old implementation left this promise to the Game side, and did in fact fill the
+    /// eye in once.** A puff is not a point: it is scattered over the disc's radius and
+    /// spreads a further half a particle-radius outwards.
+    /// Now that <b>both the disc's radius (<see cref="VortexPuff.DiscFraction"/>) and the
+    /// particle size (<see cref="SizeFractionOf"/>) are declared by this type</b>, this type
+    /// can compute "how far inwards the particles reach":
     ///
     /// <code>
     /// EyeClearanceOf(index) = RadiusFraction - DiscFraction - SizeFraction/2 ≥ EyeFraction
     /// </code>
     ///
-    /// **テストがこれを全粒について固定している。** 数字を動かしても、眼が埋まれば
-    /// ビルドが赤くなる ——「テストでも捕まらない」という旧 doc の但し書きは消えた。
+    /// **A test pins this for every puff.** Move the numbers and, if the eye fills in, the
+    /// build goes red — the old doc's caveat that "the tests will not catch it either" is
+    /// gone.
     ///
-    /// Game 側に残る唯一の逃げ道は粒径の下限クランプ（<c>MinSizeMetres</c>）で、
-    /// これは**いちばん小さい台風でしか効かない**（強度 1 でも強風域半径は 2200 m 以上
-    /// あり、塔の粒径は 110 m を超える）。あちらの doc に書いてある。
+    /// The only escape route left on the Game side is the particle size's lower clamp
+    /// (<c>MinSizeMetres</c>), and that **only bites on the very smallest typhoon** (even at
+    /// intensity 1 the strong-wind radius is over 2200 m and the tower's particle size is
+    /// over 110 m). It is written up in that doc.
     ///
-    /// なお、ここでいう「眼」は<b>雲の穴</b>であって <c>TyphoonProfile.EyeFraction</c> の
-    /// <b>風の眼ではない</b>（あちらのほうが小さい）。粒径に対して読める大きさに取ってある。
+    /// Note that "the eye" here means <b>the hole in the cloud</b>, not
+    /// <c>TyphoonProfile.EyeFraction</c>'s <b>eye of the wind</b> (that one is smaller). It
+    /// is sized so as to read against the particle size.
     ///
-    /// ── 揺らぎ ────────────────────────────────────────
+    /// ── The jitter ────────────────────────────────────────
     ///
-    /// 完全な等間隔だと機械的に見えるので、<see cref="DeterministicRandom"/> で
-    /// 角度・半径・高さに小さな揺らぎを入れる。**添字だけの関数**なので毎フレーム
-    /// 同じ形になり、粒がちらつかない（フレームを混ぜると渦が毎フレーム組み替わって
-    /// 沸騰して見える）。<c>System.Random</c> は使わない（本 MOD 全体の規律）。
-    /// 揺らぎは同じ柱の中でも段ごとに違う添字を引くので、**塔はまっすぐ立たず
-    /// 段ごとにずれて盛り上がる**＝これが cauliflower の実体である。
+    /// Perfectly even spacing looks mechanical, so <see cref="DeterministicRandom"/> puts a
+    /// small jitter into the angle, radius and height. It is **a function of the indices
+    /// alone**, so the shape is the same every frame and the puffs do not flicker (mix the
+    /// frame in and the vortex reassembles itself every frame and looks like it is boiling).
+    /// <c>System.Random</c> is not used (the discipline across this whole mod).
+    /// The jitter draws a different index for each level even within the same column, so
+    /// **the tower does not stand straight but billows out with an offset at each level** —
+    /// which is the substance of the cauliflower.
     /// </summary>
     public static class VortexPuffLayout
     {
-        /// <summary>腕（スパイラルバンド）の本数。</summary>
+        /// <summary>The number of arms (rainbands).</summary>
         public const int ArmCount = 3;
 
-        /// <summary>1 本の腕に置く柱の数。</summary>
+        /// <summary>How many columns are placed on one arm.</summary>
         public const int ColumnsPerArm = 5;
 
-        /// <summary>眼を囲む環（眼の壁雲）に置く柱の数。</summary>
+        /// <summary>How many columns are placed on the ring around the eye (the eyewall).</summary>
         public const int EyeWallColumns = 7;
 
-        /// <summary>柱の総数。</summary>
+        /// <summary>The total number of columns.</summary>
         public const int ColumnCount = ArmCount * ColumnsPerArm + EyeWallColumns;
 
-        /// <summary>柱 1 本に積む粒の数（雲底・塔下・塔上・かなとこ）。</summary>
+        /// <summary>How many puffs are stacked in one column (base, lower tower, upper tower,
+        /// anvil).</summary>
         public const int LevelsPerColumn = 4;
 
-        /// <summary>1 フレームに出す <c>RenderEffect</c> の本数。**これが毎フレームの上限である。**</summary>
+        /// <summary>The number of <c>RenderEffect</c> calls issued per frame. **This is the
+        /// per-frame cap.**</summary>
         public const int PuffCount = ColumnCount * LevelsPerColumn;
 
-        /// <summary>雲の穴（眼）の半径 ÷ 渦の外周半径。**粒はここまで届いてはいけない。**</summary>
+        /// <summary>The radius of the hole in the cloud (the eye) ÷ the vortex's outer radius.
+        /// **No puff may reach this far in.**</summary>
         public const float EyeFraction = 0.16f;
 
-        /// <summary>眼の壁雲の環を置く半径 ÷ 渦の外周半径（＝いちばん内側の柱）。</summary>
+        /// <summary>The radius the eyewall's ring is placed at ÷ the vortex's outer radius
+        /// (i.e. the innermost columns).</summary>
         public const float EyeWallFraction = 0.26f;
 
         /// <summary>
-        /// 腕が外周まで伸びるあいだに回る回転数。
+        /// How many turns an arm makes as it runs out to the rim.
         ///
-        /// ★ **作図して 0.85 から下げた。** 0.85（＝306 度）だと、腕の隣り合う柱の
-        ///   あいだの弧が半径 0.5R のところで 3 km を超え、腕が**ちぎれた雲の列**に
-        ///   見えた（<c>tools/TyphoonPreview</c> の plan 画像）。
+        /// ★ **Lowered from 0.85 after drawing it.** At 0.85 (i.e. 306 degrees), the arc
+        ///   between neighbouring columns on an arm exceeded 3 km at a radius of 0.5R, and
+        ///   the arm read as **a line of torn-off clouds** (see the plan image from
+        ///   <c>tools/TyphoonPreview</c>).
         /// </summary>
         public const float SpiralTurns = 0.45f;
 
-        // ── 段ごとの数値表 ───────────────────────────────────
+        // ── The per-level tables of numbers ───────────────────────────────────
         //
-        // ★ 配列の添字は段（0=雲底, 1=塔下, 2=塔上, 3=かなとこ）である。
-        //   readonly な float[] にしてあるのは Core の他の表（EruptionColumn.Weights）と
-        //   同じ形で、**要素は書き換えない**（static だが Unity オブジェクトではないので
-        //   fake-null の問題は無い）。
+        // ★ The array index is the level (0=base, 1=lower tower, 2=upper tower, 3=anvil).
+        //   They are readonly float[] in the same shape as Core's other tables
+        //   (EruptionColumn.Weights), and **the elements are never rewritten** (they are
+        //   static, but they are not Unity objects, so there is no fake-null problem).
 
-        /// <summary>段ごとの層。</summary>
+        /// <summary>The tier for each level.</summary>
         private static readonly VortexCloudLayer[] Layers =
         {
             VortexCloudLayer.Deck,
@@ -204,94 +228,110 @@ namespace DisasterPlus.Core.Typhoon
             VortexCloudLayer.Canopy,
         };
 
-        /// <summary>段ごとの円盤半径 ÷ 外周半径。雲底とかなとこは広く、塔は締まっている。</summary>
+        /// <summary>The disc radius ÷ the outer radius, per level. The base and the anvil are
+        /// broad; the tower is tight.</summary>
         private static readonly float[] LevelDisc = { 0.115f, 0.062f, 0.052f, 0.095f };
 
-        /// <summary>段ごとに柱の半径へ足す量 ÷ 外周半径。
-        /// 雲底は外へ広がり、塔は高いほど外へ倒れ（風のシアー）、かなとこは張り出す。</summary>
+        /// <summary>How much is added to the column's radius per level ÷ the outer radius.
+        /// The base spreads outwards, the tower leans outwards the higher it goes (wind
+        /// shear), and the anvil overhangs.</summary>
         private static readonly float[] LevelOutward = { 0.060f, 0.000f, 0.015f, 0.050f };
 
-        /// <summary>段ごとの上への伸び ÷ 雲の厚み。**雲底は薄く平ら、塔は厚い。**</summary>
+        /// <summary>The upward extent per level ÷ the cloud's thickness. **The base is thin
+        /// and flat; the tower is thick.**</summary>
         private static readonly float[] LevelBand = { 0.06f, 0.34f, 0.34f, 0.14f };
 
-        /// <summary>段ごとの高さの下駄（雲の厚みに対する比）。</summary>
+        /// <summary>The height offset per level (as a fraction of the cloud's thickness).</summary>
         private static readonly float[] LevelHeightBase = { 0.02f, 0.12f, 0.20f, 0.34f };
 
-        /// <summary>段ごとの高さのうち「柱の背の高さ」に比例する分。</summary>
+        /// <summary>The part of the per-level height that is proportional to "the column's
+        /// height".</summary>
         private static readonly float[] LevelHeightSpan = { 0.00f, 0.00f, 0.24f, 0.46f };
 
-        /// <summary>段ごとの濃さ。**下が濃く、上ほど薄い**（積乱雲の見え方そのもの）。</summary>
+        /// <summary>The density per level. **Dense at the bottom, thinner higher up** (exactly
+        /// how a cumulonimbus looks).</summary>
         private static readonly float[] LevelDensity = { 1.00f, 0.85f, 0.65f, 0.45f };
 
-        /// <summary>段ごとの接線方向の速さ。**下層がいちばん速い**（地表付近の暴風）。</summary>
+        /// <summary>The tangential speed per level. **The lowest tier is fastest** (the gale
+        /// near the surface).</summary>
         private static readonly float[] LevelSwirl = { 1.00f, 0.85f, 0.65f, 0.45f };
 
         /// <summary>
-        /// 段ごとの半径方向の速さ。**負が吸い込み、正が吹き出し。**
-        /// 下層で吸い込み・上層で吹き出すのが台風の二次循環である。
+        /// The radial speed per level. **Negative is inflow, positive is outflow.**
+        /// Inflow at the bottom and outflow at the top is a typhoon's secondary circulation.
         /// </summary>
         private static readonly float[] LevelRadial = { -0.35f, -0.10f, 0.05f, 0.45f };
 
-        /// <summary>段ごとの上昇成分。塔の中がいちばん強い。</summary>
+        /// <summary>The updraught component per level. Strongest inside the tower.</summary>
         private static readonly float[] LevelRise = { 0.05f, 0.55f, 0.75f, 0.15f };
 
-        /// <summary>層ごとの粒径 ÷ 渦の外周半径。**複製の <c>startSize</c> の比**である。</summary>
+        /// <summary>The particle size ÷ the vortex's outer radius, per tier. **It is the
+        /// fraction used for the clone's <c>startSize</c>.**</summary>
         public const float DeckSizeFraction = 0.055f;
 
-        /// <summary>同上（塔）。塔は粒を小さくして「もこもこ」を出す。</summary>
+        /// <summary>The same (tower). The tower uses smaller particles to bring out the
+        /// billowing.</summary>
         public const float TowerSizeFraction = 0.040f;
 
-        /// <summary>同上（かなとこ）。いちばん大きく、薄く広げる。</summary>
+        /// <summary>The same (anvil). The largest, spread out thin.</summary>
         public const float CanopySizeFraction = 0.070f;
 
-        /// <summary>眼の壁雲の柱の背の高さ [0, 1]。**いちばん高い。**</summary>
+        /// <summary>The height of the eyewall's columns, [0, 1]. **The tallest.**</summary>
         public const float EyeWallTop = 1f;
 
-        /// <summary>腕の柱が外へ行くにつれて低くなる割合。</summary>
+        /// <summary>How much lower the arms' columns get as they go outwards.</summary>
         public const float ArmTopFalloff = 0.5f;
 
         /// <summary>
-        /// 腕の柱が外へ行くにつれて薄くなる割合。
+        /// How much thinner the arms' columns get as they go outwards.
         ///
-        /// ★ **作図して 0.45 から下げた。** <see cref="MagnitudeFor"/> は円盤の面積で
-        ///   正規化するので、1 粒あたりの粒子数は円盤の大きさに依らない ——
-        ///   つまり <see cref="ArmDiscGrowth"/> で円盤を広げた時点で、外側の
-        ///   単位面積あたりの濃さは既に下がっている。そこへ更に 0.45 を掛けると
-        ///   腕の外側が**点々**になった。実物のスパイラルバンドも外側ほど薄いので
-        ///   向きは正しく、効かせ過ぎていただけである。
+        /// ★ **Lowered from 0.45 after drawing it.** <see cref="MagnitudeFor"/> normalises by
+        ///   the disc's area, so the particle count per puff does not depend on the disc's
+        ///   size — which means that the moment <see cref="ArmDiscGrowth"/> widens the disc,
+        ///   the density per unit area on the outside has already dropped. Multiply that by
+        ///   0.45 as well and the outside of the arms became **a scatter of dots**. Real
+        ///   rainbands are thinner further out too, so the direction was right; it was
+        ///   simply applied too hard.
         /// </summary>
         public const float ArmDensityFalloff = 0.15f;
 
-        /// <summary>いちばん低い柱でも段の厚みがこれだけは残る（背の高さ 0 のときの比）。</summary>
+        /// <summary>Even the lowest column keeps at least this much of the level's thickness
+        /// (the fraction at height 0).</summary>
         public const float BandFloor = 0.45f;
 
         /// <summary>
-        /// 腕のいちばん外の柱で円盤が何倍になるか − 1。
+        /// How many times larger the disc is on the arms' outermost column, minus 1.
         ///
-        /// ★ **これも作図して足した。** 腕は外へ行くほど柱の間隔が開く（弧が伸びる）ので、
-        ///   円盤の大きさを一定にすると外側だけ雲が途切れる。実物のスパイラルバンドも
-        ///   外側ほど広く薄いので、**広げて薄くする**のが正しい向きである
-        ///   （薄くするのは <see cref="ArmDensityFalloff"/> が既にやっている）。
+        /// ★ **This too was added after drawing it.** The columns on an arm get further
+        ///   apart the further out they go (the arc lengthens), so holding the disc's size
+        ///   constant leaves the cloud broken up on the outside alone. Real rainbands are
+        ///   broader and thinner further out too, so **broaden and thin** is the right
+        ///   direction (the thinning is already done by
+        ///   <see cref="ArmDensityFalloff"/>).
         /// </summary>
         public const float ArmDiscGrowth = 1.4f;
 
-        /// <summary>角度の揺らぎ（rad）の振幅。</summary>
+        /// <summary>The amplitude of the angle jitter (rad).</summary>
         public const float AngleJitterRadians = 0.14f;
 
-        /// <summary>半径の揺らぎ（外周半径に対する比）の振幅。</summary>
+        /// <summary>The amplitude of the radius jitter (as a fraction of the outer
+        /// radius).</summary>
         public const float RadiusJitterFraction = 0.035f;
 
-        /// <summary>高さの揺らぎ（厚みに対する比）の振幅。**塔を段ごとにずらす。**</summary>
+        /// <summary>The amplitude of the height jitter (as a fraction of the thickness). **It
+        /// offsets the tower level by level.**</summary>
         public const float HeightJitterFraction = 0.025f;
 
-        /// <summary>揺らぎの種。**固定値**（添字だけの関数にするため）。</summary>
+        /// <summary>The jitter's seed. **A fixed value** (so it stays a function of the
+        /// indices alone).</summary>
         private const uint JitterSeed = 0x54595048u;   // "TYPH"
 
         private const float TwoPi = 6.28318530718f;
 
         /// <summary>
-        /// 層ごとの粒径 ÷ 渦の外周半径。<c>Game</c> 側が複製の <c>startSize</c> を
-        /// この比で決め、**この型は眼の余白の計算に同じ値を使う**（両者がずれないこと）。
+        /// The particle size ÷ the vortex's outer radius, per tier. The <c>Game</c> side
+        /// sets the clone's <c>startSize</c> from this fraction, and **this type uses the
+        /// same value to compute the eye's clearance** (so the two cannot drift apart).
         /// </summary>
         public static float SizeFractionOf(VortexCloudLayer layer)
         {
@@ -301,10 +341,12 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 粒 <paramref name="index"/> の置き場所と流れ方。全部**正規化した比**である。
+        /// Where puff <paramref name="index"/> is placed and how it flows. All of it in
+        /// **normalised fractions**.
         ///
-        /// **範囲外の添字は例外を投げず、眼の壁雲の 1 個目に丸める。** 毎フレーム回る
-        /// 経路なので、呼び出し側の数え違いでレベルロードを壊さない。
+        /// **An out-of-range index does not throw; it is rounded to the first puff of the
+        /// eyewall.** This is a path taken every frame, so a miscount by the caller must not
+        /// break the level load.
         /// </summary>
         public static VortexPuff PuffAt(int index)
         {
@@ -323,8 +365,10 @@ namespace DisasterPlus.Core.Typhoon
 
             VortexCloudLayer layer = Layers[level];
 
-            // 揺らぎ。**添字だけの関数**なので毎フレーム同じ形になる（クラス doc）。
-            // 段ごとに添字が違う ＝ 塔はまっすぐ立たずに段ごとにずれて盛り上がる。
+            // The jitter. **A function of the indices alone**, so the shape is the same every
+            // frame (see the class doc).
+            // A different index per level = the tower does not stand straight but billows out
+            // with an offset at each level.
             float ja = DeterministicRandom.Unit(JitterSeed, (uint)index) * 2f - 1f;
             float jr = DeterministicRandom.Unit(JitterSeed + 1u, (uint)index) * 2f - 1f;
             float jh = DeterministicRandom.Unit(JitterSeed + 2u, (uint)index) * 2f - 1f;
@@ -332,11 +376,13 @@ namespace DisasterPlus.Core.Typhoon
             float angle = columnAngle + ja * AngleJitterRadians;
             float radius = columnRadius + LevelOutward[level] + jr * RadiusJitterFraction;
 
-            // 腕は外へ行くほど柱の間隔が開くので、円盤も広げる（<see cref="ArmDiscGrowth"/>）。
+            // The columns on an arm get further apart the further out they go, so widen the
+            // disc as well (see <see cref="ArmDiscGrowth"/>).
             float disc = LevelDisc[level] * columnDisc;
 
-            // ★★ 眼は穴のまま。**この型が自分で守る**（クラス doc）。
-            //    戻す先は「その段の粒がどこまで広がるか」を引いた最小半径である。
+            // ★★ The eye stays a hole. **This type enforces it itself** (see the class doc).
+            //    What it is pushed back to is the minimum radius with "how far that level's
+            //    particles spread" subtracted.
             float minimum = EyeFraction + disc + SizeFractionOf(layer) * 0.5f;
             if (radius < minimum) radius = minimum;
 
@@ -345,8 +391,9 @@ namespace DisasterPlus.Core.Typhoon
             if (height < 0f) height = 0f;
             if (height > 1f) height = 1f;
 
-            // ★ 段の厚みも柱の背の高さに従う。従わせないと、外側の低い柱まで
-            //   眼の壁雲と同じ高さの塔になり、「中心ほど高い」が消える。
+            // ★ The level's thickness follows the column's height too. Without that, even
+            //   the low columns on the outside become towers as tall as the eyewall's, and
+            //   "taller towards the centre" disappears.
             float band = LevelBand[level] * (BandFloor + (1f - BandFloor) * columnTop);
 
             return new VortexPuff(Normalize(angle), radius, height,
@@ -357,9 +404,9 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 粒 <paramref name="index"/> の内側の縁が眼の縁からどれだけ離れているか
-        /// （外周半径に対する比）。**0 以上でなければ眼が埋まる。**
-        /// テストが全粒についてこれを固定している。
+        /// How far the inner edge of puff <paramref name="index"/> is from the eye's edge
+        /// (as a fraction of the outer radius). **It must be 0 or more, or the eye fills in.**
+        /// A test pins this for every puff.
         /// </summary>
         public static float EyeClearanceOf(int index)
         {
@@ -369,8 +416,9 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 柱 <paramref name="column"/> の素の置き場所（段の下駄も揺らぎも入っていない）。
-        /// 前半が眼の壁雲の環、後半が腕である。
+        /// The bare placement of column <paramref name="column"/> (with neither the level
+        /// offsets nor the jitter applied).
+        /// The first part is the eyewall's ring and the rest are the arms.
         /// </summary>
         private static void Column(int column, out float angleRadians, out float radiusFraction,
                                    out float topFraction, out float densityFraction,
@@ -378,7 +426,8 @@ namespace DisasterPlus.Core.Typhoon
         {
             if (column < EyeWallColumns)
             {
-                // 眼の壁雲: 眼のすぐ外を等間隔に囲む環。いちばん高く、いちばん濃い。
+                // The eyewall: a ring evenly spaced just outside the eye. The tallest and the
+                // densest.
                 angleRadians = TwoPi * column / EyeWallColumns;
                 radiusFraction = EyeWallFraction;
                 topFraction = EyeWallTop;
@@ -391,7 +440,8 @@ namespace DisasterPlus.Core.Typhoon
             int arm = k / ColumnsPerArm;
             int step = k - arm * ColumnsPerArm;
 
-            // t は腕に沿った位置 (0, 1)。端に柱を寄せないよう半歩ずらす。
+            // t is the position along the arm, (0, 1). Offset by half a step so no column
+            // sits at either end.
             float t = (step + 0.5f) / ColumnsPerArm;
 
             angleRadians = TwoPi * arm / ArmCount + TwoPi * SpiralTurns * t;
@@ -402,15 +452,17 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 1 粒ぶんの <c>magnitude</c>（＝粒子の密度）。中身は
-        /// <see cref="ParticleBudget.MagnitudeFor"/> そのもの ——
-        /// **④の渦と暴風雨で同じ式を使う**ためにあちらへ移した。
-        /// ここに残してあるのは、渦の側の呼び出しと doc がこの名前で書かれているからである。
+        /// The <c>magnitude</c> (i.e. the particle density) for one puff. Its body is
+        /// <see cref="ParticleBudget.MagnitudeFor"/> itself — it was moved over there so
+        /// that **④'s vortex and its rainstorm use the same formula**.
+        /// It is left here because the vortex side's calls and docs are written with this name.
         /// </summary>
-        /// <param name="discRadius">1 粒の円盤半径（m）。</param>
-        /// <param name="rateOverTime">エフェクト側の <c>emission.rateOverTime.constant</c>。</param>
-        /// <param name="particlesPerSecond">渦**全体**で 1 秒あたりに出したい粒子数。</param>
-        /// <param name="puffCount">粒の数（<see cref="PuffCount"/>）。</param>
+        /// <param name="discRadius">One puff's disc radius (m).</param>
+        /// <param name="rateOverTime">The effect side's
+        /// <c>emission.rateOverTime.constant</c>.</param>
+        /// <param name="particlesPerSecond">The particles per second wanted across **the whole
+        /// vortex**.</param>
+        /// <param name="puffCount">The number of puffs (<see cref="PuffCount"/>).</param>
         public static float MagnitudeFor(float discRadius, float rateOverTime,
                                          float particlesPerSecond, int puffCount)
         {

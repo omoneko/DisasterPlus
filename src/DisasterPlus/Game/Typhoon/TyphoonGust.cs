@@ -6,124 +6,147 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **竜巻を出さずに竜巻並みの被害だけを起こす**局所被害域（パッチ）。
-    /// <b>sim スレッド専用。</b>既定 ON。
+    /// Local damage areas (patches) that **produce tornado-grade damage without producing
+    /// a tornado**. <b>Sim thread only.</b> On by default.
     ///
-    /// ── 持ち主の指示 ──────────────────────────────────────
+    /// ── The owner's instruction ──────────────────────────────────────
     ///
-    /// > 竜巻を発生させずに竜巻の被害だけを複数発生させてください
+    /// > Please produce several instances of tornado damage without producing tornadoes
     ///
-    /// <b>災害の実体（<c>TornadoAI</c>）も渦の車両も漏斗のメッシュも 1 つも作らない。</b>
-    /// 作るのは「台風の下のあちこちで、短いあいだ、狭い範囲だけが竜巻並みに壊れる」
-    /// という現象だけである。置き方と寿命は <see cref="GustPatchPlan"/>、
-    /// 壊れ方は <see cref="GustDamageModel"/>（どちらも Core、テストつき）。
+    /// <b>We create no disaster object (<c>TornadoAI</c>), no vortex vehicle and no funnel
+    /// mesh.</b> All we create is the phenomenon "here and there under the typhoon, for a
+    /// short while, a narrow area gets wrecked as a tornado would wreck it". Where they go
+    /// and how long they live is <see cref="GustPatchPlan"/>; how things break is
+    /// <see cref="GustDamageModel"/> (both in Core, with tests).
     ///
-    /// ── 退役した随伴竜巻との違い ──────────────────────────────
+    /// ── How this differs from the retired accompanying tornado ───────────
     ///
-    /// 旧実装はバニラの竜巻災害を借りていた。見た目と破壊が無料でバニラ品質だった
-    /// 代わりに、その破壊は <c>DisasterHelpers.DestroyStuff</c> を通るので
-    /// **Natural Disasters Renewal が丸ごと置き換えていた**（IL 事実文書 §F-1）。
-    /// パッチは <c>BuildingAI.CollapseBuilding</c> を直接呼ぶ（＝④の風害と同じ経路）ので
-    /// **NDR と完全に無衝突**である。設定キー <c>typhoonTornado</c> /
-    /// <c>typhoonTornadoCount</c> は<b>退役</b>し、読む場所はもう 1 つも無い
-    /// （<c>ModSettings</c> の doc。**別の意味で再利用しないこと**）。
+    /// The old implementation borrowed vanilla's tornado disaster. The look and the
+    /// destruction came free at vanilla quality, but that destruction goes through
+    /// <c>DisasterHelpers.DestroyStuff</c>, which **Natural Disasters Renewal replaces
+    /// wholesale** (IL facts document §F-1). The patches call
+    /// <c>BuildingAI.CollapseBuilding</c> directly (i.e. the same route as ④'s wind
+    /// damage), so they are **completely free of conflict with NDR**. The settings keys
+    /// <c>typhoonTornado</c> / <c>typhoonTornadoCount</c> are <b>retired</b> and not one
+    /// place reads them any more (<c>ModSettings</c>'s doc. **Do not reuse them with a
+    /// different meaning**).
     ///
-    /// ── 台帳を持たない ────────────────────────────────────
+    /// ── It keeps no ledger ───────────────────────────────────────
     ///
-    /// パッチの状態は<b>台風の経過フレームだけ</b>である。位置も大きさも寿命も
-    /// 「何番目のパッチか」の関数なので（<see cref="GustPatchPlan"/>）、
-    /// ここが覚えているのは「前回いつ被害を出したか」と診断カウンタだけ。
-    /// **したがって台風が消えたらパッチも 1 個残らず消える** ——
-    /// 寿命の管理を忘れて残る、という壊れ方が構造的に起きない。
-    /// <see cref="Reset"/> は <c>TyphoonController.Forget</c> と
-    /// <c>TyphoonFeature.OnLevelUnloading</c> から呼ばれる（どちらも冪等）。
+    /// A patch's state is <b>the typhoon's elapsed frame count and nothing else</b>.
+    /// Position, size and lifetime are all functions of "which patch number this is"
+    /// (<see cref="GustPatchPlan"/>), so all this class remembers is "when damage was last
+    /// done" and the diagnostic counters.
+    /// **So when the typhoon goes, not one patch remains** — the failure mode where you
+    /// forget to manage a lifetime and something lingers cannot happen structurally.
+    /// <see cref="Reset"/> is called from <c>TyphoonController.Forget</c> and
+    /// <c>TyphoonFeature.OnLevelUnloading</c> (both idempotent).
     ///
-    /// ── 1 tick あたりの仕事量の上限（全部ここに書く）───────────────────
+    /// ── The ceiling on work per tick (all of it written here) ────────────
     ///
-    /// - 被害の走査が走るのは<b>台風の経過フレーム <see cref="DamageIntervalFrames"/>
-    ///   ごとに 1 回</b>まで
-    /// - 1 回で見るパッチは<b>最大 <see cref="GustPatchPlan.MaxActivePatches"/> 個</b>
-    /// - 1 個のパッチが見るグリッドセルは<b>最大 <see cref="MaxCellsPerPatch"/> 個</b>
-    ///   （半径 95 m ＋ セル 64 m ＝ 5×5 で足りる）
-    /// - 1 回で調べる建物は<b>全パッチ合計 <see cref="MaxBuildingsPerPass"/> 棟</b>
-    /// - <c>AddWind</c> / <c>DestroyTrees</c> / <c>DispatchEffect</c> は
-    ///   1 回につきパッチ 1 個あたり 1 度ずつ
+    /// - The damage sweep runs at most <b>once per
+    ///   <see cref="DamageIntervalFrames"/> of the typhoon's elapsed frames</b>
+    /// - One sweep looks at <b>at most
+    ///   <see cref="GustPatchPlan.MaxActivePatches"/> patches</b>
+    /// - One patch looks at <b>at most <see cref="MaxCellsPerPatch"/> grid cells</b>
+    ///   (a 95 m radius plus 64 m cells means 5×5 is enough)
+    /// - One sweep examines <b><see cref="MaxBuildingsPerPass"/> buildings across all
+    ///   patches</b>
+    /// - <c>AddWind</c> / <c>DestroyTrees</c> / <c>DispatchEffect</c> are each called once
+    ///   per patch per sweep
     ///
-    /// ── 破壊の経路（風害とまったく同じ規律）────────────────────────
+    /// ── The destruction route (exactly the same discipline as wind damage) ──
     ///
-    /// - <c>BuildingAI.CollapseBuilding(demolish: false, burnAmount: 0)</c> を直接呼ぶ。
-    ///   <c>DisasterHelpers.DestroyBuildings</c> / <c>DestroyNetSegments</c> は**通さない**
-    /// - <b><c>Building.m_fireIntensity</c> には 1 バイトも書かない。</b>
-    ///   書くと誰も消さない永久の幽霊火災になり、セーブに焼き付いて MOD を外しても残る
-    /// - <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> は <c>testOnly: true</c> に false を
-    ///   返してから本当に倒れるので、**dry-run でフィルタしない**（本番は必ず呼ぶ）
-    /// - Shelter / DoomsdayVault / DamPowerHouse / DecorationBuilding / TsunamiBuoy は
-    ///   <c>demolish: false</c> を本当に断る。**それは正しい挙動なので
-    ///   <c>demolish: true</c> へ逃げない。** <see cref="LastRefused"/> に積む
+    /// - Call <c>BuildingAI.CollapseBuilding(demolish: false, burnAmount: 0)</c> directly.
+    ///   **Do not go through** <c>DisasterHelpers.DestroyBuildings</c> /
+    ///   <c>DestroyNetSegments</c>
+    /// - <b>Do not write a single byte of <c>Building.m_fireIntensity</c>.</b>
+    ///   Write it and you get a permanent ghost fire that nobody puts out, burnt into the
+    ///   save and surviving even if the mod is removed
+    /// - <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> return false to
+    ///   <c>testOnly: true</c> and then really do collapse, so **do not filter on the
+    ///   dry run** (always make the real call)
+    /// - Shelter / DoomsdayVault / DamPowerHouse / DecorationBuilding / TsunamiBuoy really
+    ///   do refuse <c>demolish: false</c>. **That is correct behaviour, so do not run away
+    ///   to <c>demolish: true</c>.** Count them in <see cref="LastRefused"/>
     ///
-    /// ── 乱数にフレームを混ぜない ──────────────────────────────
+    /// ── Do not mix the frame into the random draw ────────────────────────
     ///
-    /// 目は (パッチの種, 建物 ID) だけで決まる。混ぜると同じ建物が毎 tick 抽選し直され、
-    /// パッチの中の建物が確率 1 で全滅する。混ぜないので、**パッチが近づいて確率が
-    /// 上がったときに初めて倒れる** ＝「通り過ぎた跡が壊れている」になる。
+    /// The draw is determined by (the patch's seed, the building ID) alone. Mix the frame
+    /// in and the same building is re-drawn every tick, so every building inside a patch
+    /// is wiped out with probability 1. Leaving it out means **a building only falls once a
+    /// patch comes close and the probability rises**, i.e. "what it passed over is
+    /// wrecked".
     /// </summary>
     public static class TyphoonGust
     {
-        /// <summary>被害の走査の間隔（台風の経過フレーム）。パッチが動くので短くする。</summary>
+        /// <summary>The interval between damage sweeps (the typhoon's elapsed frames).
+        /// Kept short because the patches move.</summary>
         private const uint DamageIntervalFrames = 16u;
 
-        /// <summary>1 個のパッチが見るグリッドセルの上限（半径 95 m なら 5×5 で足りる）。</summary>
+        /// <summary>The ceiling on grid cells one patch looks at (with a 95 m radius, 5×5
+        /// is enough).</summary>
         private const int MaxCellsPerPatch = 25;
 
-        /// <summary>1 回の走査で調べる建物の上限（全パッチ合計）。</summary>
+        /// <summary>The ceiling on buildings examined in one sweep (across all
+        /// patches).</summary>
         private const int MaxBuildingsPerPass = 256;
 
-        /// <summary>建物グリッドの 1 辺のセル数（1 セル 64 m）。</summary>
+        /// <summary>The number of cells along one side of the building grid (one cell is
+        /// 64 m).</summary>
         private const int GridSide = 270;
 
-        /// <summary>1 セルの連結リストを辿る回数の上限（壊れた保存データ対策）。</summary>
+        /// <summary>The ceiling on how many links of one cell's chain we walk (a guard
+        /// against corrupt save data).</summary>
         private const int GridChainGuard = 49152;
 
-        /// <summary>候補にするフラグ条件。<c>TyphoonWind.CandidateMask</c> と同じ。</summary>
+        /// <summary>The flag condition for a candidate. The same as
+        /// <c>TyphoonWind.CandidateMask</c>.</summary>
         private const Building.Flags CandidateMask =
             Building.Flags.Created | Building.Flags.Deleted
             | Building.Flags.Untouchable | Building.Flags.Demolishing
             | Building.Flags.Collapsed;
 
-        /// <summary>パッチの種を作るときの混ぜ物。**固定値**。</summary>
+        /// <summary>The salt mixed in when building a patch's seed. **A fixed
+        /// value.**</summary>
         private const uint PatchSeedSalt = 0x47555354u;   // "GUST"
 
-        /// <summary>吹き上げの鉛直成分・回転成分・求心成分（§B-1 の竜巻の実引数と同じ）。</summary>
+        /// <summary>The vertical, rotational and centripetal components of the uplift (the
+        /// same actual arguments as the tornado's in §B-1).</summary>
         private const float WindUpward = 80f;
 
         private const float WindRotational = 0.5f;
 
         private const float WindRadial = -40f;
 
-        /// <summary><c>AddWind</c> の半径倍率（パッチ半径に対して）。</summary>
+        /// <summary><c>AddWind</c>'s radius multiplier (relative to the patch
+        /// radius).</summary>
         private const float WindRadiusFactor = 1.6f;
 
-        /// <summary>倒木の「確実に倒れる」内側半径 ÷ パッチ半径。</summary>
+        /// <summary>The inner radius within which trees definitely fall, ÷ the patch
+        /// radius.</summary>
         private const float TreeInnerFraction = 0.35f;
 
         /// <summary>
-        /// 粉塵の密度。§B-4 の一発モードの式
-        /// <c>count = max(100, πr²) × magnitude × 0.01 × rateOverTime</c> から、
-        /// 半径 70 m・rate 20 でおよそ 150 粒になる値を選んである。
-        /// **大きくしすぎない** —— <c>Collapse Particles</c> は本物の建物崩壊と
-        /// 粒子予算（<c>maxParticles</c>）を共有しているので、食い潰すと街の崩壊が薄くなる。
+        /// The dust density. From §B-4's one-shot mode formula
+        /// <c>count = max(100, πr²) × magnitude × 0.01 × rateOverTime</c>, this value was
+        /// chosen to give roughly 150 particles at a radius of 70 m and rate 20.
+        /// **Do not make it too large** — <c>Collapse Particles</c> shares its particle
+        /// budget (<c>maxParticles</c>) with real building collapses, so eating it up
+        /// thins out collapses across the city.
         /// </summary>
         private const float DustMagnitude = 0.05f;
 
-        /// <summary>倒木の <c>Degraded</c> 自己申告キー。</summary>
+        /// <summary>The <c>Degraded</c> self-report key for felling trees.</summary>
         private const string TreeNoteKey = "typhoonGustTrees";
 
         private static ushort _typhoonId;
         private static uint _lastDamageElapsed;
         private static bool _damagedOnce;
 
-        /// <summary>粉塵に借りている粒子エフェクト。**参照 1 個**で持ち、
-        /// 毎回 <c>== null</c> で見る（破棄済みは Unity の fake-null で null と等価になる）。</summary>
+        /// <summary>The particle effect borrowed for the dust. Held as **a single
+        /// reference** and checked with <c>== null</c> each time (a destroyed one compares
+        /// equal to null through Unity's fake-null).</summary>
         private static ParticleEffect _dust;
 
         private static bool _dustMissing;
@@ -131,7 +154,7 @@ namespace DisasterPlus.Game
         private static bool _treeNotePosted;
         private static bool _errorLogged;
 
-        // ── 診断カウンタ（全て sim スレッドからのみ読み書きする）──────────────
+        // ── Diagnostic counters (all read and written from the sim thread only) ──
         private static int _passes;
         private static int _lastActive;
         private static int _lastScanned;
@@ -140,35 +163,38 @@ namespace DisasterPlus.Game
         private static int _totalCollapsed;
         private static bool _lastCapped;
 
-        /// <summary>これまでに走った走査の回数（セッション累計）。</summary>
+        /// <summary>How many sweeps have run so far (cumulative for the session).</summary>
         public static int Passes { get { return _passes; } }
 
-        /// <summary>直近の走査で生きていたパッチの数。**0 は「今は無い」で不具合ではない。**</summary>
+        /// <summary>How many patches were alive in the most recent sweep. **0 means "there
+        /// are none right now" and is not a fault.**</summary>
         public static int LastActive { get { return _lastActive; } }
 
-        /// <summary>直近の走査で調べた建物数（パッチの円の中にあったもの）。</summary>
+        /// <summary>How many buildings the most recent sweep examined (those inside a
+        /// patch's circle).</summary>
         public static int LastScanned { get { return _lastScanned; } }
 
-        /// <summary>直近の走査で倒壊した棟数。</summary>
+        /// <summary>How many buildings collapsed in the most recent sweep.</summary>
         public static int LastCollapsed { get { return _lastCollapsed; } }
 
-        /// <summary>直近の走査で**バニラが設計上断った**棟数。**0 でないのは正常。**</summary>
+        /// <summary>How many buildings **vanilla refused by design** in the most recent
+        /// sweep. **Non-zero is normal.**</summary>
         public static int LastRefused { get { return _lastRefused; } }
 
-        /// <summary>セッション累計の倒壊棟数。</summary>
+        /// <summary>Buildings collapsed, cumulative for the session.</summary>
         public static int TotalCollapsed { get { return _totalCollapsed; } }
 
-        /// <summary>直近の走査が上限で打ち切られたか。</summary>
+        /// <summary>Whether the most recent sweep was cut short at its ceiling.</summary>
         public static bool LastCapped { get { return _lastCapped; } }
 
         /// <summary>
-        /// 台風を手放すとき（<c>TyphoonController.Forget</c>）とレベルアンロードで呼ぶ。
-        /// **冪等。**
+        /// Call when letting go of a typhoon (<c>TyphoonController.Forget</c>) and on level
+        /// unload. **Idempotent.**
         ///
-        /// ★ ここで「パッチを止める」処理は要らない —— パッチは台帳ではなく
-        ///   台風の経過フレームの関数なので、台風が無くなった時点で 1 個も存在しなくなる
-        ///   （クラス doc）。戻すのはカウンタと、次の台風へ持ち越してはいけない
-        ///   走査位置だけである。
+        /// ★ No "stop the patches" work is needed here — a patch is not a ledger entry but
+        ///   a function of the typhoon's elapsed frames, so the moment the typhoon is gone
+        ///   not one of them exists (class doc). All we reset are the counters and the
+        ///   sweep position, which must not be carried over to the next typhoon.
         /// </summary>
         public static void Reset()
         {
@@ -183,8 +209,9 @@ namespace DisasterPlus.Game
             _totalCollapsed = 0;
             _lastCapped = false;
 
-            // ★ 借りたエフェクトの参照は都市をまたいで持ち越さない（クローンしていないので
-            //   破棄はしない —— 破棄したら**街じゅうの建物崩壊の粉塵が消える**）。
+            // ★ Do not carry the reference to the borrowed effect across cities (we do not
+            //   destroy it, since we never cloned it — destroy it and **the collapse dust
+            //   for every building in the city disappears**).
             _dust = null;
             _dustMissing = false;
 
@@ -193,19 +220,21 @@ namespace DisasterPlus.Game
                 _treeNotePosted = false;
                 FeatureHost.ClearDegraded(TyphoonFeature.FeatureName, TreeNoteKey);
             }
-            // ★ _errorLogged / _treesUnavailable は戻さない。どちらも「この DLL が
-            //    参照しているゲームのビルドに対する事実」であって都市ごとの状態ではない。
+            // ★ _errorLogged / _treesUnavailable are not reset. Both are "facts about the
+            //    game build this DLL is referencing", not per-city state.
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>TyphoonFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から、台風が動いているときだけ呼ぶこと**（ポーズ中に建物が倒れる）。
-        /// 設定が OFF のときは呼び出し側が呼ばない。
+        /// Sim thread. **Always call it from below the pause guard in
+        /// <c>TyphoonFeature.OnSimulationTick</c>, and only while a typhoon is running**
+        /// (otherwise buildings fall while the game is paused).
+        /// When the setting is OFF the caller does not call it.
         ///
-        /// <paramref name="snapshot"/> は**前 tick の状態**なので位置も強度も読まない
-        /// （<see cref="TyphoonSnapshot"/> の T3 節の注記）。<c>TyphoonController</c> の
-        /// static から同じスレッドで直接読む。引数に残してあるのは他の要素と
-        /// 呼び出しの形をそろえるためである。
+        /// <paramref name="snapshot"/> holds **the previous tick's state**, so neither the
+        /// position nor the intensity is read from it (the note in
+        /// <see cref="TyphoonSnapshot"/>'s T3 section). They are read directly from
+        /// <c>TyphoonController</c>'s statics on the same thread. It is kept as a parameter
+        /// to give every element the same call shape.
         /// </summary>
         public static void Tick(TyphoonSnapshot snapshot, uint frame, float deltaMinutes)
         {
@@ -240,8 +269,9 @@ namespace DisasterPlus.Game
             ushort id = TyphoonController.DisasterId;
             if (id != _typhoonId)
             {
-                // 新しい台風。走査位置を持ち越さない（前の台風の経過フレームで
-                // 「もう出した」と判断すると、最初のパッチが丸ごと消える）。
+                // A new typhoon. Do not carry the sweep position over (judge "we already
+                // did this one" from the previous typhoon's elapsed frames and the first
+                // patch disappears entirely).
                 _typhoonId = id;
                 _damagedOnce = false;
                 _lastDamageElapsed = 0u;
@@ -258,7 +288,8 @@ namespace DisasterPlus.Game
             if (strength > 10) strength = 10;
             if (strength == 0)
             {
-                // スライダーで完全に無効化できることの保証。演出も出さない。
+                // The guarantee that the slider can disable it completely. No effects
+                // either.
                 _lastActive = 0;
                 _lastScanned = 0;
                 _lastCollapsed = 0;
@@ -283,7 +314,8 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // プレハブ半径が読めていなければ何もしない（設計書 §6：推測しない）。
+            // If the prefab radius could not be read, do nothing (design doc §6: do not
+            // guess).
             float stormRadius = TyphoonController.StormRadius;
             if (!(stormRadius > 0f))
             {
@@ -298,8 +330,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-            //    new GameObject を走らせる main スレッド専用 API なので exists で先に確認する。
+            // ★ Singleton<T>.instance runs FindObjectOfType and new GameObject when
+            //    sInstance is null, which makes it a main thread only API, so we check
+            //    exists first.
             if (!Singleton<BuildingManager>.exists) return;
 
             var bm = Singleton<BuildingManager>.instance;
@@ -309,9 +342,9 @@ namespace DisasterPlus.Game
             var grid = bm.m_buildingGrid;
             if (buildings == null || grid == null) return;
 
-            // ★ 偏りと同じく、進行方位は**毎走査読み直す**。パッチの相対角は
-            //   GustPatchPlan が進行方位からの相対で出しているので、
-            //   経路が曲がればパッチの散らばりも一緒に回る。
+            // ★ As with the bias, the heading is **re-read every sweep**. The patches'
+            //   relative angles come out of GustPatchPlan relative to the heading, so if
+            //   the track bends the scatter of patches turns with it.
             float heading = TyphoonController.HeadingRadians;
             bool southern = ModSettings.TyphoonSouthernHemisphere.value;
             var group = GroupOf(typhoonId);
@@ -369,7 +402,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// パッチ 1 個ぶんの被害。上限に当たったら false（呼び出し側が capped を立てる）。
+        /// The damage for one patch. false if we hit a ceiling (the caller then raises
+        /// capped).
         /// </summary>
         private static bool Strike(Building[] buildings, ushort[] grid,
                                    float px, float pz, float patchRadius,
@@ -399,7 +433,8 @@ namespace DisasterPlus.Game
 
                     while (id != 0 && id < buildings.Length)
                     {
-                        // ★ 次の ID は**行動する前に**控える（②の LongPeriodDamage と同じ）。
+                        // ★ Take down the next ID **before acting** (the same as ②'s
+                        //   LongPeriodDamage).
                         ushort next = buildings[id].m_nextGridBuilding;
 
                         if ((buildings[id].m_flags & CandidateMask) == Building.Flags.Created)
@@ -416,7 +451,7 @@ namespace DisasterPlus.Game
                             {
                                 scanned++;
 
-                                // ★ フレームを混ぜない（クラス doc）。
+                                // ★ Do not mix the frame in (class doc).
                                 if (DeterministicRandom.Unit(seed, id) < chance)
                                 {
                                     bool accepted;
@@ -436,10 +471,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 実際に倒す。**<c>DisasterHelpers</c> を経由しない**（クラス doc）。
-        /// **dry-run が false でも本番は必ず呼ぶ** —— <c>PowerPoleAI</c> /
-        /// <c>CableCarPylonAI</c> は <c>if (testOnly) return false;</c> の直後に本物の
-        /// 倒壊を行う。
+        /// Actually knock it down. **Do not go via <c>DisasterHelpers</c>** (class doc).
+        /// **Always make the real call even when the dry run returns false** —
+        /// <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> perform the real collapse
+        /// immediately after <c>if (testOnly) return false;</c>.
         /// </summary>
         private static bool Collapse(Building[] buildings, ushort id,
                                      InstanceManager.Group group, out bool accepted)
@@ -451,16 +486,18 @@ namespace DisasterPlus.Game
 
             var ai = info.m_buildingAI;
 
-            // demolish: false（瓦礫を残す。防災施設は断る＝正しい挙動）、
-            // burnAmount: 0（風は吹き飛ばして潰すのであって焼損ではない）。
-            // ★ m_fireIntensity には触れない。
+            // demolish: false (leave the rubble; disaster response facilities refuse, which
+            // is correct behaviour), burnAmount: 0 (the wind blows things over and crushes
+            // them; it does not scorch them).
+            // ★ Do not touch m_fireIntensity.
             accepted = ai.CollapseBuilding(id, ref buildings[id], group, true, false, 0);
             return ai.CollapseBuilding(id, ref buildings[id], group, false, false, 0);
         }
 
         /// <summary>
-        /// 市民と車両を吹き飛ばす。**無害**（<c>AddWindCitizens</c> ＋
-        /// <c>AddWindVehicles</c> の 2 行だけで、建物・道路・樹木には触らない）。
+        /// Blow citizens and vehicles about. **Harmless** (it is just the two lines
+        /// <c>AddWindCitizens</c> + <c>AddWindVehicles</c> and touches neither buildings,
+        /// roads nor trees).
         /// </summary>
         private static void PushWind(Vector3 position, float patchRadius,
                                      InstanceManager.Group group)
@@ -472,9 +509,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 倒木。**燃やさない**（<c>burnRadiusMin</c> / <c>burnRadiusMax</c> は 0）。
-        /// この 1 経路だけが解決できない環境がありうる（そのときは倒木を諦め、
-        /// 建物の被害はそのまま出す）。
+        /// Fell trees. **Do not set them alight** (<c>burnRadiusMin</c> /
+        /// <c>burnRadiusMax</c> are 0).
+        /// This one route may be unresolvable in some environments (in which case we give
+        /// up on felling trees and still do the building damage as usual).
         /// </summary>
         private static void FellTrees(uint seed, Vector3 position, float patchRadius,
                                       InstanceManager.Group group)
@@ -488,7 +526,7 @@ namespace DisasterPlus.Game
                                              0f,                                // removeRadius
                                              patchRadius * TreeInnerFraction,   // destructionMin
                                              patchRadius,                       // destructionMax
-                                             0f, 0f);                           // ★ 燃やさない
+                                             0f, 0f);                           // ★ do not set alight
             }
             catch (System.Exception e)
             {
@@ -510,24 +548,28 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 粉塵を 1 発。**バニラの <c>Collapse Particles</c> を借りるだけで、
-        /// クローンも改変もしない** —— 街じゅうの建物崩壊と同じインスタンスなので、
-        /// ここで色や粒径を変えると街の崩壊まで変わる（エフェクト実測文書 §D-5）。
+        /// One burst of dust. **We only borrow vanilla's <c>Collapse Particles</c>; we
+        /// neither clone nor modify it** — it is the same instance as every building
+        /// collapse in the city, so changing the colour or particle size here would change
+        /// those collapses too (effects measurement document §D-5).
         ///
-        /// <c>MultiEffect</c>（<c>Collapse Effect</c>）ではなく**粒子の子だけ**を借りる。
-        /// 束のほうを撃つと <c>Collapse Sound</c> まで鳴り、走査ごとに崩壊音が繰り返す。
+        /// We borrow **only the particle child**, not the <c>MultiEffect</c>
+        /// (<c>Collapse Effect</c>). Fire the bundle and <c>Collapse Sound</c> plays too,
+        /// repeating the collapse sound on every sweep.
         ///
-        /// <c>DispatchEffect</c> は <c>Monitor.TryEnter</c> のキュー投入なので
-        /// **sim スレッドから呼んでよい**（IL 事実文書 §C）。
-        /// 取れなければ 1 度だけ諦めて以後は呼ばない。**被害は続く。**
+        /// <c>DispatchEffect</c> queues through <c>Monitor.TryEnter</c>, so **it may be
+        /// called from the sim thread** (IL facts document §C).
+        /// If we cannot get it we give up once and never call again. **The damage
+        /// continues.**
         /// </summary>
         private static void Dust(Vector3 position, float patchRadius, float strengthFraction,
                                  ushort typhoonId)
         {
             if (_dustMissing) return;
 
-            // ★ 参照そのものを毎回見る。破棄済みなら fake-null で null と等価になり、
-            //   ここで引き直される（2 つ目の都市の自己修復）。
+            // ★ Look at the reference itself each time. If it has been destroyed, fake-null
+            //   makes it compare equal to null and it is looked up again here (the second
+            //   city's self-repair).
             if (_dust == null)
             {
                 _dust = ResolveDust();
@@ -547,19 +589,21 @@ namespace DisasterPlus.Game
 
             var area = new EffectInfo.SpawnArea(position, Vector3.up, patchRadius * 0.6f);
 
-            // ★ 音のグループには null を渡す。ParticleEffect は RequirePlay() が
-            //   false なので音のキューには 1 件も積まれず、null が読まれることも無い
-            //   （IL 事実文書 §C の DispatchEffect の分岐）。AudioManager を
-            //   sim スレッドから触りに行く理由が無い。
+            // ★ Pass null for the audio group. ParticleEffect's RequirePlay() is false, so
+            //   not one entry is queued on the audio queue and the null is never read
+            //   (the branching in DispatchEffect, IL facts document §C). There is no reason
+            //   to go and touch AudioManager from the sim thread.
             Singleton<EffectManager>.instance.DispatchEffect(
                 _dust, id, area, Vector3.zero, 0f,
                 DustMagnitude * strengthFraction, null);
         }
 
         /// <summary>
-        /// <c>BuildingProperties.m_collapseEffect</c> から粒子の子を取り出す。
-        /// **束（<c>MultiEffect</c>）ではなく粒子だけ**を返す（<see cref="Dust"/> の doc）。
-        /// sim スレッドから呼ぶので <c>Singleton&lt;T&gt;.exists</c> を先に見る。
+        /// Get the particle child out of <c>BuildingProperties.m_collapseEffect</c>.
+        /// **Return only the particles, not the bundle (<c>MultiEffect</c>)**
+        /// (<see cref="Dust"/>'s doc).
+        /// It is called from the sim thread, so look at <c>Singleton&lt;T&gt;.exists</c>
+        /// first.
         /// </summary>
         private static ParticleEffect ResolveDust()
         {
@@ -595,8 +639,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 災害グループ。渡すとバニラ側の集計（災害ごとの被害棟数）が正しく積まれる。
-        /// <c>InstanceManager</c> がまだ居なければ <c>null</c>。
+        /// The disaster group. Passing it makes vanilla's own tally (buildings damaged per
+        /// disaster) add up correctly.
+        /// <c>null</c> if <c>InstanceManager</c> is not there yet.
         /// </summary>
         private static InstanceManager.Group GroupOf(ushort disasterId)
         {
@@ -608,8 +653,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **倒壊 0 のときも毎回出す。** <c>Log.Diag</c> は同一キーで間引かれるが、
-        /// **引数の文字列連結は毎回走ってしまう**ので <c>DiagEnabled</c> で先に落とす。
+        /// **Written every time, even when nothing collapsed.** <c>Log.Diag</c> thins the
+        /// same key out, but **the string concatenation in the arguments would still run
+        /// every time**, so we bail out first with <c>DiagEnabled</c>.
         /// </summary>
         private static void WriteDiag(ushort typhoonId, int strength, uint elapsed,
                                       uint first, uint last, int active, int scanned,

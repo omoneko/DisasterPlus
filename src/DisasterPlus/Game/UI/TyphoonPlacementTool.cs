@@ -5,56 +5,59 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 台風の発生地点を指すツール。**main スレッド専用。**
-    /// ⑤の <see cref="VolcanoPlacementTool"/> をそのまま写している。
+    /// The tool for pointing at where the typhoon starts. **Main thread only.**
+    /// Copied straight from ⑤'s <see cref="VolcanoPlacementTool"/>.
     ///
-    /// ── なぜ在るのか ─────────────────────────────────────
+    /// ── Why it exists ─────────────────────────────────────
     ///
-    /// バニラの災害ボタンは「押す → **強度スライダーが出る** → 地図をクリック →
-    /// その地点に出現の遅れを置いて災害が起きる」である。④もこの 3 手に揃える ——
-    /// 入口は <see cref="Arm"/> で、地点と<b>そのとき選ばれていた強度</b>を
-    /// <see cref="TyphoonRequestData"/> が運ぶ。スライダーはバニラのものをそのまま
-    /// 借りる（<see cref="IntensitySlider"/>）。
+    /// A vanilla disaster button goes "press → **the intensity slider appears** → click the
+    /// map → the disaster happens at that spot after a spawn delay". ④ lines up with the
+    /// same three steps — the entry point is <see cref="Arm"/>, and
+    /// <see cref="TyphoonRequestData"/> carries the spot along with <b>the intensity that was
+    /// selected at that moment</b>. The slider is borrowed from vanilla as-is
+    /// (<see cref="IntensitySlider"/>).
     ///
-    /// ★ **ここからパネルは開かない。** 起こすことと読むことは別で、
-    ///   ④の情報は左上のショートカットの側にある（所有者の指摘
-    ///   「あれこれ説明は出さなくていい」）。
+    /// ★ **No panel is opened from here.** Triggering and reading are separate things, and
+    ///   ④'s information lives on the shortcut in the top-left (the owner's remark:
+    ///   "you don't need to put out all that explanation").
     ///
-    /// ── ⑤と違い、クリックは「起こす」である ──────────────────────
+    /// ── Unlike ⑤, the click is "make it happen" ──────────────────────
     ///
-    /// ⑤の配置ツールが積むのは <c>Survey</c>（調べるだけ）で、実際に地形を壊すのは
-    /// プレイヤーが確認の行を読んでから押したときだけである。**⑤の地形変更は
-    /// 取り消せない**からで、④にその制約は無い（台風は通り過ぎる）。
-    /// したがって④はバニラの災害ボタンと同じく<b>クリックした時点で確定</b>する。
+    /// What ⑤'s placement tool queues is a <c>Survey</c> (look only); the terrain is actually
+    /// wrecked only when the player has read the confirmation line and pressed.
+    /// That is because **⑤'s terrain change cannot be undone**, and ④ has no such constraint
+    /// (a typhoon passes through). So, like a vanilla disaster button, ④ <b>commits at the
+    /// moment of the click</b>.
     ///
-    /// ── 登録しないと <c>SetTool&lt;T&gt;()</c> は黙って空振りする ─────────────
+    /// ── Without registration, <c>SetTool&lt;T&gt;()</c> silently does nothing ─────────────
     ///
-    /// <c>ToolController.m_tools</c> は <c>Awake</c> で一度だけ構築され、
-    /// <c>ToolsModifierControl.SetTool&lt;T&gt;</c> は静的辞書を引くだけなので、
-    /// **起動後に足したツールはどちらにも入っていない。**
-    /// <see cref="ToolRegistration.Register{T}"/> を<b>毎レベルロードで</b>呼ぶこと
-    /// （<c>TyphoonFeature.OnLevelLoaded</c>）。呼び忘れると
-    /// 「ボタンは押せるのにカーソルが変わらない」という、例外の出ない壊れ方をする。
+    /// <c>ToolController.m_tools</c> is built exactly once in <c>Awake</c>, and
+    /// <c>ToolsModifierControl.SetTool&lt;T&gt;</c> only looks up a static dictionary, so
+    /// **a tool added after startup is in neither of them.**
+    /// Call <see cref="ToolRegistration.Register{T}"/> <b>on every level load</b>
+    /// (<c>TyphoonFeature.OnLevelLoaded</c>). Forget it and you get the kind of breakage that
+    /// throws no exception: "the button can be pressed but the cursor never changes".
     ///
-    /// ── 地点の取り方 ─────────────────────────────────────
+    /// ── How the spot is picked ─────────────────────────────────────
     ///
-    /// 地形に Unity のコライダーは無いので <c>Physics.Raycast</c> は**絶対に当たらない**。
-    /// カメラレイと高さ場の交差を Core の <see cref="RayGeometry.IntersectTerrain"/> で
-    /// 自前に解く（⑤と同じ経路。既に出荷され実機で動いており、Core のテストが掛かっている）。
+    /// The terrain has no Unity collider, so <c>Physics.Raycast</c> **can never hit it**.
+    /// The intersection of the camera ray and the height field is solved ourselves with
+    /// Core's <see cref="RayGeometry.IntersectTerrain"/> (the same path as ⑤. It has shipped,
+    /// it works in the game, and Core's tests cover it).
     ///
-    /// ── ここから <c>DisasterManager</c> に触らない ────────────────────
+    /// ── Do not touch <c>DisasterManager</c> from here ────────────────────
     ///
-    /// 災害の生成は sim スレッドの仕事で、④は <see cref="TyphoonHub"/> の依頼経路を
-    /// 既に持っている。ここで <c>SimulationManager.AddAction</c> を足すと経路が 2 本になり
-    /// 「どちらが先に走るか」が生まれる（⑤が同じ判断をしている）。
+    /// Creating disasters is the sim thread's job, and ④ already has the request path through
+    /// <see cref="TyphoonHub"/>. Add a <c>SimulationManager.AddAction</c> here and there would
+    /// be two paths, which creates a question of "which one runs first" (⑤ made the same call).
     /// </summary>
     public class TyphoonPlacementTool : ToolBase
     {
         private const float MaxRayDistance = 8000f;
 
         /// <summary>
-        /// このツールが今アクティブか。**main スレッドから呼ぶこと**
-        /// （<c>ToolsModifierControl</c> は UI 側の型である）。
+        /// Whether this tool is currently active. **Call from the main thread**
+        /// (<c>ToolsModifierControl</c> is a UI-side type).
         /// </summary>
         public static bool IsActive
         {
@@ -73,19 +76,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ★★ **災害パネルの④タイルの動作。バニラの災害ボタンと同じ 3 手である。**
+        /// ★★ **What the ④ tile on the disaster panel does. The same three steps as a
+        /// vanilla disaster button.**
         ///
-        ///   1. タイルを押す      → カーソルが構わり、**強度スライダーが出る**
-        ///   2. スライダーを動かす → 台風の強度（バニラの <c>m_intensity</c> と同じ意味）
-        ///   3. 地図をクリック    → その地点で台風が始まる
+        ///   1. press the tile     → the cursor changes and **the intensity slider appears**
+        ///   2. move the slider    → the typhoon's intensity (the same meaning as vanilla's
+        ///                           <c>m_intensity</c>)
+        ///   3. click the map      → the typhoon starts at that spot
         ///
-        /// **説明のパネルはもう開かない。** 情報は左上のショートカットの側にある
-        /// （所有者の指摘「あれこれ説明は出さなくていい」）。ここで開くと
-        /// 「起こす」と「読む」が同じ操作に戻る。
+        /// **No explanation panel is opened any more.** The information lives on the shortcut
+        /// in the top-left (the owner's remark: "you don't need to put out all that
+        /// explanation"). Open one here and "make it happen" and "read about it" collapse back
+        /// into a single action.
         ///
-        /// 起こせない環境（Natural Disasters 非所持）ではタイル自体が押せない
-        /// （<see cref="DisasterPanelBar"/> が無効化し、理由をツールチップに出す）。
-        /// それでも押せてしまう経路が将来足されたときのために、ここでも門を置く。
+        /// In an environment where it cannot be triggered (Natural Disasters not owned) the
+        /// tile itself cannot be pressed (<see cref="DisasterPanelBar"/> disables it and puts
+        /// the reason in the tooltip). The gate is repeated here in case a path that does let
+        /// it be pressed is added in future.
         /// </summary>
         public static void Arm()
         {
@@ -95,8 +102,9 @@ namespace DisasterPlus.Game
             Activate();
             if (!IsActive) return;
 
-            // ★ 構えるたびに既定値を入れる。スライダーは 1 本しかないのに、
-            //   ④と⑤では数字の意味が違う（IntensitySlider のクラス doc）。
+            // ★ Seed the default every time the tool is armed. There is only one slider, yet
+            //   the number means different things for ④ and ⑤ (see the IntensitySlider
+            //   class doc).
             IntensitySlider.Seed(ModSettings.TyphoonIntensity.value);
             IntensitySlider.Show();
         }
@@ -112,9 +120,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 既定のツールへ戻す。**アクティブでないときは何もしない** ——
-        /// レベルアンロードの後始末から無条件に呼ぶと、他 MOD が選んでいたツールを
-        /// 横から既定へ戻すことになる。
+        /// Return to the default tool. **Does nothing when not active** — call it
+        /// unconditionally from the level-unload cleanup and you would yank whatever tool
+        /// another mod had selected back to the default.
         /// </summary>
         public static void Deactivate()
         {
@@ -122,8 +130,9 @@ namespace DisasterPlus.Game
             {
                 if (!IsActive) return;
 
-                // ★ 強度スライダーを畳むのは**このツールが構えていたときだけ**。
-                //   無条件に畳むと、バニラの災害を構えている人のスライダーを横から消す。
+                // ★ Fold the intensity slider away **only when this tool was the armed one**.
+                //   Do it unconditionally and you take the slider away from someone who has a
+                //   vanilla disaster armed.
                 IntensitySlider.Hide();
                 ToolsModifierControl.SetTool<DefaultTool>();
             }
@@ -137,8 +146,8 @@ namespace DisasterPlus.Game
         {
             base.OnToolUpdate();
 
-            // 機能を切ったのにツールだけ生き残っていたら、そこで畳む
-            // （パネルもタイルも既に撤去されているので、指しても行き先が無い）。
+            // If the feature was switched off but the tool survived, fold it away there
+            // (the panel and the tile are already gone, so pointing leads nowhere).
             if (!ModSettings.TyphoonEnabled.value) { Deactivate(); return; }
 
             if (Input.GetMouseButtonUp(1)) { Deactivate(); return; }
@@ -152,30 +161,33 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 強度は**クリックした瞬間のスライダーの値**である（バニラと同じ）。
-            //   読めない環境では設定画面の値へ落とす —— 読めなかったことを
-            //   0（＝いちばん弱い、という有効な値）で表さない。
+            // ★ The intensity is **the slider's value at the moment of the click** (same as
+            //   vanilla). Where it cannot be read, fall back to the value from the settings
+            //   screen — never express "could not read" as 0 (a valid value meaning
+            //   "the weakest setting").
             int intensity = IntensitySlider.ReadOr(ModSettings.TyphoonIntensity.value);
 
             TyphoonHub.Request(new TyphoonRequestData(TyphoonRequest.Start, hit, intensity));
 
-            // 指したら用は済んでいる。押しっぱなしで 2 つ目を指させない
-            // （sim 側も同時に 1 個しか作らないが、それは断り文が出るだけで
-            //  「押しても何も起きない」に見える）。
+            // Once pointed, the job is done. Do not let a held button point at a second spot
+            // (the sim side also makes only one at a time, but that just produces a refusal
+            //  message, which looks like "pressing does nothing").
             //
-            // ★ **ここでパネルを開かない。** バニラの災害ボタンも、指したあとに
-            //   説明の窓を出したりしない。台風の状態は左上のショートカットから読む。
+            // ★ **Do not open a panel here.** Vanilla's disaster buttons do not pop up an
+            //   explanation window after you point, either. The typhoon's state is read from
+            //   the shortcut in the top-left.
             Deactivate();
         }
 
         /// <summary>
-        /// **バニラと同じ的（まと）を出す**（2026-08-22、所有者の依頼
-        /// 「ほかの災害と同様のターゲティングマークを使いたいです」）。
+        /// **Show the same target marker as vanilla** (2026-08-22, the owner's request:
+        /// "I'd like to use the same targeting mark as the other disasters").
         ///
-        /// 描き直してはいない —— <c>DisasterTool.RenderOverlay</c> をそのまま呼ぶ
-        /// （<see cref="PlacementMarker"/> のクラス doc に IL 実測）。
+        /// Nothing is redrawn — <c>DisasterTool.RenderOverlay</c> is called as-is
+        /// (measured from the IL, see the <see cref="PlacementMarker"/> class doc).
         ///
-        /// ★ 地面を指していないフレームは何も描かない。**前の位置に置き去りにしない。**
+        /// ★ Draw nothing on a frame that is not pointing at the ground. **Do not leave it
+        ///   behind at the previous position.**
         /// </summary>
         public override void RenderOverlay(RenderManager.CameraInfo cameraInfo)
         {
@@ -186,8 +198,8 @@ namespace DisasterPlus.Game
             Vec3 hit;
             if (!TryPickGround(out hit)) return;
 
-            // ★ 色はバニラの災害ツールと同じ作り方。警告でも異常でも
-            //   ないので両方 false ＝ 通常色である。
+            // ★ The colour is produced the same way vanilla's disaster tool produces it.
+            //   This is neither a warning nor an error, so both are false = the normal colour.
             PlacementMarker.Render(cameraInfo, new Vector3(hit.X, hit.Y, hit.Z),
                                    GetToolColor(false, false));
         }

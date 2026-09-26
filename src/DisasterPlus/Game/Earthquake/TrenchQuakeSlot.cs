@@ -6,107 +6,117 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **海溝型地震。** プレイヤーが指した地点に<b>いちばん近い海</b>で地震を起こし、
-    /// <b>その地震だけ</b>が津波を連れてくる。**sim スレッド専用。**
+    /// **The trench earthquake.** It raises an earthquake in <b>the sea nearest</b> the
+    /// point the player clicked, and <b>that earthquake alone</b> brings a tsunami.
+    /// **Sim thread only.**
     ///
-    /// ── 所有者の指示（2026-08-22）─────────────────────────────────
+    /// ── The owner's instruction (2026-08-22) ─────────────────────────────
     ///
-    /// &gt; 地震について、バニラの断層地震だけでなく海溝型地震を追加したいです。
-    /// &gt; 現在断層型地震でも津波が発生していますが、バニラの地震では津波は
-    /// &gt; 発生させず、新たに新設する海溝型地震（アイコンも新規で）でのみ発生する
-    /// &gt; ようにしてください。発生は、アイコンクリック→左クリックした場所に
-    /// &gt; 一番近い海で発生にしてください。
+    /// &gt; On earthquakes: I'd like to add a trench earthquake alongside vanilla's fault
+    /// &gt; earthquake. At the moment fault earthquakes also produce tsunamis; please make
+    /// &gt; it so vanilla earthquakes produce none, and only the newly added trench
+    /// &gt; earthquake does (with a new icon too). For triggering it: click the icon, then
+    /// &gt; left-click, and it happens in the sea nearest where you clicked.
     ///
-    /// ── ★★ 何が「海溝型」なのか（実装上の定義）────────────────────────
+    /// ── ★★ What "trench" means (the definition in the implementation) ───────
     ///
-    /// ゲームの災害には型が 1 つしか無い（<c>EarthquakeAI</c>）。**新しい災害種別を
-    /// 足すことはできない。** そこで「海溝型」は
-    /// <b>この MOD が海の上に自分で起こした地震</b>と定義する。
-    /// 見分けは<b>災害 ID と乱数種の組</b>を覚えておくことで行う
-    /// （<see cref="LastId"/> と <see cref="IsTrenchQuake"/>）。
+    /// The game has only one type of this disaster (<c>EarthquakeAI</c>). **A new
+    /// disaster type cannot be added.** So "trench" is defined as
+    /// <b>an earthquake this mod raised over the sea itself</b>. It is identified by
+    /// remembering <b>the pair of disaster ID and random seed</b>
+    /// (<see cref="LastId"/> and <see cref="IsTrenchQuake"/>).
     ///
-    /// ★★ **ID だけでは足りない。**（2026-08-30、最終検証で再現された）
-    ///   <c>DisasterManager.CreateDisaster</c> は index 1 から
-    ///   <c>m_flags == None</c> の枠を<b>先頭一致で使い回し</b>、
-    ///   <c>ReleaseDisaster</c> は枠を <c>default(DisasterData)</c> で潰す。
-    ///   つまり海溝型が終わると<b>次の災害がたいてい同じ番号を取る</b>。
-    ///   ID だけで見ていたので、その災害まで海溝型と誤認していた ——
-    ///   <b>バニラの地震の断層が抑止され、海の上なら津波まで付いた。</b>
-    ///   これは所有者の指示「バニラの地震では津波は発生させず」に真っ向から反する。
+    /// ★★ **The ID alone is not enough.** (2026-08-30, reproduced in the final
+    ///   verification) <c>DisasterManager.CreateDisaster</c> <b>reuses the first slot it
+    ///   finds with <c>m_flags == None</c></b>, scanning from index 1, and
+    ///   <c>ReleaseDisaster</c> wipes the slot with <c>default(DisasterData)</c>. So once
+    ///   a trench quake ends, <b>the next disaster usually takes the same number</b>.
+    ///   Because we were watching the ID alone, that disaster was mistaken for a trench
+    ///   quake too — <b>vanilla earthquakes' faults were suppressed, and over water they
+    ///   even got a tsunami.</b> That flatly contradicts the owner's instruction that
+    ///   vanilla earthquakes produce no tsunami.
     ///
-    ///   <c>CreateDisaster</c> は枠ごとに <c>m_randomSeed</c> を
-    ///   sim の乱数から引き直す（IL 実測）。**種が変わっていたら別人**である。
+    ///   <c>CreateDisaster</c> draws a fresh <c>m_randomSeed</c> from the sim's RNG for
+    ///   each slot (measured in the IL). **If the seed has changed, it is a different
+    ///   disaster.**
     ///
-    /// ★ <b>震源の位置では見分けない。</b> プレイヤーがバニラの災害パネルから
-    ///   海の上に地震を置くこともできるが、それは断層型のつもりで置いたものである。
-    ///   位置で判定すると、その地震にも津波が付いてしまい、
-    ///   「バニラの地震では津波は発生させず」という指示に反する。
+    /// ★ <b>Never identify it by the hypocentre's position.</b> The player can place an
+    ///   earthquake over the sea from vanilla's disaster panel, and that was placed as a
+    ///   fault quake. Decide by position and that earthquake gets a tsunami too, against
+    ///   the instruction that vanilla earthquakes produce none.
     ///
-    /// ── 罠（③④⑤で踏んだものと同じ。IL 実測済み）──────────────────────
+    /// ── Traps (the same ones ③④⑤ hit. All measured in the IL) ─────────────
     ///
     /// <list type="number">
-    /// <item><c>CreateDisaster</c> の<b>戻り値を必ず見る</b>。false のとき出力は 0 で、
-    ///   そのまま書くと<b>他人の災害スロット（0 番）を書き潰す</b></item>
-    /// <item><c>m_flags |= SelfTrigger (64)</c> が要る。<c>EarthquakeAI.StartDisaster</c> は
-    ///   このビットを見て、立っていなければ<b>永久に Emerging のまま固まる</b></item>
-    /// <item>プレハブが引けない環境（ND DLC 非所持）では<b>断って理由を残す</b></item>
+    /// <item><b>Always check <c>CreateDisaster</c>'s return value.</b> On false the output
+    ///   is 0, and writing to it anyway <b>overwrites somebody else's disaster slot
+    ///   (number 0)</b></item>
+    /// <item><c>m_flags |= SelfTrigger (64)</c> is required.
+    ///   <c>EarthquakeAI.StartDisaster</c> checks that bit, and without it the disaster
+    ///   <b>sits in Emerging forever</b></item>
+    /// <item>Where the prefab cannot be found (the ND DLC is not owned), <b>refuse and
+    ///   record the reason</b></item>
     /// </list>
     /// </summary>
     public static class TrenchQuakeSlot
     {
         /// <summary>
-        /// <c>DisasterData.Flags.SelfTrigger</c>。**立てないと Emerging で固まる。**
+        /// <c>DisasterData.Flags.SelfTrigger</c>. **Without it, the disaster sticks in Emerging.**
         /// </summary>
         private const ushort SelfTrigger = 64;
 
         private static ushort _id;
 
         /// <summary>
-        /// 起こしたときの <c>DisasterData.m_randomSeed</c>。
-        /// **番号が使い回されたことを見抜く唯一の手掛かり**（クラス doc の ★★）。
+        /// The <c>DisasterData.m_randomSeed</c> at the moment it was raised.
+        /// **The only clue that the number has been reused** (see the ★★ in the class doc).
         /// </summary>
         private static ulong _seed;
         private static Vec3 _epicentre;
         private static float _searchDistanceMetres;
 
         /// <summary>
-        /// 直近に起こした海溝型地震の災害 ID。0 なら「まだ 1 度も起こしていない」。
-        /// <c>TsunamiChain</c> はこれと一致する地震にしか津波を付けない。
+        /// The disaster ID of the most recent trench earthquake raised. 0 means "none has
+        /// ever been raised". <c>TsunamiChain</c> only attaches a tsunami to an earthquake
+        /// matching this.
         /// </summary>
         public static ushort LastId { get { return _id; } }
 
-        /// <summary>実際に震源になった海の座標。</summary>
+        /// <summary>The position in the sea that actually became the hypocentre.</summary>
         public static Vec3 Epicentre { get { return _epicentre; } }
 
-        /// <summary>指した地点から震源までの距離（m）。**思ったより遠いときに名乗る。**</summary>
+        /// <summary>Distance from the clicked point to the hypocentre (m). **Stated when it is further than expected.**</summary>
         public static float SearchDistanceMetres { get { return _searchDistanceMetres; } }
 
-        /// <summary>直近の顛末（**英語・診断用**）。断ったときは必ず入る。</summary>
+        /// <summary>How the last attempt turned out (**English, for diagnostics**). Always populated on a refusal.</summary>
         public static string Detail { get; private set; }
 
         /// <summary>
-        /// <see cref="Raise"/> を試みた回数。**ツールはこれが増えるのを待つ。**
+        /// How many times <see cref="Raise"/> has been attempted. **The tool waits for
+        /// this to increase.**
         ///
-        /// ★★ 地震を起こすのは sim スレッドなので、ツール（main）は
-        ///   <b>成否をその場では知れない</b>。以前はクリックした瞬間に
-        ///   ツールを閉じていたので、sim が断ったときは
-        ///   <b>印は出る・ツールは閉じる・何も起きない</b>——
-        ///   画面上は<b>死んだボタン</b>と見分けが付かなかった
-        ///   （2026-08-30、第 4 回検証）。
+        /// ★★ The earthquake is raised on the sim thread, so the tool (on main)
+        ///   <b>cannot know there and then whether it worked</b>. It used to close the
+        ///   tool the instant you clicked, so when the sim refused you got
+        ///   <b>the marker appearing, the tool closing, and nothing happening</b> —
+        ///   on screen, indistinguishable from <b>a dead button</b> (2026-08-30, fourth
+        ///   round of verification).
         /// </summary>
         public static int AttemptSerial { get; private set; }
 
-        /// <summary>直近の <see cref="Raise"/> が成功したか。</summary>
+        /// <summary>Whether the most recent <see cref="Raise"/> succeeded.</summary>
         public static bool LastAttemptOk { get; private set; }
 
         /// <summary>
-        /// この災害 ID は海溝型か。<paramref name="id"/> が 0 なら常に false。
+        /// Whether this disaster ID is a trench quake. Always false when
+        /// <paramref name="id"/> is 0.
         ///
-        /// ★★ **番号だけで判定しない。**<c>m_randomSeed</c> も照合する ——
-        ///   番号は使い回されるので、これが無いと<b>次のバニラの地震を
-        ///   海溝型と誤認する</b>（クラス doc の ★★）。
-        ///   照合できない状況（バッファが読めない）では<b>false</b>を返す。
-        ///   誤って津波を付けるより、付けないほうが指示に近い。
+        /// ★★ **Do not decide by number alone.** <c>m_randomSeed</c> is checked as well —
+        ///   numbers are reused, so without it <b>the next vanilla earthquake is mistaken
+        ///   for a trench quake</b> (see the ★★ in the class doc).
+        ///   Where the check cannot be made (the buffer cannot be read) it returns
+        ///   <b>false</b>. Not attaching a tsunami is closer to the instruction than
+        ///   attaching one by mistake.
         /// </summary>
         public static bool IsTrenchQuake(ushort id)
         {
@@ -120,7 +130,7 @@ namespace DisasterPlus.Game
                 DisasterData[] buffer = manager.m_disasters.m_buffer;
                 if (buffer == null || id >= buffer.Length) return false;
 
-                // ★ 枠が空いた ＝ もう自分の災害ではない。忘れる。
+                // ★ The slot is free, so it is no longer our disaster. Forget it.
                 if (buffer[id].m_flags == DisasterData.Flags.None)
                 {
                     _id = 0;
@@ -130,10 +140,10 @@ namespace DisasterPlus.Game
 
                 if (buffer[id].m_randomSeed == _seed) return true;
 
-                // ★★ **種が違う ＝ 番号が使い回された。** 忘れる。
-                //    忘れないと、以後この番号を見るたびに同じ照合を繰り返し、
-                //    <c>LastId</c> はセッションのあいだ 0 に戻らない
-                //    （2026-08-30、第 5 回検証）。
+                // ★★ **A different seed means the number was reused.** Forget it.
+                //    Without forgetting, we repeat the same check every time we see this
+                //    number, and <c>LastId</c> never returns to 0 for the rest of the
+                //    session (2026-08-30, fifth round of verification).
                 _id = 0;
                 _seed = 0UL;
                 return false;
@@ -144,7 +154,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>レベルのロード／アンロードで呼ぶ。**都市をまたいで持ち越さない。**</summary>
+        /// <summary>Call this on level load and unload. **Carry nothing across cities.**</summary>
         public static void Reset()
         {
             _id = 0;
@@ -157,10 +167,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **sim スレッド。** <paramref name="point"/> にいちばん近い海で地震を起こす。
-        /// 起こせなかったら false を返し、理由を <see cref="Detail"/> に残す。
+        /// **Sim thread.** Raises an earthquake in the sea nearest
+        /// <paramref name="point"/>. Returns false if it could not, leaving the reason in
+        /// <see cref="Detail"/>.
         /// </summary>
-        /// <param name="intensity">バニラの強度スライダーの生値（0〜255）。</param>
+        /// <param name="intensity">The raw value of vanilla's intensity slider (0-255).</param>
         public static bool Raise(Vec3 point, byte intensity)
         {
             bool ok;
@@ -176,7 +187,8 @@ namespace DisasterPlus.Game
                 ok = false;
             }
 
-            // ★★ **必ず名乗る。** ツールはこの 2 つを見て、閉じるか開いたままかを決める。
+            // ★★ **Always report.** The tool reads these two to decide whether to close
+            //    or stay open.
             LastAttemptOk = ok;
             AttemptSerial++;
 
@@ -200,25 +212,27 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★★ **断るのは「津波がまだ途中」のあいだだけ。**（第 4 回検証）
+            // ★★ **Refuse only while the tsunami is still under way.** (fourth round of
+            //    verification)
             //
-            //    前の版は <c>IsTrenchQuake(_id)</c>（＝災害スロットがまだ生きているか）
-            //    で断っていた。ところが <c>EarthquakeAI</c> の Clearing は
-            //    <c>(|x| + 4800) &gt; elapsed*0.125 - 1000 - L</c> で終わるので、
-            //    スロットは<b>クリックから 17〜35 実分</b>も押さえられる。
-            //    津波のほうは 7 分 40 秒で終わっているのに、そのあと
-            //    <b>30 分ちかく「まだ走っている」と断り続けていた。</b>
+            //    The previous version refused on <c>IsTrenchQuake(_id)</c>, i.e. whether
+            //    the disaster slot was still alive. But <c>EarthquakeAI</c>'s Clearing
+            //    ends at <c>(|x| + 4800) &gt; elapsed*0.125 - 1000 - L</c>, so the slot is
+            //    held for <b>17-35 real minutes from the click</b>. The tsunami finished
+            //    after 7 minutes 40, yet we went on refusing with "it is still running"
+            //    for <b>nearly 30 minutes afterwards.</b>
             //
-            //    断る理由は<b>津波を 1 本しか追えないこと</b>であって、
-            //    地震が長生きすることではない。だから津波の状態で見る。
-            //    （そのころには最初の地震は Active を過ぎていて地面も割らないので、
-            //     海溝型の印を 2 つ目へ移して構わない。）
-            // ★★ **&& にしてはいけない。**（2026-08-31、相互検証）
-            //    <c>IsTrenchQuake</c> は地震の災害枠が空いた時点で false になるが、
-            //    津波はそのあと 20 分以上走り続ける。&& だと短絡して
-            //    <c>StillOwes</c>（＝<c>TsunamiRing.Running</c>）が評価されず、
-            //    2 本目を通してしまう。通ったあと <c>Begin</c> が
-            //    「もう走っている」と断るので、<b>地震だけ起きて津波が来ない</b>。
+            //    The reason to refuse is <b>that only one tsunami can be tracked</b>, not
+            //    that the earthquake is long-lived. So we look at the tsunami's state.
+            //    (By then the first earthquake is past Active and no longer cracking the
+            //     ground, so moving the trench marker to the second one is fine.)
+            // ★★ **This must not be an &&.** (2026-08-31, cross-checked)
+            //    <c>IsTrenchQuake</c> becomes false the moment the earthquake's disaster
+            //    slot is freed, but the tsunami travels for over 20 minutes after that.
+            //    With &&, short-circuiting means <c>StillOwes</c> (i.e.
+            //    <c>TsunamiRing.Running</c>) is never evaluated and a second one gets
+            //    through. <c>Begin</c> then refuses it with "one is already running", so
+            //    <b>you get the earthquake and no tsunami</b>.
             if (TsunamiRing.Running || (IsTrenchQuake(_id) && TsunamiChain.StillOwes(_id)))
             {
                 Detail = "the tsunami from the previous trench earthquake (#" + _id
@@ -231,25 +245,29 @@ namespace DisasterPlus.Game
             float distance;
             bool sawDeepWater;
 
-            // ★★ **プレビューとまったく同じ探索をする。**（2026-08-31、第 7 回検証）
-            //    以前は探索の中で「津波の円が入るか」も見て、入らない点は
-            //    <b>飛ばして先へ進んで</b>いた。すると<b>印を出した場所と
-            //    実際の震源が最大 2,304 m ずれる</b>のに、ツールは成功として閉じる ——
-            //    画面外で地震が起きるので、プレイヤーには「押しても何も起きない」と
-            //    区別が付かない。このプロジェクトが自分で
-            //    「実機テストで判定を壊す壊れ方」と名指ししている形である。
+            // ★★ **Run exactly the same search as the preview does.** (2026-08-31,
+            //    seventh round of verification) The search used to also check "does the
+            //    tsunami's circle fit here?" and <b>skip past</b> points where it did not.
+            //    That made <b>the marker and the actual hypocentre differ by up to
+            //    2,304 m</b>, while the tool closed as though it had succeeded — the
+            //    earthquake happened off screen, so to the player it was
+            //    indistinguishable from "I clicked and nothing happened". It is exactly
+            //    the shape this project itself names as "a breakage that invalidates
+            //    in-game testing".
             //
-            //    円の検査は<b>選ばれた 1 点にだけ、置く直前に</b>行う。
-            //    走査は 1 回で済み（描画スレッドの負荷も戻らない）、
-            //    印と震源は必ず一致し、入らなければその場で理由付きで断る。
+            //    The circle is checked <b>on the single chosen point only, immediately
+            //    before placing</b>. The sweep runs once (so the render thread's load does
+            //    not come back), the marker and the hypocentre always agree, and if it
+            //    does not fit we refuse on the spot with a reason.
             if (!NearestSea(point, SearchRings, out sea, out distance, out sawDeepWater))
             {
-                // ★★ **内陸マップでは海が無いのが正しい答えである。**
-                //    「それらしい地点」を作って起こさない —— 海溝型地震の意味が消える。
+                // ★★ **On an inland map, "there is no sea" is the right answer.**
+                //    Never invent a plausible-looking point and raise it there — that
+                //    empties the trench earthquake of meaning.
                 //
-                // ★★ **理由を取り違えない。** 深い水はあったが狭かった場合と、
-                //    そもそも深い水が無かった場合は、プレイヤーの次の一手が違う
-                //    （前者は沖へ寄る、後者は諦める）。
+                // ★★ **Do not mix up the reasons.** "There was deep water but it was too
+                //    narrow" and "there was no deep water at all" call for different next
+                //    moves from the player (move further out to sea, versus give up).
                 float reach = SeaSearch.StepMetres * SearchRings;
 
                 Detail = sawDeepWater
@@ -266,7 +284,7 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★★ 円が入らないなら、ここで断る（上の ★★）。
+            // ★★ If the circle does not fit, refuse here (see the ★★ above).
             TerrainManager ringTerrain = Singleton<TerrainManager>.instance;
             if (ringTerrain != null
                 && TsunamiRing.OpenWaterRadius(ringTerrain, sea.X, sea.Z) <= 0f)
@@ -281,7 +299,7 @@ namespace DisasterPlus.Game
             ushort id;
             if (!Singleton<DisasterManager>.instance.CreateDisaster(out id, info))
             {
-                // ★★ **戻り値を見ないと 0 番のスロットを書き潰す。**
+                // ★★ **Ignore the return value and we overwrite slot number 0.**
                 Detail = "CreateDisaster refused (the disaster buffer is full?)";
                 return false;
             }
@@ -291,22 +309,24 @@ namespace DisasterPlus.Game
             buffer[id].m_targetPosition = new Vector3(sea.X, sea.Y, sea.Z);
             buffer[id].m_intensity = intensity;
 
-            // ★★ これが無いと StartDisaster が即 return し、**Emerging のまま固まる。**
+            // ★★ Without this, StartDisaster returns immediately and it **sticks in Emerging.**
             buffer[id].m_flags |= (DisasterData.Flags)SelfTrigger;
 
-            // ★ <c>DisasterAI.StartDisaster</c> は protected（IL 確認済み）なので
-            //   直接は呼べない。公開ラッパーの <c>StartNow</c> を使う ——
-            //   あれは <c>m_flags &amp; 0x3C</c>（Emerging|Active|Clearing|Finished）が
-            //   立っていなければ <c>StartDisaster</c> を呼ぶだけで、
-            //   <c>CreateDisaster</c> 直後は <c>Created(0x01)</c> だけなので必ず通る。
-            //   <b>SelfTrigger(64) は 0x3C に含まれない</b>ので、先に立てても判定は
-            //   変わらない（③の <c>FireWhirlSpawner</c> と同じ道）。
+            // ★ <c>DisasterAI.StartDisaster</c> is protected (confirmed in the IL), so it
+            //   cannot be called directly. Use the public wrapper <c>StartNow</c> — all it
+            //   does is call <c>StartDisaster</c> when <c>m_flags &amp; 0x3C</c>
+            //   (Emerging|Active|Clearing|Finished) is clear, and straight after
+            //   <c>CreateDisaster</c> only <c>Created(0x01)</c> is set, so it always gets
+            //   through. <b>SelfTrigger(64) is not part of 0x3C</b>, so setting it first
+            //   does not change that check (the same route as ③'s
+            //   <c>FireWhirlSpawner</c>).
             info.m_disasterAI.StartNow(id, ref buffer[id]);
 
-            // ★★ **追う相手を乗り換える。**（Codex P1）前の地震が Clearing で
-            //    まだ生きていると、連鎖は古い相手を追い続けて<b>この地震の
-            //    Emerging→Active を見逃す</b>。前の津波は出し終えている
-            //    （上の StillOwes が保証）ので、ここで捨ててよい。
+            // ★★ **Switch what we are tracking.** (Codex P1) If the previous earthquake
+            //    is still alive in Clearing, the chain keeps tracking the old one and
+            //    <b>misses this earthquake's Emerging→Active</b>. The previous tsunami
+            //    has already been delivered (guaranteed by the StillOwes above), so it is
+            //    safe to drop it here.
             TsunamiChain.Retarget();
 
             _id = id;
@@ -323,24 +343,25 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <paramref name="point"/> にいちばん近い海。
-        /// 順序は <see cref="SeaSearch"/>（Core・テスト済み）が決め、
-        /// ここは<b>そこに水があるかを聞くだけ</b>である。
+        /// The sea nearest <paramref name="point"/>.
+        /// The order is decided by <see cref="SeaSearch"/> (in Core, with tests); this
+        /// file <b>only asks whether there is water there</b>.
         ///
-        /// ★ <b>川や湖ではなく海を採る。</b><c>HasWater</c> は流れる水にも true を
-        ///   返すので、**水面が海面の高さにあること**も見る
-        ///   （<c>WaterSimulation.m_currentSeaLevel</c>）。市街地の川で
-        ///   海溝型地震が起きると、津波の説明が成立しない。
+        /// ★ <b>Take sea, not a river or a lake.</b> <c>HasWater</c> returns true for
+        ///   flowing water too, so we also check that **the water surface is at sea
+        ///   level** (<c>WaterSimulation.m_currentSeaLevel</c>). A trench earthquake in a
+        ///   river through the city makes nonsense of the tsunami's explanation.
         /// </summary>
         internal static bool TryFindNearestSea(Vec3 point, out Vec3 sea,
                                                out float distanceMetres)
         {
             try
             {
-                // ★★ **プレビューはリング数を絞る。**（2026-08-30、最終検証）
-                //    全走査は 37,249 点で、1 点ごとに HasWater と WaterLevel が
-                //    水シミュの読み取りロックを取り直す。RenderOverlay は
-                //    6 フレームごとに呼ぶので、毎秒 70 万回の錠のやり取りになっていた。
+                // ★★ **The preview limits the number of rings.** (2026-08-30, final
+                //    verification) A full sweep is 37,249 points, and for each one
+                //    HasWater and WaterLevel re-take the water simulation's read lock.
+                //    RenderOverlay calls this every 6 frames, which worked out at 700,000
+                //    lock operations per second.
                 return NearestSea(point, SearchRings, out sea, out distanceMetres);
             }
             catch
@@ -352,9 +373,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 震源に使える海を探す。<paramref name="maxRings"/> でリング数を絞れる
-        /// （プレビュー用）。<b>見つからなければ断る</b> ——
-        /// 浅い海に落とすくらいなら、起こさないほうがよい（下の ★★）。
+        /// Searches for sea usable as a hypocentre. <paramref name="maxRings"/> limits the
+        /// number of rings (for the preview). <b>If nothing is found, refuse</b> —
+        /// better not to raise one at all than to drop it into shallow sea (see the ★★
+        /// below).
         /// </summary>
         private static bool NearestSea(Vec3 point, int maxRings,
                                        out Vec3 sea, out float distanceMetres)
@@ -364,13 +386,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 同上。<paramref name="sawDeepWater"/> に「十分に深い海はあったが
-        /// <see cref="IsOpenSea"/> で落ちた」かどうかを返す。
+        /// As above. <paramref name="sawDeepWater"/> reports whether there was sea deep
+        /// enough but it failed on <see cref="IsOpenSea"/>.
         ///
-        /// ★★ **断る理由を取り違えない。**（2026-08-30、最終検証）
-        ///   30 m のフィヨルドや広い川は深さの条件を通り、開けていないことで落ちる。
-        ///   それを「そんなに深い海は無い」と言うと<b>嘘になる</b> ——
-        ///   プレイヤーがもらえる説明はこの 1 文だけなのだから、外してはいけない。
+        /// ★★ **Do not mix up the reason for refusing.** (2026-08-30, final
+        ///   verification) A 30 m fjord or a wide river passes the depth condition and
+        ///   fails for not being open. Calling that "there is no sea that deep" is <b>a
+        ///   lie</b> — this one sentence is the only explanation the player gets, so it
+        ///   must not miss.
         /// </summary>
         private static bool NearestSea(Vec3 point, int maxRings,
                                        out Vec3 sea, out float distanceMetres,
@@ -391,16 +414,18 @@ namespace DisasterPlus.Game
             int seaUnits = (int)(seaLevel * 64f);
             int minDepthUnits = (int)(MinDepthMetres * 64f);
 
-            // ★★ **水柱そのものを見る。**（2026-08-31、第 5 回検証）
-            //    直前の版は <c>seaUnits - block[cell]</c>、つまり
-            //    <b>地面が海面よりどれだけ低いか</b>だけを見ていた。それは
-            //    「海がある」ではない —— <b>堤防で囲まれた干拓地やクレーターは
-            //    海面より低いまま乾いている</b>。そこへ半径 3.8 km の水源を置くと、
-            //    引きの円は 160 m しかないので<b>戻せない水が永久に残る</b>。
+            // ★★ **Look at the water column itself.** (2026-08-31, fifth round of
+            //    verification) The version just before used <c>seaUnits - block[cell]</c>,
+            //    i.e. it only looked at <b>how far the ground is below sea level</b>. That
+            //    is not "there is sea" — <b>polders and craters enclosed by embankments
+            //    sit below sea level and are dry</b>. Put a source with a radius of 3.8 km
+            //    there and, since the drawdown circle is only 160 m, <b>water that cannot
+            //    be taken back is left there forever</b>.
             //
-            // ★ <c>WaterSimulation.Cell.m_height</c> が水柱（1/64 m）そのもの。
-            //   <c>BeginRead</c> は<b>走査の前後で 1 回ずつ</b>しか取らない ——
-            //   1 点ごとに <c>HasWater</c> を呼ぶと数千回の錠になる（第 4 回検証）。
+            // ★ <c>WaterSimulation.Cell.m_height</c> is the water column itself (in
+            //   1/64 m). <c>BeginRead</c> is taken <b>exactly once at each end of the
+            //   sweep</b> — calling <c>HasWater</c> per point means thousands of lock
+            //   operations (fourth round of verification).
             if (block == null) return false;
             if (terrain.WaterSimulation == null) return false;
 
@@ -410,23 +435,24 @@ namespace DisasterPlus.Game
             {
             if (cells == null) return false;
 
-            // ★★ **いちばん近い海ではなく、いちばん近い「深い」海を採る。**
-            //    （2026-08-30、オフライン再現で分かった）
+            // ★★ **Take the nearest "deep" sea, not simply the nearest sea.**
+            //    (2026-08-30, learned from the offline reproduction)
             //
-            //    ゲームの浅水ソルバは流量を <c>v = min(v, m_height)</c> で
-            //    <b>水深に頭打ちする</b>。だから浅い海はどんなに強く押しても
-            //    大きな波を運べない。実測（tools/WaterSolverSim、格子 1081）:
+            //    The game's shallow-water solver <b>caps the flow at the depth</b> with
+            //    <c>v = min(v, m_height)</c>. So shallow sea cannot carry a big wave
+            //    however hard you push it. Measured (tools/WaterSolverSim, a 1081 grid):
             //
-            //        水深 40 m: 隆起 17.8 m、環は 5.3 km 先でも 2.1 m
-            //        水深 10 m: 隆起  4.2 m、環は 2.4 km でほぼ消える
+            //        40 m deep: an uplift of 17.8 m, the ring still 2.1 m at 5.3 km out
+            //        10 m deep: an uplift of  4.2 m, the ring all but gone by 2.4 km
             //
-            //    「海溝型」はそもそも<b>沖の深い海</b>で起きるものなので、
-            //    深いほうを採るのは物理的にも正しい。
+            //    A "trench" quake happens in <b>deep open water offshore</b> in the first
+            //    place, so taking the deeper option is also physically correct.
             //
-            //    近い順に走査し、**十分に深い海が見つかった時点で確定**する。
-            //    ★ **見つからなければ断る（false）。**「いちばん深かった所へ落とす」
-            //      という逃げ道は置いていない —— 浅い海はこのソルバでは波を運べず、
-            //      震源に穴が開くだけになるからである（TsunamiSource のクラス doc）。
+            //    Sweep nearest-first and **settle the moment sea deep enough is found**.
+            //    ★ **If none is found, refuse (false).** There is no fallback of
+            //      "drop it wherever was deepest" — shallow sea cannot carry a wave in
+            //      this solver and merely digs a hole at the hypocentre (see
+            //      TsunamiSource's class doc).
             int count = SeaSearch.CountUpTo(maxRings < 0 ? 0 : (maxRings > SeaSearch.MaxRing ? SeaSearch.MaxRing : maxRings));
             for (int i = 0; i < count; i++)
             {
@@ -438,38 +464,42 @@ namespace DisasterPlus.Game
                 if (x < -MapHalfExtent || x > MapHalfExtent) continue;
                 if (z < -MapHalfExtent || z > MapHalfExtent) continue;
 
-                // ★★ **錠は走査の前後で 1 回ずつしか取らない。**（第 4 回検証）
-                //    ここは <c>RenderOverlay</c> から<b>main スレッド</b>で
-                //    毎 6 フレーム、最大 2,401 点まわる。以前は 1 点ごとに
-                //    <c>HasWater</c> / <c>WaterLevel</c> / <c>DepthAt</c> を呼んでいて、
-                //    そのどれもが <c>WaterSimulation.BeginRead</c>
-                //    （<c>Monitor.TryEnter</c> のスピン）を取る ——
-                //    **1 フレームに数百回、水スレッドと錠を奪い合っていた。**
-                //    いまは走査の頭で 1 回 <c>BeginRead</c> し、
-                //    借りた配列を最後まで使い回す（<c>SeaWatch</c> と同じ形）。
+                // ★★ **The lock is taken exactly once at each end of the sweep.**
+                //    (fourth round of verification) This runs from <c>RenderOverlay</c> on
+                //    <b>the main thread</b>, every 6 frames, over up to 2,401 points. It
+                //    used to call <c>HasWater</c> / <c>WaterLevel</c> / <c>DepthAt</c> per
+                //    point, and every one of those takes
+                //    <c>WaterSimulation.BeginRead</c> (a <c>Monitor.TryEnter</c> spin) —
+                //    **hundreds of times per frame, fighting the water thread for the
+                //    lock.** Now we <c>BeginRead</c> once at the top of the sweep and
+                //    reuse the borrowed array right through (the same shape as
+                //    <c>SeaWatch</c>).
                 int cell = CellOf(z) * (GridCells + 1) + CellOf(x);
                 if (cell < 0 || cell >= block.Length || cell >= cells.Length) continue;
 
-                // ★★ 「外洋か」は 1 つの式に統一してある
-                //    （<c>TsunamiRing.IsOpenSeaCell</c> の doc）。
+                // ★★ "Is this open sea?" is unified into a single expression (see
+                //    <c>TsunamiRing.IsOpenSeaCell</c>'s doc).
                 if (!TsunamiRing.IsOpenSeaCell(block, cells, cell,
                                                seaUnits, minDepthUnits)) continue;
 
-                // ★ ここまで来た ＝ 十分に深い海はあった。断る理由が変わる。
+                // ★ Getting this far means there was sea deep enough. That changes the
+                //   reason we refuse.
                 sawDeepWater = true;
 
-                // ★★ **源のまわりが開けた海であること。**（2026-08-30、最終検証）
-                //    確かめるのは <c>OpenSeaRadiusMetres</c>（2,000 m）の 8 方位である。
-                //    その中に陸があると
-                //    <b>源そのものが桶になって共振する</b>（掃引で +111 m まで跳ねた）。
-                //    オフライン再現で確かめたのは<b>開けた海</b>だけなので、
-                //    保証できない地形では起こさない。
+                // ★★ **The water around the source must be open sea.** (2026-08-30,
+                //    final verification) What is checked is the 8 azimuths at
+                //    <c>OpenSeaRadiusMetres</c> (2,000 m). With land inside that,
+                //    <b>the source itself becomes a bucket and resonates</b> (a sweep
+                //    made it jump to +111 m). The offline reproduction only ever verified
+                //    <b>open sea</b>, so we do not raise one on terrain we cannot vouch
+                //    for.
                 if (!IsOpenSea(terrain, cells, seaUnits, x, z)) continue;
 
-                // ★ 円が入るかどうかは<b>ここでは見ない</b>。見ると、入らない点を
-                //   飛ばして先へ進むことになり、プレビューの印と震源がずれる
-                //   （<c>RaiseCore</c> の ★★、第 7 回検証）。検査は
-                //   選ばれた 1 点に対して <c>RaiseCore</c> が 1 回だけ行う。
+                // ★ Whether the circle fits is <b>not checked here</b>. Check it and we
+                //   skip past points where it does not, so the preview's marker and the
+                //   hypocentre part company (see the ★★ in <c>RaiseCore</c>, seventh
+                //   round of verification). <c>RaiseCore</c> makes that check once, on
+                //   the single chosen point.
                 sea = new Vec3(x, seaLevel, z);
                 distanceMetres = SeaSearch.DistanceMetres(dx, dz);
                 return true;
@@ -484,28 +514,29 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 海を探すリング数。**プレビューと発生で同じ値を使うこと。**
+        /// The number of rings searched for sea. **The preview and the trigger must use
+        /// the same value.**
         ///
-        /// ★★ 別々にしていたのが 2026-08-30 の指摘だった。プレビューは 24 リング
-        ///   （2,304 m）、発生は 96 リング（9,216 m）だったので、
-        ///   <b>印が出ないのにクリックすると 9 km 先で地震が起きた</b>。
-        ///   画面外で起きるので、プレイヤーには「押しても何も起きない」に見える ——
-        ///   まさに実機テストで判定を壊す壊れ方である。
+        /// ★★ Having them differ was what 2026-08-30 flagged. The preview used 24 rings
+        ///   (2,304 m) and the trigger 96 rings (9,216 m), so <b>clicking where no marker
+        ///   appeared raised an earthquake 9 km away</b>. It happened off screen, so to
+        ///   the player it looked like "I clicked and nothing happened" — precisely the
+        ///   kind of breakage that invalidates in-game testing.
         ///
-        /// ★ 揃える先は<b>狭いほう</b>。<c>SeaSearch.MaxRing</c>(96) は 37,249 点で、
-        ///   1 点ごとに <c>HasWater</c> と <c>WaterLevel</c> が
-        ///   <c>WaterSimulation.BeginRead</c>（<c>Monitor.TryEnter</c> のスピン）を
-        ///   取り直す。プレビューは毎フレームに近い頻度で呼ばれるので、
-        ///   広いほうへ揃えると<b>水スレッドと錠を奪い合う。</b>
-        ///   24 リング ＝ 2,304 m ＝ 2,401 点。
+        /// ★ They are aligned on <b>the narrower one</b>. <c>SeaSearch.MaxRing</c> (96) is
+        ///   37,249 points, and for each one <c>HasWater</c> and <c>WaterLevel</c> re-take
+        ///   <c>WaterSimulation.BeginRead</c> (a <c>Monitor.TryEnter</c> spin). The
+        ///   preview is called at close to frame rate, so aligning on the wider one means
+        ///   <b>fighting the water thread for the lock.</b>
+        ///   24 rings = 2,304 m = 2,401 points.
         /// </summary>
         private const int SearchRings = 24;
 
-        /// <summary>源のまわりを確かめる方位の数（8 方位）。</summary>
-        /// <summary>16 m セルの数。<c>BlockHeights</c> の添字は <c>z*(1080+1)+x</c>。</summary>
+        /// <summary>The number of azimuths probed around the source (8 of them).</summary>
+        /// <summary>The number of 16 m cells. <c>BlockHeights</c> is indexed <c>z*(1080+1)+x</c>.</summary>
         private const int GridCells = 1080;
 
-        /// <summary>ワールド座標を 16 m セルへ（<c>TsunamiWave.CellOf</c> と同じ式）。</summary>
+        /// <summary>World coordinate to a 16 m cell (the same formula as <c>TsunamiWave.CellOf</c>).</summary>
         private static int CellOf(float world)
         {
             int c = (int)((world + MapHalfExtent) / 16f + 0.5f);
@@ -515,38 +546,39 @@ namespace DisasterPlus.Game
         private const int OpenSeaProbes = 8;
 
         /// <summary>
-        /// 源のまわりに要る<b>開けた海</b>の距離（m）。
+        /// How much <b>open sea</b> is required around the source (m).
         ///
-        /// ★★ **旧実装の 1,088 m は、いまの円に対して短すぎた。**
-        ///   （2026-08-31、相互検証）当時の外力は半径 1,280 m だったが、
-        ///   いまの水源は<b>半径 3,840 m</b> で、しかもその円の中の
-        ///   「目標水位より低い陸」は<b>直接その水位まで満たされる</b>。
-        ///   震源が岸に近いと、波が来るのではなく<b>円形の洪水が出現する</b>。
+        /// ★★ **The old implementation's 1,088 m was too short for the current circle.**
+        ///   (2026-08-31, cross-checked) The force at that time had a radius of 1,280 m,
+        ///   but the current water source has a <b>radius of 3,840 m</b>, and within that
+        ///   circle any land below the target water level is <b>filled directly up to
+        ///   that level</b>. With the hypocentre near the shore, what appears is not a
+        ///   wave arriving but <b>a circular flood</b>.
         ///
-        /// ★ ではなぜ 3,840 m にしないのか —— それを要求すると、
-        ///   湾や内海のあるマップがほぼ全部落ちる。妥協点として 2,000 m を採る。
-        ///   これより内側に岸があるときは、円の縁が陸に掛かるぶんだけ
-        ///   「せり上がり」が早く始まる。<b>壊れてはいないが、波らしくはない。</b>
+        /// ★ So why not require 3,840 m? Because demanding that rejects almost every map
+        ///   with a bay or an inland sea. 2,000 m is the compromise. With a shore closer
+        ///   in than that, the rise starts earlier by however much the circle's edge
+        ///   overlaps land. <b>It is not broken, but it does not look like a wave.</b>
         ///
-        /// ★★ この値は<b>断りの文言と同じものを使うこと</b>。
-        ///   以前は判定が 1,088 m、文言が別の数字で、
-        ///   プレイヤーに嘘の距離を伝えていた。
+        /// ★★ <b>Use this same value in the refusal's wording.</b> The check used to be
+        ///   1,088 m while the wording gave a different number, telling the player a
+        ///   distance that was not true.
         /// </summary>
         public const float OpenSeaRadiusMetres = 2000f;
 
         /// <summary>
-        /// 外力の円盤のまわりが<b>開けた海</b>かどうか。
+        /// Whether the area around the force's disc is <b>open sea</b>.
         ///
-        /// ★★ これが無いと、オフライン再現で確かめていない地形
-        ///   （入り江・浅瀬・マップ端）で起こしてしまう。
-        ///   再現ツールの海は<b>陸が 1 セルも無い平らな海</b>なので、
-        ///   そこで取った保証は「開けた海」にしか及ばない。
+        /// ★★ Without this we raise one on terrain the offline reproduction never
+        ///   verified (inlets, shallows, the map's edge). The reproduction tool's sea is
+        ///   <b>flat sea with not one cell of land</b>, so the guarantees obtained there
+        ///   extend to open sea and no further.
         /// </summary>
         private static bool IsOpenSea(TerrainManager terrain, WaterSimulation.Cell[] cells,
                                       int seaUnits, float x, float z)
         {
-            // ★★ 呼び出し側が既に <c>BeginRead</c> を握っている（NearestSea）。
-            //    ここで取り直さず、渡された配列をそのまま使う。
+            // ★★ The caller already holds <c>BeginRead</c> (NearestSea). Do not re-take
+            //    it here; use the array that was passed in.
             ushort[] block = terrain.BlockHeights;
             if (block == null || cells == null) return false;
 
@@ -563,7 +595,8 @@ namespace DisasterPlus.Game
                 if (px < -MapHalfExtent || px > MapHalfExtent) return false;
                 if (pz < -MapHalfExtent || pz > MapHalfExtent) return false;
 
-                // ★★ ここも同じ式で見る（第 6 回検証: ここだけ海底の高さのままだった）。
+                // ★★ Use the same expression here too (sixth round of verification: this
+                //    one place was still going by the sea floor's height).
                 if (!TsunamiRing.IsOpenSeaCell(block, cells,
                         CellOf(pz) * (GridCells + 1) + CellOf(px),
                         seaUnits, minDepthUnits)) return false;
@@ -573,20 +606,20 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// マップ半辺（m）。<c>TsunamiAI.FindSea</c> の IL 実測にある 8640 と同じ。
+        /// Half the map's extent (m). The same 8640 found in <c>TsunamiAI.FindSea</c>'s IL.
         /// </summary>
         private const float MapHalfExtent = 8640f;
 
         /// <summary>
-        /// 海面が読めないときの既定（m）。<c>WaterSimulation.DEFAULT_SEA_LEVEL</c> の
-        /// 実測値である（リフレクションで確認）。
+        /// The default sea level (m) used when it cannot be read. It is the measured value
+        /// of <c>WaterSimulation.DEFAULT_SEA_LEVEL</c> (confirmed by reflection).
         /// </summary>
         private const float DefaultSeaLevelMetres = 40f;
 
-        /// <summary>これより高い水面は川・湖とみなす（m）。</summary>
+        /// <summary>A water surface higher than this is taken to be a river or a lake (m).</summary>
         private const float RiverToleranceMetres = 6f;
 
-        /// <summary>これより浅い水は「海」に数えない（m）。</summary>
+        /// <summary>Water shallower than this does not count as "sea" (m).</summary>
         private const float MinDepthMetres =
             DisasterPlus.Core.Earthquake.TsunamiSource.ReferenceDepthMetres * 0.6f;
     }

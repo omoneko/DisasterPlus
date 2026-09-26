@@ -21,7 +21,7 @@ namespace DisasterPlus.Core.Tests.Diagnostics
         [Fact]
         public void NullReport_ProducesEmptyList()
         {
-            // オーバーレイは publish 前に一度描画されうる。
+            // The overlay can be drawn once before anything has been published.
             var lines = DiagnosticFormatter.Format(null);
             Assert.NotNull(lines);
             Assert.Empty(lines);
@@ -98,7 +98,7 @@ namespace DisasterPlus.Core.Tests.Diagnostics
         [Fact]
         public void NewlinesInValue_DoNotBreakLineStructure()
         {
-            // 例外メッセージには改行が入る。1 行 = 1 要素を崩さないこと。
+            // Exception messages contain newlines. Do not break "1 line = 1 element".
             var r = new DiagnosticReport(
                 new List<DiagnosticLine> { new DiagnosticLine(0, "err", "line1\nline2\r\nline3") },
                 null, null);
@@ -127,7 +127,8 @@ namespace DisasterPlus.Core.Tests.Diagnostics
         [Fact]
         public void PassedAssumptions_AreNotListedIndividually_ButFailuresAre()
         {
-            // 通った前提を全部出すとオーバーレイが埋まる。FAIL だけ列挙する。
+            // Printing every assumption that passed would fill the overlay.
+            // Only the FAILs are listed.
             var r = new DiagnosticReport(null, new List<AssumptionResult>
             {
                 new AssumptionResult("QUIETPASS", true, ""),
@@ -167,7 +168,8 @@ namespace DisasterPlus.Core.Tests.Diagnostics
         [Fact]
         public void Output_IsAsciiOnly()
         {
-            // IMGUI の既定フォントは日本語グリフを持たない可能性が高く、豆腐になる。
+            // The IMGUI default font very likely has no Japanese glyphs, so they come out
+            // as tofu boxes.
             var r = new DiagnosticReport(
                 new List<DiagnosticLine> { new DiagnosticLine(0, "state", "ready") },
                 new List<AssumptionResult> { new AssumptionResult("x", false, "breaks") },

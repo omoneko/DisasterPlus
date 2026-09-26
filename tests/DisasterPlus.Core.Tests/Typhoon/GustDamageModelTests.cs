@@ -15,7 +15,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheCentreIsFarMoreDestructiveThanTheAmbientWind()
         {
-            // 「周りの風害よりずっと激しい」を数字で固定する。
+            // Pins down "far more violent than the surrounding wind damage" as a number.
             float gust = GustDamageModel.CollapseChance(0f, 1f, 10);
             float wind = WindDamageModel.CollapseChance(1f, 200f, 10);
 
@@ -44,7 +44,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
             {
                 Assert.Equal(0f, GustDamageModel.CollapseChance(d, 1f, 0), 6);
             }
-            // 手で編集された .cgs の負値でも 0 のまま。
+            // A negative value from a hand-edited .cgs stays 0 as well.
             Assert.Equal(0f, GustDamageModel.CollapseChance(0f, 1f, -3), 6);
         }
 
@@ -75,7 +75,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void BrokenInputsCollapseNothing()
         {
-            // 「距離 NaN で全棟倒壊」を作らない。
+            // Never create "a NaN distance collapses every building".
             Assert.Equal(0f, GustDamageModel.CollapseChance(float.NaN, 1f, 10), 6);
             Assert.Equal(0f, GustDamageModel.CollapseChance(-1f, 1f, 10), 6);
             Assert.Equal(0f, GustDamageModel.CollapseChance(0f, float.NaN, 10), 6);

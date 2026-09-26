@@ -9,50 +9,57 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.WaterSolverSim
 {
     /// <summary>
-    /// <b>津波の発生源を、ゲームを起動せずにソルバへ通す。</b>
+    /// <b>Runs the tsunami source through the solver without launching the game.</b>
     ///
-    /// ── なぜ要るのか ─────────────────────────────────────────────
+    /// ── Why it is needed ─────────────────────────────────────────────
     ///
-    /// <c>tools/TsunamiPreview</c> で描けるのは<b>ソルバへの入力</b>だけだった。
-    /// 「その外力で海面が何 m 上がるか」は<b>IL を読んでも決まらない</b> ——
-    /// 応答は水深と海の広さで変わるからで、TsunamiSource のコメントにも
-    /// そう書いてある（だから実機で測って外力を上げる作りになっている）。
+    /// All <c>tools/TsunamiPreview</c> could draw was <b>the input to the solver</b>.
+    /// "How many metres that force raises the sea surface" <b>cannot be settled by reading
+    /// the IL</b> —— the response depends on the water depth and the extent of the sea, as
+    /// the comments in TsunamiSource also say (which is why it is built to measure in the
+    /// game and raise the force accordingly).
     ///
-    /// ★★ このツールは<b>その「測って上げる」ループをオフラインで回す</b>。
-    ///   実機を起動して 18 秒待たなくても、外力と水深を変えて即座に結果が出る。
+    /// ★★ This tool <b>runs that "measure and raise" loop offline</b>.
+    ///   Without launching the game and waiting 18 seconds, you get results immediately for
+    ///   different forces and water depths.
     ///
-    /// ── 使い方 ───────────────────────────────────────────────────
+    /// ── Usage ───────────────────────────────────────────────────
     ///
     /// <code>
     ///   dotnet run --project tools/WaterSolverSim -- docs/images/water
     ///   dotnet run --project tools/WaterSolverSim -- out --depth 60 --intensity 200 --frames 1800
     /// </code>
     ///
-    /// ── 読み方 ───────────────────────────────────────────────────
+    /// ── How to read it ───────────────────────────────────────────────────
     ///
     /// <list type="bullet">
-    /// <item><c>drive</c> ── いま出している外力（<c>m_delta</c> の単位、符号なし）。
-    ///       <c>NextDrive</c> が実測から自分で決める。</item>
-    /// <item><c>centre</c> ── 震源の海面の持ち上がり（m）。①の目標はこれ。</item>
-    /// <item><c>peak</c> ── いちばん高い<b>輪</b>の半径と高さ。**これが走っている波**。
-    ///       半径が増えていけば伝播しており、増えなければ立ち上がっていない。</item>
+    /// <item><c>drive</c> ── the force currently applied (in <c>m_delta</c> units, unsigned).
+    ///       <c>NextDrive</c> decides it for itself from the measurements.</item>
+    /// <item><c>centre</c> ── the rise of the sea surface at the epicentre (m). This is
+    ///       stage 1's target.</item>
+    /// <item><c>peak</c> ── the radius and height of the highest <b>ring</b>. **This is the
+    ///       wave that is running.** If the radius keeps growing it is propagating; if not,
+    ///       it never got going.</item>
     /// </list>
     /// </summary>
     internal static class Program
     {
-        /// <summary>格子の一辺（セル）の既定。512 x 16 m = 8.2 km 四方。実機は 1081。</summary>
+        /// <summary>Default grid side (cells). 512 x 16 m = 8.2 km square. The game uses
+        /// 1081.</summary>
         private const int DefaultGridSize = 512;
 
-        /// <summary>海面（m）。実機の既定と同じ。</summary>
+        /// <summary>Sea level (m). The same as the game's default.</summary>
         private const float SeaLevelMetres = 40f;
 
-        /// <summary>外力を組み直す間隔（フレーム）。実機の MOD も毎フレームは触らない。</summary>
-        private const int DriveInterval = 1;   // 1 Step() = 1 water step = MOD の書き換え間隔
+        /// <summary>Interval at which the force is rebuilt (frames). The mod in the game does
+        /// not touch it every frame either.</summary>
+        private const int DriveInterval = 1;   // 1 Step() = 1 water step = the mod's rewrite interval
 
-        /// <summary>表を出す間隔（フレーム）。</summary>
+        /// <summary>Interval at which a table row is printed (frames).</summary>
         private const int PrintInterval = 60;
 
-        /// <summary>ゲーム速度 1 の目安。1 水ステップ ≒ 1 sim フレーム（IL 実測）。</summary>
+        /// <summary>A guide for game speed 1. 1 water step ~= 1 sim frame (measured from the
+        /// IL).</summary>
         private const float FramesPerRealSecond = 60f / 64f;   // 1 water step = 64 sim frames
 
         private static int Main(string[] args)
@@ -62,32 +69,33 @@ namespace DisasterPlus.Tools.WaterSolverSim
             byte intensity = 100;
             int frames = 1500;
             int pinnedDrive = -1;
-            int shape = 0;             // 0 = TsunamiSource.DriveAt をそのまま使う
-            bool shelf = false;   // 沖 -> 大陸棚 -> 汀線 -> 陸 の断面で回す
-            float srcFrac = 0.5f;   // 源の X 位置（格子に対する比）。0.1 ならマップ端すれすれ
+            int shape = 0;             // 0 = use TsunamiSource.DriveAt as it is
+            bool shelf = false;   // run on an offshore -> shelf -> shoreline -> land section
+            float srcFrac = 0.5f;   // source X position (fraction of the grid). 0.1 is right at the map edge
             int radiusCells = TsunamiSource.RadiusCells;
             float totalSteps = TsunamiSource.TotalSteps;
-            // ★ 外周の輪は矩形の Dirichlet 境界なので、盤面が狭いと角の反射が
-            //   早く戻ってくる。実機は 1081 —— 「見えている構造が境界のせいか」を
-            //   分けるには、格子を変えて同じ結果になるかを見るしかない。
+            // ★ The outer ring is a rectangular Dirichlet boundary, so on a small board the
+            //   reflections from the corners come back sooner. The game uses 1081 —— the only
+            //   way to tell whether a structure you see is an artefact of the boundary is to
+            //   change the grid and see whether the result is the same.
             int gridSize = DefaultGridSize;
             bool noPng = false;
             bool audit = false;
-            int edgeIntensity = 0;   // >0 なら DLC の津波を左端に立てる（外力は使わない）
-            int ringIntensity = 0;   // >0 なら震源に WaterSource を置いて同心円で立てる
-            int ringRadius = 80;     // 震源の円の半径（セル）。80 -> 1280 m
-            long ringRate = 0;       // その半径を出すのに要る流量
-            bool ringHold = false;   // 円をつねに目標水位へ張り付かせる
-            bool ringNoIn = false;   // 取り込みを一切使わない（int32 の溢れを避ける）
-            int ringImpact = 0;      // >0 なら引き波を TYPE_IMPACT で出す（その最大 delta）
-            float ringInR = 0f;      // >0 なら取り込み円の半径（m）を別に決める
-            int ringDurSteps = 256;  // 波形の長さ（水ステップ）。バニラは 256
-            float ringCap = 0f;      // >0 なら押し波の高さの頭打ち（m）
-            float landRise = 0.5f;   // 陸の勾配（m/セル）。飽和すると浸水距離が測れない
-            int ringRepeat = 1;      // 波形を何回打つか（第2波・第3波）
-            int ringLine = 1;        // 断層に沿って並べる円の数（1 なら点の波源）
-            float ringDraw = 0f;     // >0 なら引き波の深さの頭打ち（m）。既定は ringCap と同じ
-            float arrivalThreshold = float.NaN;   // ★ 診断。>0 なら波頭の到達時刻を測る。         // ★ 診断用。ゲームには対応物が無い。
+            int edgeIntensity = 0;   // >0 raises the DLC tsunami at the left edge (no impact force)
+            int ringIntensity = 0;   // >0 puts a WaterSource at the epicentre and radiates concentrically
+            int ringRadius = 80;     // radius of the epicentre circle (cells). 80 -> 1280 m
+            long ringRate = 0;       // the flow rate needed to give that radius
+            bool ringHold = false;   // keep the circle pinned to the target level at all times
+            bool ringNoIn = false;   // never use intake (avoids the int32 overflow)
+            int ringImpact = 0;      // >0 produces the drawback with TYPE_IMPACT (its maximum delta)
+            float ringInR = 0f;      // >0 sets the intake circle's radius (m) separately
+            int ringDurSteps = 256;  // length of the waveform (water steps). Vanilla is 256
+            float ringCap = 0f;      // >0 caps the height of the crest (m)
+            float landRise = 0.5f;   // slope of the land (m/cell). If it saturates, inundation distance cannot be measured
+            int ringRepeat = 1;      // how many times to fire the waveform (second and third waves)
+            int ringLine = 1;        // number of circles laid along the fault (1 = a point source)
+            float ringDraw = 0f;     // >0 caps the depth of the drawback (m). Defaults to the same as ringCap
+            float arrivalThreshold = float.NaN;   // ★ diagnostic. >0 measures the wave front's arrival time.         // ★ diagnostic. No counterpart in the game.
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -125,49 +133,55 @@ namespace DisasterPlus.Tools.WaterSolverSim
             if (gridSize < 16) gridSize = 16;
             Directory.CreateDirectory(outDir);
 
-            // ── 平らな海 ──────────────────────────────────────────
+            // ── Flat sea ──────────────────────────────────────────
             //
-            // ★★ **海面より深い海は作れない。** 地形は ushort（1/64 m）なので
-            //   海底の下限は標高 0 であり、海面 40 m のマップで作れる海は
-            //   最大 40 m である —— これは実機の制約そのもの（m_heightBuffer は ushort）。
-            //   要求された水深がそれを超えるときは<b>海面ごと持ち上げる</b>。
-            //   黙って浅い海で回すと「深くしたのに波が伸びない」を誤診する。
+            // ★★ **A sea deeper than the sea level cannot be built.** The terrain is a ushort
+            //   (1/64 m), so the sea bed bottoms out at elevation 0, and on a map with a sea
+            //   level of 40 m the deepest sea that can be built is 40 m —— this is the game's
+            //   own constraint (m_heightBuffer is a ushort).
+            //   When the requested depth exceeds that, <b>raise the sea level along with it</b>.
+            //   Silently running on a shallower sea leads to the misdiagnosis "I made it
+            //   deeper but the wave does not grow".
             float seaLevel = Math.Max(SeaLevelMetres, depth);
 
             WaterField field = new WaterField(gridSize, seaLevel);
 
-            // ★★ 海岸を置くと「震源では大きいのに海岸では高潮」が測れる。
-            //    棚は格子の 60% 地点から始まり、85% 地点が汀線。
+            // ★★ Placing a coast makes it possible to measure "large at the epicentre but only
+            //    a storm surge at the coast". The shelf starts at 60% of the grid and the
+            //    shoreline is at 85%.
             int shelfStart = (int)(gridSize * 0.60f);
             int shoreCell = (int)(gridSize * 0.85f);
 
             if (shelf) field.FillShelf(depth, shelfStart, shoreCell, landRise);
             else field.FillFlatSea(depth);
 
-            // ★★ 源を端に寄せられるようにする（2026-08-30）。外周セルはソルバが
-            //    海面に固定する境界なので、**近いとエネルギーを吸われる**。
+            // ★★ Allow the source to be moved towards the edge (2026-08-30). The outermost
+            //    cells are a boundary that the solver pins to sea level, so **being close to
+            //    it drains energy**.
             int centreX = (int)(gridSize * srcFrac);
             int centreZ = gridSize / 2;
 
             float target = 0f;
             int drive = (pinnedDrive >= 0) ? pinnedDrive : TsunamiSource.DriveUnitsFor(intensity, depth);
 
-            // 初期の総水量。以降の行で「ソルバが水を作った／消した」を見るための基準。
-            // ★ 外周の輪は設計どおり水を捨てる／湧かせるので、0% にはならない。
-            //   見たいのは**跳ねていないか**である。
+            // Initial total water volume. The baseline against which later rows show whether
+            // "the solver created / destroyed water".
+            // ★ By design the outer ring discards and creates water, so this will not be 0%.
+            //   What we want to see is **whether it is running away**.
             //
-            // ★★ <c>--audit</c> で分解した結果（2026-08-30、drive 0-12800 /
-            //   水深 5・40・150 m / 格子 512・1081 / 1500 フレームまで）:
-            //   <b>dV は「外周の輪 - 蒸発」で完全に説明でき、resid は常に 0</b>。
-            //   <c>Math.Max(...,0)</c> / <c>Math.Min(...,65535)</c> の飽和は
-            //   <b>一度も発火しなかった</b>（satLost = satGain = 0、65535 のセルも 0 個）。
-            //   「飽和が水を失わせている」という当初の見立ては**誤り**である。
-            // ── DLC の津波（--edge）──────────────────────────────
+            // ★★ The breakdown obtained with <c>--audit</c> (2026-08-30, drive 0-12800 /
+            //   depths 5, 40 and 150 m / grids 512 and 1081 / up to 1500 frames):
+            //   <b>dV is fully explained by "outer ring - evaporation", and resid is always
+            //   0</b>. The saturation in <c>Math.Max(...,0)</c> / <c>Math.Min(...,65535)</c>
+            //   <b>never fired once</b> (satLost = satGain = 0, and zero cells at 65535).
+            //   The initial guess that "saturation is losing the water" is **wrong**.
+            // ── The DLC tsunami (--edge) ──────────────────────────────
             //
-            // ★★ **こちらの外力とは仕掛けがまるで違う**（EdgeWave のクラス doc）。
-            //   左端まるごとを海の区画とみなし、内向き +X で立てる。
-            //   実機の GetSeaSideLocation は「いちばん長く続く海の区画」を採るので、
-            //   左が全部海のこの断面ではまさにこうなる。
+            // ★★ **The mechanism is completely different from our own force** (the class doc
+            //   of EdgeWave). It treats the entire left edge as the sea segment and raises the
+            //   wave inwards along +X. The game's GetSeaSideLocation picks "the longest
+            //   continuous sea segment", so on this section, where the whole left side is sea,
+            //   that is exactly what happens.
             if (edgeIntensity > 0)
             {
                 field.Edge = new EdgeWave
@@ -184,7 +198,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     Duration = EdgeWave.VanillaDuration,
                 };
 
-                drive = 0;   // 外力は出さない。比べたいのは仕掛けの違いである。
+                drive = 0;   // no impact force. What we want to compare is the difference in mechanism.
                 pinnedDrive = 0;
 
                 Console.WriteLine("  ** DLC tsunami mode ** intensity " + edgeIntensity
@@ -196,22 +210,24 @@ namespace DisasterPlus.Tools.WaterSolverSim
                                   + "MAKES water - it does not borrow it. No impact drive is used.");
             }
 
-            // ── 震源の同心円（--ring）─────────────────────────────
+            // ── Concentric circles at the epicentre (--ring) ─────────────────────────────
             //
-            // ★★ DLC の<b>波形はそのまま</b>、置き場所だけ震源へ移す。
-            //   水位が海面より下の位相は取り込み（引き波）、上の位相は
-            //   吐き出し（押し波）。<see cref="SourceDisc"/> のクラス doc。
+            // ★★ <b>The DLC's waveform is kept as it is</b>; only where it is placed moves to
+            //   the epicentre. Phases where the level is below sea level take water in (the
+            //   drawback), and phases above it put water out (the crest). See the class doc of
+            //   <see cref="SourceDisc"/>.
             EdgeWave ringShape = null;
 
             if (ringIntensity > 0)
             {
-                // 半径 r [m] を出すのに要る流量: rate = ((r - 10) / 0.4)^2
+                // The flow rate needed to give a radius of r [m]: rate = ((r - 10) / 0.4)^2
                 float wantR = ringRadius * WaterField.CellSizeMetres;
                 long rate = (long)Math.Pow((wantR - 10f) / 0.4f, 2.0);
 
-                // ★★ 断層に沿って円を並べる（線の波源）。ringLine == 1 なら従来どおり点。
-                //    円の間隔は半径ぶん —— 重なりすぎると同じ水を奪い合い、
-                //    離しすぎると波が 1 本にならない。
+                // ★★ Lay circles along the fault (a line source). With ringLine == 1 it is a
+                //    point as before. The spacing is one radius —— overlap them too much and
+                //    they fight over the same water, spread them too far and the wave does not
+                //    merge into one.
                 field.Sources = new SourceDisc[ringLine];
                 int lineStep = ringRadius;
                 for (int k = 0; k < ringLine; k++)
@@ -244,15 +260,15 @@ namespace DisasterPlus.Tools.WaterSolverSim
                                   + " water steps. It MAKES water on the crest and TAKES it "
                                   + "on the retreat, so the wave radiates concentrically.");
 
-                // 流量は毎ステップ位相で切り替える。ここでは覚えておくだけ。
+                // The flow rate is switched by phase on every step. Here we just remember it.
                 ringRate = rate;
             }
 
             long baseVolume = TotalWaterUnits(field);
 
-            Console.WriteLine("== WaterSolverSim : SimulateWater のオフライン再現 ==");
+            Console.WriteLine("== WaterSolverSim : offline reproduction of SimulateWater ==");
             Console.WriteLine("  grid       " + gridSize + " x " + gridSize + " cells ("
-                              + (gridSize * WaterField.CellSizeMetres / 1000f).ToString("F1") + " km 四方), "
+                              + (gridSize * WaterField.CellSizeMetres / 1000f).ToString("F1") + " km square), "
                               + WaterField.CellSizeMetres.ToString("F0") + " m / cell");
             Console.WriteLine("  sea level  " + seaLevel.ToString("F0") + " m"
                               + (seaLevel > SeaLevelMetres
@@ -281,10 +297,10 @@ namespace DisasterPlus.Tools.WaterSolverSim
             List<Impulse> impulses = new List<Impulse>();
             HashSet<int> pngFrames = PickPngFrames(frames);
 
-            // ── 波頭の到達時刻（診断。ゲームには対応物が無い）────────────
-            //   半径ごとの平均水面が初めて閾値を超えたフレームを覚える。
-            //   「いちばん高い輪」は中心の窪みや格子ノイズで跳ねるので、
-            //   波の速さを測るにはこちらを使う。
+            // ── Arrival time of the wave front (diagnostic; no counterpart in the game) ────────────
+            //   Remembers, for each radius, the first frame at which the radial mean surface
+            //   exceeds the threshold. "The highest ring" jumps about because of the dip at
+            //   the centre and grid noise, so use this instead to measure the wave speed.
             bool trackArrival = !float.IsNaN(arrivalThreshold) && arrivalThreshold > 0f;
             int[] arrival = null;
             if (trackArrival)
@@ -295,10 +311,10 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
             Stopwatch clock = Stopwatch.StartNew();
 
-            // ★★ **印字の間引きは罠である。**（2026-08-30、判定役）
-            //    60 フレームおきに出すだけだと、そのあいだの谷と山が見えない。
-            //    「420 歩で緑・1080 歩で +111 m」を見落としたのと同じ穴なので、
-            //    **毎フレーム走査した最小・最大をここで持つ。**
+            // ★★ **Thinning out the printing is a trap.** (2026-08-30, the adjudicator)
+            //    Printing only every 60 frames hides the troughs and peaks in between.
+            //    It is the same pitfall as missing "green at step 420, +111 m at step 1080",
+            //    so **keep the minimum and maximum scanned on every frame here.**
             float shoreMax = 0f;
             int shoreMaxFrame = -1;
             int floodCells = 0;
@@ -311,17 +327,19 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
             for (int frame = 0; frame < frames; frame++)
             {
-                // ── 外力を組み直す（実機の MOD と同じ手順）──────────
+                // ── Rebuild the force (the same procedure as the mod in the game) ──────────
                 {
                     if (shelf)
                     {
-                        // ★ 汀線の手前 2 セルで、平常からの上がりを追う。
-                        //   **ここが「街に何 m 来たか」である。**
+                        // ★ Track the rise above normal two cells short of the shoreline.
+                        //   **This is "how many metres reached the town".**
                         float atShore = field.ColumnRiseMetres(shoreCell - 2, centreZ);
                         if (atShore > shoreMax) { shoreMax = atShore; shoreMaxFrame = frame; }
 
-                        // 陸へ何セル乗り上げたか（水が 0.5 m 以上乗っている列）。
-                        // ★★ **標高ではなく水の厚みで見る**（WaterDepthMetres の doc）。
+                        // How many cells it ran up onto the land (columns carrying at least
+                        // 0.5 m of water).
+                        // ★★ **Judge by the thickness of the water, not the elevation** (see
+                        //    the doc of WaterDepthMetres).
                         for (int lx = shoreCell; lx < gridSize; lx++)
                         {
                             if (field.WaterDepthMetres(lx, centreZ) <= 0.5f) break;
@@ -340,13 +358,13 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 {
                     float observed = field.SurfaceAboveSeaMetres(centreX, centreZ);
                     if (float.IsNaN(observed) || float.IsInfinity(observed))
-                        throw new InvalidOperationException("水面が NaN になった: frame " + frame);
+                        throw new InvalidOperationException("the water surface became NaN: frame " + frame);
 
-                    // ★★ 閉ループはやめた（2026-08-30）。ソルバの応答は 100 歩ほど
-                    //    遅れるので、8 歩ごとに測って上げると必ず巻き上がる
-                    //    （このツールで再現して確かめた: 2000 -> 139,516 units、
-                    //     中心が -40 m ＝ 海底まで掘れる）。
-                    //    いまは **このツールで測って決めた開ループの定数**を使う。
+                    // ★★ The closed loop was abandoned (2026-08-30). The solver's response
+                    //    lags by about 100 steps, so measuring and raising every 8 steps always
+                    //    winds up (reproduced and confirmed with this tool: 2000 -> 139,516
+                    //    units, with the centre at -40 m, i.e. dug down to the sea bed).
+                    //    We now use **an open-loop constant measured and fixed with this tool**.
                     if (observed > 1e9f) throw new InvalidOperationException("runaway");
 
                     int total = DriveTotal(shape, frame, totalSteps, drive);
@@ -360,13 +378,15 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     }
                 }
 
-                // ★ 震源の円を DLC の波形で動かす。取り込みと吐き出しは排他。
+                // ★ Drive the epicentre circle with the DLC's waveform. Intake and output are
+                //   mutually exclusive.
                 if (ringShape != null)
                 {
                     int level = ringShape.LevelAt(0, 0, field.SeaLevelUnits);
 
-                    // ★★ 押し波の高さに蓋をする。遠くへ届かせるのは
-                    //    高さではなく<b>体積</b>なので、蓋のぶんは長さで補う。
+                    // ★★ Put a lid on the height of the crest. What carries the wave far is
+                    //    not the height but the <b>volume</b>, so what the lid takes off is
+                    //    made up for in duration.
                     if (ringCap > 0f)
                     {
                         int capUnits = field.SeaLevelUnits + (int)(ringCap * 64f);
@@ -379,16 +399,16 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
                     for (int k = 0; k < field.Sources.Length; k++) field.Sources[k].Target = level;
 
-                    // ★★ **押しと引きを両方いつも入れる。** これで円は
-                    //    「目標水位へ張り付く」——DLC が外周セルにやっている
-                    //    Dirichlet 境界とまったく同じ振る舞いになる。
-                    //    片方ずつにすると、寄せ集まった水を抜く力が無いので
-                    //    震源が目標の 2 倍以上に盛り上がる（2026-08-31 実測:
-                    //    目標 +102 m に対して実際 +232 m）。
+                    // ★★ **Always enable both the push and the pull.** That makes the circle
+                    //    "stick to the target level" —— exactly the same behaviour as the
+                    //    Dirichlet boundary the DLC applies to the outermost cells.
+                    //    With only one at a time there is no force to drain the water that has
+                    //    gathered, so the epicentre piles up to more than twice the target
+                    //    (measured 2026-08-31: +232 m in reality against a target of +102 m).
                     long outRate = ringHold ? ringRate : (level > field.SeaLevelUnits ? ringRate : 0);
                     for (int k = 0; k < field.Sources.Length; k++) field.Sources[k].OutputRate = outRate;
-                    // ★ 取り込みは別半径にできる。ゲームの int32 が溢れないところまで
-                    //   小さくするため（このファイルを書いた理由）。
+                    // ★ The intake can use a different radius, so it can be made small enough
+                    //   that the game's int32 does not overflow (the reason this file exists).
                     long inRate = ringInR > 0f
                         ? (long)Math.Pow((ringInR - 10f) / 0.4f, 2.0)
                         : ringRate;
@@ -403,7 +423,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
                         field.Source.InputRate = 0;
                     }
 
-                    // ★★ 引き波は水源ではなく丘で出す（このファイルの冒頭 doc）。
+                    // ★★ Produce the drawback with a mound rather than a water source (see
+                    //    the doc at the top of this file).
                     if (ringImpact > 0)
                     {
                         field.Source.InputRate = 0;
@@ -412,7 +433,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
                         if (level < field.SeaLevelUnits)
                         {
-                            // 目標がどれだけ下かに比例して、負の丘＝窪みを置く。
+                            // Place a negative mound, i.e. a depression, in proportion to how
+                            // far below the target is.
                             float drop = (field.SeaLevelUnits - level)
                                          / (float)Math.Max(1, (int)(ringCap * 64f));
                             int delta = -(int)(ringImpact * Math.Min(1f, drop));
@@ -425,8 +447,9 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
                     ringShape.Step();
 
-                    // ★ 波形を打ち直す（第2波・第3波）。時計を 0 に戻すので
-                    //   振幅の減衰項もやり直しになり、同じ高さの波がもう一度来る。
+                    // ★ Fire the waveform again (the second and third waves). The clock is
+                    //   reset to 0, so the amplitude decay term starts over too and a wave of
+                    //   the same height arrives once more.
                     if (ringRepeat > 1 && !ringShape.Active)
                     {
                         ringRepeat--;
@@ -436,7 +459,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
                 field.Step(impulses);
 
-                // ★ DLC の津波の時計を進める。m_currentTime は 1 水ステップで +64。
+                // ★ Advance the DLC tsunami's clock. m_currentTime goes up by 64 per water step.
                 if (field.Edge != null) field.Edge.Step();
 
                 if (trackArrival)
@@ -525,16 +548,17 @@ namespace DisasterPlus.Tools.WaterSolverSim
                               + ", steps at bare seabed " + zeroWaterSteps);
             Console.WriteLine("  final drive " + drive + " units = "
                               + (drive / (float)TsunamiSource.UnitsPerMetre).ToString("F0")
-                              + " m の仮想的な海底隆起 ("
+                              + " m of virtual sea-bed uplift ("
                               + TsunamiSource.WavesNeeded(drive) + " waves)");
             return 0;
         }
 
         /// <summary>
-        /// <b>質量の帳簿</b>（ゲームには存在しない診断）。
-        /// 総水量の増減を、それを起こしうる 4 つの出口に分解して突き合わせる:
-        /// 外周の輪、蒸発、Max(...,0) の底打ち、Min(...,65535) の頭打ち。
-        /// <c>resid</c> が 0 でなければ**未知の漏れがある**。
+        /// A <b>mass ledger</b> (a diagnostic with no counterpart in the game).
+        /// It breaks the change in total water volume down into the four exits that could
+        /// cause it and reconciles them: the outer ring, evaporation, the floor at
+        /// Max(...,0) and the ceiling at Min(...,65535).
+        /// If <c>resid</c> is not 0, **there is an unknown leak**.
         /// </summary>
         private static void PrintAudit(WaterField f, long baseVolume)
         {
@@ -552,10 +576,10 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 if (h > maxH) maxH = h;
             }
 
-            // ── 格子スケールの振動（ringing / checkerboard）─────────────
-            //   2 セル周期のモードだけを取り出す: h[x] - (h[x-1]+h[x+1])/2。
-            //   なめらかな波はここに乗らないので、値が立てば**数値的な振動**である。
-            //   ゲームには存在しない診断。
+            // ── Grid-scale oscillation (ringing / checkerboard) ─────────────
+            //   Extracts only the two-cell-period mode: h[x] - (h[x-1]+h[x+1])/2.
+            //   A smooth wave does not show up here, so if the value rises it is
+            //   **numerical oscillation**. A diagnostic with no counterpart in the game.
             int n = f.Size;
             ushort[] terr = f.Terrain;
             double nyq = 0.0; double nyqMax = 0.0; long nyqN = 0;
@@ -587,7 +611,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                               + " m  nyqMax=" + nyqMax.ToString("F2") + " m");
         }
 
-        /// <summary>盤面の水柱の総和（1/64 m 単位のセル和）。</summary>
+        /// <summary>Sum of the water columns over the board (cell sum in units of 1/64 m).</summary>
         private static long TotalWaterUnits(WaterField field)
         {
             Cell[] cells = field.Cells;
@@ -596,7 +620,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
             return sum;
         }
 
-        /// <summary>表の 1 行。</summary>
+        /// <summary>One row of the table.</summary>
         private static void PrintRow(WaterField field, int cx, int cz, int frame, int drive,
                                      long baseVolume)
         {
@@ -632,11 +656,13 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
-        /// 掃引用の外力の形。**ここで勝った形だけを Core へ持ち帰る。**
+        /// Forcing shapes for the sweep. **Only the shape that wins here is taken back into
+        /// Core.**
         ///
-        /// ソルバは <c>dv/dt ∝ drive</c>、<c>dh/dt ∝ -div v</c> なので、
-        /// 水位が元へ戻るには<b>外力の 2 重積分が 0</b>でなければならない。
-        /// 1 重積分だけ 0（＝正弦 1 周期）では**穴が残る**。ここはその確認に使う。
+        /// In the solver <c>dv/dt ∝ drive</c> and <c>dh/dt ∝ -div v</c>, so for the water
+        /// level to return to where it started the <b>double integral of the force must be
+        /// 0</b>. With only the single integral 0 (i.e. one sine cycle) **a hole is left
+        /// behind**. This is used to confirm that.
         /// </summary>
         private static int DriveTotal(int shape, float step, float total, int drive)
         {
@@ -647,34 +673,36 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
             switch (shape)
             {
-                case 0:   // ★ Core の現行そのもの（掃引で勝った形を取り込んだ）
+                case 0:   // ★ exactly what Core uses today (the shape that won the sweep)
                     return TsunamiSource.DeltaAt(step / total * TsunamiSource.TotalSteps,
                                                  drive);
 
-                case 1:   // 引きを厚くした 1.5 周期（包絡を sin(pi*w) に）
+                case 1:   // 1.5 cycles with a heavier drawback (envelope changed to sin(pi*w))
                     f = -Math.Sin(Math.PI * w) * Math.Sin(2.0 * Math.PI * 1.5 * w);
                     break;
 
-                case 2:   // ★ 2 重積分 0: bump の 2 階微分（Ricker 風）
-                    //   B(w) = (1-cos(2 pi w))/2 のとき B'' ∝ cos(2 pi w)。
-                    //   これなら ∫drive = 0 かつ ∫∫drive = 0（B が両端 0 で ∫B=0 だから
-                    //   ではなく、drive = -B'' の 2 重積分が -B に戻るため）。
+                case 2:   // ★ double integral 0: the second derivative of a bump (Ricker-like)
+                    //   For B(w) = (1-cos(2 pi w))/2, B'' ∝ cos(2 pi w).
+                    //   This gives ∫drive = 0 and ∫∫drive = 0 (not because B is 0 at both ends
+                    //   and ∫B=0, but because the double integral of drive = -B'' comes back
+                    //   to -B).
                     f = Math.Cos(2.0 * Math.PI * w);
-                    // 両端の段差を消す（ソルバは傾きの差を積むので段差は衝撃になる）。
+                    // Remove the steps at both ends (the solver accumulates differences of
+                    // slope, so a step acts as an impulse).
                     f *= Taper(w, 0.10);
                     break;
 
-                case 3:   // 引きを長く、押しを短く（隆起を見せてから吐き出す）
+                case 3:   // long drawback, short push (show the uplift, then let it out)
                     if (w < 0.6) f = -Math.Sin(Math.PI * w / 0.6);
                     else f = Math.Sin(Math.PI * (w - 0.6) / 0.4) * 1.5;
                     break;
 
-                case 4:   // 押しを先に、引きを後に（符号を反転しただけ）
+                case 4:   // push first, drawback after (just the sign flipped)
                     f = ((1.0 - Math.Cos(2.0 * Math.PI * w)) * 0.5)
                         * Math.Sin(2.0 * Math.PI * 1.5 * w);
                     break;
 
-                case 5:   // 2 周期。短い波長で環を細くする
+                case 5:   // 2 cycles. A shorter wavelength makes the ring narrower
                     f = -((1.0 - Math.Cos(2.0 * Math.PI * w)) * 0.5)
                         * Math.Sin(2.0 * Math.PI * 2.0 * w);
                     break;
@@ -690,7 +718,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
             return units;
         }
 
-        /// <summary>両端を滑らかに 0 へ落とす窓。</summary>
+        /// <summary>A window that rolls both ends smoothly down to 0.</summary>
         private static double Taper(double w, double edge)
         {
             double k = w < edge ? w / edge : (w > 1.0 - edge ? (1.0 - w) / edge : 1.0);
@@ -699,7 +727,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
             return k * k * (3.0 - 2.0 * k);
         }
 
-        /// <summary>TsunamiSource の段を 1 文字で。</summary>
+        /// <summary>TsunamiSource's stage in a single character.</summary>
         private static string StageTag(int frame)
         {
             if (frame >= TsunamiSource.TotalSteps) return "4 free";
@@ -708,7 +736,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
             return "3 back";
         }
 
-        /// <summary>PNG を出すフレーム。段の切れ目と、そのあとの伝播を等間隔で。</summary>
+        /// <summary>The frames to emit a PNG for: the stage boundaries, and the propagation
+        /// afterwards at even intervals.</summary>
         private static HashSet<int> PickPngFrames(int frames)
         {
             HashSet<int> set = new HashSet<int>();
@@ -729,8 +758,10 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
-        /// 水面の高さを 1 枚の絵にする。青が凹み、赤が盛り上がり、白が海面ちょうど。
-        /// **色の目盛りは絵ごとに自動**なので、絶対値は表のほうで読むこと。
+        /// Renders the height of the water surface as a single picture. Blue is a dip, red is
+        /// a rise, and white is exactly sea level.
+        /// **The colour scale is chosen automatically per picture**, so read absolute values
+        /// from the table instead.
         /// </summary>
         private static void WriteSurfacePng(WaterField field, string dir, int frame)
         {
@@ -739,7 +770,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
             ushort[] terrain = field.Terrain;
             int sea = field.SeaLevelUnits;
 
-            // 目盛り。全部平らなときに 0 除算しないよう下限を置く。
+            // The scale. A floor is set so that a completely flat field does not divide by 0.
             float scale = 0.25f;
             for (int i = 0; i < cells.Length; i++)
             {
@@ -759,12 +790,12 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 if (t >= 0f)
                 {
                     byte fade = (byte)(255f * (1f - t));
-                    r = 255; g = fade; b = fade;      // 白 -> 赤
+                    r = 255; g = fade; b = fade;      // white -> red
                 }
                 else
                 {
                     byte fade = (byte)(255f * (1f + t));
-                    r = fade; g = fade; b = 255;      // 白 -> 青
+                    r = fade; g = fade; b = 255;      // white -> blue
                 }
 
                 int o = i * 3;

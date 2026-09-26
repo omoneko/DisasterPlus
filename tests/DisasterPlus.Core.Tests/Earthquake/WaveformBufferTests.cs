@@ -43,7 +43,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
 
             Assert.Equal(4, n);
             Assert.Equal(4, b.Count);
-            // 直近 4 件（6,7,8,9）が古い順に並ぶこと。
+            // The most recent 4 samples (6,7,8,9) must be lined up oldest first.
             Assert.Equal(6u, frames[0]);
             Assert.Equal(9u, frames[3]);
             Assert.Equal(6u, b.OldestFrame);
@@ -60,7 +60,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
             var values = new float[3];
             int n = b.CopyTo(frames, values);
 
-            // 落ちないこと、書いた件数を正直に返すこと。
+            // It must not crash, and must honestly report how many it wrote.
             Assert.Equal(3, n);
         }
 
@@ -87,7 +87,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void RejectsNonsenseCapacity()
         {
-            // 0 や負の容量でも落ちない。最低 1 件は持つ。
+            // It does not crash on a zero or negative capacity. It holds at least 1 sample.
             var b = new WaveformBuffer(0);
             b.Add(1u, 1f);
             Assert.True(b.Capacity >= 1);
@@ -97,8 +97,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void PeakForgetsSamplesThatHaveFallenOutOfTheBuffer()
         {
-            // Add() で最大値を更新して覚えっぱなしにすると、もう保持していない
-            // サンプルの振幅を「今の最大振幅」として出し続ける嘘になる。
+            // If Add() updates the maximum and then keeps remembering it forever, it goes on
+            // lying, reporting the amplitude of a sample that is no longer held as "the
+            // current peak amplitude".
             var b = new WaveformBuffer(2);
             b.Add(0u, 5f);
             b.Add(1u, 0.1f);
@@ -111,8 +112,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void NeverReadsItsUnfilledRegion()
         {
-            // 未使用の領域は 0 で初期化されているので、「読んでしまった」ことは
-            // 値では見えない。件数と最古・最新フレームで縛る。
+            // The unused region is initialised to 0, so the fact that it "was read after
+            // all" is not visible in the values. Pin it down with the count and the
+            // oldest/newest frames.
             var b = new WaveformBuffer(16);
             b.Add(1000u, 0.5f);
 

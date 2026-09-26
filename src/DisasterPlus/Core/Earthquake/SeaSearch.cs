@@ -1,51 +1,55 @@
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// クリックされた地点から<b>いちばん近い海</b>を探すときの、調べる順序と刻み。
-    /// **エンジン非依存の純関数だけ。**（水があるかどうかを聞くのは Game 側）
+    /// The order and the step size used when searching for <b>the nearest sea</b> from the
+    /// point that was clicked.
+    /// **Pure, engine-free functions only.** (Asking whether there is water is the Game
+    /// side's job.)
     ///
-    /// ── 所有者の指示（2026-08-22）─────────────────────────────────
+    /// ── The owner's instruction (2026-08-22) ─────────────────────────────
     ///
-    /// &gt; 発生は、アイコンクリック→左クリックした場所に一番近い海で発生に
-    /// &gt; してください。
+    /// &gt; For spawning: click the icon, then have it spawn at the sea nearest to where
+    /// &gt; you left-clicked.
     ///
-    /// ── なぜ順序を Core に置くのか ──────────────────────────────
+    /// ── Why the ordering lives in Core ──────────────────────────────
     ///
-    /// 「近い順に調べる」は<b>目で見て確かめられない</b>。順序が壊れていても
-    /// 海はどこかで見つかるので、<b>少し遠い海が選ばれるだけ</b>で、
-    /// 実機では誰も気づけない。だから順序そのものをテストで固定する。
+    /// "Search nearest first" is <b>something you cannot confirm by eye</b>. Even with the
+    /// order broken, a sea is found somewhere, so <b>all that happens is a slightly more
+    /// distant sea gets picked</b>, and nobody can spot it on real hardware. So we pin the
+    /// ordering itself down with tests.
     ///
-    /// <see cref="OutwardCellOrder"/> の同心リング（チェビシェフ距離）を使う。
-    /// 厳密な最近傍ではない —— リングは正方形なので、対角のセルが
-    /// 同じリングの軸上のセルより √2 倍遠い。<b>それでよい。</b>
-    /// 刻み（<see cref="StepMetres"/>）より細かい差は、
-    /// 「一番近い海」としてどのみち区別が付かない。
+    /// We use <see cref="OutwardCellOrder"/>'s concentric rings (Chebyshev distance). It is
+    /// not a strict nearest-neighbour search — the rings are squares, so a diagonal cell is
+    /// √2 times further away than an on-axis cell in the same ring. <b>That is fine.</b>
+    /// Differences finer than the step (<see cref="StepMetres"/>) are indistinguishable as
+    /// "the nearest sea" anyway.
     ///
-    /// ★★ <b>見つからなかったときに「適当な海」を返さない。</b>
-    ///   内陸マップでは海が無いのが正しい答えである。
-    ///   呼び出し側は断って、理由を名乗ること。
+    /// ★★ <b>Do not return "some sea or other" when nothing was found.</b>
+    ///   On an inland map, "there is no sea" is the correct answer.
+    ///   The caller should decline and say why.
     /// </summary>
     public static class SeaSearch
     {
         /// <summary>
-        /// 1 リングぶんの距離（m）。細かすぎると遠い海まで届かず、
-        /// 粗すぎると狭い入り江を跨いでしまう。
+        /// The distance of one ring (m). Too fine and the search never reaches a distant
+        /// sea; too coarse and it steps straight over a narrow inlet.
         /// </summary>
         public const float StepMetres = 96f;
 
         /// <summary>
-        /// 探す最大のリング半径。<see cref="StepMetres"/> × これ ＝ 探索の届く距離で、
-        /// 96 × 96 = 9216 m ——**マップの半辺（8640 m）より少し広い**ので、
-        /// マップのどこを指しても、海があるなら必ず届く。
+        /// The largest ring radius searched. <see cref="StepMetres"/> × this is how far the
+        /// search reaches: 96 × 96 = 9,216 m — **a little wider than half the map's side
+        /// (8,640 m)** — so wherever on the map you point, if there is a sea the search is
+        /// guaranteed to reach it.
         /// </summary>
         public const int MaxRing = 96;
 
         /// <summary>
-        /// 調べる地点の総数。呼び出し側はこれで <see cref="At"/> を回す。
+        /// The total number of points searched. Callers loop <see cref="At"/> over this.
         /// </summary>
         public static int Count { get { return CountUpTo(MaxRing); } }
 
-        /// <summary>リング <paramref name="ring"/> までの地点数。</summary>
+        /// <summary>The number of points up to ring <paramref name="ring"/>.</summary>
         public static int CountUpTo(int ring)
         {
             if (ring < 0) return 0;
@@ -54,10 +58,10 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// <paramref name="ordinal"/> 番目に調べる地点の、クリック地点からのずれ（m）。
-        /// <b>近い順である</b>（0 番目はクリック地点そのもの）。
+        /// The offset (m) from the clicked point of the <paramref name="ordinal"/>-th point
+        /// searched. <b>Nearest first</b> (the 0th is the clicked point itself).
         ///
-        /// 範囲外なら false を返す。**「それらしい 0」を返さない。**
+        /// Returns false when out of range. **It does not return a plausible-looking 0.**
         /// </summary>
         public static bool At(int ordinal, out float offsetX, out float offsetZ)
         {
@@ -74,8 +78,8 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// その地点がクリック地点から何 m 離れているか（診断と、
-        /// 「思ったより遠い海が選ばれた」を名乗るため）。
+        /// How many metres that point is from the clicked point (for diagnostics, and to be
+        /// able to say "a further-off sea than you expected was picked").
         /// </summary>
         public static float DistanceMetres(float offsetX, float offsetZ)
         {

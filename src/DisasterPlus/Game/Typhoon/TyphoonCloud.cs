@@ -4,178 +4,199 @@ using UnityEngine;
 
 namespace DisasterPlus.Game
 {
-    /// <summary>雲が今どうなっているか。</summary>
+    /// <summary>What the cloud is doing right now.</summary>
     public enum TyphoonCloudState
     {
-        /// <summary>設定で切っている（あるいはまだ都市に入っていない）。</summary>
+        /// <summary>Switched off in the settings (or we are not in a city yet).</summary>
         Off,
 
-        /// <summary>台風が居ないので描いていない。**不具合ではない。**</summary>
+        /// <summary>Not drawing, because there is no typhoon. **Not a fault.**</summary>
         NotBuilt,
 
         /// <summary>
-        /// **本経路。** バニラの粒子エフェクトを借りた雲の粒で渦を組んでいる
-        /// （<see cref="TyphoonCloudFx"/>）。
+        /// **The main route.** The vortex is built from cloud puffs borrowed from vanilla's
+        /// particle effects (<see cref="TyphoonCloudFx"/>).
         /// </summary>
         Puffs,
 
-        /// <summary>退避経路。自前のスパイラルメッシュを毎フレーム描いている。</summary>
+        /// <summary>The fallback route. Drawing our own spiral mesh every frame.</summary>
         Drawing,
 
-        /// <summary>メッシュかマテリアルの構築が失敗した。</summary>
+        /// <summary>Building the mesh or the material failed.</summary>
         BuildFailed,
 
-        /// <summary><c>Shader.Find</c> が 1 つも解決しなかった。</summary>
+        /// <summary><c>Shader.Find</c> resolved nothing at all.</summary>
         ShaderMissing,
     }
 
     /// <summary>
-    /// 台風の巨大な回転雲。<b>main スレッド専用。</b>
+    /// The typhoon's huge rotating cloud. <b>Main thread only.</b>
     ///
-    /// ── なぜゼロから作るのか（既製品が 1 つも無い） ──────────────────
+    /// ── Why we build it from scratch (there is nothing off the shelf) ─────
     ///
-    /// <c>DisasterInfo.m_effect</c> は**フィールドごと存在しない**。災害まわりで
-    /// <c>EffectInfo</c> 型のフィールドを持つのは <c>DisasterProperties.m_mediumExplosion</c> と
-    /// <c>MeteorAI.m_impactEffect</c> の 2 つだけで、**雲も渦もプレハブ化されていない**
-    /// （IL 事実文書 §C-1）。そしてバニラの雲は半径 6400 km のスカイドームに貼られた
-    /// ノイズシェーダで、位置は <c>(0, m_HorizonOffset, 0)</c> 固定・**ワールド座標を
-    /// 持たない**。<c>m_Coverage</c> は毎フレーム <c>m_MaxCoverage × SampleCloudCoverage()</c> で
-    /// 上書きされる（§C-2）。したがって「台風の位置に雲の渦を置く」合成は**原理的に
-    /// できない**。④は自分でメッシュを組み、自分でマテリアルを作り、自分で描く。
+    /// <c>DisasterInfo.m_effect</c> **does not exist as a field at all**. Around the
+    /// disaster code, only two fields are of type <c>EffectInfo</c> —
+    /// <c>DisasterProperties.m_mediumExplosion</c> and <c>MeteorAI.m_impactEffect</c> —
+    /// and **neither a cloud nor a vortex is prefabbed** (IL facts document §C-1). And
+    /// vanilla's clouds are a noise shader pasted on a sky dome of radius 6400 km, fixed at
+    /// <c>(0, m_HorizonOffset, 0)</c> and **with no world coordinates**.
+    /// <c>m_Coverage</c> is overwritten every frame with
+    /// <c>m_MaxCoverage × SampleCloudCoverage()</c> (§C-2). So compositing "a cloud vortex
+    /// at the typhoon's position" is **impossible in principle**. ④ builds its own mesh,
+    /// makes its own material, and draws it itself.
     ///
-    /// スカイドームは無限遠に描かれるので、④の雲は**必ずその手前に出る。深度の破綻は
-    /// 起きない**（§C-2）。
+    /// The sky dome is drawn at infinity, so ④'s cloud **always appears in front of it.
+    /// There is no depth breakage** (§C-2).
     ///
-    /// ── 罠 1: CS のマテリアルを借りない（③が確定させた） ────────────────
+    /// ── Trap 1: do not borrow CS materials (③ settled this) ──────────────
     ///
-    /// CS のシェーダはエンジンが供給する per-instance データを要求する
-    /// （<c>VortexAI.RenderExtraStuff</c> は <c>VehicleManager.m_materialBlock</c> に
-    /// <c>ID_TyreMatrix</c> / <c>ID_TyrePosition</c> / <c>ID_LightState</c> / <c>ID_Color</c> を
-    /// 詰めてから <c>DrawMesh</c> している。§C-1）。それを自前の <c>DrawMesh</c> に載せると
-    /// **何も描画されないか真っ黒になる**。だから借りるとしてもメッシュだけで、
-    /// マテリアルは自作する（火災旋風 §4.9、③の <c>FireWhirlFlameFx.FlameMaterial</c> と同じ形）。
+    /// CS's shaders demand per-instance data supplied by the engine
+    /// (<c>VortexAI.RenderExtraStuff</c> packs <c>ID_TyreMatrix</c> /
+    /// <c>ID_TyrePosition</c> / <c>ID_LightState</c> / <c>ID_Color</c> into
+    /// <c>VehicleManager.m_materialBlock</c> before its <c>DrawMesh</c>. §C-1). Put one of
+    /// those into a hand-rolled <c>DrawMesh</c> and **nothing is drawn, or it comes out
+    /// black**. So if we borrow anything it is the mesh only, and we build the material
+    /// ourselves (fire whirl §4.9; the same shape as ③'s
+    /// <c>FireWhirlFlameFx.FlameMaterial</c>).
     ///
-    /// ★ そのシェーダは <see cref="ShaderPool"/> が取ってくる。<c>Shader.Find</c> が
-    ///   **組み込みの <c>"Standard"</c> にさえ null を返す環境**が実機で見つかったので、
-    ///   名前で引けないときは読み込み済み <c>Material</c> から<b>シェーダだけ</b>を借りる
-    ///   （<c>Material</c> インスタンスは借りない。2 つの違いはあちらのクラス doc）。
+    /// ★ That shader is fetched by <see cref="ShaderPool"/>. An environment was found in
+    ///   the game where <c>Shader.Find</c> **returns null even for the built-in
+    ///   <c>"Standard"</c>**, so when lookup by name fails we borrow <b>the shader
+    ///   only</b> from an already-loaded <c>Material</c> (we do not borrow the
+    ///   <c>Material</c> instance. The difference between the two is in that class's doc).
     ///
-    /// **シェーダが 1 つも解決しなければ何も描かない**（<see cref="TyphoonCloudState.ShaderMissing"/>）。
-    /// 将来のゲーム更新でそうなったときに黙って不可視にならないよう、
-    /// <c>Assumptions</c> にも同じ検証を 1 件置いてある。
+    /// **If no shader resolves at all we draw nothing**
+    /// (<see cref="TyphoonCloudState.ShaderMissing"/>).
+    /// So that a future game update cannot make it silently invisible, there is one
+    /// matching check in <c>Assumptions</c> as well.
     ///
-    /// ── 罠 2: 静的キャッシュを <c>Mesh[]</c> にしない（③が確定させた） ──────────
+    /// ── Trap 2: do not make the static cache a <c>Mesh[]</c> (③ settled this) ──
     ///
-    /// <c>UnityEngine.Object</c> は <c>==</c> を多重定義していて破棄済みオブジェクトが
-    /// null と等価になるが、**配列参照の比較にはそれが効かない**。<c>static Mesh[]</c> は
-    /// 破棄済みメッシュを抱えたまま非 null であり続け、**2 つ目の都市で無言・無ログの
-    /// まま見えなくなる**（火災旋風 §4.8）。ここは <c>Mesh</c> と <c>Material</c> を
-    /// **1 個ずつの参照**で持ち、毎フレームその参照そのものを <c>== null</c> で見る。
+    /// <c>UnityEngine.Object</c> overloads <c>==</c> so that a destroyed object compares
+    /// equal to null, but **that does not apply to comparing the array reference**. A
+    /// <c>static Mesh[]</c> stays non-null while holding destroyed meshes and
+    /// **goes invisible in the second city, silently and with no log** (fire whirl §4.8).
+    /// Here we hold the <c>Mesh</c> and the <c>Material</c> as **one reference each** and
+    /// check that reference itself with <c>== null</c> every frame.
     ///
-    /// ── <c>Mesh</c> と <c>Material</c> は自分で <c>Object.Destroy</c> する ──────────
+    /// ── We <c>Object.Destroy</c> the <c>Mesh</c> and <c>Material</c> ourselves ──
     ///
-    /// どちらも <c>Component</c> ではないので、<c>GameObject</c> を消しても道連れに
-    /// ならない（②が <c>WaveformView</c> の <c>Texture2D</c> で踏んだのと同じ形のリーク）。
-    /// <see cref="Destroy"/> が両方を明示的に破棄する。
+    /// Neither is a <c>Component</c>, so destroying a <c>GameObject</c> does not take them
+    /// with it (the same shape of leak ② hit with <c>WaveformView</c>'s
+    /// <c>Texture2D</c>). <see cref="Destroy"/> destroys both explicitly.
     ///
-    /// ── この型は sim スレッドから 1 度も呼ばれない ────────────────────
+    /// ── This type is never once called from the sim thread ────────────────
     ///
-    /// **それが T9（雲）を④の他の要素から独立させている実体である。**
-    /// <c>TyphoonController.Forget</c> の後始末列にこの型を足してはいけない ——
-    /// 足した瞬間に雲が台風本体の依存になり、切れなくなる。雲は
-    /// <c>TyphoonFeature.OnMainThreadUpdate</c> が毎フレーム <see cref="Update"/> を呼び、
-    /// **スナップショットが <c>Active == false</c> になったフレームで自分で後始末する**。
+    /// **That is what makes T9 (the cloud) independent of ④'s other elements.**
+    /// Do not add this type to <c>TyphoonController.Forget</c>'s cleanup list — the moment
+    /// you do, the cloud becomes a dependency of the typhoon proper and can no longer be
+    /// switched off. <c>TyphoonFeature.OnMainThreadUpdate</c> calls
+    /// <see cref="Update"/> every frame, and **it cleans up after itself on the frame
+    /// where the snapshot goes <c>Active == false</c>**.
     ///
-    /// ── ★ 今は本経路ではない（雲は粒で組む） ────────────────────────
+    /// ── ★ This is no longer the main route (the cloud is built from puffs) ──
     ///
-    /// 持ち主の指摘「現在の巨大な渦を雲から構成するように」を受けて、渦は
-    /// <see cref="TyphoonCloudFx"/> が**バニラの粒子エフェクトを借りた雲の粒**で
-    /// 組むようになった。このファイルのメッシュ経路は<b>退避経路として残してある</b>:
+    /// Following the owner's note "build the current huge vortex out of cloud", the vortex
+    /// is now built by <see cref="TyphoonCloudFx"/> from **cloud puffs borrowed from
+    /// vanilla's particle effects**. The mesh route in this file is <b>kept as a
+    /// fallback</b>:
     ///
-    /// - 借りられる粒子エフェクトが 1 つも無い環境（ゲーム更新・別 MOD）でも
-    ///   渦の位置は読めたほうがよい。
-    /// - <see cref="ShaderPool"/> 経路は<b>まだ 1 度も実機で通っていない</b>ので、
-    ///   ここで消すと「効かないと分かっているもの」ではなく
-    ///   「効くか分からないもの」を消すことになる。
+    /// - Even in an environment with not one borrowable particle effect (a game update,
+    ///   another mod), it is better to be able to read where the vortex is.
+    /// - The <see cref="ShaderPool"/> route **has not once been exercised in the game**, so
+    ///   deleting it here would mean deleting not "something we know does not work" but
+    ///   "something we do not know whether it works".
     ///
-    /// 退避したときの見え方は下の段落のとおり **半径およそ 900 m の平らな渦巻き
-    /// 1 枚＝渦の記号**であって空を覆う雲ではない。実物の台風の雲は数十 km に
-    /// 広がる。空全体を重くするのは <see cref="ApplyVanillaBoost"/> の担当で、
-    /// それも環境によっては効かない。**画面写真を見て「思ったより小さい」と
-    /// 驚かないこと。** 判断は設計書 §4.5 と実機チェックリストにもある。
+    /// What the fallback looks like is, as the paragraph below says, **a single flat spiral
+    /// of roughly 900 m radius — a symbol of a vortex** — not a cloud covering the sky. A
+    /// real typhoon's cloud spreads over tens of kilometres. Weighing down the whole sky is
+    /// <see cref="ApplyVanillaBoost"/>'s job, and that too does not work in every
+    /// environment. **Do not be surprised by a screenshot and say "it is smaller than I
+    /// expected".** The decision is in design doc §4.5 and the in-game checklist as well.
     ///
-    /// ── 毎フレームの費用 ─────────────────────────────────
+    /// ── The per-frame cost ─────────────────────────────────────
     ///
-    /// <c>Graphics.DrawMesh</c> **1 回**（2304 頂点 / 4560 三角形、影は落とさず受けない）と
-    /// <c>Matrix4x4.TRS</c> 1 個、バニラ雲の増強が有効なときは float 3 本の書き込みだけ。
-    /// **ヒープ確保は 0 バイト**（<c>Matrix4x4</c> / <c>Quaternion</c> / <c>Vector3</c> は
-    /// いずれも struct、メッシュ・マテリアル・テクスチャは都市ごとに 1 回だけ作る）。
+    /// **One** <c>Graphics.DrawMesh</c> (2304 vertices / 4560 triangles, casting and
+    /// receiving no shadows), one <c>Matrix4x4.TRS</c>, and — when the vanilla cloud boost
+    /// is enabled — writing three floats. **Zero bytes of heap allocation**
+    /// (<c>Matrix4x4</c> / <c>Quaternion</c> / <c>Vector3</c> are all structs, and the
+    /// mesh, material and texture are built once per city).
     /// </summary>
     public static class TyphoonCloud
     {
-        /// <summary>ゆっくり回す（度／秒）。6 度/秒 ＝ 1 回転 60 秒。**④が決めた演出値。**</summary>
+        /// <summary>Turn it slowly (degrees per second). 6 deg/s = one turn in 60 seconds.
+        /// **A presentation value ④ chose.**</summary>
         /// <summary>
-        /// 渦が回る速さ（度／秒）。
+        /// How fast the vortex turns (degrees per second).
         ///
-        /// ★★ 2026-08-22 に 6 → 2.2 へ落とした（所有者の指示「もっと低速で回転でいい」）。
-        ///   6 度/秒は 1 周 60 秒で、**実物の台風の 100 倍以上速い** ——
-        ///   衛星画像で渦が回って見えるのは何時間もの早回しである。
-        ///   2.2 なら 1 周 164 秒で、ゲームの時間の流れではまだ速いが、
-        ///   「ゆっくり渦を巻いている」と読める範囲に入る。
+        /// ★★ Lowered from 6 to 2.2 on 2026-08-22 (the owner's instruction "a slower
+        ///   rotation would be fine"). 6 deg/s is one turn in 60 seconds, **more than a
+        ///   hundred times faster than a real typhoon** — a satellite image only looks like
+        ///   a turning vortex because it is hours of footage sped up.
+        ///   At 2.2 one turn takes 164 seconds, which is still fast for the game's flow of
+        ///   time but falls within what reads as "slowly swirling".
         /// </summary>
         private const float SpinDegreesPerSecond = 2.2f;
 
-        /// <summary>雲の高度（m）。スカイドームは無限遠なので必ずその手前に出る（§C-2）。</summary>
+        /// <summary>The cloud's altitude (m). The sky dome is at infinity, so it always
+        /// appears in front of it (§C-2).</summary>
         private const float CloudAltitudeMetres = 900f;
 
-        /// <summary>山岳マップで山に埋まらないための、中心の地形高からの最低クリアランス（m）。</summary>
+        /// <summary>The minimum clearance above the terrain height at the centre (m), so it
+        /// does not get buried in a mountain on a mountainous map.</summary>
         private const float MinClearanceMetres = 300f;
 
-        /// <summary>描画に使うレイヤー。0 ＝ Default はどのカメラのカリングマスクにも入る。</summary>
+        /// <summary>The layer used for drawing. 0 = Default, which is in every camera's
+        /// culling mask.</summary>
         private const int CloudLayer = 0;
 
-        // メッシュは固定寸法で 1 回だけ組み、大きさは行列のスケールで変える。
+        // The mesh is built once at a fixed size, and the size is varied through the
+        // matrix's scale.
         private const float MeshInnerRadius = 120f;
         private const float MeshOuterRadius = 1000f;
         private const float MeshHeightMetres = 140f;
 
-        /// <summary>バニラ空の雲量の最大倍率（強度 255 のとき）。</summary>
+        /// <summary>The maximum multiplier on the vanilla sky's cloud cover (at intensity
+        /// 255).</summary>
         private const float BoostMaxCoverage = 1.4f;
 
-        /// <summary>バニラ空の雲の流速の最大倍率。</summary>
+        /// <summary>The maximum multiplier on the vanilla sky clouds' flow speed.</summary>
         private const float BoostWindForce = 2.5f;
 
-        /// <summary>バニラ空の雲の変形速度の最大倍率。</summary>
+        /// <summary>The maximum multiplier on the vanilla sky clouds' rate of
+        /// deformation.</summary>
         private const float BoostEvolutionSpeed = 2f;
 
-        /// <summary>バニラ空の雲の設定を探し直すまでに空けるフレーム数。
-        /// <c>Resources.FindObjectsOfTypeAll</c> は確保と全走査を伴うので毎フレームは回さない。</summary>
+        /// <summary>How many frames to leave before looking for the vanilla sky's cloud
+        /// settings again. <c>Resources.FindObjectsOfTypeAll</c> involves an allocation and
+        /// a full scan, so we do not run it every frame.</summary>
         private const int BoostRetryFrames = 300;
 
-        /// <summary>シェーダを探し直すまでに空けるフレーム数（<see cref="_shaderMissCount"/>）。
-        /// <see cref="BoostRetryFrames"/> と同じ間引きで、理由も同じである。</summary>
+        /// <summary>How many frames to leave before looking for the shader again
+        /// (<see cref="_shaderMissCount"/>). The same thinning as
+        /// <see cref="BoostRetryFrames"/>, for the same reason.</summary>
         private const int ShaderRetryFrames = 300;
 
-        // ★ 配列にしない（罠 2）。参照 1 個ずつで持ち、fake-null の自己修復を効かせる。
+        // ★ Not an array (trap 2). One reference each, so fake-null self-repair works.
         private static Mesh _mesh;
         private static Material _material;
 
-        /// <summary>リボンの縁を落とすアルファ（<c>CloudBandAlpha</c>）。
-        /// <c>Mesh</c> / <c>Material</c> と同じく <c>Component</c> ではないので
-        /// <see cref="Destroy"/> が自分で <c>Object.Destroy</c> する。</summary>
+        /// <summary>The alpha that fades out the ribbon's edges (<c>CloudBandAlpha</c>).
+        /// Like <c>Mesh</c> / <c>Material</c> it is not a <c>Component</c>, so
+        /// <see cref="Destroy"/> calls <c>Object.Destroy</c> on it itself.</summary>
         private static Texture2D _texture;
 
         /// <summary>
-        /// シェーダが 1 つも解決しなかったとき、次に <see cref="ShaderPool"/> へ
-        /// 訊きに行くまでに空けるフレーム数の残り（全体レビュー）。
+        /// When no shader resolves, how many frames are left before we go and ask
+        /// <see cref="ShaderPool"/> again (whole-project review).
         ///
-        /// <c>BuildMaterial</c> はマテリアルが作れない限り**毎フレーム**呼ばれるので、
-        /// 素直に書くと解決の試行がセッションのあいだ毎フレーム走る
-        /// （<see cref="ShaderPool"/> の側にも走査の間引きがあるが、こちらはこちらで持つ）。
-        /// <c>Log.Warn</c> のほうは 1 回だけにラッチしてあったが、**探索自体には
-        /// 同じ間引きが掛かっていなかった** —— 同じファイルの
-        /// <see cref="ApplyVanillaBoost"/> が既に <see cref="BoostRetryFrames"/> で
-        /// やっていることを、こちらに写し忘れていた。
+        /// <c>BuildMaterial</c> is called **every frame** as long as the material cannot be
+        /// built, so written naively the resolution attempt runs every frame for the whole
+        /// session (<see cref="ShaderPool"/> has thinning of its own on the scan, but this
+        /// side keeps its own too).
+        /// The <c>Log.Warn</c> was already latched to fire once, but **the search itself had
+        /// no such thinning** — what <see cref="ApplyVanillaBoost"/> in this same file
+        /// already does with <see cref="BoostRetryFrames"/> had not been copied across here.
         /// </summary>
         private static int _shaderMissCount;
 
@@ -191,18 +212,21 @@ namespace DisasterPlus.Game
         private static float _originalWindForce;
         private static float _originalEvolutionSpeed;
 
-        /// <summary>バニラ空の雲の設定がこの環境に無いことを 1 度だけ名乗ったか。</summary>
+        /// <summary>Whether we have named once that the vanilla sky's cloud settings are
+        /// absent in this environment.</summary>
         private static bool _boostUnavailableLogged;
 
-        /// <summary>シェーダが解決しないことを <c>Log.Warn</c> で 1 度だけ鳴らしたか。
-        /// **<see cref="Destroy"/> で戻さない**（ゲームのビルドに対する事実であって
-        /// 都市ごとの状態ではない）。</summary>
+        /// <summary>Whether the shader failing to resolve has been sounded once through
+        /// <c>Log.Warn</c>. **Not reset by <see cref="Destroy"/>** (it is a fact about the
+        /// game build, not per-city state).</summary>
         private static bool _shaderWarned;
 
-        /// <summary>直近に解決したシェーダの事実（**取れなければ <c>Usable</c> が false**）。
-        /// <see cref="Destroy"/> で戻さない —— <see cref="_shaderWarned"/> と同じ理由で
-        /// ゲームのビルドに対する事実である。抱えるのは <c>Shader</c> 参照だけで、
-        /// <c>Material</c> は <see cref="Destroy"/> が破棄している。</summary>
+        /// <summary>The facts about the shader most recently resolved (**<c>Usable</c> is
+        /// false if we could not get one**).
+        /// Not reset by <see cref="Destroy"/> — for the same reason as
+        /// <see cref="_shaderWarned"/>, it is a fact about the game build. All it holds is a
+        /// <c>Shader</c> reference; the <c>Material</c> is destroyed by
+        /// <see cref="Destroy"/>.</summary>
         private static ShaderPick _pick;
 
         private static bool _errorLogged;
@@ -210,9 +234,10 @@ namespace DisasterPlus.Game
         public static TyphoonCloudState State { get { return _state; } }
 
         /// <summary>
-        /// 診断に出す 1 行（**英語**）。<c>Assumptions</c> は同じ答えを
-        /// <see cref="ShaderPool"/> から直接引くので、ここに「粒子系か」を
-        /// 別の口として生やさない（同じ事実の口が 2 つあると片方が古くなる）。
+        /// The one line for the diagnostics (**in English**). <c>Assumptions</c> gets the
+        /// same answer directly from <see cref="ShaderPool"/>, so do not grow a second
+        /// accessor here for "is it a particle system" (with two accessors onto the same
+        /// fact, one of them goes stale).
         /// </summary>
         public static string ShaderDetail
         {
@@ -224,19 +249,21 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>バニラ空の雲を今増強しているか。</summary>
+        /// <summary>Whether the vanilla sky's clouds are currently being boosted.</summary>
         public static bool VanillaBoostApplied { get { return _boostApplied; } }
 
-        /// <summary>直近のフレームで出した <c>DrawMesh</c> の回数（0 か 1）。</summary>
+        /// <summary>How many <c>DrawMesh</c> calls were made on the most recent frame
+        /// (0 or 1).</summary>
         public static int LastDrawCalls { get { return _lastDrawCalls; } }
 
-        /// <summary>直近に描いた雲の外周半径（m）。診断用。</summary>
+        /// <summary>The outer radius of the cloud most recently drawn (m). For
+        /// diagnostics.</summary>
         public static float LastRadiusMetres { get { return _lastRadius; } }
 
         /// <summary>
-        /// **main スレッド、毎フレーム。**
-        /// <paramref name="snapshot"/> が古くても構わない —— 1 フレーム前の中心に
-        /// 雲があっても誰も気付かない。
+        /// **Main thread, every frame.**
+        /// It does not matter if <paramref name="snapshot"/> is stale — nobody notices a
+        /// cloud sitting at where the centre was one frame ago.
         /// </summary>
         public static void Update(TyphoonSnapshot snapshot)
         {
@@ -255,8 +282,8 @@ namespace DisasterPlus.Game
                     Log.Error("typhoon cloud failed", e);
                 }
 
-                // 触ったものは返す。例外が出たフレームでバニラ空の設定を
-                // 握ったままにしない。
+                // Give back what we touched. Do not stay holding the vanilla sky's settings
+                // on a frame where something threw.
                 ReleaseVanillaBoost();
             }
         }
@@ -265,15 +292,16 @@ namespace DisasterPlus.Game
         {
             if (snapshot == null || !snapshot.Valid || !snapshot.Active)
             {
-                // ★ 台風が終わったフレームで**自分で**後始末する。sim 側の
-                //   TyphoonController は雲を 1 度も呼ばない（クラス doc）。
+                // ★ Clean up **ourselves** on the frame the typhoon ends. The sim side's
+                //   TyphoonController never once calls the cloud (class doc).
                 ReleaseVanillaBoost();
 
-                // ★★ **粒の側にも「台風は居ない」を伝える。** 伝えないと
-                //    TyphoonCloudFx の状態と RenderEffect の回数が最後の値で
-                //    止まったままになり、**診断が「まだ描いている」と読める**。
-                //    あちらは Active でないフレームで Idle に落ちて 0 を出す
-                //    （既に湧いた粒は寿命ぶん漂って消える。それが正しい見え方）。
+                // ★★ **Tell the puff side "there is no typhoon" too.** Without that,
+                //    TyphoonCloudFx's state and its RenderEffect count stay stuck at their
+                //    last values, and **the diagnostics read as "still drawing"**.
+                //    That side drops to Idle and reports 0 on a frame that is not Active
+                //    (particles already spawned drift for their lifetime and disappear,
+                //    which is the correct look).
                 TyphoonCloudFx.Update(snapshot, _spinDegrees);
 
                 _state = TyphoonCloudState.NotBuilt;
@@ -282,8 +310,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 大きさは粒の側と**同じ 1 本**から取る（TyphoonCloudFx.VortexRadiusMetres）。
-            //   2 か所で決めると、退避したときに渦の大きさが飛ぶ。
+            // ★ Take the size from **the same single source** as the puff side
+            //   (TyphoonCloudFx.VortexRadiusMetres). Decide it in two places and the vortex
+            //   jumps in size when we fall back.
             float radius = TyphoonCloudFx.VortexRadiusMetres(snapshot);
             if (!(radius > 0f))
             {
@@ -294,22 +323,24 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ ポーズ中は回さない（全体レビュー）。ここは main スレッドの
-            //   毎フレーム経路なので Time.deltaTime はポーズしても進み続ける ——
-            //   何も動いていない都市の上で雲だけが回っていた。
-            //   SimulationManager.SimulationPaused は bool のプロパティで、
-            //   main スレッドから読んでよい（②の CameraShakeBooster と同じ扱い）。
-            //   **粒とメッシュで同じ角度を使う**ので、退避しても向きが飛ばない。
+            // ★ Do not turn it while paused (whole-project review). This is a per-frame
+            //   main-thread route, so Time.deltaTime keeps advancing through a pause —
+            //   the cloud alone was turning over a city where nothing was moving.
+            //   SimulationManager.SimulationPaused is a bool property and may be read from
+            //   the main thread (treated the same way as ②'s CameraShakeBooster).
+            //   **The puffs and the mesh use the same angle**, so the orientation does not
+            //   jump when we fall back.
             if (!SimulationIsPaused())
             {
                 _spinDegrees += SpinDegreesPerSecond * Time.deltaTime;
                 if (_spinDegrees >= 360f) _spinDegrees -= 360f;
             }
 
-            // ★★ **本経路は粒**（クラス doc）。借りた雲の粒で渦が組めたら、
-            //    メッシュは 1 枚も描かないし、**組みもしない** —— 両方出すと
-            //    粒の中に円盤が透けて見えるし、使わないシェーダを毎フレーム
-            //    探しに行って実機のログが埋まる。
+            // ★★ **The main route is the puffs** (class doc). If the vortex can be built
+            //    from borrowed cloud puffs, we draw not one mesh — and **do not even build
+            //    one** — because showing both makes a disc show through inside the puffs,
+            //    and because going looking for a shader we will not use every frame fills
+            //    the in-game log.
             if (TyphoonCloudFx.Update(snapshot, _spinDegrees))
             {
                 _state = TyphoonCloudState.Puffs;
@@ -319,10 +350,11 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ── ここから下は退避経路（自前メッシュ）────────────────────
+            // ── Everything below is the fallback route (our own mesh) ────────────
 
-            // ★ 罠 2: 参照そのものを毎フレーム見る。破棄済みなら Unity の fake-null で
-            //   null と等価になり、ここで作り直される（2 つ目の都市の自己修復）。
+            // ★ Trap 2: look at the reference itself every frame. If it has been destroyed,
+            //   Unity's fake-null makes it compare equal to null and it is rebuilt here
+            //   (the second city's self-repair).
             if (_mesh == null) _mesh = BuildMesh();
             if (_material == null) _material = BuildMaterial();
             if (_mesh == null || _material == null)
@@ -337,20 +369,21 @@ namespace DisasterPlus.Game
 
             float scale = radius / MeshOuterRadius;
 
-            // 以下は全て struct。**ヒープ確保は 0 バイト**（クラス doc）。
+            // Everything below is a struct. **Zero bytes of heap allocation** (class doc).
             var position = new Vector3(centre.X, altitude, centre.Z);
             var rotation = Quaternion.AngleAxis(_spinDegrees, Vector3.up);
             var matrix = Matrix4x4.TRS(position, rotation, new Vector3(scale, 1f, scale));
 
-            // ★ 影を落とさない・受けない（全体レビュー）。4 引数版は
-            //   castShadows: true / receiveShadows: true を転送するので、
-            //   **900 m 上空の半透明な渦（4560 三角形）が影のパスに入り**、
-            //   都市に渦巻きの影を落としうる。雲は演出であって遮蔽物ではない。
-            //   camera は null のまま（＝全カメラ）にする —— CS はゲーム内カメラの
-            //   ほかにマップ編集や写真モードでも世界を描くので、1 台に絞ると
-            //   そこだけ雲が消える。
+            // ★ Cast and receive no shadows (whole-project review). The four-argument
+            //   overload forwards castShadows: true / receiveShadows: true, which would put
+            //   **a translucent vortex 900 m up (4560 triangles) into the shadow pass** and
+            //   could drop a spiral shadow on the city. The cloud is presentation, not an
+            //   occluder.
+            //   Leave camera as null (i.e. all cameras) — CS draws the world in the map
+            //   editor and photo mode as well as through the in-game camera, so narrowing it
+            //   to one makes the cloud disappear there.
             Graphics.DrawMesh(_mesh, matrix, _material, CloudLayer,
-                              null,     // camera: 全カメラ
+                              null,     // camera: all cameras
                               0,        // submeshIndex
                               null,     // MaterialPropertyBlock
                               false,    // castShadows
@@ -363,11 +396,11 @@ namespace DisasterPlus.Game
             ApplyVanillaBoost(snapshot.Intensity);
         }
 
-        // ── メッシュとマテリアル ───────────────────────────────────
+        // ── The mesh and the material ──────────────────────────────────────
 
         /// <summary>
-        /// <c>SpiralMesh</c>（Core の純データ）から <c>Mesh</c> を組む。
-        /// 都市ごとに 1 回だけ走る。**毎フレームの経路ではない。**
+        /// Build a <c>Mesh</c> from <c>SpiralMesh</c> (pure data in Core).
+        /// It runs once per city. **This is not a per-frame route.**
         /// </summary>
         private static Mesh BuildMesh()
         {
@@ -396,14 +429,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **CS のマテリアルを借りない**（罠 1）。半透明で描きたいので、まず粒子系の
-        /// アルファブレンドを狙い、無ければ順に落とす。<c>Standard</c> まで落ちたときだけ
-        /// 透過の設定を手で入れる —— 既定の <c>Standard</c> は不透明なので、
-        /// **都市の上に不透明な灰色の円盤を置くことになる**。
+        /// **Do not borrow a CS material** (trap 1). We want to draw it translucently, so we
+        /// aim first for a particle alpha blend and fall back in order if there is none.
+        /// Only when we fall all the way to <c>Standard</c> do we set transparency up by
+        /// hand — the default <c>Standard</c> is opaque, so **it would put an opaque grey
+        /// disc over the city**.
         /// </summary>
         private static Material BuildMaterial()
         {
-            // ★ 毎フレーム探しに行かない（_shaderMissCount の doc）。
+            // ★ Do not go looking every frame (the doc on _shaderMissCount).
             if (_shaderMissCount > 0)
             {
                 _shaderMissCount--;
@@ -411,14 +445,15 @@ namespace DisasterPlus.Game
                 return null;
             }
 
-            // ★ Shader.Find が全滅する環境があるので、名前で引けなければ
-            //   読み込み済み Material から**シェーダだけ**を借りる（ShaderPool）。
+            // ★ There are environments where Shader.Find fails entirely, so when lookup by
+            //   name fails we borrow **the shader only** from an already-loaded Material
+            //   (ShaderPool).
             _pick = ShaderPool.Resolve(ShaderPreference.AlphaBlended);
             if (!_pick.Usable)
             {
-                // ★ Log.Warn はスロットルされない。ここは**毎フレームの経路**
-                //   （マテリアルが作れない限り毎フレーム再挑戦する）なので、
-                //   1 回だけ鳴らして以後は黙る。
+                // ★ Log.Warn is not throttled. This is **a per-frame route** (it retries
+                //   every frame as long as the material cannot be built), so we sound it
+                //   once and then stay quiet.
                 if (!_shaderWarned)
                 {
                     _shaderWarned = true;
@@ -434,23 +469,25 @@ namespace DisasterPlus.Game
             var m = new Material(_pick.Shader);
             m.name = "DisasterPlus_TyphoonCloud";
 
-            // ★ リボンの縁を落とすテクスチャ。UV は SpiralMesh が出しているのに
-            //   _MainTex を 1 度も割り当てていなかった（全体レビュー）＝ UV は
-            //   死んだデータで、縁の硬いべた塗りが出ていた。
-            //   **色は入れない**（白 × ティント ＝ ティント）。作れなければ
-            //   割り当てないだけで、今までと同じ見え方に落ちる。
+            // ★ The texture that fades out the ribbon's edges. SpiralMesh was emitting UVs
+            //   and yet _MainTex had never once been assigned (whole-project review), i.e.
+            //   the UVs were dead data and we were getting a hard-edged flat fill.
+            //   **It carries no colour** (white × tint = tint). If it cannot be built we
+            //   simply do not assign it and fall back to exactly the old appearance.
             if (_texture == null) _texture = BuildTexture();
             if (_texture != null && m.HasProperty("_MainTex")) m.SetTexture("_MainTex", _texture);
 
-            // 嵐雲の色。粒子系シェーダのティントは _TintColor、Standard は _Color
-            // （③が確定させた区別。FireWhirlFlameFx の doc）。**効かないほうを
-            // 書いて満足しない**ので、実在するプロパティにだけ入れる。
+            // The storm cloud's colour. A particle shader's tint is _TintColor, Standard's
+            // is _Color (the distinction ③ settled. FireWhirlFlameFx's doc). **Do not write
+            // the one that has no effect and feel satisfied** — only set properties that
+            // actually exist.
             var tint = new Color(0.32f, 0.34f, 0.38f, 0.5f);
             if (m.HasProperty("_TintColor")) m.SetColor("_TintColor", tint);
             if (m.HasProperty("_Color")) m.SetColor("_Color", tint);
 
-            // ★ Standard まで落ちたときだけ透過へ落とす。借りてきた別のシェーダには
-            //   掛けない（_Mode / _SrcBlend は Standard の契約である）。
+            // ★ Only switch to transparency when we fell all the way to Standard. Do not
+            //   apply it to some other borrowed shader (_Mode / _SrcBlend are Standard's
+            //   contract).
             if (_pick.StandardFallback) ShaderPool.MakeStandardTransparent(m);
 
             m.renderQueue = 3000;   // Transparent
@@ -458,12 +495,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// リボンの縁を落とすアルファのテクスチャを 1 枚作る。都市ごとに 1 回だけ。
+        /// Build the one alpha texture that fades out the ribbon's edges. Once per city.
         ///
-        /// **RGB は白**（色はマテリアルのティントが持つ。<c>CloudBandAlpha</c> の doc）。
-        /// <c>TextureFormat.Alpha8</c> にしないのは、粒子系シェーダが RGB も掛けるため
-        /// 環境によっては**真っ黒**になりうるからである。作れなければ null を返し、
-        /// 呼び出し側は <c>_MainTex</c> を割り当てない（＝これまでどおりの見え方）。
+        /// **The RGB is white** (the colour lives in the material's tint.
+        /// <c>CloudBandAlpha</c>'s doc). We do not use <c>TextureFormat.Alpha8</c> because a
+        /// particle shader multiplies the RGB as well, which in some environments would make
+        /// it **pure black**. If it cannot be built we return null and the caller does not
+        /// assign <c>_MainTex</c> (i.e. the appearance stays as it was).
         /// </summary>
         private static Texture2D BuildTexture()
         {
@@ -481,8 +519,8 @@ namespace DisasterPlus.Game
 
                 var t = new Texture2D(size, size, TextureFormat.RGBA32, false);
                 t.name = "DisasterPlus_TyphoonCloudBand";
-                // u は腕に沿った 1 本ぶん、v はリボンを横切る 1 本ぶんしか無いので
-                // どちらも繰り返さない。縁の 0 を折り返さないためにも Clamp である。
+                // u covers one span along an arm and v one span across the ribbon, so
+                // neither repeats. Clamp also keeps the 0 at the edge from wrapping round.
                 t.wrapMode = TextureWrapMode.Clamp;
                 t.filterMode = FilterMode.Bilinear;
                 t.SetPixels32(pixels);
@@ -491,16 +529,18 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // ここで諦めても雲は出る（縁が硬くなるだけ）。毎フレームの経路では
-                // ないが、ログは出さない —— 失敗しても機能は落ちない。
+                // Giving up here still leaves a cloud (just with harder edges). This is not
+                // a per-frame route, but we log nothing — failing does not degrade the
+                // feature.
                 return null;
             }
         }
 
         /// <summary>
-        /// シミュレーションが止まっているか。読めなければ「止まっていない」に倒す
-        /// （雲が回らないより、ポーズ中に回るほうが害が小さい……のではなく、
-        ///  読めない環境で雲が永久に静止するのを避けるため）。
+        /// Whether the simulation is stopped. If it cannot be read we come down on "not
+        /// stopped" (not because a cloud turning through a pause does less harm than one
+        /// that never turns, but to avoid the cloud standing still for ever in an
+        /// environment where it cannot be read).
         /// </summary>
         private static bool SimulationIsPaused()
         {
@@ -515,16 +555,18 @@ namespace DisasterPlus.Game
             }
         }
 
-        // ── バニラ空の雲の増強（無ければ黙って諦める） ─────────────────
+        // ── Boosting the vanilla sky's clouds (give up quietly if absent) ──────
 
         /// <summary>
-        /// <c>DayNightDynamicCloudsProperties</c> の 3 値を上げ、空全体を重く・速くする。
-        /// 上書きされないのはこの 3 つだけである（<c>m_Coverage</c> は毎フレーム
-        /// <c>m_MaxCoverage × SampleCloudCoverage()</c> で潰されるので書いても無意味。§C-2）。
+        /// Raise three values on <c>DayNightDynamicCloudsProperties</c> to make the whole
+        /// sky heavier and faster. These three are the only ones that are not overwritten
+        /// (<c>m_Coverage</c> is crushed every frame by
+        /// <c>m_MaxCoverage × SampleCloudCoverage()</c>, so writing it is pointless. §C-2).
         ///
-        /// **この型がこの環境に無いことは正当である**（DLC・グラフィック設定。PARTIAL）。
-        /// 無ければ診断に 1 行出して諦める —— ④の自前の雲はこれに依存しない。
-        /// <c>Assumptions</c> には入れない（FAIL にすると狼少年になる）。
+        /// **This type being absent in this environment is legitimate** (DLC and graphics
+        /// settings. PARTIAL). If it is absent we put one line in the diagnostics and give
+        /// up — ④'s own cloud does not depend on it.
+        /// Do not put it in <c>Assumptions</c> (making it a FAIL would cry wolf).
         /// </summary>
         private static void ApplyVanillaBoost(byte intensity)
         {
@@ -534,13 +576,15 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 参照 1 個。破棄済みなら fake-null で null と等価になり、探し直される。
+            // ★ One reference. If it has been destroyed, fake-null makes it compare equal to
+            //   null and it is looked up again.
             //
-            // ★★ ただし**毎フレーム探しに行かない。** SceneObjects.FindInScene は
-            //    Resources.FindObjectsOfTypeAll<T>() を呼び、**配列を確保して全オブジェクトを
-            //    走査する**。この型が存在しない環境（正当。§C-2）では見つからないので、
-            //    素直に書くと台風の間ずっと毎フレーム確保と全走査が走る。
-            //    TyphoonReader のプレハブ走査と同じ間引きを掛ける。
+            // ★★ But **do not go looking every frame.** SceneObjects.FindInScene calls
+            //    Resources.FindObjectsOfTypeAll<T>(), which **allocates an array and sweeps
+            //    every object**. In an environment where this type does not exist
+            //    (legitimate. §C-2) it is never found, so written naively an allocation and
+            //    a full sweep run every frame for the whole of the typhoon.
+            //    We apply the same thinning as TyphoonReader's prefab scan.
             if (_clouds == null)
             {
                 if (_boostMissCount > 0)
@@ -568,15 +612,17 @@ namespace DisasterPlus.Game
 
             if (!_boostApplied)
             {
-                // ★ 元の値は**最初の 1 回だけ**控える。毎フレーム読み直すと、
-                //   自分が書いた値を「元の値」として覚え直して指数的に増える。
+                // ★ Take down the original values **once only**. Re-read them every frame
+                //   and we would memorise the values we wrote as "the originals" and grow
+                //   exponentially.
                 _originalMaxCoverage = _clouds.m_MaxCoverage;
                 _originalWindForce = _clouds.m_WindForce;
                 _originalEvolutionSpeed = _clouds.m_EvolutionSpeed;
                 _boostApplied = true;
             }
 
-            // 台風が近づく（強くなる）ほど重く・速くする。強度 0 で等倍。
+            // The closer (stronger) the typhoon, the heavier and faster. At intensity 0 it
+            // is unchanged.
             float t = intensity / 255f;
             float coverage = _originalMaxCoverage * (1f + (BoostMaxCoverage - 1f) * t);
             if (coverage > 1f) coverage = 1f;
@@ -587,15 +633,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// バニラ空の雲の設定を元へ戻す。**冪等。** 台風が終わったフレーム・
-        /// 設定を切ったフレーム・<see cref="Destroy"/> から呼ばれる。
+        /// Put the vanilla sky's cloud settings back. **Idempotent.** Called on the frame
+        /// the typhoon ends, on the frame the setting is switched off, and from
+        /// <see cref="Destroy"/>.
         /// </summary>
         public static void ReleaseVanillaBoost()
         {
             if (!_boostApplied) return;
             _boostApplied = false;
 
-            if (_clouds == null) return;   // 都市ごと消えた。戻す先が無い
+            if (_clouds == null) return;   // it went with the city. There is nothing to restore
 
             _clouds.m_MaxCoverage = _originalMaxCoverage;
             _clouds.m_WindForce = _originalWindForce;
@@ -603,18 +650,20 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **レベルアンロードと、設定で雲を切ったときに呼ぶ。** main スレッド専用。
+        /// **Call on level unload and when the cloud is switched off in the settings.**
+        /// Main thread only.
         ///
-        /// <c>Mesh</c> も <c>Material</c> も <c>Component</c> ではないので、
-        /// <c>GameObject</c> を消しても道連れにならない。**自分で <c>Object.Destroy</c> する**
-        /// （クラス doc）。冪等である。
+        /// Neither <c>Mesh</c> nor <c>Material</c> is a <c>Component</c>, so destroying a
+        /// <c>GameObject</c> does not take them with it. **We <c>Object.Destroy</c> them
+        /// ourselves** (class doc). It is idempotent.
         /// </summary>
         public static void Destroy()
         {
             ReleaseVanillaBoost();
 
-            // ★ 粒のクローン（GameObject と、その内側の ParticleEffect）も必ず畳む。
-            //   DontDestroyOnLoad で作ってあるので、放っておくと都市をまたいで残る。
+            // ★ Always pack away the puff clones (the GameObject and the ParticleEffect
+            //   inside it) too. They are created with DontDestroyOnLoad, so left alone they
+            //   survive across cities.
             TyphoonCloudFx.Destroy();
 
             if (_mesh != null) Object.Destroy(_mesh);
@@ -623,8 +672,8 @@ namespace DisasterPlus.Game
             if (_material != null) Object.Destroy(_material);
             _material = null;
 
-            // ★ Texture2D も Component ではない（Mesh / Material と同じ。②が
-            //   WaveformView の Texture2D で踏んだのと同じ形のリーク）。
+            // ★ Texture2D is not a Component either (the same as Mesh / Material; the same
+            //   shape of leak ② hit with WaveformView's Texture2D).
             if (_texture != null) Object.Destroy(_texture);
             _texture = null;
 
@@ -636,8 +685,8 @@ namespace DisasterPlus.Game
             _lastDrawCalls = 0;
             _lastRadius = 0f;
             _boostUnavailableLogged = false;
-            // ★ _errorLogged は戻さない（ゲームのビルドに対する事実であって
-            //    都市ごとの状態ではない。④の他の型と同じ判断）。
+            // ★ _errorLogged is not reset (it is a fact about the game build, not per-city
+            //    state. The same decision as ④'s other types).
         }
     }
 }

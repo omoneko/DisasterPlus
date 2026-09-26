@@ -9,11 +9,12 @@ using ColossalFramework.Plugins;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// Locales/&lt;lang&gt;.txt を読み、Strings の public static string フィールドを
-    /// フィールド名をキーに上書きする。
+    /// Reads Locales/&lt;lang&gt;.txt and overwrites the public static string fields of Strings,
+    /// keyed by field name.
     ///
-    /// 英語の既定値を最初に 1 回だけ退避し、別言語を適用する前に必ず復元する。
-    /// そうしないと部分翻訳の言語を行き来したとき、前の言語の訳が残る。
+    /// The English defaults are stashed away exactly once at the start and always restored
+    /// before applying another language. Otherwise, moving between partially translated
+    /// languages leaves the previous language's translations behind.
     /// </summary>
     public static class LocaleLoader
     {
@@ -47,55 +48,57 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 一度引けた MOD フォルダ。**セッション中は変わらない**（Workshop の
-        /// フォルダもローカルのフォルダもゲームの起動中に移動しない）ので控えておく。
-        /// **null は控えない** —— まだ <c>PluginManager</c> が出来ていないだけかもしれず、
-        /// 控えると「一度早く呼んだせいで以後ずっと無い」を作ることになる。
+        /// The mod folder, once it has been resolved. **It does not change during a session**
+        /// (neither the Workshop folder nor a local folder moves while the game is running),
+        /// so it is kept. **null is not kept** — it may only be that <c>PluginManager</c> is
+        /// not ready yet, and keeping it would create "one early call and it is gone for good".
         /// </summary>
         private static string _modPath;
 
         /// <summary>
-        /// MOD の配置フォルダ。Workshop 版とローカル版の両方に対応する。
-        /// 引けなければ null（呼び出し側は次の機会に引き直してよい）。
+        /// The folder the mod is installed in. Handles both the Workshop and local versions.
+        /// null if it cannot be resolved (the caller may retry at the next opportunity).
         ///
-        /// ── ★★ <c>GetInstances&lt;Mod&gt;()</c> は**必ず空を返す**（IL 実測）────────
+        /// ── ★★ <c>GetInstances&lt;Mod&gt;()</c> **always returns empty** (measured from the IL) ────
         ///
-        /// 2026-08-22 まで、ここは <c>p.GetInstances&lt;Mod&gt;()</c> が 1 個でも返した
-        /// プラグインの <c>modPath</c> を採っていた。**1 度も返らない。**
-        /// <c>PluginManager.PluginInfo.GetInstances&lt;T&gt;()</c> の中身は
+        /// Until 2026-08-22, this took the <c>modPath</c> of whichever plugin
+        /// <c>p.GetInstances&lt;Mod&gt;()</c> returned at least one instance from.
+        /// **It never returns one.** The body of
+        /// <c>PluginManager.PluginInfo.GetInstances&lt;T&gt;()</c> is
         ///
         /// <code>
         /// foreach (Type t in assembly.GetExportedTypes())
         ///     if (!t.IsClass || t.IsAbstract) continue;
         ///     Type[] ifaces = t.GetInterfaces();
-        ///     if (!ifaces.Contains(typeof(T))) continue;          ★ ここ
+        ///     if (!ifaces.Contains(typeof(T))) continue;          ★ here
         ///     if (ifaces.Contains(PluginManager.userModType))
         ///         list.Add(this.userModInstance as T);
         ///     else list.Add(CreateInstance&lt;T&gt;(t.GetConstructor(Type.EmptyTypes)));
         /// </code>
         ///
-        /// で、<b><c>T</c> は「その型が実装している<u>インタフェース</u>」の中から
-        /// 探される</b>。<see cref="Mod"/> は <c>class</c> なので、どの型の
-        /// <c>GetInterfaces()</c> にも入っていない ⇒ 常に空配列 ⇒ 常に null が返っていた。
+        /// so <b><c>T</c> is looked for among the <u>interfaces</u> the type implements</b>.
+        /// <see cref="Mod"/> is a <c>class</c>, so it is in no type's <c>GetInterfaces()</c>
+        /// ⇒ always an empty array ⇒ null was always returned.
         ///
-        /// 目に見えた影響は 2 つ:
-        ///   - <c>Locales\ja.txt</c> が**一度も読まれていなかった**（英語の既定値のまま）
-        ///   - <c>Audio\erupting-volcano.wav</c> が見つからず、噴火が無音だった
-        ///     （実機ログ「the mod folder could not be resolved」）
+        /// There were two visible consequences:
+        ///   - <c>Locales\ja.txt</c> was **never read once** (the English defaults stayed)
+        ///   - <c>Audio\erupting-volcano.wav</c> was not found, so eruptions were silent
+        ///     (the log from the game: "the mod folder could not be resolved")
         ///
-        /// ★ 直し方は <c>GetInstances&lt;IUserMod&gt;()</c> ではなく
-        ///   <c>PluginInfo.ContainsAssembly(Assembly)</c> にした。あちらは
-        ///   <c>m_Assemblies</c> の**参照比較**だけで（IL 実測）、型の走査も
-        ///   インスタンス生成も起こさない。**この DLL が入っているプラグインを
-        ///   直接指す**ので、インタフェースの実装状況にも <c>isEnabled</c> にも依らない。
+        /// ★ The fix was not <c>GetInstances&lt;IUserMod&gt;()</c> but
+        ///   <c>PluginInfo.ContainsAssembly(Assembly)</c>. That does nothing but a
+        ///   **reference comparison** over <c>m_Assemblies</c> (measured from the IL); it
+        ///   neither sweeps types nor creates instances. **It points straight at the plugin
+        ///   this DLL is in**, so it depends on neither which interfaces are implemented nor
+        ///   <c>isEnabled</c>.
         ///
-        /// ★ <c>Assembly.Location</c> は使えない。<c>PluginManager.LoadPlugin</c> が
-        ///   <c>Assembly.Load(File.ReadAllBytes(path))</c> でバイト列から読むので
-        ///   （IL 実測）、MOD のアセンブリの <c>Location</c> は**空文字**である。
+        /// ★ <c>Assembly.Location</c> cannot be used. <c>PluginManager.LoadPlugin</c> reads
+        ///   from a byte array with <c>Assembly.Load(File.ReadAllBytes(path))</c>
+        ///   (measured from the IL), so a mod assembly's <c>Location</c> is **an empty string**.
         ///
-        /// ★ <c>isEnabled</c> は見ない。このコードが動いている時点でこの MOD は
-        ///   有効であり、しかも <c>get_isEnabled</c> は <c>SavedBool</c> を作って
-        ///   設定ファイルを読む（IL 実測）——**判定に要らない I/O** である。
+        /// ★ <c>isEnabled</c> is not consulted. If this code is running then this mod is
+        ///   enabled, and besides, <c>get_isEnabled</c> creates a <c>SavedBool</c> and reads
+        ///   the settings file (measured from the IL) — **I/O the check does not need**.
         /// </summary>
         public static string ModDirectoryPath()
         {
@@ -112,7 +115,7 @@ namespace DisasterPlus.Game
 
                     bool mine;
                     try { mine = p.ContainsAssembly(self); }
-                    catch { continue; /* 壊れた MOD の列挙で落ちない */ }
+                    catch { continue; /* do not fall over enumerating a broken mod */ }
                     if (!mine) continue;
 
                     string path = p.modPath;
@@ -122,7 +125,7 @@ namespace DisasterPlus.Game
                     return _modPath;
                 }
             }
-            catch { /* PluginManager がまだ出来ていない等。次の機会に引き直す */ }
+            catch { /* PluginManager not ready yet, and the like. Retry at the next opportunity */ }
 
             return null;
         }
@@ -195,7 +198,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>en.txt を既定値から書き出す。手書きテンプレートは黙って乖離するので使わない。</summary>
+        /// <summary>Writes en.txt out from the defaults. A hand-written template drifts silently, so it is not used.</summary>
         public static void WriteTemplate(string path)
         {
             CaptureDefaults();

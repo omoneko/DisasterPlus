@@ -5,66 +5,75 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ④が<b>バニラの粒子エフェクトを借りる</b>ときの共通部分。**main スレッド専用。**
+    /// The common parts of ④ <b>borrowing vanilla particle effects</b>.
+    /// **Main thread only.**
     ///
-    /// ── ★ 名前ではなくマテリアルで選ぶ ────────────────────────────
+    /// ── ★ Pick by material, not by name ──────────────────────────────────
     ///
-    /// エフェクト実測文書の在庫は <b>PARTIAL</b> と印が付いている（アセットに在ることと、
-    /// 実行時 API がそれを返すことは別）。名前を書き並べて先頭から試す作りは、
-    /// その名前がこのビルドに在るかどうかに賭けている。
+    /// The inventory in the effects measurement document is marked <b>PARTIAL</b> (an
+    /// asset existing and the runtime API returning it are two different things). Writing
+    /// a list of names and trying them from the top is a bet on those names existing in
+    /// this build.
     ///
-    /// ここは賭けない。<c>EffectsWrapper.m_BuiltinEffects</c>
-    /// （＝ <c>Resources.FindObjectsOfTypeAll&lt;EffectInfo&gt;()</c> の結果。「このビルドに
-    /// 読み込まれている全部」）と <c>EffectCollection.Effects</c>（登録済み 186 個）を
-    /// <b>実際に列挙し</b>、各 <c>ParticleEffect</c> が実際に描いている
-    /// <c>ParticleSystemRenderer.sharedMaterial.name</c> を読んで、
-    /// <b>呼び出し側が渡したマテリアルの優先順で採点する</b>。
+    /// Here we do not bet. We <b>actually enumerate</b>
+    /// <c>EffectsWrapper.m_BuiltinEffects</c> (i.e. the result of
+    /// <c>Resources.FindObjectsOfTypeAll&lt;EffectInfo&gt;()</c>, "everything loaded into
+    /// this build") and <c>EffectCollection.Effects</c> (the 186 registered ones), read
+    /// the <c>ParticleSystemRenderer.sharedMaterial.name</c> each <c>ParticleEffect</c> is
+    /// really drawing with, and <b>score them by the material preference the caller passed
+    /// in</b>.
     ///
-    /// 出荷アセットから取り出して測ったテクスチャの平均 RGB:
+    /// Average RGB measured from the textures extracted from the shipped assets:
     ///
     /// <code>
-    /// マテリアル      テクスチャ        平均 RGB        見た目
-    /// Steam          steam           (168, 184, 189)  淡い青白の綿。**雲**
-    /// Water          water           (201, 222, 254)  白青の飛沫。**雨・しぶき**
-    /// Placement Dust placement-dust  (198, 165, 131)  砂色の土煙
-    /// IndustryDust   IndustryDust    ( 99,  94,  79)  茶灰の粉塵
-    /// Smoke          smoke           ( 75,  78,  80)  暗い煤色の塊（火の粉の点入り）
+    /// Material       Texture         Average RGB      Appearance
+    /// Steam          steam           (168, 184, 189)  Pale blue-white cotton. **Cloud**
+    /// Water          water           (201, 222, 254)  White-blue spray. **Rain / spray**
+    /// Placement Dust placement-dust  (198, 165, 131)  Sand-coloured dust cloud
+    /// IndustryDust   IndustryDust    ( 99,  94,  79)  Brown-grey dust
+    /// Smoke          smoke           ( 75,  78,  80)  Dark sooty mass (with specks of ember)
     /// </code>
     ///
-    /// <c>startColor</c> は乗算で掛かるので、<b>素材が煤なら何色を掛けても煙に見える。</b>
-    /// これが持ち主の「雲のエフェクトが煙になっている」の直接の原因だった。
+    /// <c>startColor</c> is applied multiplicatively, so <b>if the source is soot, it looks
+    /// like smoke whatever colour you multiply by.</b> That was the direct cause of the
+    /// owner's "the cloud effect has turned into smoke".
     ///
-    /// 名前の一覧（<c>namePreference</c>）は<b>同点の並べ替えにしか使わない</b>。
-    /// ゲームが更新されて名前が変わっても、マテリアルが同じなら同じ絵が出る。
+    /// The list of names (<c>namePreference</c>) is <b>only ever used to break ties</b>.
+    /// If the game is updated and the names change, the same picture comes out as long as
+    /// the material is the same.
     ///
-    /// ★ <c>sharedMaterial</c> を読むこと。<c>material</c> はレンダラのマテリアルを
-    ///   **複製して差し替える**ので、ゲームの共有状態を壊すうえリークする。
+    /// ★ Read <c>sharedMaterial</c>. <c>material</c> **clones the renderer's material and
+    ///   swaps it in**, which both damages the game's shared state and leaks.
     ///
-    /// ── ★ 複製してから触る（§D-5）─────────────────────────────────
+    /// ── ★ Clone before touching (§D-5) ───────────────────────────────────
     ///
-    /// <c>ParticleSystem</c> の色・粒径・寿命・可視距離は**エフェクトの共有状態**である。
-    /// 借り元をそのまま書き換えると街じゅうの蒸気や飛沫が道連れになり、
-    /// セーブではなくメモリ上に残る。<see cref="Clone"/> が
-    /// <c>Object.Instantiate</c> してから返す。
+    /// A <c>ParticleSystem</c>'s colour, particle size, lifetime and visibility distance
+    /// are **the effect's shared state**. Rewrite the source in place and every bit of
+    /// steam and spray in the city is dragged along with it — and it stays in memory, not
+    /// in the save. <see cref="Clone"/> does an <c>Object.Instantiate</c> before returning.
     ///
-    /// ★★ 複製した <c>GameObject</c> は**アクティブなシーンに入る**ので、そのままだと
-    ///   自分の <c>ParticleSystem</c> がワールド原点で吐き続ける。
-    ///   <see cref="Clone"/> は <c>emission.enabled = false</c> にしてから返す
-    ///   （<c>InitializeEffect()</c> は**その状態をもう 1 段複製する**ので内側にも
-    ///   同じ設定が渡る。IL 実測）。<c>playOnAwake</c> は**触らない** ——
-    ///   内側の複製は <c>ParticleEffect.Update</c> が <c>isPaused</c> を見て
-    ///   <c>Play()</c> し直す作りなので、止めた状態を配ると粒子が動かなくなる。
+    /// ★★ The cloned <c>GameObject</c> **goes into the active scene**, so left as it is
+    ///   its own <c>ParticleSystem</c> keeps emitting at the world origin.
+    ///   <see cref="Clone"/> sets <c>emission.enabled = false</c> before returning
+    ///   (<c>InitializeEffect()</c> **clones that state one level further down**, so the
+    ///   same setting is passed to the inner one too. Measured from the IL).
+    ///   <c>playOnAwake</c> is **left alone** — the inner clone is built so that
+    ///   <c>ParticleEffect.Update</c> looks at <c>isPaused</c> and calls <c>Play()</c>
+    ///   again, so handing out a stopped state leaves the particles motionless.
     ///
-    /// ⑤火山にも同じ形の借り方がある（<c>VolcanoVanillaFx</c>）。**まとめていない** ——
-    /// あちらは名前で引く前提の在庫（<c>Fire Particles</c> など「その 1 個でなければ
-    /// ならない」もの）を扱っていて、こちらは「いちばん雲らしいもの」を選ぶ。
-    /// 選び方が違うものを 1 つの型にすると、どちらの意図も読めなくなる。
+    /// ⑤ the volcano has a borrowing of the same shape (<c>VolcanoVanillaFx</c>). **They
+    /// have not been merged** — that one deals with an inventory that assumes lookup by
+    /// name (things like <c>Fire Particles</c> where it has to be that one specific
+    /// effect), whereas this one picks "whichever looks most like cloud". Put two
+    /// different ways of choosing into one type and neither intention can be read any
+    /// more.
     /// </summary>
     internal static class VanillaParticles
     {
         /// <summary>
-        /// **加算合成（<c>Custom/Particles/Additive (Soft)</c>）の光り物。**
-        /// 雲にも雨にも使えない（空が燃える）ので、採点の前に落とす。
+        /// **Glowing things with additive blending
+        /// (<c>Custom/Particles/Additive (Soft)</c>).** They can be used for neither cloud
+        /// nor rain (the sky catches fire), so we drop them before scoring.
         /// </summary>
         private static readonly string[] Rejected =
         {
@@ -73,9 +82,9 @@ namespace DisasterPlus.Game
         };
 
         /// <summary>
-        /// <c>ParticleEffect.m_particleSystem</c>（<c>[NonSerialized]</c> の private）。
-        /// **初期化されていない複製を <c>RenderEffect</c> へ渡すと
-        /// <c>EmitParticles</c> の中で NRE になる**ので、これで確かめる。
+        /// <c>ParticleEffect.m_particleSystem</c> (a <c>[NonSerialized]</c> private).
+        /// **Pass an uninitialised clone to <c>RenderEffect</c> and you get an NRE inside
+        /// <c>EmitParticles</c>**, so we check with this.
         /// </summary>
         private static readonly System.Reflection.FieldInfo ParticleSystemField =
             typeof(ParticleEffect).GetField("m_particleSystem",
@@ -86,14 +95,17 @@ namespace DisasterPlus.Game
         private static readonly EffectInfo[] EmptyEffects = new EffectInfo[0];
 
         /// <summary>
-        /// 在庫を列挙して、<paramref name="materialPreference"/> にいちばん近い
-        /// 粒子エフェクトを 1 つ返す。**例外は投げない**（取れなければ null）。
+        /// Enumerate the inventory and return the one particle effect closest to
+        /// <paramref name="materialPreference"/>. **It does not throw** (null if nothing
+        /// could be got).
         ///
-        /// **確保はする**（辞書の列挙と <c>EffectCollection.Effects</c> の
-        /// <c>IEnumerable</c>）が、呼ぶのは都市ごとに 1 回である。
+        /// **It does allocate** (enumerating the dictionary, and the <c>IEnumerable</c>
+        /// from <c>EffectCollection.Effects</c>), but it is called once per city.
         /// </summary>
-        /// <param name="materialPreference">良い順のマテリアル名。先頭がいちばん良い。</param>
-        /// <param name="namePreference">同点のときの並べ替えに使う名前。無ければ null。</param>
+        /// <param name="materialPreference">Material names, best first. The first is the
+        /// best.</param>
+        /// <param name="namePreference">Names used to break ties. null if there are
+        /// none.</param>
         internal static ParticleEffect Pick(string[] materialPreference, string[] namePreference,
                                             out string name, out string material)
         {
@@ -123,7 +135,7 @@ namespace DisasterPlus.Game
 
             if (best == null)
             {
-                // 最後の手段: ゲーム自身が握っている建物崩壊の粉塵。
+                // Last resort: the building-collapse dust the game itself holds.
                 Consider("BuildingProperties.m_collapseEffect", BuildingCollapseEffect(),
                          materialPreference, namePreference,
                          ref best, ref bestScore, ref bestRank, ref name, ref material);
@@ -132,7 +144,8 @@ namespace DisasterPlus.Game
             return best;
         }
 
-        /// <summary>候補 1 件を採点して、いまの最良と入れ替えるか決める。</summary>
+        /// <summary>Score one candidate and decide whether it replaces the current
+        /// best.</summary>
         private static void Consider(string candidateName, EffectInfo info,
                                      string[] materialPreference, string[] namePreference,
                                      ref ParticleEffect best, ref int bestScore, ref int bestRank,
@@ -147,8 +160,9 @@ namespace DisasterPlus.Game
 
             int rank = RankOf(candidateName, namePreference);
 
-            // 点が高いほうを採る。同点なら名前の優先順、それでも同点なら辞書順 ——
-            // **どのビルドでも同じものを選ぶ**（実機の報告が読める）。
+            // Take the higher score. On a tie, the name preference; still tied, ordinal
+            // order — **so that every build picks the same thing** (which makes in-game
+            // reports readable).
             if (score < bestScore) return;
             if (score == bestScore)
             {
@@ -165,9 +179,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// マテリアル名の採点。**大きいほど良い。** 0 は「使わない」。
-        /// 一覧に無いマテリアルは 1 点 —— **一覧に在るものには必ず負ける**が、
-        /// 何も無いよりはましである（ゲーム更新で名前が全部変わった環境の保険）。
+        /// Scoring a material name. **Higher is better.** 0 means "do not use".
+        /// A material not on the list scores 1 — **it always loses to one that is on the
+        /// list**, but it is better than nothing (insurance for an environment where a
+        /// game update has changed all the names).
         /// </summary>
         private static int ScoreOf(string material, string[] preference)
         {
@@ -201,8 +216,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// その粒子エフェクトが実際に描いているマテリアルの名前。
-        /// **<c>sharedMaterial</c> を読むこと**（クラス doc）。
+        /// The name of the material that particle effect is really drawing with.
+        /// **Read <c>sharedMaterial</c>** (class doc).
         /// </summary>
         internal static string MaterialNameOf(ParticleEffect effect)
         {
@@ -217,7 +232,8 @@ namespace DisasterPlus.Game
                 var mat = renderer.sharedMaterial;
                 if (mat == null) return null;
 
-                // Unity は複製したマテリアルに " (Instance)" を付ける。素の名前で見る。
+                // Unity appends " (Instance)" to a cloned material. Look at the plain
+                // name.
                 string n = mat.name;
                 if (n == null) return null;
 
@@ -253,7 +269,7 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // 列挙できない環境でも、上の m_BuiltinEffects だけで足りる。
+                // Even where this cannot be enumerated, m_BuiltinEffects above is enough.
             }
             return EmptyEffects;
         }
@@ -273,11 +289,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>EffectInfo</c> から粒子を取り出す。<c>MultiEffect</c>（＝
-        /// <c>Collapse Effect</c> のように粒子と音の束）と <c>FireEffect</c> は
-        /// 中に <c>ParticleEffect</c> を抱えている（§B-7）。
-        /// **音のほうを掴まないこと** —— <c>SoundEffect.RenderEffect</c> は
-        /// override されておらず、呼んでも何も起きない。
+        /// Get the particles out of an <c>EffectInfo</c>. <c>MultiEffect</c> (i.e. a bundle
+        /// of particles and sound, like <c>Collapse Effect</c>) and <c>FireEffect</c> hold
+        /// a <c>ParticleEffect</c> inside them (§B-7).
+        /// **Do not grab the sound one** — <c>SoundEffect.RenderEffect</c> is not
+        /// overridden and calling it does nothing.
         /// </summary>
         private static ParticleEffect Extract(EffectInfo info)
         {
@@ -303,11 +319,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// プレハブを 1 個複製する。内部フィールドは全て <c>[NonSerialized]</c> なので、
-        /// 複製は**未初期化状態**で始まり、元のプレハブと <c>ParticleSystem</c> を
-        /// 共有する事故は起きない（IL 実測 §D-1）。
-        /// **まだ <c>InitializeEffect()</c> は呼んでいない**（呼び出し側が数値を書いてから
-        /// <see cref="Initialize"/> を呼ぶ）。
+        /// Clone one prefab. Every internal field is <c>[NonSerialized]</c>, so the clone
+        /// starts in an **uninitialised state** and the accident of sharing a
+        /// <c>ParticleSystem</c> with the original prefab cannot happen (measured from the
+        /// IL, §D-1).
+        /// **<c>InitializeEffect()</c> has not been called yet** (the caller writes its
+        /// numbers and then calls <see cref="Initialize"/>).
         /// </summary>
         internal static GameObject Clone(ParticleEffect source, string name)
         {
@@ -322,7 +339,7 @@ namespace DisasterPlus.Game
                 go.name = name;
                 Object.DontDestroyOnLoad(go);
 
-                // ★★ **InitializeEffect の前に**外側の放出を止める（クラス doc）。
+                // ★★ Stop the outer emission **before InitializeEffect** (class doc).
                 var ps = go.GetComponent<ParticleSystem>();
                 if (ps != null)
                 {
@@ -343,8 +360,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>InitializeEffect()</c> を呼び、粒子系が実際に出来たかを確かめる。
-        /// 出来ていなければ複製ごと捨てて null を返す。
+        /// Call <c>InitializeEffect()</c> and check the particle system really came out.
+        /// If it did not, throw the clone away and return null.
         /// </summary>
         internal static GameObject Initialize(GameObject go, ParticleEffect effect)
         {
@@ -368,8 +385,9 @@ namespace DisasterPlus.Game
 
             try
             {
-                // ★ ParticleSystem へ落としてから比較する。object のまま != null で見ると
-                //   Unity の破棄済み（fake-null）を「在る」と読んでしまう。
+                // ★ Cast down to ParticleSystem before comparing. Testing != null while it
+                //   is still an object reads Unity's destroyed (fake-null) objects as
+                //   "present".
                 var particles = ParticleSystemField.GetValue(effect) as ParticleSystem;
                 return particles != null;
             }
@@ -379,7 +397,8 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>作りかけを捨てる。**中途半端な複製を残さない。**</summary>
+        /// <summary>Throw away a half-built one. **Leave no half-finished clone
+        /// behind.**</summary>
         internal static GameObject Reject(GameObject go)
         {
             try
@@ -389,7 +408,7 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // 解放できなくても GameObject は消す。
+                // Even if it cannot be released, destroy the GameObject.
             }
 
             Object.Destroy(go);
@@ -397,8 +416,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 複製 1 個を手放す。**冪等。** 内側の複製
-        /// （<c>ParticleEffect.CreateEffect</c> が作ったもの）も畳む。
+        /// Let go of one clone. **Idempotent.** It also packs away the inner clone (the one
+        /// <c>ParticleEffect.CreateEffect</c> made).
         /// </summary>
         internal static void Release(ref GameObject go, ref ParticleEffect effect,
                                      ref ParticleSystem particles)
@@ -411,7 +430,7 @@ namespace DisasterPlus.Game
                 }
                 catch
                 {
-                    // 畳めなくても外側は必ず消す。
+                    // Even if it cannot be packed away, always destroy the outer one.
                 }
             }
             effect = null;
@@ -422,8 +441,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 今この環境で描けるカメラ情報。**null を <c>RenderEffect</c> へ渡さないこと**
-        /// （<c>ParticleEffect.RenderEffect</c> の先頭で NRE になる。§H-18）。
+        /// The camera info we can draw with in this environment right now. **Do not pass
+        /// null to <c>RenderEffect</c>** (it gives an NRE on the first line of
+        /// <c>ParticleEffect.RenderEffect</c>. §H-18).
         /// </summary>
         internal static RenderManager.CameraInfo CameraInfo()
         {
@@ -439,12 +459,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// バニラが今フレームぶんとして使っている時間差。
-        /// <b><c>Time.deltaTime</c> ではない。</b> <c>EffectManager.EndRenderingImpl</c> は
-        /// <c>SimulationManager.m_simulationTimeDelta</c> を渡していて（IL 実測 §B-3）、
-        /// こちらを使うと**一時停止と速度変更にそのまま追随する**。
-        /// 読めなければ 0 を返す ——**0 は「今フレームは 1 粒も出さない」であって、
-        /// 例外でも作り話でもない。**
+        /// The time delta vanilla is using for this frame.
+        /// <b>It is not <c>Time.deltaTime</c>.</b>
+        /// <c>EffectManager.EndRenderingImpl</c> passes
+        /// <c>SimulationManager.m_simulationTimeDelta</c> (measured from the IL, §B-3),
+        /// and using this one **follows pausing and speed changes automatically**.
+        /// If it cannot be read it returns 0 — **0 means "emit no particles this frame",
+        /// which is neither an exception nor a fabrication.**
         /// </summary>
         internal static float TimeDelta()
         {

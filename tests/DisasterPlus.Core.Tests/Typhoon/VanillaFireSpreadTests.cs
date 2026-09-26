@@ -4,16 +4,17 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// 実機で出た <c>DivideByZeroException</c> の再現と、④の対処の固定。
-    /// 割り算そのものはバニラの中にあるので、ここで固定できるのは
-    /// **「どの経過フレームで 0 になるか」と「④が書く活性化フレームは安全か」**である。
+    /// Reproduces the <c>DivideByZeroException</c> seen in-game and pins down feature no. 4's
+    /// fix. The division itself lives inside vanilla, so all we can pin down here is
+    /// **"at which elapsed frames it becomes 0" and "whether the activation frame feature
+    /// no. 4 writes is safe"**.
     /// </summary>
     public class VanillaFireSpreadTests
     {
         [Fact]
         public void TheVanillaDivisorIsZeroForExactlyOneThousandTwentyFourFrames()
         {
-            // 窓の中は全部 0（＝例外）。
+            // Everything inside the window is 0 (i.e. an exception).
             for (int e = VanillaFireSpread.UnsafeElapsedFirst;
                  e <= VanillaFireSpread.UnsafeElapsedLast; e++)
             {
@@ -28,7 +29,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void JustOutsideTheWindowTheDivisorIsNonZeroOnBothSides()
         {
-            // 窓のすぐ内側と、すぐ外側。**両側**を固定する。
+            // Just inside the window and just outside it. **Both sides** are pinned down.
             Assert.True(VanillaFireSpread.DividesByZero(VanillaFireSpread.UnsafeElapsedFirst));
             Assert.True(VanillaFireSpread.DividesByZero(VanillaFireSpread.UnsafeElapsedLast));
 
@@ -42,8 +43,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ThunderstormsEmergingDurationLandsExactlyOnTheWindow()
         {
-            // Thunderstorm プレハブの m_emergingDuration は 8192（実測）。
-            // StartDisaster の既定値のままだと、台風を起こした瞬間がちょうど窓の左端。
+            // The m_emergingDuration of the Thunderstorm prefab is 8192 (measured).
+            // Left at StartDisaster's default, the moment the typhoon is raised lands
+            // exactly on the left edge of the window.
             const uint start = 1000u;
             const uint emergingDuration = 8192u;
             uint vanillaActivation = start + emergingDuration;
@@ -63,7 +65,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
             Assert.Equal(start, activation);
             Assert.True(VanillaFireSpread.IsSafeActivation(start, activation));
 
-            // 台風の寿命ぶん（8192 フレーム）を全部歩いても除数は下限を割らない。
+            // Walking through the typhoon's whole lifetime (8192 frames), the divisor never
+            // drops below the floor.
             for (uint f = start; f <= start + 8192u; f++)
             {
                 int elapsed = VanillaFireSpread.ElapsedOf(f, activation);
@@ -76,10 +79,11 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void FrameZeroIsRaisedToOneBecauseZeroMeansNoScheduleAtAll()
         {
-            // m_activationFrame == 0 は「予定が無い」の意味なので、そのまま書かない。
+            // m_activationFrame == 0 means "there is no schedule at all", so we never write
+            // it as it stands.
             Assert.Equal(1u, VanillaFireSpread.SafeActivationFrame(0u));
 
-            // その 1 フレームだけ elapsed は -1 になるが、除数は 7 であって 0 ではない。
+            // For that one frame elapsed is -1, but the divisor is 7, not 0.
             Assert.Equal(-1, VanillaFireSpread.ElapsedOf(0u, 1u));
             Assert.Equal(7, VanillaFireSpread.DivisorOf(-1));
             Assert.False(VanillaFireSpread.DividesByZero(-1));
@@ -88,7 +92,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ElapsedIsSignedSoAFutureActivationDoesNotLookLikeAHugePast()
         {
-            // uint のまま引くと 4294959104 になり、「危険な窓」が見えなくなる。
+            // Subtract as uint and you get 4294959104, which hides the "dangerous window".
             Assert.Equal(-8192, VanillaFireSpread.ElapsedOf(0u, 8192u));
         }
     }

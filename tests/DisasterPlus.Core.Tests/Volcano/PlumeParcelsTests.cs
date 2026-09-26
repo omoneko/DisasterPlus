@@ -4,12 +4,13 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 実機報告（2026-08-22）「噴煙のアニメーションもまだまだリアルではありません。
-    /// 幾何的なものではなくもっと自然的なカオスな煙のアニメーションを作ってほしいです」。
+    /// In-game report (2026-08-22): "the animation of the eruption plume is still far from
+    /// realistic. I would like a more natural, chaotic smoke animation instead of a
+    /// geometric one."
     ///
-    /// ★★ <b>「カオス」はテストできる。</b>「自然に見える」は測れないが、
-    ///    <b>幾何的でないこと</b>は測れる —— 塊が同じ高さに並んでいないか、
-    ///    時間で動いているか、同じ形が周期で戻ってこないか。
+    /// ★★ <b>"Chaos" can be tested.</b> "Looks natural" cannot be measured, but
+    ///    <b>not being geometric</b> can —— are the parcels lined up at the same heights,
+    ///    do they move over time, does the same shape not come back with a period.
     /// </summary>
     public class PlumeParcelsTests
     {
@@ -25,12 +26,12 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheParcelsAreNotStackedOnASmallNumberOfShelves()
         {
-            // ★★ これが「幾何的」の正体だった —— 前の実装は 9 段の円盤で、
-            //    塊はその 9 つの高さにしか居なかった。
+            // ★★ This was what "geometric" really meant —— the previous implementation was
+            //    9 stacked discs, and the parcels only ever sat at those 9 heights.
             var seen = new System.Collections.Generic.HashSet<int>();
             for (int i = 0; i < PlumeParcels.Count; i++)
             {
-                seen.Add((int)(P(i, 40f).Y / 25f));   // 25 m 刻み
+                seen.Add((int)(P(i, 40f).Y / 25f));   // in 25 m steps
             }
 
             Assert.True(seen.Count > 40,
@@ -40,7 +41,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void EveryParcelMovesBetweenFrames()
         {
-            // 1/30 秒でも全部が動くこと。止まっている塊があると「貼り付いた煙」に見える。
+            // Every parcel must move even over 1/30 of a second. A stationary parcel looks
+            // like "smoke stuck to the screen".
             int still = 0;
             for (int i = 0; i < PlumeParcels.Count; i++)
             {
@@ -55,8 +57,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheCrowdNeverRepeatsItselfWithinOneLifetime()
         {
-            // 乱れは周期の違う渦を重ねてある。1 つの周期で元へ戻るなら、
-            // 目で繰り返しが追えてしまう。
+            // The turbulence is built from eddies of differing periods. If it returned to
+            // the same state after a single period, the eye could follow the repetition.
             float worst = float.MaxValue;
             for (int step = 1; step <= 12; step++)
             {
@@ -78,8 +80,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheColumnIsTallerThanItIsWide()
         {
-            // 柱であって塊ではないこと。**はじめ広がりを 2 度掛けていて、
-            // 画面いっぱいの雲になっていた**（tools/PlumePreview で気づいた）。
+            // It must be a column, not a blob. **At first the flare was applied twice and
+            // it became a cloud that filled the screen** (spotted with tools/PlumePreview).
             float top = 0f, halfWidth = 0f;
             for (int i = 0; i < PlumeParcels.Count; i++)
             {
@@ -98,7 +100,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheStemIsNarrowAndTheUmbrellaIsBroad()
         {
-            // 教科書の断面（ガス推力 → 対流 → 傘）になっていること。
+            // The profile must be the textbook one (gas thrust → convection → umbrella).
             float stem = PlumeParcels.ColumnRadiusAt(0.05f, Vent, Height);
             float middle = PlumeParcels.ColumnRadiusAt(0.5f, Vent, Height);
             float umbrella = PlumeParcels.ColumnRadiusAt(1f, Vent, Height);
@@ -124,7 +126,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void EveryParcelFadesInAndOut()
         {
-            // 濃さ 1 のまま消える塊があると、そこだけ「ぱっと消えた」ように見える。
+            // A parcel that disappears while still at full opacity looks as if it has
+            // "popped out of existence" at that one spot.
             for (int i = 0; i < 40; i++)
             {
                 float maxAlpha = 0f, minAlpha = 1f;
@@ -161,7 +164,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSameVolcanoAlwaysLooksTheSame()
         {
-            // DeterministicRandom だけ（この MOD の乱数の規律）。
+            // DeterministicRandom only (this mod's discipline for randomness).
             for (int i = 0; i < 50; i++)
             {
                 PlumeParcel a = P(i, 33.25f);
@@ -201,7 +204,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheWindLeansThePlumeDownwindAndOnlyAtTheTop()
         {
-            // 風のシアー: 上ほど流される。根元まで一緒に動いたら、柱ごと平行移動している。
+            // Wind shear: the higher it is the further it is carried. If the base moves with
+            // it, the whole column is simply being translated.
             PlumeParcel[] still = new PlumeParcel[PlumeParcels.Count];
             PlumeParcel[] blown = new PlumeParcel[PlumeParcels.Count];
             for (int i = 0; i < PlumeParcels.Count; i++)

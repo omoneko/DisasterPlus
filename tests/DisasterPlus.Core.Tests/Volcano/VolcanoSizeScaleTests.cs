@@ -8,8 +8,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheVanillaDefaultMeansExactlyTheConfiguredSize()
         {
-            // 55（ゲーム自身の災害の既定強度）で倍率 1.0。ここがずれると、
-            // スライダーに触っていないプレイヤーが設定と違う山を建てることになる。
+            // At 55 (the default intensity of the game's own disasters) the factor is 1.0.
+            // Let this drift and a player who never touched the slider builds a mountain
+            // that differs from the settings.
             Assert.Equal(1f, VolcanoSizeScale.ScaleFor(VolcanoSizeScale.AnchorRaw), 4);
             Assert.Equal(1200f, VolcanoSizeScale.Apply(1200f, VolcanoSizeScale.ScaleFor(55)), 3);
         }
@@ -24,7 +25,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ZeroIsNotAZeroSizedVolcano()
         {
-            // 0 倍は「小さい山」ではなく「押しても何も起きない」である。
+            // A factor of 0 is not "a small mountain" but "nothing happens when you press it".
             Assert.Equal(VolcanoSizeScale.MinScale, VolcanoSizeScale.ScaleFor(0), 4);
             Assert.Equal(VolcanoSizeScale.MinScale, VolcanoSizeScale.ScaleFor(-30), 4);
         }
@@ -50,9 +51,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void GarbageInputDoesNotBecomeNaNMetres()
         {
-            // NaN の倍率は「掛けない」に倒す（メートルはそのまま）。
+            // A NaN factor falls back to "do not multiply" (the metres pass through unchanged).
             Assert.Equal(1200f, VolcanoSizeScale.Apply(1200f, float.NaN), 3);
-            // NaN のメートルは NaN のまま返す（ここで既定値を発明しない）。
+            // NaN metres are returned as NaN (we do not invent a default here).
             Assert.True(float.IsNaN(VolcanoSizeScale.Apply(float.NaN, 2f)));
             Assert.Equal(VolcanoSizeScale.AnchorRaw, VolcanoSizeScale.RawFor(float.NaN));
         }

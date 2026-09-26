@@ -8,9 +8,10 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void MiddayIsTheDayFactor()
         {
-            // 日夜サイクル OFF のとき時刻は永久に 12.0 に固定される（IL 事実文書 §F-1）。
-            // その設定で係数がちょうど 1.0 になることを固定しておくと、
-            // 「切っている人には何も足されない」が保証できる。
+            // With the day/night cycle off, the hour is pinned at 12.0 forever
+            // (IL facts document §F-1). Pinning down that the factor is exactly 1.0 in
+            // that configuration guarantees that "nothing is added at all for people who
+            // have it turned off".
             Assert.Equal(TimeOfDayFactor.DayFactor, TimeOfDayFactor.Of(12f), 5);
         }
 
@@ -24,7 +25,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void SunriseAndSunsetMatchTheGameConstants()
         {
-            // IL 実測: SUNRISE_HOUR = 5、SUNSET_HOUR = 20。
+            // Measured from the IL: SUNRISE_HOUR = 5, SUNSET_HOUR = 20.
             Assert.Equal(5f, TimeOfDayFactor.SunriseHour, 5);
             Assert.Equal(20f, TimeOfDayFactor.SunsetHour, 5);
             Assert.True(TimeOfDayFactor.IsNight(4.9f));
@@ -36,7 +37,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheBoundaryIsRampedNotStepped()
         {
-            // 段差にすると、日の出の 1 フレームで追加被害が跳ねる。
+            // If it were a step, the extra damage would jump in a single frame at
+            // sunrise.
             float justBefore = TimeOfDayFactor.Of(TimeOfDayFactor.SunriseHour - 0.01f);
             float justAfter = TimeOfDayFactor.Of(TimeOfDayFactor.SunriseHour + 0.01f);
             Assert.True(System.Math.Abs(justBefore - justAfter) < 0.01f,
@@ -68,7 +70,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void GarbageHourIsTheNeutralFactor()
         {
-            // 壊れた読み取りで被害倍率が跳ねないこと。
+            // A broken reading must not make the damage multiplier jump.
             Assert.Equal(TimeOfDayFactor.DayFactor, TimeOfDayFactor.Of(float.NaN), 5);
             Assert.Equal(TimeOfDayFactor.DayFactor, TimeOfDayFactor.Of(float.PositiveInfinity), 5);
             Assert.Equal(TimeOfDayFactor.DayFactor, TimeOfDayFactor.Of(float.NegativeInfinity), 5);
@@ -78,8 +80,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheCoefficientIsModest()
         {
-            // 「夜の方が被害が大きい」はバニラのどこにも根拠が無い（設計書 §4.3）。
-            // 第 1 層の数字を疑わせない程度に抑える、という判断そのものを固定する。
+            // "Damage is greater at night" has no basis anywhere in vanilla (design
+            // document §4.3). What is pinned down here is that judgement itself: keep it
+            // small enough that it does not cast doubt on the layer 1 figures.
             Assert.Equal(1f, TimeOfDayFactor.DayFactor, 5);
             Assert.True(TimeOfDayFactor.NightFactor > TimeOfDayFactor.DayFactor);
             Assert.True(TimeOfDayFactor.NightFactor <= 1.25f,

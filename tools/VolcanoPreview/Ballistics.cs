@@ -9,12 +9,15 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.VolcanoPreview
 {
     /// <summary>
-    /// 噴石の弾道を**ゲームを起動せずに**描いて確かめる。
-    /// 呼ぶのは <see cref="EjectaBallistics"/> の実物で、書き直した近似ではない。
+    /// Draws and checks the ballistics of the ejected blocks **without launching the game**.
+    /// What is called is the real <see cref="EjectaBallistics"/>, not a rewritten
+    /// approximation.
     ///
-    /// 2 枚出す:
-    ///   - <c>ejecta-plan.png</c>    上から見た着弾点（山の輪郭と火口も描く）
-    ///   - <c>ejecta-section.png</c> 横から見た弾道（山肌の断面と一緒に）
+    /// Two images are produced:
+    ///   - <c>ejecta-plan.png</c>    the impact points seen from above (the outline of the
+    ///                               mountain and the crater are drawn too)
+    ///   - <c>ejecta-section.png</c> the trajectories seen from the side (together with a
+    ///                               section of the mountainside)
     /// </summary>
     internal static class Ballistics
     {
@@ -82,7 +85,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                            + F(longest) + " m (mean " + F(sum / n) + "), "
                            + (beyond * 100 / n) + " % land beyond the foot, longest flight "
                            + F1(longestFlight) + " s");
-            // ★ 飛んでいる間に地面へ潜っていないか。潜っていたら「山肌に落ちる」が嘘になる。
+            // ★ Do they dive into the ground while in flight? If they do, "they land on the
+            //   mountainside" is a lie.
             int buried = 0;
             float deepest = 0f;
             for (int b = 0; b < Blasts * 4; b++)
@@ -114,12 +118,13 @@ namespace DisasterPlus.Tools.VolcanoPreview
 
         }
 
-        /// <summary>上から見た着弾点。山の輪郭・火口・裾の外まで飛んだ岩が分かる。</summary>
+        /// <summary>The impact points seen from above. Shows the outline of the mountain, the
+        /// crater, and the blocks that flew beyond the foot.</summary>
         private static void Plan(string dir, uint seed, float r, float h, float vent)
         {
             int n = PlanPixels;
             var rgb = new byte[n * n * 3];
-            float span = r * 2.6f;               // 画像の一辺（m）
+            float span = r * 2.6f;               // side of the image (m)
             float scale = n / span;              // px / m
 
             float crater = VolcanoShape.CraterRadiusOf(r);
@@ -141,7 +146,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
                     rgb[i + 1] = (byte)(v * 0.78f);
                     rgb[i + 2] = (byte)(v * 0.60f);
 
-                    // 山の輪郭と火口の縁を薄く引く。
+                    // Draw the outline of the mountain and the crater rim faintly.
                     if (Math.Abs(d - r) < 1.5f / scale * 2f) { rgb[i] = 90; rgb[i + 1] = 90; rgb[i + 2] = 90; }
                     if (Math.Abs(d - crater) < 1.5f / scale * 2f) { rgb[i] = 120; rgb[i + 1] = 80; rgb[i + 2] = 60; }
                 }
@@ -155,7 +160,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
                     EjectaBlock block = EjectaBallistics.Plan(seed, b, i, 1f, Form, r, h, vent);
                     if (!block.Valid) continue;
 
-                    // 弾道を薄い点で、着弾点を大きく。
+                    // The trajectory as faint dots, the impact point larger.
                     for (float t = 0f; t < block.FlightSeconds; t += 0.35f)
                     {
                         float dx, dy, dz;
@@ -175,7 +180,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                               + "  (plan view, " + F(span) + " m across)");
         }
 
-        /// <summary>横から見た弾道。山肌の断面と一緒に描く。</summary>
+        /// <summary>The trajectories seen from the side, drawn together with a section of the
+        /// mountainside.</summary>
         private static void Section(string dir, uint seed, float r, float h, float vent)
         {
             var rgb = new byte[SectionWidth * SectionHeight * 3];
@@ -189,7 +195,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             float sx = SectionWidth / spanX;
             float sy = SectionHeight / spanY;
 
-            // 山肌（中心から右へ）。
+            // The mountainside (from the centre rightwards).
             for (int px = 0; px < SectionWidth; px++)
             {
                 float d = px / sx;

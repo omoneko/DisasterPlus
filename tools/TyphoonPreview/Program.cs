@@ -8,49 +8,53 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.TyphoonPreview
 {
     /// <summary>
-    /// 台風の渦を**ゲームを起動せずに**描いて確かめる。
+    /// Draws and checks the typhoon's vortex **without launching the game**.
     ///
-    /// 「見た目の変更は自分でオフラインに描画・計測してから実機テストを頼む」という
-    /// このプロジェクトの決まりのための道具である。Core の実物
-    /// （<see cref="VortexPuffLayout"/> / <see cref="VortexCloudProfile"/>）を
-    /// そのままコンパイルして呼ぶので、**書き直した近似ではない**。
+    /// This is the tool for this project's rule that "visual changes are drawn and measured
+    /// offline by yourself before asking for a test in the game". It compiles and calls the
+    /// real thing from Core (<see cref="VortexPuffLayout"/> /
+    /// <see cref="VortexCloudProfile"/>) directly, so it is **not a rewritten approximation**.
     ///
     ///   dotnet run --project tools/TyphoonPreview -- docs/images/typhoon
     ///
-    /// 出す絵は 3 枚:
+    /// Three pictures are produced:
     ///
-    /// - <c>vortex-plan.png</c>      真上から。**腕・壁雲・眼の穴**を見る
-    /// - <c>vortex-elevation.png</c> 真横から（渦ぜんぶ）。**平らな雲底**を見る
-    /// - <c>vortex-eyewall-elevation.png</c> 真横から、眼のまわりに 3 倍寄る。
-    ///   **塔の高さともこもこ**を見る
-    /// - <c>vortex-oblique.png</c>   ゲームのカメラに近い俯角 35 度。**実機の見え方**
-    /// - <c>squall-elevation.png</c> 吹き付ける雨を真横から。**風下へ流れているか**を見る
+    /// - <c>vortex-plan.png</c>      from directly above. Look at **the arms, the eyewall and
+    ///   the hole of the eye**
+    /// - <c>vortex-elevation.png</c> from the side (the whole vortex). Look at **the flat
+    ///   cloud base**
+    /// - <c>vortex-eyewall-elevation.png</c> from the side, zoomed 3x around the eye.
+    ///   Look at **the height of the towers and how billowy they are**
+    /// - <c>vortex-oblique.png</c>   at a 35 degree pitch, close to the game's camera.
+    ///   **What it looks like in the game**
+    /// - <c>squall-elevation.png</c> the driving rain from the side. Look at **whether it is
+    ///   being blown downwind**
     /// </summary>
     internal static class Program
     {
-        /// <summary>強度 128 の台風の渦の外周半径（m）。
-        /// 実機と同じ規則（暴風域半径 × 1.35、6000 m で頭打ち）で出す。</summary>
+        /// <summary>Outer radius of the vortex of an intensity 128 typhoon (m).
+        /// Derived by the same rule as the game (storm radius x 1.35, capped at 6000 m).</summary>
         private static readonly float Radius =
             Vortex.RadiusOf(TyphoonProfile.StormRadiusOf(128, PrefabRadiusMetres));
 
-        /// <summary><c>ThunderStormAI.m_radius</c>（sharedassets55 の実測値）。</summary>
+        /// <summary><c>ThunderStormAI.m_radius</c> (measured from sharedassets55).</summary>
         private const float PrefabRadiusMetres = 4000f;
 
-        /// <summary>絵の一辺（px）。</summary>
+        /// <summary>Side of the picture (px).</summary>
         private const int Pixels = 900;
 
-        /// <summary>渦の外周が画面のどこまでを占めるか。</summary>
+        /// <summary>How much of the screen the vortex's outer edge takes up.</summary>
         private const float Fill = 0.92f;
 
-        /// <summary>ゲームのカメラに近い俯角（度）。</summary>
+        /// <summary>The downward pitch closest to the game's camera (degrees).</summary>
         private const float ObliquePitchDegrees = 35f;
 
         /// <summary>
-        /// 1 粒の不透明度の倍率。**推測ではなく実測値である** ——
-        /// <c>sharedassets11.assets</c> の <c>steam</c> テクスチャの平均アルファは
-        /// 109/255 ＝ 0.43 で、粒子の見かけの濃さは
-        /// <c>startColor.a × テクスチャのアルファ</c>になる。
-        /// 重なれば足し合わさって不透明になる（実機と同じ）。
+        /// Opacity multiplier for one particle. **This is a measured value, not a guess** ——
+        /// the mean alpha of the <c>steam</c> texture in <c>sharedassets11.assets</c> is
+        /// 109/255 = 0.43, and a particle's apparent density is
+        /// <c>startColor.a × the texture's alpha</c>.
+        /// Overlapping particles add up and become opaque (the same as in the game).
         /// </summary>
         private const float SplatAlpha = 0.43f;
 
@@ -93,8 +97,9 @@ namespace DisasterPlus.Tools.TyphoonPreview
             Write(outDir, "vortex-eyewall-elevation.png", Elevation(specks, 3f));
             Write(outDir, "vortex-oblique.png", Oblique(specks));
 
-            // ★ 暴風雨（横殴りの飛沫）。**カメラの周りに置く**ものなので、
-            //   渦とは別の絵にする。カメラの高さ 260 m ＝ 街を見るくらいの引き。
+            // ★ The squall (spray driven sideways). It is **placed around the camera**, so it
+            //   gets a picture of its own, separate from the vortex. A camera height of 260 m
+            //   is roughly how far back you sit to look at the city.
             Speck[] spray = Squall.Build(260f, 1f, 0x53515544u);
             log.AppendLine("driving rain particles drawn = " + spray.Length
                            + " (cap " + SquallLayout.MaxParticles + ", spread "
@@ -103,8 +108,8 @@ namespace DisasterPlus.Tools.TyphoonPreview
             log.AppendLine();
             Write(outDir, "squall-elevation.png", SquallElevation(spray));
 
-            // ★★ **自前の白い雲で組んだ渦**（2026-08-22 の作り直し）。
-            //    借り物の粒子との違いを数字と絵で残す。
+            // ★★ **The vortex built from our own white clouds** (the 2026-08-22 rebuild).
+            //    Record the difference from the borrowed particles in numbers and pictures.
             OwnedPuffs(outDir, log);
 
             File.WriteAllText(Path.Combine(outDir, "measurements.txt"), log.ToString());
@@ -113,8 +118,9 @@ namespace DisasterPlus.Tools.TyphoonPreview
         }
 
         /// <summary>
-        /// **自前の白い雲の粒で置いた渦**（<c>TyphoonVortexPuffFx</c>）を、
-        /// 真上と俯角 35 度から描く。借り物の粒子と何が違うのかを数字でも出す。
+        /// Draws **the vortex laid out with our own white cloud puffs**
+        /// (<c>TyphoonVortexPuffFx</c>) from directly above and at a 35 degree pitch.
+        /// Also prints, as numbers, what differs from the borrowed particles.
         /// </summary>
         private static void OwnedPuffs(string dir, StringBuilder log)
         {
@@ -138,7 +144,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             log.AppendLine("  puff radius = " + F(smallest) + " .. " + F(largest)
                            + " m  (vortex radius " + F(Radius) + " m)");
 
-            // 粒がどれだけ重なっているか。**隙間が空いていないこと**を数で見る。
+            // How much the puffs overlap. A number that shows **there are no gaps**.
             float area = 0f;
             foreach (OwnedVortex.Puff q in puffs) area += 3.14159265f * q.Radius * q.Radius;
             log.AppendLine("  puff area / vortex area = "
@@ -150,7 +156,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             Write(dir, "vortex-owned-oblique.png", OwnedOblique(puffs));
         }
 
-        /// <summary>真上から。腕と眼が読めるか。</summary>
+        /// <summary>From directly above. Can the arms and the eye be made out?</summary>
         private static byte[] OwnedPlan(OwnedVortex.Puff[] puffs)
         {
             var cover = new float[Pixels * Pixels];
@@ -158,7 +164,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             float scale = Pixels * Fill * 0.5f / Radius;
             float half = Pixels * 0.5f;
 
-            // 高いものが上に来る（真上から見るので）。
+            // Higher ones come out on top (we are looking straight down).
             Array.Sort(puffs, delegate(OwnedVortex.Puff a, OwnedVortex.Puff b)
             {
                 return a.Y.CompareTo(b.Y);
@@ -173,7 +179,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             return ComposeOwned(cover, colour, false);
         }
 
-        /// <summary>俯角 35 度。実機に近い見え方。</summary>
+        /// <summary>At a 35 degree pitch. Close to how it looks in the game.</summary>
         private static byte[] OwnedOblique(OwnedVortex.Puff[] puffs)
         {
             var cover = new float[Pixels * Pixels];
@@ -185,7 +191,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             float cos = (float)Math.Cos(pitch);
             float sin = (float)Math.Sin(pitch);
 
-            // 奥のものから描く。
+            // Draw from the back forwards.
             Array.Sort(puffs, delegate(OwnedVortex.Puff a, OwnedVortex.Puff b)
             {
                 float da = a.Z * sin - a.Y * cos;
@@ -204,8 +210,9 @@ namespace DisasterPlus.Tools.TyphoonPreview
         }
 
         /// <summary>
-        /// 粒 1 個。**テクスチャの式そのもの**で塗る（<c>OwnedVortex.TextureAlpha</c>）。
-        /// アルファ合成なので、重ねるほど背景が隠れる。
+        /// One puff. Painted with **the texture's own formula**
+        /// (<c>OwnedVortex.TextureAlpha</c>). It is alpha compositing, so the more you stack
+        /// the more the background is hidden.
         /// </summary>
         private static void Blob(float[] cover, float[] colour, float cx, float cy, float r,
                                  float alpha, float shade)
@@ -215,7 +222,8 @@ namespace DisasterPlus.Tools.TyphoonPreview
             int x0 = (int)Math.Floor(cx - r), x1 = (int)Math.Ceiling(cx + r);
             int y0 = (int)Math.Floor(cy - r), y1 = (int)Math.Ceiling(cy + r);
 
-            // 日向の白と底面の灰（TyphoonVortexPuffFx と同じ 2 色）。
+            // The sunlit white and the grey of the underside (the same two colours as
+            // TyphoonVortexPuffFx).
             float rr = (242f + (150f - 242f) * shade) / 255f;
             float gg = (244f + (156f - 244f) * shade) / 255f;
             float bb = (248f + (170f - 248f) * shade) / 255f;
@@ -236,7 +244,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
                     if (a <= 0f) continue;
 
                     int i = y * Pixels + x;
-                    // 手前が奥を隠す（over 合成）。
+                    // What is in front hides what is behind (over compositing).
                     float keep = 1f - a;
                     colour[i * 3] = colour[i * 3] * keep + rr * a;
                     colour[i * 3 + 1] = colour[i * 3 + 1] * keep + gg * a;
@@ -246,7 +254,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             }
         }
 
-        /// <summary>雲を空（と地面）の上に載せる。</summary>
+        /// <summary>Puts the clouds on top of the sky (and the ground).</summary>
         private static byte[] ComposeOwned(float[] cover, float[] colour, bool horizon)
         {
             var rgb = new byte[Pixels * Pixels * 3];
@@ -279,7 +287,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             Console.WriteLine("wrote " + Path.Combine(dir, name));
         }
 
-        /// <summary>数字で確かめる（絵を見るだけにしない）。</summary>
+        /// <summary>Confirm it with numbers (do not just look at the pictures).</summary>
         private static void Measure(StringBuilder log)
         {
             float worst = float.MaxValue;
@@ -349,9 +357,10 @@ namespace DisasterPlus.Tools.TyphoonPreview
             log.AppendLine();
         }
 
-        // ── 3 つの視点 ─────────────────────────────────────────
+        // ── The three viewpoints ─────────────────────────────────────────
 
-        /// <summary>真上から（平面図）。腕・壁雲・眼の穴を見る。</summary>
+        /// <summary>From directly above (plan view). Look at the arms, the eyewall and the
+        /// hole of the eye.</summary>
         private static byte[] Plan(Speck[] specks)
         {
             var cover = new float[Pixels * Pixels];
@@ -359,7 +368,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             float scale = Pixels * Fill * 0.5f / Radius;
             float half = Pixels * 0.5f;
 
-            // 上から見るので、高いものが手前 ＝ 後ろから描く。
+            // Seen from above, higher means nearer, so draw from the back forwards.
             Sort(specks, true);
 
             for (int i = 0; i < specks.Length; i++)
@@ -373,21 +382,22 @@ namespace DisasterPlus.Tools.TyphoonPreview
         }
 
         /// <summary>
-        /// 真横から（立面図）。雲底の平らさと塔の高さを見る。
-        /// <paramref name="zoom"/> が 1 なら渦ぜんぶ、大きいほど眼のまわりに寄る。
-        /// **縦横は同じ尺度である**（高さを誇張しない）。
+        /// From the side (elevation). Look at how flat the cloud base is and how tall the
+        /// towers are. With <paramref name="zoom"/> at 1 it is the whole vortex; larger values
+        /// zoom in around the eye.
+        /// **The horizontal and vertical scales are the same** (the height is not exaggerated).
         /// </summary>
         private static byte[] Elevation(Speck[] specks, float zoom)
         {
             var cover = new float[Pixels * Pixels];
             var colour = new float[Pixels * Pixels * 3];
 
-            // 横から見るときも尺度は縦横同じ（高さを誇張しない）。
+            // Seen from the side too, the scale is the same in both axes (no exaggeration).
             float scale = Pixels * Fill * 0.5f / Radius * zoom;
             float half = Pixels * 0.5f;
             float groundY = Pixels * 0.94f;
 
-            // 奥（+Z）から手前（-Z）へ。
+            // From the back (+Z) to the front (-Z).
             SortByZ(specks);
 
             for (int i = 0; i < specks.Length; i++)
@@ -400,7 +410,8 @@ namespace DisasterPlus.Tools.TyphoonPreview
             return Compose(cover, colour, true);
         }
 
-        /// <summary>俯角 35 度（ゲームのカメラに近い）。**実機の見え方はこれである。**</summary>
+        /// <summary>At a 35 degree pitch (close to the game's camera). **This is what it looks
+        /// like in the game.**</summary>
         private static byte[] Oblique(Speck[] specks)
         {
             var cover = new float[Pixels * Pixels];
@@ -414,7 +425,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             float half = Pixels * 0.5f;
             float centreY = Pixels * 0.62f;
 
-            // 奥行き = Z·cos + Y·sin。遠いものから描く。
+            // Depth = Z·cos + Y·sin. Draw from the furthest forwards.
             Array.Sort(specks, delegate (Speck a, Speck b)
             {
                 float da = a.Z * cp + a.Y * sp;
@@ -434,15 +445,16 @@ namespace DisasterPlus.Tools.TyphoonPreview
         }
 
         /// <summary>
-        /// 吹き付ける雨を真横から。**風は +X 向き**なので、粒が右へ流れて落ちていれば
-        /// 「横殴り」になっている。縦横は同じ尺度である。
+        /// The driving rain from the side. **The wind blows towards +X**, so if the drops
+        /// stream to the right as they fall it is indeed "driving sideways". The horizontal
+        /// and vertical scales are the same.
         /// </summary>
         private static byte[] SquallElevation(Speck[] specks)
         {
             var cover = new float[Pixels * Pixels];
             var colour = new float[Pixels * Pixels * 3];
 
-            // 窓は幅 1400 m。地面は下から 6% のところ。
+            // The window is 1400 m wide. The ground is 6% up from the bottom.
             const float windowMetres = 900f;
             float scale = Pixels / windowMetres;
             float half = Pixels * 0.5f;
@@ -460,7 +472,7 @@ namespace DisasterPlus.Tools.TyphoonPreview
             return Compose(cover, colour, true);
         }
 
-        // ── 描画の下請け ────────────────────────────────────────
+        // ── Rendering helpers ────────────────────────────────────────
 
         private static void Sort(Speck[] specks, bool byHeight)
         {
@@ -475,7 +487,8 @@ namespace DisasterPlus.Tools.TyphoonPreview
             Array.Sort(specks, delegate (Speck a, Speck b) { return b.Z.CompareTo(a.Z); });
         }
 
-        /// <summary>柔らかい円を 1 個積む（<c>tools/VolcanoPreview</c> の Plume と同じ形）。</summary>
+        /// <summary>Stacks one soft disc (the same shape as Plume in
+        /// <c>tools/VolcanoPreview</c>).</summary>
         private static void Splat(float[] cover, float[] colour,
                                   float cx, float cy, float radius, Speck s)
         {

@@ -4,9 +4,11 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 所有者の依頼（2026-08-22）「25.5 のときだけ、破局噴火の再現を…
-    /// 地下のマグマ上昇による火山の形成 → 数万年かけた巨大なマグマだまりの成長 →
-    /// 内圧限界による破局噴火（大爆発） → 地面の自重による大陥没とカルデラ形成」。
+    /// Owner's request (2026-08-22): "only at 25.5, reproduce a supereruption...
+    /// a volcano formed by magma rising underground -> the growth of a huge magma
+    /// chamber over tens of thousands of years -> a supereruption (a great explosion)
+    /// as the internal pressure reaches its limit -> a great subsidence under the
+    /// ground's own weight, forming a caldera".
     /// </summary>
     public class SuperEruptionTests
     {
@@ -16,7 +18,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void OnlyTheVeryTopOfTheSliderIsASupereruption()
         {
-            // 「25.5 のときだけ」。24.9 では起きない。
+            // "Only at 25.5". It does not happen at 24.9.
             Assert.True(SuperEruption.IsSuper(255));
             Assert.False(SuperEruption.IsSuper(254));
             Assert.False(SuperEruption.IsSuper(100));
@@ -29,7 +31,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             float reach = SuperEruption.InflationRadiusMetres(Radius);
             float rise = SuperEruption.InflationHeightMetres(Height);
 
-            // ★ 山よりずっと広く、山よりずっと低い。
+            // ★ Far wider than the mountain, and far lower than the mountain.
             Assert.True(reach > Radius * 2f, "the bulge only reached " + reach);
             Assert.True(rise < Height * 0.5f, "the bulge rose " + rise + ", that is a mountain");
             Assert.True(rise > 0f);
@@ -45,7 +47,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.Equal(0f, SuperEruption.InflationAt(reach, reach, rise), 4);
             Assert.Equal(0f, SuperEruption.InflationAt(reach * 2f, reach, rise), 4);
 
-            // 縁の直前の変化がなだらかであること（折れ目 = 崖に見える）。
+            // The change just before the edge must be gentle (a kink looks like a cliff).
             float a = SuperEruption.InflationAt(reach * 0.95f, reach, rise);
             float b = SuperEruption.InflationAt(reach * 0.99f, reach, rise);
             Assert.True(a - b < rise * 0.02f, "the bulge edge is a step: " + (a - b));
@@ -59,16 +61,18 @@ namespace DisasterPlus.Core.Tests.Volcano
 
             Assert.True(cr > Radius, "the caldera " + cr + " is smaller than the cone " + Radius);
 
-            // ★★ <b>「山の高さより深い」は要求ではない。</b>（2026-08-22 に直した）
+            // ★★ <b>"Deeper than the mountain's height" is not a requirement.</b>
+            //    (this was corrected on 2026-08-22)
             //
-            //    ここは以前 depth &gt; Height を要求していた。その要求のせいで
-            //    <c>CalderaDepthFactor</c> が 1.35（上限 900 m）になり、
-            //    <b>床が必ず海面（40 m）より 800 m 下へ落ちた</b> ——
-            //    所有者の問い「カルデラ内部の標高が必ず海抜より低くなる理由は
-            //    何ですか？」の原因そのものである。
+            //    This used to require depth &gt; Height. That requirement pushed
+            //    <c>CalderaDepthFactor</c> to 1.35 (capped at 900 m), and
+            //    <b>the floor always dropped 800 m below sea level (40 m)</b> ——
+            //    which is precisely the cause of the owner's question, "why does the
+            //    elevation inside the caldera always end up below sea level?".
             //
-            //    落ちるのは<b>山体</b>であって、まわりの大地ごと沈むのではない。
-            //    要求は「まわりの地面より確かに下」と「深すぎない」の 2 つだけである。
+            //    What drops is the <b>edifice</b>; the surrounding land does not sink
+            //    along with it. There are only two requirements: "definitely below the
+            //    surrounding ground" and "not too deep".
             Assert.True(depth > 0f, "the caldera does not go below the original ground at all");
             Assert.True(depth < Height,
                         "the caldera floor drops " + depth + " m for a " + Height
@@ -78,7 +82,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheCalderaHasAFlatFloorNotACone()
         {
-            // ★★ ここが「大きい火口」との違いである。
+            // ★★ This is what makes it different from "a big crater".
             float cr = SuperEruption.CalderaRadiusMetres(Radius);
             float depth = SuperEruption.CalderaDepthMetres(Height);
 
@@ -111,7 +115,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheCalderaWallOnlyGetsShallowerOutwards()
         {
-            // 壁が凸凹すると、落ちた塊ではなく削った穴に見える。
+            // A bumpy wall looks like a hole that was gouged out, not a block that dropped.
             float cr = SuperEruption.CalderaRadiusMetres(Radius);
             float depth = SuperEruption.CalderaDepthMetres(Height);
 
@@ -127,7 +131,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NothingEverExceedsWhatTheMapCanHold()
         {
-            // マップは一辺 17,280 m。半径も深さも桁で外れないこと。
+            // The map is 17,280 m on a side. Neither the radius nor the depth may be
+            // out by an order of magnitude.
             foreach (float r in new[] { 400f, 2000f, 6000f, 100000f })
             {
                 Assert.True(SuperEruption.CalderaRadiusMetres(r) <= SuperEruption.MaxRadiusMetres);

@@ -1,38 +1,43 @@
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// **バニラ自身の揺れの式**（IL 事実文書 §A-7、<c>EarthquakeAI.RenderInstance</c>）。
-    /// 捏造ではなく、ゲームが毎フレーム計算しているものをそのまま写している。
+    /// **Vanilla's own shaking formula** (§A-7 of the IL facts document,
+    /// <c>EarthquakeAI.RenderInstance</c>). Nothing invented: this is a straight copy of what
+    /// the game computes every frame.
     ///
     ///   amp = 0.3 / (1 + distance * 0.001)
-    ///   amp *= 0.5 - 0.5 * cos(t * 0.02454369)      // 2π/0.02454369 = 256 フレーム周期
+    ///   amp *= 0.5 - 0.5 * cos(t * 0.02454369)      // 2π/0.02454369 = a 256-frame period
     ///   s   = (sin(t * 0.63) + sin(t * 0.17)) * amp
     ///
-    /// 成分は 0.63 rad/frame（周期 ≒10 フレーム）と 0.17 rad/frame（≒37 フレーム）の
-    /// 2 本だけで、**長周期成分は存在しない**（256 フレーム周期のものは振幅の
-    /// 包絡線であって地震動ではない）。長周期地震動は Task 10 が別に足す
-    /// —— あちらは第 2 層、こちらは第 1 層。
+    /// There are only two components, 0.63 rad/frame (a period of ≒10 frames) and
+    /// 0.17 rad/frame (≒37 frames), and **there is no long-period component** (the
+    /// 256-frame one is the amplitude envelope, not ground motion). Long-period ground
+    /// motion is added separately by Task 10 — that is the second layer, this is the first.
     ///
-    /// **振幅に m_intensity は入っていない。** それがこの MOD が補正する空白であり、
-    /// <see cref="IntensityFactor"/> がその補正倍率を返す。
+    /// **m_intensity does not appear in the amplitude at all.** That is the gap this mod
+    /// corrects, and <see cref="IntensityFactor"/> returns the correction factor.
     ///
-    /// ── distance の意味は呼び出し側で変わる（設計書 §3.5）────────────────
+    /// ── What `distance` means changes with the caller (design document §3.5) ─────
     ///
-    ///   - カメラシェイク補正（<c>CameraShakeBooster</c>、Task 6）は
-    ///     **カメラからの距離**。バニラが <c>camera.transform.InverseTransformPoint</c>
-    ///     （§A-7 IL_003F）で測っているものと同じで、しかも <c>z</c> を 0.25 倍してから
-    ///     長さを取るところまで同じにする。バニラの波に**足す**のだから、同じ点で
-    ///     評価しないと形が崩れる。
-    ///   - 波形グラフ（Task 8）は **震源から観測点までの距離**。
+    ///   - The camera shake correction (<c>CameraShakeBooster</c>, Task 6) uses
+    ///     **the distance from the camera**. The same thing vanilla measures with
+    ///     <c>camera.transform.InverseTransformPoint</c> (§A-7 IL_003F), and we match it
+    ///     right down to scaling <c>z</c> by 0.25 before taking the length. We are
+    ///     **adding** to vanilla's wave, so unless we evaluate at the same point the shape
+    ///     falls apart.
+    ///   - The waveform graph (Task 8) uses **the distance from the hypocentre to the
+    ///     observation point**.
     ///
-    /// **これは同じ式の別評価であって近似ではない。** バニラの式そのものを、
-    /// 別の点で評価しているだけである。UI にもその差を書くこと（設計書 §3.5）。
-    /// 混同すると、波形グラフが「地面の揺れ」を名乗りながら実際にはカメラの動きを
-    /// 描いている、という嘘になる。
+    /// **These are two evaluations of the same formula, not an approximation.** It is
+    /// vanilla's formula itself, merely evaluated at a different point. Write that
+    /// distinction into the UI as well (design document §3.5). Confuse the two and you get a
+    /// lie: a waveform graph that claims to be "ground shaking" while actually drawing the
+    /// camera's movement.
     ///
-    /// Core は <c>UnityEngine.Mathf</c> を使えないので <c>System.Math</c>（double）で
-    /// 計算して float に落とす。バニラの <c>Mathf.Sin</c>（float）とは最下位ビットが
-    /// 異なりうるが、これは表示と演出のための量であって予測ではないので許容する。
+    /// Core cannot use <c>UnityEngine.Mathf</c>, so we compute in <c>System.Math</c>
+    /// (double) and narrow to float. The lowest bits can differ from vanilla's
+    /// <c>Mathf.Sin</c> (float), which we accept because this is a quantity for display and
+    /// presentation, not a prediction.
     /// </summary>
     public static class ShakeWaveform
     {
@@ -43,22 +48,24 @@ namespace DisasterPlus.Core.Earthquake
         public const float FastRate = 0.63f;
         public const float SlowRate = 0.17f;
 
-        /// <summary>IL: <c>e = m_referenceFrameIndex - m_activationFrame + 128</c>。</summary>
+        /// <summary>IL: <c>e = m_referenceFrameIndex - m_activationFrame + 128</c>.</summary>
         public const int FrameOffset = 128;
 
         /// <summary>
-        /// 追加できる強度倍率の上限。強度 255 だと素の値は (255/55 - 1) = 3.64 になり、
-        /// 合計でバニラの 4.64 倍になる。画面が使い物にならなくなるのは迫力ではなく不具合。
+        /// The cap on the intensity factor we may add. At intensity 255 the raw value would
+        /// be (255/55 - 1) = 3.64, giving 4.64× vanilla in total. A screen you cannot use is
+        /// not drama, it is a defect.
         /// </summary>
         public const float MaxIntensityFactor = 2f;
 
         /// <summary>
-        /// バニラの表示窓。<paramref name="activeDuration"/> はプレハブ値で、
-        /// **読めていないとき（0）は false を返す** —— 窓が分からないまま揺らすと
-        /// 地震が終わった後も揺れ続ける。
+        /// Vanilla's display window. <paramref name="activeDuration"/> is the prefab value,
+        /// and **when it could not be read (0) we return false** — shake without knowing the
+        /// window and the shaking carries on after the earthquake has ended.
         ///
-        /// IL の <c>if (e &lt;= 0) return; if (e &gt;= m_activeDuration) return;</c> を
-        /// そのまま裏返したもの。比較演算子を「読みやすく」書き換えないこと。
+        /// This is a straight inversion of the IL's
+        /// <c>if (e &lt;= 0) return; if (e &gt;= m_activeDuration) return;</c>. Do not
+        /// rewrite the comparison operators to be "more readable".
         /// </summary>
         public static bool IsShaking(long elapsedPlusOffset, uint activeDuration)
         {
@@ -67,25 +74,30 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 変位が理論上取りうる絶対値の上限 ＝ <c>|sin + sin| ≦ 2</c> 倍の
-        /// <see cref="BaseAmplitude"/>。距離 0・包絡線の頂点で到達する 0.6。
+        /// The theoretical upper bound on the displacement's absolute value:
+        /// <see cref="BaseAmplitude"/> times <c>|sin + sin| ≦ 2</c>. It is 0.6, reached at
+        /// distance 0 at the peak of the envelope.
         ///
-        /// 波形の最大振幅をバー表示するときの**満目盛り**はこれである。
-        /// 局所係数 s（0-1）の目盛りを流用すると、実際には 0.6 までしか伸びない値を
-        /// 0-1 の尺度で描くことになり、隣の s のバーと見た目が揃わない。
+        /// This is the **full-scale value** when showing the waveform's peak amplitude as a
+        /// bar. Borrow the local factor s's scale (0-1) instead and you draw a value that
+        /// only ever reaches 0.6 on a 0-1 scale, so it does not line up visually with the
+        /// s bar next to it.
         /// </summary>
         public const float MaxDisplacement = 2f * BaseAmplitude;
 
         /// <summary>
-        /// 包絡線を掛ける**前**の振幅（IL_0069: <c>amp = 0.3f / (1f + v.magnitude * 0.001f)</c>）。
+        /// The amplitude **before** the envelope is applied
+        /// (IL_0069: <c>amp = 0.3f / (1f + v.magnitude * 0.001f)</c>).
         ///
-        /// **これがバニラの「揺れ」そのものであり、半径による打ち切りは無い**（§A-7）。
-        /// 全体円盤の <c>R = 2000 + 20i</c> は倒壊・出火の判定範囲であって、
-        /// 揺れの範囲ではない。10 km 離れていても震央の 9% で揺れ続ける。
+        /// **This is vanilla's "shaking" itself, and there is no cut-off by radius** (§A-7).
+        /// The whole-quake disc's <c>R = 2000 + 20i</c> is the range of the collapse and
+        /// ignition tests, not the range of the shaking. Even 10 km away it keeps shaking at
+        /// 9% of the epicentre's amplitude.
         ///
-        /// バニラはこの distance を**カメラから**測る。呼び出し側が震央からの距離を
-        /// 渡す場合、それは同じ式の別評価であって近似ではない（設計書 §3.5）。
-        /// その差は UI に必ず書くこと。
+        /// Vanilla measures this distance **from the camera**. When the caller passes the
+        /// distance from the epicentre, that is another evaluation of the same formula, not
+        /// an approximation (design document §3.5).
+        /// Always write that distinction into the UI.
         /// </summary>
         public static float PeakAmplitudeAt(float distance)
         {
@@ -95,9 +107,9 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 変位（あるいはその最大値）を 0-1 の目盛りに写す。満目盛りは
-        /// <see cref="MaxDisplacement"/>。バー表示の入力にのみ使い、
-        /// **数値そのものは正規化前の値を出すこと**。
+        /// Maps a displacement (or its maximum) onto a 0-1 scale, with
+        /// <see cref="MaxDisplacement"/> as full scale. Use it only as the input to a bar
+        /// display, and **print the pre-normalisation value as the number itself**.
         /// </summary>
         public static float NormalisedDisplacement(float value)
         {
@@ -108,25 +120,29 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 前回サンプルしたフレームと今のフレームから、**今回埋めるべき最初のフレーム**を返す。
+        /// Returns **the first frame to fill in this time**, given the last sampled frame
+        /// and the current one.
         ///
-        /// ── なぜ 1 tick に 1 サンプルでは足りないのか ──────────────────────
+        /// ── Why one sample per tick is not enough ──────────────────────
         ///
-        /// <c>SimulationManager.m_currentFrameIndex</c> は 1 sim tick で
-        /// <c>FinalSimulationSpeed</c>（ゲーム速度 1/2/3 で 1/3/9）進む。一方
-        /// 揺れの主成分は 0.63 rad/frame（周期 ≒10 フレーム）なので、
-        /// **9 フレームおきに 1 点だけ取ると周期 ≒92 フレームの偽の波**に化ける
-        /// （エイリアシング）。しかもその見た目は「長周期地震動」そのもので、
-        /// §A-7 は**バニラに長周期成分は無い**と確定させている。つまり第 1 層の
-        /// グラフが、第 2 層でしか足せないはずの現象を描いてしまう。
+        /// <c>SimulationManager.m_currentFrameIndex</c> advances by
+        /// <c>FinalSimulationSpeed</c> (1/3/9 at game speeds 1/2/3) per sim tick. The
+        /// shaking's main component, meanwhile, is 0.63 rad/frame (a period of ≒10 frames),
+        /// so **taking a single point every 9 frames turns it into a spurious wave with a
+        /// period of ≒92 frames** (aliasing). Worse, what that looks like is precisely
+        /// "long-period ground motion", and §A-7 establishes that **vanilla has no
+        /// long-period component**. In other words the first layer's graph would be drawing
+        /// a phenomenon only the second layer is allowed to add.
         ///
-        /// <see cref="DisplacementAt"/> は e の閉じた式なので、tick の中の各フレームで
-        /// 評価するのは 1 回評価するのとまったく同じ「実測」である。飛んだぶんを
-        /// 埋めれば標本化定理を満たす（周期 10 フレームに対し 1 フレーム間隔）。
+        /// <see cref="DisplacementAt"/> is a closed form in e, so evaluating it at each
+        /// frame within the tick is exactly as much a "measurement" as evaluating it once.
+        /// Fill in the skipped frames and we satisfy the sampling theorem (1-frame spacing
+        /// against a 10-frame period).
         ///
-        /// <paramref name="maxSubSamples"/> はゲーム速度 3 の 9 で足りるが、
-        /// 保存データやポーズ跨ぎで frame が大きく飛ぶことがあるので上限として使う
-        /// （飛びすぎたぶんは埋めずに捨てる —— 貯めても窓の外である）。
+        /// 9 would do for <paramref name="maxSubSamples"/> at game speed 3, but the frame
+        /// can jump a long way across a save or a pause, so we use it as a cap (anything
+        /// beyond the jump is discarded rather than filled in — accumulating it would only
+        /// put it outside the window anyway).
         /// </summary>
         public static uint FirstUnsampledFrame(uint lastSampledFrame, bool hasLastSample,
                                                uint currentFrame, int maxSubSamples)
@@ -143,7 +159,8 @@ namespace DisasterPlus.Core.Earthquake
             return next < oldest ? oldest : next;
         }
 
-        /// <summary>包絡線込みの振幅。<paramref name="t"/> はフレーム（小数を含む）。</summary>
+        /// <summary>The amplitude with the envelope included. <paramref name="t"/> is the
+        /// frame (fractional values allowed).</summary>
         public static float AmplitudeAt(float distance, float t)
         {
             if (float.IsNaN(distance) || float.IsNaN(t)) return 0f;
@@ -153,7 +170,7 @@ namespace DisasterPlus.Core.Earthquake
             return amp < 0f ? 0f : amp;
         }
 
-        /// <summary>符号付きの変位。バニラの <c>s</c> そのもの。</summary>
+        /// <summary>The signed displacement. Vanilla's <c>s</c> itself.</summary>
         public static float DisplacementAt(float distance, float t)
         {
             float amp = AmplitudeAt(distance, t);
@@ -162,13 +179,14 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// バニラの揺れに掛ける**追加**倍率（抑制はしない）。
+        /// The **additional** factor applied to vanilla's shaking (it never suppresses).
         ///
-        /// 強度 55（<c>DisasterManager.CreateDisaster</c> の既定値）でちょうど 0 になり、
-        /// そのとき合計はバニラと完全に一致する。**この 0 がこの機能を既定 ON に
-        /// してよい唯一の根拠**なので、式を「等価に」書き換えるときも
-        /// <c>intensity == 55</c> で厳密に 0f が出ることを必ず確認すること
-        /// （55f / 55f は IEEE754 で厳密に 1.0f、そこから 1f を引いて厳密に 0f）。
+        /// At intensity 55 (<c>DisasterManager.CreateDisaster</c>'s default) it is exactly
+        /// 0, and the total then matches vanilla perfectly. **That 0 is the sole
+        /// justification for having this feature on by default**, so whenever the formula is
+        /// rewritten "equivalently", always confirm that <c>intensity == 55</c> still yields
+        /// exactly 0f (55f / 55f is exactly 1.0f in IEEE754, and subtracting 1f from it
+        /// gives exactly 0f).
         /// </summary>
         public static float IntensityFactor(byte intensity)
         {

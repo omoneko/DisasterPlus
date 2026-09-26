@@ -6,46 +6,48 @@ using DisasterPlus.Core.Diagnostics;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 設計書 付録A の前提を、実行時に実際のゲームへ問い合わせて照合する。
+    /// Checks the assumptions in design doc appendix A against the real game, at runtime.
     ///
-    /// なぜ要るか: ③の実装中、IL から読んだ前提が 3 件も誤っていた
-    /// (DAYTIME_FRAMES の 4 倍ズレ、m_targetPos0 の意味、m_fireIntensity 直接書込)。
-    /// 共通点は「前提が破れても何も起きない」こと。ゲームは平然と動き、
-    /// 挙動だけが静かに違う。ここで名指しでログに出すのが唯一の防波堤になる。
+    /// Why it is needed: during ③'s implementation, three assumptions read from the IL turned
+    /// out to be wrong (the factor-of-4 error in DAYTIME_FRAMES, the meaning of m_targetPos0,
+    /// and writing m_fireIntensity directly). What they had in common is that "nothing happens
+    /// when the assumption breaks". The game carries on unperturbed and only the behaviour is
+    /// quietly different. Naming it in the log here is the only breakwater there is.
     ///
-    /// ── ファイルの構成（全体レビュー I6 で分けた）─────────────────────
+    /// ── How the files are arranged (split in overall review I6) ─────────────────────
     ///
-    /// かつては 1 ファイル 1159 行だった。付録A と突き合わせて監査するために
-    /// 集約していたのだが、育ちすぎて**内訳を説明するコメントと、その実体が
-    /// 900 行離れる**ようになり、片方だけ古くなる形になっていた。
-    /// いまは <c>partial</c> で機能ごとに分けてある:
+    /// It was once a single file of 1159 lines. It was gathered together so it could be
+    /// audited against appendix A, but it grew until **the comment explaining the breakdown
+    /// and the thing it describes were 900 lines apart**, so one of the two would go stale.
+    /// It is now split per feature with <c>partial</c>:
     ///
     /// <code>
-    /// Assumptions.cs             土台（この file）— 集計・ログ・Check/SetResult・
-    ///                            HasField 系・スライダー検証・機能に属さない前提 1 件
-    /// Assumptions.FireWhirl.cs   ③火災旋風  4 件
-    /// Assumptions.Forecast.cs    ①天気予報  7 件
-    /// Assumptions.Earthquake.cs  ②地震     11 件
-    /// Assumptions.Typhoon.cs     ④台風      9 件
-    /// Assumptions.Volcano.cs     ⑤火山      （件数はあちらの VolcanoCheckCount が名乗る）
+    /// Assumptions.cs             the foundation (this file) — totals, logging,
+    ///                            Check/SetResult, the HasField family, the slider check,
+    ///                            and 1 assumption that belongs to no feature
+    /// Assumptions.FireWhirl.cs   ③ fire whirl   4 checks
+    /// Assumptions.Forecast.cs    ① forecast     7 checks
+    /// Assumptions.Earthquake.cs  ② earthquake  11 checks
+    /// Assumptions.Typhoon.cs     ④ typhoon      9 checks
+    /// Assumptions.Volcano.cs     ⑤ volcano      (VolcanoCheckCount over there states the count)
     /// </code>
     ///
-    /// **可視性は 1 つも変えていない。** <c>Check</c> も <c>_gate</c> も
-    /// <c>_results</c> も private のままで、partial だから届く。
-    /// <c>DisasterPlus.csproj</c> は <c>Game\**\*.cs</c> を glob しているので、
-    /// 分割にあたって csproj は触っていない。
+    /// **Not a single visibility was changed.** <c>Check</c>, <c>_gate</c> and
+    /// <c>_results</c> all stay private, and partial makes them reachable.
+    /// <c>DisasterPlus.csproj</c> globs <c>Game\**\*.cs</c>, so the split did not touch the
+    /// csproj.
     ///
-    /// **⑤以降の前提はこのファイルに足さない。** 機能ごとの partial を作り、
-    /// その中で <c>…CheckCount</c> を宣言して <see cref="TotalCheckCount"/> の
-    /// 和に足すこと。
+    /// **Do not add assumptions for ⑤ onwards to this file.** Make a partial for the feature
+    /// and declare a <c>…CheckCount</c> inside it, adding to the sum in
+    /// <see cref="TotalCheckCount"/>.
     ///
-    /// スレッド安全性: Run() / Reset() / ReportSliderOutcome() は main スレッドからのみ
-    /// 呼ばれる想定だが、LastResults は DiagnosticsHub.CollectionEnabled が立つと
-    /// FeatureHost.BuildReport() 経由で sim スレッドから毎 tick 読まれる
-    /// （Task 5 以降）。書き込み中の List を読む競合を避けるため、_results への
-    /// 全アクセスを _gate 1 本で直列化する。FeatureHost._errorGate や
-    /// DiagnosticsHub の gate とはロック順序の関係を作らないよう、
-    /// このロックを持ったまま他クラスのコードは一切呼ばない。
+    /// Thread safety: Run() / Reset() / ReportSliderOutcome() are expected to be called only
+    /// from the main thread, but LastResults is read every tick from the sim thread through
+    /// FeatureHost.BuildReport() once DiagnosticsHub.CollectionEnabled is set (from Task 5
+    /// onwards). To avoid a race reading a List while it is being written, every access to
+    /// _results is serialised through the single _gate. So as not to create a lock-ordering
+    /// relationship with FeatureHost._errorGate or DiagnosticsHub's gate, no code in another
+    /// class is ever called while holding this lock.
     /// </summary>
     public static partial class Assumptions
     {
@@ -53,70 +55,73 @@ namespace DisasterPlus.Game
         private const string SliderCheckImpact = "disaster intensity cannot be unlocked to 25.5";
 
         /// <summary>
-        /// 1 回のレベルロードで最終的に埋まる検証件数。Report() が「何件中の集計か」を
-        /// 名乗るために使う。
+        /// The number of checks that will eventually be filled in over one level load. Report()
+        /// uses it to say "out of how many" the totals are.
         ///
-        /// ★ **内訳はもう here に書かない**（全体レビュー I6）。以前ここには
-        ///   34 行の内訳表があったが、それが説明している検証の実体は最大で 900 行
-        ///   離れた場所にあり、検証を足したときに片方だけが更新される形だった
-        ///   （実際に「31 件」と書いた doc と 32 の定数が同居していた）。
-        ///   いまは**機能ごとの partial が自分の件数を宣言し**、ここはその和を取るだけ ——
-        ///   検証を足す人は、足したファイルの中の定数だけを見ればよい。
+        /// ★ **The breakdown is no longer written here** (overall review I6). There used to be
+        ///   a 34-line breakdown table here, but the checks it described lived up to 900 lines
+        ///   away, so adding a check updated only one of the two (a doc saying "31 checks" and
+        ///   a constant of 32 did in fact coexist).
+        ///   Now **each feature's partial declares its own count** and this merely sums them —
+        ///   whoever adds a check only has to look at the constant in the file they added to.
         /// </summary>
         private const int TotalCheckCount = GeneralCheckCount + FireWhirlCheckCount
                                             + ForecastCheckCount + EarthquakeCheckCount
                                             + TyphoonCheckCount + VolcanoCheckCount
                                             + SliderCheckCount;
 
-        /// <summary>このファイルが持つ検証の数（機能に属さない土台の前提）。</summary>
+        /// <summary>The number of checks this file holds (foundation assumptions belonging to no feature).</summary>
         private const int GeneralCheckCount = 1;
 
-        /// <summary>スライダー到達性の 1 件（<see cref="ReportSliderOutcome"/>）。</summary>
+        /// <summary>The single slider-reachability check (<see cref="ReportSliderOutcome"/>).</summary>
         private const int SliderCheckCount = 1;
 
         private static readonly object _gate = new object();
         private static readonly List<AssumptionResult> _results = new List<AssumptionResult>();
 
         /// <summary>
-        /// Natural Disasters DLC を持たない環境では FAIL するのが正常な検証の名前。
-        /// <see cref="Check(string,string,Func{bool},bool)"/> が登録する。
+        /// The names of checks for which FAIL is the normal outcome in an environment without
+        /// the Natural Disasters DLC. Registered by
+        /// <see cref="Check(string,string,Func{bool},bool)"/>.
         ///
-        /// **名前を別表として二重に書かない。** 書くと検証名を直したときに黙って
-        /// 対応が切れ、正常な FAIL がまた警告として出るようになる。
-        /// <see cref="Reset"/> では消さない（ゲームのビルドに対する事実であって
-        /// 都市ごとの状態ではない）。
+        /// **Do not write the names out a second time as a separate table.** Do that and the
+        /// correspondence silently breaks when a check name is corrected, and a normal FAIL
+        /// starts coming out as a warning again.
+        /// <see cref="Reset"/> does not clear it (it is a fact about the game build, not
+        /// per-city state).
         /// </summary>
         private static readonly List<string> _expectedWithoutDlc = new List<string>();
 
         private static bool _ran;
 
         /// <summary>
-        /// スライダー検証が「この環境では対象外」に確定したか。
+        /// Whether the slider check has settled as "not applicable in this environment".
         ///
-        /// 設定で強度解放を切っている環境では、そもそも検証すべき前提が無い。
-        /// これは NDR を検出した環境の既定値なので、「保留中」のまま放置すると
-        /// 該当ユーザーには永久に未確定の集計が出続ける。母数から外して
-        /// 「4 件中 4 件」と正直に名乗るのがこちらの選択。
-        /// Run() / Reset() / ReportSlider* と同じく main スレッド専用（_ran と同じ扱い）。
+        /// In an environment where the intensity unlock is switched off in the settings, there
+        /// is no assumption to check in the first place. That is the default in an environment
+        /// where NDR was detected, so leaving it "pending" means those users see an unsettled
+        /// total forever. The choice here is to take it out of the denominator and honestly
+        /// say "4 of 4".
+        /// Main thread only, like Run() / Reset() / ReportSlider* (treated the same as _ran).
         /// </summary>
         private static bool _sliderNotApplicable;
 
         /// <summary>
-        /// _results が前の都市のものか。Reset() で立て、この都市で最初の結果を
-        /// 書き込むときに SetResult が捨てる（＝遅延クリア）。
+        /// Whether _results belongs to the previous city. Set by Reset() and dropped by
+        /// SetResult when the first result for this city is written (i.e. a deferred clear).
         ///
-        /// 「Run() の先頭でクリア」にはできない。ReportSliderOutcome() は
-        /// FeatureHost.LevelLoaded() → IntensityUnlock.Apply() の経路で
-        /// Assumptions.Run() より先に走ることがあり（DisasterPlusLoading の呼び出し順）、
-        /// Run() の先頭で消すとその 1 件だけ黙って失われる。
-        /// 「次の書き込みで消す」なら、どちらが先でも積み増しにならず、
-        /// かつメインメニューでは前の都市の結果が残る。
-        /// _gate の内側でだけ触ること。
+        /// It cannot be "clear at the top of Run()". ReportSliderOutcome() can run before
+        /// Assumptions.Run() along the path FeatureHost.LevelLoaded() →
+        /// IntensityUnlock.Apply() (see DisasterPlusLoading's call order), and clearing at the
+        /// top of Run() would silently lose that one result.
+        /// With "clear on the next write", neither order accumulates, and the previous city's
+        /// results still survive on the main menu.
+        /// Touch it only inside _gate.
         /// </summary>
         private static bool _stale;
 
-        /// <summary>呼び出し元がリストを保持し続けても _results の以後の変更から保護されるよう、
-        /// 常に防御的コピーを返す。</summary>
+        /// <summary>Always returns a defensive copy, so that a caller holding on to the list is
+        /// protected from later changes to _results.</summary>
         public static IList<AssumptionResult> LastResults
         {
             get
@@ -126,16 +131,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルアンロード時に呼ぶ。次のロードで Run() を再実行できるようにするだけで、
-        /// 結果は消さない。
+        /// Call on level unload. It only makes Run() runnable again on the next load; it does
+        /// not clear the results.
         ///
-        /// ここで _results を消してはいけない。OnSettingsUI（設計書 4.4 が要求する
-        /// 3 つの出力先のひとつ）はメインメニューで走る＝必ずこの Reset() より後になるため、
-        /// ここで消すと LastResults は常に空になり、設定画面の前提警告が原理的に
-        /// 出せなくなる（Strings.AssumptionsFailedHint が案内している手順そのものが
-        /// 何も表示しない手順になる）。
-        /// 前の都市の結果はメインメニューまで持ち越す。積み増しにならないよう、
-        /// 次の都市で最初に結果が書かれた時点で SetResult がまとめて捨てる（_stale 参照）。
+        /// _results must not be cleared here. OnSettingsUI (one of the three output
+        /// destinations design doc 4.4 requires) runs on the main menu, i.e. always after this
+        /// Reset(), so clearing here would make LastResults always empty and make the
+        /// assumption warnings on the settings screen impossible in principle (the very
+        /// procedure Strings.AssumptionsFailedHint points to would become a procedure that
+        /// displays nothing).
+        /// The previous city's results are carried through to the main menu. So they do not
+        /// accumulate, SetResult drops them wholesale the moment the first result is written
+        /// in the next city (see _stale).
         /// </summary>
         public static void Reset()
         {
@@ -145,27 +152,30 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルロード完了後に 1 回だけ呼ぶ。起動時ではないのは、
-        /// Harmony の適用状況と prefab の解決を見る必要があるため。
+        /// Call exactly once after the level has finished loading. Not at startup, because it
+        /// needs to see whether Harmony was applied and whether the prefabs resolved.
         ///
-        /// ここでは確定的に判定できるものだけを見る（<see cref="TotalCheckCount"/> から
-        /// <see cref="SliderCheckCount"/> を引いた件数）。**ここに実数を書かないこと** ——
-        /// 書くと機能を足すたびに片方だけが古くなる（この doc が 1 度そうなっている）。
-        /// 強度スライダーの到達可否は
-        /// この時点ではまだ「未構築なだけ」の可能性が拭えない（IntensityUnlock 自身が
-        /// 100 回・120 フレーム間隔のリトライを持つほど）ので、ここで即座に判定して
-        /// FAIL を出すと、実際には後で正常に到達できるケースまで誤報になる。
-        /// その 1 件は ReportSliderOutcome() が IntensityUnlock の確定後に個別に埋める。
+        /// Only things that can be decided conclusively are looked at here
+        /// (<see cref="TotalCheckCount"/> minus <see cref="SliderCheckCount"/> checks).
+        /// **Do not write an actual number here** — do that and one of the two goes stale
+        /// every time a feature is added (this doc has done exactly that once).
+        /// Whether the intensity slider is reachable cannot yet be told apart from "just not
+        /// built yet" at this point (so much so that IntensityUnlock itself retries 100 times
+        /// at 120-frame intervals), so deciding immediately and emitting a FAIL here would
+        /// misreport cases that in fact become reachable perfectly well later.
+        /// That one check is filled in separately by ReportSliderOutcome() once IntensityUnlock
+        /// has settled.
         /// </summary>
         public static void Run()
         {
             if (_ran) return;
             _ran = true;
 
-            // ★ 検証の本体は機能ごとの partial にある（Assumptions.<機能>.cs）。
-            //   ここは順序と、集計・ログの土台だけを持つ。**新しい機能の検証を
-            //   このファイルに足さないこと** —— 1159 行まで育って、内訳の
-            //   コメントとその実体が 900 行離れる形になったのが分割の理由である。
+            // ★ The checks themselves live in the per-feature partials
+            //   (Assumptions.<feature>.cs). This holds only the order and the foundation for
+            //   totals and logging. **Do not add a new feature's checks to this file** —
+            //   growing to 1159 lines, with the breakdown comment 900 lines from what it
+            //   described, is the reason for the split.
             RunGeneral();
             RunFireWhirl();
             RunForecast();
@@ -176,7 +186,7 @@ namespace DisasterPlus.Game
             Report();
         }
 
-        /// <summary>機能に属さない土台の前提（<see cref="GeneralCheckCount"/> 件）。</summary>
+        /// <summary>The foundation assumptions belonging to no feature (<see cref="GeneralCheckCount"/> of them).</summary>
         private static void RunGeneral()
         {
             Check("SimulationManager.DAYTIME_FRAMES == 65536",
@@ -196,17 +206,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 名前だけで見る版。**新しい検証では使わないこと**（全体レビュー）。
+        /// The name-only version. **Do not use it for new checks** (overall review).
         ///
-        /// 名前の一致は「同じ意味のフィールドがまだそこに在る」ことを保証しない。
-        /// 型が <c>UInt16</c> から <c>UInt32</c> へ変わっても、<c>float</c> が
-        /// <c>double</c> になっても、この関数は true を返し続ける ——
-        /// そして本 MOD の読み書きは**コンパイル済みの型で**行われるので、
-        /// 実際には型ロード時例外か、黙って別の値を読む結果になる。
-        /// 型まで分かっているものは必ず <see cref="HasField(Type,string,Type)"/> を使う。
+        /// A matching name is no guarantee that "a field with the same meaning is still there".
+        /// Whether the type changed from <c>UInt16</c> to <c>UInt32</c>, or a <c>float</c>
+        /// became a <c>double</c>, this function goes on returning true —
+        /// and this mod's reads and writes happen **with the compiled type**, so what really
+        /// results is either a type-load exception or silently reading a different value.
+        /// Where the type is known, always use <see cref="HasField(Type,string,Type)"/>.
         ///
-        /// 残してあるのは、型を名指しできない相手（<c>FastList&lt;T&gt;</c> の内部
-        /// フィールドなど、ジェネリック実引数を跨いで照合したい場合）のためだけである。
+        /// It is kept solely for cases where the type cannot be named (an internal field of a
+        /// <c>FastList&lt;T&gt;</c> and the like, where the match must hold across generic
+        /// arguments).
         /// </summary>
         private static bool HasField(Type declaringType, string fieldName)
         {
@@ -215,14 +226,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 型まで込みで見る版。**こちらが既定。**
+        /// The version that checks the type as well. **This is the default.**
         ///
-        /// 期待する型は全て本タスクで実際のゲームアセンブリへリフレクションして確定させた
-        /// （<c>WeatherManager</c> の天候値は全て <c>Single</c>、
-        /// <c>DisasterData.m_intensity</c> は <c>Byte</c>、
-        /// <c>m_activationFrame</c> / <c>m_startFrame</c> は <c>UInt32</c>、
-        /// <c>WaterSource.m_type</c> / <c>m_target</c> は <c>UInt16</c>、
-        /// <c>ThunderStormAI</c> / <c>EarthquakeAI</c> の duration は <c>UInt32</c>）。
+        /// Every expected type was settled in this task by reflecting over the real game
+        /// assembly (<c>WeatherManager</c>'s weather values are all <c>Single</c>,
+        /// <c>DisasterData.m_intensity</c> is a <c>Byte</c>,
+        /// <c>m_activationFrame</c> / <c>m_startFrame</c> are <c>UInt32</c>,
+        /// <c>WaterSource.m_type</c> / <c>m_target</c> are <c>UInt16</c>, and
+        /// <c>ThunderStormAI</c>'s / <c>EarthquakeAI</c>'s durations are <c>UInt32</c>).
         /// </summary>
         private static bool HasField(Type declaringType, string fieldName, Type fieldType)
         {
@@ -232,9 +243,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// static フィールド版。<see cref="HasField"/> は Instance しか見ないので、
-        /// SimulationManager.DAYTIME_FRAME_TO_HOUR のような static readonly を
-        /// そちらに渡すと常に false になる（＝偽 FAIL）。
+        /// The static-field version. <see cref="HasField"/> only looks at Instance, so passing
+        /// a static readonly such as SimulationManager.DAYTIME_FRAME_TO_HOUR to that one
+        /// always comes back false (i.e. a false FAIL).
         /// </summary>
         private static bool HasStaticField(Type declaringType, string fieldName, Type fieldType)
         {
@@ -244,13 +255,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// IntensityUnlock がスライダー到達の可否を確定させた時点（成功で _applied、
-        /// あるいは MaxAttempts 尽きての _gaveUp）で呼ぶ。ロード直後の 1 回勝負にせず、
-        /// 「わかった時点で」名指しの結果を残す・ログに出すのが、この検証項目の
-        /// 誤報（false FAIL）を避ける唯一の方法。設定でこの機能自体を無効にした
-        /// 場合（_gaveUp だが ModSettings.IntensityUnlock.value == false）は
-        /// 前提が破れたわけではないので、ここではなく
-        /// <see cref="ReportSliderNotApplicable"/> を呼ぶこと。
+        /// Call when IntensityUnlock has settled whether the slider is reachable (_applied on
+        /// success, or _gaveUp having exhausted MaxAttempts). Not making it a one-shot right
+        /// after the load, but leaving a named result and a log line "at the moment it is
+        /// known", is the only way to avoid a misreport (a false FAIL) on this check. When the
+        /// feature itself was disabled in the settings (_gaveUp but
+        /// ModSettings.IntensityUnlock.value == false) no assumption has been broken, so call
+        /// <see cref="ReportSliderNotApplicable"/> instead of this.
         /// </summary>
         public static void ReportSliderOutcome(bool reachable)
         {
@@ -261,10 +272,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 強度解放を設定で切っているため、スライダー検証がこの環境では対象外だと確定させる。
+        /// Settles the slider check as not applicable in this environment, because the
+        /// intensity unlock is switched off in the settings.
         ///
-        /// PASS を publish してはいけない（通っていない前提を通ったと名乗ることになる）。
-        /// 代わりに母数から外し、集計行にその旨を書く。
+        /// Do not publish a PASS (that would claim an assumption held when it was never
+        /// checked). Take it out of the denominator instead and say so on the totals line.
         /// </summary>
         public static void ReportSliderNotApplicable()
         {
@@ -278,19 +290,21 @@ namespace DisasterPlus.Game
         }
 
         /// <param name="expectedWithoutDlc">
-        /// Natural Disasters DLC を持っていない環境では**この検証が FAIL するのが正常**か。
+        /// Whether **FAIL is the normal outcome for this check** in an environment without the
+        /// Natural Disasters DLC.
         ///
-        /// true を渡した検証は、DLC 非所持の環境で <see cref="LogResult"/> が
-        /// <c>Log.Warn</c> ではなく <c>Log.Info</c> で出し、設定画面の警告群からも
-        /// 外れる（<see cref="UnexpectedFailures"/>）。**結果自体は FAIL のまま**で、
-        /// 診断ダンプには従来どおり FAIL として出る —— 「DLC が無いから使えない」を
-        /// PASS と言い換えることはしない。
+        /// For a check passed true, <see cref="LogResult"/> emits it with <c>Log.Info</c>
+        /// rather than <c>Log.Warn</c> in an environment without the DLC, and it drops out of
+        /// the warnings on the settings screen (<see cref="UnexpectedFailures"/>).
+        /// **The result itself stays FAIL** and appears as FAIL in the diagnostic dump as
+        /// before — "unusable because the DLC is absent" is never rephrased as PASS.
         ///
-        /// これが要るのは、DLC を持たない環境では 5 件が**毎回のレベルロードで**
-        /// FAIL するからである。1 件につき Log.Warn が 2 行出るので、正常な
-        /// バニラ環境のログが毎回 10 行の警告で埋まり、設定画面には
-        /// 「一部の機能が使えません」の群が固定表示されて消えなくなる。
-        /// 狼少年にしないための扱いで、他の FAIL は今までどおり Warn で目立たせる。
+        /// This is needed because in an environment without the DLC five checks FAIL **on
+        /// every level load**. Each one produces two lines of Log.Warn, so a normal vanilla
+        /// environment has its log filled with ten warning lines every time, and the settings
+        /// screen carries a permanent block of "some features are unavailable" that never goes
+        /// away. This is the treatment that stops it crying wolf; other FAILs keep standing out
+        /// as Warn, as before.
         /// </param>
         private static void Check(string name, string impact, Func<bool> predicate,
                                   bool expectedWithoutDlc)
@@ -311,19 +325,19 @@ namespace DisasterPlus.Game
             }
             catch (Exception e)
             {
-                // 検証そのものが落ちても起動を壊さない。FAIL として扱う。
+                // Do not break startup even if the check itself falls over. Treat it as FAIL.
                 passed = false;
                 detail = impact + " (check threw " + e.GetType().Name + ")";
             }
             SetResult(new AssumptionResult(name, passed, passed ? "" : detail));
         }
 
-        /// <summary>同名の既存結果があれば置き換える。Run() の各件と
-        /// ReportSliderOutcome() の 1 件が非同期に混ざっても、Name をキーに
-        /// 常に最新・単一の結果だけが残るようにする。
+        /// <summary>Replaces an existing result of the same name, if there is one. So that even
+        /// when Run()'s checks and ReportSliderOutcome()'s single check arrive asynchronously,
+        /// only the latest, single result per Name ever survives.
         ///
-        /// 前の都市の結果はここで（この都市の最初の書き込み時に）まとめて捨てる。
-        /// _stale の説明を参照。</summary>
+        /// The previous city's results are dropped wholesale here (on this city's first write).
+        /// See the explanation of _stale.</summary>
         private static void SetResult(AssumptionResult result)
         {
             lock (_gate)
@@ -350,9 +364,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ DLC 非所持環境で「正常な FAIL」が毎回 2 行の警告になるのを止める
-            //   （全体レビュー）。行は必ず出す —— 黙らせるのではなく、
-            //   重み付けだけを変える。
+            // ★ Stops a "normal FAIL" becoming two lines of warning every time in an
+            //   environment without the DLC (overall review). The line always appears —
+            //   this changes only the weighting, it does not silence anything.
             if (IsExpectedFailure(a.Name))
             {
                 Log.Info("  FAIL  " + a.Name
@@ -365,8 +379,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// この FAIL が「この環境では正常」か。DLC 依存の検証で、かつ DLC を
-        /// 持っていないときだけ true。
+        /// Whether this FAIL is "normal in this environment". Only true for a DLC-dependent
+        /// check when the DLC is not owned.
         /// </summary>
         private static bool IsExpectedFailure(string name)
         {
@@ -375,12 +389,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 設定画面に「一部の機能が使えません」として出すべき FAIL だけを返す。
-        /// **main スレッド専用**（<c>ModCompat.NaturalDisastersOwned</c> を読む）。
+        /// Returns only those FAILs that ought to be shown on the settings screen as "some
+        /// features are unavailable". **Main thread only** (it reads
+        /// <c>ModCompat.NaturalDisastersOwned</c>).
         ///
-        /// DLC 非所持環境で正常に FAIL する 5 件を外すためだけに在る。外さないと、
-        /// バニラのままの環境では警告の群が**永久に出続ける** —— そして本当の
-        /// 前提破れが起きたとき、その 1 件は既に見慣れた群に紛れて読まれない。
+        /// It exists solely to take out the five checks that FAIL normally in an environment
+        /// without the DLC. Without that, a plain vanilla environment shows the block of
+        /// warnings **forever** — and when a real broken assumption does turn up, that one
+        /// entry is lost in a block people have long since stopped reading.
         /// </summary>
         public static IList<AssumptionResult> UnexpectedFailures()
         {
@@ -397,9 +413,9 @@ namespace DisasterPlus.Game
 
         private static void Report()
         {
-            // ReportSliderOutcome が Run() より前（同じ OnLevelLoaded 内、
-            // IntensityUnlock.Apply() の初回呼び出しが即座に確定した場合）に
-            // 既に 1 件足していることがあるので、その時点のスナップショットをそのまま数える。
+            // ReportSliderOutcome may already have added one result before Run() (within the
+            // same OnLevelLoaded, when the first call to IntensityUnlock.Apply() settled
+            // immediately), so count the snapshot as it stands at this moment.
             var snapshot = LastResults;
 
             int passed = 0, failed = 0;
@@ -410,13 +426,14 @@ namespace DisasterPlus.Game
                 if (snapshot[i].Name == SliderCheckName) sliderSettled = true;
             }
 
-            // 未確定の検証があるまま「4 passed, 0 FAILED」とだけ出すと、
-            // 「全部通った」と読める。本基盤が消したいのは、まさにその
-            // 「信じたが実は違う出力」なので、母数を必ず名乗る。
+            // Printing just "4 passed, 0 FAILED" while a check is still unsettled reads as
+            // "everything passed". What this infrastructure exists to remove is exactly that
+            // "output you believed and that turned out to be otherwise", so always state the
+            // denominator.
             //
-            // 「対象外」は未確定ではない。母数から外して確定扱いにする。
-            // 外さないと、NDR を検出した環境（強度解放が既定で OFF）では
-            // 永久に「slider check pending」が出続けることになる。
+            // "Not applicable" is not unsettled. Take it out of the denominator and treat it
+            // as settled. Without that, an environment where NDR was detected (intensity
+            // unlock OFF by default) would show "slider check pending" forever.
             int total = _sliderNotApplicable ? TotalCheckCount - 1 : TotalCheckCount;
             string summary;
             if (sliderSettled || _sliderNotApplicable)

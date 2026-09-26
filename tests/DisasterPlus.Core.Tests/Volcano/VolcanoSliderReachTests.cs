@@ -4,14 +4,15 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 実機報告（2026-08-22）「火山の 25.5 スケールが小さすぎるように思います」。
+    /// Report from the game (2026-08-22): "the volcano's 25.5 scale feels too small to me".
     ///
-    /// ★★ <b>原因はスライダーではなく帯だった。</b> 倍率の上端は 255/55 ≒ 4.64 で
-    ///    正しく届いていたのに、<see cref="VolcanoShape"/> の最大値が先に頭打ちになり、
-    ///    <b>表示 9.2 より上はスライダーを動かしても半径が 1 m も変わらなかった</b>。
+    /// ★★ <b>The cause was not the slider but the band.</b> The top of the multiplier was
+    ///    reaching 255/55 ≒ 4.64 correctly, but the maximum in <see cref="VolcanoShape"/>
+    ///    capped out first, so <b>above a displayed 9.2 the radius did not change by a
+    ///    single metre however far the slider was moved</b>.
     ///
-    ///    ここが固定するのは「スライダーのどの位置でも、動かせば大きさが変わる」で
-    ///    ある —— 押しても何も変わらない帯を二度と作らないため。
+    ///    What is pinned here is "at any position on the slider, moving it changes the
+    ///    size" —— so that a band where pushing does nothing is never built again.
     /// </summary>
     public class VolcanoSliderReachTests
     {
@@ -29,7 +30,7 @@ namespace DisasterPlus.Core.Tests.Volcano
 
         private static float HeightAt(VolcanoForm form, int raw)
         {
-            // 海抜 0 m の土地に立てる（天井の余裕をいちばん広く取る）。
+            // Stand it on land at 0 m above sea level (the widest possible headroom).
             return VolcanoShape.HeightFor(
                 form, VolcanoSizeScale.Apply(VolcanoShape.DefaultHeightOf(form),
                                              VolcanoSizeScale.ScaleFor(raw)), 0f);
@@ -43,7 +44,7 @@ namespace DisasterPlus.Core.Tests.Volcano
                 float atDefault = RadiusAt(form, VolcanoSizeScale.AnchorRaw);
                 float atTop = RadiusAt(form, VolcanoSizeScale.MaxRaw);
 
-                // 帯が効く前は 2000/1200 ＝ 1.67 倍しか無かった。
+                // Before the band took effect there was only 2000/1200 = 1.67x.
                 Assert.True(atTop >= atDefault * 2.5f,
                             form + " only grows from " + atDefault + " m to " + atTop + " m");
             }
@@ -57,14 +58,15 @@ namespace DisasterPlus.Core.Tests.Volcano
                 float atDefault = HeightAt(form, VolcanoSizeScale.AnchorRaw);
                 float atTop = HeightAt(form, VolcanoSizeScale.MaxRaw);
 
-                // 成層火山は 700/600 ＝ 1.17 倍しか無かった。**そこが「小さすぎる」の正体。**
+                // A stratovolcano only had 700/600 = 1.17x. **That is what "too small" was.**
                 //
-                // ★★ <b>高さは倍率いっぱい（4.64 倍）には伸ばせない。</b>
-                //   ゲームの地形の天井が海抜 1024 m で、**MOD からは上げられない**
-                //   （<c>UpliftSchedule.CeilingMetres</c>）。成層火山の推奨 600 m に
-                //   4.64 を掛けると 2784 m ——存在できない山である。
-                //   だからここが要求するのは「上端が推奨よりはっきり高い」までで、
-                //   **「大きくなった」の主役は半径のほうである**（下の体積の検査）。
+                // ★★ <b>Height cannot be stretched by the full multiplier (4.64x).</b>
+                //   The game's terrain ceiling is 1024 m above sea level and **a mod cannot
+                //   raise it** (<c>UpliftSchedule.CeilingMetres</c>). The recommended 600 m
+                //   for a stratovolcano times 4.64 is 2784 m —— a mountain that cannot exist.
+                //   So all that is demanded here is that the top is clearly higher than the
+                //   recommended value, and **the radius is what really carries "it got
+                //   bigger"** (see the volume check below).
                 Assert.True(atTop >= atDefault * 1.5f,
                             form + " only grows from " + atDefault + " m to " + atTop + " m");
             }
@@ -73,8 +75,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheTopOfTheSliderIsAnOrderOfMagnitudeMoreMountain()
         {
-            // ★ 「小さすぎる」に効くのは<b>体積</b>である（r² h）。
-            //   帯を上げる前の成層火山は 2000² × 700 / (1200² × 600) ＝ 3.2 倍しか無かった。
+            // ★ What answers "too small" is the <b>volume</b> (r² h).
+            //   Before the band was raised, a stratovolcano had only
+            //   2000² × 700 / (1200² × 600) = 3.2x.
             foreach (VolcanoForm form in AllForms)
             {
                 float rd = RadiusAt(form, VolcanoSizeScale.AnchorRaw);
@@ -92,13 +95,12 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void SomethingStillChangesAtTheTopOfTheSlider()
         {
-            // ★★ **押しても何も変わらない帯を作らない。**
+            // ★★ **Never build a band where pushing changes nothing.**
             //
-            //    どちらか片方が先に飽和するのは避けられない ——
-            //    成層火山は高さが天井（1024 m）で、楯状火山は半径が実費の上限
-            //    （6 km）で止まる。禁じているのは<b>両方いっぺんに止まること</b>で、
-            //    そうなった瞬間、プレイヤーからは「スライダーが壊れている」に
-            //    しか見えない。
+            //    One of the two saturating first is unavoidable —— the stratovolcano's
+            //    height stops at the ceiling (1024 m) and the shield volcano's radius stops
+            //    at the cost limit (6 km). What is forbidden is <b>both stopping at once</b>:
+            //    the moment that happens, all the player can see is "the slider is broken".
             foreach (VolcanoForm form in AllForms)
             {
                 bool radiusMoves = RadiusAt(form, VolcanoSizeScale.MaxRaw - 20)
@@ -114,8 +116,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NothingReachesTheGamesTerrainCeiling()
         {
-            // 天井（1024 m）は MOD からは上げられない。帯がそこを越えていたら、
-            // 「設定した高さにならない」が既定の挙動になってしまう。
+            // The ceiling (1024 m) cannot be raised from a mod. If the band went past it,
+            // "it does not reach the height you set" would become the default behaviour.
             foreach (VolcanoForm form in AllForms)
             {
                 Assert.True(VolcanoShape.MaxHeightOf(form) < UpliftSchedule.CeilingMetres,
@@ -126,7 +128,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSupereruptionStaysInsideTheCostCeiling()
         {
-            // いちばん大きい山でも、膨らみとカルデラの矩形が実費の上限を越えないこと。
+            // Even for the largest mountain, the inflation and caldera rectangles must not
+            // exceed the cost limit.
             foreach (VolcanoForm form in AllForms)
             {
                 float biggest = VolcanoShape.MaxRadiusOf(form);
@@ -140,8 +143,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void OnlyTheVeryTopOfTheSliderGetsASupereruption()
         {
-            // スライダーを 1 目盛り下げたら、ふつうの噴火に戻ること
-            // （所有者の依頼「25.5 のときだけ」）。
+            // Drop the slider by one notch and it must go back to an ordinary eruption
+            // (the owner's request: "only at 25.5").
             Assert.True(SuperEruption.IsSuper(VolcanoSizeScale.MaxRaw));
             Assert.False(SuperEruption.IsSuper(VolcanoSizeScale.MaxRaw - 1));
             Assert.False(SuperEruption.IsSuper(VolcanoSizeScale.AnchorRaw));

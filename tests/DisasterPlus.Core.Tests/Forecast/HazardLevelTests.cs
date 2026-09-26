@@ -54,8 +54,10 @@ namespace DisasterPlus.Core.Tests.Forecast
         [Fact]
         public void BarIsAsciiOnly()
         {
-            // CS の UI フォントに罫線素片（▓ ░）がある保証は無く、豆腐になりうる。
-            // このプロジェクトは描画前提の思い込みで既に何度か失敗している。
+            // There is no guarantee that the CS UI font has the block elements (▓ ░),
+            // so they can come out as tofu boxes.
+            // This project has already failed several times over assumptions about
+            // what can be drawn.
             for (int i = 0; i <= 255; i += 17)
             {
                 foreach (char c in HazardLevel.BarOf((byte)i))

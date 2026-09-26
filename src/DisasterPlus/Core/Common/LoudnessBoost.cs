@@ -3,80 +3,84 @@ using System;
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// 波形を**素材を差し替えずに大きくする**。<b>Core なのでエンジンには一切触らない</b>
-    /// （<c>UnityEngine</c> も <c>Mathf</c> も出てこない）。
+    /// Makes a waveform louder **without replacing the source material**. <b>This is Core,
+    /// so it touches the engine not at all</b> (neither <c>UnityEngine</c> nor
+    /// <c>Mathf</c> appears here).
     ///
-    /// ── なぜ要るのか（2026-08-22、所有者の依頼「噴火の音が小さい」）─────────
+    /// ── Why it is needed (2026-08-22, the owner's request: "the eruption is too quiet") ────
     ///
-    /// > あと噴火の音が小さいです。もう倍くらいの音量にしてください。
+    /// > Also the eruption sound is too quiet. Please make it about twice as loud.
     ///
-    /// **音量を掛ける場所は 3 つあり、そのうち 2 つはこちらのものではない。**
-    /// ⑤の音は <c>AudioManager.EffectGroup</c> を通っており（IL 事実文書 §H-23）、
-    /// 最終的な音量は
+    /// **There are three places volume gets multiplied, and two of them are not ours.**
+    /// ⑤'s sound goes through <c>AudioManager.EffectGroup</c> (IL findings doc §H-23), and
+    /// the final volume is
     ///
     /// <code>
     /// m_targetVolume = info.m_volume * volume * m_cachedVolume
-    ///                                           ↑ プレイヤーの効果音スライダー
-    /// source.volume ← m_targetVolume * (1 - 使用中スロット番号 / m_maxActiveCount)
+    ///                                           ↑ the player's sound-effects slider
+    /// source.volume ← m_targetVolume * (1 - slot number in use / m_maxActiveCount)
     /// </code>
     ///
-    /// である。<c>volume</c> は既に噴出の強さで <c>[0.35, 1.0]</c> まで上げきっており、
-    /// **1 を超えて渡しても <c>AudioSource.volume</c> がそれを受け付けるかは
-    /// Unity 側の実装依存で、この MOD からは実測できない**（native 呼び出しなので
-    /// IL には出てこない）。確かめられないものに 2 倍を賭けない。
+    /// <c>volume</c> is already pushed all the way up to <c>[0.35, 1.0]</c> by the eruption
+    /// strength, and **whether <c>AudioSource.volume</c> accepts a value above 1 depends on
+    /// Unity's implementation and cannot be measured from this mod** (it is a native call,
+    /// so it does not show up in the IL). Do not bet a doubling on something you cannot
+    /// verify.
     ///
-    /// ── では波形そのものを大きくする。**ただし素材にはもう余白が無い** ────────
+    /// ── So make the waveform itself louder. **Except the material has no headroom left** ───
     ///
-    /// 同梱の <c>erupting-volcano.wav</c> を実測すると:
+    /// Measuring the bundled <c>erupting-volcano.wav</c>:
     ///
-    /// | 量 | 値 |
+    /// | Quantity | Value |
     /// |---|---|
-    /// | ピーク | 27412 / 32767 ＝ 0.837（**-1.55 dBFS**） |
-    /// | RMS | 5330 / 32767 ＝ 0.163（-15.8 dBFS） |
+    /// | Peak | 27412 / 32767 = 0.837 (**-1.55 dBFS**) |
+    /// | RMS | 5330 / 32767 = 0.163 (-15.8 dBFS) |
     ///
-    /// **ピークはもう天井の 1.2 倍手前にある**ので、単純に 2 倍すると割れる
-    /// （0.837 × 2 = 1.674 が <c>[-1,1]</c> をはみ出す）。
-    /// 一方 RMS はピークより 14 dB も下 —— **平均は小さいのにピークだけ大きい**
-    /// 素材である。だから「ピークを少しだけ抑えて、それ以外を素直に 2 倍する」が
-    /// この素材に対する正しい大きくし方になる。
+    /// **The peak is already within a factor of 1.2 of the ceiling**, so simply doubling it
+    /// would clip (0.837 × 2 = 1.674 runs off the end of <c>[-1,1]</c>).
+    /// The RMS, on the other hand, is a full 14 dB below the peak — this is material whose
+    /// **average is small while only its peaks are large**. So "hold the peaks back a
+    /// little and double everything else straightforwardly" is the right way to make this
+    /// particular material louder.
     ///
-    /// ── やっていること ────────────────────────────────
+    /// ── What it does ────────────────────────────────
     ///
-    /// <see cref="Threshold"/> までは<b>厳密に <paramref name="gain"/> 倍</b>で、
-    /// そこから上は 1 に漸近する指数の膝で潰す（<see cref="Apply"/>）。
+    /// Up to <see cref="Threshold"/> it is <b>exactly <paramref name="gain"/>×</b>, and
+    /// above that it is squashed by an exponential knee asymptotic to 1 (see
+    /// <see cref="Apply"/>).
     ///
     /// <code>
     /// |y| = gain * |x|
-    /// |y| &lt;= t : そのまま          ← RMS 0.163 の素材はほとんどここを通る
+    /// |y| &lt;= t : unchanged          ← material with RMS 0.163 goes almost entirely through here
     /// |y| &gt;  t : t + (1-t)(1 - e^-((|y|-t)/(1-t)))
     /// </code>
     ///
-    /// 実測（gain = 2, t = 0.7）: 0.163（RMS）→ 0.326 でちょうど 2 倍、
-    /// ピーク 0.837 → 0.988 で**割れない**。つまり<b>体感の大きさはほぼ 2 倍、
-    /// 潰れるのはいちばん大きい山だけ</b>である。
+    /// Measured (gain = 2, t = 0.7): 0.163 (RMS) → 0.326, exactly double, and the peak
+    /// 0.837 → 0.988, which **does not clip**. In other words <b>the perceived loudness is
+    /// close to doubled and only the very largest peaks are squashed</b>.
     ///
-    /// ★ <b>素材のファイルは 1 バイトも書き換えない。</b> 読み込んだあとの
-    ///   <c>float[]</c> に掛けるだけなので、所有者が渡した wav はそのまま残る
-    ///   （差し替えたときに前の加工が二重に掛かることも無い）。
+    /// ★ <b>The source file is not altered by a single byte.</b> This only multiplies the
+    ///   <c>float[]</c> after loading, so the wav the owner supplied stays as it is (and
+    ///   swapping it out cannot leave the previous processing applied twice).
     /// </summary>
     public static class LoudnessBoost
     {
         /// <summary>
-        /// ここまでは**厳密に gain 倍**。上は膝に入る。
-        /// 0 &lt; t &lt; 1 でなければならない（1 にすると膝が消えて割れる）。
+        /// Up to here it is **exactly gain×**. Above it, the knee takes over.
+        /// It must satisfy 0 &lt; t &lt; 1 (set it to 1 and the knee disappears and it clips).
         /// </summary>
         public const float Threshold = 0.7f;
 
         /// <summary>
-        /// 波形（<c>[-1,1]</c> のインターリーブ）を <paramref name="gain"/> 倍する。
-        /// **配列はその場で書き換える**（36 秒 × 2ch で 3.2 M 要素あり、
-        /// もう 1 本作るのは 12 MB の無駄である）。
+        /// Multiplies the waveform (interleaved, in <c>[-1,1]</c>) by
+        /// <paramref name="gain"/>. **The array is rewritten in place** (36 seconds × 2
+        /// channels is 3.2 M elements, and making a second one wastes 12 MB).
         ///
-        /// <paramref name="samples"/> が null なら何もしない。
-        /// <paramref name="gain"/> が 1 以下・NaN・∞ なら**何もしない**
-        /// （「小さくする」用途はこの型に無い。あるなら別の型にすること）。
+        /// Does nothing if <paramref name="samples"/> is null.
+        /// **Does nothing** if <paramref name="gain"/> is 1 or less, NaN or ∞ (this type
+        /// has no "make it quieter" use; if you want that, use a different type).
         ///
-        /// 戻り値は加工後のピーク（診断用）。空配列なら 0。
+        /// Returns the peak after processing (for diagnostics). 0 for an empty array.
         /// </summary>
         public static float Apply(float[] samples, float gain)
         {
@@ -96,10 +100,11 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// 1 サンプルぶん。<see cref="Threshold"/> までは線形、そこから上は
-        /// 1 へ漸近する。**符号は必ず保つ**（保たないと波形が別物になる）。
-        /// 異常な入力は 0（無音）—— 0 で埋めるのはここだけで、
-        /// 「読めなかった」ではなく「その 1 サンプルが壊れていた」である。
+        /// One sample's worth. Linear up to <see cref="Threshold"/>, asymptotic to 1 above
+        /// it. **The sign is always preserved** (lose it and the waveform becomes something
+        /// else entirely).
+        /// Abnormal input gives 0 (silence) — this is the only place we fill with 0, and it
+        /// means "that one sample was corrupt", not "it could not be read".
         /// </summary>
         public static float Shape(float sample, float gain)
         {
@@ -112,14 +117,14 @@ namespace DisasterPlus.Core.Common
             float y = magnitude * gain;
             if (y <= Threshold) return sign * y;
 
-            // t から上は (1 - t) の幅を使って 1 へ漸近する。
+            // Above t, the remaining (1 - t) of range is used to approach 1 asymptotically.
             const float Knee = 1f - Threshold;
             float over = (y - Threshold) / Knee;
             float shaped = Threshold + Knee * (1f - (float)Math.Exp(-over));
             return sign * Clamp(shaped);
         }
 
-        /// <summary>今のピーク（絶対値の最大）。</summary>
+        /// <summary>The current peak (the largest absolute value).</summary>
         public static float PeakOf(float[] samples)
         {
             if (samples == null) return 0f;

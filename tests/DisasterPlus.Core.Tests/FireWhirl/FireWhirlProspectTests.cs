@@ -6,11 +6,12 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.FireWhirl
 {
     /// <summary>
-    /// 「なぜ火災旋風が出ないのか」を出す側の固定。
+    /// Pins down the side that reports "why no fire whirl is appearing".
     ///
-    /// ③は自然発生しか経路を持たないので、**既定の状態は「何も起きない」**である。
-    /// その状態で「条件が足りない」と「壊れている」を言い分けられなければ、
-    /// 実機テストは何も確かめられない（実際に一度そうなった）。
+    /// Feature no. 3 has no path other than spontaneous formation, so **the default state is
+    /// "nothing happens"**. Unless we can tell "the conditions are not met" apart from
+    /// "it is broken" in that state, an in-game test can confirm nothing at all
+    /// (which is exactly what happened once).
     /// </summary>
     public class FireWhirlProspectTests
     {
@@ -50,7 +51,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
 
             string text = p.Describe();
             Assert.Contains("nothing is on fire", text);
-            // 閾値を名乗らないと、テスターは「どれだけ燃やせばいいのか」を知りようがない。
+            // Without naming the threshold the tester has no way of knowing "how much do I
+            // have to set alight".
             Assert.Contains("12", text);
             Assert.Contains("150", text);
         }
@@ -76,7 +78,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void ScatteredFires_ReportDensityNotTotals()
         {
-            // 総数は足りているのに密度が足りない。**総数だけを出す診断はここで嘘になる。**
+            // The total is sufficient but the density is not. **A diagnostic that reports
+            // only the total becomes a lie here.**
             var burning = new List<BurningBuilding>();
             for (ushort i = 0; i < 20; i++)
                 burning.Add(new BurningBuilding((ushort)(i + 1), new Vec2(i * 2000f, 0f)));
@@ -126,9 +129,10 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void MetButNothingAccepted_PointsAwayFromTheFireConditions()
         {
-            // Detect が返す prospect ではなく、値そのものの契約を固定する。
-            // 「密度は足りている・抑制もされていない・それでも 1 基も出ない」は
-            // **条件の側の問題ではない**と言い切れなければ診断の意味が無い。
+            // Pins down the contract of the value itself rather than the prospect Detect
+            // returns. Unless we can state outright that "dense enough, not suppressed, and
+            // still not a single whirl" is **not a problem on the conditions' side**, the
+            // diagnostic is pointless.
             var p = new FireWhirlProspect(30, 20, new Vec2(0f, 0f), 150f, 12, 0, 0);
             Assert.Contains("not the fire conditions", p.Describe());
         }

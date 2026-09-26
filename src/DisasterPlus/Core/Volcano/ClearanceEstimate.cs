@@ -3,44 +3,53 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 影響範囲の行に出す「範囲の広さ」と「概数への丸め」。
+    /// The "how wide the area is" and "rounding to an approximate figure" shown on the
+    /// affected-area line.
     ///
-    /// ★★ <b>これは「壊れる数」ではない。</b> <see cref="RoundedEstimate"/> に渡すのは
-    /// <b>調査した瞬間に範囲内にあった実数</b>で、返るのはそれを丸めた概数である。
-    /// 準備（破壊）は数ゲーム内分かけて外側へ広がり、**その間に都市は変化する** ——
-    /// 建物は建ち、道路は引かれ、火災や他の災害でも消える。したがって実際に壊れる数は
-    /// この値と一致しない。設計書 §7.2 が「概数であることも明示する」と要求している
-    /// 理由がこれである（<c>Strings.VolcanoEstimateNote</c> がその 1 文）。
+    /// ★★ <b>This is not "the number that will be destroyed".</b> What you pass to
+    /// <see cref="RoundedEstimate"/> is <b>the exact count that was inside the area at the
+    /// moment of the survey</b>, and what comes back is that count rounded. The preparation
+    /// (destruction) spreads outwards over several in-game minutes, and **the city changes
+    /// during that time** — buildings go up, roads get laid, and things also disappear to
+    /// fires and other disasters. So the number actually destroyed will not match this
+    /// value. That is why design document §7.2 requires us to "state explicitly that it is
+    /// approximate" (<c>Strings.VolcanoEstimateNote</c> is that sentence).
     ///
-    /// <b>実数をそのまま出してはいけない。</b> 「243 棟」と書くとプレイヤーは
-    /// 「ぴったり 243 棟だけ壊れる」と読む。⑤にその保証は無い。
+    /// <b>Never show the exact count as-is.</b> Write "243 buildings" and the player reads
+    /// it as "exactly 243 buildings and no more will be destroyed". ⑤ makes no such
+    /// guarantee.
     ///
-    /// 丸めは<b>有効数字 2 桁の四捨五入</b>で、100 未満はそのまま出す
-    /// （「およそ 3 棟」は嘘くさいうえ、1 桁の値を丸めると 0 になりうる ——
-    /// 「0 棟」と「数えたが少なかった」は別物である）。
+    /// The rounding is <b>to two significant figures, rounding half up</b>, and anything
+    /// below 100 is shown as-is ("roughly 3 buildings" sounds fake, and rounding a
+    /// single-digit value can give 0 — "0 buildings" and "we counted, and it was few" are
+    /// different things).
     ///
-    /// > **切り捨てではなく四捨五入である。** 切り捨ては壊れる量を必ず小さく見せる。
-    /// > これはプレイヤーの資産を不可逆に壊す操作の直前に出す数字なので、
-    /// > 過小に寄せる丸めを選ばない。単調非減少であることはテストが固定している。
+    /// > **It rounds rather than truncates.** Truncation always makes the destruction look
+    /// > smaller. This number is shown immediately before an operation that irreversibly
+    /// > destroys the player's assets, so we do not choose a rounding that biases low.
+    /// > That it is monotonically non-decreasing is pinned down by tests.
     ///
-    /// エンジン非依存（<c>UnityEngine</c> も LINQ も <c>System.Random</c> も使わない）。
+    /// Engine-free (no <c>UnityEngine</c>, no LINQ, no <c>System.Random</c>).
     /// </summary>
     public static class ClearanceEstimate
     {
-        /// <summary>raw セルの一辺（m）。§A-1 / §C-8 の <c>cell = 16</c>。</summary>
+        /// <summary>The side of one raw cell (m). The <c>cell = 16</c> from §A-1 /
+        /// §C-8.</summary>
         public const float RawCellSizeMetres = 16f;
 
-        /// <summary>100 未満はそのまま出す境目（クラス doc）。</summary>
+        /// <summary>The cut-off below which counts are shown as-is (see the class
+        /// doc).</summary>
         private const int ExactBelow = 100;
 
-        /// <summary>有効数字の桁数。</summary>
+        /// <summary>The number of significant figures.</summary>
         private const int SignificantDigits = 2;
 
         /// <summary>
-        /// 半径 <paramref name="radiusMetres"/> の円が覆う raw セルの概数。
+        /// Roughly how many raw cells a circle of radius <paramref name="radiusMetres"/>
+        /// covers.
         ///
-        /// **これは面積の目安であって、走査したセル数ではない**（走査は
-        /// 64 m の建物グリッドで行う）。NaN・0 以下は 0。
+        /// **This is a measure of area, not the number of cells scanned** (the scan runs on
+        /// the 64 m building grid). NaN or zero-and-below gives 0.
         /// </summary>
         public static int CellsInside(float radiusMetres)
         {
@@ -53,7 +62,7 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 影響範囲の面積（m²）。NaN・0 以下は 0。
+        /// The area of the affected region (m²). NaN or zero-and-below gives 0.
         /// </summary>
         public static float FootprintAreaSquareMetres(float radiusMetres)
         {
@@ -62,15 +71,16 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 実数 → 概数（クラス doc）。0 以下は 0、100 未満はそのまま、
-        /// それ以上は有効数字 2 桁で四捨五入する。**単調非減少**。
+        /// Exact count → approximate figure (see the class doc). Zero and below give 0,
+        /// below 100 is passed through, and above that it is rounded to two significant
+        /// figures. **Monotonically non-decreasing.**
         /// </summary>
         public static int RoundedEstimate(int exactCount)
         {
             if (exactCount <= 0) return 0;
             if (exactCount < ExactBelow) return exactCount;
 
-            // unit = 10^(桁数 - SignificantDigits)、lead は [10, 99]。
+            // unit = 10^(digits - SignificantDigits), and lead lands in [10, 99].
             long unit = 1L;
             long lead = exactCount;
             while (lead >= ExactBelow)
@@ -80,8 +90,9 @@ namespace DisasterPlus.Core.Volcano
             }
 
             long remainder = exactCount - lead * unit;
-            // remainder * 2 >= unit で「半分以上なら 1 つ上げる」。
-            // 除算で 0.5 を作らないので、丸め方向がプラットフォームに依らない。
+            // remainder * 2 >= unit gives "round up when it is half or more".
+            // We never form 0.5 by division, so the rounding direction does not depend on
+            // the platform.
             long rounded = (remainder * 2L >= unit) ? (lead + 1L) * unit : lead * unit;
 
             return rounded > int.MaxValue ? int.MaxValue : (int)rounded;

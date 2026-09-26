@@ -4,46 +4,51 @@ using DisasterPlus.Core.Volcano;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 位相 → 火山性地震の活動度 <c>[0,1]</c>。**ここ 1 か所だけが持つ対応表である。**
+    /// Phase → volcanic-earthquake activity level <c>[0,1]</c>. **This one place holds the only
+    /// mapping table.**
     ///
-    /// ── なぜ切り出したか（2026-08-22）──────────────────────────
+    /// ── why it was split out (2026-08-22) ──────────────────────────────────────────────────
     ///
-    /// この対応表を要る者が 2 人になった:
+    /// Two parties came to need this table:
     ///
-    ///   1. <see cref="VolcanoTremorShake"/> —— **main スレッド**、カメラを揺らす。
-    ///      入力は <c>VolcanoSnapshot</c>（sim が publish したもの）。
-    ///   2. <see cref="VolcanoTremorTrace"/> —— **sim スレッド**、地震計に記録する
-    ///      （所有者の依頼「火山性地震は震度計に記録されていないのも修正して」）。
-    ///      入力は sim 側の生の状態。
+    ///   1. <see cref="VolcanoTremorShake"/> — **main thread**, shakes the camera.
+    ///      Its input is the <c>VolcanoSnapshot</c> (what sim published).
+    ///   2. <see cref="VolcanoTremorTrace"/> — **sim thread**, records onto the seismograph
+    ///      (the owner's request, "please also fix the volcanic earthquakes not being recorded on
+    ///      the seismograph"). Its input is the raw sim-side state.
     ///
-    /// 2 人が別々に <c>switch</c> を書くと、**片方だけ直した位相**が必ず出る ——
-    /// 画面は揺れているのに記録には出ない（あるいはその逆）という、
-    /// いちばん切り分けにくい食い違いになる。だから対応表は 1 つにする。
+    /// If the two wrote their own <c>switch</c> statements, there would inevitably be
+    /// **a phase fixed in only one of them** — giving the hardest kind of discrepancy to narrow
+    /// down: the screen shakes but nothing appears in the record (or vice versa). So there is one
+    /// mapping table.
     ///
-    /// ── ★★ 冷え具合の向きに注意（2026-08-22 に直した取り違え）─────────────
+    /// ── ★★ mind the direction of the cooling (a mix-up fixed on 2026-08-22) ───────────────
     ///
-    /// <c>VolcanoLava.CoolUnit</c> は <b>1 が「まだ熱い」、0 が「冷え切った」</b>である
-    /// （あちらの doc と <c>LavaGlow.CoolFade</c>）。
-    /// ところが <c>VolcanicTremor.ActivityUnit</c> の <c>coolUnit</c> は
-    /// <b>1 が「冷えきった」</b>で、**向きが逆**である。
+    /// In <c>VolcanoLava.CoolUnit</c>, <b>1 means "still hot" and 0 means "cooled out"</b>
+    /// (its doc, and <c>LavaGlow.CoolFade</c>).
+    /// But <c>VolcanicTremor.ActivityUnit</c>'s <c>coolUnit</c> has <b>1 meaning "cooled out"</b>
+    /// — **the opposite direction**.
     ///
-    /// 実装は <c>VolcanoLava.CoolUnit</c> をそのまま渡していたので、余韻は
-    /// <b>溶岩が熱いあいだ 0、冷え切ってから 0.42</b> という**真後ろ**の形になっていた。
-    /// 噴火直後がいちばん静かで、冷え切ってから鳴り出す。
-    /// ここで <c>1 − coolUnit</c> に直す。**変換はこの 1 か所だけで行う。**
+    /// The implementation was passing <c>VolcanoLava.CoolUnit</c> straight through, so the
+    /// after-tremor came out **exactly backwards**: <b>0 while the lava was hot and 0.42 once it
+    /// had cooled out</b>. Quietest right after the eruption, and starting to rumble once it had
+    /// gone cold.
+    /// It is corrected to <c>1 − coolUnit</c> here. **The conversion happens in this one place
+    /// only.**
     /// </summary>
     public static class VolcanoTremorActivity
     {
         /// <summary>
-        /// 今の活動度 <c>[0,1]</c>。<paramref name="lavaCoolUnit"/> は
-        /// <c>VolcanoLava.CoolUnit</c> の向き（**1 = まだ熱い**）で渡すこと。
+        /// The current activity level <c>[0,1]</c>. Pass <paramref name="lavaCoolUnit"/> in
+        /// <c>VolcanoLava.CoolUnit</c>'s direction (**1 = still hot**).
         /// </summary>
         public static float For(VolcanoPhase phase, float progressUnit,
                                 float eruptionIntensityUnit, float lavaCoolUnit)
         {
             switch (phase)
             {
-                // 準備（破壊）と隆起 —— マグマが上がってきている段。**噴火の前から揺れる。**
+                // The clearing (destruction) and the uplift — the stages where magma is rising.
+                // **It shakes before the eruption.**
                 case VolcanoPhase.Clearing:
                 case VolcanoPhase.Uplifting:
                     return VolcanicTremor.ActivityUnit(progressUnit, false, 0f, false, 0f);
@@ -52,8 +57,9 @@ namespace DisasterPlus.Game
                     return VolcanicTremor.ActivityUnit(1f, true, eruptionIntensityUnit,
                                                        false, 0f);
 
-                // 噴火が終わってから溶岩が冷えきるまで、余韻が引いていく。
-                // ★ 向きを揃える（クラス doc）。1 − CoolUnit が「冷えた度合い」である。
+                // From the end of the eruption until the lava has cooled out, the after-tremor
+                // fades away.
+                // ★ Line the directions up (class doc). 1 − CoolUnit is "how far it has cooled".
                 case VolcanoPhase.Flowing:
                 case VolcanoPhase.Cooling:
                     return VolcanicTremor.ActivityUnit(1f, false, 0f, true,
@@ -64,18 +70,21 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>揺れが届く距離（山の半径の何倍か）。**外はきっかり 0。**</summary>
+        /// <summary>How far the shaking carries (as a multiple of the mountain's radius). **Outside it is exactly 0.**</summary>
         public const float ReachRadiusFactor = 4.5f;
 
         /// <summary>
-        /// 地動 <c>[-1,1]</c> を**②と同じ変位の単位**へ直す倍率。
-        /// ②のバニラの理論最大（<c>ShakeWaveform.MaxDisplacement</c> ＝ 0.6）の 0.7 倍 ——
-        /// 火山性地震は近くでは強く感じるが、**本震級の断層地震ではない**。
+        /// The factor that converts the ground motion <c>[-1,1]</c> into **the same displacement
+        /// unit as ②'s**.
+        /// 0.7× ②'s vanilla theoretical maximum (<c>ShakeWaveform.MaxDisplacement</c> = 0.6) —
+        /// a volcanic earthquake feels strong up close, but **it is not a main-shock fault
+        /// earthquake**.
         ///
-        /// ★★ <b>カメラ（<see cref="VolcanoTremorShake"/>）と記象
-        /// （<see cref="VolcanoTremorTrace"/>）の両方がこれを使う。</b>
-        /// 片方だけが生の <c>[-1,1]</c> を使うと、記象の縦の尺度は 3 本で共通
-        /// なので、**火山性微動だけがバニラの本震より 1.7 倍大きい絵**になる。
+        /// ★★ <b>Both the camera (<see cref="VolcanoTremorShake"/>) and the seismogram
+        /// (<see cref="VolcanoTremorTrace"/>) use this.</b>
+        /// If only one of them used the raw <c>[-1,1]</c>, then — since the seismogram's vertical
+        /// scale is shared across all three traces — you would get **a picture where the volcanic
+        /// tremor alone is 1.7 times larger than vanilla's main shock**.
         /// </summary>
         public const float DisplacementGain = 0.7f * ShakeWaveform.MaxDisplacement;
 

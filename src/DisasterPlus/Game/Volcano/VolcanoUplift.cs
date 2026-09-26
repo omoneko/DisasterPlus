@@ -7,241 +7,252 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 隆起 —— <c>RawHeights</c> の書き込みと分割 <c>UpdateArea</c>、そして山頂の火口。
-    /// **sim スレッド専用。⑤が地形を書く唯一の型である。**
+    /// Uplift — writing <c>RawHeights</c>, the split <c>UpdateArea</c>, and the summit crater.
+    /// **Sim thread only. This is the one type in ⑤ that writes terrain.**
     ///
-    /// ── ★★ 上げてよい半径は <c>VolcanoClearing.ClearedRadiusMetres</c> だけで決まる ──
+    /// ── ★★ the radius you may raise is decided by <c>VolcanoClearing.ClearedRadiusMetres</c> alone ──
     ///
     /// <code>
     /// activeRadius = UpliftSchedule.ActiveRadiusMetres(
     ///                    footprint.RadiusMetres, VolcanoClearing.ClearedRadiusMetres)
     /// </code>
     ///
-    /// **第 2 引数にこれ以外を渡してはいけない**（計画の罠 1）。準備が届いていない場所を
-    /// 上げると、道路は <c>Heights.PrimaryLevel</c> でセルを道路の y に、建物は
-    /// <c>SecondaryLevel</c> で建物の y に**強制固定**し、しかもそれは毎フラッシュ
-    /// ゼロからやり直される（§A-2）。**書き続けても勝てない。** 例外は 1 つも出ず、
-    /// 「なんとなく変な山」——山の中の平らな溝とすり鉢——になる（設計書 §1.2）。
-    /// <c>ClearedRadiusMetres</c> が 0 なら <c>ActiveRadiusMetres</c> は 0 を返し、
-    /// この型は 1 セルも書かない。**Core 側のテストがその 0 を固定している。**
+    /// **Never pass anything else as the second argument** (plan trap 1). Raise ground the
+    /// clearing has not reached and roads **pin** the cell to the road's y through
+    /// <c>Heights.PrimaryLevel</c>, buildings pin it to the building's y through
+    /// <c>SecondaryLevel</c> — and that is redone from scratch on every flush (§A-2).
+    /// **You cannot win by writing harder.** Not a single exception is thrown; you simply get a
+    /// "vaguely wrong mountain" — flat trenches and funnels inside the cone (design doc §1.2).
+    /// If <c>ClearedRadiusMetres</c> is 0, <c>ActiveRadiusMetres</c> returns 0 and this type
+    /// writes not one cell. **The Core-side tests pin that 0.**
     ///
-    /// **レビューの grep**: このファイルの <c>ActiveRadiusMetres</c> の呼び出しは 1 箇所で、
-    /// 第 2 引数が <c>VolcanoClearing.ClearedRadiusMetres</c> であること。
+    /// **Review grep**: there is exactly one call to <c>ActiveRadiusMetres</c> in this file, and
+    /// its second argument is <c>VolcanoClearing.ClearedRadiusMetres</c>.
     ///
-    /// ── 増分ではなく「その時刻における絶対目標」を書く（罠 2）───────────────
+    /// ── write the absolute target for that instant, not an increment (trap 2) ──────────────
     ///
-    /// 素朴な <c>raw[i] += step</c> は**必ず無言で壊れる**。<c>RawHeights</c> は
-    /// <c>ushort</c> の <c>raw/64</c> メートルで、書き込み側は <c>if (n != raw)</c> で
-    /// 省略する（§C-8 IL_01E7）。1 tick の変化がセル高さで 1/64 m = 0.015625 m を
-    /// 下回ると**丸めで消え、そのセルは永久に動かない**。外周ほど遅く上がるので、
-    /// 素朴な実装では**裾だけが最初から完全停止する**。
+    /// The naive <c>raw[i] += step</c> **always breaks silently**. <c>RawHeights</c> is a
+    /// <c>ushort</c> in units of <c>raw/64</c> metres, and the writer skips with
+    /// <c>if (n != raw)</c> (§C-8 IL_01E7). If one tick's change in cell height falls below
+    /// 1/64 m = 0.015625 m, it **vanishes in the rounding and that cell never moves again**.
+    /// The outer rim rises slowest, so with the naive version **the skirt alone stops dead from
+    /// the very start**.
     ///
-    /// 絶対目標（<c>UpliftSchedule.RawTargetAt</c>）にすると、まだ 1 raw 単位に届かない
-    /// セルは「書かれないだけ」で、進捗は <c>progress</c> という float に蓄積されている。
-    /// 山頂だけは毎 tick 動かなければならないので、<c>UpliftSchedule.TotalTicksFor</c> が
-    /// 要求 tick 数を <c>H×64</c> で切り詰める。**この切り詰めを外さないこと。**
+    /// With an absolute target (<c>UpliftSchedule.RawTargetAt</c>), a cell that has not yet
+    /// reached one raw unit is merely "not written"; its progress is accumulating in the
+    /// <c>progress</c> float. Only the summit must move every tick, so
+    /// <c>UpliftSchedule.TotalTicksFor</c> clamps the requested tick count by <c>H×64</c>.
+    /// **Do not remove that clamp.**
     ///
-    /// ── 山は一様に膨らむのではなく、山頂から外へ広がる ───────────────
+    /// ── the mountain does not swell uniformly; it spreads outwards from the summit ─────────
     ///
-    /// 1 セルの目標は <c>profile × progress</c> **ではない**。あれは山全体が同じ割合で
-    /// 膨らむので、完成した山が音もなく地面から膨らんだように見える。
-    /// SimCity 4 の隆起は逆で、噴出したものが**積もって**山になる。式は
-    /// <c>UpliftSchedule.GrowthMetresAt</c> の 1 行:
+    /// A cell's target is **not** <c>profile × progress</c>. That makes the whole mountain swell
+    /// by the same fraction, so the finished cone looks as if it silently inflated out of the
+    /// ground. SimCity 4's uplift is the other way round: the erupted material **piles up** into
+    /// a mountain. The formula is the single line in <c>UpliftSchedule.GrowthMetresAt</c>:
     ///
     /// <code>
     /// grown(d, p) = max(0, profile(d) − H·(1 − p))
     /// </code>
     ///
-    /// つまり「最終形を H(1−p) だけ地面へ沈めて、出ている分だけが今の山」である。
-    /// 直線の円錐（成層）なら前線はちょうど <c>R·p</c> で、
-    /// <c>UpliftSchedule.ClearingFrontMetres</c> が先行させる準備の前線と噛み合う。
+    /// That is, "sink the final shape into the ground by H(1−p); whatever sticks out is the
+    /// mountain right now". For a straight cone (stratovolcano) the front sits exactly at
+    /// <c>R·p</c>, which meshes with the clearing front that
+    /// <c>UpliftSchedule.ClearingFrontMetres</c> runs ahead of it.
     ///
-    /// **罠 2 に対してはむしろ強くなる。** 育っているセルは<b>どれも同じ速さ</b>
-    /// <c>H/totalTicks</c> で上がる（<see cref="RiseMetresPerTick"/>）ので、
-    /// <c>TotalTicksFor</c> の切り詰めが**全セル**に効く。
-    /// <c>profile × progress</c> では外周ほど 1 tick の変化が小さく、
-    /// 「合計の盛り上がりが小さいセル」は丸めで消えていた。
+    /// **It is in fact more robust against trap 2.** Every cell that is growing rises at <b>the
+    /// same speed</b> <c>H/totalTicks</c> (<see cref="RiseMetresPerTick"/>), so the clamp in
+    /// <c>TotalTicksFor</c> covers **every cell**. With <c>profile × progress</c> the per-tick
+    /// change shrinks towards the rim, and "cells with a small total rise" were lost to rounding.
     ///
-    /// ── 山肌の凹凸は開始時に 1 回だけ焼く（<see cref="_profile"/>）──────────
+    /// ── the relief on the flanks is baked once, at start (<see cref="_profile"/>) ──────────
     ///
-    /// 形は <c>Core/Volcano/VolcanoRelief</c> が決める。半径 R も最終高 H も
-    /// **決して超えない** —— 実効半径は縮む向きにしか動かず、起伏は削る向きにしか
-    /// 働かない（掛け算だけで組んである。あちらのクラス doc）。
-    /// 設定 <c>ModSettings.VolcanoReliefStrength</c> が 0 なら
-    /// <c>VolcanoShape.ProfileAt</c> そのものに戻り、**今日の出力と 1 bit も違わない**。
-    /// 1 セル 300 flop ほどあるので**毎 tick は呼ばない**。
+    /// The shape comes from <c>Core/Volcano/VolcanoRelief</c>. It **never exceeds** either the
+    /// radius R or the final height H — the effective radius only ever moves inwards and the
+    /// relief only ever cuts away (it is built from multiplications alone; see that class's doc).
+    /// With the setting <c>ModSettings.VolcanoReliefStrength</c> at 0 it falls back to
+    /// <c>VolcanoShape.ProfileAt</c> itself, **bit-for-bit identical to today's output**.
+    /// It costs roughly 300 flops per cell, so **do not call it every tick**.
     ///
-    /// ── <see cref="_baseRaw"/> は開始時に 1 回だけ控える ───────────────────
+    /// ── <see cref="_baseRaw"/> is snapshotted exactly once, at start ───────────────────────
     ///
-    /// **毎 tick 読み直してはいけない。** 読み直すと⑤が前 tick に書いた値が「元の高さ」に
-    /// なり、**プロファイルが毎 tick 積算されて山が天井まで伸びる**。
-    /// 実費は影響矩形ぶんの <c>ushort</c>（半径 1 km で 31 KB、2 km で 123 KB、3 km で 279 KB。§E-13）。
+    /// **Never re-read it each tick.** Re-read it and the value ⑤ wrote last tick becomes the
+    /// "original height", so **the profile is accumulated every tick and the mountain grows to
+    /// the ceiling**. The real cost is one <c>ushort</c> per cell of the affected rectangle
+    /// (31 KB at radius 1 km, 123 KB at 2 km, 279 KB at 3 km. §E-13).
     ///
-    /// > **<c>TerrainManager.BackupHeights</c> / <c>UndoBuffer</c> を使わない**（§E-13）。
-    /// > あれは <c>TerrainTool</c> / <c>DistrictTool</c> の専有物で、<c>TerrainTool.OnEnable</c> が
-    /// > <c>RawHeights</c> 全体を複製し直す ——
-    /// > **プレイヤーが整地ツールを開いた瞬間に⑤の退避が消える。**
+    /// > **Do not use <c>TerrainManager.BackupHeights</c> / <c>UndoBuffer</c>** (§E-13).
+    /// > Those belong to <c>TerrainTool</c> / <c>DistrictTool</c>, and <c>TerrainTool.OnEnable</c>
+    /// > re-copies the whole of <c>RawHeights</c> —
+    /// > **the moment the player opens the terrain tool, ⑤'s snapshot is gone.**
     /// >
-    /// > **この配列を「元に戻す機能」の土台だと誤解しないこと。** ⑤は火山を消す機能を
-    /// > 持たない（設計書 §1.3 の「不可逆でよい」）。用途は
-    /// > **「元の高さからの絶対目標を計算する」ことだけ**で、セーブにも残さない。
+    /// > **Do not mistake this array for the basis of an undo feature.** ⑤ has no way to remove
+    /// > a volcano (design doc §1.3, "irreversible is fine"). Its only use is
+    /// > **to compute absolute targets relative to the original height**, and it is not saved.
     ///
-    /// ── <c>UpdateArea</c> は 1 tick にちょうど 1 回（罠 3）────────────────
+    /// ── <c>UpdateArea</c> exactly once per tick (trap 3) ───────────────────────────────────
     ///
-    /// <c>UpdateArea</c> は矩形が 128×128 raw セルを超えた分を**タイル分割せずに無言で
-    /// 切り捨てる**（§A-1 の <c>Min(m_maxX, m_minX + 120 + 8)</c>）。加えて**単発の要求面積が
-    /// 10000 セルを超えると入れ子のバッチを無視して即フラッシュする**。
-    /// <c>TileSplit</c> が両方を同時に満たす矩形（99×99 = 9801 セル）を返す。
+    /// <c>UpdateArea</c> **silently truncates**, without tiling, anything beyond 128×128 raw
+    /// cells (§A-1, <c>Min(m_maxX, m_minX + 120 + 8)</c>). On top of that, **a single request
+    /// covering more than 10000 cells ignores the enclosing batch and flushes immediately**.
+    /// <c>TileSplit</c> returns a rectangle that satisfies both at once (99×99 = 9801 cells).
     ///
-    /// **全タイルを 1 tick で呼ばない。** 2 枚目以降は <c>merged &gt; 10000</c> の判定に
-    /// 掛かって毎回途中フラッシュする（§A-1 IL_00A8）。
+    /// **Do not call all the tiles in one tick.** From the second tile on, the
+    /// <c>merged &gt; 10000</c> test fires and you get a mid-batch flush every time (§A-1 IL_00A8).
     ///
-    /// ── 流すのは「実際に変わった矩形」だけ（2026-08-20、実機の指摘⑤）──────────
+    /// ── flush only the rectangle that actually changed (2026-08-20, live report ⑤) ─────────
     ///
-    /// 実機の指摘は「噴火のアニメーションをもっとスムーズに（現在は断続的な
-    /// せり上がりです）」。**目に見える 1 段は「1 tick の上昇量」ではなく
-    /// 「そのタイルが再び流されるまでの上昇量」である。**
+    /// The report from the live game was "make the eruption animation smoother (right now it
+    /// heaves up in steps)". **The visible step is not "the rise in one tick" but "the rise
+    /// between two flushes of that tile".**
     ///
-    /// 以前はフットプリント全体（既定 R=1200 m で 151×151）を 4 枚に割って
-    /// **1 tick 1 枚の総当たり**で流していたので、1 枚が流れ直すまで 4 tick ＝ 64 フレーム
-    /// 掛かっていた。600 m / 85 tick = 7.06 m/tick なので、**見える 1 段は 28 m**、
-    /// しかも 4 分割の四半分ずつ順番に跳ね上がる。指摘そのものである。
+    /// Previously the whole footprint (151×151 at the default R=1200 m) was split into 4 tiles
+    /// and flushed **one tile per tick, round robin**, so a given tile was re-flushed only every
+    /// 4 ticks = 64 frames. At 600 m / 85 ticks = 7.06 m/tick, **the visible step was 28 m**,
+    /// and it jumped one quarter at a time in sequence. Exactly what was reported.
     ///
-    /// 直し方は 2 つを同時にやる:
+    /// The fix does two things at once:
     ///
-    ///   1. <see cref="IntervalFrames"/> を 16 → 4 にする（tick 数 85 → 341、
-    ///      1 tick の上昇 7.06 m → 1.76 m）。**ゲーム内の所要時間は変えない**
-    ///      （30 ゲーム内分のまま）ので、準備（<c>VolcanoClearing</c>）との
-    ///      追いかけっこも噴火の包絡線との関係も 1 つも変わらない。
-    ///   2. 流す矩形を**その tick に実際に書き換えたセルの外接矩形**にする。
-    ///      隆起は山頂から外へ広がるので（<c>UpliftSchedule.GrowthMetresAt</c>）、
-    ///      変わっているのは半径 R×progress の円盤だけである。既定の成層火山なら
-    ///      progress 0.63 まで 95×95 セルに収まり、その間は
-    ///      **変化した全域が毎 tick 1 回の <c>UpdateArea</c> で流れる**
-    ///      ＝ 見える 1 段が 1.76 m、15 Hz（速度 1）になる。
+    ///   1. Take <see cref="IntervalFrames"/> from 16 to 4 (tick count 85 → 341, per-tick rise
+    ///      7.06 m → 1.76 m). **The in-game duration is unchanged** (still 30 in-game minutes),
+    ///      so neither the chase against the clearing (<c>VolcanoClearing</c>) nor the relation
+    ///      to the eruption envelope changes in any way.
+    ///   2. Flush **the bounding rectangle of the cells actually rewritten in that tick**.
+    ///      The uplift spreads outwards from the summit (<c>UpliftSchedule.GrowthMetresAt</c>),
+    ///      so the only thing changing is the disc of radius R×progress. For the default
+    ///      stratovolcano it fits inside 95×95 cells up to progress 0.63, and during that window
+    ///      **the whole changed area is flushed by the single <c>UpdateArea</c> of each tick**
+    ///      = the visible step is 1.76 m at 15 Hz (speed 1).
     ///
-    /// 収まらなくなったら（progress 0.63 以降）今までどおりタイル総当たりに落ちる ——
-    /// そこでも 4 tick × 4 フレーム ＝ 16 フレームなので、見える 1 段は 7.0 m・3.75 Hz で、
-    /// 従来の 28 m・0.94 Hz より 4 倍細かい。
+    /// Once it no longer fits (past progress 0.63) it falls back to the round-robin tiling as
+    /// before — even there it is 4 ticks × 4 frames = 16 frames, so the visible step is 7.0 m at
+    /// 3.75 Hz, four times finer than the old 28 m at 0.94 Hz.
     ///
-    /// **<c>UpdateArea</c> の回数は 1 tick に 1 回のまま**で、1 回に渡す矩形も
-    /// 99×99 = 9801 セルを超えない（<c>TileSplit.FitsSinglePass</c> が
-    /// 95 セル以下でしか単発を許さない）。増えるのは**頻度だけ**である。
-    /// 平均のフラッシュ面積は 356 → 約 1,370 セル/フレーム（既定の成層火山、
-    /// オフライン試算）。**1 フレームあたりのピークは変わらない。**
+    /// **The <c>UpdateArea</c> count stays at one per tick** and the rectangle handed over still
+    /// never exceeds 99×99 = 9801 cells (<c>TileSplit.FitsSinglePass</c> only permits a single
+    /// pass at 95 cells or fewer). All that goes up is the **frequency**. The mean flushed area
+    /// goes from 356 to about 1,370 cells/frame (default stratovolcano, offline estimate).
+    /// **The peak per frame is unchanged.**
     ///
-    /// 継ぎ目に段差は出ない —— <c>TileAt</c> / <c>ExpandForPass</c> がどちらも
-    /// ±2 セルの重なりを持って返すからである。
+    /// No steps appear at the joins — <c>TileAt</c> / <c>ExpandForPass</c> both return a ±2 cell
+    /// overlap.
     ///
-    /// ── ★★ 火口は「最後に彫る穴」ではなく「最初から在る窪み」（2026-08-22、指摘①）──
+    /// ── ★★ the crater is not a hole carved last but a hollow present from the start (2026-08-22, report ①) ──
     ///
-    /// 所有者の指摘は
-    /// 「噴火口が一番最後に生成されるのではなく最初から窪みとして生成される方がいい」。
+    /// The owner's report was
+    /// "it would be better if the crater were generated as a hollow from the start rather than
+    /// being created last".
     ///
-    /// かつてここは隆起の最後に <c>DisasterHelpers.MakeCrater</c> を 1 回だけ呼んでいた。
-    /// あれは先頭で <c>TerrainModify.RefreshAllModifications()</c> を呼ぶ（§C-8 IL_0006）ので
-    /// **呼ぶたびに強制フラッシュが 1 回走り**、毎 tick の経路には置けない ——
-    /// つまり「最後に 1 回」という制約が、窪みの生まれる時刻をそのまま決めていた。
+    /// This code used to call <c>DisasterHelpers.MakeCrater</c> once at the end of the uplift.
+    /// That calls <c>TerrainModify.RefreshAllModifications()</c> up front (§C-8 IL_0006), so
+    /// **every call forces one flush** and it cannot sit on the per-tick path — which means the
+    /// "once, at the end" constraint was itself deciding when the hollow came into being.
     ///
-    /// **いまは火口を <see cref="_profile"/> そのものに畳み込んである**
-    /// （<c>Core/Volcano/VolcanoCrater</c>）。隆起は毎 tick「その時刻における絶対目標」を
-    /// 書いているので、目標の形に窪みが在れば窪みも山と一緒に育つ。
-    /// 縁は <c>H·p</c>、底は <c>max(0, H·p − depth)</c> で上がり、窪みの深さは
-    /// 進捗 <c>depth/H</c>（既定の成層火山で 10 %）で満杯になってからずっと一定である。
-    /// <b>⑤は <c>MakeCrater</c> をもうどこからも呼ばない</b>（強制フラッシュも 1 回消えた）。
+    /// **The crater is now folded into <see cref="_profile"/> itself**
+    /// (<c>Core/Volcano/VolcanoCrater</c>). The uplift writes "the absolute target at this
+    /// instant" every tick, so if the target shape has a hollow in it, the hollow grows along
+    /// with the mountain. The rim rises as <c>H·p</c>, the floor as <c>max(0, H·p − depth)</c>,
+    /// and the hollow is at full depth from progress <c>depth/H</c> (10 % for the default
+    /// stratovolcano) onwards, constant from then on.
+    /// <b>⑤ no longer calls <c>MakeCrater</c> from anywhere</b> (one forced flush gone with it).
     ///
-    /// **レビューの grep**（コメント行を落として 0 件）:
+    /// **Review grep** (drop the comment lines; expect 0 hits):
     /// <code>
     /// grep -rn --include=*.cs "MakeCrater" src/DisasterPlus/ \
     ///   | grep -vE ':[0-9]+: *//' | grep -v '///' | wc -l          # -> 0
     /// </code>
     ///
-    /// ── 呼んではいけないもの（§D-12）───────────────────────────
+    /// ── things that must not be called (§D-12) ─────────────────────────────────────────────
     ///
-    /// **<c>Begin/EndUpdateArea</c> を⑤が呼んではいけない。**
-    /// <c>SimulationManager.SimulationStep</c> が先頭で <c>BeginUpdateArea</c>、末尾で
-    /// <c>EndUpdateArea</c> を呼んでおり、MOD の sim tick フックは全部その内側にある。
-    /// ⑤が足しても <c>m_modifyingLevel</c> が 1 増えて 1 減るだけで、内側の <c>End</c> は
-    /// <c>if (loc1 != 0) return</c>（IL_0017）で握り潰される。害は無いが意味も無く、
-    /// 「バッチしているつもり」という誤解だけが残る。
-    /// **レビューの grep**（★ 実際に走らせて件数を合わせてある。全体レビュー M12 ——
-    /// 素で走らせると**この規則の文そのもの**が 4 件引っかかり、
-    /// 「0 件」という手順が最初から成立していなかった。コメント行を落とすこと）:
+    /// **⑤ must not call <c>Begin/EndUpdateArea</c>.**
+    /// <c>SimulationManager.SimulationStep</c> calls <c>BeginUpdateArea</c> at the top and
+    /// <c>EndUpdateArea</c> at the bottom, and every mod sim-tick hook sits inside that.
+    /// If ⑤ adds its own, <c>m_modifyingLevel</c> merely goes up by one and back down, and the
+    /// inner <c>End</c> is swallowed by <c>if (loc1 != 0) return</c> (IL_0017). Harmless, but
+    /// also pointless — all it leaves behind is the illusion that you are batching.
+    /// **Review grep** (★ actually run, with the counts made to match. Whole-project review M12 —
+    /// run plainly, **the sentences of this very rule** produced 4 hits, so the "0 hits"
+    /// procedure never held in the first place. Drop the comment lines):
     ///
     /// <code>
     /// grep -rn --include=*.cs -E "BeginUpdateArea|EndUpdateArea" src/DisasterPlus/ \
     ///   | grep -vE ':[0-9]+: *//' | wc -l          # -> 0
     /// </code>
     ///
-    /// <c>grep -v '///'</c> では足りない —— <c>//</c> 1 本のコメントも落とす必要がある。
+    /// <c>grep -v '///'</c> is not enough — single <c>//</c> comments have to be dropped too.
     ///
-    /// **main スレッドから <c>UpdateArea</c> を呼ぶのが本当に危ないほう**である。
-    /// <c>m_modifyingLevel == 0</c> なので毎回フラッシュし、sim スレッドが溜めている
-    /// 途中の蓄積と競合する。⑤の地形書き込みは全部この型（sim スレッド）に置く。
+    /// **Calling <c>UpdateArea</c> from the main thread is the genuinely dangerous one.**
+    /// There <c>m_modifyingLevel == 0</c>, so it flushes every time and races the partial
+    /// accumulation the sim thread is building up. All of ⑤'s terrain writes live in this type
+    /// (sim thread).
     ///
-    /// ── 「建てられる地面」と水位は遅れる。これは不具合ではない（設計書 §7.3）─────
+    /// ── buildable ground and the water level lag behind. That is not a bug (design doc §7.3) ──
     ///
-    /// <c>m_blockHeights</c> はゲームモードで上へ 2 m / 64 sim フレームしか動かず（§A-2）、
-    /// <c>WaterSimulation.m_heightBuffer</c> は**その配列そのもの**である（§A-4）。
-    /// 見た目（<c>m_finalHeights</c> / <c>m_detailHeights</c>）は即座に変わるが、
-    /// 600 m の山なら 300 × 64 = 19200 sim フレーム ≒ 7 ゲーム内時間かけて追いつく。
-    /// **隆起をこの速度に合わせて遅くしない** —— 合わせても <c>m_blockHeights</c> は
-    /// 64 フレームに 1 回しか動かないので意味が無い。見積りをパネルと診断に出す。
+    /// <c>m_blockHeights</c> only moves upwards by 2 m per 64 sim frames in game mode (§A-2),
+    /// and <c>WaterSimulation.m_heightBuffer</c> is **that very array** (§A-4). The visuals
+    /// (<c>m_finalHeights</c> / <c>m_detailHeights</c>) change at once, but a 600 m mountain
+    /// takes 300 × 64 = 19200 sim frames ≒ 7 in-game hours to catch up.
+    /// **Do not slow the uplift down to match this speed** — matching it is pointless, because
+    /// <c>m_blockHeights</c> still only moves once every 64 frames. Report the estimate on the
+    /// panel and in the diagnostics.
     ///
-    /// ── 1 tick あたりの仕事量の上限（明示する）──────────────────────
+    /// ── the per-tick work budget (stated explicitly) ───────────────────────────────────────
     ///
-    /// 間隔は <see cref="IntervalFrames"/> フレームぶんの**経過ゲーム内時間**
-    /// （<c>frameIndex % N</c> にしない。火災旋風 付録 A-4）。毎 sim tick にしないのは
-    /// §A-3 のフィードバックループのためで、<c>m_flattenTerrain == false</c> の建物が
-    /// 動くたび <c>BuildingManager.SimulationStepImpl</c> が追加の <c>UpdateArea</c> を出す。
-    /// 準備段がフットプリント内の建物を取り除いているので残るのは⑤が壊せなかった建物だけだが、
-    /// その規模は <c>VolcanoClearing.LastBuildingsRefused</c> がそのまま示す（診断に出す）。
+    /// The interval is the **elapsed in-game time** worth of <see cref="IntervalFrames"/> frames
+    /// (never <c>frameIndex % N</c>; firestorm appendix A-4). The reason it is not every sim tick
+    /// is the feedback loop of §A-3: every time a building with <c>m_flattenTerrain == false</c>
+    /// moves, <c>BuildingManager.SimulationStepImpl</c> emits an extra <c>UpdateArea</c>.
+    /// The clearing stage has removed the buildings inside the footprint, so all that remains is
+    /// the buildings ⑤ could not destroy, and <c>VolcanoClearing.LastBuildingsRefused</c> states
+    /// that scale directly (it goes into the diagnostics).
     ///
-    /// 開始時に 1 回だけ <c>float[]</c> 1 枚（<see cref="_profile"/>）を焼く。
-    /// 実費は影響矩形ぶんの float で、半径 3 km の最大で 378² × 4 B = 558 KB。
-    /// 焼いてしまえば毎 tick の仕事は引き算 1 本だけになり、
-    /// 今日の「<c>sqrt</c> ＋ <c>ProfileAt</c>」より**むしろ安い**。
+    /// One <c>float[]</c> (<see cref="_profile"/>) is baked once at start. The real cost is one
+    /// float per cell of the affected rectangle: 378² × 4 B = 558 KB at the 3 km maximum.
+    /// Once baked, the per-tick work is a single subtraction, which is **actually cheaper** than
+    /// today's "<c>sqrt</c> + <c>ProfileAt</c>".
     ///
-    /// 1 tick の上限は<b>影響矩形のセル数ぶんの配列書き込み 1 回</b>と
-    /// <b><c>UpdateArea</c> ちょうど 1 回（99×99 = 9801 セル）</b>。
-    /// 矩形は半径 R で <c>(2R/16 + 3)²</c> セル —— 既定の成層火山（R=1200 m）で 153² ≒ 23,409、
-    /// 形態の最大（R=3000 m）でも 378² ≒ 142,884 である。
-    /// <c>RawHeights</c> への書き込みは**ただの配列書き込み**で、
-    /// <c>UpdateArea</c> を呼ぶまで誰も読まない（§D-12）。
+    /// The per-tick budget is <b>one array write per cell of the affected rectangle</b> plus
+    /// <b>exactly one <c>UpdateArea</c> (99×99 = 9801 cells)</b>.
+    /// The rectangle is <c>(2R/16 + 3)²</c> cells at radius R — 153² ≒ 23,409 for the default
+    /// stratovolcano (R=1200 m), and 378² ≒ 142,884 even at the largest form (R=3000 m).
+    /// Writing to <c>RawHeights</c> is **just an array write**; nobody reads it until
+    /// <c>UpdateArea</c> is called (§D-12).
     ///
-    /// ── ファイルが 2 つに分かれている ────────────────────────────
+    /// ── the file is split in two ───────────────────────────────────────────────────────────
     ///
-    /// 地形を実際に触る部分（高さの書き込み・<c>UpdateArea</c>・火口）は
-    /// <c>VolcanoUplift.Terrain.cs</c> にある。プロジェクト規約の 800 行を超えたための
-    /// 分割で、**規律はこのクラス doc が全部持っている**
-    /// （<c>VolcanoClearing.Sweep.cs</c> / <c>VolcanoLava.Ignite.cs</c> と同じ形）。
+    /// The part that actually touches terrain (writing heights, <c>UpdateArea</c>, the crater)
+    /// lives in <c>VolcanoUplift.Terrain.cs</c>. The split is because of the project's 800-line
+    /// rule, and **this class doc holds all of the discipline**
+    /// (the same shape as <c>VolcanoClearing.Sweep.cs</c> / <c>VolcanoLava.Ignite.cs</c>).
     /// </summary>
     /// <summary>
-    /// <see cref="VolcanoUplift"/> が今どの形を書いているか。
+    /// Which shape <see cref="VolcanoUplift"/> is writing right now.
     ///
-    /// ── 破局噴火のために足した（2026-08-22、所有者の依頼）────────────────────
+    /// ── added for the super-eruption (2026-08-22, owner's request) ─────────────────────────
     ///
-    /// &gt; 地下のマグマ上昇による火山の形成 → 数万年かけた巨大なマグマだまりの成長
-    /// &gt; → 内圧限界による破局噴火（大爆発） → 地面の自重による大陥没とカルデラ形成
+    /// &gt; a volcano forms as magma rises underground → the magma chamber grows over tens of
+    /// &gt; thousands of years → internal pressure reaches its limit and a super-eruption (a huge
+    /// &gt; explosion) follows → the ground founders under its own weight and a caldera forms
     ///
-    /// 地形を書く仕組みは<b>1 本しか作らない</b>。矩形の取り方・退避・フラッシュ・
-    /// 天井の数え方は 3 つとも同じで、違うのは<b>矩形の半径と、焼くプロファイルと、
-    /// 進み方の規則</b>だけである。だから同じ型に段を持たせる。
+    /// <b>Only one mechanism writes terrain.</b> Taking the rectangle, the snapshot, the flush
+    /// and the ceiling count are identical in all three; the only differences are <b>the radius
+    /// of the rectangle, the profile that gets baked, and the rule for advancing</b>. So the
+    /// stages live in the same type.
     /// </summary>
     public enum UpliftStage
     {
-        /// <summary>円錐を立てる（今までの唯一の形）。**山頂から外へ広がる。**</summary>
+        /// <summary>Raise the cone (the only shape until now). **It spreads outwards from the summit.**</summary>
         Cone = 0,
 
         /// <summary>
-        /// マグマだまりの膨らみ。**裾よりずっと広く、ごく低い**ドームを一様に持ち上げる
-        /// （<c>SuperEruption.InflationAt</c>）。
+        /// The magma chamber inflating. Lifts a **far wider and far lower** dome than the skirt,
+        /// uniformly (<c>SuperEruption.InflationAt</c>).
         /// </summary>
         Inflation = 1,
 
         /// <summary>
-        /// カルデラの陥没。**平底の窪地**を一様に掘り下げる
-        /// （<c>SuperEruption.BowlProfileAt</c>。プロファイルは負）。
+        /// The caldera foundering. Digs a **flat-bottomed basin** down uniformly
+        /// (<c>SuperEruption.BowlProfileAt</c>; the profile is negative).
         /// </summary>
         Collapse = 2,
     }
@@ -249,54 +260,57 @@ namespace DisasterPlus.Game
     public static partial class VolcanoUplift
     {
         /// <summary>
-        /// 隆起の間隔（フレーム相当のゲーム内時間）。**毎 sim tick にしない**（§A-3）。
+        /// The uplift interval (in-game time equivalent to this many frames).
+        /// **Not every sim tick** (§A-3).
         ///
-        /// 16 → 4（2026-08-20、実機の指摘⑤）。**ゲーム内の所要時間は変わらない** ——
-        /// <c>VolcanoUpliftMinutes</c>（既定 30 ゲーム内分 ＝ 1365 sim フレーム）を
-        /// この間隔で割ったものが tick 数なので、間隔を 1/4 にすると tick が 4 倍になり
-        /// 1 tick の上昇が 1/4 になるだけである。準備の前線（<c>ClearingFrontMetres</c>）は
-        /// progress の関数で、progress の進み方はゲーム内時間で決まるので**変わらない**。
+        /// 16 → 4 (2026-08-20, live report ⑤). **The in-game duration is unchanged** —
+        /// the tick count is <c>VolcanoUpliftMinutes</c> (default 30 in-game minutes = 1365 sim
+        /// frames) divided by this interval, so quartering the interval merely quadruples the
+        /// ticks and quarters the per-tick rise. The clearing front
+        /// (<c>ClearingFrontMetres</c>) is a function of progress, and progress advances on
+        /// in-game time, so it **does not change**.
         ///
-        /// **これ以上短くしないこと。** <c>UpdateArea</c> 1 回は対象矩形を detail 解像度
-        /// （raw 1 セルにつき 4×4）で走査して 1 セルあたり <c>SmoothSample</c> を 5 回呼ぶ
-        /// （§A-1）。99×99 のタイルで約 78 万回である。間隔を半分にすれば
-        /// そのぶん毎フレームの平均が倍になる。
+        /// **Do not shorten it further.** One <c>UpdateArea</c> walks the target rectangle at
+        /// detail resolution (4×4 per raw cell) and calls <c>SmoothSample</c> five times per cell
+        /// (§A-1). That is about 780,000 calls for a 99×99 tile. Halve the interval and the
+        /// per-frame average doubles accordingly.
         ///
-        /// ★ <b>1 段は 1 sim tick に 1 回までである。</b> <c>_minutesSinceTick</c> は
-        ///   <c>interval</c> で頭打ちなので余りが繰り越されず、
-        ///   <c>m_currentFrameIndex</c> は 1 tick で <c>FinalSimulationSpeed</c>
-        ///   （速度 1/2/3 で 1/9 まで）進む。したがって 1 段の実効間隔は
-        ///   <c>max(IntervalFrames, FinalSimulationSpeed)</c> フレームで、
-        ///   **速度 2 / 3 では隆起にかかるゲーム内時間が伸びる**
-        ///   （既定で 30 分 → 45 分 / 67 分。設計書 §4.3 の表）。
-        ///   伸びる向きは安全側である —— 準備（64 フレーム間隔）は progress が
-        ///   遅くなるぶん余裕が増え、噴火は育っている間ずっと持続の入口で止まる。
-        ///   **1 tick に 2 回 <c>UpdateArea</c> を出して埋め合わせないこと。**
+        /// ★ <b>One step is at most once per sim tick.</b> <c>_minutesSinceTick</c> is capped at
+        ///   <c>interval</c>, so no remainder is carried over, and <c>m_currentFrameIndex</c>
+        ///   advances by <c>FinalSimulationSpeed</c> per tick (1, and up to 9 at speeds 1/2/3).
+        ///   So the effective interval of one step is
+        ///   <c>max(IntervalFrames, FinalSimulationSpeed)</c> frames, which means
+        ///   **at speed 2 / 3 the uplift takes longer in in-game time**
+        ///   (30 minutes → 45 / 67 minutes at the defaults; design doc §4.3, the table).
+        ///   Stretching is the safe direction — the clearing (64 frame interval) gains slack as
+        ///   progress slows, and the eruption stays parked at the entrance to its sustain phase
+        ///   for as long as the mountain is growing.
+        ///   **Do not compensate by issuing two <c>UpdateArea</c> calls in one tick.**
         /// </summary>
         private const int IntervalFrames = 4;
 
-        /// <summary><c>RawHeights</c> の 1 行のセル数（1081²、§C-8）。</summary>
+        /// <summary>Cells per row of <c>RawHeights</c> (1081², §C-8).</summary>
         private const int RawStride = 1081;
 
-        /// <summary>期待する <c>RawHeights</c> の長さ。合わなければ 1 セルも書かない。</summary>
+        /// <summary>The expected length of <c>RawHeights</c>. If it does not match, not one cell is written.</summary>
         private const int RawLength = RawStride * RawStride;
 
         /// <summary>
-        /// 開始時に控えた「元の高さ」。**毎 tick 読み直さない**（クラス doc）。
-        /// 火口を彫ったら捨てる。
+        /// The "original height" snapshotted at start. **Never re-read each tick** (class doc).
+        /// Dropped once the crater is carved.
         /// </summary>
         private static ushort[] _baseRaw;
 
         /// <summary>
-        /// 開始時に 1 回だけ焼いた「最終形の盛り上がり」（m）。<see cref="_baseRaw"/> と同じ並び。
+        /// The "rise of the final shape" (m), baked once at start. Same layout as <see cref="_baseRaw"/>.
         ///
-        /// <c>VolcanoRelief.ProfileAt</c> は 1 セル 300 flop ほどあるので、**毎 tick
-        /// 全セルぶん呼ばない**。焼いてしまえば毎 tick の仕事は
-        /// <c>UpliftSchedule.GrowthMetresAt</c>（引き算 1 本）だけになり、
-        /// 今日の「sqrt ＋ ProfileAt」より**むしろ安くなる**。
-        /// float で持つのは、強さ 0 のときに今日の出力と 1 bit も違わないようにするため
-        /// （raw 単位へ丸めて持つと二重丸めで 1/64 m ずれる）。
-        /// 半径 3 km の最大で 378² × 4 B = 558 KB。火口を彫ったら捨てる。
+        /// <c>VolcanoRelief.ProfileAt</c> costs about 300 flops per cell, so **do not call it for
+        /// every cell every tick**. Once baked, the per-tick work is just
+        /// <c>UpliftSchedule.GrowthMetresAt</c> (a single subtraction), which is **actually
+        /// cheaper** than today's "sqrt + ProfileAt".
+        /// It is held as float so that at strength 0 the output is bit-for-bit identical to
+        /// today's (rounding it into raw units would introduce a 1/64 m double-rounding error).
+        /// 378² × 4 B = 558 KB at the 3 km maximum. Dropped once the crater is carved.
         /// </summary>
         private static float[] _profile;
 
@@ -306,13 +320,13 @@ namespace DisasterPlus.Game
         private static int _tileCount;
 
         /// <summary>
-        /// **どの矩形をいつ流すか**を決める（<c>Core/Volcano/UpliftFlushPlan</c>）。
-        /// 判断は整数演算だけなので Core にあり、ユニットテストと
-        /// <c>tools/VolcanoPreview</c> がゲームを起動せずに同じ物を回せる。
+        /// Decides **which rectangle is flushed when** (<c>Core/Volcano/UpliftFlushPlan</c>).
+        /// The decision is integer arithmetic only, so it lives in Core, where the unit tests and
+        /// <c>tools/VolcanoPreview</c> can run the same thing without launching the game.
         /// </summary>
         private static readonly UpliftFlushPlan _flush = new UpliftFlushPlan();
 
-        /// <summary>この tick に実際に書き換えたセルの外接矩形。<see cref="_dirtyValid"/> で有効判定。</summary>
+        /// <summary>Bounding rectangle of the cells actually rewritten this tick. Valid only when <see cref="_dirtyValid"/>.</summary>
         private static int _dirtyMinX, _dirtyMinZ, _dirtyMaxX, _dirtyMaxZ;
         private static bool _dirtyValid;
 
@@ -326,31 +340,33 @@ namespace DisasterPlus.Game
         private static int _cellsWrittenLastTick;
 
         /// <summary>
-        /// 直近の tick で**ゲームの高さの天井（1024 m）に当たって削られた**セル数。
-        /// 0 でないなら山頂は平らになっている。
-        /// 天井を上げられない理由は <c>UpliftSchedule.CeilingClipped</c> の doc にある。
+        /// The number of cells **clipped against the game's height ceiling (1024 m)** in the last
+        /// tick. If it is not 0, the summit has gone flat.
+        /// The reason the ceiling cannot be raised is in the doc of <c>UpliftSchedule.CeilingClipped</c>.
         /// </summary>
         private static int _ceilingClippedCells;
 
         private static bool _started;
         private static bool _complete;
 
-        /// <summary>今どの形を書いているか。<see cref="StartStage"/> だけが入れる。</summary>
+        /// <summary>Which shape is being written now. Only <see cref="StartStage"/> sets it.</summary>
         private static UpliftStage _stage = UpliftStage.Cone;
 
-        /// <summary>山体の半径（m）。カルデラの段だけが読む。</summary>
+        /// <summary>Radius of the cone body (m). Only the caldera stage reads it.</summary>
         private static float _coneRadiusMetres;
 
-        /// <summary>カルデラの床のでこぼこの種。<see cref="BakeProfile"/> が入れる。</summary>
+        /// <summary>Seed for the roughness of the caldera floor. <see cref="BakeProfile"/> sets it.</summary>
         private static uint _floorSeed;
 
-        /// <summary>この山の最終高（m）。**火口の深さと底の高さを出すのに使う。**</summary>
+        /// <summary>Final height of this mountain (m). **Used to derive the crater depth and floor height.**</summary>
         private static float _heightMetres;
 
         /// <summary>
-        /// 火口の縁が H に届くよう円錐を立て直した倍率（<c>VolcanoCrater.SummitScale</c>）。
-        /// **準備の前線を決めるのにも要る** —— 隆起の前線がこの倍率のぶん先へ出るので、
-        /// 倍率を渡さないと準備が追いつかず、山の外周が切り立った円で止まって見える。
+        /// The factor by which the cone was rebuilt so that the crater rim reaches H
+        /// (<c>VolcanoCrater.SummitScale</c>).
+        /// **It is also needed to decide the clearing front** — the uplift front runs ahead by
+        /// this factor, so without it the clearing cannot keep up and the outer rim of the
+        /// mountain appears to stop at a sheer circle.
         /// </summary>
         private static float _summitScale = 1f;
 
@@ -360,36 +376,38 @@ namespace DisasterPlus.Game
         private static string _lastFailure;
         private static bool _errorLogged;
 
-        /// <summary>隆起の進捗 [0,1]。**準備が届いていない間は進まない。**</summary>
+        /// <summary>Uplift progress [0,1]. **It does not advance while the clearing has not reached.**</summary>
         public static float ProgressUnit { get { return _progress; } }
 
         /// <summary>
-        /// 今この tick に上げてよい半径（m）。**＝準備が届いた範囲**（クラス doc）。
-        /// パネルはこれに「準備が届いた範囲」と添えて出す —— 罠 1 を実機で
-        /// 目で確かめられる唯一の行である。
+        /// The radius (m) that may be raised this tick. **= the range the clearing has reached**
+        /// (class doc). The panel shows it labelled "the range the clearing has reached" — it is
+        /// the one line that lets you verify trap 1 with your own eyes in the live game.
         /// </summary>
         public static float ActiveRadiusMetres { get { return _activeRadius; } }
 
-        /// <summary>今の山頂の盛り上がり（m）。元の地形高さからの相対量である。</summary>
+        /// <summary>The current rise of the summit (m). Relative to the original terrain height.</summary>
         public static float SummitMetres { get { return _summitMetres; } }
 
         /// <summary>
-        /// 山頂が**ゲームの高さの天井で削られた**セルの数（直近の tick）。
-        /// **0 でないのは不具合ではないが、黙っていてもいけない** ——
-        /// 高い土地に大きな山を置くとここが増え、山頂が平らになる。
-        /// 天井は 1023.98 m で、**MOD からは上げられない**
-        /// （<c>UpliftSchedule.CeilingClipped</c> の doc に IL 実測と理由）。
+        /// The number of cells whose summit was **clipped by the game's height ceiling** (last tick).
+        /// **A non-zero value is not a bug, but it must not go unmentioned either** — put a large
+        /// mountain on high ground and this rises, flattening the summit.
+        /// The ceiling is 1023.98 m, and **a mod cannot raise it**
+        /// (the doc of <c>UpliftSchedule.CeilingClipped</c> has the IL measurements and the why).
         /// </summary>
         public static int CeilingClippedCells { get { return _ceilingClippedCells; } }
 
         /// <summary>
-        /// 育っているセルが 1 tick で上がる量（m）。**山頂から外へ広がる隆起では
-        /// どのセルも同じ速さで上がる**（<c>UpliftSchedule.GrowthMetresAt</c> の doc）。
+        /// How much a growing cell rises in one tick (m). **In an uplift that spreads outwards
+        /// from the summit, every cell rises at the same speed**
+        /// (the doc of <c>UpliftSchedule.GrowthMetresAt</c>).
         ///
-        /// <c>VolcanoLava</c> がこれを「地形が上がっているぶんの許容差」として使う ——
-        /// 隆起の途中に出した溶岩は、進んだ先の標高が**溶岩のせいではなく山のせいで**
-        /// 上がることがあり、その分を許さないと下り勾配の符号の観測が誤って発火する。
-        /// 隆起が終わっていれば 0 である。
+        /// <c>VolcanoLava</c> uses this as "the tolerance for the terrain rising underneath it" —
+        /// lava emitted while the uplift is still running can find that the elevation ahead of it
+        /// has risen **because of the mountain, not because of the lava**, and without allowing
+        /// for that the observation of the downhill gradient's sign fires spuriously.
+        /// It is 0 once the uplift has finished.
         /// </summary>
         public static float RiseMetresPerTick
         {
@@ -397,30 +415,31 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 育っているセルが**1 sim フレーム**で上がる量（m）。
+        /// How much a growing cell rises in **one sim frame** (m).
         ///
-        /// ★ <see cref="RiseMetresPerTick"/> をそのまま他の機能へ渡さないこと。
-        ///   ⑤の各段は間隔が違う（隆起 <see cref="IntervalFrames"/> ＝ 4、
-        ///   溶岩 8）ので、「1 tick」の長さが揃っていない。**溶岩が要るのは
-        ///   「自分の 1 歩のあいだに地形がどれだけ上がるか」**であり、
-        ///   それはこの値に溶岩自身の間隔を掛けたものである。
-        ///   隆起の間隔を変えた瞬間に溶岩の許容差が狂うのを、この単位が防ぐ。
+        /// ★ Do not hand <see cref="RiseMetresPerTick"/> straight to another feature.
+        ///   ⑤'s stages have different intervals (uplift <see cref="IntervalFrames"/> = 4,
+        ///   lava 8), so "one tick" is not the same length for each. **What the lava needs is
+        ///   "how far the terrain rises during one step of its own"**, which is this value times
+        ///   the lava's own interval.
+        ///   This unit is what stops the lava's tolerance going wrong the moment the uplift
+        ///   interval is changed.
         /// </summary>
         public static float RiseMetresPerFrame
         {
             get { return _complete ? 0f : _riseMetresPerTick / IntervalFrames; }
         }
 
-        /// <summary>隆起が終わったか。</summary>
+        /// <summary>Whether the uplift has finished.</summary>
         public static bool Complete { get { return _complete; } }
 
-        /// <summary>今書いている形。診断と、状態機械が段を見分けるのに使う。</summary>
+        /// <summary>The shape being written now. Used for diagnostics and for the state machine to tell the stages apart.</summary>
         public static UpliftStage Stage { get { return _stage; } }
 
         /// <summary>
-        /// 山頂の窪みが満杯の深さに達したか。**「彫ったか」ではない** ——
-        /// 火口は形の一部なので最初の tick から在り、縁が <c>depth</c> だけ上がった時点で
-        /// 深さが揃う（クラス doc）。
+        /// Whether the summit hollow has reached its full depth. **Not "whether it was carved"** —
+        /// the crater is part of the shape, so it is there from the first tick, and the depth is
+        /// complete once the rim has risen by <c>depth</c> (class doc).
         /// </summary>
         public static bool CraterFormed
         {
@@ -428,13 +447,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 今の火口の底の盛り上がり（m。元の地形高さからの相対量）。**診断に出すためだけ**に在る。
+        /// The current rise of the crater floor (m; relative to the original terrain height).
+        /// It exists **purely to be reported in the diagnostics**.
         ///
-        /// ★ **噴出口の Y はここから取っていない。** あちらは
-        ///   <c>VolcanoEruption.SampleVent</c> が中心の地形を毎 tick 引き直したもので、
-        ///   <c>UpdateArea</c> の遅れまで含んだ「実際に描かれている高さ」である。
-        ///   こちらは⑤の予定（モデル側の値）なので、**2 つがずれていたら
-        ///   地形の反映が遅れている**ことが読み取れる。それがこの行の使い道である。
+        /// ★ **The vent's Y is not taken from here.** That one is re-sampled from the terrain at
+        ///   the centre every tick by <c>VolcanoEruption.SampleVent</c>, so it is "the height
+        ///   actually being drawn", lag of <c>UpdateArea</c> included.
+        ///   This one is ⑤'s plan (the model-side value), so **if the two disagree, the terrain
+        ///   is lagging behind**. That is what this line is for.
         /// </summary>
         public static float CraterFloorMetres
         {
@@ -442,53 +462,58 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 隆起の前線が今どこまで出ているか [0,1]。**準備（<c>VolcanoClearing</c>）へ渡すのは
-        /// 進捗そのものではなくこちら**である（<c>UpliftSchedule.GrowthFrontUnit</c> の doc）。
+        /// How far out the uplift front currently reaches [0,1]. **What gets handed to the
+        /// clearing (<c>VolcanoClearing</c>) is this, not the progress itself**
+        /// (the doc of <c>UpliftSchedule.GrowthFrontUnit</c>).
         /// </summary>
         public static float GrowthFrontUnit
         {
             get { return UpliftSchedule.GrowthFrontUnit(_progress, _summitScale); }
         }
 
-        /// <summary>これまでに進んだ tick 数。</summary>
+        /// <summary>Ticks elapsed so far.</summary>
         public static int Ticks { get { return _tick; } }
 
-        /// <summary>隆起に使う tick 数（<c>UpliftSchedule.TotalTicksFor</c> で切り詰め済み）。</summary>
+        /// <summary>Ticks used for the uplift (already clamped by <c>UpliftSchedule.TotalTicksFor</c>).</summary>
         public static int TotalTicks { get { return _totalTicks; } }
 
-        /// <summary>直近 1 tick で実際に値が変わったセル数（0 なら丸めで消えている）。</summary>
+        /// <summary>Cells whose value actually changed in the last tick (0 means it is vanishing in the rounding).</summary>
         public static int CellsWrittenLastTick { get { return _cellsWrittenLastTick; } }
 
         /// <summary>
-        /// **今この瞬間、変わった範囲を画面に出し切るのに要る <c>UpdateArea</c> の回数。**
+        /// **How many <c>UpdateArea</c> calls it takes, right now, to get the changed range fully
+        /// on screen.**
         ///
-        /// 1 なら「その tick に変わった全域が同じ tick で流れている」＝ いちばん滑らかな状態
-        /// （隆起の前半はここ）。2 以上なら分割してタイル総当たりに落ちており、
-        /// 見える 1 段はこの回数ぶんの上昇量になる（クラス doc の計算）。
-        /// **フットプリント全体のタイル数ではない** —— そちらは <see cref="FootprintTileCount"/>。
+        /// 1 means "the whole area changed this tick is flushed in the same tick" = the smoothest
+        /// state (the first half of the uplift is here). 2 or more means it has been split and
+        /// fallen back to round-robin tiling, and the visible step is the rise over that many
+        /// flushes (the calculation is in the class doc).
+        /// **It is not the tile count of the whole footprint** — that is <see cref="FootprintTileCount"/>.
         /// </summary>
         public static int TileCount { get { return _flush.TileCount; } }
 
-        /// <summary>総当たりの何枚目か。単発で流せているときは 0。</summary>
+        /// <summary>Which tile of the round robin. 0 when a single pass is enough.</summary>
         public static int TileCursor { get { return _flush.Cursor; } }
 
-        /// <summary>フットプリント全体を覆うタイル数（開始時に 1 回決まる）。</summary>
+        /// <summary>Number of tiles covering the whole footprint (decided once at start).</summary>
         public static int FootprintTileCount { get { return _tileCount; } }
 
         /// <summary>
-        /// 直近に上げられなかった理由（**英語・診断用**）。上げられていれば null。
-        /// **黙って何もしないをやらない**ための口である。
+        /// The most recent reason nothing could be raised (**English, for diagnostics**). null if
+        /// it was raised. This is the mouth that stops us **failing silently**.
         /// </summary>
         public static string LastFailure { get { return _lastFailure; } }
 
         /// <summary>
-        /// 火山を手放すときとレベルアンロードで呼ぶ。冪等である。
-        /// **既に変わった地形は戻らない**（不可逆・設計書 §1.3）。畳むのは予定だけである。
+        /// Call when letting go of the volcano and on level unload. Idempotent.
+        /// **Terrain already changed does not come back** (irreversible; design doc §1.3).
+        /// All this folds away is the plan.
         /// </summary>
         public static void Reset()
         {
-            // ★ 退避配列は必ず捨てる。半径 3 km で 279 KB あり、都市をまたいで
-            //    持ち越すと前の都市の地形を「元の高さ」として名乗ることになる。
+            // ★ Always drop the snapshot array. It is 279 KB at a 3 km radius, and carrying it
+            //    across cities would mean claiming the previous city's terrain as the
+            //    "original height".
             _baseRaw = null;
             _profile = null;
             _minX = 0;
@@ -522,13 +547,15 @@ namespace DisasterPlus.Game
             _minutesSinceTick = 0f;
             _lastFailure = null;
 
-            // _errorLogged は戻さない（この DLL が参照しているゲームのビルドに対する事実）。
+            // _errorLogged is not reset (it is a fact about the build of the game this DLL
+            // references).
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から呼ぶこと**（ポーズ中に山が育つ）。<paramref name="frame"/> は診断用で、
-        /// **周期の判定には使わない**（<c>frameIndex % N</c> にしない）。
+        /// Sim thread. **Always call it from below the pause guard in
+        /// <c>VolcanoFeature.OnSimulationTick</c>** (otherwise the mountain grows while paused).
+        /// <paramref name="frame"/> is for diagnostics and **is not used to decide the period**
+        /// (never <c>frameIndex % N</c>).
         /// </summary>
         public static void Tick(VolcanoFootprint footprint, uint frame, float deltaMinutes)
         {
@@ -559,14 +586,15 @@ namespace DisasterPlus.Game
 
             if (!_started || !SamePoint(_centre, footprint.Centre))
             {
-                // ★ 自分から始まるのは**円錐だけ**である。膨らみとカルデラは
-                //   VolcanoState が StartStage で明示的に始める。
+                // ★ The only stage that starts on its own is **the cone**. Inflation and caldera
+                //   are started explicitly by VolcanoState through StartStage.
                 if (!StartStage(footprint, UpliftStage.Cone)) return;
             }
 
             if (_complete) return;
 
-            // ★ 間隔の累積は対象より先に進める（④の TyphoonWind と同じ形）。
+            // ★ Advance the interval accumulator before the subject (the same shape as
+            //   TyphoonWind in ④).
             float framesPerMinute = FeatureHost.FramesPerMinute;
             float interval = framesPerMinute > 0f ? IntervalFrames / framesPerMinute : 0f;
 
@@ -576,21 +604,24 @@ namespace DisasterPlus.Game
             if (framesPerMinute <= 0f) return;
             if (_minutesSinceTick < interval) return;
 
-            // ★★ **罠 1。第 2 引数はこれ以外を渡してはいけない。**
+            // ★★ **Trap 1. Nothing but this may be passed as the second argument.**
             _activeRadius = UpliftSchedule.ActiveRadiusMetres(
                 footprint.RadiusMetres, VolcanoClearing.ClearedRadiusMetres);
 
-            // 準備が 1 mm も届いていないなら、tick も進めない。進めると
-            // 「上げていないのに進捗だけ終わる」——山が育たないまま完成する。
-            // **累積は消費しない**ので、準備が届いた次の tick で即座に走る。
+            // If the clearing has not reached by even a millimetre, do not advance the tick
+            // either. Advancing it means "the progress finishes without anything being raised" —
+            // the mountain completes without ever growing.
+            // **The accumulator is not consumed**, so it runs immediately on the next tick after
+            // the clearing arrives.
             if (!(_activeRadius > 0f)) return;
 
             _minutesSinceTick = 0f;
 
             _progress = UpliftSchedule.ProgressAt(_tick, _totalTicks);
-            // 山頂のプロファイルは H なので、山頂の盛り上がりは今も H×progress である。
-            // ★★ **カルデラでは山頂ではなく「床がどれだけ落ちたか」である。**
-            //    ここで正の値を入れると、火山タブが陥没を「+400 m の山頂」と名乗る。
+            // The summit's profile is H, so the summit's rise is still H×progress.
+            // ★★ **For the caldera it is not the summit but "how far the floor has dropped".**
+            //    Put a positive value here and the volcano tab will call the foundering a
+            //    "+400 m summit".
             _summitMetres = _stage == UpliftStage.Collapse
                 ? -_riseMetresPerTick * _totalTicks * _progress
                 : UpliftSchedule.GrowthMetresAt(
@@ -605,54 +636,56 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ **準備が外周まで届くまでは終わらせない。**
-            //    書いたのは activeRadius の内側だけなので、ここで打ち切ると
-            //    activeRadius と R のあいだの帯が**元の高さのまま残る**——
-            //    山の外側に環状の段差ができる。準備の走査は隆起より間隔が長い
-            //    （64 対 4 フレーム）ので、この待ちは普通に発生する。
-            //    進捗はもう 1 なので、待っている間の WriteHeights は
-            //    「準備が届いた分だけ」を毎 tick 埋め足していく。
+            // ★★ **Do not finish until the clearing has reached the outer rim.**
+            //    Only the inside of activeRadius has been written, so cutting off here leaves
+            //    the band between activeRadius and R **at its original height** — an annular
+            //    step around the outside of the mountain. The clearing sweep runs on a longer
+            //    interval than the uplift (64 frames against 4), so this wait happens routinely.
+            //    Progress is already 1, so WriteHeights during the wait just fills in
+            //    "as far as the clearing has reached" each tick.
             if (_activeRadius < footprint.RadiusMetres - VolcanoShape.MetresPerRawUnit) return;
 
-            // ★★ **目標の高さは書き終えたが、まだ全部は見えていない。**
-            //    1 tick に流せる矩形は 1 枚なので（罠 3）、最後の書き込みのうち
-            //    画面に出ているのは 1 枚ぶんだけで、残りは 1 tick 前の高さ
-            //    ——山頂の 1/_totalTicks ぶん低い形——のまま止まっている。
-            //    **そこで火口を彫って終わると、山の外側が永久に低いまま残る。**
-            //    全タイルをここでまとめて呼ぶと merged > 10000 の判定で毎回
-            //    途中フラッシュするので（§A-1 IL_00A8）、**1 tick 1 枚のまま
-            //    残りを流し切ってから**火口へ進む。
+            // ★★ **The target heights are written, but not all of them are visible yet.**
+            //    Only one rectangle can be flushed per tick (trap 3), so of the final writes
+            //    only one tile's worth is on screen; the rest is still showing last tick's
+            //    heights — a shape 1/_totalTicks of the summit lower.
+            //    **Carve the crater and finish there and the outside of the mountain stays low
+            //    for good.** Calling all the tiles here at once trips the merged > 10000 test
+            //    and flushes mid-batch every time (§A-1 IL_00A8), so **keep to one tile per tick
+            //    and drain the rest** before moving on to the crater.
             //
-            //    progress = 1 に届いた以降の WriteHeights は 0 セルしか書かないので、
-            //    _flush.HasPending は流し切った時点で自然に false になる。
-            //    **枚数を数え直さないこと** —— 数えると、待っている間に届いた
-            //    最後の書き込み（準備が外周に届いた瞬間の分）を取りこぼす。
+            //    Once progress has reached 1, WriteHeights writes 0 cells, so
+            //    _flush.HasPending naturally goes false as soon as the backlog is drained.
+            //    **Do not re-count the tiles** — re-counting loses the final write that landed
+            //    during the wait (the one from the moment the clearing reached the outer rim).
             if (_flush.HasPending) return;
 
-            // ★ 火口はここで彫らない。**最初の tick から形の一部として在る**（クラス doc）。
+            // ★ The crater is not carved here. **It is part of the shape from the first tick**
+            //   (class doc).
             _progress = 1f;
             _summitMetres = _stage == UpliftStage.Collapse
                 ? -_riseMetresPerTick * _totalTicks
                 : footprint.HeightMetres;
             _complete = true;
 
-            // もう使わない。メモリを返す（クラス doc の実費表）。
+            // No longer needed. Give the memory back (the cost table in the class doc).
             _baseRaw = null;
             _profile = null;
         }
 
         /// <summary>
-        /// <paramref name="stage"/> の形を書きはじめる。**円錐以外もここを通る**
-        /// （<see cref="UpliftStage"/>）。矩形・退避・フラッシュ・天井の数え方は
-        /// 3 段とも同じで、違うのは焼くプロファイルと進み方だけである。
+        /// Start writing the shape for <paramref name="stage"/>. **The other stages come through
+        /// here too** (<see cref="UpliftStage"/>). Taking the rectangle, the snapshot, the flush
+        /// and the ceiling count are the same in all three stages; only the profile that is baked
+        /// and the way it advances differ.
         ///
-        /// <paramref name="footprint"/> は<b>その段ぶんに広げたもの</b>を渡すこと
-        /// （<c>VolcanoFootprint.Resized</c>）。半径をここで広げないのは、
-        /// 準備（<c>VolcanoClearing</c>）と同じ半径を見ていないと
-        /// 道路の下だけ地面が押し戻されるからである（設計書 §1.2 / 罠 1）。
+        /// Pass a <paramref name="footprint"/> that has been <b>widened for that stage</b>
+        /// (<c>VolcanoFootprint.Resized</c>). The radius is not widened here because unless the
+        /// clearing (<c>VolcanoClearing</c>) is looking at the same radius, the ground under the
+        /// roads alone gets pushed back (design doc §1.2 / trap 1).
         ///
-        /// ★★ <b><see cref="Reset"/> より後に段を入れる。</b> Reset を挟んで
-        ///   段を持ち回すと、前の火山のカルデラ段が次の火山の円錐に化ける。
+        /// ★★ <b>Set the stage after <see cref="Reset"/>.</b> Carry the stage across a Reset and
+        ///   the previous volcano's caldera stage turns into the next volcano's cone.
         /// </summary>
         internal static bool StartStage(VolcanoFootprint footprint, UpliftStage stage)
         {
@@ -660,9 +693,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 同上。<paramref name="coneRadiusMetres"/> は**山体の半径**（m）で、
-        /// カルデラの段だけが読む —— そこより外は元の地形がそのまま残っているので、
-        /// 床を落とす基準をそちらへ寄せる（<see cref="ReferenceGroundFor"/>）。
+        /// As above. <paramref name="coneRadiusMetres"/> is **the radius of the cone body** (m),
+        /// read only by the caldera stage — beyond it the original terrain is still intact, so
+        /// the reference for dropping the floor is biased towards that
+        /// (<see cref="ReferenceGroundFor"/>).
         /// </summary>
         internal static bool StartStage(VolcanoFootprint footprint, UpliftStage stage,
                                         float coneRadiusMetres)
@@ -674,9 +708,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 影響矩形を決めて「元の高さ」を控える。**開始時に 1 回だけ**（クラス doc）。
-        /// 失敗したら <see cref="_lastFailure"/> を残して false を返す。
-        /// **<see cref="Reset"/> はここでは呼ばない**（<see cref="StartStage"/> が済ませている）。
+        /// Decide the affected rectangle and snapshot the "original height". **Once, at start**
+        /// (class doc). On failure it leaves <see cref="_lastFailure"/> and returns false.
+        /// **<see cref="Reset"/> is not called here** (<see cref="StartStage"/> has done it).
         /// </summary>
         private static bool StartCore(VolcanoFootprint footprint)
         {
@@ -703,38 +737,40 @@ namespace DisasterPlus.Game
 
             _tileCount = TileSplit.TileCountFor(_minX, _minZ, _maxX, _maxZ);
 
-            // ★ 火口の分だけ円錐を立て直す倍率。**準備の前線もこれを見る**（_summitScale の doc）。
+            // ★ The factor that rebuilds the cone to allow for the crater. **The clearing front
+            //   looks at this too** (the doc of _summitScale).
             _heightMetres = footprint.HeightMetres;
-            // ★ 火口のぶんの立て直しは**円錐にしか要らない**。膨らみもカルデラも
-            //   山頂を彫らないので、1 のままでよい（掛けると前線が実際より先へ出る）。
+            // ★ Rebuilding for the crater is **only needed for the cone**. Neither the inflation
+            //   nor the caldera carves a summit, so 1 is right for them (multiplying would push
+            //   the front further out than it really is).
             _summitScale = _stage == UpliftStage.Cone
                 ? VolcanoCrater.SummitScale(footprint.Form, footprint.RadiusMetres)
                 : 1f;
 
-            // ★★ **プロファイルを先に焼く。** カルデラは「元の地面 − 深さ」という
-            //    絶対の目標へ落ちるので、山頂のセルが実際に動く量は
-            //    「深さ ＋ 山の高さ」であり、**焼いてみるまで分からない**
-            //    （<see cref="DeepestDropMetres"/>）。刻みの数をその実測から
-            //    出さないと、1 tick の落差が大きくなりすぎて崖のような段が付く。
+            // ★★ **Bake the profile first.** The caldera drops to an absolute target of
+            //    "original ground − depth", so the distance a summit cell actually travels is
+            //    "depth + mountain height", and **you cannot know it until it is baked**
+            //    (<see cref="DeepestDropMetres"/>). Derive the step count from that measurement
+            //    or the per-tick drop gets too large and you get cliff-like steps.
             BakeProfile(footprint, height);
 
             float travelMetres = _stage == UpliftStage.Collapse
                 ? DeepestDropMetres()
                 : footprint.HeightMetres;
-            // 焼いた結果が 0（＝落ちるセルが 1 つも無い）なら、頼まれた深さで数える。
+            // If the bake came out 0 (i.e. not a single cell drops), count using the requested depth.
             if (!(travelMetres > 0f)) travelMetres = footprint.HeightMetres;
 
-            // ★ 山頂が毎 tick 1 raw 単位以上動くよう切り詰める（罠 2）。
-            //   換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。
+            // ★ Clamp so the summit moves at least one raw unit every tick (trap 2).
+            //   Derive the conversion from FeatureHost.FramesPerMinute (never hard-code the constant).
             float framesPerMinute = FeatureHost.FramesPerMinute;
             int requestedTicks = framesPerMinute > 0f
                 ? (int)(StageMinutes() * framesPerMinute / IntervalFrames)
                 : 1;
             _totalTicks = UpliftSchedule.TotalTicksFor(travelMetres, requestedTicks);
 
-            // ★ 育っているセルはどれも同じ速さで上がる（GrowthMetresAt の doc）。
-            //   TotalTicksFor が totalTicks を H×64 で切り詰めているので、
-            //   これは必ず 1 raw 単位（1/64 m）以上である。
+            // ★ Every growing cell rises at the same speed (the doc of GrowthMetresAt).
+            //   TotalTicksFor has clamped totalTicks by H×64, so this is always at least one raw
+            //   unit (1/64 m).
             _riseMetresPerTick = travelMetres / _totalTicks;
 
             _centre = footprint.Centre;
@@ -752,14 +788,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 最終形の盛り上がりを 1 回だけ全セルぶん焼く（<see cref="_profile"/>）。
+        /// Bake the rise of the final shape for every cell, once (<see cref="_profile"/>).
         ///
-        /// **ここが⑤で唯一 <c>VolcanoRelief</c> を呼ぶ場所である。** 毎 tick 呼ぶと
-        /// 半径 3 km で 1 tick 当たり 14 万セル × 300 flop になる。
-        /// 種は火山の地点から出す（<c>VolcanoEruption</c> / <c>VolcanoLava</c> と同じ作り方）
-        /// ので、**同じ場所に作り直せば同じ山が生える**。
-        /// <c>VanillaRandomizer</c> は使わない —— ⑤はバニラの災害スロットに載らないので、
-        /// 同期すべきバニラの引きが構造上 1 つも存在しない。
+        /// **This is the only place in ⑤ that calls <c>VolcanoRelief</c>.** Calling it every tick
+        /// would be 140,000 cells × 300 flops per tick at a 3 km radius.
+        /// The seed comes from the volcano's location (built the same way as in
+        /// <c>VolcanoEruption</c> / <c>VolcanoLava</c>), so **rebuild in the same place and you
+        /// get the same mountain**.
+        /// <c>VanillaRandomizer</c> is not used — ⑤ does not occupy a vanilla disaster slot, so
+        /// structurally there is not a single vanilla draw to stay in sync with.
         /// </summary>
         private static void BakeProfile(VolcanoFootprint footprint, int height)
         {
@@ -770,7 +807,8 @@ namespace DisasterPlus.Game
             var relief = VolcanoRelief.For(footprint.Form, seed,
                                            ModSettings.VolcanoReliefStrength.value / 100f);
 
-            // ★ 床のでこぼこも同じ種から出す。**同じ場所に作り直せば同じ床**になる。
+            // ★ The floor roughness comes from the same seed. **Rebuild in the same place and you
+            //   get the same floor.**
             _floorSeed = seed;
 
             float centreX = footprint.Centre.X;
@@ -795,10 +833,11 @@ namespace DisasterPlus.Game
                     float dx = worldX - centreX;
                     if (dx * dx + dz2 > radiusSquared) continue;
 
-                    // ★★ **半径の外は 0、最終高 H は超えない。** 起伏は掛け算だけ、
-                    //    火口は min だけで働くので、どちらも構造的に守られている
-                    //    （VolcanoRelief / VolcanoCrater のクラス doc）。
-                    //    **山頂の窪みはここで入る。あとから彫らない。**
+                    // ★★ **0 outside the radius, and it never exceeds the final height H.**
+                    //    The relief works by multiplication alone and the crater by min alone,
+                    //    so both are structurally guaranteed
+                    //    (the class docs of VolcanoRelief / VolcanoCrater).
+                    //    **The summit hollow goes in here. It is not carved afterwards.**
                     _profile[row + x] = ProfileFor(
                         relief, dx, dz, radius, metres,
                         _baseRaw[row + x] * VolcanoShape.MetresPerRawUnit,
@@ -808,18 +847,20 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>RawHeights</c> を取る。**長さが 1081² でなければ 1 セルも書かない** ——
-        /// <c>z*1081 + x</c> の添字が別のセルを指し、**マップの無関係な場所が隆起する**
-        /// （<see cref="VolcanoTerrainFacts.Usable"/> と同じ述語）。
+        /// Fetch <c>RawHeights</c>. **If the length is not 1081², not one cell is written** —
+        /// the <c>z*1081 + x</c> index would point at a different cell and
+        /// **an unrelated part of the map would be uplifted**
+        /// (the same predicate as <see cref="VolcanoTerrainFacts.Usable"/>).
         ///
-        /// <c>Singleton&lt;T&gt;.exists</c> を先に見る（<c>instance</c> は main スレッド専用 API）。
+        /// Check <c>Singleton&lt;T&gt;.exists</c> first (<c>instance</c> is a main-thread-only API).
         /// </summary>
         /// <summary>
-        /// 今の段にかける時間（ゲーム内分）。
+        /// How long the current stage takes (in-game minutes).
         ///
-        /// ★ 陥没は**速い**。屋根が抜けて落ちるのに数万年はかからない ——
-        ///   数万年かかるのは<b>その前のマグマだまりの成長</b>のほうである。
-        ///   膨らみは逆にゆっくりで、隆起より長くかける。
+        /// ★ The foundering is **fast**. It does not take tens of thousands of years for the roof
+        ///   to give way and fall — the tens of thousands of years are in <b>the growth of the
+        ///   magma chamber before it</b>. The inflation is the opposite: slow, and given longer
+        ///   than the uplift.
         /// </summary>
         private static float StageMinutes()
         {
@@ -834,18 +875,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 セルぶんのプロファイル（m）。**カルデラだけ負を返す。**
+        /// The profile for one cell (m). **Only the caldera returns negative values.**
         ///
-        /// ★ <paramref name="radius"/> と <paramref name="metres"/> は
-        ///   <b>その段ぶんに広げた影響範囲そのもの</b>である（<c>VolcanoState</c> が
-        ///   <c>VolcanoFootprint.Resized</c> で作って渡す）。ここで倍率を掛け直さない ——
-        ///   掛けると準備（<c>VolcanoClearing</c>）と隆起の見ている半径がずれて、
-        ///   道路の下の地面だけ押し戻される（設計書 §1.2 / 罠 1）。
+        /// ★ <paramref name="radius"/> and <paramref name="metres"/> are
+        ///   <b>the affected range already widened for that stage</b> (<c>VolcanoState</c> builds
+        ///   and passes it through <c>VolcanoFootprint.Resized</c>). Do not re-apply a factor
+        ///   here — doing so makes the radius seen by the clearing (<c>VolcanoClearing</c>) and
+        ///   by the uplift disagree, and the ground under the roads alone gets pushed back
+        ///   (design doc §1.2 / trap 1).
         /// </summary>
-        /// <param name="baseMetres">このセルの**今の**地面の高さ（m）。カルデラだけが読む。</param>
+        /// <param name="baseMetres">The **current** ground height of this cell (m). Only the caldera reads it.</param>
         /// <param name="groundMetres">
-        /// 火山を置く前の地面の高さ（m。<c>VolcanoFootprint.GroundHeightMetres</c>）。
-        /// カルデラだけが読む。
+        /// The ground height before the volcano was placed (m; <c>VolcanoFootprint.GroundHeightMetres</c>).
+        /// Only the caldera reads it.
         /// </param>
         private static float ProfileFor(VolcanoRelief relief, float dx, float dz,
                                         float radius, float metres,
@@ -859,35 +901,39 @@ namespace DisasterPlus.Game
 
                 case UpliftStage.Collapse:
                 {
-                    // ★★ **元の地形を塗り潰さない。**（2026-08-22、所有者の指摘
-                    //    「元の地形や火山の山体の残骸も加味してリアルに寄せて」）
+                    // ★★ **Do not paint over the original terrain.** (2026-08-22, owner's report
+                    //    "take the original terrain and the remains of the cone into account and
+                    //    make it more realistic")
                     //
-                    //    以前は中心 1 点の地面（groundMetres）を基準に落としていたので、
-                    //    カルデラの中の谷も丘も消えて**まっ平らな床**になった。
+                    //    It used to drop relative to the ground at the single centre point
+                    //    (groundMetres), so every valley and hill inside the caldera was erased
+                    //    and the result was a **dead-flat floor**.
                     //
-                    //    山体の外では、そのセルの<b>今の地面がそのまま元の地形</b>である
-                    //    （円錐はそこまで届いていない）。だから基準をそちらへ寄せる。
-                    //    山体の内側だけは本物が円錐に埋もれているので、中心の高さで代用する。
-                    //    継ぎ目が出ないよう、円錐の縁の外側 1 セル幅ぶんで混ぜる。
+                    //    Outside the cone body, <b>the cell's current ground is the original
+                    //    terrain</b> (the cone never reached that far). So the reference is
+                    //    biased towards that. Only inside the cone body is the real thing buried
+                    //    under the cone, so the centre's height stands in for it there.
+                    //    To avoid a seam, blend over a one-cell-wide band outside the cone's rim.
                     float distance = (float)Math.Sqrt(dx * dx + dz * dz);
                     float reference = ReferenceGroundFor(distance, baseMetres, groundMetres);
 
-                    // ★★ **陥没は「山から一定量を引く」ではない。**（2026-08-22、所有者の指摘）
+                    // ★★ **The foundering is not "subtract a fixed amount from the mountain".**
+                    //    (2026-08-22, owner's report)
                     //
-                    //    > カルデラ形成時は、山体が大きく落ち込んで大爆発する
-                    //    > んじゃないでしょうか…？
+                    //    &gt; when the caldera forms, doesn't the cone body drop a long way and
+                    //    &gt; explode massively…?
                     //
-                    //    そのとおりで、以前ここは今の地面から深さぶんを引いていた。
-                    //    円錐は +1000 m、深さは 900 m なので、**山頂に 100 m の
-                    //    切り株が残り**、そのまわりだけ 900 m 掘れていた ——
-                    //    「山が落ちた」ではなく「山のまわりに溝を掘った」絵である。
+                    //    Quite so, and this code used to subtract the depth from the current
+                    //    ground. The cone is +1000 m and the depth is 900 m, so **a 100 m stump
+                    //    was left at the summit** with a 900 m trench dug only around it — the
+                    //    picture of "a moat dug around the mountain", not "the mountain fell".
                     //
-                    //    実際のカルデラは<b>屋根そのものが 1 枚の板として落ちる</b>ので、
-                    //    床は**元の地面より下の 1 つの高さで平ら**になり、
-                    //    山体は跡形も無くなる。だから目標は絶対の高さで置き、
-                    //    プロファイルは「そこまで落ちる量」＝ 目標 − 今 とする。
-                    // ★ 床は鉢だけではない —— 崩れた岩塊と中央火口丘が乗る
-                    //   （SuperEruption.CalderaFloorOffsetAt）。
+                    //    A real caldera <b>drops its roof as a single slab</b>, so the floor goes
+                    //    flat at one height below the original ground and the cone body vanishes
+                    //    without trace. So the target is set as an absolute height, and the
+                    //    profile is "the distance down to it" = target − current.
+                    // ★ The floor is not just a bowl — collapsed blocks and a central cone sit on
+                    //   it (SuperEruption.CalderaFloorOffsetAt).
                     float offset = SuperEruption.CalderaFloorOffsetAt(
                         dx, dz, radius, metres, _floorSeed);
 
@@ -900,10 +946,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カルデラの床を落とす基準の高さ（m）。
+        /// The reference height (m) that the caldera floor drops relative to.
         ///
-        /// 山体の外（<see cref="_coneRadiusMetres"/> より外）では**そのセルの
-        /// 本物の地面**、内側では中心の地面。あいだは混ぜる（継ぎ目を出さない）。
+        /// Outside the cone body (beyond <see cref="_coneRadiusMetres"/>) it is **that cell's
+        /// real ground**; inside, it is the ground at the centre. In between, blend (so no seam
+        /// appears).
         /// </summary>
         private static float ReferenceGroundFor(float distance, float baseMetres,
                                                 float groundMetres)
@@ -911,7 +958,8 @@ namespace DisasterPlus.Game
             float cone = _coneRadiusMetres;
             if (!(cone > 0f)) return baseMetres;
 
-            // 混ぜる帯。円錐の縁のすぐ外側で、代用 → 本物へ移る。
+            // The blending band. Just outside the cone's rim, it moves from the stand-in to the
+            // real thing.
             float band = cone * 0.25f;
             if (distance <= cone) return groundMetres;
             if (distance >= cone + band) return baseMetres;
@@ -922,8 +970,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// いちばん深く落ちるセルの落差（m、**正**）。カルデラの刻みを決めるのに使う。
-        /// <see cref="BakeProfile"/> のあとにしか呼べない（まだなら 0）。
+        /// The drop of the deepest-falling cell (m, **positive**). Used to decide the caldera's
+        /// step size. Can only be called after <see cref="BakeProfile"/> (0 before that).
         /// </summary>
         private static float DeepestDropMetres()
         {
@@ -962,7 +1010,7 @@ namespace DisasterPlus.Game
             return raw;
         }
 
-        /// <summary>1/64 m（raw 1 単位）より細かい差は「同じ地点」とみなす。</summary>
+        /// <summary>Differences finer than 1/64 m (one raw unit) count as "the same point".</summary>
         private static bool SamePoint(Vec3 a, Vec3 b)
         {
             return Same(a.X, b.X) && Same(a.Z, b.Z);
@@ -976,9 +1024,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **セルを 1 つも書かなかった tick も出す。** 「機能が死んでいる」と
-        /// 「もう目標に届いている」がログ上で区別できなくなる。
-        /// 引数の文字列連結は毎回走るので <c>DiagEnabled</c> で先に落とす。
+        /// **Report ticks that wrote no cells at all, too.** Otherwise "the feature is dead" and
+        /// "the target has already been reached" become indistinguishable in the log.
+        /// The string concatenation of the arguments runs every time, so drop it early with
+        /// <c>DiagEnabled</c>.
         /// </summary>
         private static void WriteDiag(uint frame)
         {
@@ -991,16 +1040,17 @@ namespace DisasterPlus.Game
                 + " summit=" + _summitMetres.ToString("F1")
                 + " active=" + _activeRadius.ToString("F0")
                 + " cells=" + _cellsWrittenLastTick
-                // ★ flush=1/1 は「この tick に変わった全域が同じ tick で画面に出た」
-                //   ＝ いちばん滑らかな状態。2 以上なら分割して総当たりに落ちており、
-                //   見える 1 段はその枚数ぶんの上昇量になる（クラス doc）。
+                // ★ flush=1/1 means "the whole area changed this tick made it on screen in the
+                //   same tick" = the smoothest state. 2 or more means it has been split and has
+                //   fallen back to round robin, and the visible step is the rise over that many
+                //   flushes (class doc).
                 + " flush=" + _flush.Cursor + "/" + _flush.TileCount
                 + " rect=" + (_dirtyValid ? (_dirtyMaxX - _dirtyMinX + 1) + "x"
                                             + (_dirtyMaxZ - _dirtyMinZ + 1) : "0")
                 + " tiles=" + _tileCount
                 + " crater=" + (CraterFormed ? "full" : "growing")
-                // ★ **0 のときも出す**。出さないと「削られていない」と
-                //   「削られたかどうか見ていない」がログ上で区別できない。
+                // ★ **Report it when it is 0 as well.** Otherwise "nothing was clipped" and
+                //   "nobody looked at whether anything was clipped" are indistinguishable in the log.
                 + " ceilingClipped=" + _ceilingClippedCells
                 + " floor=" + CraterFloorMetres.ToString("F1")
                 + (_complete ? " (complete)" : ""));

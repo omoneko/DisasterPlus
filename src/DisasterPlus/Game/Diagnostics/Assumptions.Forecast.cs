@@ -4,24 +4,25 @@ using System.Reflection;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="Assumptions"/> のうち①天気予報タブ の前提。
+    /// The part of <see cref="Assumptions"/> covering the ① forecast tab.
     ///
-    /// **このファイルには検証しか置かない。** <c>Check</c> / <c>SetResult</c> /
-    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> は本体側の private のままで、
-    /// partial なので可視性を 1 つも上げずに使える（分割の要件そのもの）。
+    /// **This file holds nothing but checks.** <c>Check</c> / <c>SetResult</c> /
+    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> stay private on the main side, and
+    /// because this is partial they can be used without raising a single visibility
+    /// (that is exactly the requirement behind the split).
     ///
-    /// 件数は <see cref="ForecastCheckCount"/> がこのファイルの中で宣言する。
-    /// **検証を足したらここも増やすこと** —— 本体の <c>TotalCheckCount</c> は
-    /// これらの和である。
+    /// The count is declared inside this file by <see cref="ForecastCheckCount"/>.
+    /// **If you add a check, bump it here too** — the main file's <c>TotalCheckCount</c> is
+    /// the sum of these.
     /// </summary>
     public static partial class Assumptions
     {
-        /// <summary>このファイルが持つ検証の数。</summary>
+        /// <summary>The number of checks this file holds.</summary>
         private const int ForecastCheckCount = 7;
 
         private static void RunForecast()
         {
-            // --- ①天気予報タブ（Task 5）ここから ---
+            // --- ① forecast tab (Task 5) starts here ---
 
             Check("InfoManager.SetCurrentMode is resolvable",
                   "cannot switch to the vanilla disaster hazard heatmap view",
@@ -39,24 +40,27 @@ namespace DisasterPlus.Game
                   delegate
                   {
                       var t = typeof(InfoManager.SubInfoMode);
-                      // 文字列ベースで見る。列挙メンバへのコード内の直接参照はコンパイル時に
-                      // 整数値へ畳み込まれるため、将来ゲーム側で名前が変わったり削除されたり
-                      // しても再ビルドしない限り検出できない。ここは実行時に「今のゲームの
-                      // アセンブリにその名前のメンバが実在するか」を毎回問い直す。
+                      // Check by string. A direct reference to an enum member in code is
+                      // folded down to an integer at compile time, so if the game later
+                      // renames or removes it we could not detect that without a rebuild.
+                      // This asks the question afresh at runtime: "does a member of that
+                      // name actually exist in the game assembly as it is now?"
                       return Enum.IsDefined(t, "LightningHazard") && Enum.IsDefined(t, "TornadoHazard");
                   });
 
-            // impact 文を全体レビューで訂正した。以前は「ハザードマップが埋まらない＝
-            // 空か古いデータが出る」と書いていたが、これは「本来は埋まっているはずの
-            // 静的なリスク面」を前提にした誤った説明だった。IL 実測（本 MOD 自身で
-            // 再確認）では、この 2 つの UpdateHazardMap は
+            // The impact sentence was corrected in the overall review. It used to say
+            // "the hazard map does not get filled in = empty or stale data is shown", but
+            // that explanation was wrong: it assumed a static risk surface that ought to be
+            // filled in. Measured from the IL (re-confirmed with this very mod), both of
+            // these UpdateHazardMap methods open with a two-stage gate
             //   (m_flags & 4096) == 0 -> return   … 4096 = DisasterData.Flags.Located
             //   (m_flags & 12)   == 0 -> return   … 12   = Emerging|Active
-            // という 2 段ゲートで始まり、地形も建物も一切参照せず、通過した場合だけ
-            // m_targetPosition の周りに半径と強度で決まる円盤を塗る。つまりこのマップは
-            // 静的なリスク面ではなく「測位済みで進行中の嵐の予測被害範囲」であり、
-            // 空であること自体は正常な状態（＝今どの嵐も検知されていない）でもある。
-            // impact はメソッドが消えた場合に何が失われるかだけを述べる。
+            // consult neither the terrain nor the buildings, and, only if they get past it,
+            // paint a disc around m_targetPosition whose size follows the radius and the
+            // intensity. So this map is not a static risk surface but "the predicted damage
+            // area of a located, in-progress storm", and being empty is itself a normal
+            // state (i.e. no storm is currently detected).
+            // The impact only states what is lost if the method disappears.
             Check("ThunderStormAI/TornadoAI.UpdateHazardMap exist",
                   "a located, in-progress storm's predicted impact area cannot be painted, "
                   + "so the hazard map would stay empty even while a storm is detected",
@@ -66,18 +70,21 @@ namespace DisasterPlus.Game
                           && HasUpdateHazardMap(typeof(TornadoAI));
                   });
 
-            // 全体レビュー指摘(I5): ここは以前 m_groundWetness / m_lastLightningIntensity /
-            // m_targetDirection も要求していたが、この 3 つは MOD のどこからも読んでいない。
-            // 「予報機能の中核が壊れる」という重い impact の項目が、機能が使っていない
-            // フィールドの改名だけで FAIL しうる状態だった——誤検知を消すための層が
-            // 誤検知を出すのでは本末転倒なので、実際に WeatherReader が読むものだけに絞る。
-            // （m_groundWetness / m_lastLightningIntensity は読み取り自体も撤去した。
-            //  m_currentFog / m_targetFog は Fog 行を新設して表示側へ回したので残す。）
+            // Raised in the overall review (I5): this used to demand m_groundWetness /
+            // m_lastLightningIntensity / m_targetDirection as well, but the mod reads none
+            // of those three anywhere. An entry carrying an impact as heavy as "the core of
+            // the forecast feature breaks" could FAIL purely because a field the feature
+            // does not use got renamed — a layer built to remove false positives producing
+            // false positives defeats its own purpose, so narrow it down to what
+            // WeatherReader actually reads.
+            // (The reads of m_groundWetness / m_lastLightningIntensity were removed
+            //  altogether. m_currentFog / m_targetFog stay, since a new Fog row was added
+            //  and they now feed the display.)
             Check("WeatherManager current/target fields are resolvable",
                   "trend cannot be computed (the core of the forecast feature)",
                   delegate
                   {
-                      // 全て Single であることを実際のゲームアセンブリで確認済み。
+                      // Confirmed against the real game assembly that all of these are Single.
                       var t = typeof(WeatherManager);
                       return HasField(t, "m_currentRain", typeof(float))
                           && HasField(t, "m_targetRain", typeof(float))
@@ -90,9 +97,10 @@ namespace DisasterPlus.Game
                           && HasField(t, "m_windDirection", typeof(float));
                   });
 
-            // 測位済み災害の走査に必要なもの（WeatherReader.CountLocatedStorms）。
-            // ここが解決できないと「嵐が検知されていない」という説明を出す根拠が消え、
-            // パネルは再び全ゼロのグリッドを「落雷: 0」と表示する側へ戻ってしまう。
+            // What is needed to walk the located disasters (WeatherReader.CountLocatedStorms).
+            // If this cannot be resolved, the grounds for saying "no storm is detected"
+            // disappear, and the panel falls back to showing an all-zero grid as
+            // "Lightning: 0" again.
             Check("DisasterManager.m_disasters exposes m_buffer / m_size",
                   "located storms cannot be counted, so an all-zero hazard grid would again be "
                   + "shown as a real '0' instead of 'no storm detected'",
@@ -101,20 +109,22 @@ namespace DisasterPlus.Game
                       var f = typeof(DisasterManager).GetField("m_disasters",
                           BindingFlags.Public | BindingFlags.Instance);
                       if (f == null) return false;
-                      // FastList<DisasterData> であることまで見る。名前だけでは、
-                      // 中身が別の型の FastList に差し替わっても通ってしまう。
+                      // Check as far as it being a FastList<DisasterData>. On the name alone
+                      // this would still pass if the contents were swapped for a FastList of
+                      // some other type.
                       return HasField(f.FieldType, "m_buffer", typeof(DisasterData[]))
                           && HasField(f.FieldType, "m_size", typeof(int));
                   });
 
-            // グリッド形状。HazardMapReader の GridSize / WorldUnitsPerCell は
-            // DisasterManager の const を参照して書いているが、C# の const は
-            // コンパイル時に呼び出し側へ焼き込まれるため、出荷済み DLL の中では
-            // 単なる即値 256 / 38.4 である（HazardMapReader のコメント参照）。
-            // したがって「参照しているから自動追従する」は成り立たない。
-            // 再ビルドを挟まずに食い違いを検知するには、実行時に**ロード中のゲームの
-            // メタデータ**を読むしかない。GetRawConstantValue() は const の宣言値を
-            // メタデータから直接取るので、焼き込み済みの即値とは別経路になる。
+            // Grid geometry. HazardMapReader's GridSize / WorldUnitsPerCell are written as
+            // references to DisasterManager's consts, but a C# const is baked into the
+            // caller at compile time, so inside the shipped DLL they are plain literals of
+            // 256 / 38.4 (see the comment in HazardMapReader). "It follows along
+            // automatically because it is a reference" therefore does not hold.
+            // The only way to detect a mismatch without a rebuild in between is to read
+            // **the metadata of the game currently loaded** at runtime.
+            // GetRawConstantValue() takes the const's declared value straight from the
+            // metadata, so it is a different path from the baked-in literal.
             Check("DisasterManager hazard grid geometry is 256 cells x 38.4 m",
                   "hazard values would be sampled from the wrong cell (the label would be right "
                   + "but the number would belong to somewhere else)",
@@ -130,12 +140,12 @@ namespace DisasterPlus.Game
                           && (float)cell.GetRawConstantValue() == 38.4f;
                   });
 
-            // Task 4 レビュー指摘の持ち越し分。HazardMapReader は m_hazardAmount を
-            // リフレクションで直接読む（公開 API は Color しか返さないため）。
-            // このフィールドがゲーム更新で改名・型変更されても HazardMapReader 自身は
-            // 例外にせず黙って 0/ok=false へ倒れるので、ここで名指ししないと
-            // 「もっともらしいがずっと 0 のハザード数値」が起動時の ASSUMPTIONS 要約に
-            // 一切現れないまま静かに壊れる。
+            // Carried over from the Task 4 review. HazardMapReader reads m_hazardAmount
+            // directly via reflection (the public API only returns a Color).
+            // If a game update renames or retypes this field, HazardMapReader itself does
+            // not throw but quietly falls to 0 / ok=false, so unless it is named here the
+            // failure is silent: "plausible-looking hazard numbers that are always 0" would
+            // never show up in the ASSUMPTIONS summary at startup.
             Check("DisasterManager.m_hazardAmount is a private Byte[] field",
                   "hazard numbers may silently read wrong data if the game renames or retypes this field",
                   delegate
@@ -145,7 +155,7 @@ namespace DisasterPlus.Game
                       return f != null && f.FieldType == typeof(byte[]);
                   });
 
-            // --- ①天気予報タブ（Task 5）ここまで ---
+            // --- ① forecast tab (Task 5) ends here ---
         }
     }
 }

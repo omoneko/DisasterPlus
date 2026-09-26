@@ -5,79 +5,85 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 波形プロットが今どの状態にあるか。**4 つを 1 つの bool に潰さない。**
+    /// What state the waveform plot is currently in. **Do not collapse these four into
+    /// one bool.**
     ///
-    /// 「まだ作っていない」「作れなかった」「途中で描けなくなった」は原因も対処も違い、
-    /// 画面上はどれも「絵が無い」で同じ顔になる。切り分けの手掛かりは
-    /// 診断ダンプのこの 1 行しかない。
+    /// "not built yet", "could not be built" and "stopped being drawable part way
+    /// through" have different causes and different remedies, yet on screen all three
+    /// look identical: there is no picture. The only clue for telling them apart is this
+    /// one line in the diagnostic dump.
     /// </summary>
     public enum WaveformViewState
     {
-        /// <summary>パネルをまだ一度も開いていない（＝何も試していない）。</summary>
+        /// <summary>The panel has never been opened (i.e. nothing has been attempted).</summary>
         NotBuilt,
 
-        /// <summary>使える。</summary>
+        /// <summary>Usable.</summary>
         Ready,
 
-        /// <summary>構築時に失敗した（<c>Texture2D</c> / <c>UITextureSprite</c> が作れない）。</summary>
+        /// <summary>Building it failed (the <c>Texture2D</c> / <c>UITextureSprite</c> could not be made).</summary>
         BuildFailed,
 
-        /// <summary>一度は作れたが、描画中に例外が出て以後は描かない。</summary>
+        /// <summary>It was built once, but an exception during drawing means we draw no more.</summary>
         RenderFailed,
     }
 
     /// <summary>
-    /// 波形を 1 枚のテクスチャに描く。**main スレッド専用。**
+    /// Draws the waveforms onto a single texture. **Main thread only.**
     ///
-    /// ── なぜ文字ではなくテクスチャなのか ─────────────────────────
+    /// ── Why a texture rather than characters ────────────────────────
     ///
-    /// ①はハザードのバーを ASCII に固定した（<c>HazardLevel.FilledChar</c>）。理由は
-    /// 「CS の UI フォントに罫線素片がある保証が無い」ことで、その規律をここまで
-    /// 引き伸ばすと**文字でグラフを組んではいけない**という結論になる ——
-    /// UILabel のフォントが等幅である保証も無く、列が揃わないからである。
-    /// バー 1 本なら文字数だけの問題だが、80 行 320 列の格子は成立しない。
+    /// ① pinned the hazard bar to ASCII (<c>HazardLevel.FilledChar</c>), on the grounds
+    /// that there is no guarantee CS's UI font has box-drawing glyphs. Carry that
+    /// discipline through to here and the conclusion is that **graphs must not be built
+    /// out of characters** — there is no guarantee UILabel's font is monospaced either,
+    /// so the columns would not line up. For a single bar it is only a question of
+    /// character count, but a grid of 80 rows by 320 columns simply does not work.
     ///
-    /// ── 使う API は逆アセンブルで確認済み（推測していない）──────────────
+    /// ── The APIs used were confirmed by disassembly (nothing is guessed) ──────
     ///
-    /// <c>ColossalFramework.UI.UITextureSprite</c>（ColossalManaged.dll。
-    /// Assembly-CSharp ではない）:
-    ///   - <c>public Texture texture { get; set; }</c> — 実在し、書き込み可能
-    ///   - <c>OnRebuildRenderData</c> は <c>m_Texture == null</c> なら何もせず return し、
-    ///     そうでなければ <c>EnsureMaterial()</c> → <c>renderMaterial.mainTexture = m_Texture</c>
-    ///   - <c>EnsureMaterial</c> は <c>m_Material == null</c> のとき
-    ///     <c>GetUIView().defaultAtlas.material</c> から複製を作る
-    ///     → **こちらでマテリアルを用意する必要は無い。<c>texture</c> だけ入れればよい。**
+    /// <c>ColossalFramework.UI.UITextureSprite</c> (in ColossalManaged.dll, not
+    /// Assembly-CSharp):
+    ///   - <c>public Texture texture { get; set; }</c> — exists, and is writable
+    ///   - <c>OnRebuildRenderData</c> returns doing nothing when <c>m_Texture == null</c>,
+    ///     and otherwise does <c>EnsureMaterial()</c> →
+    ///     <c>renderMaterial.mainTexture = m_Texture</c>
+    ///   - <c>EnsureMaterial</c>, when <c>m_Material == null</c>, makes a copy from
+    ///     <c>GetUIView().defaultAtlas.material</c>
+    ///     → **so we need not provide a material ourselves; setting <c>texture</c> is enough.**
     ///
-    /// <c>UnityEngine.Texture2D</c>（Unity 5.6）:
-    ///   - <c>.ctor(int, int, TextureFormat, bool)</c> — 実在
-    ///   - <c>SetPixels32(Color32[])</c> / <c>Apply()</c> — 実在
-    ///   - <c>TextureFormat.RGBA32</c> = 4 — 実在
+    /// <c>UnityEngine.Texture2D</c> (Unity 5.6):
+    ///   - <c>.ctor(int, int, TextureFormat, bool)</c> — exists
+    ///   - <c>SetPixels32(Color32[])</c> / <c>Apply()</c> — exist
+    ///   - <c>TextureFormat.RGBA32</c> = 4 — exists
     ///
-    /// それでも <see cref="Build"/> は try/catch で囲み、失敗したら
-    /// <see cref="Available"/> を false にする。**そのときパネルは黙って空欄に
-    /// ならず、最大振幅の数値とバーを出したうえで「このビルドでは描画できない」と
-    /// 名乗る**（<c>Strings.EarthquakeWaveformUnavailable</c>）。劣化であって嘘ではない。
+    /// Even so, <see cref="Build"/> is wrapped in try/catch and sets
+    /// <see cref="Available"/> to false on failure. **When that happens the panel does not
+    /// silently go blank: it shows the peak amplitude as a number and a bar, and states
+    /// that this build cannot draw the plot** (<c>Strings.EarthquakeWaveformUnavailable</c>).
+    /// That is degradation, not a lie.
     ///
-    /// ── 再描画は「データが変わったとき」だけ ────────────────────────
+    /// ── Redraw only when the data changes ───────────────────────────
     ///
-    /// Task 6 / 7 はカーソルのレイを 4 フレームに 1 回へ絞った（≦521 → ≦131 サンプル
-    /// /フレーム）。ここで毎フレーム 25,600 画素を塗り直したら、その努力をそのまま
-    /// 返上することになる。<see cref="Render"/> は観測点・件数・最新フレームが
-    /// 前回と同じなら**即座に return する**。データ自体も
-    /// <c>SeismographRecorder</c> 側で最短 8 フレーム間隔でしか組み直されないので、
-    /// 実際の塗り直しは 1 秒あたり数回で頭打ちになる。
+    /// Tasks 6 and 7 cut the cursor ray down to once every 4 frames (from ≤521 to ≤131
+    /// samples per frame). Repainting 25,600 pixels every frame here would hand all that
+    /// effort straight back. <see cref="Render"/> **returns immediately** when the
+    /// station, the sample count and the newest frame are the same as last time. The data
+    /// itself is only rebuilt at most every 8 frames on the
+    /// <c>SeismographRecorder</c> side, so the real repaint rate tops out at a few per
+    /// second.
     ///
-    /// ── <c>Texture2D</c> は自分で捨てる ────────────────────────────
+    /// ── The <c>Texture2D</c> must be thrown away by hand ────────────────
     ///
-    /// <c>Texture2D</c> は <c>Component</c> ではないので、親の GameObject を
-    /// <c>Object.Destroy</c> しても道連れにならない。<see cref="Destroy"/> で
-    /// 明示的に破棄しないと、都市を読み込み直すたびに 1 枚ずつ残る。
-    /// またフィールドを null に戻すことで、③で実際に起きた「破棄済み参照を
-    /// 掴んだまま 2 つ目の都市で無言で不可視になる」形も避ける。
+    /// A <c>Texture2D</c> is not a <c>Component</c>, so <c>Object.Destroy</c> on the
+    /// parent GameObject does not take it with it. Without explicitly destroying it in
+    /// <see cref="Destroy"/>, one is left behind every time a city is reloaded. Setting
+    /// the fields back to null also avoids the shape that actually bit us in ③: holding
+    /// a destroyed reference and silently going invisible in the second city.
     /// </summary>
     public static class WaveformView
     {
-        /// <summary>プロットの画素サイズ。UI 上のサイズも同じにして 1:1 で表示する。</summary>
+        /// <summary>The plot's size in pixels. The UI size matches it so it displays 1:1.</summary>
         public const int PlotWidth = 320;
         public const int PlotHeight = 80;
 
@@ -85,28 +91,29 @@ namespace DisasterPlus.Game
         private static readonly Color32 AxisColor = new Color32(70, 76, 90, 255);
 
         /// <summary>
-        /// **バニラの式の線**（第 1 層 <c>[measured]</c>）。白。
-        /// この色は行の接頭辞と対で意味を持つので、<see cref="ModelColor"/> と
-        /// 取り違えないこと —— 取り違えると、この MOD が発明した線が
-        /// 「ゲームが計算している値」の顔で描かれる。
+        /// **The line from vanilla's formula** (layer 1, <c>[measured]</c>). White.
+        /// This colour only means anything paired with the row's prefix, so do not mix it
+        /// up with <see cref="ModelColor"/> — mix them up and a line this mod invented is
+        /// drawn wearing the face of a value the game computes.
         /// </summary>
         private static readonly Color32 TraceColor = new Color32(255, 255, 255, 255);
 
         /// <summary>
-        /// **合成記象の線**（第 2 層 <c>[Disaster + model]</c>）。橙。
-        /// パネルの凡例（<c>Strings.EarthquakeWaveformLegend</c>）が、どちらの色が
-        /// どちらの層かを毎回グラフの真下で名乗る。
+        /// **The synthetic seismogram line** (layer 2, <c>[Disaster + model]</c>). Orange.
+        /// The panel's legend (<c>Strings.EarthquakeWaveformLegend</c>) states which
+        /// colour is which layer, directly under the graph, every time.
         /// </summary>
         private static readonly Color32 ModelColor = new Color32(255, 158, 66, 255);
 
         /// <summary>
-        /// **火山性微動の線**（第 3 層 <c>[Disaster + volcanic tremor]</c>）。青緑。
-        /// 橙（<see cref="ModelColor"/>）と取り違えないよう、色相を大きく離してある ——
-        /// 3 本が同時に出るのは「噴火中に地震が起きて、合成記象も ON」のときだけだが、
-        /// そのとき見分けが付かないのでは 3 本目を足した意味が無い。
+        /// **The volcanic tremor line** (layer 3, <c>[Disaster + volcanic tremor]</c>).
+        /// Teal. Its hue is kept well away from the orange (<see cref="ModelColor"/>) so
+        /// the two cannot be confused — all three only appear together when an earthquake
+        /// happens during an eruption with the synthetic seismogram also on, but if they
+        /// could not be told apart then, there would be no point adding the third line.
         ///
-        /// ★ これも<b>この MOD のモデル</b>の側である（バニラの式ではない）。
-        ///   <c>Game/Volcano/VolcanoTremorTrace</c> のクラス doc。
+        /// ★ This too is on <b>this mod's model</b> side (it is not vanilla's formula).
+        ///   See <c>Game/Volcano/VolcanoTremorTrace</c>'s class doc.
         /// </summary>
         private static readonly Color32 TremorColor = new Color32(96, 220, 200, 255);
 
@@ -116,41 +123,45 @@ namespace DisasterPlus.Game
         private static bool _available;
 
         /// <summary>
-        /// <see cref="Build"/> が一度でも走ったか。**「まだ作っていない」と
-        /// 「作ろうとして駄目だった」を分ける**ためだけにある。
+        /// Whether <see cref="Build"/> has ever run. It exists solely to **separate "not
+        /// built yet" from "we tried to build it and failed"**.
         ///
-        /// 診断ダンプはパネルを一度も開いていなくても出せるので、これが無いと
-        /// 起動直後のダンプが「描画不可（最大振幅の行で代替）」と書く —— 実際には
-        /// 何も試していない状態で、原因の切り分けを丸ごと誤らせる。
+        /// The diagnostic dump can be produced without the panel ever having been opened,
+        /// so without this a dump taken right after startup would say "cannot draw
+        /// (falling back to the peak amplitude row)" — when in fact nothing has been
+        /// attempted, sending the whole diagnosis off in the wrong direction.
         /// </summary>
         private static bool _built;
 
-        /// <summary>一度描けた後に描画が落ちたか（構築失敗と区別する）。</summary>
+        /// <summary>Whether drawing failed after it had worked once (distinct from a build failure).</summary>
         private static bool _renderFailed;
 
-        /// <summary>直近に描いた内容の指紋。同じなら塗り直さない。</summary>
+        /// <summary>A fingerprint of what was last drawn. If it matches, we do not repaint.</summary>
         private static ushort _drawnBuildingId;
         private static int _drawnCount;
         private static uint _drawnNewestFrame;
         private static bool _drawnAnything;
 
         /// <summary>
-        /// 直近に描いた絵にモデルの線があったか。**指紋に含める。** 含めないと、
-        /// 設定を切り替えても件数と最新フレームが同じあいだは塗り直されず、
-        /// 消したはずの線がそのまま残る。
+        /// Whether the last picture drawn had a model line on it. **It is part of the
+        /// fingerprint.** Leave it out and, after the setting is toggled, nothing is
+        /// repainted while the sample count and newest frame stay the same — so the line
+        /// you thought you had turned off stays on screen.
         /// </summary>
         private static bool _drawnModel;
         private static bool _drawnTremor;
         private static bool _drawnQuake;
 
         /// <summary>
-        /// テクスチャによる描画が使えるか。<see cref="Build"/> が一度でも呼ばれるまでは false。
-        /// false のとき、パネルは波形の代わりに最大振幅の行と理由の 1 行を出す。
+        /// Whether texture-based drawing is usable. False until <see cref="Build"/> has
+        /// been called at least once. When false, the panel shows a peak-amplitude row
+        /// and a one-line reason in place of the waveform.
         /// </summary>
         public static bool Available { get { return _available; } }
 
         /// <summary>
-        /// 今の状態。パネルの「描画できない理由」の行と診断ダンプの両方がこれを見る。
+        /// The current state. Both the panel's "why it cannot be drawn" row and the
+        /// diagnostic dump read this.
         /// </summary>
         public static WaveformViewState State
         {
@@ -163,13 +174,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// プロット用のスプライトを親パネルに作る。**main スレッド、パネル構築時に 1 回。**
-        /// 失敗しても例外を投げず、<see cref="Available"/> を false のままにする。
+        /// Creates the plot's sprite on the parent panel. **Main thread; once, when the
+        /// panel is built.** On failure it throws nothing and leaves
+        /// <see cref="Available"/> false.
         ///
-        /// 計画の型一覧は幅・高さも引数に取る形になっているが、テクスチャの画素数と
-        /// UI 上のサイズが食い違うと波形が拡大縮小されて列が潰れる。両者が必ず
-        /// 一致するよう、サイズは <see cref="PlotWidth"/> / <see cref="PlotHeight"/> に
-        /// 固定して引数から外してある。
+        /// The plan's list of types had width and height as parameters too, but if the
+        /// texture's pixel count and the UI size disagree the waveform gets scaled and
+        /// the columns collapse. To make sure the two always match, the size is fixed at
+        /// <see cref="PlotWidth"/> / <see cref="PlotHeight"/> and taken out of the
+        /// parameters.
         /// </summary>
         public static void Build(UIPanel parent, string suffix, float x, float y)
         {
@@ -188,8 +201,8 @@ namespace DisasterPlus.Game
                 _sprite.relativePosition = new Vector3(x, y);
                 _sprite.width = PlotWidth;
                 _sprite.height = PlotHeight;
-                // マテリアルは UITextureSprite.EnsureMaterial が defaultAtlas から
-                // 複製してくれる（上の逆アセンブル）。texture だけ入れればよい。
+                // UITextureSprite.EnsureMaterial makes the material for us, copied from
+                // defaultAtlas (see the disassembly above). Setting texture is enough.
                 _sprite.texture = _texture;
                 _sprite.isVisible = false;
 
@@ -202,25 +215,28 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 構築時に 1 回だけ。以後この経路は通らないのでスロットル不要。
+                // Once, at construction. This path is never taken again, so no throttling
+                // is needed.
                 Log.Warn("earthquake waveform plot unavailable: " + e.GetType().Name
                          + " (" + e.Message + ")");
                 Destroy();
             }
             finally
             {
-                // ★ catch の中の Destroy() が _built を戻すので、その後に立てる。
-                //    「試して駄目だった」を「まだ試していない」と混ぜないため。
+                // ★ The Destroy() inside the catch resets _built, so set it afterwards.
+                //    This keeps "we tried and failed" from being conflated with "we have
+                //    not tried yet".
                 _built = true;
             }
         }
 
         /// <summary>
-        /// 波形を描く。**main スレッド。** <paramref name="trace"/> が null か
-        /// サンプル 0 件ならプロットを隠す。
+        /// Draws the waveforms. **Main thread.** If <paramref name="trace"/> is null or
+        /// has zero samples, the plot is hidden.
         ///
-        /// **0 件を「変位 0」として平らな線で描かない。** 空のグラフと平らなグラフは
-        /// 別の意味である（前者は「まだ記録が無い」、後者は「記録はあるが揺れていない」）。
+        /// **Never draw zero samples as a flat line meaning "displacement 0".** An empty
+        /// graph and a flat graph mean different things (the first is "there is no record
+        /// yet", the second "there is a record and it is not shaking").
         /// </summary>
         public static void Render(SeismographTrace trace)
         {
@@ -235,7 +251,7 @@ namespace DisasterPlus.Game
 
             if (_sprite != null) _sprite.isVisible = true;
 
-            // ★ ここが毎フレームの塗り直しを止めている 1 箇所。
+            // ★ This is the one place that stops a repaint every frame.
             if (_drawnAnything
                 && _drawnBuildingId == trace.BuildingId
                 && _drawnCount == trace.Count
@@ -261,31 +277,33 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 例外が出たら二度と描かない（毎フレーム投げ続けるより無害）。
+                // Once it throws, never draw again (less harmful than throwing every
+                // frame).
                 Log.Warn("earthquake waveform draw failed: " + e.GetType().Name);
                 Destroy();
-                // ★ Destroy() が全部倒すので、そのあとで「構築はできていた」と
-                //    「描画中に落ちた」を立て直す。ここを黙って空欄にすると、
-                //    このクラスの doc が約束している「劣化であって嘘ではない」が
-                //    破れる（パネルは State を見て理由を出す）。
+                // ★ Destroy() knocks everything down, so afterwards restore both "it did
+                //    build" and "it fell over while drawing". Go silently blank here and
+                //    the promise in this class's doc — degradation, not a lie — is broken
+                //    (the panel reads State to give the reason).
                 _built = true;
                 _renderFailed = true;
             }
         }
 
         /// <summary>
-        /// レベルアンロード時、および実行時の描画失敗時。
-        /// **<c>Texture2D</c> は GameObject の道連れにならないので明示的に破棄する。**
+        /// On level unload, and on a drawing failure at runtime.
+        /// **A <c>Texture2D</c> does not go with the GameObject, so destroy it explicitly.**
         ///
-        /// **スプライトも明示的に破棄する。** 以前はフィールドを null にするだけで、
-        /// 実行時の描画失敗（<see cref="Render"/> の catch）から呼ばれたときに
-        /// 「隠れたまま誰も参照していない子コンポーネント」がパネルに残っていた。
-        /// パネルと一緒に消えるのは**パネルが破棄されるときだけ**である。
+        /// **The sprite is destroyed explicitly too.** It used to just null the field,
+        /// which meant that when this was called from a runtime drawing failure (the
+        /// catch in <see cref="Render"/>) a hidden child component that nobody referenced
+        /// was left on the panel. It only goes away with the panel **when the panel
+        /// itself is destroyed**.
         /// </summary>
         public static void Destroy()
         {
-            // 実行時の描画失敗でここへ来たときのために、先に隠す。パネルより先に
-            // 破棄されている（fake-null）場合は Unity の == null が拾う。
+            // Hide it first, in case we arrived here from a runtime drawing failure. If
+            // it was destroyed before the panel (fake-null), Unity's == null catches it.
             if (_sprite != null)
             {
                 _sprite.isVisible = false;
@@ -311,19 +329,23 @@ namespace DisasterPlus.Game
 
         private static void Draw(SeismographTrace trace)
         {
-            // 窓は「最新サンプルまでの PlotFrameWindow フレーム」。フレームで割るので
-            // ゲーム速度を上げても時間軸は伸び縮みしない（WaveformPlot のクラス doc）。
+            // The window is "the PlotFrameWindow frames up to the newest sample". It is
+            // divided by frames, so raising the game speed does not stretch or squash the
+            // time axis (see WaveformPlot's class doc).
             uint newest = trace.NewestFrame;
             uint from = newest > SeismographRecorder.PlotFrameWindow
                 ? newest - SeismographRecorder.PlotFrameWindow
                 : 0u;
 
-            // 縦軸は最大振幅で正規化する。振幅そのものはラベル側で数値として出すので、
-            // ここで自動縮尺にしても「大きさ」を偽ることにはならない。
-            // 平ら（peak == 0）でも正の縮尺を渡す —— 0 を渡すと WaveformPlot が
-            // 全列を「サンプル無し」にしてしまい、平らな波形が空の波形に化ける。
-            // ★ 縦の尺度は**全部の段で共通**にする。段ごとに正規化すると、
-            //   「どれが大きいか」という一番読みたい比較ができなくなる。
+            // The vertical axis is normalised by the peak amplitude. The amplitude itself
+            // is shown as a number on the label side, so auto-scaling here does not
+            // misrepresent "how big" it is.
+            // Pass a positive scale even when it is flat (peak == 0) — pass 0 and
+            // WaveformPlot marks every column "no sample", turning a flat waveform into
+            // an empty one.
+            // ★ The vertical scale is **shared across every lane**. Normalise per lane
+            //   and the comparison you most want to read — which one is bigger — becomes
+            //   impossible.
             float peak = trace.PeakAbsolute;
             if (trace.HasModel && trace.ModelPeakAbsolute > peak) peak = trace.ModelPeakAbsolute;
             if (trace.HasTremor && trace.TremorPeakAbsolute > peak) peak = trace.TremorPeakAbsolute;
@@ -331,22 +353,25 @@ namespace DisasterPlus.Game
 
             Fill(Background);
 
-            // ★★ **描く段を決める。** 重ねずに上下に分ける理由は元のままで、
-            //    512 フレームを 320 px に落とすと主成分が 6 px の縞になり、
-            //    重ねるとどの線を見ているのか区別できなくなる（オフライン描画で確認）。
+            // ★★ **Decide which lanes to draw.** The reason for stacking them rather
+            //    than overlaying is unchanged: squeezing 512 frames into 320 px turns the
+            //    principal component into a 6 px band, and overlaid you cannot tell which
+            //    line you are looking at (confirmed by rendering offline).
             //
-            //    ★ <b>バニラの地震が無いときは第 1 層の段を作らない</b>
-            //      （2026-08-22）。作ると、火山だけが揺れているあいだ
-            //      **平らな白い線が画面の半分を占め**、「バニラの地震も起きている
-            //      が揺れていない」という別の意味になる。第 1 層が意味を持つかは
-            //      <c>SeismographTrace.HasQuake</c> が名乗る。
+            //    ★ <b>When there is no vanilla earthquake, no layer-1 lane is made</b>
+            //      (2026-08-22). Make one and, while only the volcano is shaking,
+            //      **a flat white line takes up half the screen** and says something
+            //      quite different: "there is also a vanilla earthquake and it is not
+            //      shaking". Whether layer 1 means anything is declared by
+            //      <c>SeismographTrace.HasQuake</c>.
             int lanes = 0;
             if (trace.HasQuake) lanes++;
             if (trace.HasModel) lanes++;
             if (trace.HasTremor) lanes++;
 
-            // どれも名乗らないとき（記録はあるのに出所が全部 false）は、
-            // **空欄にせず**第 1 層をそのまま描く。黙って消すより出したほうがよい。
+            // When none of them declares itself (there is a record but every source flag
+            // is false), draw layer 1 as it stands rather than **going blank**. Showing
+            // it beats silently erasing it.
             bool fallbackToMeasured = lanes == 0;
             if (fallbackToMeasured) lanes = 1;
 
@@ -378,7 +403,7 @@ namespace DisasterPlus.Game
             _texture.Apply(false);
         }
 
-        /// <summary>1 段ぶん（軸・仕切り・線）。段の高さは全段で同じである。</summary>
+        /// <summary>One lane (axis, separator and line). Every lane has the same height.</summary>
         private static void DrawLane(uint[] frames, float[] values, int count,
                                      uint from, uint newest, float scale,
                                      Color32 color, int laneIndex, int laneHeight, int lanes)
@@ -394,9 +419,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 列ごとの行番号を中央から塗る。**<c>Empty</c>（-1）の列は飛ばす** ——
-        /// 0 を中央行として描くと、データの無い区間が「揺れていない区間」になる
-        /// （<c>WaveformPlot.Empty</c> の doc）。
+        /// Paints each column's row number outwards from the centre. **Columns marked
+        /// <c>Empty</c> (-1) are skipped** — draw 0 as the centre row and a stretch with
+        /// no data becomes a stretch with no shaking (see <c>WaveformPlot.Empty</c>'s doc).
         /// </summary>
         private static void DrawTrace(int[] columns, Color32 color, int laneTop, int laneHeight)
         {
@@ -417,7 +442,7 @@ namespace DisasterPlus.Game
             for (int i = 0; i < _pixels.Length; i++) _pixels[i] = color;
         }
 
-        /// <summary>1 段ぶんの零線。<paramref name="laneTop"/> は段の上端の行番号。</summary>
+        /// <summary>One lane's zero line. <paramref name="laneTop"/> is the row number of the lane's top edge.</summary>
         private static void DrawAxis(int laneTop, int laneHeight)
         {
             int middle = (laneHeight - 1) / 2;
@@ -425,8 +450,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 上段と下段の境目。**色だけに頼らないための 3 つ目の手掛かり**で、
-        /// これがあると「1 本の波が上下に飛んでいる」とは読めなくなる。
+        /// The boundary between one lane and the next. **A third cue, so we do not rely
+        /// on colour alone**; with it there, the picture can no longer be read as a
+        /// single wave jumping up and down.
         /// </summary>
         private static void DrawSeparator(int row)
         {
@@ -434,8 +460,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 行番号（0 = 上端）を <c>Texture2D</c> の画素（0 = 下端）に読み替えて置く。
-        /// この上下反転を忘れると波形が鏡像になり、しかも一見それらしく見える。
+        /// Translates a row number (0 = top) into a <c>Texture2D</c> pixel (0 = bottom)
+        /// and writes it. Forget this vertical flip and the waveform comes out mirrored —
+        /// and, worse, it still looks plausible at a glance.
         /// </summary>
         private static void SetPixel(int x, int row, Color32 color)
         {

@@ -4,18 +4,19 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// バニラの揺れの式（IL 事実文書 §A-7）の写しを固定する。
+    /// Pins down our copy of vanilla's shaking formula (IL facts document §A-7).
     ///
-    /// **いちばん重要なのは <see cref="IntensityFactorIsZeroAtTheVanillaDefault"/> の 1 件。**
-    /// 強度 55 で追加分が厳密に 0 になることが、この機能を既定 ON にしてよい唯一の根拠で、
-    /// そこが崩れると「バニラと同じ挙動」を名乗ったまま全プレイヤーの画面が変わる。
+    /// **The single most important case is <see cref="IntensityFactorIsZeroAtTheVanillaDefault"/>.**
+    /// That the added term is exactly 0 at intensity 55 is the only grounds for shipping this
+    /// feature ON by default; break it and every player's screen changes while we still claim
+    /// "behaves the same as vanilla".
     /// </summary>
     public class ShakeWaveformTests
     {
         [Fact]
         public void EnvelopeRateGivesA256FramePeriod()
         {
-            // IL: 0.5 - 0.5*cos(t * 0.02454369)。2π / 0.02454369 = 256.0。
+            // IL: 0.5 - 0.5*cos(t * 0.02454369). 2π / 0.02454369 = 256.0.
             double period = 2.0 * System.Math.PI / ShakeWaveform.EnvelopeRate;
             Assert.Equal(ShakeWaveform.EnvelopePeriodFrames, period, 1);
         }
@@ -55,7 +56,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void DisplacementActuallyOscillates()
         {
-            // 2 本の正弦の合成なので符号が何度も変わる。定数化していないことを固定する。
+            // It is the sum of two sinusoids, so the sign changes many times. This pins down
+            // that it has not been collapsed into a constant.
             int signChanges = 0;
             float prev = ShakeWaveform.DisplacementAt(0f, 128f);
             for (float t = 128.5f; t < 200f; t += 0.5f)
@@ -70,8 +72,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void IntensityFactorIsZeroAtTheVanillaDefault()
         {
-            // 強度 55 で追加分がちょうど 0 = バニラと完全に同一の挙動。
-            // 既定 ON にしてよい根拠そのものなので、必ず固定する。
+            // At intensity 55 the added term is exactly 0 = behaviour completely identical
+            // to vanilla. This is the very grounds for shipping it ON by default, so it must
+            // always be pinned down.
             Assert.Equal(0f, ShakeWaveform.IntensityFactor(SeismicIntensity.VanillaDefaultIntensity), 5);
         }
 
@@ -86,22 +89,22 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void ShakingWindowMatchesTheVanillaGuard()
         {
-            // IL: e <= 0 なら return、e >= m_activeDuration なら return。
+            // IL: return if e <= 0, return if e >= m_activeDuration.
             Assert.False(ShakeWaveform.IsShaking(0, 1000u));
             Assert.False(ShakeWaveform.IsShaking(-5, 1000u));
             Assert.True(ShakeWaveform.IsShaking(1, 1000u));
             Assert.True(ShakeWaveform.IsShaking(999, 1000u));
             Assert.False(ShakeWaveform.IsShaking(1000, 1000u));
-            // m_activeDuration が読めていない（0）ときは常に false。
+            // Always false when m_activeDuration cannot be read (0).
             Assert.False(ShakeWaveform.IsShaking(1, 0u));
         }
 
-        // ── 揺れの振幅そのもの（全体レビュー C3）────────────────────────
+        // ── The shaking amplitude itself (overall review C3) ────────────────────────
 
         [Fact]
         public void PeakAmplitudeIsTheVanillaAmpBeforeTheEnvelope()
         {
-            // IL_0069: amp = 0.3f / (1f + dist * 0.001f)。包絡線の頂点で一致する。
+            // IL_0069: amp = 0.3f / (1f + dist * 0.001f). It matches at the peak of the envelope.
             float t = ShakeWaveform.EnvelopePeriodFrames / 2f;
             foreach (float d in new[] { 0f, 250f, 1000f, 9000f })
             {
@@ -112,22 +115,23 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void ShakingHasNoRadiusCutOff()
         {
-            // **これが C3 の核心。** 全体円盤の R（強度 55 で 3100 m）を超えても
-            // 揺れは 0 にならない。10 km で震央の 9% 前後。
+            // **This is the heart of C3.** Beyond the R of the overall disc (3100 m at
+            // intensity 55) the shaking still does not become 0. At 10 km it is around 9%
+            // of the epicentre.
             float epicentre = ShakeWaveform.PeakAmplitudeAt(0f);
             float tenKm = ShakeWaveform.PeakAmplitudeAt(10000f);
             Assert.True(tenKm > 0f, "vanilla's shaking never cuts off with distance");
             Assert.Equal(1f / 11f, tenKm / epicentre, 4);
         }
 
-        // ── バーの満目盛り（全体レビュー I4）───────────────────────────
+        // ── The full scale of the bar (overall review I4) ───────────────────────────
 
         [Fact]
         public void MaxDisplacementIsTwiceTheBaseAmplitude()
         {
             Assert.Equal(0.6f, ShakeWaveform.MaxDisplacement, 4);
 
-            // 実際の変位がこれを超えないこと（超えると正規化が 1 で頭打ちになる）。
+            // The actual displacement must not exceed it (beyond it the normalisation caps at 1).
             for (float t = 0f; t < 1024f; t += 0.31f)
             {
                 Assert.True(System.Math.Abs(ShakeWaveform.DisplacementAt(0f, t))
@@ -141,37 +145,38 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.Equal(0f, ShakeWaveform.NormalisedDisplacement(0f), 4);
             Assert.Equal(0.5f, ShakeWaveform.NormalisedDisplacement(0.3f), 4);
             Assert.Equal(1f, ShakeWaveform.NormalisedDisplacement(ShakeWaveform.MaxDisplacement), 4);
-            // 符号は落とす（バーは大きさだけを見る）。
+            // The sign is dropped (the bar only looks at the magnitude).
             Assert.Equal(0.5f, ShakeWaveform.NormalisedDisplacement(-0.3f), 4);
-            // 上限で頭打ち。
+            // Capped at the upper limit.
             Assert.Equal(1f, ShakeWaveform.NormalisedDisplacement(99f), 4);
         }
 
-        // ── サンプリング間隔（全体レビュー I5）───────────────────────────
+        // ── The sampling interval (overall review I5) ───────────────────────────
 
         [Fact]
         public void FirstUnsampledFrameFillsTheGapLeftByTheSimulationSpeed()
         {
-            // 速度 3 では m_currentFrameIndex が 9 ずつ飛ぶ。飛んだ 9 フレームを
-            // 全部埋めないと、周期 10 フレームの主成分が偽の長周期波に折り返す。
+            // At speed 3 m_currentFrameIndex jumps by 9. Unless all 9 skipped frames are
+            // filled in, the main component with its period of 10 frames aliases into a
+            // spurious long-period wave.
             Assert.Equal(1001u, ShakeWaveform.FirstUnsampledFrame(1000u, true, 1009u, 9));
-            // 速度 1（1 フレームずつ）なら、その 1 フレームだけ。
+            // At speed 1 (one frame at a time) it is just that one frame.
             Assert.Equal(1001u, ShakeWaveform.FirstUnsampledFrame(1000u, true, 1001u, 9));
         }
 
         [Fact]
         public void FirstUnsampledFrameNeverExceedsTheSubSampleBudget()
         {
-            // ポーズやセーブ跨ぎで大きく飛んだときは、窓の外まで遡らない。
+            // After a big jump across a pause or a save, we do not go back beyond the window.
             Assert.Equal(1992u, ShakeWaveform.FirstUnsampledFrame(10u, true, 2000u, 9));
         }
 
         [Fact]
         public void FirstUnsampledFrameTakesOnlyTheCurrentFrameWithoutHistory()
         {
-            // フレーム 0 は実在しうるので、「まだ 1 件も取っていない」を 0 で表さない。
+            // Frame 0 can genuinely exist, so "nothing sampled yet" is not represented by 0.
             Assert.Equal(500u, ShakeWaveform.FirstUnsampledFrame(0u, false, 500u, 9));
-            // 同じフレームで 2 回呼ばれても遡らない（重複サンプルを作らない）。
+            // Called twice on the same frame it does not go back (it creates no duplicate sample).
             Assert.Equal(500u, ShakeWaveform.FirstUnsampledFrame(500u, true, 500u, 9));
             Assert.Equal(500u, ShakeWaveform.FirstUnsampledFrame(900u, true, 500u, 9));
         }
@@ -180,9 +185,10 @@ namespace DisasterPlus.Core.Tests.Earthquake
         public void FirstUnsampledFrameIsSafeNearFrameZero()
         {
             Assert.Equal(0u, ShakeWaveform.FirstUnsampledFrame(0u, false, 0u, 9));
-            // frame 0 を既に取っているなら 1 から。予算より手前なので遡り制限は効かない。
+            // If frame 0 has already been sampled, start from 1. It is within the budget,
+            // so the look-back limit does not apply.
             Assert.Equal(1u, ShakeWaveform.FirstUnsampledFrame(0u, true, 3u, 9));
-            // 予算 1 なら常に現在フレームだけ（＝以前の挙動）。
+            // With a budget of 1 it is always just the current frame (= the previous behaviour).
             Assert.Equal(1009u, ShakeWaveform.FirstUnsampledFrame(1000u, true, 1009u, 1));
         }
     }

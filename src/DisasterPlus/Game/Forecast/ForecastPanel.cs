@@ -6,57 +6,62 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 天気予報パネル。main スレッド専用。
+    /// The weather forecast panel. Main thread only.
     ///
-    /// **バニラのハザードマップが何なのか（全体レビューで前提が覆った）:**
-    /// 設計書 §1.3 は当初これを「地形・建物・設備から決まる静的なリスク」と書いていたが、
-    /// これは誤りだった。IL 実測で ThunderStormAI/TornadoAI の UpdateHazardMap は
-    /// どちらも Located(4096) と Emerging|Active(12) の 2 段ゲートで始まり、地形も建物も
-    /// 一切参照せず、通過した場合だけ m_targetPosition の周りに円盤を塗るだけと確定した。
-    /// つまりこのマップは「**測位済みで進行中の嵐が、これからどこを襲うか**」であり、
-    /// 雷雨・竜巻でその Located を立てられるのは気象レーダーだけである。
-    /// 該当する嵐が無ければ全セル 0 になるので、そのときは数値を出さない
-    /// （RefreshCursorHazard の doc 参照）。この「ゲートの説明」こそが、
-    /// ユーザーが「予報の概念が実感しづらい」と言った本当の理由に当たる。
+    /// **What vanilla's hazard map actually is (the full review overturned our premise):**
+    /// the design document's §1.3 originally described it as "a static risk derived from
+    /// the terrain, the buildings and the services", and that was wrong. Reading the IL
+    /// established that UpdateHazardMap on both ThunderStormAI and TornadoAI opens with a
+    /// two-stage gate on Located(4096) and Emerging|Active(12), never looks at the terrain
+    /// or the buildings at all, and only paints a disc around m_targetPosition if it gets
+    /// through. So this map is "**where the storms that have been located and are under
+    /// way are going to strike next**", and for thunderstorms and tornadoes the only thing
+    /// that can set that Located flag is the weather radar. With no such storm every cell
+    /// is 0, so in that case we show no number at all (see the doc on
+    /// RefreshCursorHazard). Explaining that gate is in fact the real answer to the user's
+    /// complaint that "the idea of a forecast is hard to get a feel for".
     ///
-    /// 設計書 §4 のレイアウトに従うが、**§4.2 の訂正を反映する**: ハザード値は
-    /// m_hazardAmount という単一の共有グリッドにしか無く、常に「今表示中のサブモード
-    /// 1 種類ぶん」しか保持していない（HazardMapReader のクラス doc 参照）。
-    /// したがって「カーソル位置のハザード」は落雷・竜巻を同時には出さない。
-    /// 今どちらのサブモードが表示されているかを見て、そのラベルの数値だけを出す。
-    /// ハザードビューが出ていなければ、数値の代わりに ForecastSwitchHazardView
-    /// （原因を特定したヒント）を出す — カーソル位置が取れないだけの場合は
-    /// ForecastUnavailable と分けている（RefreshCursorHazard のコメント参照。
-    /// レビュー指摘で ForecastUnavailable の使い回しを修正した）。
-    /// 表示していない種別のラベルを付けた数値は絶対に出さない。
+    /// We follow the layout in §4 of the design document, but **with the §4.2 correction
+    /// applied**: hazard values live only in a single shared grid, m_hazardAmount, which
+    /// always holds exactly one submode's worth of data — the one on display (see the
+    /// class doc on HazardMapReader). So "the hazard under the cursor" never shows
+    /// lightning and tornado at the same time. We look at which submode is on display and
+    /// show only the figure for that label. If no hazard view is up, we show
+    /// ForecastSwitchHazardView (a hint that names the cause) instead of a number — which
+    /// is kept separate from the case where we merely cannot work out the cursor position,
+    /// ForecastUnavailable (see the comments in RefreshCursorHazard; the review found we
+    /// were reusing ForecastUnavailable for both and it was fixed). Never, ever show a
+    /// figure under the label of a type that is not on display.
     ///
-    /// 同じ理由で、落雷・竜巻それぞれの見出し行には「傾向」や「レベル」の数値は
-    /// 付けない。DisasterManager.m_randomDisastersProbability /
-    /// m_randomDisasterCooldown は災害種別に依らない単一の市全体の値であり、
-    /// 落雷・竜巻それぞれの見出しの下に同じ値を出すと「別々に測った値がたまたま
-    /// 一致した」ように読めてしまう（本タスクが戒める「確信を持って誤った数値」と
-    /// 同種の誤解）。そこで確率は落雷・竜巻いずれの見出しにも属さない位置に、
-    /// ForecastProbability ラベル付きで 1 回だけ出す — レビュー指摘: ラベル無しの
-    /// 裸の数値は文脈から「降水確率」等と誤読される、これもハザード数値の
-    /// 誤ラベルと同種の欠陥だと判定された。DisasterManager が居らず読めなかった
-    /// 場合は 0.0% という捏造ゼロを出さず、行自体を空にする
-    /// （WeatherSnapshot.DisasterInfoAvailable 参照）。
+    /// For the same reason, the lightning and tornado heading lines carry no "trend" or
+    /// "level" figure. DisasterManager.m_randomDisastersProbability /
+    /// m_randomDisasterCooldown are single city-wide values that do not depend on the
+    /// disaster type, and printing the same value under each of the lightning and tornado
+    /// headings would read as "two separately measured values that happen to agree" — the
+    /// same class of misreading as the confidently wrong numbers this task warns against.
+    /// So the probability goes in a position that belongs to neither heading, shown once,
+    /// with a ForecastProbability label — a review finding: a bare unlabelled number gets
+    /// read from its context as "chance of rain" or similar, and that was judged to be the
+    /// same defect as mislabelling a hazard figure, arrived at by forgetting a label. When
+    /// DisasterManager is absent and we could not read it, we do not print a fabricated
+    /// 0.0%; the line is left empty (see WeatherSnapshot.DisasterInfoAvailable).
     ///
-    /// 「あと何時間で来る」という断定はしない（設計書 4.1）。出すのは傾向
-    /// （Strings.TrendRising/Falling/Steady、矢印記号ではなく単語 —
-    /// HazardLevel のバーと同じ理由で、CS の UI フォントに矢印グリフがある保証は無い）
-    /// と、相対的な高低（確率のパーセント表示）だけ。クールダウン中かどうかは
-    /// WriteDiagnostics（開発者向け、ローカライズ対象外のテキスト）でのみ明示する —
-    /// 「クールダウン中」という状態を表すための追加ローカライズキーは今回も
-    /// 確保していないため、ユーザー向けパネルでは単語化しない。
+    /// We never assert "it arrives in N hours" (design document 4.1). All we show is the
+    /// trend (Strings.TrendRising/Falling/Steady — words, not arrow glyphs, for the same
+    /// reason as HazardLevel's bar: nothing guarantees CS's UI font has an arrow glyph)
+    /// and the relative high or low (the probability as a percentage). Whether we are in a
+    /// cooldown is stated only in WriteDiagnostics (developer-facing text, not localised) —
+    /// once again we have not reserved an extra localisation key for the "in cooldown"
+    /// state, so it is not put into words on the user-facing panel.
     ///
-    /// API 実測（Task 5、docs/tools/ilload.ps1 で ColossalManaged.dll を確認）:
-    /// UIPanel / UILabel / UIButton は UIComponent の width/height/relativePosition/
-    /// isVisible/Show()/Hide() をそのまま継承する。UIView.AddUIComponent(Type) は
-    /// 非総称のみ実在するので、ここでもキャストして使う（DisasterPanelBar の退避先と同じ）。
-    /// backgroundSprite の実際の見え方（"MenuPanel2" が存在するか、意図通りに描画されるか）
-    /// はアセットのリフレクションでは確認できない。実機でしか分からない
-    /// （docs/playtest-checklist.md に追記した確認項目参照）。
+    /// Measured against the real API (Task 5, ColossalManaged.dll checked with
+    /// docs/tools/ilload.ps1): UIPanel / UILabel / UIButton inherit
+    /// width/height/relativePosition/isVisible/Show()/Hide() from UIComponent as they are.
+    /// Only the non-generic UIView.AddUIComponent(Type) actually exists, so here too we
+    /// cast the result (the same as where DisasterPanelBar falls back to). How
+    /// backgroundSprite actually looks — whether "MenuPanel2" exists, whether it draws the
+    /// way we intend — cannot be confirmed by reflecting over the assets. Only the game
+    /// itself can tell you (see the check we added to docs/playtest-checklist.md).
     /// </summary>
     public static class ForecastPanel
     {
@@ -66,23 +71,25 @@ namespace DisasterPlus.Game
         private const float MaxRayDistance = 8000f;
 
         /// <summary>
-        /// カーソル地点のレイを実際に引き直す間隔（描画フレーム数）。
+        /// How often the ray at the cursor is actually cast again (in rendered frames).
         ///
-        /// <see cref="TryPickCursorGround"/> は地形と交差するまで
-        /// <c>MaxRayDistance / 16m</c> ＝ **最大 500 回**の高さサンプリングを行い、
-        /// 当たれば二分法が 20 回追加される。**いちばん高くつくのは「外す」場合**
-        /// （地平線をかすめるレイ）で、これは視点を動かしている間に普通に起きる。
+        /// <see cref="TryPickCursorGround"/> samples the height up to
+        /// <c>MaxRayDistance / 16m</c> = **500 times** until it crosses the terrain, plus
+        /// 20 more for the bisection if it hits. **The most expensive case is a miss** (a
+        /// ray that grazes the horizon), and that happens routinely while the view is
+        /// being moved.
         ///
-        /// ①はこの費用を「ハザード情報ビューを開いている間しか走らないので許容」として
-        /// 意図的に未最適化のまま残していた。②の <c>EarthquakePanel</c> が同じ計算を
-        /// 4 フレームに 1 回へ縛った時点で、こちらがこの MOD に残る唯一の
-        /// 無制限なサンプリング経路になったので、**同じ形**に揃える。
+        /// Feature ① deliberately left this cost unoptimised, on the grounds that it only
+        /// runs while the hazard info view is open. Once feature ②'s <c>EarthquakePanel</c>
+        /// held the same computation to once every 4 frames, this became the only
+        /// unbounded sampling path left in the mod, so it is brought into **the same
+        /// shape**.
         ///
-        /// **表示する値そのものは変えない**（同じ計算の結果を、最大 3 フレーム
-        /// （60fps で 50ms 未満）遅れて出すだけ）。
+        /// **The values shown do not change** (it is the same computation, just presented
+        /// up to 3 frames late — under 50 ms at 60 fps).
         ///
-        /// 1 にすると毎フレーム引く（＝この是正が無効になる）。大きくすると
-        /// カーソル追従が目に見えて遅れる。②と揃えること。
+        /// Set it to 1 and it casts every frame (i.e. this correction is switched off).
+        /// Make it larger and the cursor visibly lags behind. Keep it in step with ②.
         /// </summary>
         private const int RepickIntervalFrames = 4;
 
@@ -100,11 +107,11 @@ namespace DisasterPlus.Game
         private static UILabel _cursorHeaderLabel;
         private static UILabel _cursorValueLabel;
 
-        // ── これからの天気（気象レーダーで解禁）─────────────────────
+        // ── The weather to come (unlocked by the weather radar) ─────────────────
         private static UILabel _comingHeaderLabel;
         private static UILabel _comingBodyLabel;
 
-        // ── 台風を地図に出す 3 つのトグル ──────────────────────────
+        // ── The three toggles that put the typhoon on the map ───────────────────
         private static UILabel _typhoonHeaderLabel;
         private static UIButton _trackButton;
         private static UIButton _galeButton;
@@ -112,36 +119,41 @@ namespace DisasterPlus.Game
         private static UIButton _gotoButton;
 
         /// <summary>
-        /// ハザード関連の行（落雷・竜巻の見出し／「マップに表示」ボタン／カーソル位置の
-        /// 数値）を構築したか。Natural Disasters DLC が無い環境では構築せず、
-        /// 代わりに理由を 1 行出す（<see cref="Strings.ForecastHazardNeedsDlc"/>）。
+        /// Whether the hazard-related rows (the lightning and tornado headings, the "show
+        /// on map" buttons, the figure under the cursor) were built. On a setup without
+        /// the Natural Disasters DLC we do not build them and print a single line giving
+        /// the reason instead (<see cref="Strings.ForecastHazardNeedsDlc"/>).
         ///
-        /// なぜ要るか（全体レビュー指摘 I2）: DLC が無いと雷雨・竜巻の DisasterInfo
-        /// prefab も気象レーダーも存在しないので、「マップに表示」は永久に空のビューへ
-        /// 切り替わるだけになり、カーソルの数値も永久に 0 になる。しかも Assumptions の
-        /// 検査は全て通ってしまう——AI の**型**は DLC の有無に関わらず Assembly-CSharp に
-        /// 同梱されているため、起動時のログにも何のヒントも出ない。
-        /// 気象・傾向の行は DLC 無しでも正しく動くのでそのまま残す。
+        /// Why this is needed (full review finding I2): without the DLC neither the
+        /// DisasterInfo prefabs for thunderstorms and tornadoes nor the weather radar
+        /// exist, so "show on map" would forever just switch to an empty view and the
+        /// figure under the cursor would forever be 0. Worse, every Assumptions check
+        /// still passes — the AI **types** ship inside Assembly-CSharp whether or not you
+        /// own the DLC, so the startup log gives no hint either. The weather and trend
+        /// rows work correctly without the DLC, so they stay.
         /// </summary>
         private static bool _hazardRowsBuilt;
 
         /// <summary>
-        /// 左上。既定値は <see cref="InfoHub"/> がまだ位置を決めていないときだけ使う。
+        /// The top-left corner. The default is only used while <see cref="InfoHub"/> has
+        /// not yet decided the position.
         /// </summary>
         private static Vector3 _origin = new Vector3(200f, 150f);
 
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
 
         /// <summary>
-        /// このパネルの幅。<see cref="InfoHub"/> がタブ帯の幅を合わせるために読む。
+        /// This panel's width. <see cref="InfoHub"/> reads it to match the width of the
+        /// tab strip.
         /// </summary>
         internal static float Width { get { return PanelWidth; } }
 
         /// <summary>
-        /// 左上を決める。**位置を決める主体は <see cref="InfoHub"/> 1 つだけである**
-        /// （<c>DisasterPanelBar</c> のクラス doc「位置を決める主体が複数ある限り、
-        /// この事故は形を変えて何度でも起きる」と同じ規律）。
-        /// ここで座標を発明しないこと。
+        /// Sets the top-left corner. **There is exactly one thing that decides position:
+        /// <see cref="InfoHub"/>** (the same discipline as the class doc on
+        /// <c>DisasterPanelBar</c>: "as long as more than one thing decides position, this
+        /// accident will keep happening in new forms").
+        /// Do not invent coordinates here.
         /// </summary>
         internal static void MoveTo(Vector3 origin)
         {
@@ -164,14 +176,15 @@ namespace DisasterPlus.Game
             if (_panel != null) _panel.Hide();
         }
 
-        /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
+        /// <summary>Every frame, from the main thread. Only updates while visible.</summary>
         public static void Tick()
         {
-            // レビュー指摘: 設定で無効化されたときにパネルが開いたままだと、
-            // OnSimulationTick が publish を止めた古いスナップショットを永遠に
-            // 出し続ける「凍りついたのに生きて見える」パネルになり、閉じる手段の
-            // ボタンも既に撤去済みで消せない。ボタン側（DisasterPanelBar が
-            // ForecastEnabled を見て並びから外す）と同じガードをここにも置く。
+            // Review finding: if the panel is left open when the setting is turned off,
+            // it goes on forever showing the stale snapshot from before OnSimulationTick
+            // stopped publishing — a panel that is frozen but looks alive — and the button
+            // that would close it has already been removed from the strip, so it cannot be
+            // dismissed. Put the same guard here as on the button side (DisasterPanelBar
+            // checks ForecastEnabled and drops it from the strip).
             if (!ModSettings.ForecastEnabled.value)
             {
                 if (IsVisible) Hide();
@@ -182,7 +195,7 @@ namespace DisasterPlus.Game
             Refresh();
         }
 
-        /// <summary>レベルアンロード時。</summary>
+        /// <summary>On level unload.</summary>
         public static void Destroy()
         {
             if (_panel != null)
@@ -211,13 +224,15 @@ namespace DisasterPlus.Game
             _cursorHeaderLabel = null;
             _cursorValueLabel = null;
             _hazardRowsBuilt = false;
-            // 次の都市が前の都市のカーソル地点を 1 回でも返さないようにする（②と同じ）。
+            // Make sure the next city never returns the previous city's cursor point,
+            // not even once (the same as ②).
             _pickCached = false;
             _pickFrame = 0;
             _pickOk = false;
             _pickHit = new Vec3(0f, 0f, 0f);
-            // fake-null 経由でも次回 Camera.main を引き直せるが、都市をまたいで
-            // 古い参照を抱え続けない、という本プロジェクトの原則を明示的に守る。
+            // Camera.main would be looked up again next time anyway via fake-null, but
+            // this explicitly upholds this project's rule of never carrying a stale
+            // reference across cities.
             _mainCameraCache = null;
         }
 
@@ -244,12 +259,13 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // レビュー指摘: 以前は _panel への代入が構築の最後の一行だったため、
-            // 途中で例外が出ると EnsureBuilt() の catch が呼ぶ Destroy() は
-            // _panel==null を見て何もせず、UIView に取り付け済みの GameObject が
-            // 孤児のまま残った（クリックのたびに 1 枚ずつ積み上がる）。
-            // ここではローカル変数に保持し、構築失敗時はこの try/catch で
-            // 自分の GameObject を確実に破棄してから外側へ再送出する。
+            // Review finding: the assignment to _panel used to be the last line of the
+            // build, so if anything threw part-way through, the Destroy() called from
+            // EnsureBuilt()'s catch saw _panel==null and did nothing, leaving the
+            // GameObject already attached to UIView orphaned (one more stacking up with
+            // every click). Here we hold it in a local instead, and on a failed build
+            // this try/catch reliably destroys our own GameObject before rethrowing
+            // outwards.
             UIPanel panel = null;
             try
             {
@@ -271,7 +287,7 @@ namespace DisasterPlus.Game
             panel.width = PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
-            // 位置は InfoHub が決める（MoveTo）。ここには既定値しか無い。
+            // InfoHub decides the position (MoveTo). All that is here is the default.
             panel.relativePosition = _origin;
             panel.isVisible = false;
 
@@ -280,8 +296,8 @@ namespace DisasterPlus.Game
             _titleLabel = AddLabel(panel, "Title", 10f, y, PanelWidth - 44f, 24f);
             _titleLabel.textScale = 1.1f;
 
-            // ★ 閉じるボタンはここには無い。**タブ帯の X が 1 つだけ持つ**
-            //   （InfoHub）。パネルごとに X を置くと、閉じる主体が 5 つになる。
+            // ★ There is no close button here. **The tab strip owns the one and only X**
+            //   (InfoHub). Put an X on each panel and there are five things that close.
             y += 30f;
 
             _temperatureLabel = AddLabel(panel, "Temperature", 12f, y, PanelWidth - 24f, 20f);
@@ -290,8 +306,8 @@ namespace DisasterPlus.Game
             y += 22f;
             _cloudLabel = AddLabel(panel, "Cloud", 12f, y, PanelWidth - 24f, 20f);
             y += 22f;
-            // I5: Fog は以前から毎 tick 読んでスナップショットに載せていたが、
-            // どこにも出していなかった。読むなら出す。
+            // I5: Fog was already being read every tick and carried on the snapshot, but
+            // it was never shown anywhere. If we read it, we show it.
             _fogLabel = AddLabel(panel, "Fog", 12f, y, PanelWidth - 24f, 20f);
             y += 22f;
             _windLabel = AddLabel(panel, "Wind", 12f, y, PanelWidth - 24f, 20f);
@@ -300,8 +316,9 @@ namespace DisasterPlus.Game
             BuildComingSection(panel, ref y);
             BuildTyphoonSection(panel, ref y);
 
-            // 確率は災害種別に依らない単一値。落雷・竜巻それぞれの見出しの下ではなく、
-            // その 2 つより上に 1 回だけ出す(クラス doc 参照)。
+            // The probability is a single value that does not depend on the disaster type.
+            // Show it once, above both of them, rather than under the lightning and
+            // tornado headings (see the class doc).
             _probabilityLabel = AddLabel(panel, "Probability", 12f, y, PanelWidth - 24f, 20f);
             y += 22f;
 
@@ -315,9 +332,10 @@ namespace DisasterPlus.Game
 
             y += 6f;
 
-            // ハザードの半分は DLC 依存。無い環境では「マップに表示」も
-            // カーソル位置の数値も原理的に意味を持たないので、行ごと出さずに
-            // 理由を書く（FireWhirlNeedsDlc と同じ扱い）。_hazardRowsBuilt の doc 参照。
+            // Half of the hazard side depends on the DLC. Without it, neither "show on
+            // map" nor the figure under the cursor can mean anything in principle, so we
+            // drop the rows entirely and write the reason instead (handled the same way
+            // as FireWhirlNeedsDlc). See the doc on _hazardRowsBuilt.
             _hazardRowsBuilt = ModCompat.NaturalDisastersOwned;
             if (!_hazardRowsBuilt)
             {
@@ -345,9 +363,9 @@ namespace DisasterPlus.Game
 
             _cursorHeaderLabel = AddLabel(panel, "CursorHeader", 12f, y, PanelWidth - 24f, 20f);
             y += 22f;
-            // 「嵐が検知されていない」の説明文は 1 行に収まらないので折り返す。
-            // 数値だけを出していた頃の 20f のままだと、この機能でいちばん読ませたい
-            // 文章が途中で切れる。
+            // The "no storm detected" explanation does not fit on one line, so it wraps.
+            // Left at the 20f from the days when only a number went here, the very
+            // sentence this feature most needs people to read would be cut off part-way.
             _cursorValueLabel = AddLabel(panel, "CursorValue", 12f, y, PanelWidth - 24f, 54f);
             _cursorValueLabel.wordWrap = true;
             y += 60f;
@@ -357,8 +375,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// パネルの下端がビューからはみ出さない位置まで上げる（②④⑤の同名メソッドと同じ）。
-        /// **横は動かさない** —— 横位置は <see cref="InfoHub"/> が決めている。
+        /// Raises the panel until its bottom edge no longer runs off the view (the same
+        /// as the method of this name in ②, ④ and ⑤).
+        /// **Never moves it horizontally** — the horizontal position is
+        /// <see cref="InfoHub"/>'s to decide.
         /// </summary>
         private static void ClampToView(UIPanel panel)
         {
@@ -373,12 +393,15 @@ namespace DisasterPlus.Game
                 float top = pos.y;
                 if (top + panel.height > viewHeight - Margin) top = viewHeight - Margin - panel.height;
                 if (top < Margin) top = Margin;
-                // ★★ **上へは <c>InfoHub</c> が指定した位置（＝タブ帯の真下）より上に出さない。**
-                //    （2026-08-22、実機報告「天気タブ・地震タブの中に X で閉じられない
-                //    タブがあり」の正体。）上の 2 つの寄せは下端を画面に収めるためだけに
-                //    パネルを上へ上げるので、背の高いパネルは**タブ帯をまるごと覆い隠して
-                //    いた** —— 閉じる手段そのものが押せなくなる。収まらないぶんは下へはみ出すが、
-                //    帯の左端を掴めば一緒に動かせる（<c>InfoHub</c> のドラッググリップ）。
+                // ★★ **Never go above the position <c>InfoHub</c> gave us (i.e. directly
+                //    below the tab strip).** (2026-08-22: this was what the in-game report
+                //    "among the weather and earthquake tabs there are tabs that cannot be
+                //    closed with the X" actually was.) The two clamps above raise the
+                //    panel purely to keep its bottom edge on screen, so a tall panel
+                //    **covered the whole tab strip** — the very means of closing it became
+                //    unclickable. Whatever does not fit now runs off the bottom instead,
+                //    and grabbing the left end of the strip moves it all together
+                //    (<c>InfoHub</c>'s drag grip).
                 if (top < _origin.y) top = _origin.y;
                 panel.relativePosition = new Vector3(pos.x, top);
             }
@@ -389,13 +412,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// これからの天気。**気象レーダーを建てると解禁**（所有者の依頼）。
+        /// The weather to come. **Unlocked by building a weather radar** (the owner's
+        /// request).
         ///
-        /// ★★ 出すのは<b>ゲームが持っている目標値</b>だけで、到達時刻は出さない
-        ///   （<c>Strings.ForecastComing</c> の上の ★★ に理由）。
+        /// ★★ We show only <b>the target values the game itself holds</b>, never a time
+        ///   of arrival (the reason is in the ★★ above <c>Strings.ForecastComing</c>).
         ///
-        /// ★ 「DLC が無い」と「まだ建てていない」を<b>同じ文言にしない</b>
-        ///   （<see cref="WeatherRadarWatch.PrefabKnown"/> の doc）。
+        /// ★ <b>Do not use the same wording</b> for "you do not have the DLC" and "you
+        ///   have not built one yet" (see the doc on
+        ///   <see cref="WeatherRadarWatch.PrefabKnown"/>).
         /// </summary>
         private static void BuildComingSection(UIPanel panel, ref float y)
         {
@@ -408,14 +433,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 台風を地図に出す 3 つのトグルと、目へ寄るボタン。
+        /// The three toggles that put the typhoon on the map, plus the button that moves
+        /// to the eye.
         ///
-        /// ★★ **ここが「暴風域へ移動」の置き場所である。** 元は④のパネルに付けたが、
-        ///   あのパネルは <c>Show()</c> を呼ぶ経路が無く<b>開けなかった</b>
-        ///   （2026-08-22 に D+ のタブが 2 枚に絞られて以来。2026-09-02 に発覚）。
-        ///   ここなら実際に押せる。
+        /// ★★ **This is where "go to the gale area" belongs.** It was originally put on
+        ///   ④'s panel, but that panel had no route that called <c>Show()</c>, so it
+        ///   <b>could not be opened</b> (ever since D+'s tabs were cut down to two on
+        ///   2026-08-22; discovered on 2026-09-02). Here it can actually be pressed.
         ///
-        /// ★ 3 つは別々に切れる。同時に全部出すと地図が読めない。
+        /// ★ The three switch independently. Turn them all on at once and the map becomes
+        ///   unreadable.
         /// </summary>
         private static void BuildTyphoonSection(UIPanel panel, ref float y)
         {
@@ -440,14 +467,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カメラを台風の目へ寄せる。**main スレッド（クリック）。**
+        /// Moves the camera to the eye of the typhoon. **Main thread (a click).**
         ///
-        /// ★ スナップショットをここで取り直す —— 台風は動いているので、
-        ///   <see cref="Refresh"/> が持っているものは 1 フレーム古い。
+        /// ★ We take the snapshot again here — the typhoon is moving, so whatever
+        ///   <see cref="Refresh"/> is holding is one frame old.
         ///
-        /// ★ 接近中の中心はマップの外にある。そこは
-        ///   <c>GameAreaManager.ClampPoint</c> がゲーム側で引き戻すので、
-        ///   「台風が来ている方角のマップ端」へ行く（<see cref="CameraJump"/>）。
+        /// ★ While it is still approaching, the centre is off the map. The game pulls
+        ///   that back itself in <c>GameAreaManager.ClampPoint</c>, so we end up at "the
+        ///   edge of the map in the direction the typhoon is coming from"
+        ///   (see <see cref="CameraJump"/>).
         /// </summary>
         private static void JumpToStorm()
         {
@@ -480,9 +508,9 @@ namespace DisasterPlus.Game
         private delegate void OnClick();
 
         /// <summary>
-        /// 行送り。**リテラルで書かない** —— このファイルはパッチスクリプトから
-        /// 書き換えることがあり、エスケープが素の改行に化けて文字列が壊れる
-        /// （2026-09-02 に実際に壊れた）。定数なら化けようがない。
+        /// A line break. **Do not write it as a literal** — this file gets rewritten by
+        /// patch scripts, and the escape turns into a bare newline that breaks the string
+        /// (which is exactly what happened on 2026-09-02). A constant cannot be mangled.
         /// </summary>
         private static readonly string Newline = ((char)10).ToString();
 
@@ -531,11 +559,12 @@ namespace DisasterPlus.Game
 
             if (snapshot == null || !snapshot.Valid)
             {
-                // レビュー指摘: 「まだ 1 回も読んでいない」と「読んだが WeatherManager が
-                // 居ない」を同じ文言にしてはいけない。ロード直後にポーズしたままだと
-                // 前者が普通に起きる（FeatureHost.SimulationTick は deltaMinutes<=0 の
-                // 間 OnSimulationTick を呼ばず、ロード後の最初の tick は必ず 0 になる）。
-                // 「読み取れません」と出すと、実際には何も壊れていないのに壊れて見える。
+                // Review finding: "we have not read anything yet" and "we read, but
+                // WeatherManager is absent" must not share the same wording. The former
+                // happens routinely if you stay paused right after loading
+                // (FeatureHost.SimulationTick does not call OnSimulationTick while
+                // deltaMinutes<=0, and the first tick after a load is always 0). Saying
+                // "cannot read" there makes it look broken when nothing is.
                 string message = snapshot == null
                     ? Strings.ForecastWaiting
                     : Strings.ForecastUnavailable;
@@ -550,8 +579,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 度記号 (deg, U+00B0) は付けない。HazardLevel のバー文字を ASCII に
-            // 揃えたのと同じ理由 (CS の UI フォントに ASCII 範囲外のグリフがある保証は無い)。
+            // No degree sign (deg, U+00B0). Same reason as keeping HazardLevel's bar
+            // characters in ASCII: nothing guarantees CS's UI font has a glyph outside
+            // the ASCII range.
             _temperatureLabel.text = Strings.ForecastTemperature + ": "
                 + snapshot.Temperature.Current.ToString("F1")
                 + "  " + TrendWord(snapshot.Temperature.Trend);
@@ -566,28 +596,37 @@ namespace DisasterPlus.Game
                 + "  " + TrendWord(snapshot.Fog.Trend);
             _windLabel.text = Strings.ForecastWind + ": " + WindDirection.LabelOf(snapshot.WindDegrees);
 
-            // 市全体の値。落雷・竜巻どちらの見出しにも属さない(クラス doc 参照)。
-            // クールダウン中かどうかというブール状態はここでは単語化しない
-            // (ローカライズキー未確保。診断には出す)。
+            // A city-wide value. It belongs to neither the lightning nor the tornado
+            // heading (see the class doc). The boolean state of being in a cooldown is
+            // not put into words here (no localisation key reserved; it does go into the
+            // diagnostics).
             //
-            // レビュー指摘: ラベル無しの裸の "50.0%" は雨・雲の直後に置かれると
-            // 「降水確率」等と誤読される。これはハザード数値を表示中でない種別の
-            // ラベルで出すのと同種の誤りを、ラベルを付け忘れることで起こしたもの。
-            // ForecastProbability ラベルで明示する。
+            // Review finding: a bare unlabelled "50.0%" placed right after rain and cloud
+            // gets misread as "chance of rain" or similar. That is the same error as
+            // showing a hazard figure under the label of a type that is not on display,
+            // arrived at here by forgetting the label. Make it explicit with the
+            // ForecastProbability label.
             //
-            // *100 は IL 実測で裏付け済み(Task 5)。DefaultSettings.randomDisastersProbability
-            // は 0.5(=50%)で、バニラ自身の PopsTelemetryEventFormatting.DisasterProbability も
-            // 同じ値に対して `ldc.r4 100 / mul / Mathf.RoundToInt` と全く同じ変換をテレメトリ用に
-            // 行っている。したがって m_randomDisastersProbability は 0.0-1.0 の分数であり、
-            // *100 して % 表示するのはこちらの独自解釈ではなくゲーム自身の扱いと一致する。
-            // ただし DisasterManager.SimulationStepImpl の IL では、実際の tick 毎の発生判定は
-            // この値をそのまま使わず(二乗し、都市面積で補正し、乱数と比較する)複雑な式を通す。
-            // ここに出すのは「設定された確率」であって「今この瞬間の発生チャンス」の直接値ではない
-            // 、という区別は WriteDiagnostics 側のコメントにも書いておく。
+            // The *100 is backed by the IL (Task 5).
+            // DefaultSettings.randomDisastersProbability is 0.5 (=50%), and vanilla's own
+            // PopsTelemetryEventFormatting.DisasterProbability performs exactly the same
+            // conversion on the same value for telemetry:
+            // `ldc.r4 100 / mul / Mathf.RoundToInt`. So m_randomDisastersProbability is a
+            // fraction in 0.0-1.0, and multiplying by 100 to show a percentage is not an
+            // interpretation of our own but agrees with how the game itself treats it.
+            // Note, though, that in the IL of DisasterManager.SimulationStepImpl the
+            // actual per-tick decision to spawn does not use this value as it stands; it
+            // goes through a more involved expression (squared, corrected for the city's
+            // area, then compared against a random number). The distinction — that what
+            // we show here is "the configured probability", not a direct figure for "the
+            // chance of one happening this instant" — is written into the comments on the
+            // WriteDiagnostics side too.
             //
-            // レビュー指摘: DisasterManager が居ない場合に以前は 0f のまま "0.0%" と表示していた。
-            // これは「本当に 0% だった」のか「読めなかった」のか区別が付かない捏造ゼロだった。
-            // DisasterInfoAvailable が false のときは行そのものを出さない(数値を一切出さない)。
+            // Review finding: when DisasterManager was absent this used to display "0.0%"
+            // from the untouched 0f. That was a fabricated zero, indistinguishable from
+            // "it really was 0%" and from "we could not read it". When
+            // DisasterInfoAvailable is false we leave the line out entirely (no figure at
+            // all).
             if (snapshot.DisasterInfoAvailable)
             {
                 float probabilityPercent = snapshot.DisasterProbability * 100f;
@@ -603,46 +642,49 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カーソル位置のハザード値。今表示中のサブモードだけを試す。
-        /// 表示していない種別のラベルを付けた数値は絶対に出さない
-        /// (HazardMapReader.SampleAt が ok=false で保証する)。
+        /// The hazard value under the cursor. Only the submode currently on display is
+        /// attempted. Never, ever show a figure under the label of a type that is not on
+        /// display (HazardMapReader.SampleAt guarantees this by returning ok=false).
         ///
-        /// レビュー指摘: 以前はハザードビューが出ていない場合も ForecastUnavailable
-        /// （「気象データを読み取れません」）を使い回していたが、これは誤り。
-        /// 気象データ自体は生きており(温度・雨・雲・霧・風は表示できている)、
-        /// 出せないのはハザード数値だけで、原因も「ハザードビューが出ていない」と
-        /// 特定できている(§4.2)。しかもパネルを読んでいる間はマウスがほぼ確実に
-        /// パネル自身の上にあり(UIView.IsInsideUI()==true)、地形上のカーソル判定は
-        /// 常に失敗する——つまりユーザーが最も頻繁に見る行がこれになる。そこで
-        /// 「今表示中のハザードビューがあるか」をカーソル位置を問う前に先に見て、
-        /// 無ければ原因を特定したヒント(ForecastSwitchHazardView)を即座に出す。
-        /// カーソル位置が取れない(UI 上・地形の外)のに何らかのハザードビューは
-        /// 出ている、という場合だけ ForecastUnavailable(=カーソル位置が不明)を使う。
+        /// Review finding: ForecastUnavailable ("cannot read the weather data") used to be
+        /// reused for the case where no hazard view is up, and that was wrong. The weather
+        /// data itself is alive (temperature, rain, cloud, fog and wind are all being
+        /// shown); the only thing we cannot show is the hazard figure, and we have
+        /// identified the cause as "no hazard view is up" (§4.2). On top of that, while
+        /// the panel is being read the mouse is almost certainly over the panel itself
+        /// (UIView.IsInsideUI()==true) and picking a cursor point on the terrain always
+        /// fails — which makes this the line the user sees most often of all. So we check
+        /// "is there a hazard view on display?" before asking about the cursor position,
+        /// and if there is not we immediately show the hint that names the cause
+        /// (ForecastSwitchHazardView). ForecastUnavailable (= the cursor position is
+        /// unknown) is used only for the case where some hazard view is up but the cursor
+        /// position cannot be worked out (over the UI, or off the terrain).
         ///
-        /// **全体レビューの最重要指摘（本メソッドの意味が変わった）:**
-        /// バニラのハザードマップは静的なリスク面ではなく、「レーダーで測位済み
-        /// （Located）かつ進行中（Emerging|Active）の嵐」の予測被害範囲である
-        /// （IL の根拠は WeatherSnapshot.LocatedLightningStorms の doc）。
-        /// 該当する嵐が 1 つも無いと、UpdateTexture が毎回グリッドを全ゼロで
-        /// 埋め直したあと誰も書き込まないので、都市の**全域が 0** になる。
-        /// 以前のこのメソッドはそれをそのまま「落雷: 0」と表示していた。
-        /// SampleAt は ok=true を返す——サブモードは一致していてグリッドも実在し、
-        /// 中身が全部ゼロなだけだからである。数値としては本物だが、プレイヤーが
-        /// 読み取る意味（「この街に落雷リスクは無い」）は嘘になる。正しくは
-        /// 「今どの嵐も検知されていない」であり、これは
-        /// **誤ったラベルではなく誤った前提から到達した「確信を持って誤った数値」**
-        /// だった。したがって表示中の種別の測位済み件数が 0 のときは、数値を
-        /// 一切出さずに空である理由（＝気象レーダーが要る）を書く。
+        /// **The most important finding of the full review (it changed what this method
+        /// means):** vanilla's hazard map is not a static risk surface but the predicted
+        /// damage area of "storms the radar has located (Located) and that are under way
+        /// (Emerging|Active)" (the IL evidence is in the doc on
+        /// WeatherSnapshot.LocatedLightningStorms). With not a single such storm,
+        /// UpdateTexture refills the grid with zeroes every time and then nobody writes
+        /// into it, so **the whole city** reads 0. This method used to display that as
+        /// plainly as "Lightning: 0". SampleAt returns ok=true — the submode does match
+        /// and the grid really is there, its contents are just all zero. As a number it is
+        /// genuine, but the meaning the player takes from it ("this city has no lightning
+        /// risk") is a lie. The truth is "no storm is detected right now", and this was
+        /// **a confidently wrong number reached not from a wrong label but from a wrong
+        /// premise**. So when the located count for the type on display is 0, we show no
+        /// figure at all and write the reason it is empty (namely, you need a weather
+        /// radar).
         /// </summary>
         /// <param name="snapshot">
-        /// 測位済み件数の出所。null または Valid=false、あるいは
-        /// DisasterInfoAvailable=false のときは件数が**不明**なので、
-        /// 「嵐は検知されていません」と言い切ってはいけない（それ自体が、
-        /// 読めていない事実を隠した断定になる）。汎用の不明扱いに落とす。
+        /// Where the located counts come from. When it is null, or Valid=false, or
+        /// DisasterInfoAvailable=false, the counts are **unknown**, so we must not state
+        /// flatly that "no storm is detected" (that would itself be an assertion hiding
+        /// the fact that we could not read anything). Fall back to the generic unknown.
         /// </param>
         /// <summary>
-        /// これからの天気。**目標値だけ**（到達時刻は出さない —— 理由は
-        /// <c>Strings.ForecastComing</c> の上）。
+        /// The weather to come. **Target values only** (no time of arrival — the reason is
+        /// above <c>Strings.ForecastComing</c>).
         /// </summary>
         private static void RefreshComing(WeatherSnapshot snapshot)
         {
@@ -650,7 +692,7 @@ namespace DisasterPlus.Game
 
             _comingHeaderLabel.text = Strings.ForecastComing;
 
-            // ★ DLC が無い／まだ建てていない／建てたが動いていない、を混ぜない。
+            // ★ Do not conflate "no DLC", "not built yet" and "built but not running".
             if (!WeatherRadarWatch.PrefabKnown)
             {
                 _comingBodyLabel.text = Strings.ForecastComingNeedsDlc;
@@ -683,9 +725,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 地図トグルの見た目。**押されているものは色を変える** ——
-        /// トグルは押しても画面のこちら側では何も変わらないので、
-        /// 状態が見えないと「効いていない」と読まれる。
+        /// How the map toggles look. **The ones that are on change colour** — pressing a
+        /// toggle changes nothing on this side of the screen, so if the state is not
+        /// visible it gets read as "it did not work".
         /// </summary>
         private static void RefreshTyphoon()
         {
@@ -702,9 +744,10 @@ namespace DisasterPlus.Game
             SetToggleLook(_galeButton, ForecastOverlay.ShowGale);
             SetToggleLook(_windButton, ForecastOverlay.ShowWind);
 
-            // ★ 台風が居ないとき、トグルは押せたままにする（次の台風のために
-            //   構えておける）。**寄るボタンだけは無効にする** ——
-            //   寄る先が無いのに押せると、押しても何も起きないボタンになる。
+            // ★ With no typhoon about, leave the toggles pressable (so you can set them
+            //   up ready for the next one). **Only the go-to button is disabled** — if it
+            //   stayed pressable with nowhere to go, it would be a button that does
+            //   nothing when you press it.
             if (_gotoButton != null) _gotoButton.isEnabled = live;
         }
 
@@ -719,7 +762,7 @@ namespace DisasterPlus.Game
 
         private static void RefreshCursorHazard(WeatherSnapshot snapshot)
         {
-            // DLC が無い環境ではハザードの行そのものを構築していない（I2）。
+            // On a setup without the DLC the hazard rows were never built at all (I2).
             if (!_hazardRowsBuilt) return;
 
             if (!InfoModeSwitch.IsShowingHazard)
@@ -728,11 +771,12 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 表示中のサブモードを先に確定させる。カーソル座標より先にこれを見るのは、
-            // 「測位済みの嵐がゼロ」の判定にカーソル位置が要らないため。
-            // パネルを読んでいる間はマウスがパネル上にあってカーソル判定が失敗するので、
-            // 座標を先に要求すると、いちばん伝えたい「レーダーが要る」の説明に
-            // 永久に到達できなくなる。
+            // Pin down the submode on display first. We look at this before the cursor
+            // coordinates because deciding "there are zero located storms" does not need
+            // a cursor position at all. While the panel is being read the mouse is over
+            // the panel and the cursor pick fails, so asking for coordinates first would
+            // mean never reaching the one explanation we most want to give — that you
+            // need a radar.
             bool showingLightning =
                 InfoModeSwitch.IsShowingHazardFor(InfoManager.SubInfoMode.LightningHazard);
             bool showingTornado =
@@ -740,15 +784,16 @@ namespace DisasterPlus.Game
 
             if (!showingLightning && !showingTornado)
             {
-                // IsShowingHazard は true だが、表示中のサブモードが落雷・竜巻の
-                // どちらでもない(洪水・隕石・地盤沈下・地震・森林火災のハザード等)。
-                // この機能が扱う 2 種の外なので、原因を「切り替えてください」と
-                // 断定するのは不正確。汎用の不明扱いに留める。
+                // IsShowingHazard is true, but the submode on display is neither
+                // lightning nor tornado (flood, meteor, sinkhole, earthquake or forest
+                // fire hazard, say). That is outside the two types this feature covers,
+                // so asserting the cause as "please switch views" would be inaccurate.
+                // Stop at the generic unknown.
                 _cursorValueLabel.text = Strings.ForecastUnavailable;
                 return;
             }
 
-            // 件数が読めていなければ何も断定しない（引数の doc 参照）。
+            // If the counts could not be read, assert nothing (see the parameter's doc).
             if (snapshot == null || !snapshot.Valid || !snapshot.DisasterInfoAvailable)
             {
                 _cursorValueLabel.text = Strings.ForecastUnavailable;
@@ -761,7 +806,7 @@ namespace DisasterPlus.Game
 
             if (located <= 0)
             {
-                // グリッドは全ゼロ。数値を出さず、空である理由を出す。
+                // The grid is all zeroes. Show no figure; show the reason it is empty.
                 _cursorValueLabel.text = Strings.ForecastNoStormDetected;
                 return;
             }
@@ -791,37 +836,42 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// Unity 5.6 の Camera.main はタグ検索で、パネル表示中は毎フレーム呼ばれうる
-        /// パスなのでキャッシュする(レビュー指摘)。fake-null(破棄済みカメラ)を
-        /// 拾えるよう Unity の == null 判定に任せ、素の参照比較はしない。
+        /// Camera.main in Unity 5.6 is a tag lookup, and this path can be called every
+        /// frame while the panel is up, so we cache it (review finding). We leave the
+        /// check to Unity's own == null so that a fake-null (a destroyed camera) is
+        /// caught, rather than doing a raw reference comparison.
         /// </summary>
         private static Camera _mainCameraCache;
 
-        /// <summary>直近に実際にレイを引いたフレーム（<c>Time.frameCount</c>）と、その結果。</summary>
+        /// <summary>The frame (<c>Time.frameCount</c>) in which the ray was last actually
+        /// cast, and the result of it.</summary>
         private static int _pickFrame;
         private static bool _pickCached;
         private static Vec3 _pickHit;
         private static bool _pickOk;
 
         /// <summary>
-        /// カーソル直下の地面。計算そのものは変えず、**引く頻度だけ**を
-        /// <see cref="RepickIntervalFrames"/> で縛ってある（②の
-        /// <c>EarthquakePanel.TryPickCursorGround</c> と同じ形）。
+        /// The ground directly under the cursor. The computation itself is unchanged;
+        /// **only how often we cast** is held down by
+        /// <see cref="RepickIntervalFrames"/> (the same shape as ②'s
+        /// <c>EarthquakePanel.TryPickCursorGround</c>).
         ///
-        /// <c>UIView.IsInsideUI()</c> の 1 行は間引きの**外**に置く。パネルを読んでいる間
-        /// ——マウスがパネルの上にある間——はサンプリング自体が起きないので、
-        /// これがいちばん効く早期打ち切りであり、キャッシュより先に判定したい。
-        /// またこの経路では「カーソルが無効になったこと」を遅らせずに伝えられる。
+        /// The one line of <c>UIView.IsInsideUI()</c> sits **outside** the throttle. While
+        /// the panel is being read — while the mouse is over the panel — no sampling
+        /// happens at all, so this is the early-out that pays best and we want it decided
+        /// before the cache. It also lets this path report "the cursor has become
+        /// invalid" without delay.
         /// </summary>
         private static bool TryPickCursorGround(out Vec3 hit)
         {
             hit = new Vec3(0f, 0f, 0f);
 
-            // パネルやその他の UI の上にマウスがあるときは意味のある地点が無い。
+            // With the mouse over the panel or any other UI there is no meaningful point.
             if (UIView.IsInsideUI())
             {
-                // 次にカーソルが地形へ戻ったとき、UI の上に載る前の古い地点を
-                // そのまま返さないよう、キャッシュを捨てる。
+                // Throw the cache away so that when the cursor next returns to the
+                // terrain we do not simply hand back the stale point from before it went
+                // over the UI.
                 _pickCached = false;
                 return false;
             }
@@ -834,8 +884,8 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★ 最大 501 回の高さサンプリングは RepickIntervalFrames フレームに
-            //    1 回しか走らない。
+            // ★ The up-to-501 height samples only run once every
+            //    RepickIntervalFrames frames.
             int frame = Time.frameCount;
             if (_pickCached && frame - _pickFrame < RepickIntervalFrames)
             {

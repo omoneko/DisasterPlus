@@ -3,59 +3,67 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="TyphoonWind"/> のうち<b>「吹き飛ばしだけ」</b>を短い間隔で撃つ部分。
-    /// <b>sim スレッド専用。</b>
+    /// The part of <see cref="TyphoonWind"/> that fires <b>the blow-away and nothing
+    /// else</b> on a short interval. <b>Sim thread only.</b>
     ///
-    /// ── なぜ本体と分けてあるのか ────────────────────────────────
+    /// ── Why it is split from the main body ────────────────────────────────
     ///
-    /// <b>2 つは別の機能である。</b> 本体（<c>Apply</c> → <c>Sweep</c>）は
-    /// <b>建物を倒す走査</b>で、設定の「風害」で入り切りする。こちらは
-    /// <c>DisasterHelpers.AddWind</c> だけ ＝ <b>市民と車を押す演出</b>で、
-    /// 設定の「地上の暴風雨を見せる」（<c>ModSettings.TyphoonStormFx</c>）で
-    /// 入り切りする。**風害を切っていても風は吹く。**
+    /// <b>They are two different features.</b> The main body (<c>Apply</c> →
+    /// <c>Sweep</c>) is <b>the sweep that knocks buildings down</b>, toggled by the
+    /// "wind damage" setting. This one is only <c>DisasterHelpers.AddWind</c>, i.e.
+    /// <b>the show of citizens and vehicles being shoved about</b>, toggled by "show the
+    /// storm at ground level" (<c>ModSettings.TyphoonStormFx</c>). **The wind blows even
+    /// with wind damage switched off.**
     ///
-    /// 累積（<see cref="_minutesSinceGale"/>）も本体と別に持つ ——
-    /// 同じ累積を使うと、走査が走ったフレームだけ吹き飛ばしが飛ぶ。
+    /// It also keeps its own accumulator (<see cref="_minutesSinceGale"/>), separate
+    /// from the main body's — share one accumulator and the blow-away only fires on the
+    /// frames the sweep runs.
     ///
-    /// （ファイルを分けているのは 800 行の上限のためでもある。）
+    /// (Splitting the file also keeps us under the 800-line limit.)
     /// </summary>
     public static partial class TyphoonWind
     {
         /// <summary>
-        /// <b>吹き飛ばしだけ</b>の間隔（フレーム相当のゲーム内時間）。
+        /// The interval for <b>the blow-away alone</b> (in-game time equivalent to a
+        /// frame count).
         ///
-        /// ★★ 持ち主の指摘「暴風雨を再現してほしい」への対応の 1 つ（2026-08-22）。
-        ///   以前は <see cref="PushWind"/> が<b>走査の中でしか呼ばれず</b>、
-        ///   市民と車が押されるのは 256 フレームに 1 回だけだった ——
-        ///   ゲーム内で 5〜6 分に 1 度である。**吹き荒れているようには見えない。**
+        /// ★★ One of the answers to the owner's note "I want the storm reproduced
+        ///   properly" (2026-08-22). Previously <see cref="PushWind"/> was
+        ///   <b>only ever called from inside the sweep</b>, so citizens and vehicles were
+        ///   shoved just once every 256 frames — once every five or six in-game minutes.
+        ///   **That does not look like a storm raging.**
         ///
-        ///   <see cref="Gale"/> は 64 フレームごとに吹き飛ばしだけを行う。
-        ///   費用は下がっている: 走査の中の押しは<b>強風域</b>（暴風域の 2.2 倍）で
-        ///   撃っていたが、こちらは<b>暴風域</b>（面積で 1/4.84）なので、
-        ///   4 倍の頻度でも合計は 0.83 倍にしかならない。
-        ///   実在の台風でも最も強い風は眼の壁雲の周りにある。
+        ///   <see cref="Gale"/> does the blow-away on its own every 64 frames. The cost
+        ///   has gone down, in fact: the push inside the sweep fired over the <b>gale
+        ///   radius</b> (2.2× the storm radius), whereas this one fires over the
+        ///   <b>storm radius</b> (1/4.84 of the area), so even at four times the
+        ///   frequency the total is only 0.83×. In a real typhoon too, the strongest
+        ///   winds are around the eyewall.
         /// </summary>
         private const int GalePushIntervalFrames = 64;
 
-        /// <summary>前回の吹き飛ばしからの経過（ゲーム内分）。<see cref="Gale"/> が使う。</summary>
+        /// <summary>Time since the last blow-away (in-game minutes). Used by
+        /// <see cref="Gale"/>.</summary>
         private static float _minutesSinceGale;
 
-        /// <summary>吹き飛ばしを撃った回数（診断用）。</summary>
+        /// <summary>How many blow-aways have been fired (diagnostics).</summary>
         private static int _galePushes;
 
         /// <summary>
-        /// <b>吹き飛ばしだけ</b>を <see cref="GalePushIntervalFrames"/> フレームごとに撃つ。
-        /// <b>sim スレッド専用</b>で、台風が動いている間だけ呼ぶ。
+        /// Fire <b>the blow-away alone</b> every <see cref="GalePushIntervalFrames"/>
+        /// frames. <b>Sim thread only</b>; call it only while a typhoon is running.
         ///
-        /// ★ **建物にも道路にも樹木にも触れない。** <c>DisasterHelpers.AddWind</c> は
-        ///   <c>AddWindCitizens</c> ＋ <c>AddWindVehicles</c> の 2 行だけである（§B-1）。
-        ///   だから風害の設定（<c>TyphoonWindDamage</c>）とは別に、
-        ///   暴風雨の演出の設定（<c>TyphoonStormFx</c>）で入り切りする。
+        /// ★ **It touches neither buildings, nor roads, nor trees.**
+        ///   <c>DisasterHelpers.AddWind</c> is just the two lines
+        ///   <c>AddWindCitizens</c> + <c>AddWindVehicles</c> (§B-1). That is why it is
+        ///   toggled by the storm-show setting (<c>TyphoonStormFx</c>) rather than by the
+        ///   wind-damage setting (<c>TyphoonWindDamage</c>).
         ///
-        /// ★ <see cref="Apply"/> とは**別の累積**（<see cref="_minutesSinceGale"/>）を持つ。
-        ///   同じ累積を使うと、走査が走ったフレームだけ吹き飛ばしが飛ぶ。
+        /// ★ It keeps **its own accumulator** (<see cref="_minutesSinceGale"/>), separate
+        ///   from <see cref="Apply"/>'s. Share one and the blow-away only fires on the
+        ///   frames the sweep runs.
         ///
-        /// 例外は 1 度だけ名乗って以後は黙る（毎 tick の経路である）。
+        /// An exception names itself once and then stays quiet (this runs every tick).
         /// </summary>
         public static void Gale(TyphoonSnapshot snapshot, float deltaMinutes)
         {
@@ -91,10 +99,11 @@ namespace DisasterPlus.Game
             if (framesPerMinute <= 0f) return;
             if (_minutesSinceGale < interval) return;
 
-            // 余りを繰り越さない（Step と同じ理由）。
+            // Do not carry the remainder over (same reason as Step).
             _minutesSinceGale = 0f;
 
-            // ★ 暴風域で撃つ（強風域ではない。GalePushIntervalFrames の doc）。
+            // ★ Fire over the storm radius, not the gale radius (see the doc on
+            //   GalePushIntervalFrames).
             float range = TyphoonController.StormRadius;
             if (!(range > 0f)) return;
 
@@ -103,44 +112,49 @@ namespace DisasterPlus.Game
 
             var group = GroupOf(TyphoonController.DisasterId);
 
-            // ★★ **この巡ぶんの答えを 1 回だけ決める**（TyphoonWind.NextLatch の ★★）。
-            //    中心とカメラの前で別々に決めると、カメラの前が永久に
-            //    「掴む」側に来ない。
+            // ★★ **Decide this round's answer exactly once** (the ★★ on
+            //    TyphoonWind.NextLatch). Decide it separately for the centre and for what
+            //    the camera is looking at, and the camera's view never once lands on the
+            //    "grab" side.
             bool latch = NextLatch();
 
             PushWind(centre, group, range, latch);
             _galePushes++;
 
-            // ★★ **見ているところにも当てる。**（2026-09-02、所有者の指示）
-            //    中心の 1 発だけだと、カメラが中心から離れているときに
-            //    <b>目の前の車や人が何事も無かったように走っている</b>。
-            //    かといってマップ全体を相手にはしたくないので、
-            //    <b>カメラの見ている先＋余白</b>にもう 1 発だけ撃つ。
+            // ★★ **Hit what the player is looking at too.** (2026-09-02, the owner's
+            //    instruction.) With only the one shot at the centre, when the camera is
+            //    away from the centre <b>the cars and people right in front of you carry
+            //    on as if nothing were happening</b>. We do not want to take on the whole
+            //    map either, so we fire just one more shot at <b>where the camera is
+            //    looking, plus a margin</b>.
             //
-            //    ★ 費用は「1 発ぶん」で固定である。都市が大きくなっても増えない。
+            //    ★ The cost is fixed at "one more shot". It does not grow with the city.
             PushAtCamera(centre, group, range, latch);
         }
 
         /// <summary>
-        /// カメラが見ている先の余白（m）。画面の外側まで少し掛ける ——
-        /// **画面の縁でぴたりと止まると、そこに線が見える。**
+        /// The margin around what the camera is looking at (m). It reaches a little past
+        /// the edge of the screen — **stop exactly at the screen edge and you can see the
+        /// line**.
         /// </summary>
         private const float CameraMarginMetres = 400f;
 
         /// <summary>
-        /// カメラの高さに対する影響半径の比。引いているほど広く映るので、
-        /// それに比例させる。近寄っているときは小さくて足りる。
+        /// Ratio of the affected radius to the camera height. The further out you are the
+        /// more is on screen, so it scales with that. Up close a small one is enough.
         /// </summary>
         private const float CameraRadiusPerHeight = 1.2f;
 
-        /// <summary>影響半径の上限（m）。引き切ったときに全域へ広がらないように。</summary>
+        /// <summary>Ceiling on the affected radius (m), so it does not spread over
+        /// everything when the camera is pulled right out.</summary>
         private const float CameraRadiusMaxMetres = 2000f;
 
         /// <summary>
-        /// <b>カメラが見ている先</b>に 1 発だけ撃つ。**sim スレッド。**
+        /// Fire exactly one shot at <b>where the camera is looking</b>. **Sim thread.**
         ///
-        /// ★ カメラが暴風域の外に居るなら撃たない —— 見ているだけで
-        ///   嵐が来ていない場所の車を揺らすのは、ただの誤りである。
+        /// ★ If the camera is outside the storm radius, do not fire — shaking the cars
+        ///   somewhere the storm has not reached, just because you are looking at it, is
+        ///   simply wrong.
         /// </summary>
         private static void PushAtCamera(Vec3 centre, InstanceManager.Group group,
                                          float range, bool latch)
@@ -160,7 +174,7 @@ namespace DisasterPlus.Game
             _galePushes++;
         }
 
-        /// <summary>吹き飛ばしを撃った回数（診断用）。</summary>
+        /// <summary>How many blow-aways have been fired (diagnostics).</summary>
         public static int GalePushes { get { return _galePushes; } }
     }
 }

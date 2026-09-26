@@ -14,8 +14,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NoTileIsWideEnoughToBeTruncatedAtOneHundredAndTwentyEight()
         {
-            // ★ 罠 3。128×128 raw セルを超えた分は**タイル分割されず無言で切り捨てられ**、
-            //   その部分は更新されないまま残る（§A-1、IL_026C）。
+            // ★ Trap 3. Anything beyond 128×128 raw cells is **silently truncated rather
+            //   than split into tiles**, and that part is left un-updated (§A-1, IL_026C).
             int minX, minZ, maxX, maxZ;
             SplitRange(3000f, out minX, out minZ, out maxX, out maxZ);
             int count = TileSplit.TileCountFor(minX, minZ, maxX, maxZ);
@@ -34,8 +34,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NoTileIsLargeEnoughToForceAMidFrameFlush()
         {
-            // ★ 罠 3 の後半。10000 セル超の単発要求は入れ子を無視して即フラッシュする
-            //   （§A-1 IL_0399）。測るのは**渡す矩形**であって内心のタイルではない。
+            // ★ The second half of trap 3. A single request of more than 10000 cells ignores
+            //   the nesting and flushes immediately (§A-1 IL_0399). What we measure is
+            //   **the rectangle we pass in**, not the tile we have in mind.
             int minX, minZ, maxX, maxZ;
             SplitRange(3000f, out minX, out minZ, out maxX, out maxZ);
             int count = TileSplit.TileCountFor(minX, minZ, maxX, maxZ);
@@ -52,7 +53,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheTilesTogetherCoverTheWholeRectangle()
         {
-            // 覆い漏れがあると、その帯だけ更新されないまま残る（見た目にすぐ出る）。
+            // Miss a patch of coverage and that strip alone is left un-updated
+            // (it shows up immediately).
             int minX, minZ, maxX, maxZ;
             SplitRange(1500f, out minX, out minZ, out maxX, out maxZ);
             int count = TileSplit.TileCountFor(minX, minZ, maxX, maxZ);
@@ -84,8 +86,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NeighbouringTilesOverlapByTheMargin()
         {
-            // MakeCrack / MakeCrater と同じ ±2。境目で SmoothSample が古い値を
-            // 掴むと、タイルの継ぎ目に段差が出る。
+            // The same ±2 as MakeCrack / MakeCrater. If SmoothSample picks up a stale value
+            // at the boundary, a step appears along the seam between tiles.
             int minX, minZ, maxX, maxZ;
             SplitRange(1500f, out minX, out minZ, out maxX, out maxZ);
             int count = TileSplit.TileCountFor(minX, minZ, maxX, maxZ);
@@ -95,7 +97,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             TileSplit.TileAt(0, minX, minZ, maxX, maxZ, out a0, out b0, out c0, out d0);
             TileSplit.TileAt(1, minX, minZ, maxX, maxZ, out a1, out b1, out c1, out d1);
 
-            // タイル 0 と 1 は X 方向に隣接する（行優先で並べる）。
+            // Tiles 0 and 1 are adjacent along X (they are laid out in row-major order).
             Assert.True(c0 >= a1, "tile 0 and tile 1 do not overlap in X");
             Assert.True(c0 - a1 + 1 >= 2 * TileSplit.Margin,
                 "the overlap is thinner than the margin: " + (c0 - a1 + 1));
@@ -113,7 +115,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheCellRangeIsClampedToTheMap()
         {
-            // マップの隅に置かれた火山でも添字が配列の外に出ない（1081² の配列）。
+            // Even for a volcano placed in the corner of the map the indices stay inside the
+            // array (an array of 1081²).
             int minX, minZ, maxX, maxZ;
             Assert.True(TileSplit.CellRangeFor(-8600f, -8600f, 2000f,
                                                out minX, out minZ, out maxX, out maxZ));
@@ -135,7 +138,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             int minX, minZ, maxX, maxZ;
             SplitRange(3000f, out minX, out minZ, out maxX, out maxZ);
             int count = TileSplit.TileCountFor(minX, minZ, maxX, maxZ);
-            // 半径 3000 m = 直径 375 セル → 4x4 = 16 枚
+            // radius 3000 m = diameter 375 cells → 4x4 = 16 tiles
             Assert.InRange(count, 2, 64);
         }
 
@@ -160,8 +163,9 @@ namespace DisasterPlus.Core.Tests.Volcano
                                                 500 + TileSplit.CoreTileSide - 1,
                                                 500 + TileSplit.CoreTileSide - 1));
 
-            // 1 セル大きいだけで駄目。**「だいたい入る」を許すと、はみ出した分が
-            // 例外も出さずに更新されないまま残る**（§A-1 の切り捨て）。
+            // One cell bigger and it is not allowed. **Permit "it roughly fits" and the
+            // overhang is left un-updated without so much as an exception**
+            // (the truncation of §A-1).
             Assert.False(TileSplit.FitsSinglePass(500, 500,
                                                   500 + TileSplit.CoreTileSide,
                                                   500 + TileSplit.CoreTileSide - 1));

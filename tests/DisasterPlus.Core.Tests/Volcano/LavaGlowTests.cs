@@ -4,13 +4,14 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 溶岩の発光（実機の指摘④「点滅している」「噴火が終わっても光り続けている」）。
+    /// The glow of the lava (in-game observation ④ "it is flickering", "it keeps
+    /// glowing even after the eruption has finished").
     ///
-    /// ここで固定するのは 4 つ:
-    ///   1. **時間の引数がどこにも無い**（点滅しようがない）
-    ///   2. いちばん明るいのは<b>前進端</b>、次が<b>火口</b>、あいだは地殻
-    ///   3. 地殻にも割れ目があり、明るさは<b>場所で</b>変わる
-    ///   4. 冷え切ったら**ちょうど 0**になり、描画側は畳む
+    /// Four things are pinned down here:
+    ///   1. **There is no time argument anywhere** (so it cannot possibly flicker)
+    ///   2. Brightest is the <b>advancing front</b>, then the <b>vent</b>, crust in between
+    ///   3. The crust has cracks too, and the brightness varies <b>by place</b>
+    ///   4. Once cooled right down it becomes **exactly 0** and the renderer folds it away
     /// </summary>
     public class LavaGlowTests
     {
@@ -30,8 +31,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ThePlaceCoolsAsTheFlowRunsPastIt()
         {
-            // 溶岩が前へ進むと、既に置かれた場所の v は小さいほうへずれる。
-            // ★ これが「年齢とともに冷える」の実装そのものである。
+            // As the lava advances, the v of a place already laid down shifts lower.
+            // ★ This is the implementation of "cools with age" itself.
             float atFront = LavaGlow.AlongFlowUnit(1.00f);
             float justBehind = LavaGlow.AlongFlowUnit(0.95f);
             float wellBehind = LavaGlow.AlongFlowUnit(0.85f);
@@ -46,8 +47,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheCrustGlowsOnlyInItsCracks()
         {
-            // 地殻の帯（v = 0.4〜0.6）を横切って、明るいところと暗いところが
-            // **どちらも在る**こと。全部同じ明るさなら「塗り」である。
+            // Crossing the crust band (v = 0.4 to 0.6), bright places and dark places
+            // must **both be present**. If it is all the same brightness, it is "paint".
             float min = 1f, max = 0f;
             for (float v = 0.35f; v <= 0.65f; v += 0.01f)
             {
@@ -78,11 +79,12 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ItGoesOutCompletelyWhenTheLavaHasCooled()
         {
-            // ★★ 以前は k = 0.15 + 0.85 x cool で、冷え切っても 0.15 残っていた。
+            // ★★ It used to be k = 0.15 + 0.85 x cool, leaving 0.15 even once fully cooled.
             Assert.Equal(0f, LavaGlow.CoolFade(0f), 4);
             Assert.Equal(1f, LavaGlow.CoolFade(1f), 4);
-            // 画面の明るさは CoolFade の 2 乗（色と不透明度の両方に掛かる）なので、
-            // ここは 1 未満の指数＝「しばらく赤いまま、終わりで一気に暗くなる」である。
+            // On-screen brightness is CoolFade squared (it multiplies both the colour and
+            // the opacity), so an exponent below 1 here means "stays red for a while,
+            // then darkens all at once at the end".
             Assert.True(LavaGlow.CoolFade(0.5f) > 0.5f);
             Assert.True(LavaGlow.CoolFade(0.5f) * LavaGlow.CoolFade(0.5f) < 0.5f);
 
@@ -91,7 +93,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.True(LavaGlow.Visible(LavaGlow.InvisibleBelow + 0.01f));
             Assert.True(LavaGlow.Visible(1f));
 
-            // 単調に暗くなる（途中で明るくなり返さない）。
+            // It darkens monotonically (it never brightens again part-way through).
             float previous = 0f;
             for (float c = 0f; c <= 1.0001f; c += 0.02f)
             {
@@ -111,7 +113,8 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.Equal(0f, LavaGlow.CoolFade(float.NaN), 4);
             Assert.False(LavaGlow.Visible(float.NaN));
 
-            // 範囲外の u / v も [0,1] に収まる（テクスチャの端で色が飛ばない）。
+            // Out-of-range u / v also stay within [0,1] (no colour blow-out at the
+            // edge of the texture).
             Assert.InRange(LavaGlow.GlowUnit(-1f, -1f), 0f, 1f);
             Assert.InRange(LavaGlow.GlowUnit(2f, 2f), 0f, 1f);
             Assert.InRange(LavaGlow.CoolFade(5f), 0f, 1f);

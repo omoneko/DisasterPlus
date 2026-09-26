@@ -1,29 +1,31 @@
 namespace DisasterPlus.Core.Forecast
 {
     /// <summary>
-    /// ハザード値（byte 0-255）を表示段階とバー文字列にする。
-    /// バニラは色でしか見せないので、段階と数値にするのが本機能の付加価値。
+    /// Turns a hazard value (byte 0-255) into a display step and a bar string.
+    /// Vanilla only ever shows it as a colour, so putting a step and a number on it is
+    /// what this feature adds.
     /// </summary>
     public static class HazardLevel
     {
         public const int Steps = 10;
 
         /// <summary>
-        /// バーは ASCII のみで組む。CS の UI フォントに罫線素片（▓ ░）がある保証は無く、
-        /// 無ければ豆腐になる。見た目より確実に出ることを優先する。
+        /// Build the bar out of ASCII only. There is no guarantee the CS UI font has the
+        /// block-drawing characters (▓ ░), and without them you get tofu. Showing up
+        /// reliably matters more than looking nice.
         /// </summary>
         public const char FilledChar = '#';
         public const char EmptyChar = '-';
 
-        /// <summary>0-255 を 0-Steps に写す。単調増加。</summary>
+        /// <summary>Maps 0-255 onto 0-Steps. Monotonically increasing.</summary>
         public static int StepOf(byte hazard)
         {
-            // 255 でちょうど Steps になるよう切り上げ側に寄せず、整数除算で素直に割る。
-            // 255 * Steps / 255 == Steps なので端は両方とも正確に出る。
+            // Plain integer division, no rounding up, so that 255 lands exactly on Steps.
+            // 255 * Steps / 255 == Steps, so both ends come out exact.
             return hazard * Steps / 255;
         }
 
-        /// <summary>長さ Steps のバー。埋まった数は StepOf と一致する。</summary>
+        /// <summary>A bar of length Steps. The number filled matches StepOf.</summary>
         public static string BarOf(byte hazard)
         {
             int filled = StepOf(hazard);

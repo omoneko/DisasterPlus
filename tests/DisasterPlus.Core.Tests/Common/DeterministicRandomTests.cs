@@ -24,7 +24,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void Unit_DifferentIds_ProduceDifferentValues()
         {
-            // 同一 tick で id 違いが同じ値を返すと、全建物が一斉に発火してしまう。
+            // If different ids returned the same value on the same tick, every building
+            // would catch fire at once.
             int distinct = 0;
             float first = DeterministicRandom.Unit(100u, 0u);
             for (uint id = 1; id < 64; id++)
@@ -37,7 +38,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void Unit_SpreadsAcrossRange()
         {
-            // 4 分位すべてに値が落ちること。偏ると延焼確率が意味を失う。
+            // Values must land in all four quartiles. Skew them and the fire-spread
+            // probability loses its meaning.
             var buckets = new int[4];
             for (uint id = 0; id < 400; id++)
             {

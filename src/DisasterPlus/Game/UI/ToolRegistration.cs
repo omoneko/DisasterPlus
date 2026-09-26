@@ -7,12 +7,12 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// カスタム ToolBase を ToolController に認識させる。
+    /// Makes ToolController aware of a custom ToolBase.
     ///
-    /// ToolController.m_tools は Awake で GetComponents&lt;ToolBase&gt;() から一度だけ構築され、
-    /// ToolsModifierControl.SetTool&lt;T&gt; は静的辞書を TryGetValue するだけ。
-    /// どちらも起動後に足したツールを知らないので、リフレクションで両方に差し込む。
-    /// 毎レベルロードで行うこと。
+    /// ToolController.m_tools is built exactly once in Awake from GetComponents&lt;ToolBase&gt;(),
+    /// and ToolsModifierControl.SetTool&lt;T&gt; only does a TryGetValue on a static dictionary.
+    /// Neither knows about a tool added after startup, so insert into both by reflection.
+    /// Do this on every level load.
     /// </summary>
     public static class ToolRegistration
     {
@@ -29,7 +29,7 @@ namespace DisasterPlus.Game
 
             try
             {
-                // 1. private な ToolController.m_tools 配列に足す
+                // 1. add to the private ToolController.m_tools array
                 var field = typeof(ToolController).GetField("m_tools",
                     BindingFlags.NonPublic | BindingFlags.Instance);
                 if (field == null)
@@ -55,7 +55,7 @@ namespace DisasterPlus.Game
                     field.SetValue(controller, grown);
                 }
 
-                // 2. 静的な ToolsModifierControl.m_Tools 辞書にも足す
+                // 2. add to the static ToolsModifierControl.m_Tools dictionary as well
                 var dictField = typeof(ToolsModifierControl).GetField("m_Tools",
                     BindingFlags.NonPublic | BindingFlags.Static);
                 if (dictField == null)

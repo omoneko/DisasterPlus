@@ -6,55 +6,56 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 火山を置く地点を指すツール。**main スレッド専用。**
-    /// ③の <see cref="FireWhirlPlacementTool"/> をそのまま写している。
+    /// The tool for pointing at where the volcano goes. **Main thread only.**
+    /// Copied straight from ③'s <see cref="FireWhirlPlacementTool"/>.
     ///
-    /// ★★ <b>クリックが「作る」である（2026-08-21 変更）。</b> 積むのは
-    /// <see cref="VolcanoRequest.Place"/> 1 件で、**確認の窓はもう出ない** ——
-    /// 所有者の指示により、⑤はほかの災害とまったく同じ
-    /// 「タイル → スライダー → 地図をクリック」で起きる
-    /// （<see cref="VolcanoState"/> のクラス doc）。
+    /// ★★ <b>The click is "make it" (changed 2026-08-21).</b> It queues a single
+    /// <see cref="VolcanoRequest.Place"/>, and **there is no confirmation window any more** —
+    /// on the owner's instruction, ⑤ is triggered exactly like every other disaster:
+    /// "tile → slider → click the map" (see the <see cref="VolcanoState"/> class doc).
     ///
-    /// **地形の変更は今も取り消せない。** 消えたのは着手前の門であって、
-    /// 不可逆であることそのものではない（火山タブの常設警告が名乗り続ける）。
+    /// **The terrain change still cannot be undone.** What went away is the gate before
+    /// starting, not the irreversibility itself (the permanent warning on the volcano tab
+    /// goes on saying so).
     ///
-    /// ── 登録しないと <c>SetTool&lt;T&gt;()</c> は黙って空振りする ─────────────
+    /// ── Without registration, <c>SetTool&lt;T&gt;()</c> silently does nothing ─────────────
     ///
-    /// <c>ToolController.m_tools</c> は <c>Awake</c> で一度だけ構築され、
-    /// <c>ToolsModifierControl.SetTool&lt;T&gt;</c> は静的辞書を引くだけなので、
-    /// **起動後に足したツールはどちらにも入っていない。**
-    /// <see cref="ToolRegistration.Register{T}"/> を<b>毎レベルロードで</b>呼ぶこと
-    /// （<c>VolcanoFeature.OnLevelLoaded</c>）。呼び忘れると
-    /// 「ボタンは押せるのにカーソルが変わらない」という、例外の出ない壊れ方をする。
+    /// <c>ToolController.m_tools</c> is built exactly once in <c>Awake</c>, and
+    /// <c>ToolsModifierControl.SetTool&lt;T&gt;</c> only looks up a static dictionary, so
+    /// **a tool added after startup is in neither of them.**
+    /// Call <see cref="ToolRegistration.Register{T}"/> <b>on every level load</b>
+    /// (<c>VolcanoFeature.OnLevelLoaded</c>). Forget it and you get the kind of breakage that
+    /// throws no exception: "the button can be pressed but the cursor never changes".
     ///
-    /// ── 地点の取り方は③のものを使う（<c>TerrainManager.RayCast</c> に寄せない）────
+    /// ── Pick the spot ③'s way (do not lean on <c>TerrainManager.RayCast</c>) ────
     ///
-    /// IL 事実文書 §B-6 は <c>TerrainManager.RayCast(Segment3, out Vector3)</c> が
-    /// public であり、③の自前マーチを置き換えられると書いている。**⑤は置き換えない。**
+    /// The IL findings document §B-6 records that <c>TerrainManager.RayCast(Segment3, out
+    /// Vector3)</c> is public and could replace ③'s hand-rolled march. **⑤ does not replace it.**
     ///
-    ///   - ③の <see cref="RayGeometry.IntersectTerrain"/> は**既に出荷され、実機で
-    ///     動いており、Core のユニットテストが掛かっている**
-    ///   - <c>TerrainManager.RayCast</c> は「存在する」ことが IL で確定しているだけで、
-    ///     **本 MOD は一度も呼んだことがない**
-    ///   - **地点の取り違えが起きる場所として、⑤の配置は本 MOD で最悪である。**
-    ///     押した瞬間にプレイヤーの都市が不可逆に壊れる
-    ///   - 得られるものは「自前マーチをやめられる」だけで、実測できるコストの差は無い
+    ///   - ③'s <see cref="RayGeometry.IntersectTerrain"/> **has already shipped, works in the
+    ///     game, and is covered by Core's unit tests**
+    ///   - all that is settled about <c>TerrainManager.RayCast</c> is that the IL says it
+    ///     exists; **this mod has never once called it**
+    ///   - **as a place for picking the wrong spot, ⑤'s placement is the worst in this mod.**
+    ///     The moment you press, the player's city is irreversibly wrecked
+    ///   - all that would be gained is dropping the hand-rolled march, and there is no
+    ///     measurable difference in cost
     ///
-    /// なお地形に Unity のコライダーは無いので <c>Physics.Raycast</c> は**絶対に
-    /// 当たらない**。当たらないのは不具合ではなく、そもそも登録されていない。
+    /// Note also that the terrain has no Unity collider, so <c>Physics.Raycast</c> **can never
+    /// hit it**. That is not a fault; it was simply never registered.
     ///
-    /// ── ここから <c>SimulationManager.AddAction</c> を使わない ─────────────
+    /// ── Do not use <c>SimulationManager.AddAction</c> from here ─────────────
     ///
-    /// ③は使ったが、⑤は <see cref="VolcanoHub"/> の依頼経路を既に持っている。
-    /// 経路を 2 本にすると「どちらが先に走るか」が生まれる（計画 §4.2）。
+    /// ③ did, but ⑤ already has the request path through <see cref="VolcanoHub"/>.
+    /// Two paths creates a question of "which one runs first" (plan §4.2).
     /// </summary>
     public class VolcanoPlacementTool : ToolBase
     {
         private const float MaxRayDistance = 8000f;
 
         /// <summary>
-        /// このツールが今アクティブか。**main スレッドから呼ぶこと**
-        /// （<c>ToolsModifierControl</c> は UI 側の型である）。
+        /// Whether this tool is currently active. **Call from the main thread**
+        /// (<c>ToolsModifierControl</c> is a UI-side type).
         /// </summary>
         public static bool IsActive
         {
@@ -73,16 +74,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ★★ **災害パネルの⑤タイルの動作。バニラの災害ボタンと同じ 3 手である。**
+        /// ★★ **What the ⑤ tile on the disaster panel does. The same three steps as a
+        /// vanilla disaster button.**
         ///
-        ///   1. タイルを押す      → カーソルが構わり、**スライダーが出る**
-        ///   2. スライダーを動かす → 山の大きさ（設定サイズに対する倍率。
-        ///                          <see cref="VolcanoSizeScale"/>）
-        ///   3. 地図をクリック    → **そこに火山ができる**
+        ///   1. press the tile     → the cursor changes and **the slider appears**
+        ///   2. move the slider    → the size of the mountain (a multiplier on the configured
+        ///                          size. <see cref="VolcanoSizeScale"/>)
+        ///   3. click the map      → **a volcano is made there**
         ///
-        /// **窓は 1 枚も開かない。** 説明のパネルも確認の窓も出ない ——
-        /// ⑤の状態・影響範囲の数・不可逆の警告は、左上のショートカットの
-        /// 「火山」タブと診断ダンプにある。
+        /// **Not one window opens.** Neither an explanation panel nor a confirmation window —
+        /// ⑤'s state, the counts in the affected area and the irreversibility warning all live
+        /// on the "Volcano" tab of the top-left shortcut and in the diagnostic dump.
         /// </summary>
         public static void Arm()
         {
@@ -92,9 +94,9 @@ namespace DisasterPlus.Game
             Activate();
             if (!IsActive) return;
 
-            // ★ 構えるたびに既定値（倍率 1.0 ＝ 設定どおりのサイズ）を入れる。
-            //   スライダーは 1 本しかないのに、④と⑤では数字の意味が違う
-            //   （IntensitySlider のクラス doc）。
+            // ★ Seed the default (multiplier 1.0 = exactly the configured size) every time the
+            //   tool is armed. There is only one slider, yet the number means different things
+            //   for ④ and ⑤ (see the IntensitySlider class doc).
             IntensitySlider.Seed(VolcanoSizeScale.AnchorRaw);
             IntensitySlider.Show();
         }
@@ -110,9 +112,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 既定のツールへ戻す。**アクティブでないときは何もしない** ——
-        /// レベルアンロードの後始末から無条件に呼ぶと、他 MOD が選んでいたツールを
-        /// 横から既定へ戻すことになる。
+        /// Return to the default tool. **Does nothing when not active** — call it
+        /// unconditionally from the level-unload cleanup and you would yank whatever tool
+        /// another mod had selected back to the default.
         /// </summary>
         public static void Deactivate()
         {
@@ -120,8 +122,9 @@ namespace DisasterPlus.Game
             {
                 if (!IsActive) return;
 
-                // ★ スライダーを畳むのは**このツールが構えていたときだけ**。
-                //   無条件に畳むと、バニラの災害を構えている人のスライダーを横から消す。
+                // ★ Fold the slider away **only when this tool was the armed one**.
+                //   Do it unconditionally and you take the slider away from someone who has a
+                //   vanilla disaster armed.
                 IntensitySlider.Hide();
                 ToolsModifierControl.SetTool<DefaultTool>();
             }
@@ -135,8 +138,8 @@ namespace DisasterPlus.Game
         {
             base.OnToolUpdate();
 
-            // 機能を切ったのにツールだけ生き残っていたら、そこで畳む
-            // （パネルもボタンも既に撤去されているので、指しても行き先が無い）。
+            // If the feature was switched off but the tool survived, fold it away there
+            // (the panel and the button are already gone, so pointing leads nowhere).
             if (!ModSettings.VolcanoEnabled.value) { Deactivate(); return; }
 
             if (Input.GetMouseButtonUp(1)) { Deactivate(); return; }
@@ -150,31 +153,34 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 大きさは**クリックした瞬間のスライダーの値**である（バニラと同じ）。
-            //   読めない環境では倍率 1.0 ＝ 設定どおりのサイズへ落とす。
+            // ★ The size is **the slider's value at the moment of the click** (same as
+            //   vanilla). Where it cannot be read, fall back to multiplier 1.0 = exactly the
+            //   configured size.
             int raw = IntensitySlider.ReadOr(VolcanoSizeScale.AnchorRaw);
             float scale = VolcanoSizeScale.ScaleFor(raw);
 
-            // ★ 積むのは「ここに作ってくれ」1 件（クラス doc）。実際に調べて壊し始める
-            //   のは sim スレッドの VolcanoState.HandlePlace である ——
-            //   **main スレッドから建物・道路・地形のバッファに触らない。**
+            // ★ What is queued is a single "make one here" (see the class doc). The surveying
+            //   and the actual wrecking happen in VolcanoState.HandlePlace on the sim thread —
+            //   **never touch the building, road or terrain buffers from the main thread.**
             VolcanoHub.Request(new VolcanoRequestData(VolcanoRequest.Place, hit, scale, raw));
 
-            // 指したら用は済んでいる。押しっぱなしで 2 つ目を指させない。
+            // Once pointed, the job is done. Do not let a held button point at a second spot.
             Deactivate();
 
-            // ★ **黙って終わらない。** 何が起きたか（影響範囲の数・進行中の段・
-            //   断られた理由）は火山タブと診断ダンプが名乗る。
+            // ★ **Do not end in silence.** What happened (the counts in the affected area,
+            //   the stage in progress, the reason for a refusal) is reported by the volcano
+            //   tab and the diagnostic dump.
         }
 
         /// <summary>
-        /// **バニラと同じ的（まと）を出す**（2026-08-22、所有者の依頼
-        /// 「ほかの災害と同様のターゲティングマークを使いたいです」）。
+        /// **Show the same target marker as vanilla** (2026-08-22, the owner's request:
+        /// "I'd like to use the same targeting mark as the other disasters").
         ///
-        /// 描き直してはいない —— <c>DisasterTool.RenderOverlay</c> をそのまま呼ぶ
-        /// （<see cref="PlacementMarker"/> のクラス doc に IL 実測）。
+        /// Nothing is redrawn — <c>DisasterTool.RenderOverlay</c> is called as-is
+        /// (measured from the IL, see the <see cref="PlacementMarker"/> class doc).
         ///
-        /// ★ 地面を指していないフレームは何も描かない。**前の位置に置き去りにしない。**
+        /// ★ Draw nothing on a frame that is not pointing at the ground. **Do not leave it
+        ///   behind at the previous position.**
         /// </summary>
         public override void RenderOverlay(RenderManager.CameraInfo cameraInfo)
         {
@@ -185,8 +191,8 @@ namespace DisasterPlus.Game
             Vec3 hit;
             if (!TryPickGround(out hit)) return;
 
-            // ★ 色はバニラの災害ツールと同じ作り方。警告でも異常でも
-            //   ないので両方 false ＝ 通常色である。
+            // ★ The colour is produced the same way vanilla's disaster tool produces it.
+            //   This is neither a warning nor an error, so both are false = the normal colour.
             PlacementMarker.Render(cameraInfo, new Vector3(hit.X, hit.Y, hit.Z),
                                    GetToolColor(false, false));
         }

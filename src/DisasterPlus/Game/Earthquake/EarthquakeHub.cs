@@ -3,14 +3,16 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// sim スレッドが Publish し main スレッドが Latest を読む。
-    /// ①の <see cref="ForecastHub"/> と同形（net35 に Concurrent は無いので素の lock 1 本）。
-    /// <see cref="EarthquakeSnapshot"/> は不変なので参照を渡すだけで安全。
+    /// The sim thread Publishes and the main thread reads Latest.
+    /// Same shape as feature ①'s <see cref="ForecastHub"/> (net35 has no Concurrent
+    /// collections, so it is a single plain lock).
+    /// <see cref="EarthquakeSnapshot"/> is immutable, so handing out the reference is safe.
     ///
-    /// **Task 5 で逆向きの経路が 1 本増えた**（カーソル座標を main → sim へ渡す）。
-    /// 両方向とも**同じ <c>_gate</c> 1 本**で守ること。別のロックを足すと、
-    /// 2 本のロックの取得順という、この MOD がまだ一度も抱えていない種類の問題を
-    /// 作ることになる。中身は Vec3 と bool だけなので、1 本で競合しない。
+    /// **Task 5 added one path in the opposite direction** (the cursor position goes
+    /// main → sim). Guard **both directions with the same single <c>_gate</c>**. Add a
+    /// second lock and you create a lock-ordering problem — a class of trouble this mod
+    /// has never had to deal with. What is inside is only a Vec3 and a bool, so one lock
+    /// causes no contention.
     /// </summary>
     public static class EarthquakeHub
     {
@@ -25,42 +27,46 @@ namespace DisasterPlus.Game
             lock (_gate) { _latest = snapshot; }
         }
 
-        /// <summary>まだ publish されていなければ null。呼び出し側で判定すること。</summary>
+        /// <summary>Null until something has been published. The caller must check for it.</summary>
         public static EarthquakeSnapshot Latest
         {
             get { lock (_gate) { return _latest; } }
         }
 
         /// <summary>
-        /// **main スレッドから。** カーソル直下の地形座標を sim 側へ渡す。
+        /// **From the main thread.** Hands the terrain position under the cursor to the
+        /// sim side.
         ///
-        /// カーソル座標は <c>Input.mousePosition</c> と <c>Camera.main</c> から来るので
-        /// main スレッドでしか取れない。一方その下の建物を調べるには
-        /// <c>BuildingManager</c> のバッファ（sim スレッド所有）が要る。
-        /// この 1 本がその橋渡しで、渡す側は座標だけを渡す。
+        /// The cursor position comes from <c>Input.mousePosition</c> and
+        /// <c>Camera.main</c>, so it can only be read on the main thread. Looking up the
+        /// building underneath it, on the other hand, needs <c>BuildingManager</c>'s
+        /// buffers (owned by the sim thread). This one method is the bridge, and the
+        /// sending side passes nothing but the position.
         ///
-        /// パネルが閉じている・カーソルが地形の上に無いときは <c>valid = false</c> を
-        /// 渡すこと。渡さないと、sim 側は最後に見た座標を永久に調べ続ける。
+        /// Pass <c>valid = false</c> when the panel is closed or the cursor is not over
+        /// terrain. Fail to, and the sim side goes on probing the last position it saw,
+        /// forever.
         /// </summary>
         public static void PublishCursor(Vec3 pos, bool valid)
         {
             lock (_gate) { _cursor = pos; _cursorValid = valid; }
         }
 
-        /// <summary>**sim スレッドから。** 最後に publish された座標を読む。</summary>
+        /// <summary>**From the sim thread.** Reads the last position that was published.</summary>
         public static bool TakeCursor(out Vec3 pos)
         {
             lock (_gate) { pos = _cursor; return _cursorValid; }
         }
 
-        /// <summary>レベルロード／アンロード時。都市をまたいで状態を持ち越さない。</summary>
+        /// <summary>On level load/unload. Never carry state across from one city to the next.</summary>
         public static void Clear()
         {
             lock (_gate)
             {
                 _latest = null;
                 _cursor = new Vec3(0f, 0f, 0f);
-                // ★ これを戻し忘れると、次の都市が前の都市の座標を 1 tick ぶん調べる。
+                // ★ Forget to reset this and the next city spends one tick probing the
+                //   previous city's position.
                 _cursorValid = false;
             }
         }

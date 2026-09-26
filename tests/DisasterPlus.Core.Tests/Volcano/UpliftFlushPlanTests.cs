@@ -4,14 +4,16 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 「どの矩形をいつ流すか」を固定する。
+    /// Pins down "which rectangle gets flushed when".
     ///
-    /// **いちばん重要なのは 2 件:**
-    ///   - <see cref="EveryPassStaysUnderBothLimits"/> —— 渡す矩形が
-    ///     128 セル（切り捨て）と 10000 セル（途中フラッシュ）の両方を必ず下回ること。
-    ///     ここが崩れると、はみ出した地形が**例外も出さずに更新されないまま残る**。
-    ///   - <see cref="NothingIsEverLeftUnflushed"/> —— 書いた範囲が必ず全部流れること。
-    ///     漏れると、山の一部が 1 tick 前の高さのまま永久に固まる。
+    /// **The two most important ones are:**
+    ///   - <see cref="EveryPassStaysUnderBothLimits"/> —— the rectangle handed over must
+    ///     always stay under both 128 cells (truncation) and 10000 cells (mid-frame flush).
+    ///     If that breaks down, the terrain that overflowed **stays un-updated without so
+    ///     much as an exception**.
+    ///   - <see cref="NothingIsEverLeftUnflushed"/> —— every range written must eventually
+    ///     be flushed. Miss one and part of the mountain freezes forever at the height it
+    ///     had one tick earlier.
     /// </summary>
     public class UpliftFlushPlanTests
     {
@@ -36,13 +38,15 @@ namespace DisasterPlus.Core.Tests.Volcano
 
             Assert.True(plan.Next(true, 500, 500, 540, 540, out minX, out minZ, out maxX, out maxZ));
 
-            // TileSplit.Margin ぶん広げた矩形がそのまま返る（呼び出し側で足し直さない）。
+            // The rectangle comes back already widened by TileSplit.Margin (the caller must
+            // not add it again).
             Assert.Equal(500 - TileSplit.Margin, minX);
             Assert.Equal(500 - TileSplit.Margin, minZ);
             Assert.Equal(540 + TileSplit.Margin, maxX);
             Assert.Equal(540 + TileSplit.Margin, maxZ);
 
-            // 1 回で出し切ったので溜まりは残らない ＝ 次の tick も 1 回で出せる。
+            // It went out in a single pass, so nothing is left pending = the next tick can
+            // also go out in one pass.
             Assert.False(plan.HasPending);
             Assert.Equal(1, plan.TileCount);
             Assert.Equal(0, plan.Cursor);
@@ -54,12 +58,12 @@ namespace DisasterPlus.Core.Tests.Volcano
             var plan = new UpliftFlushPlan();
             int minX, minZ, maxX, maxZ;
 
-            // 151x151（既定の成層火山のフットプリント）は 1 回では出せない。
+            // 151x151 (the default stratovolcano footprint) cannot go out in one pass.
             Assert.True(plan.Next(true, 465, 465, 615, 615, out minX, out minZ, out maxX, out maxZ));
             Assert.True(plan.HasPending);
             Assert.Equal(4, plan.TileCount);
 
-            // 追加の変更が無ければ、残りの枚数で出し切って空になる。
+            // With no further changes it drains over the remaining tiles and empties.
             for (int i = 1; i < 4; i++)
             {
                 Assert.True(plan.Next(false, 0, 0, 0, 0, out minX, out minZ, out maxX, out maxZ));
@@ -72,14 +76,15 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void EveryPassStaysUnderBothLimits()
         {
-            // 隆起そのものと同じ形（山頂から外へ広がる円盤）で回し、
-            // 返ってきた全部の矩形が両方の閾値を下回ることを見る。
+            // Drive it with the same shape as the uplift itself (a disc spreading outwards
+            // from the summit) and check that every rectangle returned stays under both
+            // thresholds.
             var plan = new UpliftFlushPlan();
             const int centre = 540;
 
             for (int step = 1; step <= 80; step++)
             {
-                int r = step;   // セル単位の前線
+                int r = step;   // the front, in cells
                 int minX, minZ, maxX, maxZ;
                 if (!plan.Next(true, centre - r, centre - r, centre + r, centre + r,
                                out minX, out minZ, out maxX, out maxZ))
@@ -101,7 +106,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NothingIsEverLeftUnflushed()
         {
-            // 変わったセルが必ずいつか流れること。**union を上書きに変えるとここが落ちる。**
+            // Every changed cell must be flushed at some point. **Turn the union into an
+            // overwrite and this one fails.**
             const int size = 200;
             const int origin = 440;
 
@@ -111,7 +117,7 @@ namespace DisasterPlus.Core.Tests.Volcano
 
             const int centre = 540;
 
-            // 広がる円盤を 60 tick ぶん。
+            // A spreading disc over 60 ticks.
             for (int step = 1; step <= 60; step++)
             {
                 int r = step + 20;
@@ -133,7 +139,8 @@ namespace DisasterPlus.Core.Tests.Volcano
                 }
             }
 
-            // 書き終えたあと、溜まりが空になるまで流し切る（⑤が火口を彫る前にやること）。
+            // Once the writing is done, drain until nothing is pending (this is what ⑤ must
+            // do before it carves the crater).
             int guard = 0;
             while (plan.HasPending && guard++ < 32)
             {
@@ -158,14 +165,16 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void AShrinkingChangeDoesNotDropTheRestOfTheCycle()
         {
-            // 総当たりの途中で変更範囲が縮んでも、溜まっていた範囲は消えない。
+            // Even if the changed range shrinks partway through the round-robin, the range
+            // already accumulated is not lost.
             var plan = new UpliftFlushPlan();
             int minX, minZ, maxX, maxZ;
 
             Assert.True(plan.Next(true, 465, 465, 615, 615, out minX, out minZ, out maxX, out maxZ));
             Assert.Equal(4, plan.TileCount);
 
-            // 次の tick は中央の小さな矩形しか変わらなかった。**それでも 4 枚は残る。**
+            // On the next tick only a small rectangle in the middle changed. **The four
+            // tiles still remain.**
             Assert.True(plan.Next(true, 530, 530, 550, 550, out minX, out minZ, out maxX, out maxZ));
             Assert.True(plan.HasPending);
             Assert.Equal(4, plan.TileCount);
@@ -193,7 +202,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             var plan = new UpliftFlushPlan();
             int minX, minZ, maxX, maxZ;
 
-            // min > max（呼び出し側の数え損ね）。溜めない。
+            // min > max (the caller miscounted). Do not accumulate it.
             Assert.False(plan.Next(true, 600, 600, 500, 500, out minX, out minZ, out maxX, out maxZ));
             Assert.False(plan.HasPending);
         }

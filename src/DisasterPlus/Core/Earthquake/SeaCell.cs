@@ -1,71 +1,83 @@
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// <b>そのセルは「外洋」か。</b>エンジンに触らない層。
+    /// <b>Is this cell "open sea"?</b> The layer that does not touch the engine.
     ///
-    /// ── なぜ Core に出したのか ────────────────────────────────────
+    /// ── Why this was lifted into Core ─────────────────────────────────
     ///
-    /// この 1 つの式を<b>3 日で 3 回書き直した</b>。そのたびに、片方しか見ていない
-    /// せいで別の地形を取り違えていた（2026-08-31、第 5・6 回の相互検証）:
+    /// This one formula got <b>rewritten three times in three days</b>. Each time, looking
+    /// at only one half of it meant mistaking some other bit of terrain for sea
+    /// (2026-08-31, cross-checks 5 and 6):
     ///
     /// <list type="bullet">
-    /// <item><b>海底の高さだけ</b>見た版 …… 堤防で囲まれた干拓地やクレーターを
-    ///   「海」と答えた。海面より低いまま<b>乾いている</b>のに。そこへ半径 3.8 km の
-    ///   水源を置くと、引きの円は 160 m しかないので<b>戻せない水が永久に残る</b>。</item>
-    /// <item><b>水柱だけ</b>見た版 …… 川・高い湖・<b>前の津波で冠水した街</b>を
-    ///   「海」と答えた。2 本目の津波が円をその上に広げ、目標より低い陸を
-    ///   いきなり満たす —— 同じ失敗に裏口から入る。</item>
-    /// <item><b>水面の高さ</b>で川を落とす版 …… 高潮の最中に<b>外洋を丸ごと</b>
-    ///   「海ではない」と答えた（水面が上がるので）。プレイヤーには
-    ///   「2,304 m 以内に深い海がありません」と出る —— 見るからに海なのに。</item>
+    /// <item>The version that looked at <b>the seabed height alone</b> … answered "sea"
+    ///   for polder land ringed by dykes, and for craters. They sit below sea level and
+    ///   yet are <b>dry</b>. Put a 3.8 km radius water source there and the draining
+    ///   circle is only 160 m across, so <b>water you can never get rid of stays there
+    ///   forever</b>.</item>
+    /// <item>The version that looked at <b>the water column alone</b> … answered "sea" for
+    ///   rivers, for high-altitude lakes, and for <b>a town flooded by the previous
+    ///   tsunami</b>. The second tsunami spreads its circle over that and suddenly floods
+    ///   land lower than the target — the same failure, entered through the back door.</item>
+    /// <item>The version that rejected rivers <b>by water-surface height</b> … answered
+    ///   "not sea" for <b>the entire open ocean</b> during a storm surge (because the
+    ///   surface rises). The player gets told "no deep sea within 2,304 m" — while looking
+    ///   straight at the sea.</item>
     /// </list>
     ///
-    /// ★★ **だから式をここに固定して、テストで縛る。**
-    ///   Game 層は配列から 3 つの数を拾ってここへ渡すだけにする。
+    /// ★★ **So the formula is pinned here and held down by tests.**
+    ///   The Game layer's job is only to pull three numbers out of the arrays and pass
+    ///   them in here.
     /// </summary>
     public static class SeaCell
     {
         /// <summary>
-        /// 外洋か。
+        /// Is it open sea?
         ///
         /// <code>
-        /// 水柱 &gt;= 2 m               … 本当に水がある（乾いた窪地を落とす）
-        /// かつ 海底 &lt;= 海面 - 最小水深 … 十分に深い海である（川・冠水した陸を落とす）
+        /// column &gt;= 2 m                    … there really is water (rejects dry hollows)
+        /// and seabed &lt;= sea level - min depth … it is deep enough sea (rejects rivers, flooded land)
         /// </code>
         ///
-        /// ★★ <b>深さを決めるのは海底だけである。</b>水柱に最小水深を求めると、
-        ///   引き波のあいだ外洋が「海ではない」ことになる（4 つ目の失敗例）。
+        /// ★★ <b>The seabed alone decides the depth.</b> Demand a minimum depth of the
+        ///   water column and the open ocean becomes "not sea" while the water draws back
+        ///   (the fourth failure).
         ///
-        /// ★ 海底は動かないので、<b>高潮の最中でも海は海のまま</b>である。
+        /// ★ The seabed does not move, so <b>the sea stays sea even in the middle of a
+        ///   storm surge</b>.
         /// </summary>
-        /// <param name="terrainUnits">海底の標高（1/64 m）。</param>
-        /// <param name="columnUnits">その上に乗っている水の厚み（1/64 m）。</param>
-        /// <param name="seaUnits">平常の海面（1/64 m）。</param>
-        /// <param name="minDepthUnits">要求する最小水深（1/64 m）。</param>
+        /// <param name="terrainUnits">Seabed elevation (1/64 m).</param>
+        /// <param name="columnUnits">The thickness of the water sitting on top of it (1/64
+        /// m).</param>
+        /// <param name="seaUnits">Normal sea level (1/64 m).</param>
+        /// <param name="minDepthUnits">The minimum depth we require (1/64 m).</param>
         public static bool IsOpenSea(int terrainUnits, int columnUnits,
                                      int seaUnits, int minDepthUnits)
         {
-            // ★★ **水柱には「深さ」を求めない。「在るか」だけを見る。**
-            //    （2026-08-31、第 7 回検証）
+            // ★★ **Do not demand "depth" of the water column. Only ask whether it is there.**
+            //    (2026-08-31, cross-check 7)
             //
-            //    水柱に最小水深そのものを求めると、<b>引き波のあいだ外洋が
-            //    「海ではない」</b>ことになる —— 高潮で同じ間違いをしたのと
-            //    鏡写しである（このクラスの 3 つ目の失敗例）。
-            //    深さは<b>海底の高さ</b>が決める。海底は波では動かない。
+            //    Demand the minimum depth of the water column itself and <b>the open ocean
+            //    becomes "not sea" while the water draws back</b> — a mirror image of the
+            //    mistake we made with the storm surge (the third failure in this class).
+            //    The depth is decided by <b>the seabed height</b>. The seabed does not move
+            //    with the waves.
             //
-            //    水柱を見るのは、<b>乾いた窪地を落とすため</b>だけである。
+            //    The water column is looked at <b>solely to reject dry hollows</b>.
             if (columnUnits < PresenceUnits) return false;
             return terrainUnits <= seaUnits - minDepthUnits;
         }
 
         /// <summary>
-        /// 「水が在る」と認める厚み（1/64 m 単位、＝ 2 m）。
-        /// **水深ではない** —— 深さは海底が決める（<see cref="IsOpenSea"/> の ★★）。
+        /// The thickness at which we accept "there is water" (in 1/64 m units, i.e. 2 m).
+        /// **It is not a depth** — depth is decided by the seabed (see the ★★ in
+        /// <see cref="IsOpenSea"/>).
         ///
-        /// ★ 2 m は<b>両側の失敗の間</b>に取った値である。
-        ///   小さすぎると、深い窓地に溜まった雨水を「海」と読む（セーブを壊す）。
-        ///   大きすぎると、引き波のあいだ外洋を「海ではない」と読む（嘘の文言）。
-        ///   前者のほうが重いので、そちらへ寄せてある。
+        /// ★ 2 m sits <b>between the two failures</b>.
+        ///   Too small and rainwater pooled in a deep hollow reads as "sea" (which wrecks
+        ///   the save). Too large and the open ocean reads as "not sea" while the water
+        ///   draws back (which is a lying message). The former is the heavier of the two,
+        ///   so the value leans that way.
         /// </summary>
         public const int PresenceUnits = 128;
     }

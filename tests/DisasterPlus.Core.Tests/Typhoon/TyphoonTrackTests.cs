@@ -6,7 +6,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
 {
     public class TyphoonTrackTests
     {
-        /// <summary>プレイヤーが指した地点の代わり。マップの中の 1 点。</summary>
+        /// <summary>Stands in for the point the player pointed at.
+        /// One point inside the map.</summary>
         private static readonly Vec2 Pointed = new Vec2(1200f, -800f);
 
         [Fact]
@@ -26,7 +27,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void SameSeedAlwaysGivesTheSameTrack()
         {
-            // ここが崩れると「同じセーブで再現できる」（設計書 §4.1）が嘘になる。
+            // If this breaks, "reproducible from the same save" (design doc §4.1) is a lie.
             float speed = TyphoonTrack.SpeedFor(20000u);
             for (uint s = 1; s < 50; s++)
             {
@@ -40,9 +41,10 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheStormStartsExactlyWhereThePlayerPointed()
         {
-            // ★★ バニラの災害ボタンと同じ約束（設計書 §4.1）。指した地点から始まる。
-            //    ずれると「押した場所と違うところに台風が出る」になり、
-            //    しかも例外は 1 つも出ない。
+            // ★★ The same promise as the vanilla disaster button (design doc §4.1). It
+            //    starts from the point that was pointed at. If it drifts you get "the
+            //    typhoon appears somewhere other than where I clicked", and not a single
+            //    exception is thrown.
             float speed = TyphoonTrack.SpeedFor(20000u);
             for (uint s = 1; s < 100; s++)
             {
@@ -56,17 +58,18 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheTrackStaysOnTheMapForMostOfItsLifetime()
         {
-            // ★★ **2026-08-22 に意味が反転した。**
-            //   持ち主の指摘「進行をもっとゆっくりに」で NominalPathLength を
-            //   マップの一辺から半辺へ半分にしたので、**台風は普通マップの外へ出ない**。
-            //   以前ここは「必ず外へ出ること」を固定していた（＝終了条件が
-            //   「1 度中に入ってから外へ出た」だけだと思っていた）。
-            //   いまの通常の終わり方は「持続時間を使い切った」であり、
-            //   その経路も同じ TyphoonController.Stop -> Forget を通る。
+            // ★★ **The meaning of this was inverted on 2026-08-22.**
+            //   Following the owner's remark "make it advance more slowly", NominalPathLength
+            //   was halved from one map edge to a half edge, so **the typhoon normally does
+            //   not leave the map**.
+            //   This test used to pin down "it must leave the map" (i.e. we believed the only
+            //   end condition was "it came inside once and then went out").
+            //   The normal way it now ends is "it used up its duration", and that path goes
+            //   through the same TyphoonController.Stop -> Forget.
             //
-            //   ここで固定するのは**都市の上に居続けること**である ——
-            //   暴風雨を再現する機能なので、寿命の半分を過ぎても中心がまだ
-            //   マップの中に居ること。
+            //   What is pinned down here is **that it stays over the city** ——
+            //   this feature recreates a raging storm, so past half of its lifetime the
+            //   centre must still be inside the map.
             const uint dur = TyphoonPrefabActiveDuration;
             float speed = TyphoonTrack.SpeedFor(dur);
 
@@ -81,35 +84,39 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheStormCrossesTheWholeMapInOneLife()
         {
-            // ★★ **2026-09-02 に半辺 → 一辺へ戻した。**（所有者「マップ端で発生して
-            //   徐々にクリック地点に近づき、その後進路を維持して立ち去る」）
+            // ★★ **Put back from a half edge to a full edge on 2026-09-02.** (Owner: "it
+            //   appears at the map edge, gradually approaches the clicked point, and then
+            //   holds its course and departs".)
             //
-            //   接近に使えるのは寿命の半分なので、<b>その半分でマップ半辺を戻れる</b>
-            //   速さが要る。中央を指されたときの端までの距離がちょうど半辺である。
-            //   12,000 m で試したら中央から 6,000 m しか戻れず、マップの中から
-            //   湧いてしまった（<c>NominalPathLength</c> の doc）。
+            //   Only half the lifetime is available for the approach, so we need a speed
+            //   that <b>can cover a map half-edge in that half</b>. When the centre is
+            //   pointed at, the distance to the edge is exactly a half edge.
+            //   Trying 12,000 m only got 6,000 m back from the centre, so the storm welled
+            //   up from inside the map (see the doc on <c>NominalPathLength</c>).
             float speed = TyphoonTrack.SpeedFor(TyphoonPrefabActiveDuration);
             Assert.Equal(2.1094f, speed, 3);
 
-            // 寿命いっぱいでマップの一辺（17280 m）を渡り切る。
+            // Over a full lifetime it crosses one map edge (17280 m).
             float framesToCross = TyphoonTrack.MapHalfExtent * 2f / speed;
             Assert.Equal((float)TyphoonPrefabActiveDuration, framesToCross, 0);
 
-            // ★ 接近には寿命の 25〜75% を使う（強度の台形が平らな区間）。
-            //   「速すぎる」と感じたら下げるのは速さではなく、この割合である。
+            // ★ The approach uses 25-75% of the lifetime (the flat part of the intensity
+            //   trapezium). If it feels "too fast", what to lower is this fraction, not the
+            //   speed.
             Assert.Equal(0.25f, TyphoonTrack.MinApproachFraction, 3);
             Assert.Equal(0.75f, TyphoonTrack.ApproachFraction, 3);
         }
 
-        /// <summary><c>ThunderStormAI.m_activeDuration</c> の実測値
-        /// （<c>sharedassets55.assets</c> の生バイトから復元。IL 事実文書 §A-0b）。</summary>
+        /// <summary>The measured value of <c>ThunderStormAI.m_activeDuration</c>
+        /// (recovered from the raw bytes of <c>sharedassets55.assets</c>; IL facts
+        /// document §A-0b).</summary>
         private const uint TyphoonPrefabActiveDuration = 8192u;
 
         [Fact]
         public void ZeroCurvatureIsTheLimitOfSmallCurvature()
         {
-            // κ の 0 分岐は「小さいけれど 0 ではない」値でだけ壊れる。
-            // 目視では絶対に見つからないので、ここで固定する。
+            // The κ == 0 branch only breaks for values that are "small but not zero".
+            // That can never be found by eye, so it is pinned down here.
             const float speed = 1.3f;
             float theta = 0.7f;
             var entry = new Vec2(-12000f, 0f);
@@ -137,7 +144,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void SpeedIsDerivedFromTheMeasuredActiveDuration()
         {
-            // 長い嵐ほどゆっくり動く。経路長（マップ 1 辺）は同じなので、持続時間の逆数になる。
+            // The longer the storm, the slower it moves. The path length (one map edge) is
+            // the same, so it comes out as the reciprocal of the duration.
             Assert.True(TyphoonTrack.SpeedFor(40000u) < TyphoonTrack.SpeedFor(10000u));
             Assert.InRange(TyphoonTrack.SpeedFor(10u),
                            TyphoonTrack.MinSpeedMetresPerFrame,
@@ -150,9 +158,10 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void UnknownDurationGivesZeroSpeedNotAGuess()
         {
-            // ★ 設計書 §6 の「読めなければ推測せず何もしない」を構造で保証している
-            //    唯一の場所。ここを「安全な既定値」に書き換えると、プレハブが
-            //    読めない環境で台風が推測値の速度で動き出す。
+            // ★ The only place that structurally guarantees design doc §6's "if it cannot
+            //    be read, do not guess — do nothing". Rewrite this to a "safe default" and
+            //    the typhoon will start moving at a guessed speed on any machine where the
+            //    prefab cannot be read.
             Assert.Equal(0f, TyphoonTrack.SpeedFor(0u), 5);
         }
 
@@ -174,9 +183,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ALiveTyphoonNeverReportsZeroIntensity()
         {
-            // 実機の初回テストで "intensity=0" と出たのはこれである。
-            // 台形の端が 0 だと、居るのに何も起きない台風になり、
-            // しかも「値が読めなかった」との区別が付かない。
+            // This is what produced "intensity=0" in the first in-game test.
+            // If the ends of the trapezium are 0 you get a typhoon that is there but does
+            // nothing, and it cannot even be told apart from "the value could not be read".
             const uint dur = 8192u;
 
             foreach (byte peak in new byte[] { 10, 120, 255 })
@@ -191,10 +200,10 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ZeroIntensityStillMeansUnreadableOrFullyDecayed()
         {
-            // 上の床は「丸めで 0 に落ちる」を防ぐだけであって、
-            // 0 の意味を奇抜しにしない。
-            Assert.Equal(0, TyphoonTrack.IntensityAt(200, 0u, 0u, 0f));      // 持続時間が読めない
-            Assert.Equal(0, TyphoonTrack.IntensityAt(200, 4096u, 8192u, 5000f)); // 減衰しきった
+            // The floor above only prevents "being rounded down to 0"; it does not
+            // spoil the meaning of 0.
+            Assert.Equal(0, TyphoonTrack.IntensityAt(200, 0u, 0u, 0f));      // duration unreadable
+            Assert.Equal(0, TyphoonTrack.IntensityAt(200, 4096u, 8192u, 5000f)); // fully decayed
         }
 
         [Fact]
@@ -207,9 +216,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
             Assert.True(recovered < overLand, "the sea must give strength back");
             Assert.True(recovered > 0f, "recovery must be slower than decay");
 
-            // 完全に戻り切ることはある。負にはならない。
+            // It can recover completely. It never goes negative.
             Assert.Equal(0f, TyphoonTrack.DecayAfter(0f, false, 1000f), 4);
-            // 際限なく積み上がらない。
+            // It does not pile up without limit.
             Assert.InRange(TyphoonTrack.DecayAfter(0f, true, 100000f), 0f, TyphoonTrack.MaxDecay);
         }
 
@@ -220,7 +229,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
             const uint dur = 20000u;
             byte weak = TyphoonTrack.IntensityAt(peak, dur / 2u, dur, 90f);
             Assert.True(weak < peak);
-            // byte の巻き戻り（255 になる）が最も痛い壊れ方。
+            // A byte wrapping round (becoming 255) is the most painful way to break.
             Assert.Equal(0, TyphoonTrack.IntensityAt(peak, dur / 2u, dur, 5000f));
         }
 
@@ -234,7 +243,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
             Assert.Equal(TyphoonPhase.Gone, TyphoonTrack.PhaseAt(dur, dur));
             Assert.Equal(TyphoonPhase.Gone, TyphoonTrack.PhaseAt(dur * 10u, dur));
 
-            // 持続時間が読めていないときに位相を名乗らない。
+            // Do not claim a phase when the duration has not been read.
             Assert.Equal(TyphoonPhase.Idle, TyphoonTrack.PhaseAt(0u, 0u));
         }
     }

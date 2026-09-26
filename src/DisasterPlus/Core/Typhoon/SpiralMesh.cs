@@ -4,101 +4,113 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Typhoon
 {
     /// <summary>
-    /// 台風の渦巻き雲の**頂点だけ**を生成する。エンジン非依存の純データで、
-    /// <c>Mesh</c> の組み立ては <c>Game/Typhoon/TyphoonCloud</c> が行う（設計書 §5）。
+    /// Generates **only the vertices** of the typhoon's spiral cloud. Pure, engine-free data;
+    /// assembling the <c>Mesh</c> is done by <c>Game/Typhoon/TyphoonCloud</c> (design
+    /// document §5).
     ///
-    /// ── なぜ自分で組むのか ──────────────────────────────────
+    /// ── Why we build it ourselves ──────────────────────────────────
     ///
-    /// バニラに流用できる雲は**存在しない**。<c>DisasterInfo.m_effect</c> は
-    /// フィールドごと無く、災害まわりの <c>EffectInfo</c> は
-    /// <c>DisasterProperties.m_mediumExplosion</c> と <c>MeteorAI.m_impactEffect</c> の
-    /// 2 つだけで、雲も渦もプレハブ化されていない（IL 事実文書 §C-1）。しかも
-    /// バニラの雲は半径 6400 km のスカイドームに貼られたノイズシェーダで
-    /// **ワールド座標を持たない**ので、「台風の位置に雲の渦を置く」合成は原理的に
-    /// できない（§C-2）。したがって④は自分でメッシュを組んで自分で描く。
+    /// There is **no** vanilla cloud we can borrow. <c>DisasterInfo.m_effect</c> does not
+    /// exist as a field at all; the only <c>EffectInfo</c>s around disasters are
+    /// <c>DisasterProperties.m_mediumExplosion</c> and <c>MeteorAI.m_impactEffect</c>, and
+    /// neither clouds nor vortices are prefabbed (§C-1 of the IL facts document). On top of
+    /// that, vanilla's clouds are a noise shader painted on a 6,400 km sky dome and **have no
+    /// world coordinates**, so "put a cloud vortex at the typhoon's position" is impossible
+    /// in principle (§C-2). So ④ builds its own mesh and draws it itself.
     ///
-    /// 手本は <c>VortexAI.GenerateMesh()</c>（16250 頂点・高さ 2000 m の漏斗を
-    /// <c>Randomizer(2975689)</c> の固定シードで手続き生成する。§C-1）。④の雲は
-    /// 上空に 1 枚あればよく漏斗ほどの密度は要らないので、**竜巻より 1 桁小さい**
-    /// 2304 頂点に収めてある。
+    /// The model to follow is <c>VortexAI.GenerateMesh()</c> (16,250 vertices, a 2,000 m tall
+    /// funnel generated procedurally from the fixed seed <c>Randomizer(2975689)</c>; §C-1).
+    /// ④'s cloud only needs a single sheet up in the sky and does not need a funnel's
+    /// density, so it is kept to 2,304 vertices — **an order of magnitude smaller than the
+    /// tornado's**.
     ///
-    /// ── 形 ────────────────────────────────────────────
+    /// ── The shape ────────────────────────────────────────────
     ///
-    /// 中心に眼の穴（<c>innerRadius</c>）を空けた円環に、<see cref="Arms"/> 本の
-    /// スパイラルのリボンを <see cref="Rings"/> 段重ねる。1 本のリボンは
-    /// <see cref="SegmentsPerArm"/> 個の断面を持ち、断面ごとに内側／外側の 2 頂点を出す。
+    /// On an annulus with a hole for the eye at its centre (<c>innerRadius</c>), we stack
+    /// <see cref="Arms"/> spiral ribbons in <see cref="Rings"/> layers. One ribbon has
+    /// <see cref="SegmentsPerArm"/> cross-sections, and each cross-section emits two vertices,
+    /// inner and outer.
     ///
-    /// **リボンの幅は「中心からの距離」で作り、法線方向のオフセットでは作らない。**
-    /// 法線オフセットにすると、渦の内端で頂点が眼の穴へ食い込み、外端では外周を
-    /// はみ出す。距離で作れば両端を <c>[inner, outer]</c> にクランプするだけで
-    /// 「眼が必ず空いていて、外周を必ず越えない」ことが保証できる（テストがこの 2 つを固定する）。
+    /// **The ribbon's width is built from "the distance from the centre", never from an
+    /// offset along the normal.** With a normal offset, the vertices bite into the eye hole
+    /// at the spiral's inner end and overshoot the rim at its outer end. Built from the
+    /// distance, clamping both ends to <c>[inner, outer]</c> is enough to guarantee "the eye
+    /// is always open and the rim is never crossed" (tests pin down both).
     ///
-    /// ── 三角形は表裏どちらも張る ──────────────────────────────
+    /// ── Triangles are laid on both faces ──────────────────────────────
     ///
-    /// 同じ四角形に巻き方向の違う三角形を 2 組張って**両面**にする。頂点を増やさずに
-    /// 索引だけ倍にする形なので安い。これは保険である ——「雲が真上から見えない」は
-    /// 巻き方向 1 つで起きるうえ、実機に出るまで気付けない壊れ方で、しかも
-    /// <c>Shader.Find("Standard")</c> のマテリアルは裏面を描かない。
+    /// We lay two sets of triangles with opposite windings on the same quad to make it
+    /// **double-sided**. It costs nothing but doubling the indices, with no extra vertices.
+    /// It is insurance — "the cloud is invisible from directly above" can be caused by
+    /// nothing more than the winding, it is a failure you cannot spot until it is on real
+    /// hardware, and on top of that a <c>Shader.Find("Standard")</c> material does not draw
+    /// back faces.
     ///
-    /// 乱数は <see cref="DeterministicRandom"/> だけを使う（<c>VanillaRandomizer</c> は
-    /// 使わない —— ここで決めるのはバニラが引く値ではなく④が発明した形である）。
-    /// **同じ引数なら常に同じ形になる**（都市を読み直して雲の形が変わらない）。
+    /// The only randomness used is <see cref="DeterministicRandom"/> (never
+    /// <c>VanillaRandomizer</c> — what is decided here is not a value vanilla draws but a
+    /// shape ④ invented).
+    /// **The same arguments always give the same shape** (reloading the city does not change
+    /// the cloud's shape).
     /// </summary>
     public static class SpiralMesh
     {
-        /// <summary>渦巻きの腕の本数。</summary>
+        /// <summary>The number of spiral arms.</summary>
         public const int Arms = 4;
 
-        /// <summary>腕 1 本あたりの断面の数。</summary>
+        /// <summary>The number of cross-sections per arm.</summary>
         public const int SegmentsPerArm = 96;
 
-        /// <summary>重ねる段数（高さ方向の層）。</summary>
+        /// <summary>The number of layers stacked (in the height direction).</summary>
         public const int Rings = 3;
 
-        /// <summary>腕 1 本が中心のまわりを回る角度（rad）。1.6 周ぶん。</summary>
+        /// <summary>The angle one arm sweeps around the centre (rad). 1.6 turns.</summary>
         private const float TurnRadians = 10.053096f;
 
         /// <summary>
-        /// リボンの半幅 ÷（外半径 − 内半径）。
+        /// The ribbon's half-width ÷ (outer radius − inner radius).
         ///
-        /// **腕どうしの隙間が閉じない値であること。** 隣り合う腕の通過の半径間隔は
-        /// <c>span /（回転数 × <see cref="Arms"/>）</c> ＝ span の約 1/6.4 になる。
-        /// リボンの全幅（＝この値の 2 倍）がそれに追いつくと、渦巻きは隙間の無い
-        /// 円盤に見えてしまう（オフライン描画で実測して 0.07 から下げた）。
+        /// **It must be a value that keeps the gaps between arms open.** The radial spacing
+        /// between successive passes of neighbouring arms is
+        /// <c>span / (turns × <see cref="Arms"/>)</c> = about span/6.4.
+        /// Once the ribbon's full width (= twice this value) catches up with that, the spiral
+        /// looks like a disc with no gaps at all (measured by rendering offline, which is why
+        /// it came down from 0.07).
         /// </summary>
         private const float BandHalfWidth = 0.04f;
 
         /// <summary>
-        /// リボンの端の細り。両端で細くしないと、内端と外端が
-        /// <c>[inner, outer]</c> のクランプで**平らに切り落とされ**、渦の先端が
-        /// 四角い出っ張りになる（オフライン描画で確認）。
+        /// How the ribbon tapers at its ends. Without tapering both ends, the inner and outer
+        /// ends get **cut off flat** by the <c>[inner, outer]</c> clamp and the spiral's tips
+        /// become square stubs (confirmed by rendering offline).
         /// </summary>
         private const float TaperFloor = 0.15f;
 
         /// <summary>
-        /// 腕のうねりの振幅（span に対する割合）と周波数。**完全な等間隔の渦は
-        /// 台風ではなく催眠術の円盤に見える**（オフライン描画で確認）。腕ごとに
-        /// 位相の違う低周波のうねりを 1 本入れて、規則性を崩す。
+        /// The amplitude (as a fraction of span) and frequency of the arms' waviness.
+        /// **A perfectly evenly spaced spiral looks less like a typhoon than like a
+        /// hypnotist's disc** (confirmed by rendering offline). We add one low-frequency
+        /// wave per arm, each at a different phase, to break up the regularity.
         /// </summary>
         private const float WobbleAmplitude = 0.035f;
 
         private const float WobbleFrequency = 9f;
 
-        /// <summary>段ごとの高さのばらつき（層の厚みに対する割合）。</summary>
+        /// <summary>The per-layer height jitter (as a fraction of a layer's
+        /// thickness).</summary>
         private const float HeightJitter = 0.12f;
 
         /// <summary>
-        /// 段ごとの位相のずれの最大値（rad）。腕の角度間隔（2π/<see cref="Arms"/> ≒ 1.57）に
-        /// 対して十分小さくすること —— 大きいと 3 段が互いの隙間を埋め合って
-        /// 渦巻きが消える。
+        /// The maximum per-layer phase shift (rad). Keep it well below the angular spacing of
+        /// the arms (2π/<see cref="Arms"/> ≒ 1.57) — make it large and the three layers fill
+        /// in each other's gaps and the spiral disappears.
         /// </summary>
         private const float RingPhaseSpread = 0.12f;
 
         private const float TwoPi = 6.2831855f;
 
         /// <summary>
-        /// 頂点数。腕 × 段 × 断面 × 2（内側・外側）。
-        /// **竜巻の 16250 より 1 桁小さい**（クラス doc）。
+        /// The vertex count. Arms × layers × cross-sections × 2 (inner and outer).
+        /// **An order of magnitude below the tornado's 16,250** (see the class doc).
         /// </summary>
         public static int VertexCount
         {
@@ -106,7 +118,8 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 三角形索引の数。四角形 1 枚につき表裏 2 組 ＝ 12 索引（クラス doc）。
+        /// The triangle index count. Two sets per quad, front and back = 12 indices (see the
+        /// class doc).
         /// </summary>
         public static int TriangleIndexCount
         {
@@ -114,16 +127,20 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 配列を埋める。**呼び出し側が確保する**（このメソッドは <c>new</c> しない）。
-        /// 配列が短ければ何もしない —— 途中まで書くと「頂点はあるのに面が壊れている」
-        /// という最も調べにくい形になる。
+        /// Fills the arrays. **The caller allocates** (this method never calls <c>new</c>).
+        /// If an array is too short we do nothing — writing part of the way through would
+        /// give the hardest form of all to investigate, "the vertices are there but the faces
+        /// are broken".
         /// </summary>
-        /// <param name="innerRadius">眼の穴の半径。ここより内側には頂点を置かない。</param>
-        /// <param name="outerRadius">外周。ここより外側には頂点を置かない。</param>
-        /// <param name="height">層の総厚み。Y は <c>[0, height]</c> に収まる。</param>
-        /// <param name="vertices">長さ <see cref="VertexCount"/> 以上。</param>
-        /// <param name="uvs">長さ <see cref="VertexCount"/> × 2 以上（u, v の交互）。</param>
-        /// <param name="triangles">長さ <see cref="TriangleIndexCount"/> 以上。</param>
+        /// <param name="innerRadius">The eye hole's radius. No vertex is placed inside
+        /// it.</param>
+        /// <param name="outerRadius">The rim. No vertex is placed outside it.</param>
+        /// <param name="height">The layers' total thickness. Y stays within
+        /// <c>[0, height]</c>.</param>
+        /// <param name="vertices">At least <see cref="VertexCount"/> long.</param>
+        /// <param name="uvs">At least <see cref="VertexCount"/> × 2 long (u and v
+        /// interleaved).</param>
+        /// <param name="triangles">At least <see cref="TriangleIndexCount"/> long.</param>
         public static void Build(float innerRadius, float outerRadius, float height,
                                  Vec3[] vertices, float[] uvs, int[] triangles)
         {
@@ -148,13 +165,15 @@ namespace DisasterPlus.Core.Typhoon
             for (int a = 0; a < Arms; a++)
             {
                 float armBase = TwoPi * a / Arms;
-                // 腕ごとのうねりの位相。決定論的なので都市を読み直しても形は変わらない。
+                // The wave's phase for this arm. Deterministic, so reloading the city does
+                // not change the shape.
                 float wobblePhase = DeterministicRandom.Unit((uint)(a + 1), 0x574F4243u) * TwoPi;
 
                 for (int r = 0; r < Rings; r++)
                 {
-                    // 段ごとに少しだけ位相をずらす。真上から見たときに 3 段が
-                    // ぴったり重なると、層があることが見えない。
+                    // Shift the phase a little per layer. If the three layers line up
+                    // exactly when viewed from directly above, you cannot see that there
+                    // are layers at all.
                     float ringPhase = DeterministicRandom.Unit((uint)a, (uint)(r + 1))
                                       * RingPhaseSpread;
                     float ringHeight = (r + 0.5f) * layer;
@@ -166,12 +185,14 @@ namespace DisasterPlus.Core.Typhoon
                         float cos = (float)Math.Cos(angle);
                         float sin = (float)Math.Sin(angle);
 
-                        // ★ 幅は「中心からの距離」で作り、両端をクランプする（クラス doc）。
-                        //   端は細らせる（TaperFloor）。細らせないとクランプが渦の先端を
-                        //   平らに切り落とし、四角い出っ張りになる。
+                        // ★ The width is built from "the distance from the centre" and both
+                        //   ends are clamped (see the class doc). The ends taper
+                        //   (TaperFloor); without the taper the clamp cuts the spiral's tips
+                        //   off flat and leaves square stubs.
                         float taper = TaperFloor
                                       + (1f - TaperFloor) * (float)Math.Sin(Math.PI * t);
-                        // うねりも端では消す（taper と同じ理由。外周に押し付けない）。
+                        // The waviness also dies away at the ends (same reason as the taper:
+                        // do not press it against the rim).
                         float wobble = span * WobbleAmplitude * taper
                                        * (float)Math.Sin(t * WobbleFrequency + wobblePhase);
                         float centreRadius = inner + span * t + wobble;
@@ -191,7 +212,8 @@ namespace DisasterPlus.Core.Typhoon
                         vertices[v] = new Vec3(lo * cos, y, lo * sin);
                         vertices[v + 1] = new Vec3(hi * cos, y, hi * sin);
 
-                        // u は渦に沿った進み、v は内側 0 / 外側 1。どちらも [0,1]。
+                        // u is progress along the spiral, v is 0 on the inside and 1 on the
+                        // outside. Both are in [0,1].
                         uvs[uv] = t;
                         uvs[uv + 1] = 0f;
                         uvs[uv + 2] = t;
@@ -201,15 +223,16 @@ namespace DisasterPlus.Core.Typhoon
                         uv += 4;
                     }
 
-                    // この腕・この段の四角形を張る。頂点はもう置き終わっているので、
-                    // 索引の基点は「今書いた 2*SegmentsPerArm 個の先頭」になる。
+                    // Lay the quads for this arm and this layer. The vertices are already
+                    // placed, so the index base is "the start of the 2*SegmentsPerArm we
+                    // just wrote".
                     int start = v - SegmentsPerArm * 2;
                     for (int s = 0; s < SegmentsPerArm - 1; s++)
                     {
-                        int i0 = start + s * 2;          // 内側 s
-                        int i1 = i0 + 1;                 // 外側 s
-                        int i2 = i0 + 2;                 // 内側 s+1
-                        int i3 = i0 + 3;                 // 外側 s+1
+                        int i0 = start + s * 2;          // inner, s
+                        int i1 = i0 + 1;                 // outer, s
+                        int i2 = i0 + 2;                 // inner, s+1
+                        int i3 = i0 + 3;                 // outer, s+1
 
                         triangles[tri] = i0;
                         triangles[tri + 1] = i2;
@@ -218,7 +241,8 @@ namespace DisasterPlus.Core.Typhoon
                         triangles[tri + 4] = i2;
                         triangles[tri + 5] = i3;
 
-                        // ★ 裏面（クラス doc の保険）。巻き方向だけを逆にする。
+                        // ★ The back face (the insurance from the class doc). Only the
+                        //    winding is reversed.
                         triangles[tri + 6] = i0;
                         triangles[tri + 7] = i1;
                         triangles[tri + 8] = i2;
@@ -232,7 +256,8 @@ namespace DisasterPlus.Core.Typhoon
             }
         }
 
-        /// <summary>NaN と無限大と負の値を落とす。「雲の頂点が NaN」を作らない。</summary>
+        /// <summary>Drops NaN, infinity and negative values. We do not create "a cloud vertex
+        /// that is NaN".</summary>
         private static float Sane(float value, float fallback)
         {
             if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return fallback;

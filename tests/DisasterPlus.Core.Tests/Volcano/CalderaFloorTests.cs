@@ -4,11 +4,12 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 実機報告（2026-08-22）「カルデラ内部が平地になるのはおかしい（元の地形や
-    /// 火山の山体の残骸も加味してリアルに寄せてください）」。
+    /// In-game report (2026-08-22): "it is odd that the inside of the caldera becomes flat
+    /// ground (please make it more realistic by allowing for the original terrain and the
+    /// remains of the volcanic edifice)".
     ///
-    /// ★★ <b>「まっ平らでないこと」はテストできる。</b>
-    ///    落ちた屋根は 1 枚の板のまま着地するのではなく、割れて岩塊の山になる。
+    /// ★★ <b>"Not being perfectly flat" can be tested.</b>
+    ///    A roof that falls in does not land as a single slab; it breaks into a heap of blocks.
     /// </summary>
     public class CalderaFloorTests
     {
@@ -27,12 +28,13 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheFloorIsNotFlat()
         {
-            // ★★ これが所有者の指摘そのもの。床の高さが 1 つの値に潰れていないこと。
+            // ★★ This is the owner's report itself. The floor height must not collapse to
+            //    a single value.
             var seen = new System.Collections.Generic.HashSet<int>();
             for (int i = 0; i < 60; i++)
             {
                 float d = R * SuperEruption.FloorFraction * i / 60f;
-                seen.Add((int)(F(d, 0f) / 5f));   // 5 m 刻み
+                seen.Add((int)(F(d, 0f) / 5f));   // in 5 m steps
             }
 
             Assert.True(seen.Count > 12,
@@ -42,7 +44,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheFloorHasARaisedCentre()
         {
-            // 実在の大カルデラには中央火口丘がある。無いと「まっさらな鉢」に見える。
+            // Real large calderas have a central cone. Without one it looks like "a plain bowl".
             float centre = F(0f, 0f);
             float outer = F(R * 0.6f, 0f);
 
@@ -54,8 +56,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NothingInTheCalderaEverRisesAboveTheOriginalGround()
         {
-            // でこぼこも中央火口丘も、元の地面より上には出ない ——
-            // 出ると、陥没したはずのカルデラの中に元の高さの島が残る。
+            // Neither the roughness nor the central cone ever rises above the original ground
+            // —— if it did, an island at the original height would be left inside a caldera
+            // that is supposed to have collapsed.
             for (int i = 0; i <= 240; i++)
             {
                 float d = R * 1.3f * i / 240f;
@@ -67,7 +70,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheBumpinessDiesOutAtTheRim()
         {
-            // 縁の外に岩塊がぽつぽつ残らないこと。
+            // No stray blocks may be left dotted about outside the rim.
             Assert.Equal(0f, F(R, 0f), 3);
             Assert.Equal(0f, F(R * 1.5f, 0f), 3);
             Assert.Equal(0f, F(R * 4f, 0f), 3);
@@ -84,7 +87,7 @@ namespace DisasterPlus.Core.Tests.Volcano
                 if (v < worst) worst = v;
             }
 
-            // でこぼこの幅ぶんは超えてよいが、それ以上は超えないこと。
+            // It may go past by the amplitude of the roughness, but no further.
             Assert.True(worst >= -D * (1f + SuperEruption.FloorRoughFraction) - 1f,
                         "the floor reached " + worst + " for a " + D + " m caldera");
         }
@@ -129,9 +132,10 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ACalderaOnHighGroundStaysAboveSeaLevel()
         {
-            // ★★ 所有者の問い「カルデラ内部の標高が必ず海抜より低くなる理由は
-            //    何ですか？」への答えの検査。**「必ず」ではなくなったこと。**
-            //    ゲームの海面は 40 m（WaterSimulation.DEFAULT_SEA_LEVEL、IL 実測）。
+            // ★★ The check behind the answer to the owner's question, "why is the elevation
+            //    inside the caldera always below sea level?". **It is no longer "always".**
+            //    The game's sea level is 40 m (WaterSimulation.DEFAULT_SEA_LEVEL, measured
+            //    from the IL).
             const float seaLevel = 40f;
 
             float highGround = 600f;
@@ -139,7 +143,7 @@ namespace DisasterPlus.Core.Tests.Volcano
                         "even on 600 m ground the caldera floor (" + (highGround - D)
                         + " m) is below sea level");
 
-            // 海に近い土地では水没してよい（サントリーニ・クラカタウ）。
+            // On ground close to the sea it may flood (Santorini, Krakatoa).
             float lowGround = 90f;
             Assert.True(lowGround - D < seaLevel);
         }

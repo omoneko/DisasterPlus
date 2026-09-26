@@ -5,18 +5,20 @@ $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuil
            Select-Object -First 1
 if (-not $msbuild) { throw "MSBuild not found" }
 
-# PackageReference（CitiesHarmony.API）は復元が要るので Restore を足す。
+# The PackageReference (CitiesHarmony.API) has to be restored, so Restore is added here.
 & $msbuild "src\DisasterPlus\DisasterPlus.csproj" /t:Restore,Build /p:Configuration=Release /v:minimal
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 
-# CitiesHarmony.API.dll はこの shim だけ MOD 同梱が正しい。
-# HarmonyLib 本体（CitiesHarmony.Harmony.dll）は CitiesHarmony MOD が実行時に供給するので同梱しない。
-# HarmonyBootstrap / VortexPinPatch はこのアセンブリに実行時依存するので、
-# 無いまま「デプロイ成功」を装って終了してはいけない（ビルドは成功したのに MOD がロードで落ちる事故になる）。
+# CitiesHarmony.API.dll is the one shim that is correct to ship with the mod.
+# HarmonyLib itself (CitiesHarmony.Harmony.dll) is supplied at run time by the CitiesHarmony
+# mod, so it is not shipped.
+# HarmonyBootstrap / VortexPinPatch depend on this assembly at run time, so we must never
+# finish here pretending the deployment succeeded while it is missing (that turns into the
+# accident where the build succeeded but the mod dies on load).
 #
-# この確認は必ず DisasterPlus.dll のコピーより前に行う。後ろに置くと、throw した時点で
-# 配置先には Harmony を解決できない DisasterPlus.dll だけが残り、次回起動でその壊れた
-# 組み合わせが読み込まれる。
+# This check must always be done BEFORE DisasterPlus.dll is copied. Put it after, and the
+# moment it throws all that is left in the deployment folder is a DisasterPlus.dll that cannot
+# resolve Harmony, and that broken pair is what gets loaded on the next launch.
 $apiDll = "src\DisasterPlus\bin\Release\CitiesHarmony.API.dll"
 if (-not (Test-Path $apiDll)) {
     throw "CitiesHarmony.API.dll not found in build output; HarmonyBootstrap/VortexPinPatch would fail at runtime"
@@ -30,15 +32,15 @@ Write-Host "Deployed DisasterPlus.dll -> $modDir"
 Copy-Item $apiDll $modDir -Force
 Write-Host "Deployed CitiesHarmony.API.dll"
 
-# ★ Locales をコピーする**前に**検査する。ja.txt は「[measured] が付いた行だけ」と
-#   案内しながら、自分の SourceVanilla は [実測] だった（英語では偶然一致するので
-#   英語側を読んでも気付けない形）。キーの数だけ数えても捕まらないので、
-#   キー集合の一致に加えて印の契約まで見る。壊れたまま配置しないよう、
-#   ここで throw して以降のコピーを止める。
+# ★ Check **before** copying Locales. ja.txt told the reader "only the lines carrying
+#   [measured]", while its own SourceVanilla said [実測] (in English the two happen to
+#   coincide, so reading the English side would never reveal it). Counting the keys alone
+#   does not catch that, so on top of the key sets matching we check the marker contract too.
+#   So that nothing is ever deployed broken, throw here and stop every copy that follows.
 & powershell -NoProfile -ExecutionPolicy Bypass -File "tools\CheckLocales.ps1"
 if ($LASTEXITCODE -ne 0) { throw "Locale check failed" }
 
-# LocaleLoader は実行時に Locales\<lang>.txt を読む。
+# LocaleLoader reads Locales\<lang>.txt at run time.
 if (Test-Path "Locales") {
     $dst = Join-Path $modDir "Locales"
     New-Item -ItemType Directory -Force -Path $dst | Out-Null

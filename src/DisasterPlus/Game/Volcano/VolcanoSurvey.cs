@@ -6,53 +6,54 @@ using DisasterPlus.Core.Volcano;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 1 つの火山の「調べた結果」。sim スレッドが作り、スナップショットに載って
-    /// main スレッドが読む**不変の値型**である。
+    /// The "result of surveying" one volcano. **An immutable value type** built on the sim thread,
+    /// carried in the snapshot and read on the main thread.
     ///
-    /// <see cref="SegmentCount"/> だけ **-1 が「数えられなかった」**を表す。
-    /// **0 と混ぜないこと** ——「範囲内に道路が 1 本も無い」と「本数を数える経路が
-    /// この環境に無い」はまったく違う事実で、後者でも**道路は壊される**。
+    /// Only <see cref="SegmentCount"/> uses **-1 to mean "could not be counted"**.
+    /// **Do not mix that with 0** — "there is not one road in range" and "there is no path in this
+    /// environment for counting them" are entirely different facts, and in the latter case
+    /// **the roads are still destroyed**.
     /// </summary>
     public struct VolcanoFootprint
     {
-        /// <summary>調査が成立したか。false のとき他のフィールドは読まない。</summary>
+        /// <summary>Whether the survey succeeded. When false, do not read the other fields.</summary>
         public readonly bool Valid;
 
-        /// <summary>クリックされたワールド座標。<c>Y</c> は地形高さ（m）。</summary>
+        /// <summary>The world coordinates clicked. <c>Y</c> is the terrain height (m).</summary>
         public readonly Vec3 Centre;
 
-        /// <summary>設置地点の地形高さ（m）。**ゲームの配列から読んだだけの値。**</summary>
+        /// <summary>The terrain height at the placement point (m). **A value merely read out of the game's arrays.**</summary>
         public readonly float GroundHeightMetres;
 
         public readonly VolcanoForm Form;
 
-        /// <summary>形態の帯へクランプ済みの半径（m）。</summary>
+        /// <summary>The radius already clamped into the form's band (m).</summary>
         public readonly float RadiusMetres;
 
-        /// <summary>天井（§C-10）まで考慮して切り下げ済みの最終高（m）。</summary>
+        /// <summary>The final height already cut down to allow for the ceiling (§C-10) (m).</summary>
         public readonly float HeightMetres;
 
-        /// <summary>天井のせいで要求より低い山になるか。**黙って低い山を作らない**ための旗。</summary>
+        /// <summary>Whether the ceiling makes the mountain lower than requested. The flag that stops us **silently building a low mountain**.</summary>
         public readonly bool HeightLimitedByCeiling;
 
-        /// <summary>調査時点で範囲内にあった建物の実数（丸める前）。</summary>
+        /// <summary>The real number of buildings in range at survey time (before any rounding).</summary>
         public readonly int BuildingCount;
 
         /// <summary>
-        /// 調査時点で範囲内にあった道路セグメントの実数（丸める前）。
-        /// **-1 は「数えられなかった」**（クラス doc）。
+        /// The real number of road segments in range at survey time (before any rounding).
+        /// **-1 means "could not be counted"** (class doc).
         /// </summary>
         public readonly int SegmentCount;
 
-        /// <summary>隆起で <c>UpdateArea</c> に渡すことになるタイル数（診断用）。</summary>
+        /// <summary>The number of tiles the uplift will end up passing to <c>UpdateArea</c> (for diagnostics).</summary>
         public readonly int TileCount;
 
-        /// <summary>「建てられる地面」と水位が追いつくまでの sim フレーム数（§A-2 / §A-4）。</summary>
+        /// <summary>Sim frames until the buildable ground and the water level catch up (§A-2 / §A-4).</summary>
         public readonly int BlockHeightCatchUpFrames;
 
         /// <summary>
-        /// 1 tick ぶんの上限で走査を打ち切ったか。true のとき
-        /// <see cref="BuildingCount"/> / <see cref="SegmentCount"/> は**下限**である。
+        /// Whether the sweep was cut short by the one-tick limit. When true,
+        /// <see cref="BuildingCount"/> / <see cref="SegmentCount"/> are **lower bounds**.
         /// </summary>
         public readonly bool Capped;
 
@@ -76,17 +77,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 同じ地点・同じ調査結果のまま、**半径と高さだけ差し替えた**1 個を作る。
+        /// Build one with the same location and the same survey result but **the radius and height
+        /// swapped out**.
         ///
-        /// 破局噴火の段（膨らみ／カルデラ）が使う。あちらは山より広い範囲を動かすので、
-        /// <c>VolcanoUplift</c> にも <c>VolcanoClearing</c> にも
-        /// <b>その段ぶんの半径をそのまま見せる</b>必要がある ——
-        /// 片方だけ広げると、道路の下の地面だけが押し戻されて
-        /// 平らな溝が残る（設計書 §1.2 / 罠 1）。
+        /// Used by the super-eruption's stages (inflation / caldera). Those move a wider range
+        /// than the mountain, so both <c>VolcanoUplift</c> and <c>VolcanoClearing</c> have to be
+        /// <b>shown that stage's radius as it is</b> — widen it for only one of them and the
+        /// ground under the roads alone gets pushed back and a flat trench is left
+        /// (design doc §1.2 / trap 1).
         ///
-        /// ★ 建物・道路の数（<see cref="BuildingCount"/> / <see cref="SegmentCount"/>）は
-        ///   **元の調査のまま**である。広げた範囲を数え直してはいない ——
-        ///   数えていない数を名乗らないために、ここは触らない。
+        /// ★ The building and road counts (<see cref="BuildingCount"/> /
+        ///   <see cref="SegmentCount"/>) are **left as the original survey's**. The widened range
+        ///   has not been re-counted — so as not to quote a number we never counted, they are not
+        ///   touched here.
         /// </summary>
         public VolcanoFootprint Resized(float radiusMetres, float heightMetres)
         {
@@ -96,7 +99,7 @@ namespace DisasterPlus.Game
                                         BlockHeightCatchUpFrames, Capped);
         }
 
-        /// <summary>「調べていない」1 個。**0 を並べた「それらしい」値を作らない。**</summary>
+        /// <summary>The "not surveyed" one. **Do not fabricate "plausible" values out of a row of zeroes.**</summary>
         public static VolcanoFootprint None
         {
             get
@@ -109,25 +112,26 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// 影響範囲を**数えるだけ**の走査。**sim スレッド専用。**
+    /// The sweep that **only counts** the affected range. **Sim thread only.**
     ///
-    /// ★★ <b>この型は何も壊さない。</b> 建物も道路も地形も 1 つも触らない。
-    /// 壊すのは T5（<c>VolcanoClearing</c>）、上げるのは T6（<c>VolcanoUplift</c>）である。
-    /// レビューの grep: このファイルに建物や道路の破壊 API・地形の書き込み API が
-    /// **1 つも現れないこと**（計画 T4 Step 8）。
+    /// ★★ <b>This type destroys nothing.</b> It touches not one building, road or terrain cell.
+    /// Destroying is T5 (<c>VolcanoClearing</c>) and raising is T6 (<c>VolcanoUplift</c>).
+    /// Review grep: **not one** building or road destruction API, or terrain write API, appears in
+    /// this file (plan T4 Step 8).
     ///
-    /// ── なぜ main スレッドから数えられないのか（計画 §4.1）─────────────
+    /// ── why it cannot be counted from the main thread (plan §4.1) ──────────────────────────
     ///
-    /// <c>BuildingManager.m_buildingGrid</c> と <c>NetManager.m_segmentGrid</c> は
-    /// **sim スレッドが所有している**。配置ツールのクリックハンドラは main スレッドなので、
-    /// そこから数えると、スタックトレースの無い <c>IndexOutOfRangeException</c> が
-    /// **後になってバニラのコードの中で**出る。だから⑤のクリック → 確認は
-    /// <b>2 往復</b>する（<see cref="VolcanoState"/> のクラス doc）。
+    /// <c>BuildingManager.m_buildingGrid</c> and <c>NetManager.m_segmentGrid</c> are
+    /// **owned by the sim thread**. The placement tool's click handler is on the main thread, so
+    /// counting from there produces an <c>IndexOutOfRangeException</c> with no stack trace,
+    /// **later, inside vanilla's own code**. That is why ⑤'s click → confirm makes
+    /// <b>two round trips</b> (the class doc of <see cref="VolcanoState"/>).
     ///
-    /// ── グリッドの寸法（本タスクで IL 実測した。推測していない）───────────
+    /// ── the grid dimensions (measured in IL in this task; not guessed) ─────────────────────
     ///
-    /// 建物側は②④が既に使っている値（セル 64・オフセット 135・<c>[0,269]</c>・
-    /// <c>GridSide = 270</c>）。**道路側は本 MOD で初めてなので IL で確定させた**:
+    /// The building side uses the values ② and ④ already use (64 m cells, offset 135,
+    /// <c>[0,269]</c>, <c>GridSide = 270</c>). **The road side is a first for this mod, so it was
+    /// settled in IL**:
     ///
     /// <code>
     /// NetManager.Awake         : m_segmentGrid = new ushort[72900]     (= 270 * 270)
@@ -137,72 +141,78 @@ namespace DisasterPlus.Game
     ///     z    = Mathf.Clamp((int)(pos.z / 64f + 135f), 0, 269)
     ///     idx  = z * 270 + x
     ///     segments[id].m_nextGridSegment = m_segmentGrid[idx];  m_segmentGrid[idx] = id
-    /// NetSegment.m_nextGridSegment : UInt16（public instance）
-    /// NetSegment.m_flags           : NetSegment.Flags（Created=1 / Deleted=2 /
-    ///                                Collapsed=8 / Untouchable=0x20）
-    /// NetSegment.m_middlePosition  : Vector3（NetSegment.UpdateBounds が
-    ///                                2 本のベジェの中点の平均として書く）
+    /// NetSegment.m_nextGridSegment : UInt16 (public instance)
+    /// NetSegment.m_flags           : NetSegment.Flags (Created=1 / Deleted=2 /
+    ///                                Collapsed=8 / Untouchable=0x20)
+    /// NetSegment.m_middlePosition  : Vector3 (NetSegment.UpdateBounds writes it as the mean of
+    ///                                the midpoints of the two beziers)
     /// NetManager.Awake             : m_segments = new Array16&lt;NetSegment&gt;(36864)
     /// </code>
     ///
-    /// **セルに入れる位置（両端ノードの中点）と、道路が実際に伸びている範囲は
-    /// 同じではない。** だから矩形を <c>VolcanoScan.SegmentGridMargin</c> セルだけ
-    /// 広げてから走査し、距離は**両端ノード → 中点 → 両端ノードの折れ線**で測る。
+    /// **The position that puts it into a cell (the midpoint of the two end nodes) and the extent
+    /// the road actually spans are not the same.** So the rectangle is widened by
+    /// <c>VolcanoScan.SegmentGridMargin</c> cells before sweeping, and the distance is measured
+    /// along **the polyline end node → midpoint → end node**.
     ///
-    /// ★★ <b>マスクも余白も当たり判定も、このファイルは 1 つも持っていない。</b>
-    /// 全部 <see cref="VolcanoScan"/> にあり、**準備段（<see cref="VolcanoClearing"/>）が
-    /// 同じものを使う**。全体レビュー I2 は、ここが独自にマスクを持っていたせいで
-    /// <c>Untouchable</c> と <c>Collapsed</c> を数え落とし、**不可逆の操作の直前に
-    /// 壊れる数を実際より少なく見せていた**ことを見つけている。
+    /// ★★ <b>This file holds not one mask, margin or hit test.</b>
+    /// They are all in <see cref="VolcanoScan"/>, and **the clearing stage
+    /// (<see cref="VolcanoClearing"/>) uses the same ones**. Whole-project review I2 found that
+    /// because this file held its own masks, it missed <c>Untouchable</c> and <c>Collapsed</c> in
+    /// the count and so **showed fewer things about to be destroyed than there really were,
+    /// immediately before an irreversible operation**.
     ///
-    /// **それでも長い 1 本の道路の一部だけが範囲に掛かる場合は正しく表せない。**
-    /// だからこれは概数であり、<see cref="VolcanoConfirmRows"/> はそう名乗る（設計書 §7.2）。
+    /// **Even so, it cannot correctly represent a case where only part of one long road falls
+    /// inside the range.** So this is an approximation, and
+    /// <see cref="VolcanoConfirmRows"/> says so (design doc §7.2).
     /// </summary>
     public static class VolcanoSurvey
     {
-        /// <summary>建物・道路グリッドの 1 辺のセル数（1 セル 64 m）。</summary>
+        /// <summary>Cells along one side of the building/road grid (one cell is 64 m).</summary>
         private const int GridSide = 270;
 
-        /// <summary>グリッドのセル寸法（m）。</summary>
+        /// <summary>Grid cell size (m).</summary>
         private const float GridCellSize = 64f;
 
-        /// <summary>ワールド座標 → セル添字のオフセット。</summary>
+        /// <summary>Offset from world coordinates to cell index.</summary>
         private const float GridCellOffset = 135f;
 
-        /// <summary>1 回の走査で見るグリッドセルの上限（④の <c>TyphoonWind</c> と同じ）。</summary>
+        /// <summary>Maximum grid cells examined in one sweep (the same as ④'s <c>TyphoonWind</c>).</summary>
         private const int MaxCellsPerPass = 32768;
 
-        /// <summary>1 回の走査で数える建物／道路の上限（④の <c>TyphoonWind</c> と同じ）。</summary>
+        /// <summary>Maximum buildings/roads counted in one sweep (the same as ④'s <c>TyphoonWind</c>).</summary>
         private const int MaxItemsPerPass = 2048;
 
-        /// <summary>建物の連結リストを辿る回数の上限（建物バッファの大きさ）。</summary>
+        /// <summary>Guard on how many times the building linked list is walked (the size of the building buffer).</summary>
         private const int BuildingChainGuard = 49152;
 
-        /// <summary>道路の連結リストを辿る回数の上限（<c>Array16&lt;NetSegment&gt;(36864)</c>）。</summary>
+        /// <summary>Guard on how many times the road linked list is walked (<c>Array16&lt;NetSegment&gt;(36864)</c>).</summary>
         private const int SegmentChainGuard = 36864;
 
-        // ★★ **マスクも余白も当たり判定もここには置かない**（クラス doc）。
-        //    <see cref="VolcanoScan"/> の 1 組を、準備段（VolcanoClearing）と共有する。
-        //    ②④の CandidateMask を写して Collapsed / Untouchable を弾いていた頃、
-        //    調査は「壊れる数」を実際より少なく見せていた（全体レビュー I2）。
+        // ★★ **Neither the masks nor the margins nor the hit test belong here** (class doc).
+        //    The single set in <see cref="VolcanoScan"/> is shared with the clearing stage
+        //    (VolcanoClearing).
+        //    Back when ②'s and ④'s CandidateMask was copied here and excluded Collapsed /
+        //    Untouchable, the survey showed "the number about to be destroyed" as smaller than it
+        //    really was (whole-project review I2).
 
         private static string _lastFailure;
 
         /// <summary>
-        /// 直近の <see cref="Run"/> が false を返した理由（**英語・診断用**）。
-        /// 成功したときは null。**黙って何もしないをやらない**ための口である。
+        /// Why the most recent <see cref="Run"/> returned false (**English, for diagnostics**).
+        /// null on success. This is the mouth that stops us **failing silently**.
         /// </summary>
         public static string LastFailure { get { return _lastFailure; } }
 
         /// <summary>
-        /// 1 tick で終わる調査。**何も壊さない。**
+        /// A survey that finishes in one tick. **It destroys nothing.**
         ///
-        /// 走査順は中心から外側へ（<see cref="OutwardCellOrder"/>）。上限に当たったときに
-        /// 切り捨てられるのが**いちばん外側**になるようにするためで、行優先だと
-        /// 最初に見るのが矩形の角＝中心からいちばん遠い場所になる（②の第 2 層レビュー I1）。
+        /// The sweep order is outwards from the centre (<see cref="OutwardCellOrder"/>). That is
+        /// so what gets cut off when a limit is hit is **the outermost part**; row-major would
+        /// start at the corner of the rectangle, which is the furthest point from the centre
+        /// (②'s second-layer review I1).
         ///
-        /// **分割して数え続けない。** プレイヤーを待たせるより「概数です」と言うほうが
-        /// 正しい（計画 §4.1）。上限に当たったら <c>Capped</c> を立てて打ち切る。
+        /// **Do not split it and keep counting.** Saying "this is approximate" is better than
+        /// making the player wait (plan §4.1). When a limit is hit, set <c>Capped</c> and stop.
         /// </summary>
         public static bool Run(Vec3 point, VolcanoForm form, float requestedRadius,
                                float requestedHeight, out VolcanoFootprint footprint)
@@ -225,12 +235,13 @@ namespace DisasterPlus.Game
                     return false;
                 }
 
-                // 地形高さ。**ゲームの配列から読んだだけの値**なので、
-                // 確認の行はここだけ [measured] を名乗ってよい（設計書 §7.4）。
+                // The terrain height. **A value merely read out of the game's arrays**, so this is
+                // the only place a confirmation row may claim [measured] (design doc §7.4).
                 //
-                // ★ 読めなければ**断る**（全体レビュー M14）。0 に倒すと「海面だった」と
-                //   区別が付かないまま、天井の判定も山の高さもその 0 を土台に計算され、
-                //   しかもその値に [measured] が付く。
+                // ★ If it cannot be read, **refuse** (whole-project review M14). Fall to 0 and it
+                //   is indistinguishable from "it was at sea level", while the ceiling test and
+                //   the mountain's height are both computed on top of that 0 — and that value
+                //   then gets a [measured] marker.
                 float ground = TerrainHeightSampler.Instance.SampleHeight(point.X, point.Z);
                 if (float.IsNaN(ground))
                 {
@@ -264,7 +275,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>隆起で <c>UpdateArea</c> に渡すタイル数。分割は⑤の責任である（罠 3）。</summary>
+        /// <summary>The number of tiles the uplift passes to <c>UpdateArea</c>. The splitting is ⑤'s responsibility (trap 3).</summary>
         private static int TileCountFor(float centreX, float centreZ, float radius)
         {
             int minX, minZ, maxX, maxZ;
@@ -277,16 +288,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 範囲内の建物の実数。読めなければ 0 を返し <see cref="LastFailure"/> は触らない
-        /// （建物が 0 棟の荒野と区別が付かないが、**建物グリッドが読めない環境は
-        /// 存在しない** —— <c>BuildingManager</c> はゲームモードで必ず在る）。
+        /// The real number of buildings in range. If it cannot be read it returns 0 and leaves
+        /// <see cref="LastFailure"/> untouched (indistinguishable from empty wilderness with 0
+        /// buildings, but **there is no environment where the building grid cannot be read** —
+        /// <c>BuildingManager</c> always exists in game mode).
         /// </summary>
         private static int CountBuildings(Vec3 centre, float radius, out bool capped)
         {
             capped = false;
 
-            // ★ Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-            //    new GameObject を走らせる main スレッド専用 API なので exists で先に見る。
+            // ★ Singleton<T>.instance is a main-thread-only API that runs FindObjectOfType and
+            //    new GameObject when sInstance is null, so check exists first.
             if (!Singleton<BuildingManager>.exists) return 0;
 
             var bm = Singleton<BuildingManager>.instance;
@@ -333,11 +345,12 @@ namespace DisasterPlus.Game
 
                 while (id != 0 && id < buildings.Length)
                 {
-                    // ★ 次の ID は**行動する前に**控える（②④と同じ）。ここは読むだけだが、
-                    //    形を崩すと T5 が同じファイルの隣に破壊を書くときに崩れたまま写る。
+                    // ★ Note the next ID **before acting** (the same as ② and ④). This only reads,
+                    //    but break the shape here and it gets copied, broken, when T5 writes the
+                    //    destruction next to the same file.
                     ushort next = buildings[id].m_nextGridBuilding;
 
-                    // ★ 述語は準備段とまったく同じもの（VolcanoScan）。
+                    // ★ The predicate is exactly the clearing stage's (VolcanoScan).
                     if (VolcanoScan.IsCandidate(buildings[id].m_flags)
                         && VolcanoScan.BuildingInside(buildings[id].m_position, origin,
                                                       radiusSquared))
@@ -354,9 +367,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 範囲内の道路セグメントの実数。**読めなければ -1**（クラス doc の
-        /// <c>SegmentCount</c>）。<b>数えられないことと壊せないことは別の話であり、
-        /// 壊せるかどうかは T5 が決める</b>ので、ここが -1 でも設置は止めない。
+        /// The real number of road segments in range. **-1 if it cannot be read** (see
+        /// <c>SegmentCount</c> in the class doc). <b>Not being able to count them and not being
+        /// able to destroy them are different matters, and whether they can be destroyed is T5's
+        /// decision</b>, so a -1 here does not stop the placement.
         /// </summary>
         private static int CountSegments(Vec3 centre, float radius, out bool capped)
         {
@@ -371,12 +385,15 @@ namespace DisasterPlus.Game
             var grid = nm.m_segmentGrid;
             if (segments == null || grid == null) return -1;
 
-            // ★ 実測した長さと合わなければ数えない（推測で走らない。設計書 §6）。
-            //    合わないまま z*270+x で引くと、まったく別の場所の道路を数える。
+            // ★ Do not count if it does not match the measured length (do not run on a guess.
+            //    Design doc §6).
+            //    Index with z*270+x when it does not match and you count roads somewhere else
+            //    entirely.
             if (grid.Length != GridSide * GridSide) return -1;
 
-            // ★ ノードのバッファは折れ線判定に使う。読めなければ null のままで、
-            //   VolcanoScan が中点 1 点の判定に落ちる（準備段もまったく同じ）。
+            // ★ The node buffer is used for the polyline test. If it cannot be read it stays null
+            //   and VolcanoScan falls back to the single-midpoint test (the clearing stage does
+            //   exactly the same).
             NetNode[] nodes = VolcanoScan.NodeBuffer(nm);
 
             int minX, maxX, minZ, maxZ, centreX, centreZ;
@@ -417,7 +434,7 @@ namespace DisasterPlus.Game
                 {
                     ushort next = segments[id].m_nextGridSegment;
 
-                    // ★ 述語は準備段とまったく同じもの（VolcanoScan）。
+                    // ★ The predicate is exactly the clearing stage's (VolcanoScan).
                     if (VolcanoScan.IsCandidate(segments[id].m_flags)
                         && VolcanoScan.SegmentInside(segments, nodes, id, origin, radius))
                     {
@@ -433,9 +450,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 走査する矩形とリングの中心セル。<paramref name="marginCells"/> は
-        /// 道路側だけ 0 でない（クラス doc）。矩形と同じクランプを中心にも掛けるので、
-        /// 中心がマップの外でもグリッドの中に落ちる。
+        /// The rectangle to sweep and the centre cell of the rings. <paramref name="marginCells"/>
+        /// is non-zero only on the road side (class doc). The same clamp as the rectangle is
+        /// applied to the centre too, so even a centre outside the map lands inside the grid.
         /// </summary>
         private static void RectFor(Vec3 centre, float radius, int marginCells,
                                     out int minX, out int maxX, out int minZ, out int maxZ,

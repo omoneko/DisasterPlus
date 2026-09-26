@@ -3,109 +3,129 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 山頂の火口。**高さプロファイルの一部**であって、あとから彫る穴ではない。
+    /// The summit crater. **Part of the height profile**, not a hole carved afterwards.
     ///
-    /// ── なぜ <c>MakeCrater</c> をやめたのか（2026-08-22、実機の指摘①）────────────
+    /// ── Why <c>MakeCrater</c> was dropped (2026-08-22, in-game report ①) ────────────
     ///
-    /// 所有者の指摘:
+    /// The owner's report:
     ///
-    /// > 噴火口が一番最後に生成されるのではなく最初から窪みとして生成される方がいいと思います。
+    /// > I think it would be better if the crater were generated as a depression from the
+    /// > start, rather than being generated last of all.
     ///
-    /// 以前は隆起の**最後に 1 回だけ** <c>DisasterHelpers.MakeCrater</c> を呼んでいた。
-    /// あれは先頭で <c>TerrainModify.RefreshAllModifications()</c> を呼ぶ（IL 事実 §C-8）ので
-    /// **呼ぶたびに地形の強制フラッシュが 1 回走り**、毎 tick の経路には置けない。
-    /// だから「最後に 1 回」だったのであって、**それが窪みの生まれる時刻を決めていた**。
+    /// It used to call <c>DisasterHelpers.MakeCrater</c> **once, at the end** of the uplift.
+    /// That method calls <c>TerrainModify.RefreshAllModifications()</c> at its top (IL fact
+    /// §C-8), so **every call forces one full terrain flush**, and it cannot be put on a
+    /// per-tick path. That is why it was "once at the end" — and **that is what decided the
+    /// moment the depression came into existence**.
     ///
-    /// 火口を<b>プロファイルそのものに畳み込む</b>と、この制約はまるごと消える。
-    /// 隆起は毎 tick「その時刻における絶対目標」を書いているので（<see cref="UpliftSchedule"/>）、
-    /// 目標の形に最初から窪みが在れば、窪みも山と一緒に育つ。
-    /// <c>MakeCrater</c> は⑤のどこからも呼ばれなくなった。
+    /// Fold the crater <b>into the profile itself</b> and the constraint disappears
+    /// entirely. The uplift writes "the absolute target at this moment" every tick (see
+    /// <see cref="UpliftSchedule"/>), so if the depression is in the target shape from the
+    /// start, the depression grows along with the mountain.
+    /// Nothing in ⑤ calls <c>MakeCrater</c> any more.
     ///
-    /// ── 2 つの硬い制約は掛け算と <c>min</c> だけで守る ────────────────────
+    /// ── The two hard constraints are kept with nothing but a multiply and a <c>min</c> ─────
     ///
     /// <list type="number">
-    /// <item><b>半径 R を 1 mm も超えない</b> —— 準備（破壊）が届いていない場所を持ち上げると
-    ///   道路がセルを引き戻し、山の中に平らな溝が残る（設計書 §1.2）。
-    ///   火口は <c>min</c> でしか働かないので、R の外の 0 は 0 のままである。</item>
-    /// <item><b>最終高 H を 1 mm も超えない</b> —— 天井 1023.98 m（§C-10）と
-    ///   <see cref="VolcanoShape.HeightFor"/> が H を基準に考えている。
-    ///   <see cref="CeilingMetres"/> は必ず H 以下なので、
-    ///   <c>min(起伏, 天井)</c> も必ず H 以下である。</item>
+    /// <item><b>Never exceed the radius R by a single millimetre</b> — raise a place the
+    ///   preparation (the destruction) has not reached and a road pulls the cell back down,
+    ///   leaving a flat trench through the mountain (design doc §1.2).
+    ///   The crater only ever works through <c>min</c>, so the 0 outside R stays 0.</item>
+    /// <item><b>Never exceed the final height H by a single millimetre</b> — the ceiling is
+    ///   1023.98 m (§C-10) and <see cref="VolcanoShape.HeightFor"/> reasons in terms of H.
+    ///   <see cref="CeilingMetres"/> is always at most H, so <c>min(relief, ceiling)</c> is
+    ///   always at most H too.</item>
     /// </list>
     ///
-    /// ── ★★ 円錐は「火口の縁で H に届く」ように立てる（<see cref="SummitScale"/>）────
+    /// ── ★★ The cone is raised to "reach H at the crater rim" (<see cref="SummitScale"/>) ───────
     ///
-    /// 素朴に「円錐から窪みを引く」と、**成層火山では火口が消える**。
-    /// 円錐は火口半径 <c>cr = 0.12R</c> のあいだに <c>H × 0.12</c>（既定で 72 m）下がるのに、
-    /// 火口の深さは <c>CraterDepthOf</c> の上限で 60 m しかない。引き算では
-    /// 中心が縁より高いままになり、窪みではなく**丸い頂**になる（実測で確認した）。
+    /// Naively "subtracting a depression from a cone" makes **the crater disappear on a
+    /// stratovolcano**. The cone drops <c>H × 0.12</c> (72 m by default) across the crater
+    /// radius <c>cr = 0.12R</c>, while the crater's depth is at most 60 m under
+    /// <c>CraterDepthOf</c>. Subtracting leaves the centre still higher than the rim, so you
+    /// get **a rounded summit**, not a depression (confirmed by measurement).
     ///
-    /// 正しい形は「火口は円錐の頂を切り落とした跡である」という現実そのもので、
-    /// **縁の高さが山の高さ**である。したがって円錐は
+    /// The correct shape is reality itself — "a crater is the scar left where the cone's
+    /// summit was cut off" — and **the rim's height is the mountain's height**. So the cone
+    /// is raised to
     ///
     /// <code>
     /// coneHeight = H / profileFraction(cr)      profileFraction = VolcanoShape.ProfileAt(form, cr, R, 1)
     /// </code>
     ///
-    /// まで立てて、その内側を天井で削り落とす。結果の最大値は <b>d = cr でちょうど H</b> で、
-    /// 火口の底は <c>H − depth</c> である。仮想の頂（<c>coneHeight</c>）は地形に 1 セルも書かれない。
-    /// 成層火山で <c>coneHeight = 1.136 H</c>、鐘状で 1.029 H、盾状で 1.0004 H である
-    /// （盾状の頂はもともと平らなので、ほとんど変わらない）。
+    /// and everything inside it is shaved off by the ceiling. The result's maximum is
+    /// <b>exactly H at d = cr</b>, and the crater floor is <c>H − depth</c>. The virtual
+    /// summit (<c>coneHeight</c>) is never written to a single cell of terrain.
+    /// It is <c>coneHeight = 1.136 H</c> for a stratovolcano, 1.029 H for a lava dome and
+    /// 1.0004 H for a shield volcano (a shield's summit is flat to begin with, so it barely
+    /// changes).
     ///
-    /// 山肌の傾斜はそのぶん急になる。**これは副作用ではなく同じ事実の別の面**で、
-    /// 火口を持つ円錐の斜面は、切り落とされた頂へ向かって延びている。
+    /// The flanks get correspondingly steeper. **That is not a side effect but another face
+    /// of the same fact**: the slopes of a cone with a crater extend up towards the summit
+    /// that was cut off.
     ///
-    /// ── 育ち方（隆起と噛み合っていること）──────────────────────────
+    /// ── How it grows (and that it meshes with the uplift) ──────────────────────────
     ///
-    /// <c>UpliftSchedule.GrowthMetresAt(profile, H, p) = max(0, profile − H(1−p))</c> なので:
+    /// Since <c>UpliftSchedule.GrowthMetresAt(profile, H, p) = max(0, profile − H(1−p))</c>:
     ///
     /// <code>
-    /// 縁   growth = H·p                    （プロファイルが H だから）
-    /// 底   growth = max(0, H·p − depth)    （プロファイルが H − depth だから）
+    /// rim    growth = H·p                    (because the profile is H)
+    /// floor  growth = max(0, H·p − depth)    (because the profile is H − depth)
     /// </code>
     ///
-    /// つまり<b>縁が先に出て、底は depth だけ遅れて追う</b>。窪みの深さは
-    /// <c>min(H·p, depth)</c> で、進捗 <c>depth/H</c>（既定の成層火山で 10 %）で満杯になり、
-    /// **そこから先はずっと同じ深さのまま山と一緒に上がる**。
-    /// 「最初から窪みとして在る」は、この 1 行の式が構造的に保証している。
+    /// In other words <b>the rim comes up first and the floor follows, lagging by depth</b>.
+    /// The depression's depth is <c>min(H·p, depth)</c>, which fills up at progress
+    /// <c>depth/H</c> (10% for the default stratovolcano), and **from there on it rises
+    /// with the mountain at a constant depth**.
+    /// "It is there as a depression from the start" is structurally guaranteed by that one
+    /// line of arithmetic.
     ///
-    /// ★ <see cref="FloorMetresAt"/> が返すのがその底の高さで、**噴出口（炎・噴煙・噴石）は
-    ///   これに乗せる**。山頂に乗せると、育っているあいだ中ずっと窪みの上に浮く。
+    /// ★ What <see cref="FloorMetresAt"/> returns is the height of that floor, and **the
+    ///   vents (flames, ash plume, ejecta) sit on it**. Sit them on the summit and they
+    ///   float above the depression for the whole time it is growing.
     /// </summary>
     public static class VolcanoCrater
     {
         /// <summary>
-        /// 火口底が平らな範囲（火口半径に対する比）。ここから縁までを滑らかに立ち上げる。
-        /// **平らな底が要る** —— 噴出口の炎は半径を持つ円盤なので、底が椀だと縁で地面に潜る。
+        /// The range over which the crater floor is flat (as a fraction of the crater
+        /// radius). From here out to the rim it rises smoothly.
+        /// **A flat floor is required** — the vent's flame is a disc with a radius, so with
+        /// a bowl-shaped floor it sinks into the ground at its edges.
         /// </summary>
         public const float FloorFraction = 0.55f;
 
         /// <summary>
-        /// 火口の中で山肌の起伏をどこまで効かせるか（0 = 滑らかな円錐そのもの）。
+        /// How far the flank relief is allowed to act inside the crater (0 = the smooth cone
+        /// itself).
         ///
-        /// ★ **これが無いと窪みが浅くなる。** 16 m 格子で実測すると、起伏（強さ 1）は
-        ///   火口の縁を 20〜30 m 削り、既定の成層火山で <b>60 m の窪みが 32 m に減る</b>
-        ///   （<c>tools/VolcanoPreview</c> の crater 表）。底のほうは天井が平らに
-        ///   クランプするので削られず、**差だけが消える**。
+        /// ★ **Without this the depression gets shallow.** Measured on a 16 m grid, the
+        ///   relief (at strength 1) shaves 20-30 m off the crater rim, which on the default
+        ///   stratovolcano <b>reduces a 60 m depression to 32 m</b> (see the crater table in
+        ///   <c>tools/VolcanoPreview</c>). The floor is not shaved, because the ceiling
+        ///   clamps it flat, so **only the difference disappears**.
         ///
-        /// 物理的にも縁の内側は削れていない側が正しい —— 斜面を刻む放射谷は
-        /// 火口の縁から下で始まるものである。
+        /// Physically the un-shaved version is right too — the radial gullies that score the
+        /// flanks begin below the crater rim.
         /// </summary>
         public const float ReliefInsideCrater = 0.35f;
 
-        /// <summary>起伏が満額に戻る距離（火口半径に対する比）。縁で段差を作らないため。</summary>
+        /// <summary>The distance over which the relief returns to full (as a fraction of the
+        /// crater radius). So as not to leave a step at the rim.</summary>
         public const float ReliefBlendRadiusFactor = 1.8f;
 
         /// <summary>
-        /// 円錐を立て直す倍率の上限。**形態の帯（<c>MinRadiusOf</c>）では届かない値**だが、
-        /// <c>.cgs</c> は手で編集されうるので、山肌が垂直に立つ前にここで止める。
+        /// The cap on the factor by which the cone is re-raised. **It is a value the bands
+        /// of the forms (<c>MinRadiusOf</c>) never reach**, but <c>.cgs</c> can be edited by
+        /// hand, so we stop here before the flanks go vertical.
         /// </summary>
         public const float MaxSummitScale = 2f;
 
         /// <summary>
-        /// 火口の縁が山の高さ H に届くように円錐を立てる倍率（&gt;= 1）。クラス doc の式。
-        /// **火口が成立しない入力（R &lt;= 0 / H &lt;= 0 / cr &gt;= R / NaN）では 1 を返す** ——
-        /// そのとき <see cref="CeilingMetres"/> も H を返すので、形は今までの円錐そのものになる。
+        /// The factor (&gt;= 1) that raises the cone so the crater rim reaches the
+        /// mountain's height H. The formula is in the class doc.
+        /// **For input where a crater cannot exist (R &lt;= 0 / H &lt;= 0 / cr &gt;= R /
+        /// NaN) it returns 1** — <see cref="CeilingMetres"/> then returns H as well, so the
+        /// shape is the plain cone we had before.
         /// </summary>
         public static float SummitScale(VolcanoForm form, float radiusMetres)
         {
@@ -114,7 +134,7 @@ namespace DisasterPlus.Core.Volcano
             float crater = VolcanoShape.CraterRadiusOf(radiusMetres);
             if (!(crater > 0f) || crater >= radiusMetres) return 1f;
 
-            // 単位高さの円錐が火口半径のところで残している割合。
+            // The fraction a unit-height cone still has left at the crater radius.
             float fraction = VolcanoShape.ProfileAt(form, crater, radiusMetres, 1f);
             if (IsBad(fraction) || fraction <= 0f) return 1f;
 
@@ -124,8 +144,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 起伏へ渡す「仮想の頂の高さ」（m）。**地形には 1 セルも書かれない**
-        /// （内側は <see cref="CeilingMetres"/> が必ず削り落とす）。
+        /// The "virtual summit height" (m) handed to the relief. **It is never written to a
+        /// single cell of terrain** (everything inside is always shaved off by
+        /// <see cref="CeilingMetres"/>).
         /// </summary>
         public static float ConeHeightMetres(VolcanoForm form, float radiusMetres,
                                              float heightMetres)
@@ -135,10 +156,13 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// この距離で許される高さの上限（m）。中心から <see cref="FloorFraction"/> ×火口半径 までは
-        /// <c>H − depth</c>、そこから火口半径で <c>H</c> へ滑らかに戻り、**外はずっと H**。
+        /// The greatest height allowed at this distance (m). Out to
+        /// <see cref="FloorFraction"/> × the crater radius from the centre it is
+        /// <c>H − depth</c>, from there it returns smoothly to <c>H</c> at the crater
+        /// radius, and **outside that it is H throughout**.
         ///
-        /// **必ず <c>[0, heightMetres]</c> を返す。** これがクラス doc の制約 2 の全てである。
+        /// **It always returns a value in <c>[0, heightMetres]</c>.** That is the whole of
+        /// constraint 2 from the class doc.
         /// </summary>
         public static float CeilingMetres(float distanceMetres, float radiusMetres,
                                           float heightMetres)
@@ -159,12 +183,14 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// **⑤が地形へ書く最終形はこの 1 本である**（<c>Game/Volcano/VolcanoUplift</c> と
-        /// <c>tools/VolcanoPreview</c> の両方がここを呼ぶ。式を 2 か所に書かないこと）。
+        /// **This single method is the final shape ⑤ writes to the terrain** (both
+        /// <c>Game/Volcano/VolcanoUplift</c> and <c>tools/VolcanoPreview</c> call it; do not
+        /// write the formula in two places).
         ///
-        /// 起伏（<see cref="VolcanoRelief"/>）を**仮想の頂の高さ**で評価し、火口の天井で
-        /// 切り落とす。返り値は必ず <c>[0, heightMetres]</c> で、
-        /// <c>√(dx²+dz²) &gt;= radiusMetres</c> なら必ずきっかり 0 である。
+        /// It evaluates the relief (<see cref="VolcanoRelief"/>) at the **virtual summit
+        /// height** and cuts it off with the crater's ceiling. The return value is always in
+        /// <c>[0, heightMetres]</c>, and is always exactly 0 when
+        /// <c>√(dx²+dz²) &gt;= radiusMetres</c>.
         /// </summary>
         public static float ProfileAt(VolcanoRelief relief, float dx, float dz,
                                       float radiusMetres, float heightMetres)
@@ -180,10 +206,11 @@ namespace DisasterPlus.Core.Volcano
 
             float d = (float)Math.Sqrt(dx * dx + dz * dz);
 
-            // ★ 火口の中では起伏を薄める（<see cref="ReliefInsideCrater"/>）。
-            //   起伏は必ず削る向きにしか働かない（あちらのクラス doc）ので、
-            //   薄めた値は必ず raised と滑らかな円錐のあいだに入る —— つまり
-            //   **上限は滑らかな円錐のまま**で、制約 2 は 1 mm も緩まない。
+            // ★ Dilute the relief inside the crater (<see cref="ReliefInsideCrater"/>).
+            //   The relief only ever works in the direction of shaving away (see its own
+            //   class doc), so the diluted value always lands between raised and the smooth
+            //   cone — in other words **the upper bound is still the smooth cone**, and
+            //   constraint 2 is not relaxed by a single millimetre.
             float crater = VolcanoShape.CraterRadiusOf(radiusMetres);
             if (crater > 0f && d < crater * ReliefBlendRadiusFactor)
             {
@@ -201,11 +228,13 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 今この瞬間の火口底の盛り上がり（m。元の地形高さからの相対量）。
-        /// <paramref name="summitMetres"/> は縁の盛り上がり（<c>VolcanoUplift.SummitMetres</c>）。
+        /// How far the crater floor has risen at this moment (m, relative to the original
+        /// terrain height).
+        /// <paramref name="summitMetres"/> is how far the rim has risen
+        /// (<c>VolcanoUplift.SummitMetres</c>).
         ///
-        /// **噴出口の Y はこれで決める。** 縁に乗せると、育っているあいだ中ずっと
-        /// 炎が窪みの上に浮いて見える（実機の指摘②）。
+        /// **This is what decides the vents' Y.** Sit them on the rim and the flames appear
+        /// to float above the depression for the whole time it is growing (in-game report ②).
         /// </summary>
         public static float FloorMetresAt(float summitMetres, float heightMetres)
         {
@@ -219,8 +248,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 火口が満杯の深さに達したか（＝「窪みが完成した」と名乗ってよいか）。
-        /// 縁が <c>depth</c> 上がった時点である。
+        /// Whether the crater has reached its full depth (i.e. whether we may claim "the
+        /// depression is complete"). That is the point at which the rim has risen by
+        /// <c>depth</c>.
         /// </summary>
         public static bool FullDepthReached(float summitMetres, float heightMetres)
         {

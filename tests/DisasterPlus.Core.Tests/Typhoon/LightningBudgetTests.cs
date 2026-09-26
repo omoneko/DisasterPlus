@@ -8,8 +8,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheQueueCapacityIsTheNumberTheGameActuallyUses()
         {
-            // §A-3 の ldc.i4.s 20。ここを勝手に増やすと、超過した要求が
-            // 黙って捨てられる状態に自分から突っ込むことになる。
+            // The ldc.i4.s 20 of §A-3. Raise this on our own and we walk straight into the
+            // state where requests over the limit are silently discarded.
             Assert.Equal(20, LightningBudget.QueueCapacity);
             Assert.True(LightningBudget.MinFreeSlots > 0,
                 "some slots must always be left for the game itself");
@@ -35,15 +35,15 @@ namespace DisasterPlus.Core.Tests.Typhoon
             const uint act = 1000u, dur = 8000u;
             Assert.Equal(0, LightningBudget.VanillaRampCount(act - 1u, act, dur, 255));
             Assert.Equal(0, LightningBudget.VanillaRampCount(act + dur + 1u, act, dur, 255));
-            // 持続時間が読めていなければ 0（＝バニラのぶんを見積もれない）。
+            // 0 when the duration cannot be read (i.e. vanilla's share cannot be estimated).
             Assert.Equal(0, LightningBudget.VanillaRampCount(act + 100u, act, 0u, 255));
         }
 
         [Fact]
         public void TheVanillaReserveIsTheUpperBoundOfTheDrawNotTheAverage()
         {
-            // n = r.Int32(max(1, c/20), max(1, 1 + c/10)) の**上限**を取る。
-            // 平均で見積もると、運が悪い step にちょうど 20 を超える。
+            // Take the **upper bound** of n = r.Int32(max(1, c/20), max(1, 1 + c/10)).
+            // Estimate with the mean instead and an unlucky step goes just over 20.
             Assert.Equal(1, LightningBudget.VanillaMaxStrikes(0));
             Assert.Equal(1 + 255 / 10, LightningBudget.VanillaMaxStrikes(255));
             Assert.True(LightningBudget.VanillaMaxStrikes(255)
@@ -71,20 +71,21 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void AnEmptyQueueAlwaysLeavesRoomForAtLeastOneStrike()
         {
-            // ここが 0 になると、雨 > 0.8 でキューが空になり、
-            // ゲームが勝手に雷雨災害を作り始める（§A-3）。
+            // If this becomes 0, the queue empties while rain > 0.8 and the game starts
+            // creating thunderstorm disasters of its own accord (§A-3).
             Assert.True(LightningBudget.Allowance(0, LightningBudget.VanillaMaxStrikes(0)) >= 1);
         }
 
         [Fact]
         public void AboveAKnownIntensityTheHostStormTakesTheWholeBudget()
         {
-            // 全体レビュー I4。**この境界は設定できる強度の範囲の中にある**
-            // （スライダーは 10〜255）ので、プレイヤーは黙って T6 の壁雲散布を
-            // 失いうる。定数が式からずれないよう、両側を式から作って固定する。
+            // Overall review I4. **This threshold lies inside the range of intensities that
+            // can be set** (the slider goes 10–255), so a player can silently lose T6's
+            // eyewall scatter. To stop the constant drifting away from the formula, both
+            // sides are built from the formula and pinned down.
             const uint act = 1000u, dur = 80000u;
 
-            // ランプの頂点を踏むフレーム（c が 100 で頭打ちになる十分後ろ）。
+            // A frame that lands on the peak of the ramp (far enough in that c caps at 100).
             uint peak = act + dur / 2u;
 
             int justBelow = LightningBudget.VanillaMaxStrikes(
@@ -97,7 +98,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
             Assert.False(LightningBudget.YieldsCompletely(justBelow));
             Assert.True(LightningBudget.YieldsCompletely(atThreshold));
 
-            // 「取り分 0」は取り分 0 であって、負でもエラーでもない。
+            // "A share of 0" is a share of 0 —— neither negative nor an error.
             Assert.Equal(0, LightningBudget.Allowance(0, atThreshold));
             Assert.True(LightningBudget.Allowance(0, justBelow) >= 1);
         }
@@ -105,9 +106,10 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void YieldingCompletelyIgnoresTheModsOwnStock()
         {
-            // 在庫で一時的に 0 になっている状態（次の tick で戻る）と、
-            // 宿主の取り分だけで 0 になっている状態（強度を下げるまで戻らない）を
-            // 混ぜないための性質。表示側はこの区別に乗っている。
+            // The property that keeps two states apart: being temporarily at 0 because of
+            // our own stock (which recovers on the next tick), and being at 0 purely
+            // because of the host's share (which does not recover until the intensity is
+            // lowered). The display side rests on this distinction.
             Assert.Equal(0, LightningBudget.Allowance(18, 0));
             Assert.False(LightningBudget.YieldsCompletely(0));
         }
@@ -122,10 +124,10 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void StrikesExpireExactlyWhenTheGameDropsThem()
         {
-            // §A-3: sf + 45 < m_currentFrameIndex で ReleaseInstance される。
+            // §A-3: ReleaseInstance happens when sf + 45 < m_currentFrameIndex.
             Assert.False(LightningBudget.HasExpired(1000u, 1045u));
             Assert.True(LightningBudget.HasExpired(1000u, 1046u));
-            // まだ来ていない予定は期限切れではない。
+            // A scheduled strike that has not come round yet has not expired.
             Assert.False(LightningBudget.HasExpired(2000u, 1000u));
         }
     }

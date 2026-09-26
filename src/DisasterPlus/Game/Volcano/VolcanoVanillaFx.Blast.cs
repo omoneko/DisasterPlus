@@ -3,40 +3,41 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="VolcanoVanillaFx"/> のうち<b>爆発（一発もの）と噴石（飛ぶ岩）</b>の分。
-    /// **main スレッド専用。**
+    /// The part of <see cref="VolcanoVanillaFx"/> covering <b>the blast (a one-shot) and the
+    /// ejecta (the flying rocks)</b>.
+    /// **Main thread only.**
     ///
-    /// ── ★★ 爆発だけは「複製しない」（ここが他の 4 つと違う唯一の点）─────────
+    /// ── ★★ the blast alone is "not cloned" (the one way it differs from the other four) ────
     ///
-    /// 爆発は <c>EffectManager.DispatchEffect</c> で積む一発ものである。あれは
-    /// **キューに積むだけで、実際に描くのはバニラがあとのフレームで**行う（IL 事実 §C）。
-    /// つまり⑤が複製を <c>DispatchEffect</c> して、その直後にレベルアンロードで
-    /// 複製を <c>Destroy</c> すると、**バニラの中で破棄済みオブジェクトを触ることになる。**
-    /// だから積むのは <b>ゲーム自身のプレハブ（<c>Medium Explosion Particles</c> そのもの）</b>
-    /// だけにする。あれはゲームが持っていて、⑤が消すことは決して無い。
+    /// The blast is a one-shot queued with <c>EffectManager.DispatchEffect</c>. That
+    /// **only queues it; vanilla does the actual drawing on a later frame** (IL fact §C).
+    /// So if ⑤ were to <c>DispatchEffect</c> a clone and then <c>Destroy</c> that clone on level
+    /// unload immediately afterwards, **vanilla would be touching a destroyed object.**
+    /// So what is queued is only <b>the game's own prefab (<c>Medium Explosion Particles</c>
+    /// itself)</b>. That one belongs to the game and ⑤ will never destroy it.
     ///
-    /// ★ 1 バイトも書き換えないので、共有しても安全である（§D-5 の規律）。
-    ///   <c>m_renderDuration</c> が 1.0 秒あるので、**1 回積むだけで
-    ///   <c>m_intensityCurve</c> に沿って減衰して消える** —— 一発ものはこれが正解。
+    /// ★ Not one byte of it is rewritten, so sharing is safe (the discipline of §D-5).
+    ///   Its <c>m_renderDuration</c> is 1.0 seconds, so **queuing it once is enough: it decays
+    ///   away along <c>m_intensityCurve</c>** — which is the right answer for a one-shot.
     ///
-    /// ── 飛ぶ岩は複製する（尾を引かせたい）───────────────────────────
+    /// ── the flying rocks are cloned (we want them to leave a trail) ────────────────────────
     ///
-    /// 岩そのものの位置は <c>Core/Volcano/EjectaBallistics</c> が決め、こちらは
-    /// **その 1 点に小さな粒子の玉を毎フレーム湧かせる**（継続モード）。
-    /// 素の <c>Medium Explosion Particles</c> は初速 100–150 m/s で四方へ散るので、
-    /// **玉ではなく破裂**に見える。複製して初速を落とし、寿命を短くし、
-    /// 重力を弱く効かせて<b>飛跡</b>にする。
+    /// The rocks' positions are decided by <c>Core/Volcano/EjectaBallistics</c>, and this code
+    /// **wells a small ball of particles up at that one point every frame** (continuous mode).
+    /// Stock <c>Medium Explosion Particles</c> scatters in all directions at 100–150 m/s, so it
+    /// reads as **a burst rather than a ball**. Clone it, drop the initial speed, shorten the
+    /// lifetime and apply weak gravity to make it <b>a trail</b>.
     /// </summary>
     internal static partial class VolcanoVanillaFx
     {
-        /// <summary>飛ぶ岩の尾。爆発と同じプレハブから作る。**基本ゲーム。**</summary>
+        /// <summary>The flying rocks' trail. Built from the same prefab as the blast. **Base game.**</summary>
         internal const string BlockName = EjectaName;
 
         private static int _blastMiss;
         private static bool _blastMissLogged;
         private static bool _blastOk;
 
-        // ★ 配列にしない。参照 1 個ずつ。
+        // ★ Not an array. One reference each.
         private static GameObject _blockObject;
         private static ParticleEffect _blockClone;
         private static int _blockMiss;
@@ -46,22 +47,22 @@ namespace DisasterPlus.Game
         private static bool _blockCloned;
 
         /// <summary>
-        /// 爆発（<c>DispatchEffect</c> で積む一発もの）。**ゲーム自身のプレハブそのもの**で、
-        /// 複製ではない（クラス doc）。引けなければ null ——
-        /// **その 1 つを出さないだけで、噴火は続く。**
+        /// The blast (the one-shot queued with <c>DispatchEffect</c>). **The game's own prefab
+        /// itself**, not a clone (class doc). null if it cannot be looked up —
+        /// **that one thing is simply not emitted, and the eruption carries on.**
         /// </summary>
         internal static ParticleEffect BlastOneShot()
         {
             ParticleEffect source = Source(EjectaName, ref _blastMiss, ref _blastMissLogged);
 
-            // ★ 初期化されていないプレハブを描画へ渡さない（Ready の doc）。
-            //   DispatchEffect 経由でも最後に走るのは同じ EmitParticles である。
+            // ★ Do not hand an uninitialised prefab to the drawing path (the doc of Ready).
+            //   Even via DispatchEffect, what runs at the end is the same EmitParticles.
             ParticleEffect resolved = source != null && Ready(source) ? source : null;
             _blastOk = resolved != null;
             return resolved;
         }
 
-        /// <summary>飛んでいる岩の尾。**複製**（引けなければ元のプレハブ、それも駄目なら null）。</summary>
+        /// <summary>The trail of a rock in flight. **A clone** (the original prefab if it cannot be cloned, and null if that fails too).</summary>
         internal static ParticleEffect FlyingBlock()
         {
             ParticleEffect resolved = ResolveBlock();
@@ -74,8 +75,9 @@ namespace DisasterPlus.Game
         {
             if (_blockClone != null) return _blockClone;
 
-            // ★ 間引きカウンタは爆発とも噴石とも別にする（共有すると同じフレームで
-            //   複数回減って RetryFrames が実質割れる）。
+            // ★ Keep the throttle counter separate from both the blast's and the ejecta's
+            //   (share them and they are decremented several times in the same frame, effectively
+            //   dividing RetryFrames down).
             ParticleEffect source = Source(BlockName, ref _blockMiss, ref _blockMissLogged);
             if (source == null) return null;
 
@@ -97,11 +99,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 飛ぶ岩の複製。**その場に留まる小さな熱い玉**にする ——
-        /// 動かすのは⑤（<c>Core/Volcano/EjectaBallistics</c> が出した位置に
-        /// 毎フレーム湧かせ直す）なので、粒子自身は飛ばなくてよい。
+        /// The clone for the flying rocks. Make it **a small hot ball that stays where it is** —
+        /// ⑤ does the moving (re-welling it up every frame at the position
+        /// <c>Core/Volcano/EjectaBallistics</c> produced), so the particles themselves do not need
+        /// to fly.
         ///
-        /// ★ <c>emission.rateOverTime</c> を 0 にしないこと（Clones のクラス doc）。
+        /// ★ Do not set <c>emission.rateOverTime</c> to 0 (the class doc of Clones).
         /// </summary>
         private static GameObject CloneFlyingBlock(ParticleEffect source)
         {
@@ -112,7 +115,8 @@ namespace DisasterPlus.Game
             var particles = go.GetComponent<ParticleSystem>();
             if (effect == null || particles == null) return Reject(go);
 
-            // 尾。1 秒足らずで消えるので、湧いた場所に短く残って線に見える。
+            // The trail. It disappears in under a second, so it lingers briefly where it was
+            // welled up and reads as a line.
             effect.m_minLifeTime = 0.35f;
             effect.m_maxLifeTime = 0.95f;
             effect.m_minStartSpeed = 1.5f;
@@ -120,7 +124,8 @@ namespace DisasterPlus.Game
             effect.m_minSpawnAngle = 0f;
             effect.m_maxSpawnAngle = 180f;
             effect.m_maxVisibilityDistance = 10000f;
-            // ★ 素は 1.0 秒。継続モードで自分で窓を作るので 0 に落とす。
+            // ★ Stock is 1.0 seconds. We make the window ourselves in continuous mode, so drop it
+            //   to 0.
             effect.m_renderDuration = 0f;
 
             var main = particles.main;
@@ -137,8 +142,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 爆発と噴石の後始末。**<see cref="VolcanoVanillaFx.Destroy"/> から呼ぶ。**
-        /// 爆発側は借りているだけなので参照すら持たない（数える旗を戻すだけ）。
+        /// Cleaning up after the blast and the ejecta. **Called from
+        /// <see cref="VolcanoVanillaFx.Destroy"/>.**
+        /// The blast side is only borrowed, so we do not even hold a reference (all that happens
+        /// is resetting the counting flags).
         /// </summary>
         private static void DestroyBlast()
         {
@@ -149,10 +156,10 @@ namespace DisasterPlus.Game
             _blastOk = false;
             _blockOk = false;
             _blockCloned = false;
-            // ★ *MissLogged は戻さない（ゲームのビルドに対する事実である）。
+            // ★ The *MissLogged flags are not reset (they are facts about the build of the game).
         }
 
-        /// <summary>診断に出す 1 行の一部（**英語**）。sim スレッドから読む平の値だけ。</summary>
+        /// <summary>Part of the one line reported in the diagnostics (**English**). Only plain values read from the sim thread.</summary>
         internal static string BlastDetail
         {
             get

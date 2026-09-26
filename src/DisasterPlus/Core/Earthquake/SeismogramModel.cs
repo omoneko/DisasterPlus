@@ -3,128 +3,150 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// **P 波・S 波・コーダを持つ合成地震動。これはこの MOD のモデルであって実測ではない。**
+    /// **Synthetic ground motion with a P wave, an S wave and a coda. This is a model of
+    /// this mod's own, not a measurement.**
     ///
-    /// ── なぜこれが要るのか（依頼②「揺れ方や波形がリアルではない」）────────────
+    /// ── Why it is needed (request ②, "the shaking and the waveform are not realistic") ─────
     ///
-    /// <see cref="ShakeWaveform"/> はバニラ自身の式（§A-7）をそのまま写している ——
-    /// <c>(sin(t·0.63) + sin(t·0.17)) × 振幅</c>、つまり**固定の 2 本の正弦波**である。
-    /// 2 本の周期は通約でないので厳密には反復しないが、見た目の肌理は数十フレームで
-    /// 一巡し、**到達も、立ち上がりも、減衰も無い**。地震計の記録として見ると、
-    /// これは地震動ではなく単なる連続振動である。プレイヤーの指摘は正しい。
+    /// <see cref="ShakeWaveform"/> copies vanilla's own formula (§A-7) as it stands —
+    /// <c>(sin(t·0.63) + sin(t·0.17)) × amplitude</c>, i.e. **two fixed sinusoids**.
+    /// Their two periods are incommensurate so it does not repeat exactly, but the visible
+    /// texture comes round in a few tens of frames, and **there is no arrival, no onset and
+    /// no decay**. Looked at as a seismometer record, that is not ground motion but merely
+    /// a continuous oscillation. The player's report is correct.
     ///
-    /// ── 何を作ったのか ──────────────────────────────────────
+    /// ── What was built ──────────────────────────────────────
     ///
-    /// 実際の地震記象が持つ、いちばん見分けの付く 3 つの性質だけを作る:
+    /// Only the three most recognisable properties a real seismogram has:
     ///
-    ///   1. **P 波の到達** —— 小さく、周波数が高い
-    ///   2. **S 波の到達** —— P より遅れて着き、はるかに大きく、周波数が低い
-    ///   3. **コーダ** —— S のあと指数的に減衰しつつ、振幅が不規則に揺らぐ
+    ///   1. **The P wave arrival** — small, and higher in frequency
+    ///   2. **The S wave arrival** — later than the P, far larger, and lower in frequency
+    ///   3. **The coda** — decaying exponentially after the S, with an amplitude that
+    ///      wanders irregularly
     ///
-    /// そして**到達時刻の差が震源距離とともに開く**。これが記象で最も分かりやすい
-    /// 性質であり（初期微動継続時間）、②の看板である「距離による震度分布」を
-    /// 波形の側から見せる唯一の手掛かりでもある。
+    /// And **the gap between the arrival times widens with the hypocentral distance**. That
+    /// is the most legible property of a seismogram (the preliminary tremor duration), and
+    /// it is also the only handle for showing ②'s headline feature, the intensity
+    /// distribution with distance, from the waveform side.
     ///
-    /// ── 数字の出どころを偽らない ─────────────────────────────
+    /// ── Do not lie about where the numbers come from ─────────────────────────────
     ///
-    ///   - <see cref="VpOverVs"/> = √3 は**実在の物理**である（ポアソン固体の
-    ///     P 波速度と S 波速度の比）。比だけは本物を使う。
-    ///   - **速度の絶対値は本物ではない。** 実際の地殻は Vp ≒ 6 km/s なので、
-    ///     CS の都市（対角 10 km 強）では S-P が 1 秒に満たず、画面上で 1 画素も
-    ///     開かない。ここでは「基準距離 <see cref="ReferenceDistanceMetres"/> で
-    ///     P が窓の <see cref="PArrivalFractionAtReference"/> の位置に着く」と
-    ///     決めている。**見せるために選んだ縮尺であり、実測でも実在の値でもない。**
-    ///   - 窓（<paramref name="windowFrames"/>）はバニラの <c>m_activeDuration</c> を
-    ///     そのまま使う。読めていないときは呼び出し側が 1 サンプルも取らない
-    ///     （<see cref="ShakeWaveform.IsShaking"/> と同じ規律）。
+    ///   - <see cref="VpOverVs"/> = √3 is **real physics** (the ratio of P to S wave speed
+    ///     in a Poisson solid). The ratio alone is genuine.
+    ///   - **The absolute speeds are not.** The real crust has Vp ≈ 6 km/s, so across a CS
+    ///     city (a little over 10 km on the diagonal) S-P would be under a second and would
+    ///     not open by a single pixel on screen. What is fixed here is "at the reference
+    ///     distance <see cref="ReferenceDistanceMetres"/> the P arrives at
+    ///     <see cref="PArrivalFractionAtReference"/> of the way into the window".
+    ///     **That is a scale chosen so it can be shown; it is neither measured nor real.**
+    ///   - The window (<paramref name="windowFrames"/>) uses vanilla's
+    ///     <c>m_activeDuration</c> as it stands. When it cannot be read, the caller takes
+    ///     not one sample (the same discipline as <see cref="ShakeWaveform.IsShaking"/>).
     ///
-    /// ── 折り返さないこと（全体レビュー I5 の再発防止）──────────────────
+    /// ── Do not alias (preventing a recurrence of whole-mod review I5) ──────────────────
     ///
-    /// 記録は 1 sim フレームに 1 点である（<c>SeismographRecorder</c> が tick 内の
-    /// 飛んだフレームを埋める）。したがって標本間隔は 1 フレーム、ナイキスト周期は
-    /// 2 フレーム。ここで使ういちばん速い成分は P 波の
-    /// <see cref="BasePRate"/> = 0.90 rad/frame（周期 ≒7.0 フレーム）で、
-    /// ゆらぎの種も <see cref="NoiseSegmentFrames"/> = 11 フレーム刻みである。
-    /// **どれも 1 周期あたり 6 点以上とれる。** 速度 3（1 tick = 9 フレーム）でも
-    /// 埋めれば足りる。
-    /// <b>これ以上速い成分を足さないこと</b> —— 足した瞬間に、第 2 層の
-    /// 長周期地震動と見分けの付かない偽の長周期波がグラフに現れる。
+    /// The record is one point per sim frame (<c>SeismographRecorder</c> backfills the
+    /// frames skipped within a tick). So the sample interval is one frame and the Nyquist
+    /// period is two frames. The fastest component used here is the P wave's
+    /// <see cref="BasePRate"/> = 0.90 rad/frame (a period of ≈7.0 frames), and the seed of
+    /// the wander is on a <see cref="NoiseSegmentFrames"/> = 11 frame grid.
+    /// **Both get six or more points per cycle.** Even at speed 3 (1 tick = 9 frames) the
+    /// backfilling is enough.
+    /// <b>Do not add any component faster than this</b> — the instant you do, a fake
+    /// long-period wave indistinguishable from the second layer's long-period ground motion
+    /// appears on the graph.
     ///
-    /// ── 同じ地震は同じ波形（<see cref="DeterministicRandom"/> だけを使う）────────
+    /// ── Same earthquake, same waveform (it uses <see cref="DeterministicRandom"/> alone) ───────
     ///
-    /// 地震ごとのばらつきは全部その地震の種から出す。<c>VanillaRandomizer</c> は
-    /// **使わない** —— あれは「バニラが引く値を先読みする」ためだけのもので、
-    /// 合成記象はこの MOD が自分で決めることである（<c>DeterministicRandom</c> の doc）。
-    /// フレーム番号を種に混ぜないので、同じ地震を同じ時刻で評価すれば必ず同じ値になる。
+    /// All the per-earthquake variation comes out of that earthquake's seed.
+    /// <c>VanillaRandomizer</c> is **not used** — that exists solely to "predict the values
+    /// vanilla is about to draw", and the synthetic seismogram is something this mod decides
+    /// for itself (see the doc on <c>DeterministicRandom</c>).
+    /// The frame number is not mixed into the seed, so evaluating the same earthquake at the
+    /// same time always gives the same value.
     ///
-    /// <see cref="DisplacementAt"/> は t の**閉じた式**である（状態を持たない）。
-    /// 飛んだフレームをあとから埋めても、そのフレームで 1 回評価したのと同じ値になる。
+    /// <see cref="DisplacementAt"/> is a **closed-form expression** in t (it holds no state).
+    /// Backfilling a skipped frame afterwards gives the same value as evaluating it once on
+    /// that frame.
     /// </summary>
     public struct SeismogramModel
     {
         /// <summary>
-        /// P 波速度と S 波速度の比。**ここだけは実在の物理**（ポアソン固体で √3）。
-        /// 絶対速度は<see cref="ReferenceDistanceMetres"/> の側で決めている。
+        /// The ratio of P to S wave speed. **This alone is real physics** (√3 in a Poisson
+        /// solid). The absolute speed is fixed on the
+        /// <see cref="ReferenceDistanceMetres"/> side.
         /// </summary>
         public const float VpOverVs = 1.7320508f;
 
-        /// <summary>到達時刻の縮尺を決める基準距離（m）。**見せるために選んだ値。**</summary>
+        /// <summary>The reference distance (m) that sets the scale of the arrival times. **A
+        /// value chosen so it can be shown.**</summary>
         public const float ReferenceDistanceMetres = 4000f;
 
-        /// <summary>基準距離で P が着く位置（窓の長さに対する比）。**見せるために選んだ値。**</summary>
+        /// <summary>Where the P arrives at the reference distance (as a fraction of the window
+        /// length). **A value chosen so it can be shown.**</summary>
         public const float PArrivalFractionAtReference = 0.12f;
 
         /// <summary>
-        /// S の到達をここで頭打ちにする（窓の長さに対する比）。
-        /// これを超えるとコーダを置く場所が無くなり、遠い観測点の記象が
-        /// 「S が着いた瞬間に窓が閉じる」だけの絵になる。
-        /// **頭打ちに達した先では距離を増やしても S-P は開かない。**
+        /// The S arrival is capped here (as a fraction of the window length).
+        /// Past this there is nowhere left to put the coda, and the record at a distant
+        /// station becomes a picture of nothing but "the window closing the instant the S
+        /// arrives".
+        /// **Beyond the cap, increasing the distance no longer widens S-P.**
         /// </summary>
         public const float MaxSArrivalFraction = 0.55f;
 
-        /// <summary>P 波の振幅（S 波を 1 とする）。小さい。</summary>
+        /// <summary>The P wave's amplitude (taking the S wave as 1). Small.</summary>
         public const float PAmplitude = 0.22f;
 
-        /// <summary>P 波の搬送波（rad/frame、周期 ≒7.0 フレーム）。**これが最速成分。**</summary>
+        /// <summary>The P wave's carrier (rad/frame, a period of ≈7.0 frames). **This is the
+        /// fastest component.**</summary>
         public const float BasePRate = 0.90f;
 
-        /// <summary>S 波の搬送波（rad/frame、周期 ≒21 フレーム）。P より低い。</summary>
+        /// <summary>The S wave's carrier (rad/frame, a period of ≈21 frames). Lower than the
+        /// P.</summary>
         public const float BaseSRate = 0.30f;
 
-        /// <summary>ゆらぎの刻み（フレーム）。**2 フレームより十分長いこと**（クラス doc）。</summary>
+        /// <summary>The wander's grid (frames). **It must be comfortably longer than two
+        /// frames** (see the class doc).</summary>
         public const int NoiseSegmentFrames = 11;
 
-        /// <summary>ゆらぎで振幅が落ちる下限。0 にすると波が完全に途切れて見える。</summary>
+        /// <summary>The floor the wander can drop the amplitude to. At 0 the wave appears to
+        /// cut out completely.</summary>
         public const float NoiseFloor = 0.55f;
 
-        /// <summary>S 波の立ち上がりに使うフレーム数。**0 にしない**（不連続は耳にも目にも出る）。</summary>
+        /// <summary>The number of frames used for the S wave's onset. **Not 0** (a
+        /// discontinuity shows up to both ear and eye).</summary>
         public const float SRiseFrames = 3f;
 
-        /// <summary>P 波の立ち上がりに使うフレーム数。</summary>
+        /// <summary>The number of frames used for the P wave's onset.</summary>
         public const float PRiseFrames = 1.5f;
 
-        /// <summary>コーダの減衰時定数（窓の長さに対する比）。</summary>
+        /// <summary>The coda's decay time constant (as a fraction of the window length).</summary>
         public const float CodaFraction = 0.30f;
 
-        /// <summary>窓の終わりで 0 へ落とす区間（窓の長さに対する比）。</summary>
+        /// <summary>The stretch over which it is brought to 0 at the end of the window (as a
+        /// fraction of the window length).</summary>
         public const float TaperFraction = 0.08f;
 
         /// <summary>
-        /// 全体の利得。**S 波の最大振幅をバニラの最大振幅と同じ桁に揃えるためにある。**
+        /// The overall gain. **It exists to bring the S wave's peak amplitude to the same
+        /// order as vanilla's peak amplitude.**
         ///
-        /// 3 本の搬送波を重みの和で割ってあるので（<see cref="ShapeAt"/>）、
-        /// 素の形は理論最大 1 に対して実際には 0.6 前後にしか届かない。そのまま
-        /// 差し替えると、**バニラより弱い揺れ**になって「リアルにした結果、
-        /// 迫力が落ちた」になる。3 本が同時に揃ったときだけ ±1 で頭打ちになるが、
-        /// それは記録計が振り切れた形そのものであり、オフラインで測った
-        /// 頭打ちの割合は <c>tools/WaveformPreview</c> の測定に出る。
+        /// The three carriers are divided by the sum of their weights (see
+        /// <see cref="ShapeAt"/>), so the bare shape only actually reaches about 0.6
+        /// against a theoretical maximum of 1. Swap it in as it stands and you get
+        /// **shaking weaker than vanilla's**, i.e. "we made it realistic and it lost its
+        /// impact". It clips at ±1 only when all three line up at once, and that is exactly
+        /// the shape of a recorder pegging its needle; the proportion of clipping measured
+        /// offline shows up in <c>tools/WaveformPreview</c>'s measurements.
         /// </summary>
         public const float Gain = 1.4f;
 
-        /// <summary>この型が扱える窓の下限（フレーム）。これ未満なら波形を出さない。</summary>
+        /// <summary>The floor on the window this type can handle (frames). Below it, no
+        /// waveform is produced.</summary>
         public const int MinWindowFrames = 32;
 
-        // ── 地震ごとに種から決まる値 ──────────────────────────────
+        // ── Values decided per earthquake from the seed ──────────────────────────────
 
         private float _window;
         private float _pArrivalScale;
@@ -139,20 +161,23 @@ namespace DisasterPlus.Core.Earthquake
         private uint _seed;
         private bool _valid;
 
-        /// <summary>窓の長さが読めていて、波形を出してよいか。</summary>
+        /// <summary>Whether the window length was readable and a waveform may be
+        /// produced.</summary>
         public bool Valid { get { return _valid; } }
 
-        /// <summary>この地震の揺れの窓（フレーム）。<c>m_activeDuration</c> そのもの。</summary>
+        /// <summary>This earthquake's shaking window (frames). <c>m_activeDuration</c>
+        /// itself.</summary>
         public float WindowFrames { get { return _window; } }
 
         /// <summary>
-        /// 地震 1 個ぶんの形を種から作る。**毎サンプルではなく、tick / フレームに 1 回作ること**
-        /// （<see cref="DisplacementAt"/> は状態を持たないので、作り直しても同じ値になる）。
+        /// Builds the shape for one earthquake from the seed. **Build it once per tick or
+        /// frame, not per sample** (<see cref="DisplacementAt"/> holds no state, so
+        /// rebuilding gives the same values).
         ///
-        /// <paramref name="windowFrames"/> は <c>m_activeDuration</c>。
-        /// 0 や極端に短い値なら <see cref="Valid"/> が false になり、
-        /// <see cref="DisplacementAt"/> は 0 を返す —— 窓が分からないまま
-        /// 到達時刻を決め打ちすると、地震が終わった後も伸びる波形になる。
+        /// <paramref name="windowFrames"/> is <c>m_activeDuration</c>.
+        /// At 0, or at an extremely short value, <see cref="Valid"/> comes out false and
+        /// <see cref="DisplacementAt"/> returns 0 — fix the arrival times without knowing
+        /// the window and you get a waveform that goes on after the earthquake has ended.
         /// </summary>
         public static SeismogramModel For(uint seed, uint windowFrames)
         {
@@ -164,18 +189,21 @@ namespace DisasterPlus.Core.Earthquake
             m._window = windowFrames;
             m._valid = true;
 
-            // 見かけの速度のばらつき（±15%）。同じ距離でも地震ごとに初期微動継続時間が違う。
+            // Variation in the apparent velocity (±15%). At the same distance, the
+            // preliminary tremor duration differs from earthquake to earthquake.
             float velocityJitter = 0.85f + 0.30f * DeterministicRandom.Unit(seed, 1u);
             m._pArrivalScale = PArrivalFractionAtReference * m._window * velocityJitter
                                / ReferenceDistanceMetres;
 
-            // 搬送波は ±10% だけ振る。**上限を上げない**（クラス doc の折り返しの話）。
+            // The carrier is shaken by ±10% only. **Do not raise the upper end** (see the
+            // class doc on aliasing).
             m._pRate = BasePRate * (0.92f + 0.16f * DeterministicRandom.Unit(seed, 2u));
 
-            // S は 3 本の非通約な成分。1 本だと「同じ波形が連続している」に戻る。
+            // The S is three incommensurate components. With one you are back to "the same
+            // waveform going on and on".
             float sJitter = 0.90f + 0.20f * DeterministicRandom.Unit(seed, 3u);
             m._sRate0 = BaseSRate * sJitter;
-            m._sRate1 = BaseSRate * sJitter * 1.618f;   // 黄金比。通約にならない組にする
+            m._sRate1 = BaseSRate * sJitter * 1.618f;   // Golden ratio: keeps the set incommensurate
             m._sRate2 = BaseSRate * sJitter * 0.577f;
 
             m._sPhase0 = 6.2831853f * DeterministicRandom.Unit(seed, 4u);
@@ -190,8 +218,8 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// P 波の到達（窓の頭 <c>e = 0</c> からのフレーム数）。距離に比例する。
-        /// <see cref="Valid"/> が false なら 0。
+        /// The P wave arrival (frames from the head of the window, <c>e = 0</c>).
+        /// Proportional to distance. 0 if <see cref="Valid"/> is false.
         /// </summary>
         public float PArrivalFrames(float distanceMetres)
         {
@@ -204,8 +232,9 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// S 波の到達（同上）。<c>P × √3</c>。**震源直上では P と同時に着く**
-        /// （距離 0 なら S-P も 0）——これは近似ではなく、そういうものである。
+        /// The S wave arrival (as above). <c>P × √3</c>. **Directly above the hypocentre it
+        /// arrives with the P** (at distance 0, S-P is 0 too) — that is not an
+        /// approximation, it is simply how it is.
         /// </summary>
         public float SArrivalFrames(float distanceMetres)
         {
@@ -213,8 +242,9 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 初期微動継続時間（S-P、フレーム）。**距離とともに開く**のがこのモデルの看板。
-        /// <see cref="MaxSArrivalFraction"/> の頭打ちに達した先では開かない。
+        /// The preliminary tremor duration (S-P, frames). **Widening with distance** is this
+        /// model's headline.
+        /// It stops widening past the <see cref="MaxSArrivalFraction"/> cap.
         /// </summary>
         public float SMinusPFrames(float distanceMetres)
         {
@@ -222,13 +252,15 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 符号付きの変位。<paramref name="t"/> は <c>e</c>（フレーム、小数を含む）。
+        /// The signed displacement. <paramref name="t"/> is <c>e</c> (frames, fractions
+        /// included).
         ///
-        /// 振幅の基準はバニラと同じ <see cref="ShakeWaveform.PeakAmplitudeAt"/> の 2 倍
-        /// （＝<see cref="ShakeWaveform.MaxDisplacement"/>）なので、**満目盛りは
-        /// バニラの波形と共通**である。並べて描いたときに縦の尺度が揃う。
+        /// The amplitude baseline is twice
+        /// <see cref="ShakeWaveform.PeakAmplitudeAt"/>, the same as vanilla (i.e.
+        /// <see cref="ShakeWaveform.MaxDisplacement"/>), so **full scale is shared with
+        /// vanilla's waveform**. Drawn side by side, the vertical scales line up.
         ///
-        /// 窓の外・<see cref="Valid"/> が false・NaN では 0。
+        /// 0 outside the window, when <see cref="Valid"/> is false, and for NaN.
         /// </summary>
         public float DisplacementAt(float distanceMetres, float t)
         {
@@ -239,12 +271,13 @@ namespace DisasterPlus.Core.Earthquake
             float shape = ShapeAt(distanceMetres, t);
             if (shape == 0f) return 0f;
 
-            // PeakAmplitudeAt の 2 倍 ＝ 距離 0 でちょうど MaxDisplacement（0.60）。
+            // Twice PeakAmplitudeAt = exactly MaxDisplacement (0.60) at distance 0.
             return shape * 2f * ShakeWaveform.PeakAmplitudeAt(distanceMetres);
         }
 
         /// <summary>
-        /// 距離を除いた形（絶対値は必ず 1 以下）。テストが上限を直接見る。
+        /// The shape with the distance taken out (the absolute value is always at most 1).
+        /// The tests look at that bound directly.
         /// </summary>
         public float ShapeAt(float distanceMetres, float t)
         {
@@ -257,7 +290,7 @@ namespace DisasterPlus.Core.Earthquake
 
             float value = 0f;
 
-            // ── P 波: 小さく、速く、S が着くまでに消える ──────────────
+            // ── The P wave: small, fast, and gone before the S arrives ──────────────
             if (t >= tP)
             {
                 float dt = t - tP;
@@ -269,14 +302,15 @@ namespace DisasterPlus.Core.Earthquake
                          * (float)System.Math.Sin(t * _pRate);
             }
 
-            // ── S 波とコーダ: 大きく、遅く、不規則に減衰する ────────────
+            // ── The S wave and the coda: large, slow, decaying irregularly ────────────
             if (t >= tS)
             {
                 float dt = t - tS;
                 float envelope = Rise(dt, SRiseFrames) * Decay(dt, _codaFrames);
 
-                // ゆらぎ。**コーダの振幅を不規則にするのはここ 1 箇所だけ。**
-                // 搬送波の周波数を揺らすと折り返しの余裕を食う（クラス doc）。
+                // The wander. **This one place is the only thing making the coda's
+                // amplitude irregular.** Wobbling the carrier frequency would eat into the
+                // aliasing margin (see the class doc).
                 envelope *= NoiseFloor + (1f - NoiseFloor) * Wobble(t);
 
                 float carrier =
@@ -290,7 +324,8 @@ namespace DisasterPlus.Core.Earthquake
 
             value *= Gain;
 
-            // 窓の終わりで 0 へ落とす。落とさないと窓が閉じた瞬間にカメラが跳ねる。
+            // Bring it to 0 at the end of the window. Without that the camera jolts the
+            // instant the window closes.
             float taper = TaperFraction * _window;
             if (taper > 0f)
             {
@@ -303,7 +338,7 @@ namespace DisasterPlus.Core.Earthquake
             return value;
         }
 
-        /// <summary>立ち上がり [0,1]。<paramref name="frames"/> 以下なら線形に上げる。</summary>
+        /// <summary>The onset [0,1]. Rises linearly up to <paramref name="frames"/>.</summary>
         private static float Rise(float dt, float frames)
         {
             if (frames <= 0f) return 1f;
@@ -311,20 +346,23 @@ namespace DisasterPlus.Core.Earthquake
             return dt <= 0f ? 0f : dt / frames;
         }
 
-        /// <summary>指数減衰 <c>exp(-dt/tau)</c>。<paramref name="tau"/> は 1 未満にしない。</summary>
+        /// <summary>Exponential decay <c>exp(-dt/tau)</c>. Do not let <paramref name="tau"/>
+        /// go below 1.</summary>
         private static float Decay(float dt, float tau)
         {
             if (tau < 1f) tau = 1f;
             float x = dt / tau;
-            // 8 時定数（振幅 1/3000）より先は 0 でよい。exp を呼ばずに済ませる。
+            // Past eight time constants (amplitude 1/3000) 0 will do. Saves calling exp.
             if (x > 8f) return 0f;
             return (float)System.Math.Exp(-x);
         }
 
         /// <summary>
-        /// [0,1] の不規則な包絡（値ノイズ）。<see cref="NoiseSegmentFrames"/> フレームごとの
-        /// 乱数を smoothstep で繋ぐ。**乱数に t の小数部やフレーム番号そのものを混ぜない** ——
-        /// 混ぜると同じ時刻を 2 回評価したときに違う値が出て、閉じた式でなくなる。
+        /// An irregular envelope in [0,1] (value noise). Random numbers every
+        /// <see cref="NoiseSegmentFrames"/> frames, joined with a smoothstep.
+        /// **Do not mix t's fractional part or the frame number itself into the random
+        /// draw** — mix them in and evaluating the same time twice gives different values,
+        /// and it stops being a closed-form expression.
         /// </summary>
         private float Wobble(float t)
         {

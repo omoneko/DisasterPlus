@@ -5,41 +5,45 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 地震パネルのタブ。**main スレッド専用。**
+    /// The earthquake panel's tabs. **Main thread only.**
     ///
-    /// ── なぜタブなのか（縦の予算はもう無かった） ────────────────────
+    /// ── Why tabs (the vertical budget had already run out) ──────────────
     ///
-    /// UIView の座標系は高さ 1080 に正規化されている。第 1 層を作り終えた時点で
-    /// パネルは既に**約 1050** まで積み上がっており、震度分布オーバーレイの 3 行を
-    /// 足すために幅を 520 → 640 へ広げて折り返し行の予約高さを削るという、
-    /// 一度しか使えない手を既に使っていた。<see cref="EarthquakePanel.ClampToView"/> は
-    /// 下端がはみ出したら警告を 1 回出すだけで、**はみ出しそのものは防げない**。
-    /// 第 2 層（Task 9〜11）は 3 つの節を足すので、このまま行を追記すれば
-    /// 説明文が確実に画面外へ出る —— 書いたのに読めないのは、書いていないより悪い。
+    /// UIView's coordinate system is normalised to a height of 1080. By the time layer 1
+    /// was finished the panel had already stacked up to **about 1050**, and the one trick
+    /// available — widening it from 520 to 640 so the reserved height for wrapped rows
+    /// could be cut — had already been spent to fit the overlay's three rows.
+    /// <see cref="EarthquakePanel.ClampToView"/> only warns once when the bottom edge
+    /// runs off; **it cannot prevent the overflow itself**. Layer 2 (Tasks 9-11) adds
+    /// three sections, so carrying on appending rows would certainly have pushed the
+    /// explanatory text off screen — and text that was written but cannot be read is
+    /// worse than text that was never written.
     ///
-    /// ── 3 案のうちタブを選んだ理由 ────────────────────────────
+    /// ── Why tabs, out of the three options ──────────────────────────
     ///
-    /// | 案 | 採らなかった理由 |
+    /// | Option | Why it was not taken |
     /// |---|---|
-    /// | スクロール領域 | <c>UIScrollablePanel</c> は IL 実測で <c>UIComponent</c> 直系であり
-    ///   <c>UIPanel</c> ではない。行ヘルパーの引数型（<c>UIPanel</c>）と
-    ///   <c>WaveformView.Build</c> / <see cref="EarthquakeOverlayRows"/> の受け口を
-    ///   まとめて作り替えることになるうえ、スクロールバーはサムとトラックの
-    ///   スプライトを自前で組む必要があり、**構造の変更だけで済まない**。 |
-    /// | 折りたたみ | 開閉のたびに全行の y を組み直す＝実行時レイアウトが増える。
-    ///   「どこに何があるか」が状態依存になり、説明文が畳まれたまま気付かれない。 |
-    /// | **タブ（採用）** | 使う型は <c>UIPanel</c> と <c>UIButton</c> だけで、
-    ///   どちらも既に使っている。行ヘルパーの引数型も変えなくてよい
-    ///   （ページ自体が <c>UIPanel</c> なので）。y の計算は構築時に 1 回だけで、
-    ///   実行時の並べ替えは無い。 |
+    /// | A scrolling region | Measured in the IL, <c>UIScrollablePanel</c> derives
+    ///   directly from <c>UIComponent</c>, not from <c>UIPanel</c>. That would mean
+    ///   rebuilding the row helpers' parameter type (<c>UIPanel</c>) together with what
+    ///   <c>WaveformView.Build</c> and <see cref="EarthquakeOverlayRows"/> accept, and on
+    ///   top of that the scrollbar needs its thumb and track sprites assembled by hand,
+    ///   so **it is not just a structural change**. |
+    /// | Collapsible sections | Every open and close rebuilds the y of every row, i.e.
+    ///   more layout at runtime. "What is where" becomes state-dependent, and the
+    ///   explanatory text stays folded away without anyone noticing. |
+    /// | **Tabs (chosen)** | The only types involved are <c>UIPanel</c> and
+    ///   <c>UIButton</c>, both already in use. The row helpers' parameter type does not
+    ///   change either (a page is itself a <c>UIPanel</c>). The y values are computed
+    ///   once at construction, with no rearranging at runtime. |
     ///
-    /// ── 第 2 層はタブの中に入れない ───────────────────────────
+    /// ── Layer 2 does not go inside the tabs ─────────────────────────
     ///
-    /// 計画は「第 2 層は第 1 層の**下**に構築し、実行時の並べ替えはしない」と
-    /// 定めている。タブに分けると「下」が成立しなくなるので、**第 2 層の節は
-    /// タブ領域の外側・その下**に置く（<see cref="EarthquakeLayer2Rows"/>）。
-    /// どのタブを見ていても、本 MOD が足した挙動は常に同じ場所に、
-    /// 第 1 層の全内容より下に見えている。
+    /// The plan states that layer 2 is built **below** layer 1, with no rearranging at
+    /// runtime. Splitting it across tabs would make "below" meaningless, so **layer 2's
+    /// sections sit outside the tab area, beneath it** (<see cref="EarthquakeLayer2Rows"/>).
+    /// Whichever tab you are looking at, the behaviour this mod adds is always in the
+    /// same place, below everything layer 1 has to say.
     /// </summary>
     internal sealed class EarthquakePanelTabs
     {
@@ -56,8 +60,8 @@ namespace DisasterPlus.Game
         private int _active;
 
         /// <summary>
-        /// タブ行を <paramref name="y"/> の位置に置き、<paramref name="y"/> を
-        /// ページ領域の先頭へ進める。
+        /// Places the row of tabs at <paramref name="y"/> and advances
+        /// <paramref name="y"/> to the top of the page area.
         /// </summary>
         internal EarthquakePanelTabs(UIPanel root, ref float y)
         {
@@ -68,9 +72,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ページを 1 枚足す。返る <c>UIPanel</c> がそのページの行の親になる。
-        /// **ページ内の y は 0 から数える**（ページの原点はページ自身の左上）。
-        /// 最初に足したページが初期表示になる。
+        /// Adds one page. The <c>UIPanel</c> returned becomes the parent of that page's
+        /// rows. **Within a page, y counts from 0** (a page's origin is its own top-left
+        /// corner). The first page added is the one shown initially.
         /// </summary>
         internal UIPanel AddPage(string suffix, string caption)
         {
@@ -88,10 +92,12 @@ namespace DisasterPlus.Game
             button.text = caption;
             button.tooltip = caption;
             button.height = TabHeight;
-            // 幅はページを全部足してから均等割りする（Finish）。ここでは仮の値。
+            // The widths are divided evenly once every page has been added (Finish).
+            // This is a placeholder.
             button.width = EarthquakeRows.RowWidth;
             button.relativePosition = new Vector3(EarthquakeRows.RowLeft, _tabY);
-            // 日本語の見出しは英語より横に長い。既定倍率だと 2 タブでも溢れうる。
+            // Japanese captions run wider than English ones. At the default scale even
+            // two tabs can overflow.
             button.textScale = 0.85f;
             button.textHorizontalAlignment = UIHorizontalAlignment.Center;
             button.eventClick += (c, e) => Select(index);
@@ -102,7 +108,7 @@ namespace DisasterPlus.Game
             return page;
         }
 
-        /// <summary>ページの行を積み終わったら、その高さを渡す。</summary>
+        /// <summary>Once a page's rows are stacked up, hand its height over.</summary>
         internal void FinishPage(UIPanel page, float height)
         {
             if (page == null) return;
@@ -111,10 +117,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// タブボタンの幅を均等割りし、<paramref name="y"/> をタブ領域の下端へ進める。
+        /// Divides the tab buttons' width evenly and advances <paramref name="y"/> to the
+        /// bottom of the tab area.
         ///
-        /// **高さはいちばん高いページに合わせる。** タブを切り替えるたびに
-        /// パネルの高さと位置が変わると、読んでいる行が画面上で飛ぶ。
+        /// **The height matches the tallest page.** If the panel's height and position
+        /// changed every time you switched tabs, the row you were reading would jump
+        /// around on screen.
         /// </summary>
         internal void Finish(ref float y)
         {
@@ -144,13 +152,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 選択中のタブを押し込んだ見た目にする。
+        /// Makes the selected tab look pressed in.
         ///
-        /// 使うスプライトは既にこの MOD が使っている 3 種だけに限る
-        /// （<c>ButtonMenu</c> / <c>ButtonMenuHovered</c> / <c>ButtonMenuPressed</c>）。
-        /// 存在を確かめていないスプライト名を増やすと、名前が違ったときに
-        /// **ボタンが透明になって押せなくなる**という、画面を見るまで分からない
-        /// 壊れ方をする。
+        /// The sprites used are limited to the three this mod already uses
+        /// (<c>ButtonMenu</c> / <c>ButtonMenuHovered</c> / <c>ButtonMenuPressed</c>). Add
+        /// a sprite name whose existence has not been verified and, if the name turns out
+        /// to be wrong, **the button goes transparent and cannot be clicked** — a
+        /// breakage you will not spot until you look at the screen.
         /// </summary>
         private void ApplySprites(int index)
         {

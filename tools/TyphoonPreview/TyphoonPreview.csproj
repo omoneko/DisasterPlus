@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- 台風の渦をゲームを起動せずに描いて確かめるための開発用ツール。
-       MOD 本体（net35）には入らない。Core だけを直接コンパイルする。 -->
+  <!-- A development tool for drawing the typhoon vortex and checking it without starting
+       the game. It is not part of the mod itself (net35). It compiles only Core, directly. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>

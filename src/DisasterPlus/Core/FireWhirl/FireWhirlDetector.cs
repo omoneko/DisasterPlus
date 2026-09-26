@@ -4,17 +4,20 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.FireWhirl
 {
     /// <summary>
-    /// 密集度による火災旋風の発生判定。
-    /// 「半径 R 以内に N 棟以上が同時に延焼中」を満たす地点を探す。
-    /// 面積だけを見ると郊外の点在火災を足し算してしまうので、密度で判定する。
+    /// The spawn test for fire whirls, based on density.
+    /// It looks for points satisfying "N or more buildings burning at once within radius R".
+    /// Looking at area alone would add up scattered fires out in the suburbs, so we judge by
+    /// density.
     /// </summary>
     public static class FireWhirlDetector
     {
         /// <summary>
-        /// 判定だけを行う短い形。**診断が要らない呼び出し（テスト）のためだけに在る。**
-        /// 本番の呼び出しは <see cref="FireWhirlProspect"/> を受け取る側を使うこと ——
-        /// ③は自然発生しか経路を持たないので、「出なかった理由」を捨ててよい経路が
-        /// 実質存在しない。
+        /// The short form that only runs the test. **It exists solely for callers that do
+        /// not need the diagnostics (the tests).**
+        /// Production callers should use the overload that takes
+        /// <see cref="FireWhirlProspect"/> — ③ has no path other than natural spawning, so
+        /// in practice there is no path where it is acceptable to throw away "why nothing
+        /// spawned".
         /// </summary>
         public static List<FireWhirlCandidate> Detect(
             IList<BurningBuilding> burning,
@@ -26,8 +29,8 @@ namespace DisasterPlus.Core.FireWhirl
         }
 
         /// <summary>
-        /// 判定と、**同じ 1 パスで**「なぜ出なかったか」を返す
-        /// （<see cref="FireWhirlProspect"/> のクラス doc）。
+        /// Runs the test and, **in the same single pass**, returns "why nothing spawned"
+        /// (see <see cref="FireWhirlProspect"/>'s class doc).
         /// </summary>
         public static List<FireWhirlCandidate> Detect(
             IList<BurningBuilding> burning,
@@ -37,8 +40,9 @@ namespace DisasterPlus.Core.FireWhirl
         {
             var result = new List<FireWhirlCandidate>();
 
-            // いちばん密な塊。**閾値に届かない塊もここでだけは数える** ——
-            // 届かないことこそが「出ない理由」なので、判定で捨てる前に控える。
+            // The densest cluster. **Here, and only here, we also count clusters that fall
+            // short of the threshold** — falling short is exactly "the reason nothing
+            // spawned", so we note it down before the test discards it.
             int densest = 0;
             var densestCentre = new Vec2(0f, 0f);
             int suppressed = 0;
@@ -52,7 +56,8 @@ namespace DisasterPlus.Core.FireWhirl
 
             int burningTotal = burning.Count;
 
-            // セルは半径と同じ大きさにする。近傍探索が 3x3 セルで済む。
+            // Make the cells the same size as the radius, so a neighbour search only needs
+            // 3x3 cells.
             var grid = new GridVote(config.DetectRadius);
             for (int i = 0; i < burning.Count; i++) grid.Add(i, burning[i].Position);
 
@@ -77,8 +82,9 @@ namespace DisasterPlus.Core.FireWhirl
 
                 var centre = new Vec2(sx / count, sz / count);
 
-                // ★ 判定より先に控える。ここを if の後ろに置くと、閾値に届かない
-                //   ——つまり診断がいちばん要る——場合にだけ数え損なう。
+                // ★ Note it down before the test. Move this below the if and the one case
+                //   we fail to count is the one that falls short of the threshold — i.e.
+                //   exactly when the diagnostics are needed most.
                 if (count > densest)
                 {
                     densest = count;
@@ -96,8 +102,9 @@ namespace DisasterPlus.Core.FireWhirl
                 return result;
             }
 
-            // 燃焼棟数の多い順に確定させ、近すぎる候補を捨てる。
-            // 入力順に依存しないよう、同数のときはインデックスで決着させる（決定論のため）。
+            // Settle them in order of most burning buildings first, discarding candidates
+            // that are too close. Ties are broken by index so the result does not depend on
+            // the input order (for determinism).
             var order = new int[raw.Count];
             for (int i = 0; i < order.Length; i++) order[i] = i;
             SortByCountDescending(order, raw);
@@ -118,9 +125,10 @@ namespace DisasterPlus.Core.FireWhirl
                     }
                 }
 
-                // ★ 生存中／クールダウン中の旋風に弾かれた数だけを数える。
-                //   同じパスで採用済みの候補に弾かれたぶんは数えない ——
-                //   そのときは result が空でないので「出なかった理由」ではない。
+                // ★ Count only those rejected by a live or cooling-down whirl.
+                //   Do not count the ones rejected by a candidate already accepted in this
+                //   same pass — in that case result is not empty, so it is not "the reason
+                //   nothing spawned".
                 if (blocked) suppressed++;
 
                 if (!blocked)
@@ -140,8 +148,9 @@ namespace DisasterPlus.Core.FireWhirl
         }
 
         /// <summary>
-        /// 挿入ソート。件数は同時延焼中の建物数どまりなので O(n^2) で足りる。
-        /// List.Sort は比較が等しいとき順序を保証しないため、決定論のために自前で書く。
+        /// An insertion sort. The count is bounded by the number of simultaneously burning
+        /// buildings, so O(n^2) is enough. List.Sort does not guarantee the order of equal
+        /// elements, so we write our own for determinism.
         /// </summary>
         private static void SortByCountDescending(int[] order, List<FireWhirlCandidate> raw)
         {
@@ -162,7 +171,7 @@ namespace DisasterPlus.Core.FireWhirl
         {
             if (raw[a].BurningCount != raw[b].BurningCount)
                 return raw[a].BurningCount > raw[b].BurningCount;
-            return a < b;   // 同数ならインデックス順。入力が同じなら結果も同じになる。
+            return a < b;   // Ties go by index, so the same input gives the same result.
         }
     }
 }

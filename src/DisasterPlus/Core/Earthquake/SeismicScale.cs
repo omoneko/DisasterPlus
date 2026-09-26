@@ -1,6 +1,7 @@
 namespace DisasterPlus.Core.Earthquake
 {
-    /// <summary>揺れの大きさの粗い区分。実在の震度階級の名前は使わない。</summary>
+    /// <summary>A coarse banding of how hard the ground shakes. It does not borrow the names
+    /// of any real intensity scale.</summary>
     public enum SeismicBand
     {
         None,
@@ -11,18 +12,21 @@ namespace DisasterPlus.Core.Earthquake
     }
 
     /// <summary>
-    /// 局所係数 s（0-1）を表示用の段階・バー・区分名にする。
+    /// Turns the local factor s (0-1) into a display step, a bar and a band name.
     ///
-    /// **気象庁震度階級を名乗らない**（設計書 §3.1）。s は加速度でも計測震度でもなく、
-    /// ゲームの倒壊係数である。実在の尺度の名前を借りると、実在の意味があると
-    /// 誤解させる。表示は「強度」「揺れの大きさ」に留め、必ず 0.0-1.0 の生値と併記する。
+    /// **It does not claim to be the JMA seismic intensity scale** (design doc §3.1). s is
+    /// neither an acceleration nor a measured intensity; it is the game's collapse factor.
+    /// Borrowing the name of a real scale makes people think it carries a real meaning.
+    /// Keep the wording to "strength" and "how hard it shakes", and always print the raw
+    /// 0.0-1.0 value alongside it.
     ///
-    /// 段階が 10 でバンドが 5 なのは意図的。バーの分解能は 10 段階で欲しいが、
-    /// 10 個の段階名をローカライズすると、訳語の差がそのまま「意味のある尺度」に
-    /// 見えてしまう。名前を付けるのは 5 区分までにする。
+    /// Ten steps but five bands is deliberate. We want the bar's resolution to be ten
+    /// steps, but localising ten step names would make the differences between the
+    /// translations themselves look like "a scale that means something". Only go as far as
+    /// naming five bands.
     ///
-    /// バーは ASCII 固定（①の HazardLevel と同じ理由。CS の UI フォントに
-    /// 罫線素片がある保証は無く、無ければ豆腐になる）。
+    /// The bar is fixed ASCII (same reason as ①'s HazardLevel: there is no guarantee the
+    /// CS UI font has the block-drawing characters, and without them you get tofu).
     /// </summary>
     public static class SeismicScale
     {
@@ -30,7 +34,8 @@ namespace DisasterPlus.Core.Earthquake
         public const char FilledChar = '#';
         public const char EmptyChar = '-';
 
-        /// <summary>s を 0-Steps に写す。単調増加。s = 1 でちょうど Steps。</summary>
+        /// <summary>Maps s onto 0-Steps. Monotonically increasing. s = 1 lands exactly on
+        /// Steps.</summary>
         public static int StepOf(float s)
         {
             if (float.IsNaN(s) || s <= 0f) return 0;
@@ -42,7 +47,7 @@ namespace DisasterPlus.Core.Earthquake
             return step;
         }
 
-        /// <summary>長さ Steps のバー。埋まった数は StepOf と一致する。</summary>
+        /// <summary>A bar of length Steps. The number filled matches StepOf.</summary>
         public static string BarOf(float s)
         {
             int filled = StepOf(s);
@@ -51,7 +56,7 @@ namespace DisasterPlus.Core.Earthquake
             return sb.ToString();
         }
 
-        /// <summary>区分名。境界は下側を含む（0.25 は Moderate）。</summary>
+        /// <summary>The band name. Boundaries include the lower side (0.25 is Moderate).</summary>
         public static SeismicBand BandOf(float s)
         {
             if (float.IsNaN(s) || s <= 0f) return SeismicBand.None;

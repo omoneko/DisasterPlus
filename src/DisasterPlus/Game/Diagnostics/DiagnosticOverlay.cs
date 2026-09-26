@@ -5,10 +5,10 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// IMGUI のデバッグオーバーレイ。CS の UI フレームワークには一切依存しない。
+    /// An IMGUI debug overlay. It depends on CS's UI framework not at all.
     ///
-    /// OnGUI は 1 フレームに複数回呼ばれる(レイアウト用と描画用)。
-    /// したがってホットキー判定と状態取得は Update で行い、OnGUI では描画だけする。
+    /// OnGUI is called several times per frame (once for layout, once for drawing).
+    /// So hotkey handling and fetching the state happen in Update, and OnGUI only draws.
     /// </summary>
     public class DiagnosticOverlay : MonoBehaviour
     {
@@ -26,8 +26,9 @@ namespace DisasterPlus.Game
 
         public static DiagnosticOverlay Create()
         {
-            // fake-null に注意: 破棄済みの MonoBehaviour は == null が true になる。
-            // ここはコレクションではなくオブジェクト自体を見ているので正しく再生成される。
+            // Mind the fake-null: == null is true for a destroyed MonoBehaviour.
+            // This looks at the object itself rather than a collection, so it is correctly
+            // recreated.
             if (_instance != null) return _instance;
 
             var go = new GameObject(HostName);
@@ -41,8 +42,9 @@ namespace DisasterPlus.Game
             if (_instance == null) return;
             Object.Destroy(_instance.gameObject);
             _instance = null;
-            // 表示中だった場合に備え、収集フラグは即座に落とす。OnDestroy 経由でも
-            // 落ちるが、破棄はフレーム末まで遅延することがあるため二重に安全策を取る。
+            // In case it was being displayed, drop the collection flag immediately. It also
+            // drops via OnDestroy, but destruction can be deferred to the end of the frame, so
+            // take the precaution twice.
             DiagnosticsHub.CollectionEnabled = false;
         }
 
@@ -56,9 +58,9 @@ namespace DisasterPlus.Game
                 bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
                 if (ctrl)
                 {
-                    // 依頼を立てるだけ。組み立ては次の sim tick、書き出しはこの下の
-                    // FlushPendingWrite() が拾う。ここで直接書かない
-                    // （BuildReport は sim スレッド専用の契約のため）。
+                    // Only raise the request. Assembly happens on the next sim tick, and the
+                    // write is picked up by FlushPendingWrite() below. Do not write directly
+                    // here (BuildReport is contracted as sim-thread only).
                     DiagnosticDump.RequestDump();
                 }
                 else
@@ -67,7 +69,7 @@ namespace DisasterPlus.Game
                 }
             }
 
-            // 収集が走るのは表示中だけ。閉じていればコストはゼロ。
+            // Collection only runs while it is displayed. Closed, the cost is zero.
             DiagnosticsHub.CollectionEnabled = _visible;
 
             if (_visible)
@@ -75,10 +77,10 @@ namespace DisasterPlus.Game
                 _lines = DiagnosticFormatter.Format(DiagnosticsHub.Latest);
             }
 
-            // ダンプの書き出し(DiagnosticDump.FlushPendingWrite)をここでやってはいけない。
-            // このオブジェクト自体が設定次第で存在しないので、書き出しがこの Update に
-            // 相乗りしていると「オーバーレイ OFF ならダンプも出ない」という
-            // 隠れた依存になる。呼び出しは FeatureHost.MainThreadUpdate() に置く。
+            // Writing the dump (DiagnosticDump.FlushPendingWrite) must not happen here.
+            // This object itself may not exist depending on the settings, so having the write
+            // ride along on this Update creates a hidden dependency: "overlay OFF means no
+            // dump either". The call belongs in FeatureHost.MainThreadUpdate().
         }
 
         private void Toggle()
@@ -113,8 +115,8 @@ namespace DisasterPlus.Game
 
         private void EnsureStyle()
         {
-            // fake-null 対策: 都市を跨ぐと Texture2D が破棄されている場合がある。
-            // オブジェクト自体を見て作り直す。
+            // Guarding against the fake-null: the Texture2D can have been destroyed when
+            // crossing between cities. Look at the object itself and rebuild.
             if (_background == null)
             {
                 _background = new Texture2D(1, 1);
@@ -137,12 +139,12 @@ namespace DisasterPlus.Game
             if (_background != null) Object.Destroy(_background);
             _background = null;
             _style = null;
-            // Object.Destroy は破棄が次フレーム末まで遅延することがある。もし旧
-            // インスタンスの OnDestroy が、新しい生存インスタンスが生成され既に
-            // 収集を有効化した後に発火すると、this が現行の _instance でない限り
-            // ここで収集を止めてはいけない（生きているオーバーレイの分まで
-            // 次の Update まで無効化してしまう）。_instance の判定と同じ
-            // 「古いオブジェクトの発言は無視する」規律をここにも適用する。
+            // Object.Destroy can defer the destruction to the end of the next frame. If the
+            // old instance's OnDestroy fires after a new, live instance has been created and
+            // has already enabled collection, we must not stop collection here unless this is
+            // the current _instance (doing so would disable it on the live overlay's behalf
+            // until its next Update). Apply the same "ignore what an old object says"
+            // discipline as the _instance check.
             if (_instance == this)
             {
                 DiagnosticsHub.CollectionEnabled = false;

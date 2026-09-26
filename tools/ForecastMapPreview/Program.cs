@@ -6,36 +6,40 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.ForecastMapPreview
 {
     /// <summary>
-    /// <b>予報パネルが地図に描くものを、ゲームを起動せずに描く。</b>
+    /// <b>Draws what the forecast panel puts on the map, without launching the game.</b>
     ///
-    /// ── なぜ要るのか ─────────────────────────────────────────
+    /// ── Why it is needed ─────────────────────────────────────────
     ///
-    /// 所有者の規律:「視覚変更はオフラインで描画・計測して自分で確認してから
-    /// 実機テストを頼む」。<c>ForecastOverlay</c> は
-    /// <c>OverlayEffect.DrawCircle</c> / <c>DrawQuad</c> を呼ぶだけなので、
-    /// <b>座標を決めているのは全部 Core の式</b>である。その式をここで同じように
-    /// 走らせて絵にすれば、<b>実機を起動する前に幾何が正しいか分かる</b>。
+    /// The owner's discipline: "draw and measure visual changes offline and check them
+    /// yourself before asking for a test in the game". <c>ForecastOverlay</c> does nothing
+    /// but call <c>OverlayEffect.DrawCircle</c> / <c>DrawQuad</c>, so <b>everything that
+    /// decides the coordinates is a formula in Core</b>. Run those same formulas here and
+    /// turn them into a picture, and <b>you can tell whether the geometry is right before
+    /// launching the game</b>.
     ///
-    /// 確かめたいのは 3 つ:
+    /// Three things are being checked:
     ///
     /// <list type="number">
-    /// <item><b>進路がマップの外から入り、クリック地点を通り、外へ抜ける</b>こと</item>
-    /// <item><b>暴風域の円が中心に乗っている</b>こと</item>
-    /// <item><b>風の分布に眼がある</b>こと（中心が薄く、壁雲が濃い）</item>
+    /// <item><b>that the track enters from outside the map, passes through the clicked point
+    ///   and leaves again</b></item>
+    /// <item><b>that the storm-area circle sits on the centre</b></item>
+    /// <item><b>that the wind field has an eye</b> (faint at the centre, dense at the
+    ///   eyewall)</item>
     /// </list>
     ///
-    /// ★ ここで描けないのは「実際に画面へ出るか」だけである。それは
-    ///   <c>OverlayEffect</c> の仕事で、②の震度オーバーレイが同じ経路で
-    ///   既に出ていることが分かっている。
+    /// ★ The only thing that cannot be drawn here is "whether it actually appears on
+    ///   screen". That is <c>OverlayEffect</c>'s job, and we know that the intensity overlay
+    ///   of point 2 already appears via the same path.
     /// </summary>
     internal static class Program
     {
         private const int Size = 900;
 
-        /// <summary>マップの半辺（m）。<c>TyphoonTrack.MapHalfExtent</c> と同じ。</summary>
+        /// <summary>Half the map's side (m). The same as
+        /// <c>TyphoonTrack.MapHalfExtent</c>.</summary>
         private const float Half = 8640f;
 
-        /// <summary>25 タイル全域が入るよう、マップより少し広く描く。</summary>
+        /// <summary>Drawn a little wider than the map so that all 25 tiles fit in.</summary>
         private const float ViewHalf = Half * 1.25f;
 
         private static void Main(string[] args)
@@ -58,7 +62,7 @@ namespace DisasterPlus.Tools.ForecastMapPreview
             uint approach = TyphoonTrack.ApproachFramesFor(origin, seed, speed, lifetime);
             var plan = new TyphoonTrackPlan(origin, seed, speed, approach, lifetime);
 
-            // 「今」はクリック地点に着いた瞬間 —— いちばん見たい絵になる。
+            // "Now" is the moment it reaches the clicked point —— the picture we most want.
             uint now = approach;
             Vec2 centre = plan.CentreAt(now);
 
@@ -93,7 +97,8 @@ namespace DisasterPlus.Tools.ForecastMapPreview
             Console.WriteLine("end (" + end.X.ToString("F0") + "," + end.Z.ToString("F0")
                               + ") inside=" + TyphoonTrack.IsInsideMap(end));
 
-            // 眼が本当にあるか、数字でも言う（絵だけだと薄い色を見落とす）。
+            // State in numbers whether the eye is really there (from the picture alone a faint
+            // colour is easy to miss).
             Console.WriteLine("wind at centre=" + TyphoonProfile.WindAt(0f, intensity, prefabRadius).ToString("F2")
                               + "  at eyewall=" + TyphoonProfile.WindAt(storm * 0.6f, intensity, prefabRadius).ToString("F2")
                               + "  at gale edge=" + TyphoonProfile.WindAt(gale * 0.99f, intensity, prefabRadius).ToString("F2"));
@@ -107,7 +112,8 @@ namespace DisasterPlus.Tools.ForecastMapPreview
             }
         }
 
-        /// <summary>マップの範囲を薄い枠で。進路が外から入ることを目で確かめるため。</summary>
+        /// <summary>The map's extent as a faint frame, so it can be seen by eye that the
+        /// track enters from outside.</summary>
         private static void DrawMapEdge(byte[] rgb)
         {
             int a = ToPixel(-Half), b = ToPixel(Half);
@@ -121,7 +127,8 @@ namespace DisasterPlus.Tools.ForecastMapPreview
         }
 
         /// <summary>
-        /// 風の分布。<c>ForecastOverlay.DrawWind</c> と<b>同じ格子・同じ関数</b>。
+        /// The wind field. <b>The same grid and the same function</b> as
+        /// <c>ForecastOverlay.DrawWind</c>.
         /// </summary>
         private static void DrawWindField(byte[] rgb, Vec2 centre, float gale,
                                           byte intensity, float prefabRadius)
@@ -152,7 +159,7 @@ namespace DisasterPlus.Tools.ForecastMapPreview
             }
         }
 
-        /// <summary><c>ForecastOverlay.WindColourOf</c> と同じ配色。</summary>
+        /// <summary>The same colour scheme as <c>ForecastOverlay.WindColourOf</c>.</summary>
         private static void WindColour(float wind, out byte r, out byte g, out byte b)
         {
             if (wind > 1f) wind = 1f;
@@ -241,7 +248,7 @@ namespace DisasterPlus.Tools.ForecastMapPreview
             {
                 int x = x0 + (x1 - x0) * i / steps;
                 int z = z0 + (z1 - z0) * i / steps;
-                // 少し太らせる（1 px だと縮小して見えない）。
+                // Thicken it slightly (at 1 px it disappears when scaled down).
                 for (int oz = -1; oz <= 1; oz++)
                     for (int ox = -1; ox <= 1; ox++)
                         Plot(rgb, x + ox, z + oz, r, g, bl);
@@ -256,7 +263,7 @@ namespace DisasterPlus.Tools.ForecastMapPreview
         private static void Plot(byte[] rgb, int x, int z, byte r, byte g, byte b)
         {
             if (x < 0 || x >= Size || z < 0 || z >= Size) return;
-            // 北が上になるよう z を反転する。
+            // Flip z so that north is up.
             int i = ((Size - 1 - z) * Size + x) * 3;
             rgb[i] = r; rgb[i + 1] = g; rgb[i + 2] = b;
         }

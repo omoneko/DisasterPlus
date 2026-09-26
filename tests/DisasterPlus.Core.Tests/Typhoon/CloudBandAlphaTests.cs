@@ -15,8 +15,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void BothEdgesOfTheRibbonFadeToNothing()
         {
-            // ここが 0 でないと、メッシュの縁がそのまま見えて硬い帯に戻る
-            // （そのために UV を使い始めたのだから、これがこの型の存在理由）。
+            // Unless this is 0, the edge of the mesh shows through and it goes back to being
+            // a hard-edged band (we started using UVs for precisely this, so it is the
+            // reason this type exists).
             var a = Built();
             int last = CloudBandAlpha.Size - 1;
             for (int x = 0; x < CloudBandAlpha.Size; x++)
@@ -29,8 +30,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheCentreOfTheRibbonKeepsFullOpacity()
         {
-            // **雲を濃くも薄くもしない**約束。中央が 255 なら、雲の濃さは今までどおり
-            // マテリアルのティントの α だけで決まり、テクスチャは縁を落とすだけになる。
+            // The promise **not to make the cloud any denser or any thinner**. With 255 in
+            // the middle, the cloud's opacity is still decided solely by the alpha of the
+            // material's tint, and the texture does nothing but fade the edges.
             var a = Built();
             int mid = (CloudBandAlpha.Size - 1) / 2;
             int peak = 0;
@@ -46,8 +48,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void EveryTexelIsMonotonicTowardsTheCentreOfTheBand()
         {
-            // 縁から中央へ向かって単調に濃くなること。途中に山や谷があると、
-            // リボンの中に線が見える（v 方向は 1 本のグラデーションであるべき）。
+            // It must grow denser monotonically from the edge towards the middle. A peak or
+            // a trough on the way makes a line visible inside the ribbon (along v it should
+            // be a single gradient).
             var a = Built();
             int mid = (CloudBandAlpha.Size - 1) / 2;
             for (int x = 0; x < CloudBandAlpha.Size; x++)
@@ -64,12 +67,13 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void AShortBufferIsLeftAlone()
         {
-            // 途中まで書くと「縁の片側だけ硬い」という最も調べにくい形になる。
+            // Writing part of the way gives "only one edge is hard", the hardest form of all
+            // to investigate.
             var a = new byte[CloudBandAlpha.Size];
             CloudBandAlpha.Build(a);
             for (int i = 0; i < a.Length; i++) Assert.Equal(0, a[i]);
 
-            CloudBandAlpha.Build(null);   // 落ちないこと
+            CloudBandAlpha.Build(null);   // it must not fall over
         }
 
         [Fact]

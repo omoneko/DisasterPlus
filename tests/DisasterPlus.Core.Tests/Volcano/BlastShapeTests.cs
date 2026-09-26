@@ -4,15 +4,16 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 実機報告（2026-08-22）「火山の爆発について、エフェクトが平面的なのと
-    /// 場所が少しずれて見えます」。
+    /// Live report (2026-08-22): "About the volcanic explosion, the effect looks flat
+    /// and the location seems slightly off."
     ///
-    /// ★★ 原因は 2 つとも IL で確かめてある:
+    /// ★★ Both causes have been confirmed in IL:
     ///
-    ///   1. <b>平面的</b> —— 3 引数の <c>EffectInfo.SpawnArea(pos, dir, radius)</c> は
-    ///      <c>m_halfHeight = 0</c> を書く（IL_006F-0075）。粒は
-    ///      「円盤 ＋ 上×[0, halfHeight)」に湧くので、**厚みゼロの円盤**になる。
-    ///   2. <b>ずれ</b> —— 発の散らばりが火口より広かった（横 1.15 倍・縦 1.9 倍）。
+    ///   1. <b>Flat</b> —— the 3-argument <c>EffectInfo.SpawnArea(pos, dir, radius)</c>
+    ///      writes <c>m_halfHeight = 0</c> (IL_006F-0075). Particles spawn in
+    ///      "disc + up×[0, halfHeight)", so it becomes a **disc of zero thickness**.
+    ///   2. <b>Off</b> —— the scatter of the bursts was wider than the crater
+    ///      (1.15x horizontally, 1.9x vertically).
     /// </summary>
     public class BlastShapeTests
     {
@@ -22,8 +23,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void EveryBurstHasRealVerticalExtent()
         {
-            // ★★ **0 を渡したら平面に戻る。** ここが 0 を許すと、また
-            //    3 引数の SpawnArea と同じ絵になる。
+            // ★★ **Pass 0 and it goes back to being flat.** If 0 is allowed here, we get
+            //    the same picture as the 3-argument SpawnArea all over again.
             int count = BlastCluster.CountFor(1f, 1f, false);
             for (int i = 0; i < count; i++)
             {
@@ -38,8 +39,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheBurstsStayInsideTheCrater()
         {
-            // 火口の外まで散ると、1 つの大きい爆発ではなく
-            // 「火口のまわりでばらばらに弾けている」ように見える。
+            // If they scatter beyond the crater it looks like things "popping off
+            // separately around the crater" rather than one big explosion.
             int count = BlastCluster.CountFor(1f, 1f, false);
             for (int i = 0; i < count; i++)
             {
@@ -56,7 +57,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheBurstsStayNearTheVentVertically()
         {
-            // 爆発は火口で起きる。噴煙柱の高さまで浮かせない。
+            // The explosion happens at the crater. Do not float it up to the height
+            // of the plume.
             int count = BlastCluster.CountFor(1f, 1f, false);
             for (int i = 0; i < count; i++)
             {
@@ -70,8 +72,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheRingFissureIsStillAllowedToReachOutFar()
         {
-            // ★ 火口に収めるのは**中央の噴火だけ**である。破局噴火の環状火口列は
-            //   カルデラのふちまで届かなければならない（BlastCluster のクラス doc）。
+            // ★ Only the **central eruption** is kept inside the crater. The ring of
+            //   fissures of a caldera-forming eruption has to reach the rim of the
+            //   caldera (see the BlastCluster class doc).
             const float ring = 5563f;
             int count = BlastCluster.CountFor(1f, 1f, true);
 

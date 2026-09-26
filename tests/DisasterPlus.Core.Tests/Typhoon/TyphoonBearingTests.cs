@@ -5,18 +5,21 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// 実機報告（2026-08-22）「台風の雲のエフェクトは一瞬だけ現れて消えてしまいます
-    /// …可能な限り上空を巨大な台風雲がゆっくりと回転して通過しながら…」。
+    /// In-game report (2026-08-22): "the typhoon cloud effect appears for only an
+    /// instant and then disappears ... I want a huge typhoon cloud to rotate slowly
+    /// overhead and pass across as much of the map as possible ...".
     ///
-    /// ★★ <b>原因は方位が出発点と無関係だったことである。</b> マップの端の近くを
-    ///    指して外向きの目が出ると、台風は数百 m でマップを出て
-    ///    <c>TyphoonController.Stop()</c> に掛かる —— <b>雲が一瞬出て消える。</b>
-    ///    宿主のバニラの雷雨は別の寿命で動いているので、そちらだけが残る
-    ///    （報告の「そこからはただの雷雨が続く」）。
+    /// ★★ <b>The cause was that the bearing had nothing to do with the start point.</b>
+    ///    Point near the edge of the map, draw a seed that faces outwards, and the
+    ///    typhoon leaves the map within a few hundred metres and is caught by
+    ///    <c>TyphoonController.Stop()</c> —— <b>the cloud appears for an instant and
+    ///    vanishes.</b> The host vanilla thunderstorm runs on a different lifetime, so
+    ///    only that one is left behind (the report's "from then on it is just a plain
+    ///    thunderstorm").
     /// </summary>
     public class TyphoonBearingTests
     {
-        /// <summary>ThunderStormAI の実測値。</summary>
+        /// <summary>Measured from ThunderStormAI.</summary>
         private const uint HostDuration = 8192u;
 
         private static float Speed
@@ -29,7 +32,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
             get { return TyphoonTrack.LifetimeFramesFor(HostDuration); }
         }
 
-        /// <summary>マップの端ぎわの地点をいくつか。**いちばん壊れやすい置き方である。**</summary>
+        /// <summary>A few points right at the edge of the map.
+        /// **This is the placement that breaks most easily.**</summary>
         private static Vec2[] EdgePoints()
         {
             const float e = TyphoonTrack.MapHalfExtent * 0.92f;
@@ -43,14 +47,15 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ATyphoonPlacedAtTheEdgeHeadsInland()
         {
-            // ★★ どの種でも、端に置いたら**内側へ**向かうこと。
+            // ★★ For every seed, placing it at the edge must head **inwards**.
             foreach (Vec2 origin in EdgePoints())
             {
                 for (uint seed = 1; seed < 40; seed++)
                 {
                     float bearing = TyphoonTrack.BearingFrom(origin, seed);
 
-                    // 進行方向の単位ベクトルと、中心へ向かう単位ベクトルの内積。
+                    // Dot product of the heading unit vector with the unit vector
+                    // pointing at the centre.
                     float dx = (float)System.Math.Cos(bearing);
                     float dz = (float)System.Math.Sin(bearing);
 
@@ -61,7 +66,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
 
                     float dot = dx * tx + dz * tz;
 
-                    // spread が 0.62 rad なので cos(0.62) = 0.81 より下にはならない。
+                    // spread is 0.62 rad, so it never goes below cos(0.62) = 0.81.
                     Assert.True(dot > 0.8f,
                                 "seed " + seed + " at (" + origin.X + "," + origin.Z
                                 + ") heads away from the map (dot=" + dot + ")");
@@ -72,8 +77,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ATyphoonPlacedAtTheEdgeStaysOverTheMapForMostOfItsLife()
         {
-            // ★★ これが依頼そのものである —— 「可能な限り上空を…通過」。
-            //    以前はここが 0 になる種が普通に出た。
+            // ★★ This is the request itself —— "pass overhead ... as much as possible".
+            //    This used to come out as 0 for plenty of seeds.
             foreach (Vec2 origin in EdgePoints())
             {
                 for (uint seed = 1; seed < 20; seed++)
@@ -99,8 +104,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void APointNearTheCentreStillGetsAVariedHeading()
         {
-            // ★ 中心のすぐ近くでは「中心へ向かう向き」が定義できない。
-            //   種だけで決めるので、方位は散らばること。
+            // ★ Right by the centre, "the direction towards the centre" is undefined.
+            //   It is decided by the seed alone, so the bearings must be spread out.
             var origin = new Vec2(0f, 0f);
             var seen = new System.Collections.Generic.HashSet<int>();
 
@@ -116,7 +121,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheSamePlaceAndSeedAlwaysGivesTheSameTrack()
         {
-            // 同じセーブで再現できること（設計書 §4.1）。
+            // It must be reproducible within the same save (design document §4.1).
             var origin = new Vec2(3000f, -2000f);
             for (uint seed = 1; seed < 20; seed++)
             {

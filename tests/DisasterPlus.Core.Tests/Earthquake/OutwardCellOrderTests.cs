@@ -5,17 +5,20 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// 走査の順序（第 2 層レビュー I1）。
+    /// Sweep order (second-layer review I1).
     ///
-    /// 直す前の実装は矩形を行優先で辿っていたので、**最初に見るセルが震央から
-    /// いちばん遠い角**になり、1 回ぶんの上限が「いちばん壊れやすい建物」を
-    /// 切り捨てていた。ここで固定するのは 3 つだけである:
+    /// Before the fix the implementation walked the rectangle in row-major order, so **the
+    /// first cell it looked at was the corner furthest from the epicentre**, and the
+    /// per-pass budget cut off "the buildings most likely to be destroyed". Only three
+    /// things are pinned here:
     ///
-    ///   1. 序数 0 は震央そのもの（<see cref="StartsAtTheCentre"/>）
-    ///   2. リング（チェビシェフ距離）は序数について**非減少**
-    ///      （<see cref="RingsNeverGoBackInwards"/>）—— これが「近い方を先に見る」の中身
-    ///   3. <see cref="OutwardCellOrder.OrdinalCount"/> ぶん回せば、その半径の
-    ///      正方形の全セルを**ちょうど 1 回ずつ**通る（重複も取りこぼしも無い）
+    ///   1. Ordinal 0 is the epicentre itself (<see cref="StartsAtTheCentre"/>)
+    ///   2. The ring (Chebyshev distance) is **non-decreasing** in the ordinal
+    ///      (<see cref="RingsNeverGoBackInwards"/>) —— this is the substance of
+    ///      "look at the nearer ones first"
+    ///   3. Running through <see cref="OutwardCellOrder.OrdinalCount"/> ordinals passes
+    ///      through every cell of the square of that radius **exactly once** (no
+    ///      duplicates and nothing missed)
     /// </summary>
     public class OutwardCellOrderTests
     {
@@ -38,8 +41,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         /// <summary>
-        /// **この機能の中身。** 序数が進むにつれてリングが内側へ戻らないこと。
-        /// 行優先の実装はここで落ちる（最初の序数が最大リングになる）。
+        /// **The substance of this feature.** The ring must not go back inwards as the
+        /// ordinal advances. A row-major implementation fails here (its first ordinal is
+        /// on the largest ring).
         /// </summary>
         [Fact]
         public void RingsNeverGoBackInwards()
@@ -57,7 +61,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
                 previous = ring;
             }
 
-            // 最後の序数は必ず最外リングに居る。
+            // The last ordinal is always on the outermost ring.
             Assert.Equal(12, previous);
         }
 
@@ -75,7 +79,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
                 Assert.True(dx >= -radius && dx <= radius);
                 Assert.True(dz >= -radius && dz <= radius);
 
-                // (dx, dz) を 1 つの整数へ畳む。半径は 9 なので衝突しない。
+                // Fold (dx, dz) into a single integer. The radius is 9, so it cannot collide.
                 Assert.True(seen.Add((dx + radius) * 1000 + (dz + radius)),
                             "ordinal " + n + " repeated a cell");
             }
@@ -85,8 +89,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         /// <summary>
-        /// リングの決定は整数平方根を使う。<c>(2r+1)²</c> の**直前と直後**が
-        /// 境界なので、そこだけを名指しで固定する（double の Sqrt では 1 ずれうる）。
+        /// The ring is determined with an integer square root. The boundaries are
+        /// **immediately before and after** <c>(2r+1)²</c>, so only those are pinned by
+        /// name (a double Sqrt can be off by one there).
         /// </summary>
         [Fact]
         public void RingBoundariesAreExact()
@@ -116,13 +121,14 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.Equal(9, OutwardCellOrder.OrdinalCount(1));
             Assert.Equal(25, OutwardCellOrder.OrdinalCount(2));
 
-            // 実際に使う最大（建物グリッド 270 辺）でも int に収まる。
+            // Even the largest one actually used (a 270-cell building grid side) fits in an int.
             Assert.Equal(541 * 541, OutwardCellOrder.OrdinalCount(270));
         }
 
         /// <summary>
-        /// 桁あふれを 0 や負にしない。あふれた値で <c>while (n &lt; count)</c> を
-        /// 回すと走査が 1 セルも走らないという、いちばん見えにくい壊れ方をする。
+        /// Overflow must not turn into 0 or a negative. Running
+        /// <c>while (n &lt; count)</c> with an overflowed value makes the sweep visit not
+        /// a single cell, which is the hardest breakage of all to see.
         /// </summary>
         [Fact]
         public void OrdinalCountSaturatesInsteadOfOverflowing()
@@ -132,8 +138,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         /// <summary>
-        /// リングの半径は矩形の全セルを覆う。中心が矩形の**外**にあっても覆う
-        /// （震央がマップ外でクランプされた場合）。
+        /// The ring radius covers every cell of the rectangle. It covers them even when the
+        /// centre is **outside** the rectangle (the case where the epicentre was clamped
+        /// because it lay off the map).
         /// </summary>
         [Fact]
         public void RingRadiusCoversTheWholeBox()
@@ -141,14 +148,15 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.Equal(0, OutwardCellOrder.RingRadiusFor(5, 5, 5, 5, 5, 5));
             Assert.Equal(3, OutwardCellOrder.RingRadiusFor(5, 5, 2, 8, 4, 6));
 
-            // 中心が矩形の外（左下の外）。いちばん遠い角までの距離になる。
+            // The centre is outside the rectangle (below and to the left). It becomes the
+            // distance to the furthest corner.
             Assert.Equal(10, OutwardCellOrder.RingRadiusFor(0, 0, 3, 10, 1, 4));
         }
 
         /// <summary>
-        /// 矩形とその中心から作った順序が、矩形の全セルを 1 回ずつ通ること。
-        /// <c>LongPeriodDamage.Sweep</c> が実際に行っている「はみ出しは飛ばす」を
-        /// そのまま写した検証である。
+        /// An order built from a rectangle and its centre must pass through every cell of
+        /// the rectangle once. This is a direct transcription of the "skip what falls
+        /// outside" that <c>LongPeriodDamage.Sweep</c> actually does.
         /// </summary>
         [Fact]
         public void SweepingAClippedBoxVisitsEveryCellOnce()
@@ -176,8 +184,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         /// <summary>
-        /// 打ち切りは**外側から**落ちる。1 回ぶんの上限で切ったとき、
-        /// 見終わったセルはどれも、まだ見ていないセルより震央に近いか同じリングに居る。
+        /// Truncation drops cells **from the outside in**. When the per-pass budget cuts
+        /// the sweep short, every cell already visited is nearer the epicentre than, or on
+        /// the same ring as, every cell not yet visited.
         /// </summary>
         [Fact]
         public void TruncatingDropsTheOutermostCellsFirst()

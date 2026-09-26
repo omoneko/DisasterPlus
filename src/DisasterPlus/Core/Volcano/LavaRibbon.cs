@@ -4,44 +4,49 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 溶岩の帯（リボン）の頂点を作る**純データ**。④の <c>SpiralMesh</c> と同じ扱いで、
-    /// <c>UnityEngine</c> を 1 つも知らない。
+    /// **Pure data** producing the vertices of a lava ribbon. Treated exactly like ④'s
+    /// <c>SpiralMesh</c>: it knows nothing whatsoever about <c>UnityEngine</c>.
     ///
-    /// ── なぜゼロから作るのか ─────────────────────────────────
+    /// ── Why we build it from scratch ─────────────────────────────────
     ///
-    /// 溶岩・マグマ・溶融物のプレハブもマテリアルもシェーダも、**DLL の文字列ヒープに
-    /// 1 件も無い**（§B-5。UTF-16 / ASCII の両方で <c>lava</c> / <c>magma</c> /
-    /// <c>molten</c> を走査してヒット 0）。借りられる既製品が存在しないので、
-    /// ⑤は形も面も自分で作る。
+    /// There is **not a single** prefab, material or shader for lava, magma or molten
+    /// anything **in the DLL's string heap** (§B-5: scanning for <c>lava</c> / <c>magma</c> /
+    /// <c>molten</c> in both UTF-16 and ASCII gave zero hits). There is no off-the-shelf
+    /// thing to borrow, so ⑤ builds both the shape and the surface itself.
     ///
-    /// ── 高さは⑤が持たない ────────────────────────────────
+    /// ── ⑤ does not hold the height ────────────────────────────────
     ///
-    /// <paramref name="heightOffset"/> は「地面からどれだけ浮かせるか」だけである。
-    /// **地面の高さは Game 側が <c>SampleDetailHeight</c> で引いて各頂点に足す。**
-    /// Core に地形を持ち込まない。
+    /// <paramref name="heightOffset"/> is only "how far above the ground to float".
+    /// **The ground height is looked up by the Game side with <c>SampleDetailHeight</c> and
+    /// added to each vertex.** We do not bring terrain into Core.
     ///
-    /// ── 折れ線は 1 本ぶんである ──────────────────────────────
+    /// ── A polyline is one flow's worth ──────────────────────────────
     ///
-    /// 溶岩は複数本流れるが、この型が扱うのは**1 本の折れ線**だけである。
-    /// 呼び出し側が流れごとに呼び、できた頂点を 1 枚のメッシュへ詰め合わせる
-    /// （別々の流れの点を 1 本の折れ線として渡すと、流れの間を飛び回る帯になる）。
+    /// Lava runs in several streams, but this type handles **one polyline** only.
+    /// The caller calls it once per flow and packs the resulting vertices into a single mesh
+    /// (hand it points from separate flows as one polyline and you get a ribbon flying back
+    /// and forth between them).
     /// </summary>
     public static class LavaRibbon
     {
-        /// <summary>1 本の折れ線に使える点の上限。**配列を無限に伸ばさない。**</summary>
+        /// <summary>The cap on points in one polyline. **We never let the arrays grow
+        /// without limit.**</summary>
         public const int MaxPoints = 256;
 
-        /// <summary>帯の最小の幅（m）。0 幅の帯は面積を持たず、何も描かれない。</summary>
+        /// <summary>The ribbon's minimum width (m). A zero-width ribbon has no area and
+        /// nothing gets drawn.</summary>
         public const float MinWidthMetres = 4f;
 
-        /// <summary>点の数に対する頂点数（各点の左右で 2 個）。</summary>
+        /// <summary>The vertex count for a given point count (2 per point, left and
+        /// right).</summary>
         public static int VertexCountFor(int pointCount)
         {
             if (pointCount < 2) return 0;
             return pointCount * 2;
         }
 
-        /// <summary>点の数に対する三角形の添字の数（区間ごとに 2 枚 ＝ 6 個）。</summary>
+        /// <summary>The triangle index count for a given point count (2 triangles = 6
+        /// indices per segment).</summary>
         public static int TriangleIndexCountFor(int pointCount)
         {
             if (pointCount < 2) return 0;
@@ -49,15 +54,17 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 折れ線と幅から帯を作る。点が 2 個に満たなければ**何も作らずに false**
-        /// （縮退したメッシュを Unity へ渡すと、例外は出ないまま描画が静かに壊れる）。
+        /// Builds the ribbon from a polyline and its widths. With fewer than 2 points it
+        /// **builds nothing and returns false** (hand Unity a degenerate mesh and the
+        /// rendering breaks quietly, with no exception).
         ///
-        /// <paramref name="count"/> が <see cref="MaxPoints"/> を超えたら
-        /// <see cref="MaxPoints"/> で切る。
+        /// If <paramref name="count"/> exceeds <see cref="MaxPoints"/> it is cut to
+        /// <see cref="MaxPoints"/>.
         ///
-        /// 進行方向は前後の点の差分（端は片側だけ）。**差分が 0 なら直前の有効な
-        /// 方向を引き継ぐ**（無ければ <c>(1, 0)</c>）—— 溶岩が止まると同じ点が続くので、
-        /// ここで 0 除算すると <c>NaN</c> の頂点ができる。
+        /// The direction of travel is the difference between the neighbouring points (one
+        /// side only at the ends). **If the difference is 0 we carry over the last valid
+        /// direction** (or <c>(1, 0)</c> if there is none) — when lava stops, the same point
+        /// repeats, and dividing by zero here would produce <c>NaN</c> vertices.
         /// </summary>
         public static bool Build(Vec2[] points, int count, float[] widths, float heightOffset,
                                  out Vec3[] vertices, out float[] uv, out int[] triangles)
@@ -97,7 +104,7 @@ namespace DisasterPlus.Core.Volcano
                     lastDirZ = dz / length;
                 }
 
-                // 進行方向を 90 度回した単位ベクトル。
+                // The unit vector at 90 degrees to the direction of travel.
                 float normalX = -lastDirZ;
                 float normalZ = lastDirX;
 

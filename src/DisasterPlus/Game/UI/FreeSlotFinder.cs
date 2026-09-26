@@ -5,120 +5,127 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 他 MOD やバニラのボタンと重ならない位置を実行時に探す。
+    /// Finds a position at runtime that does not overlap other mods' or vanilla's buttons.
     ///
-    /// CS1 は左上に MOD のボタンが積み上がるのが慣習で、固定座標は必ずいつか衝突する
-    /// （ユーザーからの明示要件）。
+    /// On CS1 it is the convention for mod buttons to pile up in the top-left, and fixed
+    /// coordinates are bound to collide eventually (an explicit requirement from the user).
     ///
-    /// ★★ **呼び出し元は 2 か所だけであり、その 2 つは互いに独立ではない。**
+    /// ★★ **There are only two callers, and those two are not independent of each other.**
     ///
-    ///   1. <see cref="InfoHub"/> —— 左上のショートカット 1 個。**常に画面に居る。**
-    ///   2. <see cref="DisasterPanelBar"/> の退避バー —— バニラの災害パネルが
-    ///      どうしても見つからない環境でだけ現れる。**自分で preferred を
-    ///      決めず、1 の真下から探し始める**（あちらの <c>EnsureFallbackBar</c>）。
+    ///   1. <see cref="InfoHub"/> — one shortcut in the top-left. **Always on screen.**
+    ///   2. <see cref="DisasterPanelBar"/>'s fallback bar — appears only in an environment
+    ///      where vanilla's disaster panel simply cannot be found. **It does not decide a
+    ///      preferred of its own; it starts searching directly below 1**
+    ///      (see <c>EnsureFallbackBar</c> over there).
     ///
-    /// 2 が 1 の真下から探すのは、下の事故を構造的に不可能にするためである ——
-    /// **探索は下方向にしか進まないので、2 が 1 の位置を返す経路が存在しない。**
-    /// ①〜⑤が個別にここを呼ぶ形には戻さないこと。**新しい呼び出し元を足すなら、
-    /// 既存のどれかの真下から探すこと**（同じ preferred を共有しないこと）。
+    /// 2 starts directly below 1 so as to make the accident below structurally impossible —
+    /// **the search only ever moves downwards, so there is no path by which 2 returns 1's
+    /// position.** Do not go back to a shape where ① to ⑤ each call in here individually.
+    /// **If you add a new caller, have it search from directly below one of the existing ones**
+    /// (do not share the same preferred).
     ///
-    /// この doc は以前「②〜⑤も同じ問題を持つので共用する」と書いていたが、
-    /// 実際に②〜⑤がそれぞれ同じ preferred 座標から呼んだ結果が、初回の実機テストの
-    /// output_log.txt に残っている ——
-    /// <c>no free UI slot found after 30 tries</c> が 4 回出て、4 個のボタンが
-    /// (8,50) に積み上がった。**探索が誤っていたのではなく、探索する主体が
-    /// 4 つあったことが誤りだった。** いま①②④⑤のボタンはバニラの災害パネルの中に
-    /// 並び（位置はパネルの autolayout が決める）、ここが呼ばれるのは
-    /// **そのパネルがどうしても見つからない環境で、退避用のバー 1 本の起点を
-    /// 1 回だけ決めるとき**に限られる。バーの中のボタンは起点からの相対位置に
-    /// 1 回のループで並ぶので、ここへ 5 回問い合わせることはもう無い。
+    /// This doc used to say "② to ⑤ have the same problem, so they share this". What actually
+    /// happened when ② to ⑤ each called with the same preferred coordinates is on record in
+    /// the output_log.txt from the first playtest —
+    /// <c>no free UI slot found after 30 tries</c> came out four times and four buttons piled
+    /// up at (8,50). **The search was not wrong; having four things doing the searching was.**
+    /// The ①②④⑤ buttons now line up inside vanilla's disaster panel (the panel's autolayout
+    /// decides the positions), and this is called only **in an environment where that panel
+    /// simply cannot be found, to decide the origin of a single fallback bar, once**.
+    /// The buttons in that bar are laid out relative to the origin in one loop, so there is no
+    /// longer any question of asking here five times.
     ///
-    /// ── そして 2 度目の壊れ方（実機 2 回目） ─────────────────────────
+    /// ── And then it broke a second time (second playtest) ─────────────────────────
     ///
-    /// 上を直したあと、今度は逆側に外れた ——
-    /// <c>Disaster + info button installed at (8,1094)</c>。高さ 1080 の画面で
-    /// y = 1094 である。探索は下へ 30 回ぶん無条件に降り、**画面の外に出たところを
-    /// 「空いている」と正しく判定していた**（外なのだから何とも重ならない）。
-    /// 重なって使えないのと、見えなくて使えないのは、どちらも同じだけ壊れている。
+    /// Having fixed the above, it then missed on the other side —
+    /// <c>Disaster + info button installed at (8,1094)</c>. On a 1080-high screen, y = 1094.
+    /// The search descended 30 steps unconditionally and **correctly judged the point where it
+    /// left the screen to be "free"** (being outside, it overlaps nothing).
+    /// Unusable because it overlaps and unusable because it is invisible are equally broken.
     ///
-    /// そこで<b>「画面の外へは 1 歩も出ない」を探索の上位の制約に置いた</b>。
-    /// 候補の数は <see cref="DisasterPlus.Core.Common.ScreenSlot"/> が決め
-    /// （Core、テストが境界を固定している）、画面の広さは
-    /// <c>UIView.GetScreenResolution()</c> から読む —— **1080 を仮定しない。**
-    /// 画面内に空きが 1 つも無ければ preferred（これも画面内へ丸めてある）へ落ちる。
-    /// <b>その分岐は本当に到達する</b>ようになった。以前は到達しても
-    /// 画面外の「空き」が先に見つかるので、事実上死んでいた。
+    /// So <b>"do not take a single step off the screen" was made a higher-priority constraint
+    /// on the search</b>. The number of candidates is decided by
+    /// <see cref="DisasterPlus.Core.Common.ScreenSlot"/> (in Core, with tests pinning the
+    /// boundaries), and the size of the screen is read from
+    /// <c>UIView.GetScreenResolution()</c> — **do not assume 1080.**
+    /// If there is not a single free slot on screen, it falls back to preferred (which is
+    /// likewise rounded into the screen). <b>That branch really is reached</b> now. Before,
+    /// even when it was reached, an off-screen "free" slot was found first, so it was
+    /// effectively dead.
     ///
-    /// API 実測（docs/tools/ilload.ps1 + ildasm.ps1 で ColossalManaged.dll / UnityEngine.dll を
-    /// 直接確認。詳細は task-2-report.md）:
-    ///   - UIView.GetAView() は static。
-    ///   - UIComponent は UnityEngine.MonoBehaviour 派生（Behaviour → Component → Object）なので
-    ///     GetComponentsInChildren&lt;T&gt;() は UnityEngine.Component 側の総称メソッドが解決する
-    ///     （ColossalManaged 固有のオーバーロードではない）。既定の includeInactive=false を
-    ///     そのまま使う（理由は下記 Find のコメント）。
-    ///   - UIComponent.isVisible の実装は m_IsVisible フィールドと親の isVisible を再帰的に
-    ///     見ているだけで、GameObject.activeSelf は一切参照しない（IL 実測）。
-    ///   - name は UnityEngine.Object 由来（string, 読み取り可）。
+    /// API measurements (ColossalManaged.dll / UnityEngine.dll inspected directly with
+    /// docs/tools/ilload.ps1 + ildasm.ps1. Details in task-2-report.md):
+    ///   - UIView.GetAView() is static.
+    ///   - UIComponent derives from UnityEngine.MonoBehaviour (Behaviour → Component → Object),
+    ///     so GetComponentsInChildren&lt;T&gt;() resolves to the generic method on
+    ///     UnityEngine.Component (not a ColossalManaged-specific overload). The default
+    ///     includeInactive=false is used as-is (for the reason see the Find comment below).
+    ///   - UIComponent.isVisible is implemented by looking recursively at the m_IsVisible field
+    ///     and the parent's isVisible, and never consults GameObject.activeSelf (measured from
+    ///     the IL).
+    ///   - name comes from UnityEngine.Object (string, readable).
     /// </summary>
     public static class FreeSlotFinder
     {
         /// <summary>
-        /// DisasterPlus 製 UI コンポーネントの命名接頭辞。ログや識別のために
-        /// 名前を揃えるのに使う。後続タスクはこの定数からコンポーネント名を
-        /// 組み立てること（文字列 "DisasterPlus" をそれぞれの箇所で書き直さない）。
+        /// The naming prefix for DisasterPlus UI components. Used to keep names consistent for
+        /// logging and identification. Later tasks should build component names from this
+        /// constant (do not write the string "DisasterPlus" out again in each place).
         ///
-        /// **衝突判定の除外には使わない**（全体レビュー指摘 I4）。以前はこの接頭辞を
-        /// 持つコンポーネント（と、その子孫）を丸ごと走査対象から外していたが、
-        /// それは「自分の中身と衝突しない」ためのつもりが、実際には
-        /// **この MOD が置いた全てのボタンを、以後のあらゆる配置探索から見えなくする**
-        /// 動作だった。設計書 §6 はこのクラスを②〜⑤の共用基盤と定めており、
-        /// ②が同じ preferred で Find を呼ぶと予報ボタンが見えないまま真上に重ねて
-        /// 置くことになる——このファイルが存在する理由そのものを、このファイルが
-        /// 引き起こす形になっていた。除外は「今まさに配置しようとしている当人」
-        /// だけに限る（<see cref="Find"/> の owner 引数）。
+        /// **Do not use it to exclude things from overlap testing** (raised in the overall
+        /// review, I4). Components with this prefix (and their descendants) used to be
+        /// excluded from the sweep wholesale; that was meant as "do not collide with my own
+        /// insides", but what it actually did was **make every button this mod had placed
+        /// invisible to all subsequent placement searches**. Design doc §6 designates this
+        /// class as shared infrastructure for ② to ⑤, so when ② called Find with the same
+        /// preferred it would not see the forecast button and would place itself right on top
+        /// of it — this file was causing the very thing it exists to prevent. Exclusion is
+        /// limited to "the one being placed right now" (the owner argument of
+        /// <see cref="Find"/>).
         /// </summary>
         public const string SelfPrefix = "DisasterPlus";
 
-        /// <summary>parent を辿る際の上限。循環参照があっても sim を止めない安全弁。</summary>
+        /// <summary>The limit when walking up parents. A safety valve so a reference cycle cannot stall sim.</summary>
         private const int MaxAncestorDepth = 32;
 
         /// <summary>
-        /// これより小さいものは装飾であって障害物ではない（px）。
-        /// SIREN Alert の <c>SirenButton.MinWidgetSize</c> と同じ値に揃えてある。
+        /// Anything smaller than this is decoration, not an obstacle (px).
+        /// Kept at the same value as SIREN Alert's <c>SirenButton.MinWidgetSize</c>.
         /// </summary>
         private const float MinWidgetSize = 8f;
 
         /// <summary>
-        /// 画面のこの割合より広い／高いものは**入れ物の容器**として無視する。
-        /// 中身は個々に拾うので取りこぼさない。これも SIREN Alert と同じ値である。
+        /// Anything wider or taller than this fraction of the screen is ignored as **a
+        /// container**. Its contents are picked up individually, so nothing is missed.
+        /// This too is the same value as SIREN Alert's.
         /// </summary>
         private const float ContainerRatio = 0.5f;
 
         /// <summary>
-        /// preferred から下方向へ stepY ずつずらし、可視要素と重ならない最初の位置を返す。
-        /// 見つからなければ preferred を返し foundFree=false にする
-        /// （隠れて見つからないより、見えて重なる方がマシ）。
+        /// Steps down from preferred by stepY and returns the first position that does not
+        /// overlap a visible element. If none is found it returns preferred with
+        /// foundFree=false (better to be visible and overlapping than hidden and unfindable).
         ///
-        /// ★★ **候補は必ず画面の中に限る**（<see cref="ScreenSlot"/>）。
-        ///   実機の初回テストで <c>installed at (8,1094)</c>——高さ 1080 の画面で
-        ///   y = 1094——が出た。探索は下端を歩いて画面の外へ出て、そこを
-        ///   「空いている」と**正しく**判定していた。空いていたのは画面の外だからである。
-        ///   以前の壊れ方（4 個が同じ座標に積み上がる）と、今度の壊れ方
-        ///   （見えない）はどちらも使えないが、**重なるほうがまだ押せる**。
-        ///   だからここは「画面の外へは 1 歩も出ない」を上位の制約に置き、
-        ///   空きが無ければ画面内に丸めた preferred へ落ちる。
+        /// ★★ **Candidates are always confined to the screen** (<see cref="ScreenSlot"/>).
+        ///   The first playtest produced <c>installed at (8,1094)</c> — y = 1094 on a
+        ///   1080-high screen. The search walked past the bottom edge, off the screen, and
+        ///   judged that **correctly** to be "free". It was free because it was off the screen.
+        ///   The old breakage (four piled up at the same coordinates) and this one (invisible)
+        ///   are both unusable, but **an overlapping one can at least still be pressed**.
+        ///   So "do not take a single step off the screen" is the higher-priority constraint
+        ///   here, and with no free slot it falls back to a preferred rounded into the screen.
         /// </summary>
         /// <param name="owner">
-        /// 今まさに配置しようとしているコンポーネント。これ自身とその子孫だけを
-        /// 衝突判定から外す（再配置のときに自分の現在位置と衝突しないため）。
+        /// The component being placed right now. Only this itself and its descendants are
+        /// excluded from overlap testing (so a re-placement does not collide with its own
+        /// current position).
         ///
-        /// **初回配置のようにまだコンポーネントが存在しない場合は null を渡す。**
-        /// その場合は何も除外しない。null を渡すこと自体は正常な使い方であって、
-        /// 手抜きではない。
+        /// **Pass null when the component does not exist yet, as on a first placement.**
+        /// Nothing is excluded in that case. Passing null is a normal use, not a shortcut.
         ///
-        /// 他の DisasterPlus 製コンポーネント（別機能のボタン、開いている予報パネル等）は
-        /// **除外してはいけない**。それらは画面上の場所を実際に占有しており、
-        /// 避けるべき相手である（SelfPrefix の doc 参照）。
+        /// Other DisasterPlus components (another feature's button, an open forecast panel and
+        /// so on) **must not be excluded**. They really do occupy space on screen, and they
+        /// are exactly what should be avoided (see the SelfPrefix doc).
         /// </param>
         public static Vector2 Find(Vector2 preferred, Vector2 size, float stepY,
                                    int maxTries, UIComponent owner, out bool foundFree)
@@ -127,23 +134,26 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 上の 2 軸版。<paramref name="stepX"/> ／ <paramref name="stepY"/> のどちらか
-        /// （または両方）へ 1 歩ずつ進み、可視要素と重ならない最初の位置を返す。
+        /// The two-axis version of the above. Steps one at a time along
+        /// <paramref name="stepX"/> and/or <paramref name="stepY"/> and returns the first
+        /// position that does not overlap a visible element.
         ///
-        /// ── なぜ横向きが要るのか（2026-08-22、所有者の依頼）───────────────
+        /// ── Why a horizontal search is needed (2026-08-22, the owner's request) ───────────────
         ///
-        /// > D＋ボタンが左サイドメニューと重なる位置にあるので……
-        /// > CSWARFRONT ボタンや SIREN Alert ボタンと同じ高さで並んで表示されるように
+        /// > The D＋ button sits where it overlaps the left side menu, so…
+        /// > could it be shown lined up at the same height as the CSWARFRONT button and the
+        /// > SIREN Alert button
         ///
-        /// **バニラの左サイドメニューは縦の列である。** 縦にしか進めない探索は
-        /// その列を上から下までなぞることになり、空きが見つかっても
-        /// **列の一部を隠す位置**にしか置けない（実機で実際にそうなった）。
-        /// 他 MOD 2 本が居るのは画面最上段の**横**の列で、そこへ並べるには
-        /// <c>stepX &gt; 0, stepY = 0</c> で探す。
+        /// **Vanilla's left side menu is a vertical column.** A search that can only move
+        /// vertically traces that column from top to bottom, and even when it finds a free
+        /// slot it can only place **somewhere that hides part of the column** (which is what
+        /// actually happened in the game). The two other mods sit in the **horizontal** row at
+        /// the very top of the screen, and lining up there means searching with
+        /// <c>stepX &gt; 0, stepY = 0</c>.
         ///
-        /// **画面の外へは 1 歩も出ない**という上位の制約はそのままで、
-        /// 候補の数は <see cref="ScreenSlot.CandidatesInside(float,float,float,float,float,float,float,float,int)"/>
-        /// が両軸まとめて決める。
+        /// The higher-priority constraint of **not taking a single step off the screen** is
+        /// unchanged, and the number of candidates is decided for both axes together by
+        /// <see cref="ScreenSlot.CandidatesInside(float,float,float,float,float,float,float,float,int)"/>.
         /// </summary>
         public static Vector2 Find(Vector2 preferred, Vector2 size, float stepX, float stepY,
                                    int maxTries, UIComponent owner, out bool foundFree)
@@ -161,50 +171,54 @@ namespace DisasterPlus.Game
                 var view = UIView.GetAView();
                 if (view == null) return preferred;
 
-                // ★ 画面の広さ。**1080 を仮定しない。**
-                //   UIView.GetScreenResolution() は IL 実測（ColossalManaged）で
-                //   「UI 座標系での解像度」を返す —— uiCamera があれば
-                //   pixelSize / (pixelHeight / fixedHeight * scale)、無ければ
-                //   (fixedWidth, fixedHeight)。absolutePosition / relativePosition と
-                //   同じ空間なので、そのまま比較してよい。
-                //   読めない環境（0 や NaN）では ScreenSlot が「制限しない」側に倒れる。
+                // ★ The size of the screen. **Do not assume 1080.**
+                //   Measured from the IL (ColossalManaged), UIView.GetScreenResolution()
+                //   returns "the resolution in the UI coordinate system" — with a uiCamera,
+                //   pixelSize / (pixelHeight / fixedHeight * scale); without one,
+                //   (fixedWidth, fixedHeight). It is the same space as absolutePosition /
+                //   relativePosition, so it can be compared directly.
+                //   Where it cannot be read (0 or NaN), ScreenSlot falls to the
+                //   "do not constrain" side.
                 Vector2 screen = ReadScreenSize(view);
 
-                // preferred 自体が画面の外を指していることもある（呼び出し元は
-                // 別のボタンの真下から探し始めるので、そちらが下寄りなら起こりうる）。
+                // preferred itself may point off the screen (the caller starts searching from
+                // directly below another button, so it can happen if that one is low down).
                 preferred = new Vector2(ScreenSlot.ClampInto(preferred.x, size.x, screen.x),
                                         ScreenSlot.ClampInto(preferred.y, size.y, screen.y));
 
-                // includeInactive は既定の false のまま使う。UIComponent.set_isVisible を
-                // IL 実測すると m_IsVisible を書き換えて可視キャッシュを更新するだけで
-                // GameObject.SetActive は一切呼んでいない。つまり Hide() された（＝
-                // 「非表示のまま常駐する」）パネルは GameObject としては常にアクティブなまま
-                // であり、includeInactive=false でも配列に入ってくる。それを isVisible で
-                // 弾くのが正しい経路。
+                // includeInactive is left at its default of false. Measuring
+                // UIComponent.set_isVisible in the IL shows it only writes m_IsVisible and
+                // refreshes the visibility cache; it never calls GameObject.SetActive. So a
+                // panel that has been Hide()n (i.e. "resident but not displayed") is always
+                // active as a GameObject and comes into the array even with
+                // includeInactive=false. Rejecting it via isVisible is the correct path.
                 //
-                // 逆に includeInactive=true にすると、UITemplateManager.Get/Instantiate が
-                // まだ画面にアタッチしていないテンプレート複製（GameObject は非アクティブ、
-                // GameObject.SetActive(true) は後で UIComponent.AttachUIComponent が呼ぶ）まで
-                // 拾ってしまう。これらは m_IsVisible がプレハブのシリアライズ値
-                // （多くの場合 true）を保持したままで、isVisible は activeSelf を見ないので
-                // フィルタで弾けない。absolutePosition も画面に配置される前の未確定値
-                // （原点付近＝この探索が動く左上寄りの領域）になりがちで、実際には画面上の
-                // どこも占有していないのに「占有中」と誤判定し、maxTries を空費して
-                // preferred（＝この機能が避けたい重なった位置）へフォールバックしてしまう。
+                // Conversely, with includeInactive=true it would also pick up template copies
+                // that UITemplateManager.Get/Instantiate has not attached to the screen yet
+                // (the GameObject is inactive; GameObject.SetActive(true) is called later by
+                // UIComponent.AttachUIComponent). These still hold m_IsVisible at the prefab's
+                // serialised value (usually true), and isVisible does not consult activeSelf,
+                // so the filter cannot reject them. Their absolutePosition also tends to be an
+                // unsettled value from before they were placed on screen (near the origin =
+                // the top-left region this search runs over), so they would be misjudged as
+                // "occupied" when they occupy nowhere on screen at all, burning maxTries and
+                // falling back to preferred (i.e. exactly the overlapping position this
+                // feature wants to avoid).
                 var all = view.GetComponentsInChildren<UIComponent>();
                 if (all == null || all.Length == 0) { foundFree = true; return preferred; }
 
-                // stepY <= 0 だと毎回同じ候補を検査することになり、探索として意味がない。
-                // 1 回だけ検査して打ち切る。そうしないと「maxTries 回試した」という警告が
-                // 実態（同じ点を繰り返しただけ）と食い違う。
-                // 画面の下端も同じ理由で打ち切る —— そこから先の候補は、空いていても
-                // 押せない（クラス doc の (8,1094)）。
+                // With stepY <= 0 the same candidate would be tested every time, which is
+                // pointless as a search. Test once and stop. Otherwise the warning "tried
+                // maxTries times" would disagree with reality (the same point, repeated).
+                // The bottom edge of the screen stops it for the same reason — candidates
+                // beyond that cannot be pressed even when free (see (8,1094) in the class doc).
                 int effectiveTries = ScreenSlot.CandidatesInside(
                     preferred.x, preferred.y, size.x, size.y, stepX, stepY,
                     screen.x, screen.y, maxTries);
                 if (effectiveTries <= 0)
                 {
-                    // 最初の候補すら画面に入らない。下へ進めばもっと外れるので探索しない。
+                    // Not even the first candidate fits on screen. Going further down only
+                    // gets worse, so do not search.
                     Log.Warn("no on-screen UI slot is available for a "
                              + size.x + "x" + size.y + " button in a "
                              + screen.x + "x" + screen.y + " view; placing it at "
@@ -223,10 +237,11 @@ namespace DisasterPlus.Game
                     }
                 }
 
-                // ★ ここがクラス doc の言う「隠れて見つからないより、見えて重なる方がマシ」
-                //   の実体である。**この分岐は本当に到達する**（左上の列が他 MOD で
-                //   埋まっている環境）。preferred は上で画面内へ丸めてあるので、
-                //   戻り値が画面の外を指すことはない。
+                // ★ This is where the class doc's "better to be visible and overlapping than
+                //   hidden and unfindable" actually lives. **This branch really is reached**
+                //   (in an environment where the top-left column is full of other mods).
+                //   preferred was rounded into the screen above, so the return value never
+                //   points off screen.
                 Log.Warn("no free UI slot found after " + effectiveTries
                          + " on-screen tries (view " + screen.x + "x" + screen.y
                          + "); placing the button at the preferred position (it may overlap)");
@@ -240,22 +255,24 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// UI 座標系での画面の広さ。**読めなければ (0,0) を返す** ——
-        /// <see cref="ScreenSlot"/> はそれを「制限しない」と解釈するので、
-        /// 寸法が読めない環境でボタンが 1 個も置けなくなることはない。
+        /// The size of the screen in the UI coordinate system. **Returns (0,0) if it cannot be
+        /// read** — <see cref="ScreenSlot"/> reads that as "do not constrain", so in an
+        /// environment where the dimensions cannot be read it never becomes impossible to
+        /// place a button at all.
         ///
-        /// <c>GetScreenResolution()</c> が例外を投げる経路（uiCamera が破棄済み等）は
-        /// 実測できていないので、握って (0,0) に倒す。**Warn は出さない** ——
-        /// ここは配置のたびに 1 回しか通らないが、出しても打つ手が無い。
-        /// <c>fixedHeight</c> は保険で、こちらは常に読める整数である。
+        /// The path by which <c>GetScreenResolution()</c> throws (uiCamera already destroyed,
+        /// and so on) has not been measured, so it is swallowed and falls to (0,0).
+        /// **No Warn is emitted** — this only runs once per placement, and there would be
+        /// nothing to do about it anyway.
+        /// <c>fixedHeight</c> is the fallback, and that one is always a readable integer.
         /// </summary>
         /// <summary>
-        /// UI 座標系での画面の広さ。読めなければ <c>(0,0)</c> ——
-        /// <see cref="ScreenSlot"/> はそれを「制限しない」と解釈する。
+        /// The size of the screen in the UI coordinate system. <c>(0,0)</c> if it cannot be
+        /// read — <see cref="ScreenSlot"/> reads that as "do not constrain".
         ///
-        /// <see cref="InfoHub"/> がドラッグの丸めに使う。**ここを 2 番目の
-        /// 「置き場所を決める主体」にしないこと**（クラス doc）—— これは
-        /// 「画面の広さ」を答えるだけで、どこに置くかは答えない。
+        /// <see cref="InfoHub"/> uses it for rounding during a drag. **Do not make this a
+        /// second thing that decides where to place** (see the class doc) — it only answers
+        /// "how big is the screen", never "where does it go".
         /// </summary>
         public static Vector2 ScreenSize()
         {
@@ -291,28 +308,33 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 画面最上段の帯 <c>[bandTop, bandBottom)</c> で、**左から続いている一団の
-        /// 右端**を返す。一団が無ければ 0。
+        /// Returns **the right edge of the run that continues from the left** within the band
+        /// <c>[bandTop, bandBottom)</c> at the top of the screen. 0 if there is no run.
         ///
-        /// ── ★★ 「いちばん右の端」ではない（2026-08-22、実機 2 回目）───────
+        /// ── ★★ Not "the rightmost edge" (2026-08-22, second playtest) ───────
         ///
-        /// 所有者の指示は最初から <b>WF ＞ ！＞ D＋</b> の順である。
+        /// The owner's instruction was <b>WF ＞ ！＞ D＋</b> in that order from the start.
         ///
-        ///   - 1 回目（左端から探す）… **先に間に合った者がいちばん左を取る**ので、
-        ///     この MOD が 1 番だと画面の左端に張り付いた
-        ///   - 2 回目（帯のいちばん右の端の右）… CS は**右上にもバニラの UI を置く**ので、
-        ///     そちらの右端が選ばれて**設定のボタンと重なった**
+        ///   - first attempt (search from the left edge)… **whoever gets there first takes
+        ///     the leftmost spot**, so when this mod was first it stuck to the left edge of
+        ///     the screen
+        ///   - second attempt (just right of the rightmost edge in the band)… CS **puts
+        ///     vanilla UI in the top-right too**, so that right edge was chosen and it
+        ///     **overlapped the settings button**
         ///
-        /// 正しいのは<b>左から続いている一団の右端</b>で、その算術は
-        /// <see cref="TopRowCluster"/>（Core、テストが両方の外し方を固定している）にある。
-        /// ここは**帯に居る要素の左右端を集めるだけ**である。
+        /// What is correct is <b>the right edge of the run that continues from the left</b>,
+        /// and the arithmetic for that lives in <see cref="TopRowCluster"/> (in Core, with
+        /// tests pinning both ways of getting it wrong).
+        /// This only **collects the left and right edges of the elements in the band**.
         ///
-        /// フィルタは SIREN Alert の <c>SirenButton.FindTopRowPosition</c> と揃えてある:
-        /// 小さすぎるもの（装飾）と、画面の半分を超えるもの（入れ物の容器）は
-        /// 障害物に数えない。容器の中身は個々に拾うので取りこぼさない。
+        /// The filters match SIREN Alert's <c>SirenButton.FindTopRowPosition</c>: anything too
+        /// small (decoration) and anything more than half the screen (a container) does not
+        /// count as an obstacle. A container's contents are picked up individually, so nothing
+        /// is missed.
         ///
-        /// ★ <paramref name="owner"/>（とその子孫）は数えない。数えると、置き直すたびに
-        ///   **自分の右端で自分を押しやる**ことになり、右へ逃げていく。
+        /// ★ <paramref name="owner"/> (and its descendants) do not count. Count them and every
+        ///   re-placement would **push itself along by its own right edge**, escaping to the
+        ///   right.
         /// </summary>
         public static float ClusterRightEdge(float bandTop, float bandBottom,
                                              UIComponent owner)
@@ -341,16 +363,17 @@ namespace DisasterPlus.Game
                     Vector2 cs = c.size;
                     if (cs.x < MinWidgetSize || cs.y < MinWidgetSize) continue;
 
-                    // 画面の半分を超えるものは入れ物の容器であって、場所を占有していない。
+                    // Anything more than half the screen is a container and does not occupy
+                    // the space.
                     if (ScreenSlot.IsUsableExtent(screen.x)
                         && cs.x > screen.x * ContainerRatio) continue;
                     if (ScreenSlot.IsUsableExtent(screen.y)
                         && cs.y > screen.y * ContainerRatio) continue;
 
                     Vector2 cp = c.absolutePosition;
-                    if (cp.y >= bandBottom) continue;          // 帯より下
-                    if (cp.y + cs.y <= bandTop) continue;      // 帯より上
-                    if (cp.x + cs.x <= 0f) continue;           // 左に外れている
+                    if (cp.y >= bandBottom) continue;          // below the band
+                    if (cp.y + cs.y <= bandTop) continue;      // above the band
+                    if (cp.x + cs.x <= 0f) continue;           // off to the left
                     if (ScreenSlot.IsUsableExtent(screen.x) && cp.x >= screen.x) continue;
 
                     starts[count] = cp.x;
@@ -375,20 +398,21 @@ namespace DisasterPlus.Game
                 var c = all[i];
                 if (c == null) continue;
 
-                // 非表示の要素は無視する。CS は UI テンプレートを非表示のまま
-                // 常駐させるので、これを数えると空きが永久に見つからない。
+                // Ignore elements that are not displayed. CS keeps UI templates resident while
+                // hidden, and counting those would mean never finding a free slot.
                 if (!c.isVisible) continue;
 
-                // 配置しようとしている当人（とその子孫）だけを無視する。
-                // 複合パネルを再配置する場合、その内部ラベルやアイコンは既定の
-                // 無接頭辞名を持つので、owner との参照一致だけでなく祖先チェーンも辿る。
+                // Ignore only the one being placed (and its descendants).
+                // When re-placing a composite panel, its internal labels and icons carry
+                // default, prefix-less names, so walk the ancestor chain rather than relying
+                // on reference equality with owner alone.
                 if (IsOwnedBy(c, owner)) continue;
 
                 Vector2 cp = c.absolutePosition;
                 Vector2 cs = c.size;
                 if (cs.x <= 0f || cs.y <= 0f) continue;
 
-                // 辺が接するだけ（境界が一致）は重なりに数えない。
+                // Edges merely touching (coincident boundaries) do not count as an overlap.
                 bool separated = pos.x + size.x <= cp.x
                               || cp.x + cs.x <= pos.x
                               || pos.y + size.y <= cp.y
@@ -399,14 +423,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// c が owner そのもの、または owner の子孫なら true。
-        /// owner が null（まだ存在しない初回配置）なら常に false ＝ 何も除外しない。
+        /// true if c is owner itself or a descendant of owner.
+        /// If owner is null (a first placement, where it does not exist yet) always false,
+        /// i.e. nothing is excluded.
         ///
-        /// 名前ではなく参照の一致で見るのが要点。名前（接頭辞）で見ると、この MOD の
-        /// **他の**コンポーネントまで巻き添えで除外され、後続機能が既存ボタンの真上に
-        /// 配置されるようになる（SelfPrefix の doc、全体レビュー指摘 I4）。
+        /// The point is to test by reference equality rather than by name. Test by name
+        /// (prefix) and **other** components of this mod get caught up in the exclusion, so
+        /// later features end up placed right on top of existing buttons (see the SelfPrefix
+        /// doc, raised in the overall review as I4).
         ///
-        /// MaxAncestorDepth で打ち切るので、万一 parent が循環していてもハングしない。
+        /// MaxAncestorDepth stops it, so even if parent somehow formed a cycle it would not
+        /// hang.
         /// </summary>
         private static bool IsOwnedBy(UIComponent c, UIComponent owner)
         {
@@ -416,8 +443,8 @@ namespace DisasterPlus.Game
             int depth = 0;
             while (cur != null && depth < MaxAncestorDepth)
             {
-                // UnityEngine.Object の == オーバーロード経由で比較する
-                // （破棄済みの fake-null を素の参照比較で取り違えない）。
+                // Compare through UnityEngine.Object's == overload
+                // (so a destroyed fake-null is not mistaken by a raw reference comparison).
                 if (cur == owner) return true;
                 cur = cur.parent;
                 depth++;

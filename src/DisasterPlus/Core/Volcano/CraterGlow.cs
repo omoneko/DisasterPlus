@@ -3,68 +3,81 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// **火口のマグマだまりと、そこから噴煙へ届く光。**
-    /// <b>Core なのでエンジンには一切触らない</b>（純関数だけで、状態を 1 つも持たない）。
+    /// **The magma pool in the crater, and the light that reaches the plume from it.**
+    /// <b>This is Core, so it never touches the engine</b> (pure functions only, holding no
+    /// state at all).
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── The request (2026-08-22) ─────────────────────────────────
     ///
-    /// > 噴火口のマグマだまり（溶岩同様光る）と噴煙への光の放射
+    /// > A magma pool in the crater (glowing like the lava) and light radiating into the
+    /// > plume
     ///
-    /// ── ★★ 点滅させないこと ───────────────────────────────
+    /// ── ★★ Do not make it flicker ───────────────────────────────
     ///
-    /// <see cref="LavaGlow"/> は一度この失敗をしている ——
-    /// UV をスクロールさせたら**溶岩流が点滅して見えた**（所有者の指摘）。
-    /// だからここも明るさは<b>時刻の滑らかな関数</b>だけで作り、
-    /// いちばん速い成分は <see cref="BreathHz"/> ＝ 0.19 Hz（周期 5 秒強）である。
-    /// **これより速い成分を足さないこと。**
+    /// <see cref="LavaGlow"/> already made this mistake once — scrolling the UVs made
+    /// **the lava flow look like it was blinking** (the owner pointed it out).
+    /// So here too the brightness is built from <b>smooth functions of time</b> alone, and
+    /// the fastest component is <see cref="BreathHz"/> = 0.19 Hz (a period of just over 5
+    /// seconds). **Do not add anything faster than this.**
     ///
-    /// マグマだまりが揺らぐのは対流であって明滅ではない。周期の違う 2 本の
-    /// 正弦波を足して、繰り返しに聞こえないようにしてある（通約でない比）。
+    /// A magma pool stirs by convection; it does not blink. We add two sine waves with
+    /// different periods so it does not sound repetitive (an incommensurable ratio).
     ///
-    /// ── 光の届き方 ────────────────────────────────────
+    /// ── How the light carries ────────────────────────────────────
     ///
-    /// 火口から上へ行くほど暗い。逆二乗にはしない ——
-    /// 実際の噴煙は<b>散乱体</b>なので、光源から離れても急には消えず、
-    /// かつ<b>噴煙自体の厚みで奥が隠れる</b>。両方が効いた結果は指数に近い形になる。
-    /// <see cref="ReachFraction"/> は「柱の高さの何割まで届くか」で、
-    /// そこで<b>きっかり 0</b> になる —— 上まで薄く光らせると、
-    /// 噴煙全体が発光しているように見えて夜景が壊れる。
+    /// The higher above the crater, the darker. Not an inverse square — a real plume is
+    /// <b>a scattering medium</b>, so the light does not fall away abruptly with distance
+    /// from the source, and at the same time <b>the plume's own thickness hides what is
+    /// behind it</b>. With both in play the result comes out close to an exponential.
+    /// <see cref="ReachFraction"/> is "what fraction of the column's height it reaches", and
+    /// at that point it is <b>exactly 0</b> — let it glow faintly all the way up and the
+    /// whole plume looks luminous, which ruins the night view.
     /// </summary>
     public static class CraterGlow
     {
-        /// <summary>マグマだまりの半径（火口半径に対する比）の下限。</summary>
+        /// <summary>The floor on the magma pool's radius (as a ratio of the crater's
+        /// radius).</summary>
         public const float PoolRadiusFloorRatio = 0.45f;
 
-        /// <summary>噴出の強さで足される半径（火口半径に対する比）。</summary>
+        /// <summary>The radius added by the eruption's strength (as a ratio of the crater's
+        /// radius).</summary>
         public const float PoolRadiusGainRatio = 0.35f;
 
-        /// <summary>いちばん速い成分（Hz）。**ここより速い成分を足さないこと。**</summary>
+        /// <summary>The fastest component (Hz). **Do not add anything faster than
+        /// this.**</summary>
         public const float BreathHz = 0.19f;
 
-        /// <summary>2 本目のうねり（Hz）。<see cref="BreathHz"/> と通約でない値。</summary>
+        /// <summary>The second swell (Hz). A value incommensurable with
+        /// <see cref="BreathHz"/>.</summary>
         public const float Breath2Hz = 0.071f;
 
-        /// <summary>うねりの深さ（0 で一定、1 で 0 まで落ちる）。</summary>
+        /// <summary>The depth of the swell (0 for constant, 1 to fall all the way to
+        /// 0).</summary>
         public const float BreathDepth = 0.22f;
 
-        /// <summary>噴出の強さ 0 のときの明るさ。**0 にしない**（火口は噴火前から赤い）。</summary>
+        /// <summary>The brightness at eruption strength 0. **Never 0** (the crater is red
+        /// before the eruption too).</summary>
         public const float MinBrightness = 0.35f;
 
-        /// <summary>噴出の強さ 1 のときの明るさ。</summary>
+        /// <summary>The brightness at eruption strength 1.</summary>
         public const float MaxBrightness = 1.0f;
 
-        /// <summary>光が届く高さ（柱の高さに対する比）。ここで<b>きっかり 0</b>。</summary>
+        /// <summary>How high the light reaches (as a ratio of the column's height). At that
+        /// point it is <b>exactly 0</b>.</summary>
         public const float ReachFraction = 0.34f;
 
-        /// <summary>火口の真上での光の強さ（マグマだまりの明るさに対する比）。</summary>
+        /// <summary>The light's strength directly above the crater (as a ratio of the magma
+        /// pool's brightness).</summary>
         public const float LightAtVentRatio = 0.85f;
 
-        /// <summary>光の減り方の鋭さ。大きいほど早く暗くなる。</summary>
+        /// <summary>How sharply the light falls away. The larger it is, the faster it goes
+        /// dark.</summary>
         public const float LightDecay = 2.6f;
 
         /// <summary>
-        /// マグマだまりの半径（m）。<paramref name="craterRadiusMetres"/> は火口の半径。
-        /// **火口より大きくしない** —— 縁からあふれて見えると、それは溶岩流の仕事である。
+        /// The magma pool's radius (m). <paramref name="craterRadiusMetres"/> is the
+        /// crater's radius. **Never larger than the crater** — if it looks like it is
+        /// spilling over the rim, that is the lava flow's job.
         /// </summary>
         public static float PoolRadiusMetres(float craterRadiusMetres, float unit)
         {
@@ -77,8 +90,8 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// マグマだまりの明るさ <c>[0,1]</c>。<paramref name="seconds"/> は⑤の効果時計。
-        /// **時刻の滑らかな関数だけ**（クラス doc）。
+        /// The magma pool's brightness <c>[0,1]</c>. <paramref name="seconds"/> is ⑤'s
+        /// effect clock. **Smooth functions of time only** (see the class doc).
         /// </summary>
         public static float PoolBrightness(float unit, float seconds)
         {
@@ -87,7 +100,7 @@ namespace DisasterPlus.Core.Volcano
 
             if (IsBad(seconds)) seconds = 0f;
 
-            // 2 本のうねりを平均する。**片方だけだと周期がはっきり見える。**
+            // Average the two swells. **With only one, the period is plainly visible.**
             double a = Math.Sin(6.2831853 * BreathHz * seconds);
             double b = Math.Sin(6.2831853 * Breath2Hz * seconds + 1.3);
             float wave = (float)((a * 0.6 + b * 0.4) * 0.5 + 0.5);   // [0,1]
@@ -97,11 +110,11 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 火口から <paramref name="heightMetres"/> だけ上の噴煙が、マグマの光で
-        /// どれだけ明るくなるか <c>[0,1]</c>。
+        /// How much the magma's light brightens the plume <paramref name="heightMetres"/>
+        /// above the crater, in <c>[0,1]</c>.
         ///
-        /// <paramref name="plumeHeightMetres"/> は噴煙柱の全高で、
-        /// <c>ReachFraction</c> を超えた高さは<b>きっかり 0</b> である。
+        /// <paramref name="plumeHeightMetres"/> is the plume column's full height, and above
+        /// <c>ReachFraction</c> of it the result is <b>exactly 0</b>.
         /// </summary>
         public static float LightAt(float heightMetres, float plumeHeightMetres,
                                     float poolBrightness)
@@ -114,8 +127,9 @@ namespace DisasterPlus.Core.Volcano
 
             float t = heightMetres / reach;
 
-            // 指数で落ちてから、届く距離でちょうど 0 になるよう窓を掛ける
-            // （窓が無いと reach の直前で切れて、輪郭が線になって見える）。
+            // Fall off exponentially, then apply a window so it hits exactly 0 at the reach
+            // (without the window it cuts off just short of reach and the boundary shows up
+            // as a line).
             float decay = (float)Math.Exp(-LightDecay * t);
             float window = 1f - t * t;
 

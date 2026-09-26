@@ -8,21 +8,23 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.CraterPreview
 {
     /// <summary>
-    /// 火口のマグマだまり・噴煙への光・噴煙の中の雷を、**ゲームを起動せずに**描いて確かめる
-    /// （2026-08-22、所有者の依頼）。
+    /// Draws and checks the crater's magma pool, the light it casts on the plume, and the
+    /// lightning inside the plume, **without launching the game** (2026-08-22, at the owner's
+    /// request).
     ///
-    /// このプロジェクトの決まり「見た目の変更は自分でオフラインに描画・計測してから
-    /// 実機テストを頼む」のための道具である。<b>Core の実物をそのままコンパイルして
-    /// 呼ぶ</b>ので、書き直した近似ではない。
+    /// This is the tool for this project's rule that "visual changes are drawn and measured
+    /// offline by yourself before asking for a test in the game". It compiles and calls
+    /// <b>the real thing from Core</b> directly, so it is not a rewritten approximation.
     ///
     ///   dotnet run --project tools/CraterPreview -- docs/images/volcano
     /// </summary>
     internal static class Program
     {
-        /// <summary>横（m）。火口の半径 144 m（成層 1200 m の 0.12）の 6 倍を見る。</summary>
+        /// <summary>Horizontal (m). Shows 6 times the crater radius of 144 m (0.12 of a
+        /// 1200 m stratovolcano).</summary>
         private const float ViewHalfWidthMetres = 900f;
 
-        /// <summary>縦（m）。柱の高さの 0.8 まで。</summary>
+        /// <summary>Vertical (m). Up to 0.8 of the column height.</summary>
         private const float ViewHeightMetres = 1400f;
 
         private const int Width = 900;
@@ -52,7 +54,7 @@ namespace DisasterPlus.Tools.CraterPreview
             return 0;
         }
 
-        // ── 1. 点滅していないこと ────────────────────────────────
+        // ── 1. That it does not strobe ────────────────────────────────
 
         private static void Strobe(StringBuilder log)
         {
@@ -78,7 +80,7 @@ namespace DisasterPlus.Tools.CraterPreview
             log.AppendLine();
         }
 
-        // ── 2. 光がどこまで届くか ────────────────────────────────
+        // ── 2. How far the light reaches ────────────────────────────────
 
         private static void Reach(StringBuilder log)
         {
@@ -96,7 +98,7 @@ namespace DisasterPlus.Tools.CraterPreview
             log.AppendLine();
         }
 
-        // ── 3. 雷の頻度と大きさ ─────────────────────────────────
+        // ── 3. The frequency and size of the lightning ─────────────────────────────────
 
         private static void Bolts(StringBuilder log)
         {
@@ -137,7 +139,7 @@ namespace DisasterPlus.Tools.CraterPreview
             log.AppendLine();
         }
 
-        // ── 3b. 溢岩流の太さ ──────────────────────────────
+        // ── 3b. The width of the lava flow ──────────────────────────────
 
         private static void LavaWidth(StringBuilder log)
         {
@@ -158,7 +160,7 @@ namespace DisasterPlus.Tools.CraterPreview
             log.AppendLine();
         }
 
-        // ── 4. 絵（真横から見た断面）────────────────────────────
+        // ── 4. The picture (a cross-section seen from the side) ────────────────────────────
 
         private static void Scene(string dir, StringBuilder log)
         {
@@ -168,7 +170,8 @@ namespace DisasterPlus.Tools.CraterPreview
             var column = new EruptionColumn(CraterRadiusMetres, 1f, 1f, 0f, 12f);
             uint seed = DeterministicRandom.Hash(4242u, 909u);
 
-            // 柱の輪郭（うっすら灰色）。雷がこの中に収まっていることを目で見るため。
+            // The column's outline (faint grey), so it can be seen by eye that the lightning
+            // stays inside it.
             for (int py = 0; py < Height; py++)
             {
                 float y = MetresY(py);
@@ -182,7 +185,7 @@ namespace DisasterPlus.Tools.CraterPreview
                 }
             }
 
-            // マグマだまり（真横から見るので、火口の底の帯として描く）。
+            // The magma pool (seen from the side, so it is drawn as a band at the crater floor).
             float b0 = CraterGlow.PoolBrightness(1f, 4f);
             float poolR = CraterGlow.PoolRadiusMetres(CraterRadiusMetres, 1f);
             for (int px = 0; px < Width; px++)
@@ -198,7 +201,7 @@ namespace DisasterPlus.Tools.CraterPreview
                 }
             }
 
-            // 噴煙への光（高さごとに横へ広がる）。
+            // The light on the plume (spreading sideways with height).
             for (int py = 0; py < Height; py++)
             {
                 float y = MetresY(py);
@@ -219,7 +222,7 @@ namespace DisasterPlus.Tools.CraterPreview
                 }
             }
 
-            // 雷を 6 本、いちばん明るい瞬間で重ねて描く。
+            // Six bolts, overlaid at their brightest moment.
             var path = new LightningPoint[PlumeLightning.PointCount];
             EruptionColumn shape = column;
             float height = shape.HeightMetres;
@@ -249,7 +252,7 @@ namespace DisasterPlus.Tools.CraterPreview
             Png.Write(Path.Combine(dir, "crater-glow-preview.png"), Width, Height, rgb);
         }
 
-        // ── 座標 ───────────────────────────────────────────
+        // ── Coordinates ───────────────────────────────────────────
 
         private static float MetresX(int px)
         {
@@ -308,7 +311,8 @@ namespace DisasterPlus.Tools.CraterPreview
             }
         }
 
-        /// <summary>加算合成。ゲーム側も additive なので同じ見え方になる。</summary>
+        /// <summary>Additive compositing. The game side is additive too, so it looks the
+        /// same.</summary>
         private static void Add(byte[] rgb, int x, int y, byte r, byte g, byte b)
         {
             if (x < 0 || x >= Width || y < 0 || y >= Height) return;

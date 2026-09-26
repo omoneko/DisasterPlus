@@ -8,10 +8,12 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheEyeStaysAHole()
         {
-            // ★★ 「粒の中心を眼の外に置く」だけでは足りない。1 粒は円盤の半径ぶん
-            //   ばらまかれ、粒径の半分だけ外へ広がる。旧実装はその約束を Game 側に
-            //   預けていて（＝テストで捕まらず）、実際に 1 度眼を埋めた。
-            //   いまは円盤半径も粒径も **Core が宣言している**ので、ここで固定できる。
+            // ★★ "Put the centre of the puff outside the eye" is not enough. A single puff
+            //   is scattered over the radius of its disc and spreads outward by half its
+            //   particle size. The old implementation left that promise to the Game side
+            //   (i.e. no test could catch it) and did in fact fill in the eye once.
+            //   Both the disc radius and the particle size are now **declared by Core**,
+            //   so we can pin it down here.
             for (int i = 0; i < VortexPuffLayout.PuffCount; i++)
             {
                 float clearance = VortexPuffLayout.EyeClearanceOf(i);
@@ -23,12 +25,12 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheEyeIsBigEnoughToRead()
         {
-            // 穴が粒 1 つより小さいと、そもそも穴として見えない。
+            // If the hole is smaller than a single puff it does not read as a hole at all.
             Assert.True(VortexPuffLayout.EyeFraction
                         >= VortexPuffLayout.TowerSizeFraction * 0.5f);
-            // 眼の壁雲が外周の半分より外にあると、渦ではなく輪に見える。
+            // If the eyewall sits beyond half the outer radius it looks like a ring, not a vortex.
             Assert.True(VortexPuffLayout.EyeWallFraction < 0.5f);
-            // 壁雲は眼より外にあること。
+            // The wall must sit outside the eye.
             Assert.True(VortexPuffLayout.EyeWallFraction > VortexPuffLayout.EyeFraction);
         }
 
@@ -48,7 +50,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
                 Assert.InRange(p.RiseFraction, 0f, 1f);
                 Assert.InRange(p.RadialFraction, -1f, 1f);
 
-                // 揺らぎと段の下駄のぶんだけ外周をはみ出しうるが、際限は無い。
+                // It may overrun the outer radius by the jitter and the per-level offset,
+                // but not without limit.
                 Assert.True(p.RadiusFraction
                             <= 1f + VortexPuffLayout.RadiusJitterFraction + 0.07f);
             }
@@ -57,7 +60,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheLayoutIsTheSameEveryTime()
         {
-            // 添字だけの関数。毎フレーム同じ形にならないと渦が沸騰して見える。
+            // A function of the index alone. Unless it gives the same shape every frame the
+            // vortex looks like it is boiling.
             for (int i = 0; i < VortexPuffLayout.PuffCount; i++)
             {
                 VortexPuff a = VortexPuffLayout.PuffAt(i);
@@ -74,8 +78,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void EveryColumnCarriesTheThreeLayersOfACumulonimbus()
         {
-            // 雲底 1・塔 2・かなとこ 1。**塔が 2 段あることが「もこもこ」の実体**で、
-            // 1 段に減らすと入道雲ではなく平らな雲片に戻る。
+            // 1 deck, 2 towers, 1 canopy. **The two tower levels are what makes it billow**;
+            // cut them to one and it goes back to being a flat scrap of cloud rather than a
+            // thunderhead.
             for (int column = 0; column < VortexPuffLayout.ColumnCount; column++)
             {
                 int deck = 0, tower = 0, canopy = 0;
@@ -97,7 +102,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void EveryColumnStandsUpFromADarkBaseToABrightTop()
         {
-            // 積乱雲は鉛直に伸びる。段の順に必ず高くなること（揺らぎより刻みが大きい）。
+            // A cumulonimbus grows vertically. Each level must be higher than the last
+            // (the step is larger than the jitter).
             for (int column = 0; column < VortexPuffLayout.ColumnCount; column++)
             {
                 float previous = -1f;
@@ -115,7 +121,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheEyeWallIsTheTallestAndTheArmsRunOutward()
         {
-            // 眼の壁雲の柱（先頭 EyeWallColumns 本）がいちばん高いこと。
+            // The eyewall columns (the first EyeWallColumns of them) must be the tallest.
             float wallTop = TopOf(0);
             for (int column = VortexPuffLayout.EyeWallColumns;
                  column < VortexPuffLayout.ColumnCount; column++)
@@ -124,7 +130,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
                             "arm column " + column + " is taller than the eyewall");
             }
 
-            // 腕は外へ伸びる（同じ腕の中で柱の半径が単調に増える）。
+            // The arms run outward (within one arm the column radius increases monotonically).
             for (int arm = 0; arm < VortexPuffLayout.ArmCount; arm++)
             {
                 float previous = -1f;
@@ -132,7 +138,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
                 {
                     int column = VortexPuffLayout.EyeWallColumns
                                  + arm * VortexPuffLayout.ColumnsPerArm + step;
-                    // 塔下の段（段 1）は下駄が 0 なので柱の半径そのものが読める。
+                    // The lower tower level (level 1) has an offset of 0, so the column's own
+                    // radius can be read directly.
                     float r = VortexPuffLayout
                         .PuffAt(column * VortexPuffLayout.LevelsPerColumn + 1).RadiusFraction;
                     Assert.True(r > previous);
@@ -144,15 +151,15 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheLowLevelInflowTurnsIntoHighLevelOutflow()
         {
-            // 台風の二次循環。下層は吸い込み、かなとこは吹き出す。
-            // ここが逆だと「渦が外へ散っていく」ように見える。
+            // The secondary circulation of a typhoon. The lower levels draw in, the canopy
+            // blows out. Reverse it and the vortex looks like it is scattering outward.
             for (int column = 0; column < VortexPuffLayout.ColumnCount; column++)
             {
                 int at = column * VortexPuffLayout.LevelsPerColumn;
                 Assert.True(VortexPuffLayout.PuffAt(at).RadialFraction < 0f);
                 Assert.True(VortexPuffLayout.PuffAt(at + 3).RadialFraction > 0f);
 
-                // 下層ほど速く回る（地表付近の暴風）。
+                // The lower the level the faster it spins (the gale near the ground).
                 Assert.True(VortexPuffLayout.PuffAt(at).SwirlFraction
                             > VortexPuffLayout.PuffAt(at + 3).SwirlFraction);
             }
@@ -161,14 +168,14 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheDeckIsWiderAndDenserThanTheTowers()
         {
-            // 「暗く平らな下面」は広い円盤と高い密度で出す。ここが塔より狭いと
-            // 入道雲ではなく綿あめになる。
+            // The "dark, flat underside" is produced by a wide disc and a high density.
+            // Make it narrower than the towers and you get candyfloss rather than a thunderhead.
             VortexPuff deck = VortexPuffLayout.PuffAt(0);
             VortexPuff towerLow = VortexPuffLayout.PuffAt(1);
             VortexPuff canopy = VortexPuffLayout.PuffAt(3);
 
             Assert.True(deck.DiscFraction > towerLow.DiscFraction);
-            // 「下は平ら・上はもこもこ」＝ 雲底の段は薄く、塔の段は厚い。
+            // "Flat below, billowing above" = the deck level is thin, the tower levels are thick.
             Assert.True(deck.BandFraction < towerLow.BandFraction * 0.5f);
             Assert.True(deck.DensityFraction > canopy.DensityFraction);
             Assert.True(VortexPuffLayout.SizeFractionOf(VortexCloudLayer.Canopy)
@@ -180,7 +187,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void OutOfRangeIndicesDoNotThrow()
         {
-            // 毎フレーム回る経路なので、数え違いでレベルロードを壊さない。
+            // This path runs every frame, so a miscount must not break loading the level.
             VortexPuff a = VortexPuffLayout.PuffAt(-1);
             Assert.True(VortexPuffLayout.EyeClearanceOf(-1) >= -1e-5f);
             Assert.Equal(VortexCloudLayer.Deck, a.Layer);
@@ -192,7 +199,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void MagnitudeHitsTheRequestedParticleBudget()
         {
-            // §B-4 の式を前へ回して、頼んだ本数がそのまま出ることを確かめる。
+            // Run the formula of §B-4 forwards and check that the count we asked for is
+            // exactly what comes out.
             const float discRadius = 120f;
             const float rate = 20f;
             const float perSecond = 600f;
@@ -212,7 +220,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void BrokenInputsProduceNoParticlesAtAll()
         {
-            // 「粒子数 NaN で空が埋まる」を作らない。
+            // Never create "a NaN particle count fills the sky".
             Assert.Equal(0f, VortexPuffLayout.MagnitudeFor(0f, 20f, 600f, 30), 6);
             Assert.Equal(0f, VortexPuffLayout.MagnitudeFor(120f, 0f, 600f, 30), 6);
             Assert.Equal(0f, VortexPuffLayout.MagnitudeFor(120f, 20f, 0f, 30), 6);
@@ -222,7 +230,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
 
         private static float TopOf(int column)
         {
-            // かなとこの段の高さがそのまま柱の背の高さの代理になる（揺らぎは入る）。
+            // The height of the canopy level stands in directly for the height of the column
+            // (jitter included).
             return VortexPuffLayout
                 .PuffAt(column * VortexPuffLayout.LevelsPerColumn + 3).HeightFraction;
         }

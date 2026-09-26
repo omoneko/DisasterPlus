@@ -4,17 +4,19 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 実機報告（2026-08-22）「カルデラ形成時は、山体が大きく落ち込んで大爆発する
-    /// んじゃないでしょうか…？ 生成の際の正しい現象を再現してください」。
+    /// In-game report (2026-08-22): "when a caldera forms, surely the mountain edifice
+    /// drops away massively and there is a huge explosion...? Please reproduce the correct
+    /// phenomenon for the formation."
     ///
-    /// ★★ <b>ここが固定するのは「山が残らない」ことである。</b>
-    ///    最初の実装は今の地面から深さぶんを引いていたので、
-    ///    円錐 +1000 m − 深さ 900 m ＝ <b>山頂に 100 m の切り株が残った</b>。
-    ///    それは「陥没」ではなく「山のまわりに溝を掘った」絵である。
+    /// ★★ <b>What is pinned here is that no mountain is left behind.</b>
+    ///    The first implementation subtracted the depth from the current ground, so
+    ///    cone +1000 m − depth 900 m = <b>a 100 m stump was left at the summit</b>.
+    ///    That is not a "collapse"; it is a picture of "a trench dug around the mountain".
     ///
-    ///    断面は本物の円錐（<see cref="VolcanoCrater.ProfileAt"/>）から作る ——
-    ///    自分で作った「それらしい山」で検査すると、実際の形と食い違ったときに
-    ///    ここが通ってしまう。
+    ///    The cross-section is built from the real cone
+    ///    (<see cref="VolcanoCrater.ProfileAt"/>) —— if you inspect it with a
+    ///    "plausible-looking mountain" of your own making, this would pass even when it
+    ///    disagrees with the actual shape.
     /// </summary>
     public class CalderaFounderingTests
     {
@@ -35,13 +37,13 @@ namespace DisasterPlus.Core.Tests.Volcano
             get { return SuperEruption.CalderaDepthMetres(ConeHeight); }
         }
 
-        /// <summary>噴火前の地面（m）。平らな土地に円錐が乗っている。</summary>
+        /// <summary>The ground before the eruption (m). A cone sitting on flat land.</summary>
         private static float BaseAt(float distance)
         {
             return Ground + VolcanoCrater.ProfileAt(Flat, distance, 0f, ConeRadius, ConeHeight);
         }
 
-        /// <summary>落ち切ったあとの地面（m）。</summary>
+        /// <summary>The ground after it has finished dropping (m).</summary>
         private static float FinalAt(float distance)
         {
             float bowl = SuperEruption.BowlProfileAt(distance, CalderaRadius, CalderaDepth);
@@ -59,8 +61,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NoStumpOfTheMountainIsLeftBehind()
         {
-            // ★★ これが所有者の指摘そのもの。山の在った範囲のどこにも、
-            //    元の地面より高いところが残っていないこと。
+            // ★★ This is exactly the owner's point. Nowhere within the area the mountain
+            //    occupied may anything remain higher than the original ground.
             for (int i = 0; i <= 200; i++)
             {
                 float d = ConeRadius * i / 200f;
@@ -87,8 +89,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSummitFallsFurtherThanTheCalderaIsDeep()
         {
-            // 山頂は「深さ ＋ 山の高さ」ぶん落ちる。深さだけしか落ちないなら、
-            // それは引き算に戻っている。
+            // The summit falls by "the depth plus the height of the mountain". If it only
+            // falls by the depth, we are back to the subtraction.
             float fall = BaseAt(0f) - FinalAt(0f);
 
             Assert.True(fall > CalderaDepth + ConeHeight * 0.5f,
@@ -108,7 +110,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheGroundOnlyEverGoesDown()
         {
-            // 陥没が地面を持ち上げる経路が 1 本も無いこと。
+            // There must not be a single path by which the collapse raises the ground.
             for (int i = 0; i <= 400; i++)
             {
                 float d = CalderaRadius * 1.2f * i / 400f;
@@ -120,8 +122,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ASlopingSiteNeverGetsItsRimPushedUp()
         {
-            // 起点の高さは中心の 1 点なので、外縁の実地面がそれより低いことがある。
-            // そこを「目標まで上げる」と縁が盛り上がる ——> 0 に切っていること。
+            // The reference height is a single point at the centre, so the real ground at the
+            // outer rim can be lower than it. Raising that "up to the target" would make the
+            // rim bulge ——> it must be clamped at 0.
             float lowOutskirt = Ground - 60f;
             float bowlAtRim = SuperEruption.BowlProfileAt(CalderaRadius * 0.98f,
                                                           CalderaRadius, CalderaDepth);

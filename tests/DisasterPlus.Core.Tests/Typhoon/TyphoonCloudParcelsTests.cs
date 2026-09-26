@@ -4,12 +4,12 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// 所有者の指示（2026-08-22）「台風の雲のエフェクトは一瞬だけ現れて消えて
-    /// しまいます。火山の噴火の雲が質感としてはふさわしいので、噴火雲エフェクトを
-    /// 応用して台風の雲を作ってください」。
+    /// The owner's instruction (2026-08-22): "the typhoon cloud effect only appears for an
+    /// instant and then vanishes. The volcanic eruption cloud has the right texture, so
+    /// please build the typhoon cloud by adapting the eruption-cloud effect".
     ///
-    /// ★★ ここが固定するのは<b>台風に見えること</b>である ——
-    ///    目が空いていること、腕があること、そして<b>止まらないこと</b>。
+    /// ★★ What is pinned down here is <b>that it looks like a typhoon</b> ——
+    ///    that the eye is open, that there are arms, and <b>that it does not stop</b>.
     /// </summary>
     public class TyphoonCloudParcelsTests
     {
@@ -24,8 +24,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void NoParcelEverIntrudesIntoTheEye()
         {
-            // ★★ **塊の内側の縁**で見ること。中心までの距離だけ見ていたとき、
-            //    壁雲の塊が目の中まではみ出していた（被覆 100%）。
+            // ★★ Test on **the inner edge of the parcel**. Back when only the distance to
+            //    the centre was checked, the eyewall parcels spilled into the eye
+            //    (100% coverage).
             float eye = TyphoonCloudParcels.EyeFraction * Radius;
 
             for (float t = 0f; t < TyphoonCloudParcels.LifeSeconds; t += 3f)
@@ -45,8 +46,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheCloudIsBandedNotAUniformRing()
         {
-            // ★★ 腕が無いと、質感がどれだけ良くても**ただの丸い塊**に見える。
-            //    同じ半径の帯を角度で刻んで、密度に偏りがあることを見る。
+            // ★★ Without arms it looks like **just a round blob**, however good the texture.
+            //    Slice an annulus of the same radius by angle and check that the density is
+            //    uneven.
             const int Sectors = 36;
             var count = new int[Sectors];
 
@@ -83,8 +85,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void EveryParcelKeepsMovingSoTheCloudNeverFreezes()
         {
-            // ★★ これが「一瞬だけ現れて消える」の反対側の検査である。
-            //    以前は添字だけで決まる静止した並びだった。
+            // ★★ This is the check on the other side of "appears for an instant and vanishes".
+            //    It used to be a static arrangement determined by the index alone.
             int still = 0;
             for (int i = 0; i < TyphoonCloudParcels.Count; i++)
             {
@@ -122,7 +124,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
                 TyphoonParcel p = P(i, 130f);
                 float d = (float)System.Math.Sqrt(p.X * p.X + p.Z * p.Z);
 
-                // 塊の半径と乱れのぶんだけは外へ出てよい。
+                // It may reach outside by the parcel radius and the turbulence, but no more.
                 Assert.True(d < Radius * 1.35f,
                             "a parcel reached " + d + " m, well past the storm at " + Radius);
             }

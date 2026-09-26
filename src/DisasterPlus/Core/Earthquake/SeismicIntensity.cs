@@ -1,46 +1,51 @@
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// 震央からの距離と地震の強度から、**バニラが実際に倒壊判定へ使っている
-    /// 局所係数**を出す。捏造ではない。
+    /// Works out, from the distance to the epicentre and the earthquake's intensity, **the
+    /// local factor vanilla actually uses for its collapse test**. Nothing invented here.
     ///
-    /// IL 事実文書 §A-3 の全体円盤の呼び出し:
+    /// The whole-quake disc call from §A-3 of the IL facts document:
     ///   DestroyBuildings(preRadius: R, destructionRadiusMin: 0, destructionRadiusMax: R,
-    ///                    probability: 0.02f)   ただし R = 2000 + m_intensity * 20
-    /// その中で建物ごとに
+    ///                    probability: 0.02f)   where R = 2000 + m_intensity * 20
+    /// Inside it, for each building it computes
     ///   fD = (destructionRadiusMax - dist) / Max(1, destructionRadiusMax - destructionRadiusMin)
-    /// を計算する。min = 0、max = R ≧ 2000 なので Max(1, ...) は常に R になり、
-    /// **fD = 1 - dist/R** に簡約される。この値がここでいう s である。
+    /// With min = 0 and max = R ≧ 2000, Max(1, ...) is always R, so this reduces to
+    /// **fD = 1 - dist/R**. That value is what we call s here.
     ///
-    /// 依頼文の「震源からの距離に応じた震度分布の概念が無い」は半分だけ正しかった。
-    /// 距離減衰は最初から効いている。**欠けていたのは可視化だけ。**
+    /// The request's claim that "there is no notion of intensity varying with distance from
+    /// the hypocentre" was only half right. The distance falloff has been there all along.
+    /// **What was missing was only the visualisation.**
     /// </summary>
     public static class SeismicIntensity
     {
-        /// <summary>全体円盤の基底半径（IL: ldc.r4 2000）。</summary>
+        /// <summary>The whole-quake disc's base radius (IL: ldc.r4 2000).</summary>
         public const float BaseRadius = 2000f;
 
-        /// <summary>強度 1 あたりの半径増分（IL: ldc.r4 20）。</summary>
+        /// <summary>Radius added per point of intensity (IL: ldc.r4 20).</summary>
         public const float RadiusPerIntensity = 20f;
 
         /// <summary>
-        /// DisasterManager.CreateDisaster が入れる既定値（IL_0028）。
-        /// カメラシェイクの補正がここでゼロになる基準点でもある（Task 6）。
+        /// The default DisasterManager.CreateDisaster fills in (IL_0028).
+        /// It is also the reference point at which the camera-shake correction is zero
+        /// (Task 6).
         /// </summary>
         public const byte VanillaDefaultIntensity = 55;
 
-        /// <summary>全体円盤の半径 R。強度 55 で 3100 m、100 で 4000 m、255 で 7100 m。</summary>
+        /// <summary>The whole-quake disc radius R. 3,100 m at intensity 55, 4,000 m at 100,
+        /// 7,100 m at 255.</summary>
         public static float RadiusOf(byte intensity)
         {
             return BaseRadius + intensity * RadiusPerIntensity;
         }
 
         /// <summary>
-        /// 震央から distance の地点の局所係数 s。震央で 1、R で 0 の線形ランプ。
+        /// The local factor s at a point `distance` from the epicentre. A linear ramp: 1 at
+        /// the epicentre, 0 at R.
         ///
-        /// R の外では 0 を返すが、**それは「揺れていない」ではなく「バニラが判定すら
-        /// していない」**（preRadius によるハードカリング）。呼び出し側は
-        /// <see cref="IsInside"/> で区別し、圏外を「強度 0.0」と表示しないこと。
+        /// Outside R it returns 0, but **that does not mean "no shaking" — it means "vanilla
+        /// does not even run the test"** (the hard cull by preRadius). Callers must tell the
+        /// two apart with <see cref="IsInside"/> and must not display out-of-range as
+        /// "intensity 0.0".
         /// </summary>
         public static float At(float distance, byte intensity)
         {
@@ -51,7 +56,8 @@ namespace DisasterPlus.Core.Earthquake
             return 1f - distance / r;
         }
 
-        /// <summary>バニラが倒壊判定を行う範囲の内側か。</summary>
+        /// <summary>Whether this is inside the range where vanilla runs its collapse
+        /// test.</summary>
         public static bool IsInside(float distance, byte intensity)
         {
             if (float.IsNaN(distance) || distance < 0f) return false;

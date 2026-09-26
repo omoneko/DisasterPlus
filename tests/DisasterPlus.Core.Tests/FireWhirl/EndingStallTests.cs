@@ -5,10 +5,12 @@ namespace DisasterPlus.Core.Tests.FireWhirl
 {
     public class EndingStallTests
     {
-        /// <summary>バニラ実測の 65536/1440。ゲーム側は FeatureHost.FramesPerMinute を渡す。</summary>
+        /// <summary>65536/1440, measured from vanilla. The game side passes
+        /// FeatureHost.FramesPerMinute.</summary>
         private const float Fpm = EndingStall.VanillaFramesPerMinute;
 
-        /// <summary>IL 実測どおりの、正常な解体にかかるゲーム内分（約 8.09）。</summary>
+        /// <summary>The in-game minutes a healthy teardown takes, exactly as measured
+        /// from the IL (about 8.09).</summary>
         private static float HealthyTeardownMinutes
         {
             get { return EndingStall.TeardownFrames / Fpm; }
@@ -23,8 +25,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void HealthyTeardownIsAboutEightInGameMinutes()
         {
-            // 車両は 16 sim フレームに 1 回しかステップしない（VehicleManager.SimulationStepImpl）。
-            // 23 ステップ × 16 フレーム = 368 フレーム ≒ 8.09 ゲーム内分。
+            // Vehicles only step once every 16 sim frames (VehicleManager.SimulationStepImpl).
+            // 23 steps × 16 frames = 368 frames ≒ 8.09 in-game minutes.
             Assert.Equal(368, EndingStall.TeardownFrames);
             Assert.InRange(HealthyTeardownMinutes, 8.0f, 8.2f);
         }
@@ -32,8 +34,9 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void HealthyTeardownIsNeverReportedStuck_AtAnyAllowedLifetime()
         {
-            // これがこの修正の動機。スライダーは 1〜60 分を許すので、
-            // 倍率 2 だけを閾値にすると 4 分以下の設定で正常な解体が STUCK になる。
+            // This is the motivation for the fix. The slider allows 1 to 60 minutes, so
+            // using only the factor of 2 as the threshold makes a healthy teardown come
+            // out as STUCK on any setting of 4 minutes or less.
             for (int lifetime = 1; lifetime <= 60; lifetime++)
             {
                 Assert.False(EndingStall.IsStuck(HealthyTeardownMinutes, lifetime, Fpm));
@@ -43,7 +46,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void ShortLifetimeStillLeavesRoomForATeardown()
         {
-            // 旧実装は maxLifetime=1 のとき閾値 2 分。正常な解体（約 8.1 分）で必ず誤報した。
+            // The old implementation gave a 2 minute threshold at maxLifetime=1. A healthy
+            // teardown (about 8.1 minutes) always produced a false report.
             Assert.False(EndingStall.IsStuck(3f, 1, Fpm));
             Assert.True(EndingStall.ThresholdMinutes(1, Fpm) > HealthyTeardownMinutes * 3f);
         }
@@ -54,18 +58,20 @@ namespace DisasterPlus.Core.Tests.FireWhirl
             float floor = EndingStall.MinimumMinutes(Fpm);
             Assert.InRange(floor, 32f, 33f);   // 368 / 45.51 * 4
 
-            // 短い設定では下限が効き、設定値によらず同じ閾値になる。
+            // On short settings the floor applies, so the threshold is the same
+            // regardless of the configured value.
             Assert.Equal(floor, EndingStall.ThresholdMinutes(1, Fpm));
             Assert.Equal(floor, EndingStall.ThresholdMinutes(16, Fpm));
 
-            // 長い設定では 2 倍の項が下限を追い越す。
+            // On long settings the doubling term overtakes the floor.
             Assert.Equal(120f, EndingStall.ThresholdMinutes(60, Fpm));
         }
 
         [Fact]
         public void ExactlyAtThreshold_NotStuck()
         {
-            // 閾値ちょうどは通す（誤検知を避ける側に倒す）。
+            // Exactly at the threshold passes (we err on the side of avoiding
+            // false positives).
             float t = EndingStall.ThresholdMinutes(10, Fpm);
             Assert.False(EndingStall.IsStuck(t, 10, Fpm));
         }
@@ -73,7 +79,7 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void BeyondThreshold_IsStuck()
         {
-            // 「終わらない」は永久に続くので、閾値を越えれば必ず捕まる。
+            // "Never ending" goes on forever, so anything past the threshold is always caught.
             Assert.True(EndingStall.IsStuck(1000f, 10, Fpm));
             Assert.True(EndingStall.IsStuck(1000f, 60, Fpm));
         }
@@ -81,8 +87,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void NonPositiveLifetime_FallsBackToTheMeasuredFloor()
         {
-            // 設定が壊れていても、下限だけで判定できる。
-            // 下限は正常な解体の 4 倍あるので、これで誤検知にはならない。
+            // Even with a broken setting, the floor alone is enough to judge by.
+            // The floor is 4 times a healthy teardown, so this is not a false positive.
             Assert.False(EndingStall.IsStuck(HealthyTeardownMinutes, 0, Fpm));
             Assert.False(EndingStall.IsStuck(HealthyTeardownMinutes, -5, Fpm));
             Assert.True(EndingStall.IsStuck(9999f, 0, Fpm));
@@ -92,7 +98,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void NonPositiveFramesPerMinute_FallsBackToTheVanillaRate()
         {
-            // ゲーム側から異常な値が来ても 0 除算や無限大の閾値にしない。
+            // Even if an abnormal value comes from the game side, never divide by zero
+            // or end up with an infinite threshold.
             Assert.Equal(EndingStall.MinimumMinutes(Fpm), EndingStall.MinimumMinutes(0f));
             Assert.Equal(EndingStall.MinimumMinutes(Fpm), EndingStall.MinimumMinutes(-1f));
         }
@@ -100,8 +107,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void SlowerGameClockRaisesTheFloor()
         {
-            // 下限はフレーム数で測った実測値から導くので、
-            // 1 分あたりのフレーム数が変われば分に直した下限も追従する。
+            // The floor is derived from a value measured in frames, so if the number of
+            // frames per minute changes, the floor converted into minutes follows it.
             Assert.Equal(EndingStall.MinimumMinutes(Fpm) * 2f,
                          EndingStall.MinimumMinutes(Fpm / 2f), 3);
         }
@@ -109,7 +116,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void CalibrationConstantsAreThoseMeasuredFromIl()
         {
-            // 閾値の根拠を数値として固定する。ここを触るなら IL を読み直すこと。
+            // Pins down the basis of the threshold as numbers. If you touch this,
+            // read the IL again.
             Assert.Equal(16, EndingStall.FramesPerVehicleStep);
             Assert.Equal(23, EndingStall.TeardownVehicleSteps);
             Assert.Equal(4f, EndingStall.TeardownSafetyFactor);

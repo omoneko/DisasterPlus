@@ -5,51 +5,54 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **海溝型地震では地面を割らない。** sim スレッド専用。
+    /// **A trench earthquake does not crack the ground.** Sim thread only.
     ///
-    /// ── 実機報告（2026-08-22）────────────────────────────────────
+    /// ── Report from the game (2026-08-22) ────────────────────────────────
     ///
-    /// &gt; 海溝型地震でも断層（震源地の地形変更）が発生しています。海溝型地震の
-    /// &gt; 震源は海の沖の方なので、地震の揺れは発生する一方で断層は発生させないで
-    /// &gt; ください。
+    /// &gt; Trench earthquakes are producing a fault too (the terrain deformation at the
+    /// &gt; epicentre). A trench quake's epicentre is out at sea, so please let the
+    /// &gt; shaking happen but do not produce the fault.
     ///
-    /// そのとおりで、**プレート境界の破壊は海底の数十 km 下**で起きる。
-    /// 地表に見える裂け目はできない（内陸の直下型・断層型はできる）。
+    /// Quite right: **a plate-boundary rupture happens tens of kilometres below the sea
+    /// floor**. It leaves no fissure you can see at the surface (an inland shallow or
+    /// fault quake does).
     ///
-    /// ── ★★ どこを止めるか（IL で確かめた）──────────────────────────
+    /// ── ★★ What to stop (confirmed in the IL) ───────────────────────────
     ///
-    /// 地面を割っているのは <c>EarthquakeAI.SimulationStep</c> の中の
-    /// <c>DisasterHelpers.MakeCrack</c> ただ 1 箇所である（IL_03AD）。
+    /// The ground is cracked in exactly one place: the <c>DisasterHelpers.MakeCrack</c>
+    /// call inside <c>EarthquakeAI.SimulationStep</c> (IL_03AD).
     ///
-    /// <b>止めるのはそれ「だけ」である。</b> 同じ <c>SimulationStep</c> は
-    /// <c>DestroyBuildings</c>（IL_0298）・<c>DestroyNetSegments</c>（IL_02B6）・
-    /// <c>SplashWater</c>（IL_024F）・<c>DetectDisaster</c> も呼んでいる。
-    /// 揺れも被害も残すのが依頼なので、そちらには 1 つも触らない。
+    /// <b>That is the <i>only</i> thing to stop.</b> The same <c>SimulationStep</c> also
+    /// calls <c>DestroyBuildings</c> (IL_0298), <c>DestroyNetSegments</c> (IL_02B6),
+    /// <c>SplashWater</c> (IL_024F) and <c>DetectDisaster</c>. The request was to keep
+    /// the shaking and the damage, so not one of those is touched.
     ///
-    /// ★★ <b><c>m_crackLength</c> / <c>m_crackWidth</c> を 0 にする手は採らない。</b>
-    ///   あの 2 つは同じメソッドの中で<b>被害を配る帯の長さ</b>にも使われており
-    ///   （IL_017E / IL_018A で強度を掛けた値が、そのあとの破壊のループを回す）、
-    ///   0 にすると<b>揺れ以外の被害もまるごと消える</b>。
-    ///   しかも <c>IsStillClearing</c> / <c>CanAffectAt</c> /
-    ///   <c>GetMinimumEdgeDistance</c> / <c>GetPosition</c> / <c>UpdateHazardMap</c> が
-    ///   同じフィールドを読むので、プレハブを書き換えると
-    ///   <b>同時に走っているバニラの地震まで壊れる</b>。
+    /// ★★ <b>Zeroing <c>m_crackLength</c> / <c>m_crackWidth</c> is not the way.</b>
+    ///   Inside that same method those two also set <b>the length of the band over which
+    ///   damage is spread</b> (at IL_017E / IL_018A the value multiplied by the intensity
+    ///   drives the destruction loop that follows), so zeroing them
+    ///   <b>wipes out every kind of damage except the shaking</b>.
+    ///   On top of that <c>IsStillClearing</c>, <c>CanAffectAt</c>,
+    ///   <c>GetMinimumEdgeDistance</c>, <c>GetPosition</c> and <c>UpdateHazardMap</c> all
+    ///   read the same fields, so rewriting the prefab
+    ///   <b>breaks any vanilla earthquake running at the same time</b>.
     ///
-    /// ── なぜ 2 つのパッチが要るのか ────────────────────────────────
+    /// ── Why two patches are needed ──────────────────────────────────────
     ///
-    /// <c>MakeCrack</c> は <c>static</c> で、**どの災害のための呼び出しか分からない**
-    /// （引数は座標と幅と深さだけ）。そこで
+    /// <c>MakeCrack</c> is <c>static</c>, so **it cannot tell which disaster the call is
+    /// for** (its arguments are just a position, a width and a depth). Hence
     ///
     /// <code>
-    /// EarthquakeAI.SimulationStep の Prefix   → 「今は海溝型の中だ」を立てる
-    /// DisasterHelpers.MakeCrack の Prefix     → 立っていたら本体を飛ばす
-    /// EarthquakeAI.SimulationStep の Postfix  → 必ず下ろす
+    /// Prefix on EarthquakeAI.SimulationStep   → raise "we are inside a trench quake"
+    /// Prefix on DisasterHelpers.MakeCrack     → if it is raised, skip the original
+    /// Postfix on EarthquakeAI.SimulationStep  → always lower it again
     /// </code>
     ///
-    /// ★ 旗は <c>[ThreadStatic]</c> にしない。<c>SimulationStep</c> は sim スレッド
-    ///   からしか呼ばれず（バニラの規約）、素の <c>static</c> で足りる。
-    ///   <b>Postfix は例外が出ても走る</b>（Harmony の既定）ので、旗が立ちっぱなしに
-    ///   なって<b>バニラの地震まで割れなくなる</b>ことは無い。
+    /// ★ The flag is not <c>[ThreadStatic]</c>. <c>SimulationStep</c> is only ever
+    ///   called from the sim thread (vanilla's own convention), so a plain <c>static</c>
+    ///   is enough. <b>A Postfix runs even when an exception is thrown</b> (Harmony's
+    ///   default), so the flag cannot get stuck up and leave
+    ///   <b>vanilla earthquakes unable to crack the ground either</b>.
     /// </summary>
     [HarmonyPatch(typeof(EarthquakeAI), "SimulationStep",
         new[] { typeof(ushort), typeof(DisasterData) },
@@ -57,12 +60,12 @@ namespace DisasterPlus.Game
     public static class TrenchQuakeStepPatch
     {
         /// <summary>
-        /// 今まさに海溝型地震の <c>SimulationStep</c> の中か。
-        /// <see cref="TrenchQuakeNoCrackPatch"/> だけが読む。
+        /// Whether we are right now inside a trench earthquake's <c>SimulationStep</c>.
+        /// Only <see cref="TrenchQuakeNoCrackPatch"/> reads it.
         /// </summary>
         internal static bool InTrenchQuake;
 
-        /// <summary>直近に裂け目を止めた回数（診断用）。</summary>
+        /// <summary>How many cracks have been suppressed so far (for diagnostics).</summary>
         internal static int SuppressedCracks;
 
         public static void Prefix(ushort disasterID)
@@ -72,27 +75,28 @@ namespace DisasterPlus.Game
 
         public static void Postfix()
         {
-            // ★★ **必ず下ろす。** 立ったままだと、次に走るバニラの地震も割れなくなる。
+            // ★★ **Always lower it.** Left raised, the next vanilla earthquake to run
+            //    would not crack the ground either.
             InTrenchQuake = false;
         }
     }
 
     /// <summary>
-    /// 地面を割る本体を、海溝型地震のあいだだけ飛ばす。
-    /// <see cref="TrenchQuakeStepPatch"/> のクラス doc に全部書いてある。
+    /// Skips the method that cracks the ground, but only during a trench earthquake.
+    /// The whole story is in <see cref="TrenchQuakeStepPatch"/>'s class doc.
     /// </summary>
     [HarmonyPatch(typeof(DisasterHelpers), "MakeCrack",
         new[] { typeof(Vector2), typeof(Vector2), typeof(float), typeof(float) })]
     public static class TrenchQuakeNoCrackPatch
     {
-        /// <summary>false を返すと本体が走らない（Harmony の Prefix の約束）。</summary>
+        /// <summary>Returning false skips the original (Harmony's Prefix contract).</summary>
         public static bool Prefix()
         {
             if (!TrenchQuakeStepPatch.InTrenchQuake) return true;
 
             TrenchQuakeStepPatch.SuppressedCracks++;
 
-            // ★ 毎フレームの経路なので、ログは最初の 1 回だけ。
+            // ★ This runs every frame, so log only the first time.
             if (TrenchQuakeStepPatch.SuppressedCracks == 1)
             {
                 Log.Info("trench earthquake: the terrain crack is suppressed on purpose "

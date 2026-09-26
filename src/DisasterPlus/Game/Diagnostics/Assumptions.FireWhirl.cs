@@ -4,19 +4,20 @@ using System.Reflection;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="Assumptions"/> のうち③火災旋風 の前提。
+    /// The part of <see cref="Assumptions"/> covering the ③ fire whirl.
     ///
-    /// **このファイルには検証しか置かない。** <c>Check</c> / <c>SetResult</c> /
-    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> は本体側の private のままで、
-    /// partial なので可視性を 1 つも上げずに使える（分割の要件そのもの）。
+    /// **This file holds nothing but checks.** <c>Check</c> / <c>SetResult</c> /
+    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> stay private on the main side, and
+    /// because this is partial they can be used without raising a single visibility
+    /// (that is exactly the requirement behind the split).
     ///
-    /// 件数は <see cref="FireWhirlCheckCount"/> がこのファイルの中で宣言する。
-    /// **検証を足したらここも増やすこと** —— 本体の <c>TotalCheckCount</c> は
-    /// これらの和である。
+    /// The count is declared inside this file by <see cref="FireWhirlCheckCount"/>.
+    /// **If you add a check, bump it here too** — the main file's <c>TotalCheckCount</c> is
+    /// the sum of these.
     /// </summary>
     public static partial class Assumptions
     {
-        /// <summary>このファイルが持つ検証の数。</summary>
+        /// <summary>The number of checks this file holds.</summary>
         private const int FireWhirlCheckCount = 4;
 
         private static void RunFireWhirl()
@@ -40,22 +41,25 @@ namespace DisasterPlus.Game
                           null) != null;
                   });
 
-            // 炎のシェーダ。
+            // The flame shader.
             //
-            // ★ **③にはこの検査が無かった。** ④と⑤は同じ検査を持っていたので
-            //   「シェーダが取れない」を FAIL として綺麗に報告できたが、③は
-            //   検査を持たない代わりに new Material(null) で毎フレーム落ちていた
-            //   （実機ログに同じ NullReferenceException が 6,938 行）。
+            // ★ **③ did not have this check.** ④ and ⑤ had the same check, so they could
+            //   report "the shader cannot be resolved" cleanly as a FAIL; ③, having no check,
+            //   instead fell over on new Material(null) every frame
+            //   (6,938 lines of the same NullReferenceException in the log from the game).
             //
-            // ★★ **述語に「Standard が取れた」を混ぜない**（④⑤と同じ規律）。
-            //   ここが見るのは **粒子系（加算 / アルファブレンド）が取れたか**で、
-            //   取れなければ Standard を透過モードにして描く（＝見えるが光らない）。
-            //   1 つも取れなければ描かない —— それは名前のほうに出る。
+            // ★★ **Do not mix "Standard resolved" into the predicate** (the same discipline as
+            //   ④⑤). What this looks at is **whether something in the particle family
+            //   (additive / alpha-blended) resolved**; if not, we draw with Standard forced
+            //   into transparent mode (i.e. visible but not glowing).
+            //   If nothing at all resolves, nothing is drawn — and that shows up in the name.
             //
-            // ★ 述語は FireWhirlFlameFx が実際に門にしている式そのものである
-            //   （同じ ShaderPool を同じ preference で呼ぶ。順序をここへ写すと、
-            //   検査が報告する名前と実際に使うシェーダが黙ってずれる）。
-            //   **⑤の噴煙も同じ preference なので、この 1 件はあちらの答えでもある。**
+            // ★ The predicate is exactly the expression FireWhirlFlameFx actually gates on
+            //   (the same ShaderPool called with the same preference. Copy the ordering over
+            //   here and the name the check reports would silently diverge from the shader
+            //   actually used).
+            //   **⑤'s eruption plume uses the same preference, so this one check is the answer
+            //   for that too.**
             ShaderPick flame = ResolveFlameShader();
             Check("an additive or alpha-blended particle shader resolves for the fire whirl "
                   + "flames, by name or by borrowing the shader off a loaded material "
@@ -65,7 +69,8 @@ namespace DisasterPlus.Game
                   + "The fire whirl still spins, stays pinned and still spreads fire either way",
                   delegate { return flame.Particle; });
 
-            // DLC 非所持環境では FAIL するのが正常（プレハブごと存在しない）。
+            // FAIL is the normal outcome in an environment without the DLC (the prefab does
+            // not exist at all).
             Check("TornadoAI disaster prefab is available",
                   "fire whirls cannot be created. This also FAILs when the Natural Disasters "
                   + "DLC is not owned, which is expected.",
@@ -74,14 +79,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ③の炎が実際に使うシェーダ。**<c>FireWhirlFlameFx.FlameMaterial</c> と
-        /// 同じ <c>ShaderPool</c> を同じ preference で呼ぶ。**
+        /// The shader ③'s flames actually use. **It calls the same <c>ShaderPool</c> with the
+        /// same preference as <c>FireWhirlFlameFx.FlameMaterial</c>.**
         ///
-        /// ★ **自分で try/catch する。** ここは検証の*名前*を組み立てるために
-        ///   <c>Check()</c> の外側（＝あの try/catch の外）で呼ばれる。
-        ///   <c>Assumptions.Run()</c> は <c>DisasterPlusLoading.OnLevelLoaded</c> から
-        ///   素で呼ばれているので、ここから例外を投げるとレベルロードが壊れる
-        ///   （④の <c>ResolveCloudShader</c> が同じ理由で同じ形をしている）。
+        /// ★ **It try/catches for itself.** This is called outside <c>Check()</c> (i.e.
+        ///   outside that try/catch) in order to assemble the check's *name*.
+        ///   <c>Assumptions.Run()</c> is called bare from
+        ///   <c>DisasterPlusLoading.OnLevelLoaded</c>, so throwing from here would break the
+        ///   level load (④'s <c>ResolveCloudShader</c> has the same shape for the same
+        ///   reason).
         /// </summary>
         private static ShaderPick ResolveFlameShader()
         {
@@ -97,9 +103,9 @@ namespace DisasterPlus.Game
 
         private static bool VortexStepIsPatched()
         {
-            // Harmony が実際にこのメソッドを持っているかを見る。
-            // [HarmonyPatch] の引数が実メソッドと 1 つでも食い違うと
-            // パッチは無言で当たらず、MOD は正常に見えたまま竜巻だけが流れる。
+            // Check whether Harmony really holds this method.
+            // If even one argument of [HarmonyPatch] disagrees with the real method, the patch
+            // silently fails to land, the mod looks fine and only the tornado drifts away.
             var target = typeof(VortexAI).GetMethod("SimulationStep",
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
                 null,
@@ -115,9 +121,9 @@ namespace DisasterPlus.Game
             var info = HarmonyLib.Harmony.GetPatchInfo(target);
             if (info == null || info.Postfixes == null) return false;
 
-            // 「誰かの postfix が載っている」ではなく「自分の postfix が載っている」を見る。
-            // 同じ private overload に別 MOD が偶然 postfix を当てていた場合、前者だと
-            // 自分のパッチが無言で失敗していてもマスクされて PASS になってしまう。
+            // Check for "my postfix is on it", not "somebody's postfix is on it".
+            // If another mod happened to have put a postfix on the same private overload, the
+            // latter would mask our patch failing silently and still report PASS.
             for (int i = 0; i < info.Postfixes.Count; i++)
             {
                 if (info.Postfixes[i].owner == HarmonyBootstrap.HarmonyId) return true;

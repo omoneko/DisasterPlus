@@ -4,44 +4,45 @@ using DisasterPlus.Core.Volcano;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **地震計が記録するぶんの火山性地震。sim スレッド専用。**
+    /// **The volcanic earthquakes as far as the seismograph records them. Sim thread only.**
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── the request (2026-08-22) ───────────────────────────────────────────────────────────
     ///
-    /// > 火山性地震は震度計に記録されていないのも修正してください。
+    /// > Please also fix the volcanic earthquakes not being recorded on the seismograph.
     ///
-    /// ②の <c>SeismographRecorder</c> は<b>バニラの地震が 1 つも無ければ観測点を
-    /// まるごと捨てる</b>作りだったので、火山だけが揺れているあいだ地震計は
-    /// 空欄のままだった。**揺れているのに記録が空**は、この MOD がいちばん
-    /// 避けたい形（「読めなかった」と「値が 0」を混ぜる）そのものである。
+    /// ②'s <c>SeismographRecorder</c> was built to <b>throw the observation point away entirely if
+    /// there is not a single vanilla earthquake</b>, so while only the volcano was shaking the
+    /// seismograph stayed blank. **Shaking but a blank record** is precisely the shape this mod
+    /// most wants to avoid (mixing up "could not be read" and "the value is 0").
     ///
-    /// ── ★★ カメラの揺れとは<b>別の時計</b>で評価している ────────────────
+    /// ── ★★ it is evaluated on <b>a different clock</b> from the camera shake ──────────────
     ///
-    /// <see cref="VolcanoTremorShake"/>（main）は<b>実時間</b>（<c>EffectTimeDelta</c>）で
-    /// 時計を進める —— カメラの揺れは目で見るものなので、そうでないと速度を
-    /// 上げたときに震えが速くなりすぎる。
-    /// こちらは記象なので<b>sim フレーム</b>を横軸に取る（②のプロットが全部そうである。
-    /// <c>WaveformPlot</c> のクラス doc）。両者は<b>同じ閉じた式を別の時計で評価している</b>
-    /// のであって、片方がもう片方のコピーではない。
+    /// <see cref="VolcanoTremorShake"/> (main) advances its clock on <b>real time</b>
+    /// (<c>EffectTimeDelta</c>) — the camera shake is something you look at, and otherwise the
+    /// shaking would get too fast when you speed the game up.
+    /// This one is a seismogram, so it takes <b>sim frames</b> as its x-axis (all of ②'s plots do;
+    /// see the class doc of <c>WaveformPlot</c>). The two are
+    /// <b>the same closed-form expression evaluated on different clocks</b>; neither is a copy of
+    /// the other.
     ///
-    /// したがって<b>この線は「カメラが実際に足した変位」ではない</b>。
-    /// 名乗りも <c>[Disaster + volcanic tremor]</c> ——
-    /// ②の第 2 層（合成記象）と同じ「この MOD のモデル」の側であり、
-    /// 第 1 層（バニラの式）を名乗らせないこと。
+    /// So <b>this trace is not "the displacement the camera actually added"</b>.
+    /// Its attribution is <c>[Disaster + volcanic tremor]</c> too —
+    /// it is on the same side as ②'s second layer (the composite seismogram), "this mod's model",
+    /// and it must never claim the first layer (vanilla's formula).
     ///
-    /// ── 何を持っているか ────────────────────────────────
+    /// ── what it holds ──────────────────────────────────────────────────────────────────────
     ///
-    /// 状態は「いつ揺れ始めたか」1 つだけである（<see cref="_startFrame"/>）。
-    /// 活動度も減衰も <see cref="VolcanicTremor"/> の閉じた式で、フレームを
-    /// 飛ばしても同じ値になる。
+    /// The only state is "when the shaking started" (<see cref="_startFrame"/>).
+    /// Both the activity level and the attenuation are closed-form expressions in
+    /// <see cref="VolcanicTremor"/>, so skipping frames still gives the same value.
     /// </summary>
     public static class VolcanoTremorTrace
     {
         /// <summary>
-        /// sim フレーム → 秒。**速度 1 のとき 1 秒 60 フレーム**である。
-        /// 速度を上げるとフレーム番号のほうが速く進むので、記象は時間軸が
-        /// 縮んで見える —— ②のプロットは全部その約束で描かれている
-        /// （横軸はフレームであって実時間ではない）。
+        /// Sim frames → seconds. **At speed 1 there are 60 frames per second.**
+        /// Speed the game up and the frame index advances faster, so the seismogram's time axis
+        /// appears compressed — all of ②'s plots are drawn on that convention
+        /// (the x-axis is frames, not real time).
         /// </summary>
         private const float FramesPerSecond = 60f;
 
@@ -52,16 +53,16 @@ namespace DisasterPlus.Game
         private static float _reachMetres;
         private static uint _seed;
 
-        /// <summary>今、火山が揺れているか。</summary>
+        /// <summary>Whether the volcano is shaking right now.</summary>
         public static bool Active { get { return _active; } }
 
-        /// <summary>影響範囲の中心（火口ではない。<see cref="VolcanoTremorShake"/> と同じ理由）。</summary>
+        /// <summary>The centre of the affected range (not the crater. The same reason as <see cref="VolcanoTremorShake"/>).</summary>
         public static Vec3 Centre { get { return _centre; } }
 
-        /// <summary>今の活動度 <c>[0,1]</c>。診断とパネル向け。</summary>
+        /// <summary>The current activity level <c>[0,1]</c>. For the diagnostics and the panel.</summary>
         public static float ActivityUnit { get { return _activityUnit; } }
 
-        /// <summary>レベルアンロード・火山の中止で呼ぶ。</summary>
+        /// <summary>Call on level unload and when a volcano is cancelled.</summary>
         public static void Reset()
         {
             _active = false;
@@ -73,8 +74,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **sim スレッド、ポーズガードより下**（揺れは状態の前進である）。
-        /// ⑤の位相から今の活動度を求め、揺れ始めのフレームを憶える。
+        /// **Sim thread, below the pause guard** (the shaking is an advance of state).
+        /// Derives the current activity level from ⑤'s phase and remembers the frame the shaking
+        /// started on.
         /// </summary>
         public static void Update(uint frame)
         {
@@ -107,8 +109,9 @@ namespace DisasterPlus.Game
                 _startFrame = frame;
                 _centre = footprint.Centre;
                 _reachMetres = footprint.RadiusMetres * VolcanoTremorActivity.ReachRadiusFactor;
-                // ★ 種は⑤の中心から作る（<see cref="VolcanoTremorShake"/> と同じ式）。
-                //   同じ火山なら記象もカメラも同じ揺れになる。
+                // ★ The seed is built from ⑤'s centre (the same formula as
+                //   <see cref="VolcanoTremorShake"/>).
+                //   The same volcano gives the same shaking on the seismogram and on the camera.
                 _seed = DeterministicRandom.Hash(
                     unchecked((uint)Round(footprint.Centre.X)),
                     unchecked((uint)Round(footprint.Centre.Z)));
@@ -118,12 +121,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 観測点 <paramref name="distanceMetres"/> における、フレーム
-        /// <paramref name="frame"/> の地動 <c>[-1,1]</c>。
-        /// 揺れていなければ、あるいは届く範囲の外なら <b>0</b>。
+        /// The ground motion <c>[-1,1]</c> at frame <paramref name="frame"/>, at an observation
+        /// point <paramref name="distanceMetres"/> away.
+        /// <b>0</b> if nothing is shaking, or if the point is outside the reach.
         ///
-        /// ★ ここの 0 は**「揺れていない」という値**であって「読めなかった」ではない
-        ///   （記録するかどうかは <see cref="Active"/> が決める）。
+        /// ★ The 0 here is **the value "not shaking"**, not "could not be read"
+        ///   (whether to record at all is decided by <see cref="Active"/>).
         /// </summary>
         public static float DisplacementAt(float distanceMetres, uint frame)
         {
@@ -135,15 +138,17 @@ namespace DisasterPlus.Game
 
             float seconds = (frame - _startFrame) / FramesPerSecond;
 
-            // ★★ **②と同じ変位の単位へ直す**（<c>VolcanoTremorActivity.DisplacementGain</c>）。
-            //    記象の縦の尺度は 3 本で共通なので、生の <c>[-1,1]</c> のまま入れると
-            //    **火山性微動だけがバニラの本震より 1.7 倍大きい絵**になる。
-            //    カメラの側と同じ倍率を使うのがその担保である。
+            // ★★ **Convert into the same displacement unit as ②'s**
+            //    (<c>VolcanoTremorActivity.DisplacementGain</c>).
+            //    The seismogram's vertical scale is shared across all three traces, so putting the
+            //    raw <c>[-1,1]</c> in would give **a picture where the volcanic tremor alone is
+            //    1.7 times larger than vanilla's main shock**.
+            //    Using the same factor as the camera side is what guarantees against that.
             return VolcanicTremor.DisplacementAt(_seed, seconds, _activityUnit)
                    * attenuation * VolcanoTremorActivity.DisplacementGain;
         }
 
-        /// <summary>観測点から⑤の中心までの水平距離（m）。</summary>
+        /// <summary>The horizontal distance (m) from an observation point to ⑤'s centre.</summary>
         public static float DistanceFromCentre(Vec3 position)
         {
             float dx = position.X - _centre.X;

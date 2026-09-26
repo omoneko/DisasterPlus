@@ -6,322 +6,361 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>震源から同心円状に立つ津波。</b>**sim スレッド専用。**
+    /// <b>A tsunami that rises in concentric rings from the epicentre.</b>
+    /// **Sim thread only.**
     ///
-    /// ── 何をしているのか ──────────────────────────────────────────
+    /// ── What it actually does ─────────────────────────────────────────────
     ///
-    /// 震源に <c>WaterSource</c> の <c>TYPE_NATURAL</c> を 1 個置き、その
-    /// <c>m_target</c>（＝円を満たす目標水位）を DLC の津波と<b>同じ波形</b>で
-    /// 上下させる。円は目標より低ければ<b>水を湧かせ</b>、高ければ<b>抜く</b>ので、
-    /// <b>引き波 → 押し波 → 引き波</b>がそのまま海に出る。
-    /// 波形の中身は <see cref="TsunamiRingShape"/>（Core 層）。
+    /// Place one <c>WaterSource</c> of <c>TYPE_NATURAL</c> at the epicentre and move its
+    /// <c>m_target</c> (the water level the disc fills to) up and down on the <b>same
+    /// waveform</b> the DLC tsunami uses. Below the target the disc <b>creates water</b>,
+    /// above it the disc <b>takes water away</b>, so <b>drawback → crest → drawback</b>
+    /// comes out into the sea directly. The waveform itself lives in
+    /// <see cref="TsunamiRingShape"/> (the Core layer).
     ///
-    /// ── なぜ <c>TYPE_IMPACT</c> をやめたのか ─────────────────────────
+    /// ── Why <c>TYPE_IMPACT</c> was abandoned ──────────────────────────────
     ///
-    /// 前身の <c>TsunamiWave</c> は <c>TYPE_IMPACT</c>、海中に置く<b>仮想の丘</b>だった。
-    /// 丘は水を押しのけるだけで<b>作らない</b>ので、出せるのは正味ゼロの双極子である。
-    /// オフラインで同じ棚に並べた結果（2026-08-31、水深 174 m、汀線 6.1 km）:
-    ///
-    /// <list type="bullet">
-    /// <item>DLC の津波（外周の境界条件、強度 100）… 汀線 <b>84.8 m</b></item>
-    /// <item><c>TYPE_IMPACT</c> の丘（drive 3857）… 汀線 <b>19.3 m</b></item>
-    /// </list>
-    ///
-    /// 差は振幅ではなく<b>水を作るかどうか</b>だった。丘をいくら大きくしても
-    /// 湧き出しの真似はできない（海底を掘り抜くだけである）。
-    ///
-    /// ★ ただし DLC の 84.8 m と直接は競えない。あちらは<b>マップの辺全体</b>を
-    ///   使う線の波源で、こちらは点の波源だから、幾何的な広がりのぶんだけ落ちる。
-    ///   競うべきは数字ではなく<b>大津波に見えるか</b>である。
-    ///
-    /// ── 出せる津波（実測、2026-08-31。円が汀線に掛からない配置のみ）──────
-    ///
-    /// **深い海**（水深 174 m ＝ 海面の高いマップ。押し波の蓋 40 m）:
+    /// The predecessor, <c>TsunamiWave</c>, used <c>TYPE_IMPACT</c>: a <b>virtual hill</b>
+    /// placed under the sea. A hill only displaces water, it <b>never creates any</b>, so
+    /// all it can produce is a dipole that nets to zero. Put side by side offline
+    /// (2026-08-31, 174 m of water, shoreline 6.1 km away):
     ///
     /// <list type="bullet">
-    /// <item>震源から 5.2 km … 汀線 <b>35.5 m</b>、内陸へ <b>1,328 m</b></item>
-    /// <item>震源から 8.7 km … 汀線 25.9 m、内陸へ 912 m</item>
-    /// <item>震源から 13.0 km … 汀線 23.0 m、内陸へ 848 m</item>
+    /// <item>the DLC tsunami (boundary condition at the map rim, intensity 100) …
+    ///   <b>84.8 m</b> at the shoreline</item>
+    /// <item>the <c>TYPE_IMPACT</c> hill (drive 3857) … <b>19.3 m</b> at the shoreline</item>
     /// </list>
     ///
-    /// **標準的なマップ**（水深 40 m ＝ 海面 40 m の既定。蓋は水深に縛られ 20 m）:
+    /// The difference was not amplitude but <b>whether water is created at all</b>. No
+    /// amount of hill imitates a spring; it only digs through the seabed.
+    ///
+    /// ★ It cannot compete with the DLC's 84.8 m head on, though. That is a line source
+    ///   using <b>the whole side of the map</b>, and this is a point source, so it loses
+    ///   whatever the geometry spreads. What matters is not the number but
+    ///   <b>whether it looks like a great tsunami</b>.
+    ///
+    /// ── What it can produce (measured 2026-08-31; only layouts where the disc does
+    ///    not touch the shoreline) ───────────────────────────────────────────
+    ///
+    /// **Deep sea** (174 m of water, i.e. a map with a high sea level. Crest cap 40 m):
     ///
     /// <list type="bullet">
-    /// <item>震源から 5.2 km … 汀線 <b>20.6 m</b>、内陸へ 704 m</item>
-    /// <item>震源から 8.7 km … 汀線 13.1 m、内陸へ 432 m</item>
+    /// <item>5.2 km from the epicentre … <b>35.5 m</b> at the shore, <b>1,328 m</b> inland</item>
+    /// <item>8.7 km from the epicentre … 25.9 m at the shore, 912 m inland</item>
+    /// <item>13.0 km from the epicentre … 23.0 m at the shore, 848 m inland</item>
     /// </list>
     ///
-    /// ★★ **どちらも「実機で int32 が溢れない」ことを確かめた設定である。**
-    ///   再現ツールに<b>実機の int32 なら溢れていた回数</b>を数えさせている
-    ///   （<c>tools/WaterSolverSim/SourceDisc.cs</c> の <c>Int32Overflows</c>）。
-    ///   これを付けるまでは、<b>再現側だけが綺麗な答えを返す</b>設定を
-    ///   良い設定だと思い込んでいた。
+    /// **A standard map** (40 m of water, the default 40 m sea level. The cap is bound by
+    /// the depth, so 20 m):
     ///
-    /// ★★ **だが DLC の津波をそのまま呼ぶのは解析ではない。**（所有者、2026-08-31）
-    ///   あれは<b>マップ外周でしか評価されない</b>ので、震源から同心円にはならない。
-    ///   <c>WaterSource</c> は同じ「目標水位まで満たす」装置を<b>どこにでも置ける</b>形で
-    ///   持っているので、<b>波形は DLC のまま、置き場所だけ震源へ移す</b>。
+    /// <list type="bullet">
+    /// <item>5.2 km from the epicentre … <b>20.6 m</b> at the shore, 704 m inland</item>
+    /// <item>8.7 km from the epicentre … 13.1 m at the shore, 432 m inland</item>
+    /// </list>
     ///
-    /// ── 危険（<c>TyphoonFlood</c> のクラス doc と同じ、ただし一段重い）─────
+    /// ★★ **Both are settings confirmed not to overflow int32 in the real game.**
+    ///   The offline reproduction counts <b>how many times the game's int32 would have
+    ///   overflowed</b> (<c>Int32Overflows</c> in <c>tools/WaterSolverSim/SourceDisc.cs</c>).
+    ///   Until that counter existed, a setting that <b>only the reproduction returned a
+    ///   clean answer for</b> was mistaken for a good setting.
+    ///
+    /// ★★ **But simply calling the DLC tsunami is not analysis.** (the owner, 2026-08-31)
+    ///   That one is <b>only evaluated at the map rim</b>, so it never forms rings around
+    ///   an epicentre. <c>WaterSource</c> carries the same "fill up to a target level"
+    ///   machinery in a form that can be <b>placed anywhere</b>, so <b>keep the DLC's
+    ///   waveform and move only where it is applied</b> — to the epicentre.
+    ///
+    /// ── The dangers (the same as <c>TyphoonFlood</c>'s class doc, one notch worse) ──
     ///
     /// <list type="number">
-    /// <item><c>LockWaterSource</c> は <b>Monitor を取ったまま返る</b>。
-    ///   <c>UnlockWaterSource</c> が<b>唯一の解放経路</b>なので必ず
-    ///   <c>finally</c> に置く。落とすと<b>水スレッドが永久に止まる</b>。</item>
-    /// <item><c>LockWaterSource</c> は添字を検査しない。
-    ///   <see cref="OwnsSource"/> を通ってからでなければ呼ばない。</item>
-    /// <item>★★ <b><c>WaterSource</c> はセーブに焼き付く</b>
-    ///   （<c>WaterSimulation+Data.Serialize</c> が書く、IL 実測）。
-    ///   置いたまま保存されると、MOD を外してもその都市に<b>永久に水が湧き続ける</b>。
-    ///   だから解放は
+    /// <item><c>LockWaterSource</c> <b>returns while still holding the Monitor</b>.
+    ///   <c>UnlockWaterSource</c> is <b>the only way to release it</b>, so it must sit in a
+    ///   <c>finally</c>. Drop it and <b>the water thread stops for good</b>.</item>
+    /// <item><c>LockWaterSource</c> does not bounds-check the index. Never call it without
+    ///   going through <see cref="OwnsSource"/> first.</item>
+    /// <item>★★ <b>A <c>WaterSource</c> is baked into the save</b>
+    ///   (<c>WaterSimulation+Data.Serialize</c> writes it — confirmed in the IL).
+    ///   Save with one still placed and that city has <b>a spring that runs for ever</b>,
+    ///   even after the mod is removed. So release it in all three places:
     ///   <list type="bullet">
-    ///   <item>波形が終わったとき</item>
-    ///   <item>都市を出るとき（<c>Reset</c>）</item>
-    ///   <item><b>保存の直前</b>（<see cref="SuspendForSave"/>）</item>
+    ///   <item>when the waveform ends</item>
+    ///   <item>when leaving the city (<c>Reset</c>)</item>
+    ///   <item><b>immediately before a save</b> (<see cref="SuspendForSave"/>)</item>
     ///   </list>
-    ///   の三箇所すべてで行う。<c>TyphoonFlood</c> は「<c>CreateWaterSource</c> に
-    ///   手を伸ばすな」と書いてあるが、それはこの三箇所を守れないなら、の意味である。</item>
-    /// <item><c>CreateWaterSource</c> は <c>m_type == 0</c> の枠を<b>使い回す</b>
-    ///   （first-fit、IL_0020-005A）。だから<b>握った番号だけでは足りない</b> ——
-    ///   書く前に必ず種別と位置を照合する。</item>
+    ///   <c>TyphoonFlood</c> says "do not reach for <c>CreateWaterSource</c>", and what it
+    ///   means is: not unless you can honour those three.</item>
+    /// <item><c>CreateWaterSource</c> <b>reuses</b> any slot with <c>m_type == 0</c>
+    ///   (first fit, IL_0020-005A). So <b>holding the index is not enough</b> — always
+    ///   check the type and the position before writing.</item>
     /// </list>
     /// </summary>
     public static class TsunamiRing
     {
-        /// <summary><c>WaterSource.TYPE_NATURAL</c>。</summary>
+        /// <summary><c>WaterSource.TYPE_NATURAL</c>.</summary>
         private const ushort TypeNatural = 1;
 
-        /// <summary>1 水ステップ ＝ 64 sim フレーム（IL 実測、<c>SetCurrentWaterFrame</c>）。</summary>
+        /// <summary>
+        /// One water step = 64 sim frames (measured in the IL, <c>SetCurrentWaterFrame</c>).
+        /// </summary>
         private const int FramesPerWaterStep = 64;
 
-        /// <summary>マップ半幅（m）。</summary>
+        /// <summary>Half the width of the map (m).</summary>
         private const float MapHalfExtent = 8640f;
 
         /// <summary>
-        /// 震源の円の半径（m）。**遠くへ届かせるのは高さではなく体積**なので、
-        /// ここが効く（オフライン実測 2026-08-31: 半径 1280 m → 汀線 35 m、
-        /// 半径 3840 m → 汀線 83 m、いずれも強度 100・水深 174 m・汀線 6.1 km）。
+        /// Radius of the disc at the epicentre (m). **What carries a wave a long way is
+        /// volume, not height**, so this is the constant that matters (measured offline
+        /// 2026-08-31: radius 1280 m → 35 m at the shore, radius 3840 m → 83 m at the
+        /// shore, both at intensity 100, 174 m of water, shoreline 6.1 km away).
         /// </summary>
         public const float RadiusMetres = 3840f;
 
         /// <summary>
-        /// <b>押し波の頭打ち（m、絶対値）。</b>強度 255 のときの値。
+        /// <b>The cap on the crest (m, absolute).</b> The value at intensity 255.
         ///
-        /// ★★ **2026-09-02 に 40 m から 130 m へ上げた。**
-        ///   所有者の実機報告「最大規模でも高潮程度」。原因は<b>この蓋</b>だった。
+        /// ★★ **Raised from 40 m to 130 m on 2026-09-02.**
+        ///   The owner reported from the game that "even at maximum it is no more than a
+        ///   storm surge". <b>This cap</b> was the cause.
         ///
-        ///   下の「上げると弱くなる」という表は<b>引き波の円が 3,840 m だった頃</b>の
-        ///   ものである。その設定は実機の int32 を壊すので使えず
-        ///   （<see cref="DrainRadiusMetres"/>）、いまの安全な設定では
-        ///   <b>関係が逆転していた</b>。測り直した結果（水深 165 m・半径 2,048 m ＝
-        ///   所有者のマップと同じ条件、陸の勾配 2 m/セル）:
-        ///
-        /// <list type="bullet">
-        /// <item>蓋 40 m … 汀線 32.8 m、内陸へ 288 m、海底の露出 0</item>
-        /// <item>蓋 80 m … 汀線 57.8 m、内陸へ 528 m、露出 0</item>
-        /// <item><b>蓋 130 m … 汀線 82.2 m、内陸へ 768 m、露出 5 歩</b></item>
-        /// <item>蓋 190 m … 汀線 89.9 m、内陸へ 944 m、露出 <b>63 歩</b></item>
-        /// <item>蓋 260 m … 汀線 89.7 m、内陸へ 944 m、露出 65 歩</item>
-        /// </list>
-        ///
-        /// ★★ **130 m が分岐点である。** そこまでは蓋にほぼ比例して伸びるが、
-        ///   それ以上は頭打ちになる一方で<b>海底の露出だけが 12 倍に増える</b>
-        ///   （9% の伸びと引き換えに）。だからここで止める。
-        ///
-        /// ★ 蓋を上げると引き波の円は自動的に縮む（溢れ防止、<c>_drainRate</c> の
-        ///   切り下げ）。130 m なら 101 m。それでも溢れは 0 件で、上の値が出る。
-        ///
-        /// ── 以下は旧設定（引き波の円 3,840 m）での表。**参考にしないこと。**
-        ///
-        /// （オフライン実測 2026-08-31、1081 格子・汀線 13 km・768 水ステップ）
+        ///   The table below — the one that says raising it makes the wave weaker — was
+        ///   measured <b>back when the drawback disc was 3,840 m</b>. That setting
+        ///   corrupts the game's int32 and cannot be used
+        ///   (<see cref="DrainRadiusMetres"/>), and with today's safe setting
+        ///   <b>the relationship is the other way round</b>. Measured again (165 m of
+        ///   water, radius 2,048 m — the same conditions as the owner's map — land
+        ///   sloping 2 m per cell):
         ///
         /// <list type="bullet">
-        /// <item>蓋 40 m … 汀線 <b>66.98 m</b>、浸水 <b>2592 m</b>、震源 189.7 m</item>
-        /// <item>蓋 55 m … 汀線 65.38 m、浸水 2384 m、震源 233.2 m</item>
-        /// <item>蓋 70 m … 汀線 64.56 m、浸水 2240 m、震源 255.4 m</item>
-        /// <item>蓋 20 m … 汀線 25.44 m、浸水 1280 m、震源 100.0 m</item>
+        /// <item>cap 40 m … 32.8 m at the shore, 288 m inland, no seabed exposed</item>
+        /// <item>cap 80 m … 57.8 m at the shore, 528 m inland, none exposed</item>
+        /// <item><b>cap 130 m … 82.2 m at the shore, 768 m inland, 5 steps exposed</b></item>
+        /// <item>cap 190 m … 89.9 m at the shore, 944 m inland, <b>63 steps</b> exposed</item>
+        /// <item>cap 260 m … 89.7 m at the shore, 944 m inland, 65 steps exposed</item>
         /// </list>
         ///
-        /// 高い塔を立てても遠くへは行かない —— 効くのは<b>体積</b>だからである。
+        /// ★★ **130 m is the turning point.** Up to there the wave grows roughly in step
+        ///   with the cap; past it the wave levels off while <b>the bare seabed alone grows
+        ///   twelve-fold</b> — in exchange for 9% more reach. So it stops here.
         ///
-        /// ★★ <b>この表は引き波の円が 3,840 m だったときのものである。</b>
-        ///   その設定は実機の int32 を壊すので使えない（<see cref="DrainRadiusMetres"/>）。
-        ///   採れる設定での実際の値はクラス doc の表を見ること。
-        ///   ここに残すのは<b>「蓋を上げると弱くなる」という向き</b>のためだけである。
+        /// ★ Raising the cap shrinks the drawback disc automatically (the overflow guard,
+        ///   which rounds <c>_drainRate</c> down). At 130 m it is 101 m. Even so there are
+        ///   no overflows at all, and the figures above are what comes out.
         ///
-        /// ★★ ただし<b>水深でも縛る</b>（<see cref="MaxRiseFraction"/>）。
-        ///   蓋そのものは深さによらず効くのだが、<b>浅い海では出ていく波が
-        ///   震源の水を持ち去って海底を剥き出しにする</b>。実測（震源距離 5.2 km）:
+        /// ── Below is the table from the old setting (drawback disc 3,840 m).
+        ///    **Do not use it as a guide.**
+        ///
+        /// (measured offline 2026-08-31, 1081 grid, shoreline 13 km away, 768 water steps)
         ///
         /// <list type="bullet">
-        /// <item>水深 25 m・蓋 40 m … 海底の露出 <b>297 水ステップ（約 5 実分）</b></item>
-        /// <item>水深 25 m・蓋 12 m … 露出 <b>0</b>、汀線 12.8 m</item>
-        /// <item>水深 40 m・蓋 20 m … 露出 <b>0</b>、汀線 20.6 m</item>
-        /// <item>水深 174 m・蓋 40 m … 露出 <b>0</b>、汀線 35.5 m</item>
+        /// <item>cap 40 m … <b>66.98 m</b> at the shore, <b>2592 m</b> of inundation,
+        ///   189.7 m at the epicentre</item>
+        /// <item>cap 55 m … 65.38 m at the shore, 2384 m of inundation, 233.2 m at the epicentre</item>
+        /// <item>cap 70 m … 64.56 m at the shore, 2240 m of inundation, 255.4 m at the epicentre</item>
+        /// <item>cap 20 m … 25.44 m at the shore, 1280 m of inundation, 100.0 m at the epicentre</item>
         /// </list>
         ///
-        ///   ★ 深い海を要求して逃げることはできない ——
-        ///     バニラの既定の海面は 40 m で、<b>海底は標高 0 より下へ行けない</b>ので、
-        ///     標準的なマップの海は最大でも 40 m しかない。
+        /// Building a taller tower does not carry the water further — what counts is
+        /// <b>volume</b>.
+        ///
+        /// ★★ <b>This table is from when the drawback disc was 3,840 m.</b>
+        ///   That setting corrupts the game's int32 and cannot be used
+        ///   (<see cref="DrainRadiusMetres"/>). For the real figures under a usable
+        ///   setting, see the table in the class doc. It is kept here only for
+        ///   <b>the direction it shows — that raising the cap weakened the wave</b>.
+        ///
+        /// ★★ It is also <b>bound by the depth</b> (<see cref="MaxRiseFraction"/>).
+        ///   The cap itself works regardless of depth, but <b>in shallow water the wave
+        ///   leaving carries off the water at the epicentre and lays the seabed bare</b>.
+        ///   Measured (epicentre 5.2 km away):
+        ///
+        /// <list type="bullet">
+        /// <item>25 m of water, cap 40 m … seabed exposed for
+        ///   <b>297 water steps (about 5 real minutes)</b></item>
+        /// <item>25 m of water, cap 12 m … <b>never</b> exposed, 12.8 m at the shore</item>
+        /// <item>40 m of water, cap 20 m … <b>never</b> exposed, 20.6 m at the shore</item>
+        /// <item>174 m of water, cap 40 m … <b>never</b> exposed, 35.5 m at the shore</item>
+        /// </list>
+        ///
+        ///   ★ There is no escaping this by demanding deep water — the vanilla sea level
+        ///     defaults to 40 m and <b>the seabed cannot go below elevation 0</b>, so a
+        ///     standard map has at most 40 m of sea.
         /// </summary>
         private const float MaxRiseMetres = 130f;
 
         /// <summary>
-        /// 押し波の頭打ち（水深に対する割合）。<see cref="MaxRiseMetres"/> と
-        /// <b>小さいほうを採る</b>。
+        /// The cap on the crest as a fraction of the depth. <b>The smaller of this and
+        /// <see cref="MaxRiseMetres"/> wins.</b>
         ///
-        /// ★★ **0.5 から 0.8 へ上げた**（2026-09-02）。0.5 のままだと、
-        ///   水深 165 m のマップでも蓋が 82 m で頭打ちになり、
-        ///   <see cref="MaxRiseMetres"/> を 130 m にした意味が消える。
-        ///   浅い海を守るのがこの割合の役目なので、深い海まで縛る必要は無い。
+        /// ★★ **Raised from 0.5 to 0.8** (2026-09-02). At 0.5, even a map with 165 m of
+        ///   water capped out at 82 m, which threw away the point of setting
+        ///   <see cref="MaxRiseMetres"/> to 130 m. This fraction exists to protect
+        ///   shallow water, so there is no need for it to bind deep water too.
         ///
-        /// ★ 浅い側の裏取り: 水深 40 m・蓋 32 m（＝0.8）で海底の露出 4 歩、
-        ///   水深 25 m・蓋 20 m で 0 歩（実測 2026-08-31）。
+        /// ★ Checked on the shallow side: 40 m of water with a 32 m cap (= 0.8) exposes
+        ///   the seabed for 4 steps; 25 m of water with a 20 m cap exposes it for none
+        ///   (measured 2026-08-31).
         ///
-        /// ★ 結果として<b>深い海ほど大きな津波</b>になる。物理的にも正しく、
-        ///   海溝型地震を沖に置く動機にもなる。
+        /// ★ The upshot is that <b>deeper water gives a bigger tsunami</b>. That is right
+        ///   physically, and it gives a reason to put a trench quake out to sea.
         /// </summary>
         private const float MaxRiseFraction = 0.8f;
 
         /// <summary>
-        /// <b>引き波の円の半径（m）。押し波の円とは別である。</b>
+        /// <b>Radius of the drawback disc (m). Not the same as the crest disc.</b>
         ///
-        /// ★★ **これがゲームの整数演算で決まる上限である。**（2026-08-31、IL 検証）
+        /// ★★ **This is the limit the game's integer arithmetic imposes.**
+        ///   (2026-08-31, verified in the IL)
         ///
-        ///   取り込みパス（<c>SimulateWater</c> IL_1B4C-1B58）は
-        ///   <c>share * take</c> を<b>int32 の <c>mul</c></b> で計算する
-        ///   （<c>conv.i8</c> はどこにも無い）。<c>take = min(inputRate, total&gt;&gt;1)</c>
-        ///   で、<c>inputRate</c> は半径から <c>((r-10)/0.4)^2</c> と決まるので、
-        ///   <b>円を大きくすると必ず積が 2^31 を越える</b>。越えた先は
-        ///   <c>m_height = (ushort)(h - share)</c> なので<b>セルの高さが壊れる</b>。
+        ///   The take path (<c>SimulateWater</c> IL_1B4C-1B58) computes
+        ///   <c>share * take</c> with an <b>int32 <c>mul</c></b> (there is no
+        ///   <c>conv.i8</c> anywhere). <c>take = min(inputRate, total&gt;&gt;1)</c>, and
+        ///   <c>inputRate</c> follows from the radius as <c>((r-10)/0.4)^2</c>, so
+        ///   <b>enlarging the disc always pushes the product past 2^31</b>. Past that,
+        ///   <c>m_height = (ushort)(h - share)</c>, so <b>the cell's height is corrupted</b>.
         ///
-        ///   押し波（吐き出し）側にはこの積が無いので、そちらは 3840 m で構わない。
-        ///   バニラでこれが踏まれないのは、マップの川の水源が小さいからである。
+        ///   The crest (output) side has no such product, so 3840 m is fine there. The
+        ///   reason vanilla never trips over this is that a map's river sources are small.
         ///
-        /// ★ 実測（オフライン再現に「実機の int32 なら溢れたか」を数えさせた）:
-        ///   半径 250 m は一部の配置で溢れる（最悪の積 2.35e9）。
-        ///   <b>160 m は水深 174/60 m × 震源距離 2.6-13.0 km の 8 通りすべてで 0 件。</b>
+        /// ★ Measured (the offline reproduction counts whether the game's int32 would have
+        ///   overflowed): a radius of 250 m overflows in some layouts (worst product
+        ///   2.35e9). <b>160 m overflowed in none of the 8 combinations of 174/60 m of
+        ///   water × 2.6-13.0 km to the epicentre.</b>
         ///
-        /// ★ 引きを大きくできないぶん威力は落ちるが、落ち幅は小さい ——
-        ///   汀線で 2.6 km 54 m / 5.2 km 35 m / 13 km 23 m は変わらず、
-        ///   むしろ震源が穏やかになる（水柱 190 m → 63 m）。
+        /// ★ Not being able to enlarge the drawback costs some force, but little: the
+        ///   shoreline still sees 54 m at 2.6 km, 35 m at 5.2 km and 23 m at 13 km. If
+        ///   anything the epicentre gets calmer (a 190 m column becomes 63 m).
         /// </summary>
         private const float DrainRadiusMetres = 160f;
 
         /// <summary>
-        /// 取り込み円の <c>total</c> の上限（1/64 m の総和）。
-        /// 半径 160 m ＝ 10 セル ＝ 314 セル、1 セルは最大 65535。余裕を見て切り上げ。
+        /// Ceiling on the take disc's <c>total</c> (the sum in units of 1/64 m).
+        /// A 160 m radius is 10 cells, so 314 cells, and one cell holds at most 65535.
+        /// Rounded up to leave room.
         /// </summary>
         private const long MaxTotalUnits = 22000000L;
 
         /// <summary>
-        /// 引き波で抜いてよい水深の割合。**海底を露出させない。**
-        /// 押しと違いこちらは<b>水深で縛る</b> —— 深さ 60 m で蓋 60 m にすると
-        /// 水柱が 100% 抜けて海底が 94 水ステップ露出した（実測 2026-08-31）。
-        /// 0.5 にしても深い海の威力は落ちない（汀線 66.98 m のまま）。
+        /// The fraction of the depth the drawback may take. **Never bare the seabed.**
+        /// Unlike the crest, this one is <b>bound by the depth</b> — with 60 m of water and
+        /// a 60 m cap the whole column drained and the seabed lay exposed for 94 water
+        /// steps (measured 2026-08-31). Using 0.5 costs deep water nothing (still 66.98 m
+        /// at the shore).
         /// </summary>
         private const float MaxDrawFraction = 0.5f;
 
         /// <summary>
         /// <summary>
-        /// 断層に並べる円の最大数。**5 が頭打ち**（<see cref="_sources"/> の表）。
+        /// The largest number of discs laid along the fault. **5 is the ceiling**
+        /// (see the table on <see cref="_sources"/>).
         /// </summary>
         private const int MaxSegments = 5;
 
-        /// 波形の長さ（水ステップ）。バニラは 256。
+        /// Length of the waveform (water steps). Vanilla uses 256.
         ///
-        /// ★★ **長さは効く。** 同じ蓋 40 m で 512 歩なら汀線 52.77 m、
-        ///   768 歩なら 66.98 m（実測 2026-08-31）。ただし 1024 歩は 29.80 m と
-        ///   かえって落ちる —— 振幅の減衰項 <c>(65536 - t)/65536</c> が
-        ///   終盤で 0 に近づき、後半の押しが消えるからである。
-        ///   768 水ステップ ＝ 49,152 sim フレーム ≒ 13.6 実分。
+        /// ★★ **Length matters.** At the same 40 m cap, 512 steps gives 52.77 m at the
+        ///   shore and 768 steps gives 66.98 m (measured 2026-08-31). But 1024 steps drops
+        ///   back to 29.80 m — the amplitude's decay term <c>(65536 - t)/65536</c>
+        ///   approaches 0 towards the end, so the later crest disappears.
+        ///   768 water steps = 49,152 sim frames, roughly 13.6 real minutes.
         /// </summary>
         private const int DurationSteps = 768;
 
-        /// <summary>同じ長さをティックで。波形の<b>周期でもある</b>（LevelOffsetUnits の doc）。</summary>
+        /// <summary>
+        /// The same length in ticks. This is <b>also the waveform's period</b>
+        /// (see the doc on LevelOffsetUnits).
+        /// </summary>
         private const int DurationTicks = DurationSteps * TsunamiRingShape.TicksPerWaterStep;
 
         /// <summary>
-        /// <c>_source</c> と <c>_running</c> を守る錠。
+        /// The lock guarding <c>_source</c> and <c>_running</c>.
         ///
-        /// ★★ **必要である。**（2026-08-31、相互検証）<c>Reset</c> は
-        ///   <c>LoadingExtensionBase.OnLevelUnloading</c> から<b>メインスレッド</b>で
-        ///   呼ばれ、<c>SuspendForSave</c> は <c>OnSaveData</c> から呼ばれる。
-        ///   どちらも sim スレッドの <see cref="Tick"/> と<b>同時に走る</b>
-        ///   （<c>LoadingManager.UnloadLevel</c> は sim を止める前に
-        ///    <c>OnLevelUnloading</c> を同期で呼ぶ）。
+        /// ★★ **It is necessary.** (2026-08-31, cross-verified) <c>Reset</c> is called
+        ///   from <c>LoadingExtensionBase.OnLevelUnloading</c> on the <b>main thread</b>,
+        ///   and <c>SuspendForSave</c> from <c>OnSaveData</c>. Both <b>run at the same time
+        ///   as</b> <see cref="Tick"/> on the sim thread (<c>LoadingManager.UnloadLevel</c>
+        ///   calls <c>OnLevelUnloading</c> synchronously before it stops the sim).
         ///
-        /// ★★ <b>ゲームは決してこの錠を取らない</b>ので、
-        ///   <c>m_waterSources</c> の Monitor との間に輪はできない。
-        ///   ただし順序は<b>必ず _gate → m_waterSources</b> にすること。
+        /// ★★ <b>The game never takes this lock</b>, so no cycle can form with the
+        ///   <c>m_waterSources</c> Monitor. The order must nonetheless <b>always be
+        ///   _gate → m_waterSources</b>.
         /// </summary>
         private static readonly object _gate = new object();
 
-        // ★★ **ここに「二度と立てない」錠を置いてはいけない。**（2026-08-31、第 3 回検証）
-        //    第 2 回の指摘に応えて <c>_shutDown</c> を入れたが、**それが最悪の欠陥だった。**
-        //    <c>OnReleased</c> は「MOD が外された」ときだけ来るのではない ——
-        //    IL（<c>ThreadingWrapper.GetImplementations</c>）を読むと、
-        //    <c>eventPluginsChanged</c> / <c>eventPluginsStateChanged</c> と
-        //    <b>メインメニューへ戻るたび</b>に来て、そのあと<b>すぐ作り直される</b>。
-        //    つまり「無関係な MOD を切り替えた」「街を出た」だけで錠が下り、
-        //    <b>プロセスを再起動するまで津波が二度と起きなくなる</b>。
-        //    防ごうとした漏れより、ずっと起きやすくずっと悪い。
+        // ★★ **Never put a never-again latch here.** (2026-08-31, third review)
+        //    A <c>_shutDown</c> flag was added in response to the second review, and
+        //    **that turned out to be the worst defect of the lot.** <c>OnReleased</c> does
+        //    not only arrive when the mod is removed — read the IL
+        //    (<c>ThreadingWrapper.GetImplementations</c>) and it arrives on
+        //    <c>eventPluginsChanged</c> / <c>eventPluginsStateChanged</c> and
+        //    <b>every time you return to the main menu</b>, after which the object is
+        //    <b>immediately rebuilt</b>. So merely toggling an unrelated mod, or leaving a
+        //    city, would throw the latch and <b>no tsunami would ever happen again until
+        //    the process was restarted</b>. Far more likely, and far worse, than the leak
+        //    it was meant to prevent.
         //
-        //    いま漏れを止めているのは <c>OnReleased</c> の
-        //    <c>TsunamiChain.Reset()</c>（予約を消す）＋ <c>TsunamiRing.Reset()</c>
-        //    （水源を解放して掃除する）である。拡張が本当に外されるなら
-        //    予約が消えているので <c>Begin</c> は呼ばれず、
-        //    作り直されるなら次の tick が普通に面倒を見る。
+        //    What stops the leak today is <c>OnReleased</c> calling
+        //    <c>TsunamiChain.Reset()</c> (clearing the booking) plus
+        //    <c>TsunamiRing.Reset()</c> (releasing the water source and tidying up). If the
+        //    extension really is being removed, the booking is gone so <c>Begin</c> is
+        //    never called; if it is being rebuilt, the next tick handles it as usual.
 
-        // ★ 下の 4 つは sim スレッドが錠の外で読み書きし、main スレッドが
-        //   パネルのために読む。**正しさの拠り所は Drive / Release の中の
-        //   _gate 越しの再確認であって、volatile ではない** ——
-        //   volatile は「古い値を見たまま回り続ける」のを防ぐだけである。
+        // ★ The four below are read and written by the sim thread outside the lock, and
+        //   read by the main thread for the panel. **Correctness rests on re-checking
+        //   through _gate inside Drive / Release, not on volatile** — volatile only stops
+        //   a loop spinning on a stale value.
         /// <summary>
-        /// 置いた水源の番号。**0 の要素は「持っていない」。**
+        /// Indices of the water sources placed. **A 0 entry means "we do not hold one".**
         ///
-        /// ★★ **1 個ではなく線である。**（2026-09-02、所有者の報告
-        ///   「最大規模でも高潮程度」への答え）点の波源は円周に比例して薄まるので、
-        ///   遠くへ行くほど必ず落ちる —— DLC の津波が強いのは
-        ///   <b>マップの辺全体を使う線の波源</b>だからだった。
+        /// ★★ **A line, not a single point.** (2026-09-02, the answer to the owner's
+        ///   report that "even at maximum it is no more than a storm surge".) A point
+        ///   source thins out in proportion to the circumference, so it must fall away
+        ///   with distance — the reason the DLC tsunami is strong is that it is
+        ///   <b>a line source using the whole side of the map</b>.
         ///
-        ///   海溝型地震の断層は現実にも数百 km にわたって線状に割れるので、
-        ///   点で表すほうが不自然である。実測（水深 165 m・半径 2,048 m・
-        ///   蓋 130 m、汀線 5.2 km）:
+        ///   A megathrust fault really does rupture in a line hundreds of kilometres long,
+        ///   so representing it as a point is the less natural choice. Measured (165 m of
+        ///   water, radius 2,048 m, cap 130 m, shoreline 5.2 km away):
         ///
         /// <list type="bullet">
-        /// <item>1 個（点）… 汀線 81.8 m、内陸へ 768 m、海底の露出 5 歩、震源の引き 100%</item>
-        /// <item>3 個 …… 汀線 <b>126.8 m</b>、内陸へ 1,280 m、露出 <b>0</b>、引き 29%</item>
-        /// <item><b>5 個 …… 汀線 152.2 m、内陸へ 1,504 m、露出 0、引き 25%</b></item>
-        /// <item>9 個 …… 汀線 148.2 m（<b>頭打ち</b>）、内陸へ 1,424 m</item>
+        /// <item>1 (a point) … 81.8 m at the shore, 768 m inland, seabed exposed for
+        ///   5 steps, 100% drawdown at the epicentre</item>
+        /// <item>3 …… <b>126.8 m</b> at the shore, 1,280 m inland, <b>never</b> exposed,
+        ///   29% drawdown</item>
+        /// <item><b>5 …… 152.2 m at the shore, 1,504 m inland, never exposed,
+        ///   25% drawdown</b></item>
+        /// <item>9 …… 148.2 m at the shore (<b>levelled off</b>), 1,424 m inland</item>
         /// </list>
         ///
-        /// ★ 強くなるだけでなく<b>行儀も良くなる</b> —— 水を 1 点から吸い上げず
-        ///   広い前線から集めるので、海底が露出しなくなる。
+        /// ★ It does not only get stronger, it <b>behaves better</b> — drawing the water
+        ///   from a wide front instead of sucking it up at one point stops the seabed
+        ///   being exposed at all.
         ///
-        /// ★★ int32 の制約（<see cref="DrainRadiusMetres"/>）は<b>円ごとに独立</b>
-        ///   なので、並べるぶんには壊れない。
+        /// ★★ The int32 limit (<see cref="DrainRadiusMetres"/>) applies <b>to each disc
+        ///   separately</b>, so lining them up breaks nothing.
         /// </summary>
         private static ushort[] _sources = new ushort[MaxSegments];
 
-        /// <summary>並べた円の数（0 なら何も置いていない）。</summary>
+        /// <summary>How many discs are lined up (0 means nothing is placed).</summary>
         private static volatile int _segmentCount;
 
-        /// <summary>保存のために外したときの区画数（戻すときに要る）。</summary>
+        /// <summary>
+        /// The number of segments that were lifted for a save (needed to put them back).
+        /// </summary>
         private static int _suspendedCount;
 
         /// <summary>
-        /// 震源。<b><see cref="Reset"/> で消してはいけない。</b>
+        /// The epicentre. <b>Must not be cleared in <see cref="Reset"/>.</b>
         ///
-        /// ★★ これは所有権の指紋である。消すと <see cref="OwnsSource"/> が
-        ///   <c>Vector3.zero</c> に居る他人の水源を「自分のもの」と誤認し、
-        ///   <b>他人の川を消す</b>。次の都市に持ち越しても、位置が一致しない限り
-        ///   何も起きないので無害である。
+        /// ★★ This is the fingerprint of ownership. Clear it and <see cref="OwnsSource"/>
+        ///   mistakes somebody else's water source sitting at <c>Vector3.zero</c> for one
+        ///   of ours, and <b>deletes their river</b>. Carrying it over into the next city
+        ///   is harmless: nothing happens unless the position matches.
         /// </summary>
         private static Vector3 _centre;
 
         /// <summary>
-        /// 各円の中心。<b><see cref="Reset"/> で消してはいけない</b>（<see cref="_centre"/> と同じ理由）。
+        /// The centre of each disc. <b>Must not be cleared in <see cref="Reset"/></b>
+        /// (for the same reason as <see cref="_centre"/>).
         /// </summary>
         private static Vector3[] _centres = new Vector3[MaxSegments];
         private static long _rate;
@@ -335,36 +374,37 @@ namespace DisasterPlus.Game
         private static volatile uint _lastFrame;
         private static volatile bool _running;
 
-        /// <summary>いま津波を出しているか。</summary>
+        /// <summary>Whether a tsunami is running right now.</summary>
         public static bool Running { get { return _running; } }
 
-        /// <summary>直近の理由（パネルと診断に出す）。</summary>
+        /// <summary>The most recent reason (shown on the panel and in diagnostics).</summary>
         public static string Detail { get; private set; }
 
         /// <summary>
-        /// <b>断った理由の種類。</b>プレイヤーに出す 1 行を選ぶために要る。
+        /// <b>The kind of refusal.</b> Needed to choose the one line shown to the player.
         ///
-        /// ★★ <see cref="Detail"/> は英語の 1 文なので、そのまま画面には出せない。
-        ///   長らくパネルは<b>どの理由でも「内陸マップです」</b>と言っていた ——
-        ///   沖の深海で断られた人を正反対の方向へ送る、最悪の 1 行だった
-        ///   （2026-08-31、相互検証）。
+        /// ★★ <see cref="Detail"/> is a sentence of English, so it cannot go on screen as
+        ///   it is. For a long time the panel said <b>"this is an inland map" whatever the
+        ///   reason</b> — the worst possible line, sending someone refused out in deep
+        ///   water in exactly the wrong direction (2026-08-31, cross-verified).
         /// </summary>
         public enum Refusal
         {
             None = 0,
-            NotSea,       // 震源が海ではない（内陸マップでは正常）
-            NotEnoughRoom,// 海が狭すぎて円が入らない
-            Busy,         // 前の津波がまだ走っている
-            NoRoomInGame, // ゲームが水源の枠をくれなかった
-            TooWeak,      // 地震が弱すぎて、立てても見えない
+            NotSea,       // the epicentre is not at sea (normal on an inland map)
+            NotEnoughRoom,// the sea is too narrow for the disc to fit
+            Busy,         // the previous tsunami is still running
+            NoRoomInGame, // the game would not give us a water-source slot
+            TooWeak,      // the quake is too weak for the wave to be visible
         }
 
         /// <summary>
-        /// <see cref="Begin"/> を呼ぶ前に断ったときに、その理由を記録する。
+        /// Record why we refused, when the refusal happened before <see cref="Begin"/> was
+        /// ever called.
         ///
-        /// ★★ これが無いと、<c>TsunamiChain</c> が震度で断ったときに
-        ///   <see cref="LastRefusal"/> が <c>None</c> のままになり、パネルが
-        ///   <b>「内陸マップです」</b>と言う（2026-08-31、第 5 回検証）。
+        /// ★★ Without this, a refusal by <c>TsunamiChain</c> on the intensity leaves
+        ///   <see cref="LastRefusal"/> at <c>None</c> and the panel says
+        ///   <b>"this is an inland map"</b> (2026-08-31, fifth review).
         /// </summary>
         public static void NoteRefusal(Refusal reason, string detail)
         {
@@ -372,30 +412,35 @@ namespace DisasterPlus.Game
             Detail = detail;
         }
 
-        /// <summary>直近の断りの種類。</summary>
+        /// <summary>The kind of the most recent refusal.</summary>
         public static Refusal LastRefusal { get; private set; }
 
-        /// <summary>いまの目標水位の平常からのずれ（m）。診断用。</summary>
+        /// <summary>
+        /// How far the current target level sits from the resting level (m). For diagnostics.
+        /// </summary>
         public static float OffsetMetres { get; private set; }
 
-        /// <summary>震源の水深（m）。</summary>
+        /// <summary>Depth of the water at the epicentre (m).</summary>
         public static float DepthMetres { get { return _depthUnits / 64f; } }
 
-        /// <summary>これまでに見た最高の押し波（m、目標水位ベース）。</summary>
+        /// <summary>
+        /// The highest crest seen so far (m, measured on the target level).
+        /// </summary>
         public static float PeakRiseMetres { get; private set; }
 
-        /// <summary>波形の何ステップ目か。</summary>
+        /// <summary>Which step of the waveform we are on.</summary>
         public static int ElapsedSteps
         {
             get { return _ticks / TsunamiRingShape.TicksPerWaterStep; }
         }
 
-        /// <summary>波形の長さ（水ステップ）。</summary>
+        /// <summary>Length of the waveform (water steps).</summary>
         public static int TotalSteps { get { return DurationSteps; } }
 
         /// <summary>
-        /// 都市を出るとき／機能を切るときに呼ぶ。**冪等。例外を投げない。**
-        /// ★★ ここを通らないと水源がセーブに残る（クラス doc §3）。
+        /// Call when leaving the city or switching the feature off. **Idempotent. Never
+        /// throws.**
+        /// ★★ Miss this and the water source is left in the save (class doc, §3).
         /// </summary>
         public static void Reset()
         {
@@ -403,29 +448,32 @@ namespace DisasterPlus.Game
             {
                 ReleaseLocked();
 
-                // ★★ 握っていた番号が何かの理由で外れていても、**自分の指紋の
-                //    水源は必ず消す**。ここを抜けると MOD を外しても消えない
-                //    湧き水がその都市に残る（クラス doc §3）。
+                // ★★ Even if the index we held has come loose for some reason,
+                //    **always delete any source carrying our fingerprint**. Skip this and
+                //    the city is left with a spring that survives removing the mod
+                //    (class doc, §3).
                 SweepOursLocked();
 
                 _running = false;
                 _ticks = 0;
                 _lastFrame = 0u;
-                // ★ 断りの理由を都市をまたいで持ち越さない（第 5 回検証）。
+                // ★ Do not carry a refusal reason over into the next city (fifth review).
                 LastRefusal = Refusal.None;
                 Detail = null;
                 _deltaUnits = 0;
                 _rate = 0L;
                 OffsetMetres = 0f;
                 PeakRiseMetres = 0f;
-                // ★ _centre は消さない（そのフィールドの doc）。
+                // ★ _centre is not cleared (see that field's doc).
             }
         }
 
         /// <summary>
-        /// 津波を立てる。**sim スレッドから呼ぶこと。**
+        /// Raise a tsunami. **Call from the sim thread.**
         /// </summary>
-        /// <returns>立てられたか。false のとき <see cref="Detail"/> に理由が入る。</returns>
+        /// <returns>
+        /// Whether it was raised. On false, <see cref="Detail"/> holds the reason.
+        /// </returns>
         public static bool Begin(Vec3 epicentre, byte intensity, uint frame)
         {
             Detail = null;
@@ -459,12 +507,12 @@ namespace DisasterPlus.Game
             _seaUnits = (int)(terrain.WaterSimulation.m_currentSeaLevel * 64f);
             _depthUnits = (int)(depth * 64f);
             _centre = new Vector3(epicentre.X, 0f, epicentre.Z);
-            // ★★ **円は海の広さに合わせる。**（2026-08-31、第 2 回検証）
-            //    吐き出しは<b>目標より低い陸のセルにも水を置く</b>
-            //    （IL_1E51: 飛ばすのは <c>terrain &gt;= target</c> のセルだけ）。
-            //    だから円が岸に掛かっていると、波が来るのではなく
-            //    <b>低い土地が円の形にいきなり満たされる</b>。
-            //    しかも取り込みの円は 160 m しかないので、<b>戻せない</b>。
+            // ★★ **Fit the disc to how much sea there is.** (2026-08-31, second review)
+            //    The output path <b>puts water on land cells too, wherever they sit below
+            //    the target</b> (IL_1E51: the only cells skipped are those with
+            //    <c>terrain &gt;= target</c>). So if the disc overlaps the shore, no wave
+            //    arrives — <b>the low ground simply fills, in the shape of the disc</b>.
+            //    And since the take disc is only 160 m, it <b>cannot be undone</b>.
             float toLandX, toLandZ;
             float radius = OpenWaterRadius(terrain, epicentre.X, epicentre.Z,
                                            out toLandX, out toLandZ);
@@ -484,50 +532,57 @@ namespace DisasterPlus.Game
             _drainRate = TsunamiRingShape.RateForRadiusMetres(DrainRadiusMetres);
             _deltaUnits = TsunamiRingShape.VanillaDeltaUnits(intensity);
 
-            // ★ 蓋は震度で決まる。255 で 40 m。**これより上げても弱くなる**ので、
-            //   強い地震ほど高い塔、にはしない（MaxRiseMetres の doc）。
-            // ★★ **255 で割ってはいけなかった。**（2026-08-31、第 4 回検証）
-            //    タイルが送る既定値はバニラのスライダーの既定 55 である。
-            //    255 で割ると蓋は 8.6 m にしかならず、クラス doc の表
-            //    （蓋 40 m / 20 m で測った値）とはまるで別の波になる ——
-            //    <b>既定のまま遊ぶ人が「弱い」と言うのは当たり前だった。</b>
+            // ★ The cap follows the intensity: 40 m at 255. **Raising it beyond that
+            //   made the wave weaker**, so a stronger quake does not mean a taller tower
+            //   (see the doc on MaxRiseMetres).
+            // ★★ **Dividing by 255 was wrong.** (2026-08-31, fourth review)
+            //    The default the tile sends is vanilla's own slider default of 55.
+            //    Divide by 255 and the cap comes to just 8.6 m, which is a completely
+            //    different wave from the one in the class doc's table (measured at caps of
+            //    40 m and 20 m) — <b>of course anyone playing on the default called it
+            //    weak.</b>
             //
-            //    バニラのスライダーの上限は 100 なので、**100 で飽和**させる。
-            //    既定 55 → 71 m、上限 100 → 130 m。
+            //    Vanilla's slider tops out at 100, so **saturate at 100**:
+            //    the default 55 gives 71 m, the maximum 100 gives 130 m.
             //
-            // ★ 100 を超えても蓋は上げない。130 m から先は伸びが頭打ちになり、
-            //   海底の露出だけが増えるからである（MaxRiseMetres の ★★ の表）。
-            //   解禁した強度は地震の揺れと被害のほうに効く。
+            // ★ Going above 100 does not raise the cap any further. Past 130 m the reach
+            //   levels off and only the bare seabed grows (see the ★★ table on
+            //   MaxRiseMetres). The unlocked intensity goes into the shaking and the
+            //   damage instead.
             int forCap = intensity > 100 ? 100 : intensity;
             _riseCapUnits = (int)(MaxRiseMetres * 64f * forCap / 100f);
 
-            // ★ 弱い地震でも波形が消えないように下限を置く。**水深の蓋より先に**置く
-            //   —— あとに置くと、水深 2 m 未満のとき下限が蓋を打ち消して
-            //   浅い海に大きな押し波が戻ってくる（2026-08-31、Codex の指摘）。
+            // ★ A floor, so the waveform does not vanish for a weak quake. It goes
+            //   **before** the depth cap — put it after and, in under 2 m of water, the
+            //   floor cancels the cap and a large crest comes back into shallow water
+            //   (2026-08-31, caught by Codex).
             if (_riseCapUnits < 64) _riseCapUnits = 64;
 
-            // ★★ 浅い海では水深で縛る（MaxRiseFraction の doc）。**ここが最後**。
+            // ★★ In shallow water the depth binds it (see the doc on MaxRiseFraction).
+            //    **This must come last.**
             int byDepth = (int)(_depthUnits * MaxRiseFraction);
             if (byDepth < 0) byDepth = 0;
             if (_riseCapUnits > byDepth) _riseCapUnits = byDepth;
 
-            // ★ 引きは水深に縛る。押しの蓋より深くは引かない。
+            // ★ The drawback is bound by the depth, and never draws deeper than the
+            //   crest cap.
             _drawCapUnits = (int)(_depthUnits * MaxDrawFraction);
             if (_drawCapUnits > _riseCapUnits) _drawCapUnits = _riseCapUnits;
             if (_drawCapUnits < 0) _drawCapUnits = 0;
 
-            // ★★ **溢れない流量に切り下げる。**（DrainRadiusMetres の doc）
-            //    1 セルの超過が最悪どこまで行くかを見積もり、
-            //    `share * take` が int32 に収まる流量までしか出さない。
-            //    見積もりは実測（蓋 40 m のとき最悪 102 m）に 3 倍の余裕を見た値。
-            // ★★ ゲームが int32 で持つのは <c>share*take + total - 1</c> である。
+            // ★★ **Round the rate down to one that cannot overflow.** (see the doc on
+            //    DrainRadiusMetres) Estimate the worst excess a single cell can reach, and
+            //    never emit a rate beyond the point where `share * take` still fits in an
+            //    int32. The estimate is the measured worst case (102 m at a 40 m cap) with
+            //    three times the headroom.
+            // ★★ What the game holds in an int32 is <c>share*take + total - 1</c>.
             //
-            // ★ **4 で割るのはやりすぎだった。**（2026-08-31、第 3 回検証）
-            //   <c>total</c> は掛け算の相手ではなく<b>足し算の相手</b>なので、
-            //   要る余裕は掛け算ではなく引き算である。<c>total</c> の上限は
-            //   「取り込み円のセル数 × 65535」——半径 160 m なら 314 セルで
-            //   およそ 2.1e7、int の 1% に過ぎない。4 で割ると円が 85 m まで縮み、
-            //   <b>実測で保証した 160 m から外れてしまう</b>。
+            // ★ **Dividing by 4 was overkill.** (2026-08-31, third review)
+            //   <c>total</c> is not a factor in the product, it is <b>an addend</b>, so the
+            //   headroom needed is a subtraction, not a division. <c>total</c> tops out at
+            //   "cells in the take disc × 65535" — at a 160 m radius that is 314 cells,
+            //   roughly 2.1e7, just 1% of an int. Dividing by 4 shrinks the disc to 85 m
+            //   and <b>leaves the 160 m that the measurements actually vouch for</b>.
             long worstShare = 3L * (_riseCapUnits + _drawCapUnits);
             if (worstShare > 0L)
             {
@@ -541,15 +596,16 @@ namespace DisasterPlus.Game
             OffsetMetres = 0f;
             PeakRiseMetres = 0f;
 
-            // ★★ **断層を組み立てる。**（<see cref="_sources"/> の ★★）
-            //    向きは「いちばん近い陸への方向に直交」——
-            //    波面が海岸と平行になり、海岸へ向かって来る。海溝と同じ形である。
-            //    区画数は震度で決まる（弱い地震は点、強い地震は 5 区画）。
+            // ★★ **Lay out the fault.** (see the ★★ on <see cref="_sources"/>)
+            //    Its bearing is perpendicular to the direction of the nearest land, so the
+            //    wave front runs parallel to the coast and comes in towards it — the same
+            //    shape as a real trench. The number of segments follows the intensity
+            //    (a weak quake is a point, a strong one gets 5 segments).
             int wanted = 1 + (int)(MaxSegments - 1) * (intensity > 100 ? 100 : intensity) / 100;
             if (wanted < 1) wanted = 1;
             if (wanted > MaxSegments) wanted = MaxSegments;
 
-            float alongX = -toLandZ;   // 陸への向きに直交（90 度回す）
+            float alongX = -toLandZ;   // perpendicular to the direction of land (turn 90 degrees)
             float alongZ = toLandX;
             float alongLen = Mathf.Sqrt(alongX * alongX + alongZ * alongZ);
             if (alongLen < 0.001f) { alongX = 0f; alongZ = 1f; }
@@ -563,13 +619,13 @@ namespace DisasterPlus.Game
                 float px = epicentre.X + alongX * offset;
                 float pz = epicentre.Z + alongZ * offset;
 
-                // ★★ **区画は全部確かめる。**（2026-09-02、Codex の指摘）
-                //    `k != 0` を免除していたが、区画が 2 つ以上あるとき
-                //    <b>k == 0 は震源ではなく断層の端</b>である。震源で通した検査を
-                //    端に流用すると、陸やマップ縁に円を置いてしまう ——
-                //    まさにこの検査が防ぐはずの場所である。
-                //    入らない区画は落とすだけで、津波そのものは中止しない
-                //    （断層は端で細くなるものである）。
+                // ★★ **Check every segment.** (2026-09-02, caught by Codex)
+                //    `k != 0` used to be exempt, but once there are two or more segments
+                //    <b>k == 0 is the end of the fault, not the epicentre</b>. Reusing the
+                //    check that passed at the epicentre for an end puts a disc on land or
+                //    at the map edge — precisely what this check exists to prevent.
+                //    A segment that does not fit is simply dropped; the tsunami itself is
+                //    not abandoned (a fault does taper at its ends).
                 if (OpenWaterRadius(terrain, px, pz) < radius) continue;
 
                 Vector3 at = new Vector3(px, 0f, pz);
@@ -588,7 +644,8 @@ namespace DisasterPlus.Game
                 ushort handle;
                 if (!terrain.WaterSimulation.CreateWaterSource(out handle, src) || handle == 0)
                 {
-                    // ★ 1 個も置けなければ失敗。途中まで置けたなら、それで進む。
+                    // ★ Failing to place any at all is a failure. Having placed some,
+                    //   carry on with those.
                     break;
                 }
 
@@ -597,8 +654,9 @@ namespace DisasterPlus.Game
                 _segmentCount++;
             }
 
-            // ★★ 端が全部落ちても、**震源そのものは上で検査済み**なので
-            //    そこに 1 本だけ置いて成立させる（点の波源に退化する）。
+            // ★★ Even if every end was dropped, **the epicentre itself passed the check
+            //    above**, so place a single source there and let it stand (degrading to a
+            //    point source).
             if (_segmentCount == 0)
             {
                 WaterSource only = new WaterSource();
@@ -626,7 +684,8 @@ namespace DisasterPlus.Game
 
             _running = true;
 
-            // ★ バニラの津波と同じ物差しで自分の波も測る（SeaWatch のクラス doc）。
+            // ★ Measure our own wave with the same ruler as the vanilla tsunami
+            //   (see the SeaWatch class doc).
             SeaWatch.Arm("Disaster+ concentric tsunami from the epicentre", frame);
 
             Log.Info("tsunami rising at (" + epicentre.X.ToString("F0") + ","
@@ -658,26 +717,28 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>**sim スレッド。** 毎 tick 呼んでよい（自分で間引く）。</summary>
+        /// <summary>
+        /// **Sim thread.** Safe to call every tick (it throttles itself).
+        /// </summary>
         public static void Tick(uint frame)
         {
             if (!_running) return;
             if (frame - _lastFrame < FramesPerWaterStep) return;
             _lastFrame = frame;
 
-            // ★ 保存の最中は水源を外してある。戻るまで時計も止める ——
-            //   進めてしまうと、戻ってきたときに波形が飛ぶ。
+            // ★ During a save the sources are lifted. Stop the clock too until they are
+            //   back — let it run on and the waveform jumps when they return.
             if (_segmentCount == 0) return;
 
             _ticks += TsunamiRingShape.TicksPerWaterStep;
 
-            // ★★ **DurationTicks は既にティックである。**（2026-08-31、第 2 回検証）
-            //    ここで 64 を掛け直していたせいで、打ち切りが 3,145,728 ティック
-            //    ＝ 49,152 水ステップ ＝ <b>14.5 実時間</b>になっていた。
-            //    波形自体は 768 歩で 0 に戻るので<b>見た目には終わって見え</b>、
-            //    そのあいだ水源だけが生き続けて半径 3.8 km の海を
-            //    海面ちょうどに固定し続ける（次の波を平らに均してしまう）。
-            //    <b>例外的な解放経路ばかり固めて、正常な経路を壊していた。</b>
+            // ★★ **DurationTicks is already in ticks.** (2026-08-31, second review)
+            //    Multiplying by 64 again here made the cut-off 3,145,728 ticks
+            //    = 49,152 water steps = <b>14.5 real hours</b>. The waveform itself
+            //    returns to 0 after 768 steps, so <b>it looked finished</b> while the
+            //    water source alone lived on, holding 3.8 km of sea pinned exactly at sea
+            //    level (flattening the next wave). <b>Every exceptional release path had
+            //    been hardened while the normal one was broken.</b>
             if (_ticks >= DurationTicks)
             {
                 lock (_gate)
@@ -698,7 +759,8 @@ namespace DisasterPlus.Game
             int offset = TsunamiRingShape.LevelOffsetUnits(
                 _ticks, _deltaUnits, DurationTicks);
 
-            // ★ 押しは絶対値で、引きは水深で縛る（それぞれの定数の doc）。
+            // ★ The crest is bound in absolute terms and the drawback by the depth
+            //   (see the docs on each constant).
             if (offset > _riseCapUnits) offset = _riseCapUnits;
             if (offset < -_drawCapUnits) offset = -_drawCapUnits;
 
@@ -710,12 +772,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 円をいまの目標水位へ押し引きする。**ロックを取るのはここだけ。**
+        /// Push and pull the discs towards the current target level. **The only place that
+        /// takes the lock.**
         ///
-        /// ★★ 押しと引きを<b>両方いつも入れる</b>。片方ずつにすると、寄せ集まった水を
-        ///   抜く力が無く、震源が目標の 2〜3 倍に盛り上がる（オフライン実測 2026-08-31:
-        ///   目標 +102 m に対して実測 +330 m）。両方入れると円は目標水位に張り付き、
-        ///   DLC が外周セルにやっている Dirichlet 境界とまったく同じ振る舞いになる。
+        /// ★★ <b>Always set both the push and the pull.</b> With only one of them there is
+        ///   no force to draw off the water that piles up, and the epicentre heaps to two
+        ///   or three times the target (measured offline 2026-08-31: a target of +102 m
+        ///   measured +330 m). With both, the disc sticks to the target level and behaves
+        ///   exactly like the Dirichlet boundary the DLC applies to the rim cells.
         /// </summary>
         private static void Drive(int target)
         {
@@ -728,19 +792,21 @@ namespace DisasterPlus.Game
 
                 WaterSimulation sim = terrain.WaterSimulation;
 
-                // ★★ **番号は一度だけ読んで、以後はその控えを使う。**
-                //    ロックの前後で読み直すと、あいだに 0 になった場合に
-                //    <c>LockWaterSource(0)</c> が <b>Monitor を取ったあとで</b>
-                //    IndexOutOfRange を投げ、<c>Monitor.Exit</c> に到達しない ——
-                //    水スレッドが永久に止まる（2026-08-31 の相互検証で指摘）。
-                // ★★ 線のどれか 1 本でも自分のものでなくなったら、全部畳む。
-                //    部分的に生きた水源を残すと、解放経路が届かなくなる。
+                // ★★ **Read the index once and use that copy from then on.**
+                //    Re-read it either side of the lock and, if it became 0 in between,
+                //    <c>LockWaterSource(0)</c> throws IndexOutOfRange <b>after taking the
+                //    Monitor</b> and never reaches <c>Monitor.Exit</c> — the water thread
+                //    stops for good (raised in the 2026-08-31 cross-review).
+                // ★★ If even one source in the line stops being ours, fold them all up.
+                //    Leaving some still live puts them beyond the reach of every release
+                //    path.
                 for (int k = 0; k < _segmentCount; k++)
                 {
                     if (OwnsSource(sim, _sources[k], _centres[k])) continue;
 
-                    // ★ 枠が自分のものでなくなった。**番号を捨てるだけにしない** ——
-                    //   捨てると以後どの解放経路も届かず、湧き水が残る。
+                    // ★ The slot is no longer ours. **Do not simply drop the index** —
+                    //   drop it and no release path can ever reach it again, leaving a
+                    //   spring behind.
                     ReleaseLocked();
                     SweepOursLocked();
                     _running = false;
@@ -753,19 +819,21 @@ namespace DisasterPlus.Game
                 ushort handle = _sources[k];
                 bool foreign = false;
 
-                // ★ LockWaterSource は Monitor を取ったまま返る。
-                //   UnlockWaterSource が唯一の解放経路なので必ず finally に置く。
+                // ★ LockWaterSource returns while still holding the Monitor.
+                //   UnlockWaterSource is the only way to release it, so it must sit in a
+                //   finally.
                 WaterSource src = sim.LockWaterSource(handle);
 
                 try
                 {
-                    // ★★ 錠の中でもう一度確かめる。OwnsSource は錠の外の読みなので、
-                    //    そこから先で枠が入れ替わっている余地がある。
-                    // ★★ **型だけでは足りない。**（2026-08-31、第 2 回検証）
-                    //    錠の外の <c>OwnsSource</c> は型と位置の両方を見ているのに、
-                    //    錠の中の確認が型だけだと<b>弱いほうが最後に立つ</b>。
-                    //    枠が別の TYPE_NATURAL に入れ替わっていたら、
-                    //    他人の川に自分の目標水位と 3.8 km ぶんの流量を書いてしまう。
+                    // ★★ Check again inside the lock. OwnsSource reads outside it, so
+                    //    the slot could have been swapped between then and now.
+                    // ★★ **The type alone is not enough.** (2026-08-31, second review)
+                    //    <c>OwnsSource</c> outside the lock checks both the type and the
+                    //    position, so if the check inside only looks at the type,
+                    //    <b>the weaker of the two is the one that stands</b>. Were the slot
+                    //    swapped for another TYPE_NATURAL, we would write our target level
+                    //    and 3.8 km worth of flow into somebody else's river.
                     if (src.m_type != TypeNatural
                         || src.m_inputPosition != _centres[k]
                         || src.m_outputPosition != _centres[k])
@@ -776,8 +844,9 @@ namespace DisasterPlus.Game
                     {
                         src.m_target = (ushort)target;
 
-                        // ★★ 引きと押しで流量が違う。**同じにしてはいけない**
-                        //    （DrainRadiusMetres の doc: 実機の int32 が壊れる）。
+                        // ★★ The take and the output use different rates. **They must
+                        //    not be made equal** (see the doc on DrainRadiusMetres: the
+                        //    game's int32 gets corrupted).
                         src.m_inputRate = (uint)_drainRate;
                         src.m_outputRate = (uint)_rate;
                     }
@@ -799,41 +868,49 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>16 m セルの数。<c>BlockHeights</c> の添字は <c>z*(1080+1)+x</c>。</summary>
+        /// <summary>
+        /// The number of 16 m cells. <c>BlockHeights</c> is indexed as <c>z*(1080+1)+x</c>.
+        /// </summary>
         private const int GridCells = 1080;
 
-        /// <summary>円の中で「海」と認める最小の水深（m）。</summary>
+        /// <summary>
+        /// The least depth that counts as "sea" inside the disc (m).
+        /// </summary>
         private const float MinSourceDepthMetres = 2f;
 
         /// <summary>
-        /// この半径すら取れないなら津波は立てない（m）。
-        /// これより狭い水域で 3.8 km の円を名乗っても意味が無い。
+        /// Below this radius no tsunami is raised at all (m). Claiming a 3.8 km disc in a
+        /// body of water narrower than this means nothing.
         /// </summary>
         private const float MinUsefulRadiusMetres = 320f;
 
         /// <summary>
-        /// 震源から<b>陸に当たらずに広げられる半径</b>（m）。0 なら立てられない。
+        /// <b>How far the disc can be opened out from the epicentre without hitting
+        /// land</b> (m). 0 means no tsunami can be raised.
         ///
-        /// ★★ 吐き出しの円は<b>陸にも水を置く</b>（<see cref="Begin"/> の ★★）。
-        ///   だから <see cref="RadiusMetres"/> をそのまま使わず、
-        ///   <b>実際の海の広さまで縮める</b>。狭い湾では弱い津波になるが、
-        ///   それは<b>正しい</b> —— 湾の奥で外洋規模の波は立たない。
+        /// ★★ The output disc <b>puts water on land too</b> (see the ★★ in
+        ///   <see cref="Begin"/>). So rather than use <see cref="RadiusMetres"/> as it
+        ///   stands, <b>shrink it to however much sea there really is</b>. A narrow bay
+        ///   gets a weak tsunami, and that is <b>right</b> — no open-ocean wave rises at
+        ///   the head of a bay.
         ///
-        /// ★★ **光線を放つ実装は捨てた。**（2026-08-31、第 3 回検証）
-        ///   16 方位・160 m 刻みでは、3,840 m のところで隣の光線と 1,508 m 離れる。
-        ///   そのあいだに在る島も岬も防波堤も<b>見えない</b>し、
-        ///   160 m より細い砂州は<b>またいで通り過ぎる</b>。
-        ///   どちらも「安全」と答えて陸を水浸しにする。
-        ///   さらに、最初の 1 点が陸だったときに 0 を下限で 160 m へ押し戻していた ——
-        ///   <b>陸が 160 m 以内にあると証明した場合にちょうど 160 m を返していた。</b>
+        /// ★★ **The ray-casting implementation was thrown away.** (2026-08-31, third
+        ///   review) With 16 bearings stepped every 160 m, neighbouring rays are 1,508 m
+        ///   apart by the time they reach 3,840 m. Any island, headland or breakwater in
+        ///   between is <b>invisible</b>, and a sandbar thinner than 160 m is
+        ///   <b>stepped straight over</b>. Either one answers "safe" and floods the land.
+        ///   Worse, when the very first sample was on land, the floor pushed 0 back up to
+        ///   160 m — <b>it returned exactly 160 m in the case where it had just proved
+        ///   land was within 160 m.</b>
         ///
-        ///   いまは<b>格子をそのまま舐める</b>。<c>BlockHeights</c> は生の配列で
-        ///   錠を取らないので、241×241 を 2 セルおきに見ても 1 万数千回の配列読みで済む
-        ///   （置くときに 1 度だけ）。取りこぼすのは 32 m 未満の構造物だけである。
+        ///   It now <b>sweeps the grid directly</b>. <c>BlockHeights</c> is a raw array and
+        ///   takes no lock, so looking at 241×241 every other cell is only some fifteen
+        ///   thousand array reads (once, when placing). The only things missed are
+        ///   structures under 32 m across.
         ///
-        /// ★ <c>DepthAt</c> は使わない。あれは水面が地形より 0.125 m 高ければ
-        ///   「海」と答えるので、干潟や側溝を素通りする。ここでは
-        ///   <see cref="MinSourceDepthMetres"/> を要求する。
+        /// ★ <c>DepthAt</c> is not used. That answers "sea" whenever the surface is
+        ///   0.125 m above the terrain, so it walks straight through tidal flats and
+        ///   ditches. Here <see cref="MinSourceDepthMetres"/> is required instead.
         /// </summary>
         public static float OpenWaterRadius(TerrainManager terrain, float x, float z)
         {
@@ -842,9 +919,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 同上。<paramref name="toLandX"/>/<paramref name="toLandZ"/> に
-        /// <b>いちばん近い陸への向き</b>（正規化しない）を返す。
-        /// 断層はこれに直交させる（<see cref="_sources"/> の ★★）。
+        /// As above, and returns <b>the direction of the nearest land</b> (not normalised)
+        /// in <paramref name="toLandX"/> / <paramref name="toLandZ"/>. The fault is laid
+        /// perpendicular to it (see the ★★ on <see cref="_sources"/>).
         /// </summary>
         public static float OpenWaterRadius(TerrainManager terrain, float x, float z,
                                             out float toLandX, out float toLandZ)
@@ -859,10 +936,10 @@ namespace DisasterPlus.Game
             int seaUnits = (int)(terrain.WaterSimulation.m_currentSeaLevel * 64f);
             int minDepthUnits = (int)(MinSourceDepthMetres * 64f);
 
-            // ★★ **水柱そのものを見る**（<c>TrenchQuakeSlot.NearestSea</c> の ★★）。
-            //    地面の高さだけでは、海面より低いまま乾いている土地
-            //    （干拓地・クレーター）を「海」と読んでしまう。
-            //    <c>BeginRead</c> は円盤 1 枚につき 1 回だけ取る。
+            // ★★ **Look at the water column itself** (see the ★★ on
+            //    <c>TrenchQuakeSlot.NearestSea</c>). Going by ground height alone reads
+            //    dry land that happens to sit below sea level — reclaimed land, craters —
+            //    as "sea". <c>BeginRead</c> is taken once per disc, no more.
             WaterSimulation.Cell[] cells = terrain.WaterSimulation.BeginRead();
 
             try
@@ -872,7 +949,7 @@ namespace DisasterPlus.Game
             int cx = CellOf(x);
             int cz = CellOf(z);
             int reach = (int)(RadiusMetres / 16f);
-            int best = reach * reach;   // セル単位の二乗距離で持つ（平方根を避ける）
+            int best = reach * reach;   // kept as a squared distance in cells (avoids a square root)
 
             for (int dz = -reach; dz <= reach; dz += 2)
             {
@@ -882,14 +959,14 @@ namespace DisasterPlus.Game
                 for (int dx = -reach; dx <= reach; dx += 2)
                 {
                     int square = dx * dx + dz * dz;
-                    if (square >= best) continue;      // 既に見つけた陸より遠い
+                    if (square >= best) continue;      // further than land we already found
 
                     int gx = cx + dx;
 
                     bool land;
                     if (gx < 0 || gx > GridCells || gz < 0 || gz > GridCells)
                     {
-                        land = true;                  // マップの外は陸として扱う
+                        land = true;                  // treat anything off the map as land
                     }
                     else
                     {
@@ -908,10 +985,10 @@ namespace DisasterPlus.Game
 
             float metres = Mathf.Sqrt(best) * 16f;
 
-            // ★ 見つけた陸のセルそのものには掛からないよう、1 セルぶん内側で止める。
+            // ★ Stop one cell short so the disc never covers the land cell we found.
             metres -= 16f;
 
-            // ★ best <= reach^2 なので metres は必ず RadiusMetres 未満。頭打ちは要らない。
+            // ★ best <= reach^2, so metres is always below RadiusMetres. No cap needed.
             return metres < MinUsefulRadiusMetres ? 0f : metres;
             }
             finally
@@ -921,39 +998,44 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <b>そのセルは「外洋」か。</b>この 1 つの式に統一する。
+        /// <b>Is that cell open sea?</b> One single test, used everywhere.
         ///
-        /// <code>水柱 &gt;= 最小水深   かつ   海底 &lt;= 海面 - 最小水深</code>
+        /// <code>column &gt;= minimum depth   AND   seabed &lt;= sea level - minimum depth</code>
         ///
-        /// ★★ **片方だけでは必ずどこかで間違える。**（2026-08-31、第 5・6 回検証）
+        /// ★★ **Either half on its own gets something wrong.** (2026-08-31, fifth and
+        ///   sixth reviews)
         ///
         /// <list type="bullet">
-        /// <item><b>海底だけ</b>見ると、堤防で囲まれた干拓地やクレーターが
-        ///   「海」になる —— 海面より低いまま<b>乾いている</b>のに。
-        ///   そこへ半径 3.8 km の水源を置くと、引きの円は 160 m しかないので
-        ///   <b>戻せない水が永久に残る</b>（セーブを壊す）。</item>
-        /// <item><b>水柱だけ</b>見ると、川・高い湖・<b>前の津波で冠水した街</b>が
-        ///   「海」になる。2 本目の津波が円をその上に広げ、
-        ///   目標より低い陸をいきなり満たす —— 同じ失敗に裏口から入る。</item>
+        /// <item>Look at <b>the seabed alone</b> and diked reclaimed land or a crater reads
+        ///   as "sea" — even though it sits below sea level and is <b>dry</b>. Put a
+        ///   3.8 km source there and, with a take disc of only 160 m,
+        ///   <b>water is left that can never be taken back</b> (it corrupts the save).</item>
+        /// <item>Look at <b>the column alone</b> and rivers, high lakes and <b>a city
+        ///   flooded by the previous tsunami</b> read as "sea". A second tsunami opens its
+        ///   disc over them and fills whatever land lies below the target — the same
+        ///   failure, entered by the back door.</item>
         /// </list>
         ///
-        /// ★ 両方を要求すると、<b>高潮の最中でも海は海のまま</b>である
-        ///   （海底は動かない）。海面からの高さで川を落とす旧実装は、
-        ///   バニラの津波が来ているあいだ<b>外洋を丸ごと「海ではない」と答えて</b>いた。
+        /// ★ Requiring both means <b>the sea is still the sea during a storm surge</b>
+        ///   (the seabed does not move). The old implementation, which rejected rivers by
+        ///   their height above sea level, answered <b>"not sea" for the whole ocean</b>
+        ///   while a vanilla tsunami was running.
         /// </summary>
         internal static bool IsOpenSeaCell(ushort[] block, WaterSimulation.Cell[] cells,
                                            int at, int seaUnits, int minDepthUnits)
         {
             if (at < 0 || at >= block.Length || at >= cells.Length) return false;
 
-            // ★★ 式そのものは Core にある（SeaCell）。
-            //    3 度書き直して 3 度とも別の地形を取り違えたので、
-            //    テストで縛める場所へ出した。
+            // ★★ The test itself lives in Core (SeaCell). It was rewritten three times
+            //    and mistook a different landform each time, so it was moved somewhere
+            //    tests could pin it down.
             return DisasterPlus.Core.Earthquake.SeaCell.IsOpenSea(
                 block[at], cells[at].m_height, seaUnits, minDepthUnits);
         }
 
-        /// <summary>ワールド座標を 16 m セルへ（<c>TsunamiWave.CellOf</c> と同じ式）。</summary>
+        /// <summary>
+        /// World coordinate to a 16 m cell (the same formula as <c>TsunamiWave.CellOf</c>).
+        /// </summary>
         private static int CellOf(float world)
         {
             int c = (int)((world + MapHalfExtent) / 16f + 0.5f);
@@ -961,8 +1043,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// その枠が<b>いまも自分のもの</b>か。<c>CreateWaterSource</c> は
-        /// <c>m_type == 0</c> の枠を使い回すので、番号だけでは足りない（クラス doc §4）。
+        /// Is that slot <b>still ours</b>? <c>CreateWaterSource</c> reuses slots with
+        /// <c>m_type == 0</c>, so the index alone is not enough (class doc, §4).
         /// </summary>
         private static bool OwnsSource(WaterSimulation sim, ushort handle, Vector3 centre)
         {
@@ -977,20 +1059,18 @@ namespace DisasterPlus.Game
             WaterSource s = list.m_buffer[at];
             if (s.m_type != TypeNatural) return false;
 
-            // 位置は自分で書いた値そのものなので、ビット一致で照合できる。
+            // The position is the exact value we wrote, so it can be matched bit for bit.
             return s.m_outputPosition == centre && s.m_inputPosition == centre;
         }
 
         /// <summary>
-        /// 置いた水源を解放する。**冪等。例外を投げない。**
-        /// ここが最後の砦である —— 通らないとセーブに水源が残る。
+        /// Release the water sources we placed. **Idempotent. Never throws.**
+        /// This is the last line of defence — miss it and a source is left in the save.
         /// </summary>
         private static void ReleaseLocked()
         {
-            // ★★ **先に番号を手放す。** こうしておけば、この下で何が起きても
-            //    「まだ持っている」と誤解した別の経路が同じ枠を触らない。
-            // ★★ **先に番号を手放す。** こうしておけば、この下で何が起きても
-            //    「まだ持っている」と誤解した別の経路が同じ枠を触らない。
+            // ★★ **Let go of the indices first.** That way, whatever happens below, no
+            //    other path can mistake them for still-held and touch the same slots.
             ushort[] handles = new ushort[MaxSegments];
             Vector3[] centres = new Vector3[MaxSegments];
             int count = _segmentCount;
@@ -1020,8 +1100,9 @@ namespace DisasterPlus.Game
                     if (handle == 0) continue;
                     if (!OwnsSource(sim, handle, centres[k])) continue;
 
-                    // ★ 解放の前に流量を 0 にする。ReleaseWaterSource は m_type を
-                    //   0 にするだけなので、枠を拾い直した誰かが古い流量を見る余地を消す。
+                    // ★ Zero the rates before releasing. ReleaseWaterSource only sets
+                    //   m_type to 0, so this removes any chance of whoever picks the slot
+                    //   up next seeing the old rates.
                     WaterSource src = sim.LockWaterSource(handle);
                     try
                     {
@@ -1045,18 +1126,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <b>指紋の合う水源をすべて消す。</b>呼び出し側は <c>_gate</c> を握っていること。
+        /// <b>Delete every water source matching our fingerprint.</b> The caller must hold
+        /// <c>_gate</c>.
         ///
-        /// ★★ **番号を失っても取り戻せる唯一の手段である。**（2026-08-31、相互検証）
-        ///   <c>CreateWaterSource</c> が成功したのに握り損ねた、枠を横取りされた、
-        ///   例外で経路が飛んだ —— どの筋でも、置いた水源は
-        ///   <b>両方の位置が震源にビット一致する TYPE_NATURAL</b> という
-        ///   他に例のない形をしている。走査は数十件の配列なのでただ同然。
+        /// ★★ **The only way back if the index is lost.** (2026-08-31, cross-verified)
+        ///   <c>CreateWaterSource</c> succeeded but the index was dropped, the slot was
+        ///   taken from under us, an exception skipped the path — however it happened, a
+        ///   source we placed has a shape nothing else has: <b>a TYPE_NATURAL whose two
+        ///   positions both match the epicentre bit for bit</b>. The scan walks an array of
+        ///   a few dozen entries, so it costs nothing.
         ///
-        /// ★ 震源が <c>Vector3.zero</c> のときは何もしない。まだ何も置いていないか、
-        ///   マップ中央にたまたま在る他人の川を巻き込む恐れがあるからである。
+        /// ★ Does nothing when the epicentre is <c>Vector3.zero</c>: either nothing has
+        ///   been placed yet, or we would risk sweeping up somebody else's river that
+        ///   happens to sit at the centre of the map.
         /// </summary>
-        /// <summary>その位置は自分が置いた円のどれかか（線の全区画を見る）。</summary>
+        /// <summary>
+        /// Is that position one of the discs we placed (checking every segment of the line)?
+        /// </summary>
         private static bool IsOneOfOurs(Vector3 at)
         {
             if (at == _centre) return true;
@@ -1085,17 +1171,18 @@ namespace DisasterPlus.Game
                 FastList<WaterSource> list = sim.m_waterSources;
                 if (list == null || list.m_buffer == null) return;
 
-                // ★★ **走査と解放をひとつの錠の中で行う。**（2026-08-31、第 2 回検証）
-                //    配列を錠の外で読んでから <c>ReleaseWaterSource</c> を呼ぶと、
-                //    そのあいだに枠が動いて番号が古くなる。古い番号を渡すと
-                //    ゲームは<b>Monitor を取ったあとで</b>例外を投げ、
-                //    <c>Monitor.Exit</c> に届かない —— 水スレッドが永久に止まる。
+                // ★★ **Scan and release inside one lock.** (2026-08-31, second review)
+                //    Read the array outside the lock and then call
+                //    <c>ReleaseWaterSource</c>, and a slot can move in between and leave
+                //    the index stale. Hand the game a stale index and it throws
+                //    <b>after taking the Monitor</b> and never reaches
+                //    <c>Monitor.Exit</c> — the water thread stops for good.
                 //
-                // ★ <c>Monitor</c> は同じスレッドに対して再入可能なので、
-                //   ここで取ったまま <c>ReleaseWaterSource</c> を呼んでよい。
-                //   ゲーム自身と同じ相手（<c>m_waterSources</c>）を掴む。
-                // ★ 譲らずに回すと、main スレッドから来たときに
-                //   水スレッドを飢えさせる（第 3 回検証）。
+                // ★ <c>Monitor</c> is re-entrant for the same thread, so it is fine to
+                //   call <c>ReleaseWaterSource</c> while holding it here. We take the same
+                //   object the game itself takes (<c>m_waterSources</c>).
+                // ★ Spinning without yielding starves the water thread when this is
+                //   entered from the main thread (third review).
                 while (!System.Threading.Monitor.TryEnter(list, 0))
                 {
                     System.Threading.Thread.Sleep(0);
@@ -1132,12 +1219,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **保存の直前に呼ぶ。** 水源を外して、戻すべきかどうかを返す。
+        /// **Call immediately before a save.** Lifts the water sources and returns whether
+        /// they should be put back.
         ///
-        /// ★★ <c>WaterSource</c> はセーブに焼き付く。MOD の <c>OnSaveData</c> は
-        ///   バニラの配列書き込みより先に走るので、ここで外せば書かれない。
-        ///   <b>すぐ戻し直してはいけない</b> —— <c>AddAction</c> で遅らせること
-        ///   （<c>DisasterPlusSerialization.RestoreFloodedRiversForSave</c> と同じ理由）。
+        /// ★★ A <c>WaterSource</c> is baked into the save. A mod's <c>OnSaveData</c> runs
+        ///   before vanilla writes its arrays, so lifting them here keeps them out.
+        ///   <b>Do not put them straight back</b> — defer with <c>AddAction</c> (the same
+        ///   reason as <c>DisasterPlusSerialization.RestoreFloodedRiversForSave</c>).
         /// </summary>
         public static bool SuspendForSave()
         {
@@ -1145,14 +1233,15 @@ namespace DisasterPlus.Game
             {
                 if (!_running) return false;
 
-                // ★★ **既に外してあるときも true を返す。**（2026-08-31、第 2 回検証）
-                //    false を返すと呼び出し側は「戻すものは無い」と読み、
-                //    2 回目の保存が始まった窓で<b>戻し忘れる</b>。
-                //    <c>ReapplyAfterSave</c> は <c>_source != 0</c> なら何もしないので、
-                //    余分に予約されても害は無い。
+                // ★★ **Return true even when they are already lifted.**
+                //    (2026-08-31, second review) Return false and the caller reads it as
+                //    "nothing to put back" and <b>forgets to restore</b> in the window
+                //    where a second save has begun. <c>ReapplyAfterSave</c> does nothing
+                //    when <c>_source != 0</c>, so an extra booking is harmless.
                 if (_segmentCount == 0) return true;
 
-                // ★ 戻すときに何区画あったかを覚えておく（ReleaseLocked が 0 にする）。
+                // ★ Remember how many segments there were, for the restore
+                //   (ReleaseLocked sets the count to 0).
                 _suspendedCount = _segmentCount;
 
                 ReleaseLocked();
@@ -1161,7 +1250,9 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>保存が終わってから <c>AddAction</c> 越しに呼ぶ。**sim スレッド。**</summary>
+        /// <summary>
+        /// Call through <c>AddAction</c> once the save has finished. **Sim thread.**
+        /// </summary>
         public static void ReapplyAfterSave()
         {
             lock (_gate)
@@ -1170,10 +1261,10 @@ namespace DisasterPlus.Game
 
                 try
                 {
-                    // ★★ <c>.instance</c> は sInstance が null のとき
-                    //    FindObjectOfType と new GameObject を走らせる。都市を出た
-                    //    あとにこの遅延処理が届くことがあるので、**必ず exists で先に確かめる**
-                    //    （DisasterPlusSerialization のコメントと同じ理由）。
+                    // ★★ <c>.instance</c> runs FindObjectOfType and new GameObject
+                    //    when sInstance is null. This deferred work can arrive after the
+                    //    city has been left, so **always check exists first** (the same
+                    //    reason as the comment in DisasterPlusSerialization).
                     if (!Singleton<TerrainManager>.exists) { _running = false; return; }
 
                     TerrainManager terrain = Singleton<TerrainManager>.instance;
@@ -1183,9 +1274,10 @@ namespace DisasterPlus.Game
                         return;
                     }
 
-                    // ★★ **線の全区画を戻す。**（2026-09-02）1 本だけ戻すと、
-                    //    残りの区画の中心が <c>_centres</c> に残ったまま
-                    //    水源が無い状態になり、掃除の指紋だけが宙に浮く。
+                    // ★★ **Put back every segment of the line.** (2026-09-02) Restore
+                    //    only one and the remaining segments' centres stay in
+                    //    <c>_centres</c> with no water source behind them, leaving the
+                    //    sweep's fingerprints pointing at nothing.
                     int back = 0;
 
                     for (int k = 0; k < _suspendedCount; k++)
@@ -1221,8 +1313,9 @@ namespace DisasterPlus.Game
                 {
                     _running = false;
 
-                    // ★★ 生成が通ってから落ちた場合、番号を受け取れていないので
-                    //    <b>掃除でしか回収できない</b>（SweepOursLocked の doc）。
+                    // ★★ If creation succeeded and then this threw, we never received
+                    //    the index, so <b>only the sweep can recover it</b> (see the doc
+                    //    on SweepOursLocked).
                     SweepOursLocked();
                     Log.Error("tsunami: putting the water source back after saving failed", e);
                 }

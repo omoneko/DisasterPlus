@@ -6,50 +6,55 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>台風の雲の中で光る稲妻。</b>**main スレッド専用**（Unity のオブジェクト）。
+    /// <b>Lightning flashing inside the typhoon's cloud.</b> **Main thread only** (Unity
+    /// objects).
     ///
-    /// ── 所有者の指示（2026-08-25）─────────────────────────────────
+    /// ── The owner's instruction (2026-08-25) ──────────────────────────────
     ///
-    /// &gt; まだ雷の発生場所が台風の雲より上です。いっそのこと「雷雨」にせずに
-    /// &gt; 「雨」だけにして、時々台風の雲の中から稲妻を発生させる方がうまく
-    /// &gt; いくかもしれません
+    /// &gt; The lightning still appears above the typhoon's cloud. It might work better
+    /// &gt; to drop the "thunderstorm" and have just "rain", with lightning occasionally
+    /// &gt; coming out of the typhoon's clouds
     ///
-    /// ── 2 つで 1 つの直しである ───────────────────────────────────
+    /// ── Two halves of one fix ─────────────────────────────────────────────
     ///
     /// <list type="number">
-    /// <item><b>ゲームに雷を落とさせない。</b> <c>TyphoonWeather</c> が雨を
-    ///   <c>MaxRainWithoutLightning</c>（0.8）で止める。バニラが空から雷を落とす
-    ///   条件は <c>m_currentRain &gt; 0.8</c> ただ 1 つである
-    ///   （<c>WeatherManager.SimulationStepImpl</c> IL_09D3 実測）</item>
-    /// <item><b>雲の中に自分で描く。</b> それがこの型である</item>
+    /// <item><b>Do not let the game drop lightning.</b> <c>TyphoonWeather</c> stops the
+    ///   rain at <c>MaxRainWithoutLightning</c> (0.8). The only condition under which
+    ///   vanilla drops lightning out of the sky is <c>m_currentRain &gt; 0.8</c>
+    ///   (measured in <c>WeatherManager.SimulationStepImpl</c> IL_09D3)</item>
+    /// <item><b>Draw it inside the cloud ourselves.</b> That is this type</item>
     /// </list>
     ///
-    /// ── 作りは⑤の噴煙の雷と同じ ─────────────────────────────────
+    /// ── The construction is the same as ⑤'s ash-plume lightning ───────────
     ///
-    /// <c>VolcanoCraterFx</c> で通した道をそのまま使う:
+    /// We reuse the road already travelled in <c>VolcanoCraterFx</c>:
     ///
     /// <list type="bullet">
-    /// <item>シェーダだけ <see cref="ShaderPool"/> から借り、<c>Material</c> は自作する
-    ///   （**借りた <c>Material</c> のインスタンスは絶対に使い回さない**）</item>
-    /// <item>帯は<b>カメラのほうを向ける</b>。固定の向きだと、その向きから見たとき
-    ///   板が真横を向いて消える</item>
-    /// <item>余った頂点は 0 番目へ潰す。<c>(0,0,0)</c> のまま残すと
-    ///   <c>RecalculateBounds</c> が**マップの原点まで境界を伸ばして
-    ///   視錐台カリングを殺す**</item>
+    /// <item>Borrow only the shader from <see cref="ShaderPool"/> and build the
+    ///   <c>Material</c> ourselves (**never reuse a borrowed <c>Material</c>
+    ///   instance**)</item>
+    /// <item>Point the ribbon <b>at the camera</b>. With a fixed orientation the quad
+    ///   turns edge-on and disappears when viewed from that direction</item>
+    /// <item>Collapse leftover vertices onto vertex 0. Leave them at <c>(0,0,0)</c> and
+    ///   <c>RecalculateBounds</c> **stretches the bounds all the way to the map origin and
+    ///   kills frustum culling**</item>
     /// </list>
     ///
-    /// 形だけが違う —— 噴煙は細い柱の中をほぼ真上へ走り、台風は平たい雲の中を
-    /// 横へ走る（雲間放電。<see cref="TyphoonBolt"/> のクラス doc）。
+    /// Only the shape differs — the ash plume runs almost straight up inside a narrow
+    /// column, while the typhoon runs sideways inside a flat cloud (cloud-to-cloud
+    /// discharge. <see cref="TyphoonBolt"/>'s class doc).
     /// </summary>
     public static class TyphoonBoltFx
     {
-        /// <summary>雷の帯の幅（m）。細すぎると遠景で消える。</summary>
+        /// <summary>The width of the lightning ribbon (m). Too thin and it disappears at a
+        /// distance.</summary>
         private const float BoltWidthMetres = 26f;
 
-        /// <summary>描画レイヤー。⑤の火口と同じ。</summary>
+        /// <summary>The render layer. The same as ⑤'s crater.</summary>
         private const int BoltLayer = 0;
 
-        /// <summary>シェーダが引けなかったときに、次に試すまで待つフレーム数。</summary>
+        /// <summary>How many frames to wait before trying again when the shader could not
+        /// be resolved.</summary>
         private const int ShaderRetryFrames = 300;
 
         private static Mesh _mesh;
@@ -69,18 +74,20 @@ namespace DisasterPlus.Game
         private static readonly TyphoonBoltPoint[] _path =
             new TyphoonBoltPoint[TyphoonBolt.PointCount];
 
-        /// <summary>直近のフレームで描いた稲妻の本数（診断用）。</summary>
+        /// <summary>How many bolts were drawn on the most recent frame
+        /// (diagnostics).</summary>
         public static int BoltsDrawn { get; private set; }
 
-        /// <summary>マテリアルが作れているか（診断用）。作れなければ何も描かない。</summary>
+        /// <summary>Whether the material could be built (diagnostics). If not, nothing is
+        /// drawn.</summary>
         public static bool MaterialResolved { get { return _material != null; } }
 
         /// <summary>
-        /// **main スレッド、毎フレーム。**
-        /// <paramref name="altitudeMetres"/> は雲底の高さ、
-        /// <paramref name="thicknessMetres"/> は雲の厚み
-        /// （<c>TyphoonCloudFx</c> が粒に渡しているのと**同じ値**を渡すこと ——
-        /// ずれると雷が雲の外で光る）。
+        /// **Main thread, every frame.**
+        /// <paramref name="altitudeMetres"/> is the cloud base height and
+        /// <paramref name="thicknessMetres"/> the cloud thickness (pass **the same
+        /// values** <c>TyphoonCloudFx</c> passes to the particles — if they drift apart
+        /// the lightning flashes outside the cloud).
         /// </summary>
         public static void Update(TyphoonSnapshot snapshot, RenderManager.CameraInfo camera,
                                   float radiusMetres, float altitudeMetres,
@@ -115,8 +122,9 @@ namespace DisasterPlus.Game
             if (!(radiusMetres > 0f)) return;
             if (!ModSettings.TyphoonLightning.value) return;
 
-            // ★ 時計は台風が居るあいだだけ進める。**止まっているフレームで進めない**
-            //   （進めると、ポーズ中に稲妻の枠だけが流れる）。
+            // ★ Advance the clock only while a typhoon is about. **Do not advance it on
+            //   frames where things are stopped** (do that and the lightning's timing
+            //   carries on running while the game is paused).
             float dt = Time.deltaTime;
             if (dt > 0f && !SimulationIsPaused()) _clockSeconds += dt;
 
@@ -155,8 +163,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 折れ線 1 本を帯にする。<paramref name="right"/> は**カメラから見た水平の右**で、
-        /// そちらへ広げるので、どの角度から見ても板が真横を向いて消えることが無い。
+        /// Turn one polyline into a ribbon. <paramref name="right"/> is **the horizontal
+        /// right as seen from the camera**, and since we spread towards it, the quad never
+        /// turns edge-on and disappears from any viewing angle.
         /// </summary>
         private static void AppendBolt(ref int v, ref int t, Vec3 centre, float altitude,
                                        int n, float brightness, Vector3 right)
@@ -210,7 +219,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>**レベルアンロードと、台風が終わったときに呼ぶ。** 冪等。</summary>
+        /// <summary>**Call on level unload and when the typhoon ends.** Idempotent.</summary>
         public static void Destroy()
         {
             if (_mesh != null) UnityEngine.Object.Destroy(_mesh);
@@ -226,7 +235,8 @@ namespace DisasterPlus.Game
             _triangles = null;
             _clockSeconds = 0f;
             BoltsDrawn = 0;
-            // _shaderWarned / _errorLogged は戻さない（この環境に対する事実である）。
+            // _shaderWarned / _errorLogged are not reset (they are facts about this
+            // environment).
         }
 
         // ------------------------------------------------------------------
@@ -252,11 +262,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 使った分だけをメッシュへ入れて 1 回描く。
+        /// Put only what we used into the mesh and draw it once.
         ///
-        /// ★★ **余った頂点は 0 番目と同じ位置に潰す。** <c>(0,0,0)</c> のまま残すと
-        ///   <c>RecalculateBounds</c> が**マップの原点まで境界を伸ばして
-        ///   視錐台カリングを殺す**（⑤で踏んだ穴と同じ）。
+        /// ★★ **Collapse leftover vertices onto the same position as vertex 0.** Leave
+        ///   them at <c>(0,0,0)</c> and <c>RecalculateBounds</c> **stretches the bounds all
+        ///   the way to the map origin and kills frustum culling** (the same hole we fell
+        ///   into in ⑤).
         /// </summary>
         private static void UploadAndDraw(int vertexCount, int triangleCount)
         {
@@ -272,8 +283,9 @@ namespace DisasterPlus.Game
                 _mesh.MarkDynamic();
             }
 
-            // ★ 頂点を入れる前に三角形を空にする。順序を逆にすると、前のフレームの
-            //   三角形が新しい（短い）頂点配列を指してその場で例外になる。
+            // ★ Empty the triangles before putting the vertices in. Do it the other way
+            //   round and the previous frame's triangles point into the new (shorter)
+            //   vertex array and throw on the spot.
             _mesh.triangles = null;
             _mesh.vertices = _vertices;
             _mesh.uv = _uvs;
@@ -285,7 +297,8 @@ namespace DisasterPlus.Game
                               null, 0, null, false, false);
         }
 
-        /// <summary>稲妻の色。**白に近い青。**加算合成なのでアルファは明るさに効く。</summary>
+        /// <summary>The lightning colour. **Blue, close to white.** The blend is additive,
+        /// so alpha acts on the brightness.</summary>
         private static Color32 Spark(float k)
         {
             float v = Clamp01(k);
@@ -325,7 +338,7 @@ namespace DisasterPlus.Game
 
             if (pick.StandardFallback) ShaderPool.MakeStandardTransparent(m);
 
-            // ★ 色は頂点カラーで運ぶので、ティントは白のままにする。
+            // ★ The colour travels in the vertex colours, so leave the tint white.
             if (m.HasProperty("_TintColor")) m.SetColor("_TintColor", Color.white);
             if (m.HasProperty("_Color")) m.SetColor("_Color", Color.white);
 
@@ -333,7 +346,8 @@ namespace DisasterPlus.Game
             return m;
         }
 
-        /// <summary>中心が明るく縁が透明な 1 枚（⑤の火口と同じ作り）。</summary>
+        /// <summary>One sheet, bright in the middle and transparent at the edges (the same
+        /// construction as ⑤'s crater).</summary>
         private static Texture2D BuildTexture()
         {
             try

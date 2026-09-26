@@ -1,37 +1,41 @@
 namespace DisasterPlus.Core.Typhoon
 {
     /// <summary>
-    /// ④の台風の**最盛期強度**（<c>peak</c>）の受け入れ範囲。
-    /// <b>Core なのでエンジンには一切触らない。</b>
+    /// The range of **peak intensity** (<c>peak</c>) that ④'s typhoon will accept.
+    /// <b>This is Core, so it touches the engine not at all.</b>
     ///
-    /// ── なぜ 0 を受け取らないのか ──────────────────────────────
+    /// ── Why it will not take 0 ─────────────────────────────────
     ///
-    /// バニラの強度スライダーの生値は <c>[0, 255]</c> で、そのまま
-    /// <c>DisasterData.m_intensity</c> になる（<c>IntensitySlider</c> のクラス doc）。
-    /// つまりプレイヤーはスライダーを 0 まで下げられる。**強度 0 の台風は
-    /// 「起きたが何もしない台風」**であり、災害スロットを 1 個消費して
-    /// 8192 フレーム居座るだけの、どこも壊れていないのに何も起きない状態を作る。
-    /// 押した人から見れば「ボタンが効かなかった」と区別が付かない。
+    /// The raw value of vanilla's intensity slider is <c>[0, 255]</c> and becomes
+    /// <c>DisasterData.m_intensity</c> as it stands (see the class doc on
+    /// <c>IntensitySlider</c>). So the player can drag the slider all the way down to 0.
+    /// **A typhoon of intensity 0 is a typhoon that happens and then does nothing** — it
+    /// burns one disaster slot and squats there for 8192 frames, producing a state where
+    /// nothing is broken and yet nothing happens. From the point of view of whoever
+    /// pressed the button, that is indistinguishable from "the button did not work".
     ///
-    /// そこで<b>下限へ引き上げる</b>。断るのではなく引き上げるのは、
-    /// バニラの災害タイルが同じ操作で必ず何かを起こすからである ——
-    /// ④だけがクリックに無反応で応えると、そちらのほうが説明の付かない挙動になる。
-    /// 引き上げたことは呼び出し側が <see cref="WasRaised"/> で名乗れる。
+    /// So we <b>raise it to the floor</b>. We raise rather than refuse because vanilla's
+    /// disaster tiles always make *something* happen from the same gesture — if ④ alone
+    /// answered a click with no reaction, that would be the more inexplicable behaviour.
+    /// The caller can own up to the raise via <see cref="WasRaised"/>.
     ///
-    /// <see cref="MinPeak"/> を設定画面のスライダーの下限（10）と揃えてあるのは、
-    /// 「設定で選べる最弱」と「タイルで選べる最弱」を同じにするためである。
+    /// <see cref="MinPeak"/> is lined up with the lower bound of the options-screen slider
+    /// (10) so that "the weakest you can pick in the settings" and "the weakest you can
+    /// pick from the tile" are the same thing.
     /// </summary>
     public static class TyphoonIntensity
     {
-        /// <summary>受け付ける最小の最盛期強度。設定画面のスライダー下限と同じ。</summary>
+        /// <summary>The smallest peak intensity accepted. Same as the options slider's
+        /// floor.</summary>
         public const int MinPeak = 10;
 
-        /// <summary>受け付ける最大の最盛期強度（<c>DisasterData.m_intensity</c> は byte）。</summary>
+        /// <summary>The largest peak intensity accepted (<c>DisasterData.m_intensity</c> is a
+        /// byte).</summary>
         public const int MaxPeak = 255;
 
         /// <summary>
-        /// 依頼された生値を、実際に使える最盛期強度へ落とす。
-        /// <c>[<see cref="MinPeak"/>, <see cref="MaxPeak"/>]</c> に収まる。
+        /// Brings the raw requested value down to a peak intensity we can actually use.
+        /// The result lands in <c>[<see cref="MinPeak"/>, <see cref="MaxPeak"/>]</c>.
         /// </summary>
         public static byte PeakOf(int requested)
         {
@@ -40,7 +44,8 @@ namespace DisasterPlus.Core.Typhoon
             return (byte)requested;
         }
 
-        /// <summary>依頼された値が下限に引き上げられたか（診断とログのため）。</summary>
+        /// <summary>Whether the requested value was raised to the floor (for diagnostics and
+        /// logging).</summary>
         public static bool WasRaised(int requested)
         {
             return requested < MinPeak;

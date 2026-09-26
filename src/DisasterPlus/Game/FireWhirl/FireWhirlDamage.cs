@@ -6,40 +6,48 @@ using DisasterPlus.Core.FireWhirl;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 旋風の周囲に火の粉を撒く。sim スレッドからのみ呼ぶこと（建物バッファを書く）。
+    /// Scatters embers around the whirl. Call only from the sim thread (it writes the
+    /// building buffer).
     ///
-    /// 意図的に DisasterHelpers を経由しない。
-    /// 競合MOD（Natural Disasters Renewal）は DisasterHelpers.DestroyBuildings を
-    /// Prefix で完全置換しており、竜巻と判定した呼び出しの破壊確率を半減させ、
-    /// 設定次第では破壊を丸ごと無効化する。しかも竜巻判定に使われる burnRadius は
-    /// VortexAI 内でリテラル 0 に固定されていて外から変えられない（設計書 3.3(b)）。
+    /// It deliberately does not go through DisasterHelpers.
+    /// A competing mod (Natural Disasters Renewal) replaces
+    /// DisasterHelpers.DestroyBuildings outright with a Prefix, halving the destruction
+    /// probability for calls it decides are a tornado and, depending on its settings,
+    /// disabling the destruction altogether. On top of that the burnRadius its tornado
+    /// test uses is pinned to the literal 0 inside VortexAI and cannot be changed from
+    /// outside (design document §3.3(b)).
     ///
-    /// そこで「周囲に火を撒く」という定義的な挙動だけは自前の経路に置き、
-    /// 他 MOD の設定に左右されないようにする。
+    /// So we put the one behaviour that defines this feature — scattering fire around —
+    /// on a path of our own, where another mod's settings cannot affect it.
     /// </summary>
     public static class FireWhirlDamage
     {
         /// <summary>
-        /// 延焼判定を行う間隔（sim フレーム換算）。毎 tick 判定すると重く、燃え広がりも速すぎる。
+        /// How often the spread check runs (expressed in sim frames). Checking every tick
+        /// is expensive, and the fire spreads too fast.
         ///
-        /// フレーム番号の剰余では判定できない。SimulationManager.SimulationStep は
-        /// 1 tick の中で FinalSimulationSpeed 回（ゲーム速度 1/2/3 で 1/3/9 回）ループするので、
-        /// m_currentFrameIndex は tick ごとに 1 ずつではなく 1/3/9 ずつ飛ぶ。
-        /// frameIndex % 16 では速度 2 で 3 倍、速度 3 で 9 倍まばらになり、
-        /// 延焼速度が黙ってゲーム速度に依存してしまう。
-        /// 経過ゲーム内時間を積算して閾値越えで判定する。
+        /// A modulo of the frame number cannot decide this.
+        /// SimulationManager.SimulationStep loops FinalSimulationSpeed times within one
+        /// tick (1/3/9 times at game speed 1/2/3), so m_currentFrameIndex jumps by 1/3/9
+        /// per tick rather than by 1. With frameIndex % 16 the check becomes 3 times
+        /// sparser at speed 2 and 9 times sparser at speed 3, so the spread rate quietly
+        /// ends up depending on the game speed.
+        /// We accumulate elapsed in-game time instead and check when it crosses the
+        /// threshold.
         /// </summary>
         private const int IntervalFrames = 16;
 
         /// <summary>
-        /// 候補に採るフラグ条件。Created が立っていて Collapsed が立っていないこと。
+        /// The flag condition for taking a building as a candidate: Created set and
+        /// Collapsed clear.
         ///
-        /// Collapsed（= BurnedDown、実測 0x400000。同じ値）を弾くのが要点。
-        /// 燃え尽きた瓦礫は Created を持ったまま m_fireIntensity == 0 に戻るので、
-        /// この除外が無いと「まだ燃えていない建物」として選ばれ続け、
-        /// CommonBuildingAI.BurnBuilding に必ず断られる。火災旋風が成功した跡地は
-        /// これで埋まるため、候補数・選定数まで恒常的に水増しされ、
-        /// オーバーレイの数字が読めなくなる。
+        /// The point is to reject Collapsed (= BurnedDown, measured as 0x400000; they are
+        /// the same value). Burnt-out rubble keeps Created and goes back to
+        /// m_fireIntensity == 0, so without this exclusion it keeps being picked as a
+        /// "building not yet on fire" and is always refused by
+        /// CommonBuildingAI.BurnBuilding. The aftermath of a successful fire whirl is
+        /// full of exactly this, so both the candidate and the selected counts would be
+        /// permanently inflated and the numbers on the overlay would become unreadable.
         /// </summary>
         private const Building.Flags CollectMask =
             Building.Flags.Created | Building.Flags.Collapsed;
@@ -47,14 +55,17 @@ namespace DisasterPlus.Game
         private static readonly List<IgnitionCandidate> _candidates = new List<IgnitionCandidate>();
         private static readonly List<ushort> _selected = new List<ushort>();
 
-        /// <summary>前回の延焼判定からの経過（ゲーム内分）。レベルアンロードで必ず 0 に戻す。</summary>
+        /// <summary>In-game minutes since the last spread check. Always reset to 0 on
+        /// level unload.</summary>
         private static float _minutesSinceSpread;
 
-        // --- 診断カウンタ -------------------------------------------------
-        // すべて sim スレッドからのみ読み書きする（Apply も WriteDiagnostics も sim スレッド）。
-        // 「延焼が動いているか」は WriteDiagnostics の enabled/active/scan では一切
-        // 見えなかった。IL 前提の誤り 3 件目（m_fireIntensity 直接書込）が生まれ、
-        // かつ何のログも出さなかったのがこの経路なので、ここだけは数字を出す。
+        // --- Diagnostic counters -------------------------------------------
+        // All of these are read and written only from the sim thread (both Apply and
+        // WriteDiagnostics are on the sim thread).
+        // Whether the spread was working at all was completely invisible in
+        // WriteDiagnostics' enabled/active/scan. This is the path where the third wrong
+        // assumption about the IL was born (writing m_fireIntensity directly) and which
+        // logged nothing at all, so this is the one place we put numbers out.
         private static int _passes;
         private static int _lastCandidates;
         private static int _lastSelected;
@@ -67,44 +78,51 @@ namespace DisasterPlus.Game
         private static bool _barrenAlertPending;
         private static bool _barrenRecoveryPending;
 
-        /// <summary>これまでに走った延焼判定の回数（セッション累計）。</summary>
+        /// <summary>How many spread checks have run so far (session total).</summary>
         public static int Passes { get { return _passes; } }
 
-        /// <summary>直近 1 回の判定で半径内に見つけた建物数（全旋風の合計）。</summary>
+        /// <summary>How many buildings the most recent check found within the radius
+        /// (summed over all whirls).</summary>
         public static int LastCandidates { get { return _lastCandidates; } }
 
-        /// <summary>直近 1 回の判定で確率選定を通った棟数（全旋風の合計）。</summary>
+        /// <summary>How many buildings passed the probabilistic selection in the most
+        /// recent check (summed over all whirls).</summary>
         public static int LastSelected { get { return _lastSelected; } }
 
         /// <summary>
-        /// 直近 1 回の判定で「バニラが受け付けるはずの建物に」BurnBuilding を呼んだ棟数
-        /// （全旋風の合計）。空振り検出の証拠になるのはこの数。
+        /// How many times the most recent check called BurnBuilding on a building vanilla
+        /// said it would accept (summed over all whirls). This is the count that counts
+        /// as evidence for the no-effect detection.
         /// </summary>
         public static int LastAttempted { get { return _lastAttempted; } }
 
         /// <summary>
-        /// 直近 1 回の判定で、選ばれたがバニラが設計上断る棟数（全旋風の合計）。
-        /// 瓦礫・公園・消防署・水没中など。証拠には数えない。
+        /// How many buildings in the most recent check were selected but are refused by
+        /// vanilla by design (summed over all whirls): rubble, parks, fire stations,
+        /// buildings under water and so on. Not counted as evidence.
         /// </summary>
         public static int LastRefused { get { return _lastRefused; } }
 
-        /// <summary>直近 1 回の判定で着火した棟数（全旋風の合計）。</summary>
+        /// <summary>How many buildings the most recent check set alight (summed over all
+        /// whirls).</summary>
         public static int LastIgnited { get { return _lastIgnited; } }
 
-        /// <summary>セッション累計の着火棟数。</summary>
+        /// <summary>The session total of buildings set alight.</summary>
         public static int TotalIgnited { get { return _totalIgnited; } }
 
-        /// <summary>連続で「試したのに 0 棟」だった回数。</summary>
+        /// <summary>How many times in a row we tried and got 0 buildings.</summary>
         public static int BarrenStreak { get { return _barren.Streak; } }
 
-        /// <summary>空振りが閾値に達しているか。オーバーレイのバッジ用。</summary>
+        /// <summary>Whether the no-effect streak has reached the threshold. For the badge
+        /// on the overlay.</summary>
         public static bool SpreadLooksBroken { get { return _barren.Tripped; } }
 
         public static int BarrenThreshold { get { return _barren.Threshold; } }
 
         /// <summary>
-        /// 空振り検出が「今しがた」閾値に達したかを 1 回だけ返す。
-        /// 呼び出し側（FireWhirlFeature）がログと Degraded 記録を 1 回だけ出すために使う。
+        /// Returns, once only, whether the no-effect detection has "just now" reached the
+        /// threshold. The caller (FireWhirlFeature) uses it to emit the log line and the
+        /// Degraded record exactly once.
         /// </summary>
         public static bool ConsumeBarrenAlert()
         {
@@ -114,8 +132,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 閾値に達していた空振りが「今しがた」解消したかを 1 回だけ返す。
-        /// 呼び出し側（FireWhirlFeature）が Degraded の自己申告を取り下げるために使う。
+        /// Returns, once only, whether a no-effect streak that had reached the threshold
+        /// has "just now" cleared. The caller (FireWhirlFeature) uses it to withdraw its
+        /// self-reported Degraded state.
         /// </summary>
         public static bool ConsumeBarrenRecovery()
         {
@@ -150,8 +169,9 @@ namespace DisasterPlus.Game
             float interval = IntervalFrames / FeatureHost.FramesPerMinute;
             if (_minutesSinceSpread < interval) return;
 
-            // 余りを繰り越さない。ロード直後などに大きな deltaMinutes が来ても、
-            // 次 tick に連続発火せず「間隔ごとに 1 回」を保つ。
+            // Do not carry the remainder over. Even if a large deltaMinutes arrives, as
+            // it can right after a load, this keeps it at "once per interval" instead of
+            // firing repeatedly on the following ticks.
             _minutesSinceSpread = 0f;
 
             var views = FireWhirlRegistry.Snapshot();
@@ -195,10 +215,11 @@ namespace DisasterPlus.Game
             _lastIgnited = ignited;
             _totalIgnited += ignited;
 
-            // 出力を ignited > 0 で囲ってはいけない。延焼が完全に死んでいる状態が
-            // 出力ゼロになり、「延焼が壊れている」と「近くに燃やす物が無い」が
-            // ログ上で区別できなくなる（③で実際に起きた失敗の形そのもの）。
-            // Log.Diag はキーごとにスロットルされるので毎回書いても溢れない。
+            // Do not wrap this output in ignited > 0. A spread that is completely dead
+            // would then produce no output at all, making "the spread is broken"
+            // indistinguishable in the log from "there is nothing nearby to burn" — the
+            // exact shape of the failure that actually happened in ③.
+            // Log.Diag is throttled per key, so writing every time does not flood it.
             Log.Diag("spread",
                 "pass#" + _passes + " strength=" + spreadStrength
                 + " candidates=" + candidates + " selected=" + selected
@@ -211,44 +232,53 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 選ばれた建物に火を入れる。
+        /// Sets the selected buildings alight.
         ///
-        /// m_fireIntensity を直接書いてはいけない（IL 実測）。このフィールドを消費するのは
-        /// CommonBuildingAI.SimulationStepActive → HandleFire だけで、BuildingAI.SimulationStep には
-        /// 火災処理が無い。PowerPoleAI / DecorationBuildingAI / WaterJunctionAI / OutsideConnectionAI /
-        /// IntersectionAI / CableCarPylonAI / MonorailPylonAI / RaceStartGantryAI /
-        /// WildlifeSpawnPointAI（および MOD 製の BuildingAI 直系）は BuildingAI を直接継承しており、
-        /// 書き込んだ火勢を誰も消さない。BurningBuildingScanner が永久に「燃えている」と数え続け、
-        /// しかもその値はバニラの建物配列に入るのでセーブに焼き付き、MOD を外しても残る。
+        /// Never write m_fireIntensity directly (established by reading the IL). The only
+        /// thing that consumes this field is CommonBuildingAI.SimulationStepActive →
+        /// HandleFire; BuildingAI.SimulationStep has no fire handling at all. PowerPoleAI /
+        /// DecorationBuildingAI / WaterJunctionAI / OutsideConnectionAI / IntersectionAI /
+        /// CableCarPylonAI / MonorailPylonAI / RaceStartGantryAI / WildlifeSpawnPointAI
+        /// (and any mod-made direct descendant of BuildingAI) inherit BuildingAI
+        /// directly, so nobody ever clears an intensity written into them.
+        /// BurningBuildingScanner would count them as "burning" forever — and since the
+        /// value goes into vanilla's own building array, it burns into the save and
+        /// survives even after the mod is removed.
         ///
-        /// 代わりにバニラの BuildingAI.BurnBuilding（public virtual, IL 確認済み）を呼ぶ。
-        /// BuildingAI 側の既定実装は false を返すだけなので、燃えない建物は自然に弾かれる。
-        /// CommonBuildingAI 側は GetFireParameters の可燃性判定（PlayerBuildingAI は
-        /// m_fireHazard == 0 で false）、水没判定、Collapsed/BurnedDown 判定を通したうえで、
-        /// m_fireIntensity・Frame.m_fireDamage・Active フラグ・BuildingDeactivated・
-        /// レンダラ／色／フラグ更新・サブ建物への伝播・DisasterData.m_buildingFireCount を
-        /// すべて面倒みる。火勢もそこで建物ごとに決まるので、こちらで定数を持たない。
+        /// Call vanilla's BuildingAI.BurnBuilding instead (public virtual, confirmed in
+        /// the IL). BuildingAI's own default implementation just returns false, so
+        /// buildings that cannot burn are rejected naturally. On the CommonBuildingAI side
+        /// it goes through the flammability test in GetFireParameters (PlayerBuildingAI
+        /// returns false when m_fireHazard == 0), the under-water test and the
+        /// Collapsed/BurnedDown test, and then looks after m_fireIntensity,
+        /// Frame.m_fireDamage, the Active flag, BuildingDeactivated, the renderer/colour/
+        /// flag updates, propagation to sub-buildings and DisasterData.m_buildingFireCount.
+        /// The fire intensity is decided there, per building, so we keep no constant of
+        /// our own.
         ///
-        /// DisasterHelpers は経由しないままなので、競合MOD の設定に左右されない
-        /// （クラスの先頭コメントの前提は保たれる）。
+        /// We still never go through DisasterHelpers, so another mod's settings cannot
+        /// affect this (the premise in the comment at the top of the class holds).
         /// </summary>
         /// <param name="attempted">
-        /// 「バニラ自身が dry-run で受け付けると答えた建物に BurnBuilding を呼んだ」棟数。
-        /// 診断（BarrenSpreadTracker）の証拠になるのはこの数だけ。
-        /// <see cref="CanBurn"/> が false の棟にも BurnBuilding は呼ぶが、ここには数えない。
-        /// この定義のおかげで attempted &gt; 0 かつ ignited == 0 は
-        /// 「バニラが自分の dry-run の答えを裏切った」の意味になり、証拠として強い。
+        /// How many times we called BurnBuilding on a building vanilla itself said, in the
+        /// dry run, that it would accept. This is the only count that serves as evidence
+        /// for the diagnostics (BarrenSpreadTracker). BurnBuilding is called on buildings
+        /// where <see cref="CanBurn"/> is false too, but those are not counted here.
+        /// Thanks to that definition, attempted &gt; 0 with ignited == 0 means "vanilla
+        /// went back on its own dry-run answer", which is strong evidence.
         /// </param>
         /// <param name="refused">
-        /// 選ばれたが「バニラが設計上断る」棟数。attempted &lt; selected の理由が
-        /// オーバーレイから読めるように残すだけで、証拠には使わない。
+        /// How many selected buildings vanilla refuses by design. Kept only so that the
+        /// reason for attempted &lt; selected can be read off the overlay; it is not used
+        /// as evidence.
         /// </param>
         private static int Ignite(Building[] buildings, ushort disasterId,
                                   out int attempted, out int refused)
         {
-            // 災害グループを渡すと m_buildingFireCount が正しく積まれる。
-            // グループは DisasterAI.CreateDisaster が m_ownerInstance.Disaster = 災害ID で
-            // 作って InstanceManager に登録している（IL 確認済み）ので、ここで引ける。
+            // Passing the disaster group makes m_buildingFireCount accumulate correctly.
+            // DisasterAI.CreateDisaster builds the group with
+            // m_ownerInstance.Disaster = the disaster ID and registers it with
+            // InstanceManager (confirmed in the IL), so we can look it up here.
             var groupId = InstanceID.Empty;
             groupId.Disaster = disasterId;
             var group = InstanceManager.instance.GetGroup(groupId);
@@ -260,7 +290,7 @@ namespace DisasterPlus.Game
             {
                 ushort id = _selected[i];
                 if (id == 0 || id >= buildings.Length) continue;
-                if (buildings[id].m_fireIntensity != 0) continue;   // 判定後に燃え出した分を弾く
+                if (buildings[id].m_fireIntensity != 0) continue;   // lit since the check
 
                 var info = buildings[id].Info;
                 if (info == null || info.m_buildingAI == null) continue;
@@ -268,59 +298,67 @@ namespace DisasterPlus.Game
                 bool burnable = CanBurn(id, ref buildings[id], info.m_buildingAI, group);
                 if (burnable) attempted++; else refused++;
 
-                // burnable が false でも本番の呼び出しは行う。dry-run を信じて
-                // 呼ばないことにすると、dry-run と本番が食い違う実装（他 MOD の
-                // パッチなど）で本物の着火を握り潰してしまう。
-                // 逆にここで着火すれば ignited が増えて空振り判定は解除されるので、
-                // 証拠としての正しさも壊れない。
+                // Make the real call even when burnable is false. Trusting the dry run
+                // and skipping the call would suppress a genuine ignition wherever the
+                // dry run and the real call disagree (another mod's patch, for
+                // instance). And if it does ignite here, ignited goes up and the
+                // no-effect verdict is cleared, so its correctness as evidence is not
+                // broken either.
                 if (info.m_buildingAI.BurnBuilding(id, ref buildings[id], group, false)) ignited++;
             }
             return ignited;
         }
 
         /// <summary>
-        /// この建物への BurnBuilding が「バニラの設計として」通りうるか。
-        /// バニラ自身に dry-run で訊く（testOnly = true）。
+        /// Whether a BurnBuilding on this building could get through "as vanilla designed
+        /// it". We ask vanilla itself, as a dry run (testOnly = true).
         ///
-        /// これが要る理由: 空振り検出の証拠から「バニラが設計上断るもの」を除くため。
-        /// 除かないと、火災旋風が成功した後の定常状態
-        /// （＝まだ燃えている建物＋燃え尽きた瓦礫）で瓦礫だけが延々と試行・拒否され、
-        /// 空振りの連続が正常な街でも必ず積み上がる。streak は着火でしか下りないので
-        /// 閾値には確実に到達し、「BurnBuilding が全部拒否している」という
-        /// 字義どおり正しく完全に誤解を招く警告が出る。
+        /// Why this is needed: to keep the things "vanilla refuses by design" out of the
+        /// evidence for the no-effect detection. Without it, in the steady state after a
+        /// successful fire whirl — still-burning buildings plus burnt-out rubble — it is
+        /// the rubble alone that is tried and refused, over and over, so the no-effect
+        /// streak is guaranteed to pile up even in a perfectly healthy city. The streak
+        /// only comes down on an ignition, so it reaches the threshold for certain and
+        /// produces a warning that "BurnBuilding is refusing everything" — literally true
+        /// and utterly misleading.
         ///
-        /// 拒否条件を自前で写さないこと。ここは実際には多態呼び出しであり、
-        /// 「CommonBuildingAI.BurnBuilding の本体」を読んだだけでは足りない。
-        /// アセンブリ内で BurnBuilding を宣言している型は 4 つある（実測）:
-        ///     BuildingAI        (PrefabAI 直下)              ldc.i4.0; ret  = 常に false
-        ///     CommonBuildingAI  (BuildingAI)                 168 命令       = 本体
-        ///     ShelterAI         (PlayerBuildingAI 経由)      ldc.i4.0; ret  = 常に false
-        ///     TsunamiBuoyAI     (PlayerBuildingAI 経由)      ldc.i4.0; ret  = 常に false
-        /// ShelterAI と TsunamiBuoyAI は PlayerBuildingAI → CommonBuildingAI の
-        /// 派生なので `is CommonBuildingAI` は true になるが、GetFireParameters を
-        /// 宣言せず（＝PlayerBuildingAI の「m_fireHazard != 0 なら可燃」を継承）、
-        /// BurnBuilding では条件を一切見ずに false を返す。
-        /// つまり「3 条件の写し」では可燃と誤判定する。どちらも Natural Disasters
-        /// DLC の建物、すなわちこの機能を使うプレイヤーがまさに建てているものなので、
-        /// これは机上の穴ではない。
+        /// Do not copy the refusal conditions yourself. This is in fact a polymorphic
+        /// call, and reading "the body of CommonBuildingAI.BurnBuilding" is not enough.
+        /// Four types in the assembly declare BurnBuilding (measured):
+        ///     BuildingAI        (directly under PrefabAI)   ldc.i4.0; ret  = always false
+        ///     CommonBuildingAI  (BuildingAI)                168 instructions = the body
+        ///     ShelterAI         (via PlayerBuildingAI)      ldc.i4.0; ret  = always false
+        ///     TsunamiBuoyAI     (via PlayerBuildingAI)      ldc.i4.0; ret  = always false
+        /// ShelterAI and TsunamiBuoyAI derive from PlayerBuildingAI → CommonBuildingAI, so
+        /// `is CommonBuildingAI` is true for them, but they do not declare
+        /// GetFireParameters (i.e. they inherit PlayerBuildingAI's "flammable if
+        /// m_fireHazard != 0") and their BurnBuilding returns false without looking at any
+        /// condition at all. In other words, a copy of "the three conditions" would
+        /// wrongly judge them flammable. Both are Natural Disasters DLC buildings — that
+        /// is, exactly what a player using this feature is building — so this is not a
+        /// theoretical hole.
         ///
-        /// 型名を並べて弾く手もあるが、その一覧はゲーム更新で新しい override が
-        /// 増えた瞬間に黙って古くなる（この基盤が捕まえようとしている失敗の形そのもの）。
-        /// 他 MOD 製の BuildingAI 派生もカバーできない。
-        /// 代わりに実物へ委譲する。testOnly = true が正確にこの問いに答える:
+        /// You could also reject them by listing the type names, but such a list goes
+        /// quietly stale the moment a game update adds a new override (the very shape of
+        /// failure this groundwork is trying to catch). It would not cover another mod's
+        /// BuildingAI descendants either.
+        /// We delegate to the real thing instead. testOnly = true answers precisely this
+        /// question:
         ///
-        ///   IL 実測 (CommonBuildingAI.BurnBuilding):
+        ///   From the IL (CommonBuildingAI.BurnBuilding):
         ///     IL_000F callvirt GetFireParameters / brfalse -> false
-        ///     IL_0019 m_flags &amp; 0x400000 (Collapsed。BurnedDown と同値) -> false
+        ///     IL_0019 m_flags &amp; 0x400000 (Collapsed, same value as BurnedDown) -> false
         ///     IL_003A TerrainManager.WaterLevel(pos.xz) &gt; m_position.y -> false
         ///     IL_0053 ldarg.s 4 (testOnly) / brtrue IL_020C -> ldc.i4.1; ret
-        ///   メソッド内の書き込み（m_buildingFireCount / m_flags / m_fireIntensity /
-        ///   Frame.m_fireDamage）はすべて IL_00BB 以降＝この分岐より後にしか無い。
-        ///   よって testOnly = true の経路は純粋な問い合わせで、副作用は無い
-        ///   （GetFireParameters の全 16 実装にも stfld/stsfld が無いことを実測済み）。
+        ///   Every write in the method (m_buildingFireCount / m_flags / m_fireIntensity /
+        ///   Frame.m_fireDamage) is at IL_00BB or later, i.e. only after that branch.
+        ///   So the testOnly = true path is a pure query with no side effects (all 16
+        ///   implementations of GetFireParameters were also measured to contain no
+        ///   stfld/stsfld).
         ///
-        /// この委譲なら、判定はつねに実際に呼ばれるものと同じ override から返る。
-        /// 将来 override が増えても、MOD が差し替えても、自動的に追従する。
+        /// With this delegation the verdict always comes back from the same override that
+        /// will actually be called. If an override is added in future, or a mod swaps one
+        /// in, it follows automatically.
         /// </summary>
         private static bool CanBurn(ushort id, ref Building b, BuildingAI ai,
                                     InstanceManager.Group group)
@@ -329,8 +367,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 旋風の半径内の建物を集める。
-        /// BuildingManager の空間グリッドを使い、全 49152 スロットの走査を避ける。
+        /// Collects the buildings within the whirl's radius.
+        /// Uses BuildingManager's spatial grid to avoid sweeping all 49152 slots.
         /// </summary>
         private static void CollectNearby(Building[] buildings, FireWhirlView v)
         {
@@ -339,7 +377,8 @@ namespace DisasterPlus.Game
             var bm = BuildingManager.instance;
             float r = v.Radius;
 
-            // 建物グリッドは 1 セル 64m、270x270。境界をはみ出さないようクランプする。
+            // The building grid is 270x270 cells of 64 m each. Clamp so we do not run off
+            // the edges.
             int minX = Clamp((int)((v.Center.X - r) / 64f + 135f));
             int maxX = Clamp((int)((v.Center.X + r) / 64f + 135f));
             int minZ = Clamp((int)((v.Center.Z - r) / 64f + 135f));
@@ -370,7 +409,8 @@ namespace DisasterPlus.Game
 
                         id = buildings[id].m_nextGridBuilding;
 
-                        // 連結リストが壊れている保存データで無限ループしないための保険。
+                        // Insurance against an infinite loop on saved data whose linked
+                        // list is corrupt.
                         if (++guard > 32768) break;
                     }
                 }

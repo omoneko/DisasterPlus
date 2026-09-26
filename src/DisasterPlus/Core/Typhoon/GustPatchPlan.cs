@@ -3,110 +3,126 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Typhoon
 {
     /// <summary>
-    /// **竜巻を出さずに竜巻並みの被害だけを起こす**ための、局所被害域（パッチ）の
-    /// 撒き方と寿命。<b>Core なのでエンジンには一切触らない。</b>
+    /// How local damage areas ("patches") are scattered, and how long they live, so as to
+    /// **produce tornado-level damage without producing a tornado**.
+    /// <b>This is Core, so it never touches the engine.</b>
     ///
-    /// ── 持ち主の指示 ──────────────────────────────────────
+    /// ── The owner's instruction ──────────────────────────────────────
     ///
-    /// > 竜巻を発生させずに竜巻の被害だけを複数発生させてください
+    /// > Produce several instances of tornado damage without spawning any tornadoes
     ///
-    /// つまり<b>災害の実体（<c>TornadoAI</c>）も漏斗のメッシュも作らない</b>。
-    /// 作るのは「台風の下のあちこちで、短いあいだ、狭い範囲だけが竜巻並みに壊れる」
-    /// という現象だけである。バニラの竜巻を借りていた旧実装（随伴竜巻）は退役した。
+    /// So we create <b>neither the disaster itself (<c>TornadoAI</c>) nor a funnel mesh</b>.
+    /// All we create is the phenomenon: "here and there beneath the typhoon, for a short
+    /// while, a narrow area gets wrecked as if by a tornado". The old implementation that
+    /// borrowed vanilla's tornado (the accompanying tornado) has been retired.
     ///
-    /// **やめた側の利点も書いておく。** バニラ竜巻の破壊は
-    /// <c>DisasterHelpers.DestroyStuff</c> を通るので Natural Disasters Renewal が
-    /// 丸ごと置き換えていた。パッチは <c>BuildingAI.CollapseBuilding</c> を直接呼ぶ
-    /// （＝④の風害と同じ経路）ので、**NDR と完全に無衝突**になった。
+    /// **The benefit of dropping it is worth recording too.** Vanilla tornado damage goes
+    /// through <c>DisasterHelpers.DestroyStuff</c>, which Natural Disasters Renewal replaces
+    /// wholesale. A patch calls <c>BuildingAI.CollapseBuilding</c> directly (the same path as
+    /// ④'s wind damage), so it is now **entirely free of conflict with NDR**.
     ///
-    /// ── 一団（世代）で撒く ────────────────────────────────
+    /// ── They are scattered in generations ────────────────────────────────
     ///
-    /// パッチは <see cref="SpawnIntervalFrames"/> フレームごとに 1 個生まれ、
-    /// <see cref="LifetimeFrames"/> フレームで消える。したがって同時に生きているのは
-    /// <c>ceil(Lifetime / Interval)</c> 個で、<see cref="MaxActivePatches"/> が
-    /// その上限を宣言している（テストが両者の整合を固定している）。
-    /// **これが 1 tick あたりの仕事量の上限を決める 1 本目である。**
+    /// One patch is born every <see cref="SpawnIntervalFrames"/> frames and dies after
+    /// <see cref="LifetimeFrames"/> frames. So the number alive at once is
+    /// <c>ceil(Lifetime / Interval)</c>, and <see cref="MaxActivePatches"/> declares that
+    /// upper bound (tests pin down that the two agree).
+    /// **This is the first of the things that cap the work done per tick.**
     ///
-    /// 「何番目のパッチか」（序数）だけが状態で、位置も大きさも寿命も**序数の関数**である。
-    /// ゲーム側は序数の範囲を訊いて、その場で位置を組み立て直す ——
-    /// 台帳を持ち回さないので、**台風が消えたらパッチも 1 個残らず消える**
-    /// （寿命の管理を忘れて残る、という壊れ方が構造的に起きない）。
+    /// The only state is "which patch this is" (its ordinal); its position, its size and its
+    /// lifetime are all **functions of the ordinal**. The game side asks for the range of
+    /// ordinals and rebuilds the positions on the spot — we carry no ledger around, so
+    /// **when the typhoon goes, not one patch is left behind** (the failure mode of
+    /// forgetting to manage a lifetime and leaving something behind cannot arise
+    /// structurally).
     ///
-    /// ── 危険半円へ寄せる ────────────────────────────────
+    /// ── They favour the dangerous semicircle ────────────────────────────────
     ///
-    /// パッチは進行方向の危険半円側（北半球なら右。<see cref="TrackBias"/>）に寄る。
-    /// 反対側にも出るが、**多数派は危険半円**である（テストが分布で固定している）。
+    /// Patches favour the dangerous semicircle relative to the direction of travel (the
+    /// right in the northern hemisphere; see <see cref="TrackBias"/>). Some appear on the
+    /// other side, but **the majority are in the dangerous semicircle** (tests pin the
+    /// distribution down).
     ///
-    /// 乱数は <see cref="DeterministicRandom"/> だけ。<c>VanillaRandomizer</c> は
-    /// 使わない —— ここで決めるのはバニラが引く値ではなく④が発明した判断である。
-    /// **フレームを混ぜない**（混ぜるとパッチが毎 tick 場所を変えて瞬間移動する）。
+    /// The only randomness is <see cref="DeterministicRandom"/>. We do not use
+    /// <c>VanillaRandomizer</c> — what is decided here is not a value vanilla draws but a
+    /// judgement ④ invented.
+    /// **Do not mix in the frame** (mix it in and the patches change position every tick and
+    /// teleport).
     /// </summary>
     public static class GustPatchPlan
     {
-        /// <summary>新しいパッチが生まれる間隔（台風の経過フレーム）。</summary>
+        /// <summary>The interval at which a new patch is born (in the typhoon's elapsed
+        /// frames).</summary>
         public const uint SpawnIntervalFrames = 128u;
 
-        /// <summary>1 個のパッチが生きているフレーム数。**短命**であること。</summary>
+        /// <summary>How many frames one patch lives. It must be **short-lived**.</summary>
         public const uint LifetimeFrames = 320u;
 
-        /// <summary>同時に生きうるパッチ数の上限。<see cref="AliveRange"/> はこれを超えない。</summary>
+        /// <summary>The cap on patches alive at once. <see cref="AliveRange"/> never exceeds
+        /// it.</summary>
         public const int MaxActivePatches = 4;
 
-        /// <summary>パッチの半径（m）の下限・上限。**狭いこと** —— 竜巻の被害幅である。</summary>
+        /// <summary>The lower and upper bounds on a patch's radius (m). **Keep them narrow**
+        /// — this is the damage width of a tornado.</summary>
         public const float MinRadiusMetres = 45f;
 
         public const float MaxRadiusMetres = 95f;
 
-        /// <summary>パッチが置かれる半径 ÷ 暴風域半径の下限・上限。
-        /// 眼のすぐ外から暴風域の縁までのあいだに撒く。</summary>
+        /// <summary>The lower and upper bounds on the radius a patch is placed at, ÷ the
+        /// gale radius. They are scattered between just outside the eye and the edge of the
+        /// gale zone.</summary>
         public const float MinOrbitFraction = 0.25f;
 
         public const float MaxOrbitFraction = 0.95f;
 
-        /// <summary>危険半円へ寄せる強さ。1 で一様、2 以上で寄る。**2 乗**を使う。</summary>
+        /// <summary>How strongly they favour the dangerous semicircle. 1 is uniform, 2 and
+        /// above favours it. We use **squaring**.</summary>
         private const float BiasExponent = 2f;
 
         private const float Pi = 3.14159265f;
         private const float HalfPi = 1.57079633f;
 
-        /// <summary>序数から乱数の種を作るときの混ぜ物。**固定値**。</summary>
+        /// <summary>The salts mixed in when making a random seed from an ordinal. **Fixed
+        /// values.**</summary>
         private const uint AngleSalt = 0x47555331u;    // "GUS1"
         private const uint SpreadSalt = 0x47555332u;
         private const uint OrbitSalt = 0x47555333u;
         private const uint RadiusSalt = 0x47555334u;
         private const uint StrengthSalt = 0x47555335u;
 
-        /// <summary>序数 <paramref name="ordinal"/> のパッチが生まれる経過フレーム。</summary>
+        /// <summary>The elapsed frame at which the patch with ordinal
+        /// <paramref name="ordinal"/> is born.</summary>
         public static uint BirthFrameOf(uint ordinal)
         {
             return ordinal * SpawnIntervalFrames;
         }
 
         /// <summary>
-        /// <paramref name="elapsedFrames"/> の時点で生きている序数の範囲
-        /// <c>[first, last]</c>（両端を含む）。生きているものが 1 つも無ければ false。
+        /// The range of ordinals alive at <paramref name="elapsedFrames"/>,
+        /// <c>[first, last]</c> (inclusive at both ends). False if none is alive.
         ///
-        /// **返る個数は必ず <see cref="MaxActivePatches"/> 以下である**（テストが固定）。
+        /// **The count returned is always at most <see cref="MaxActivePatches"/>** (pinned
+        /// down by tests).
         /// </summary>
         public static bool AliveRange(uint elapsedFrames, out uint first, out uint last)
         {
             first = 0u;
             last = 0u;
 
-            // 今までに生まれた最後の序数。
+            // The last ordinal born so far.
             last = elapsedFrames / SpawnIntervalFrames;
 
-            // 生まれてから LifetimeFrames 未満のものだけが生きている。
+            // Only those born less than LifetimeFrames ago are alive.
             uint oldestBirth = elapsedFrames >= LifetimeFrames
                 ? elapsedFrames - LifetimeFrames + 1u
                 : 0u;
 
-            // 切り上げ除算（そのフレーム以降に生まれた序数の最小値）。
+            // Ceiling division (the smallest ordinal born at or after that frame).
             first = (oldestBirth + SpawnIntervalFrames - 1u) / SpawnIntervalFrames;
 
             if (first > last) return false;
 
-            // 上限で頭を落とす。**新しいほうを残す**（古いほうはもう消えかけている）。
+            // Trim at the cap. **Keep the newer ones** (the older ones are already fading).
             if (last - first + 1u > (uint)MaxActivePatches)
             {
                 first = last - (uint)MaxActivePatches + 1u;
@@ -115,8 +131,8 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// パッチの生涯のどこか [0, 1]。生まれた瞬間 0、消える瞬間 1。
-        /// 生きていない序数には 1 を返す（＝もう終わっている）。
+        /// Where we are in a patch's life, in [0, 1]. 0 the instant it is born, 1 the instant
+        /// it dies. For an ordinal that is not alive it returns 1 (= it is already over).
         /// </summary>
         public static float LifePhase(uint ordinal, uint elapsedFrames)
         {
@@ -129,17 +145,17 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// パッチ 1 個ぶんの置き場所と大きさ。**序数だけの関数**なので、
-        /// 呼び出し側が台帳を持たなくても毎 tick 同じ答えが返る。
+        /// Where one patch sits and how big it is. **A function of the ordinal alone**, so
+        /// the same answer comes back every tick without the caller keeping a ledger.
         ///
-        /// <paramref name="relativeAngleRadians"/> は<b>進行方位からの相対角</b>
-        /// （ワールド角ではない）。呼び出し側が
-        /// <c>heading + relativeAngle</c> でワールド角にする ——
-        /// こうしておくと**経路が曲がればパッチの散らばりも一緒に回る**。
+        /// <paramref name="relativeAngleRadians"/> is <b>the angle relative to the heading</b>
+        /// (not a world angle). The caller turns it into a world angle with
+        /// <c>heading + relativeAngle</c> — done this way, **when the track bends the
+        /// scatter of patches turns with it**.
         ///
-        /// <paramref name="orbitFraction"/> は暴風域半径に対する比、
-        /// <paramref name="radiusMetres"/> はパッチ自身の半径（m）、
-        /// <paramref name="strengthFraction"/> は破壊力の比 [0, 1]。
+        /// <paramref name="orbitFraction"/> is a ratio of the gale radius,
+        /// <paramref name="radiusMetres"/> is the patch's own radius (m), and
+        /// <paramref name="strengthFraction"/> is the destructive-power ratio in [0, 1].
         /// </summary>
         public static void Patch(ushort typhoonId, uint ordinal, bool southernHemisphere,
                                  out float relativeAngleRadians, out float orbitFraction,
@@ -147,12 +163,14 @@ namespace DisasterPlus.Core.Typhoon
         {
             uint id = typhoonId;
 
-            // 危険半円の中心方向（進行方位からの相対角）。
-            // TrackBias の right = (sin φ, -cos φ) は角 φ - 90° の向きなので、
-            // 北半球の危険半円は相対角 -90°、南半球は +90° である。
+            // The direction to the centre of the dangerous semicircle (relative to the
+            // heading). TrackBias's right = (sin φ, -cos φ) points along the angle φ - 90°,
+            // so the northern hemisphere's dangerous semicircle is at a relative angle of
+            // -90° and the southern hemisphere's at +90°.
             float centre = southernHemisphere ? HalfPi : -HalfPi;
 
-            // 危険半円からのずれ。2 乗で 0 側（＝危険半円）へ寄せる。
+            // The deviation from the dangerous semicircle. Squaring pulls it towards 0
+            // (i.e. towards the dangerous semicircle).
             float u = DeterministicRandom.Unit(id ^ SpreadSalt, ordinal);
             float spread = Pi * Power(u, BiasExponent);
 
@@ -167,15 +185,15 @@ namespace DisasterPlus.Core.Typhoon
                 + (MaxRadiusMetres - MinRadiusMetres)
                   * DeterministicRandom.Unit(id ^ RadiusSalt, ordinal);
 
-            // 0.6〜1.0。**0 にはしない** —— 何も壊さないパッチは「出ていない」と
-            // 見分けが付かず、診断が読めなくなる。
+            // 0.6-1.0. **Never 0** — a patch that destroys nothing is indistinguishable from
+            // one that never appeared, which makes the diagnostics unreadable.
             strengthFraction = 0.6f
                 + 0.4f * DeterministicRandom.Unit(id ^ StrengthSalt, ordinal);
         }
 
         /// <summary>
-        /// <c>System.Math.Pow</c> を避けた 2 乗（<see cref="BiasExponent"/> は 2 固定）。
-        /// 指数を変えるときはここも直すこと。
+        /// Squaring without <c>System.Math.Pow</c> (<see cref="BiasExponent"/> is fixed at
+        /// 2). If you change the exponent, fix this too.
         /// </summary>
         private static float Power(float value, float exponent)
         {

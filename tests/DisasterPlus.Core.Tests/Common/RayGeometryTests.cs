@@ -12,7 +12,7 @@ namespace DisasterPlus.Core.Tests.Common
             public float SampleHeight(float x, float z) { return _h; }
         }
 
-        /// <summary>X が増えるほど高くなる斜面。</summary>
+        /// <summary>A slope that rises as X increases.</summary>
         private class Slope : IHeightSampler
         {
             public float SampleHeight(float x, float z) { return x * 0.5f; }
@@ -41,7 +41,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void Diagonal_HitsFlatGround_AtGeometricallyCorrectPoint()
         {
-            // 高さ 100 から 45 度で降りる → 水平に 100 進んだ地点で高さ 0 に到達
+            // Descending at 45 degrees from a height of 100 → it reaches height 0 after
+            // travelling 100 horizontally
             Vec3 hit;
             bool ok = RayGeometry.IntersectTerrain(
                 new Vec3(0f, 100f, 0f), Down45(), new FlatGround(0f), 2000f, out hit);
@@ -87,7 +88,7 @@ namespace DisasterPlus.Core.Tests.Common
                 new Vec3(0f, 400f, 0f), Down45(), new Slope(), 4000f, out hit);
 
             Assert.True(ok);
-            // 収束した点で「レイの高さ ≒ 地形の高さ」になっていること
+            // At the converged point "the ray's height ≈ the terrain's height"
             Assert.Equal(new Slope().SampleHeight(hit.X, hit.Z), hit.Y, 0);
         }
 

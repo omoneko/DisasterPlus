@@ -1,88 +1,96 @@
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// 全体円盤のランプ <c>s = 1 - d/R</c> を、**同心の塗り重ね**として画面に出すための段取り。
+    /// The arrangement for putting the whole-quake disc's ramp <c>s = 1 - d/R</c> on screen
+    /// as **concentric overpainting**.
     ///
-    /// ── なぜ「塗り重ね」なのか ──────────────────────────────
+    /// ── Why "overpainting" ──────────────────────────────
     ///
-    /// CS1 のオーバーレイ API が描けるのは<b>塗り潰された</b>円・四角・帯だけである
-    /// （<c>RenderManager.OverlayEffect</c>。円は <c>ID_CenterPos</c> に
-    /// <c>(x, z, -r, +r)</c> を渡す 1 パス、四角は 4 隅を渡す 1 パスで、
-    /// どちらも太さの引数を持たない＝輪郭線ではない）。連続階調のランプを 1 回の
-    /// 描画で出す手段は無いので、**同心円を大きい順に半透明で塗り重ねて**
-    /// 階段状のランプを作る。
+    /// All the CS1 overlay API can draw is <b>filled</b> circles, quads and bands
+    /// (<c>RenderManager.OverlayEffect</c>: a circle is one pass handing
+    /// <c>(x, z, -r, +r)</c> to <c>ID_CenterPos</c>, a quad is one pass handing the four
+    /// corners, and neither takes a thickness argument, i.e. neither is an outline).
+    /// There is no way to produce a continuous-tone ramp in a single draw, so we
+    /// **overpaint concentric circles largest-first, semi-transparently**, to build a
+    /// stepped ramp.
     ///
-    /// 段数は <see cref="SeismicScale.Steps"/> と**同じ 10**にしてある。これは
-    /// 見た目の都合ではなく誠実さの都合で、パネルのカーソル行が出している
-    /// 10 段のバーと、地図に出る 10 段の濃さが**同じ量子化**になる。
-    /// 片方が 10 段でもう片方が 8 段だと、同じ s に対して 2 つの違う「段」が
-    /// 画面に同時に出ることになる。
+    /// The step count is **the same 10** as <see cref="SeismicScale.Steps"/>. That is not a
+    /// matter of looks but of honesty: the ten-step bar the panel's cursor row prints and
+    /// the ten steps of shading on the map get **the same quantisation**. If one were ten
+    /// steps and the other eight, two different "steps" for the same s would be on screen
+    /// at once.
     ///
-    /// ── 濃さは s に比例させる（曲げない）─────────────────────────
+    /// ── Make the shade proportional to s (do not bend it) ─────────────────────────
     ///
-    /// 円盤 <c>k</c>（0 がいちばん外、<c>Steps-1</c> がいちばん内）は
-    /// <c>s &gt; k/Steps</c> の範囲を覆う。したがって 0..k を塗り終えた時点で
-    /// 実際に見えている輪帯は <c>k/Steps &lt; s ≤ (k+1)/Steps</c> で、その代表値は
-    /// 中点 <c>(k+0.5)/Steps</c> である。**そこでの累積不透明度が
-    /// <c>MaxOpacity × s</c> ちょうどになるように**、各円盤単体のアルファを逆算する
-    /// （<see cref="DrawAlpha"/>）。単に同じアルファを重ねると
-    /// <c>1-(1-a)^(k+1)</c> という**飽和した曲線**になり、弱い側を強く・強い側を弱く
-    /// 見せる。それは「示していると称する量とは違う減衰を描く」ことに他ならない。
+    /// Disc <c>k</c> (0 the outermost, <c>Steps-1</c> the innermost) covers the region
+    /// <c>s &gt; k/Steps</c>. So once discs 0..k have been painted, the annulus actually
+    /// visible is <c>k/Steps &lt; s ≤ (k+1)/Steps</c>, whose representative value is the
+    /// midpoint <c>(k+0.5)/Steps</c>. **The alpha of each individual disc is worked
+    /// backwards so that the accumulated opacity there is exactly
+    /// <c>MaxOpacity × s</c>** (see <see cref="DrawAlpha"/>). Simply stacking the same
+    /// alpha gives the **saturating curve** <c>1-(1-a)^(k+1)</c>, which makes the weak end
+    /// look stronger and the strong end weaker. That is nothing other than drawing a
+    /// falloff different from the quantity you claim to be showing.
     ///
-    /// ── 前提: <c>alphaBlend: true</c> が本当にアルファ合成であること ───────────
+    /// ── Assumption: that <c>alphaBlend: true</c> really is alpha compositing ───────────
     ///
-    /// <c>OverlayEffect</c> は <c>m_shapeShader</c> と <c>m_shapeShaderBlend</c> の
-    /// **2 本のシェーダ**を持ち、<c>alphaBlend</c> 引数だけがその選択を決める
-    /// （IL 実測: <c>DrawCircle</c> IL_0127–013F / <c>DrawQuad</c> IL_014C–0164）。
-    /// 2 本ある理由は「片方が合成しないから」以外に無く、バニラ自身も
-    /// <c>DisasterTool.RenderOverlay</c> が <c>alphaBlend: true</c> で
-    /// 地区の色の上に円を重ねている。シェーダのブレンド式そのものは DLL に
-    /// 無い（アセット側）ので、ここは IL からは詰め切れない最後の一歩である。
+    /// <c>OverlayEffect</c> holds **two shaders**, <c>m_shapeShader</c> and
+    /// <c>m_shapeShaderBlend</c>, and the <c>alphaBlend</c> argument alone decides which is
+    /// used (measured from IL: <c>DrawCircle</c> IL_0127–013F / <c>DrawQuad</c>
+    /// IL_014C–0164). There is no reason for there to be two other than "one of them does
+    /// not composite", and vanilla itself has <c>DisasterTool.RenderOverlay</c> laying a
+    /// circle over the district colours with <c>alphaBlend: true</c>. The shaders' blend
+    /// equations themselves are not in the DLL (they are on the asset side), so this is the
+    /// last step that the IL cannot pin down.
     ///
-    /// **外した場合の壊れ方までは押さえてある。** 想定される外れ方は 2 通りあり、
-    /// **どちらでも <see cref="DrawAlpha"/> は k について単調増加なので、濃さが
-    /// 震央へ向かって増える向きは絶対に反転しない。** 変わるのは曲線の形と、
-    /// 画面に出る濃さの絶対値だけである。
+    /// **Even the ways it could break if we are wrong are pinned down.** There are two ways
+    /// it could go wrong, and **in both of them <see cref="DrawAlpha"/> is monotonically
+    /// increasing in k, so the direction in which the shading deepens towards the epicentre
+    /// can never be reversed.** What changes is only the shape of the curve and the
+    /// absolute darkness on screen.
     ///
-    ///   1. **上書き（合成しない）** … 最後に描いた円盤の色がそのまま残る。
-    ///      各段は <see cref="DrawAlpha"/> そのものの濃さになり、
-    ///      震央では <c>a_9 ≒ 0.113</c>。曲線が凸に歪む。
+    ///   1. **Overwrite (no compositing)** … the colour of the last disc drawn simply
+    ///      stays. Each step then has the darkness of <see cref="DrawAlpha"/> itself, and
+    ///      at the epicentre <c>a_9 ≈ 0.113</c>. The curve is distorted convexly.
     ///
-    ///   2. **<c>Blend SrcAlpha OneMinusSrcAlpha</c>（＝ Unity の既定）**
-    ///      … こちらの方がありそうである。この式は色を正しく合成するが
-    ///      **アルファチャンネルには <c>srcA</c> をもう 1 度掛ける**ので、
-    ///      <c>dstA' = srcA² + dstA(1 - srcA)</c> になる。
-    ///      最外の段は <c>a₀ = 0.0275</c> なので <c>0.0275² ＝ 0.00076</c>、
-    ///      積み上げても震央の累積は <see cref="MaxOpacity"/> ＝ 0.55 に遠く届かず、
-    ///      **オーバーレイ全体がほとんど見えない薄い着色**になる。
-    ///      段の順序は保たれるので「濃さが逆」にはならない。
+    ///   2. **<c>Blend SrcAlpha OneMinusSrcAlpha</c> (i.e. Unity's default)**
+    ///      … this is the more likely of the two. That equation composites colour
+    ///      correctly, but **it multiplies the alpha channel by <c>srcA</c> a second
+    ///      time**, giving <c>dstA' = srcA² + dstA(1 - srcA)</c>.
+    ///      The outermost step is <c>a₀ = 0.0275</c>, so <c>0.0275² = 0.00076</c>, and even
+    ///      stacked up the accumulation at the epicentre falls far short of
+    ///      <see cref="MaxOpacity"/> = 0.55, making **the whole overlay a barely visible
+    ///      tint**. The order of the steps is preserved, so the shading does not come out
+    ///      backwards.
     ///
-    /// シェーダのブレンド式は DLL に無い（アセット側）ので、**IL からはここまでしか
-    /// 詰められない**。したがって実機チェックリストの項目 53 は
-    /// 「10 段に見えるか / 1 枚に見えるか」だけでは足りない ——
-    /// 2 の壊れ方は「10 段だが全部薄い」という形で出るので、
-    /// **「震央がだいたい半分くらい不透明か、それともうっすら色が付いている程度か」**
-    /// を必ず併せて見ること。前者なら合成則は想定どおり、後者なら 2 である。
+    /// The shaders' blend equations are not in the DLL (they are on the asset side), so
+    /// **the IL can be pushed no further than this**. That means item 53 on the in-game
+    /// checklist is not covered by "does it look like ten steps / like one sheet" alone —
+    /// breakage 2 shows up as "ten steps but all of them faint", so
+    /// **always check alongside it whether the epicentre is roughly half opaque or merely
+    /// faintly tinted**. The former means the blend rule is as assumed; the latter means it
+    /// is case 2.
     /// </summary>
     public static class IntensityRamp
     {
         /// <summary>
-        /// 段数。**<see cref="SeismicScale.Steps"/> と同じでなければならない**
-        /// （クラス doc の「同じ量子化」）。ユニットテストがこの一致を固定している。
+        /// The step count. **It must equal <see cref="SeismicScale.Steps"/>** (the "same
+        /// quantisation" from the class doc). A unit test pins that agreement.
         /// </summary>
         public const int Steps = SeismicScale.Steps;
 
         /// <summary>
-        /// 震央（s = 1）での累積不透明度の上限。
+        /// The cap on the accumulated opacity at the epicentre (s = 1).
         ///
-        /// 1.0 にしない。オーバーレイの下には地形・道路・建物があり、それを
-        /// 完全に隠すと「地図に重ねた分布」ではなく「地図の代わり」になる。
+        /// Not 1.0. Under the overlay are the terrain, the roads and the buildings, and
+        /// hiding them completely turns it from "a distribution laid over the map" into "a
+        /// replacement for the map".
         /// </summary>
         public const float MaxOpacity = 0.55f;
 
         /// <summary>
-        /// 円盤 <paramref name="index"/> の半径。0 が全体円盤そのもの（R）、
-        /// <c>Steps-1</c> がいちばん内側（R/Steps）。**大きい順に描くこと。**
+        /// The radius of disc <paramref name="index"/>. 0 is the whole-quake disc itself
+        /// (R), and <c>Steps-1</c> is the innermost (R/Steps). **Draw them largest-first.**
         /// </summary>
         public static float RadiusOf(int index, float radius)
         {
@@ -92,7 +100,8 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 円盤 0..<paramref name="index"/> を塗った時点で見えている輪帯の代表 s（中点）。
+        /// The representative s (the midpoint) of the annulus visible once discs
+        /// 0..<paramref name="index"/> have been painted.
         /// </summary>
         public static float RepresentativeS(int index)
         {
@@ -102,7 +111,8 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// その輪帯で**見えていてほしい**累積不透明度。s に厳密に比例する。
+        /// The accumulated opacity we **want to see** in that annulus. Strictly
+        /// proportional to s.
         /// </summary>
         public static float TargetOpacity(int index)
         {
@@ -111,16 +121,16 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 円盤 <paramref name="index"/> **単体**に与えるアルファ。
+        /// The alpha given to disc <paramref name="index"/> **on its own**.
         ///
-        /// 大きい順にアルファ合成したとき、輪帯 k の累積が
-        /// <see cref="TargetOpacity"/>(k) になるようにする:
+        /// Chosen so that, alpha-composited largest-first, the accumulation over annulus k
+        /// comes to <see cref="TargetOpacity"/>(k):
         /// <code>
         /// 1 - A_k = (1 - a_0)(1 - a_1)...(1 - a_k)
         /// a_k     = (A_k - A_{k-1}) / (1 - A_{k-1})
         /// </code>
-        /// 分子は <c>MaxOpacity / Steps</c> の定数、分母は 1 未満なので
-        /// a_k は k について単調増加になる。
+        /// The numerator is the constant <c>MaxOpacity / Steps</c> and the denominator is
+        /// less than 1, so a_k is monotonically increasing in k.
         /// </summary>
         public static float DrawAlpha(int index)
         {
@@ -137,8 +147,8 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 大きい順に <see cref="DrawAlpha"/> をアルファ合成した結果。
-        /// **テスト専用の逆算**で、描画側はこれを使わない。
+        /// The result of alpha-compositing <see cref="DrawAlpha"/> largest-first.
+        /// **Working backwards, for tests only**; the drawing side does not use it.
         /// </summary>
         public static float AccumulatedOpacity(int index)
         {

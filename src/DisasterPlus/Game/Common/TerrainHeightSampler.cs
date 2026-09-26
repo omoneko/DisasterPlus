@@ -5,18 +5,18 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// Core の IHeightSampler を CS の地形で実装する。
-    /// SampleDetailHeight は読み取り専用で、sim / main どちらのスレッドからも安全。
+    /// Implements Core's IHeightSampler on top of CS's terrain.
+    /// SampleDetailHeight is read-only and safe from either the sim or the main thread.
     ///
-    /// ★★ <c>Singleton&lt;T&gt;.exists</c> を**必ず先に見る**（全体レビュー M14）。
-    /// <c>Singleton&lt;T&gt;.instance</c> は <c>sInstance</c> が null のとき
-    /// <c>FindObjectOfType</c> と <c>new GameObject</c> を走らせる **main スレッド専用
-    /// API** で、sim スレッドから踏むと落ちる（<c>VolcanoReader</c> がこの MOD の
-    /// 規則としてそう書いている）。この型は⑤の調査（sim スレッド。そのあと不可逆に
-    /// 都市を壊す経路）からも呼ばれる。
+    /// ★★ **Always look at <c>Singleton&lt;T&gt;.exists</c> first** (overall review M14).
+    /// When <c>sInstance</c> is null, <c>Singleton&lt;T&gt;.instance</c> runs
+    /// <c>FindObjectOfType</c> and <c>new GameObject</c> — **main-thread-only APIs** that
+    /// crash if stepped on from the sim thread (<c>VolcanoReader</c> writes this down as a
+    /// rule of this mod). This type is also called from ⑤'s survey (sim thread; the path
+    /// that then goes on to wreck the city irreversibly).
     ///
-    /// 読めないときは <b>NaN</b> を返す。0 を返すと「海面の高さだった」と区別が付かず、
-    /// 呼び出し側は読めなかったことに気づけない。
+    /// Returns <b>NaN</b> when it cannot read. Return 0 and it is indistinguishable from
+    /// "the height was sea level", so the caller never notices the read failed.
     /// </summary>
     public class TerrainHeightSampler : IHeightSampler
     {

@@ -4,103 +4,114 @@ using System.Collections.Generic;
 namespace DisasterPlus.Tools.WaterSolverSim
 {
     /// <summary>
-    /// <b><c>WaterSimulation.SimulateWater</c> のオフライン再現。</b>
-    /// UnityEngine も Cities の API も使わない、素の .NET だけ。
+    /// <b>An offline reproduction of <c>WaterSimulation.SimulateWater</c>.</b>
+    /// Plain .NET only — no UnityEngine and no Cities API.
     ///
-    /// ── 何のためのものか ─────────────────────────────────────────
+    /// ── What it is for ─────────────────────────────────────────
     ///
-    /// 津波の発生源（<see cref="Impulse"/> ＝ TYPE_IMPACT の水波）を、
-    /// <b>ゲームを起動せずに</b>調整するため。MOD が実機で出す外力を
-    /// そのままここへ流し込み、海面が何 m 上がるか、波がどこまで走るかを測る。
+    /// To tune the tsunami source (<see cref="Impulse"/>, a TYPE_IMPACT water wave)
+    /// <b>without launching the game</b>. Feed in exactly the external force the mod applies
+    /// in the real game and measure how many metres the sea surface rises and how far the
+    /// wave runs.
     ///
-    /// ── ゲームとの対応 ───────────────────────────────────────────
+    /// ── How it maps onto the game ───────────────────────────────────────────
     ///
-    /// 実機は 1081x1081（<c>Cell[(1080+1)*(1080+1)]</c>、Awake IL_002B-0032）。
-    /// ここは <c>N x N</c> にしてある —— <b>格子の大きさは 1 セルあたりの物理に効かない</b>ので、
-    /// 512 まで落として確認を速くする。添字は実機と同じく <c>z*N + x</c>、
-    /// x も z も <c>0 .. N-1</c> の<b>両端込み</b>（実機の 0..1080 に相当）。
+    /// The game uses 1081x1081 (<c>Cell[(1080+1)*(1080+1)]</c>, Awake IL_002B-0032).
+    /// Here it is <c>N x N</c> —— <b>the size of the grid has no effect on the per-cell
+    /// physics</b>, so it is dropped to 512 to make checks faster. The index is <c>z*N + x</c>
+    /// as in the game, and x and z both run <c>0 .. N-1</c> <b>inclusive at both ends</b>
+    /// (the equivalent of the game's 0..1080).
     ///
-    /// ★ <b>1 回の <see cref="Step"/> が 1 回の SimulateWater 呼び出し</b>である。
-    ///   実機の SimulateWater は帯ではなく<b>盤面まるごと</b>を 1 回で処理する
-    ///   （唯一の外側ループ <c>for (loc46 = -5; loc46 &lt;= 1080; loc46++)</c>、IL_049D / IL_181B）。
+    /// ★ <b>One call to <see cref="Step"/> is one call to SimulateWater.</b>
+    ///   The game's SimulateWater processes <b>the whole board</b> in one go, not a strip
+    ///   (the single outer loop <c>for (loc46 = -5; loc46 &lt;= 1080; loc46++)</c>,
+    ///   IL_049D / IL_181B).
     ///
-    /// ── 3 段のソフトウェアパイプライン ────────────────────────────
+    /// ── A three-stage software pipeline ────────────────────────────
     ///
-    /// 外側ループ変数は z ではない。1 回の反復で
+    /// The outer loop variable is not z. In a single iteration
     /// <list type="bullet">
-    /// <item>描画タイル（IL_04A6）── **物理ではないので写していない**</item>
-    /// <item>流速の更新: z = loc46 + 3（IL_0670-0674）</item>
-    /// <item>質量の輸送 + 海面 + 外周: z = loc46（IL_0FEC-0FEE）</item>
+    /// <item>the render tile (IL_04A6) ── **not physics, so not reproduced here**</item>
+    /// <item>the velocity update: z = loc46 + 3 (IL_0670-0674)</item>
+    /// <item>mass transfer + sea level + outer ring: z = loc46 (IL_0FEC-0FEE)</item>
     /// </list>
-    /// が別々の行に対して走る。**この 3 行のずれは飾りではない**:
-    /// 輸送は流速の結果を読み、外周は輸送の結果を読むので、
-    /// 「全行の流速 → 全行の輸送」と 2 周に割ると結果が変わる。
+    /// each run on a different row. **The three-row offset is not decoration**:
+    /// transfer reads the result of the velocity stage and the ring reads the result of
+    /// transfer, so splitting it into two passes ("velocity for all rows, then transfer for
+    /// all rows") changes the result.
     /// </summary>
     internal sealed partial class WaterField
     {
-        /// <summary>高さの単位。1 単位 = 1/64 m（実機と同じ）。</summary>
+        /// <summary>Unit of height. 1 unit = 1/64 m (the same as the game).</summary>
         public const int UnitsPerMetre = 64;
 
-        /// <summary>1 セルの一辺（m）。実機の loc6 = 16f（IL_004E）。</summary>
+        /// <summary>Side length of one cell (m). The game's loc6 = 16f (IL_004E).</summary>
         public const float CellSizeMetres = 16f;
 
         private readonly int _n;
-        private readonly int _last;      // 最後の添字。実機の loc7 = 1080 に相当
+        private readonly int _last;      // last index; the equivalent of the game's loc7 = 1080
         private readonly ushort[] _terrain;
         private readonly Cell[] _bufferA;
         private readonly Cell[] _bufferB;
 
-        /// <summary>いま最新の状態が入っているほうの配列。</summary>
+        /// <summary>Whichever array currently holds the latest state.</summary>
         private Cell[] _current;
 
-        /// <summary>実機の <c>m_stepIndex</c>。**乱数の種であり、位相マスクの元でもある。**</summary>
+        /// <summary>The game's <c>m_stepIndex</c>. **It is the random seed and also the
+        /// source of the phase masks.**</summary>
         private int _stepIndex;
 
         private Lcg _rng;
 
-        /// <summary>実機の <c>m_currentSeaLevel</c>（m）。前フレームの海面。</summary>
+        /// <summary>The game's <c>m_currentSeaLevel</c> (m). The previous frame's sea
+        /// level.</summary>
         private float _appliedSeaLevel;
 
         private bool _resetWater;
 
-        /// <summary>実機の <c>m_nextSeaLevel</c>（m）。既定 40f（Awake IL_00F9-010E）。</summary>
+        /// <summary>The game's <c>m_nextSeaLevel</c> (m). Defaults to 40f
+        /// (Awake IL_00F9-010E).</summary>
         public float SeaLevel;
 
         /// <summary>
-        /// 外周に差し込む DLC の津波。null なら輪はただの海面固定。
+        /// The DLC tsunami injected at the outer ring. If null, the ring simply holds the
+        /// sea level fixed.
         ///
-        /// ★★ **これが在るときだけ、盤面は水を「もらう」ことができる。**
-        ///   <see cref="EdgeWave"/> のクラス doc を参照。
+        /// ★★ **Only when this is present can the board "receive" water.**
+        ///   See the class doc of <see cref="EdgeWave"/>.
         /// </summary>
         public EdgeWave Edge;
 
         /// <summary>
-        /// 震源に置く <c>WaterSource</c>（TYPE_NATURAL）。null なら何もしない。
+        /// The <c>WaterSource</c> (TYPE_NATURAL) placed at the epicentre. Does nothing if null.
         ///
-        /// ★★ **これが「境界条件をマップの真ん中へ持ってきた」もの**である
-        ///   （<see cref="SourceDisc"/> のクラス doc）。
+        /// ★★ **This is the thing that "brings the boundary condition to the middle of the
+        ///   map"** (the class doc of <see cref="SourceDisc"/>).
         /// </summary>
         internal SourceDisc Source;
 
-        /// <summary>断層に沿って並べた円。null なら <see cref="Source"/> だけを使う。</summary>
+        /// <summary>Circles laid out along the fault. If null, only <see cref="Source"/> is
+        /// used.</summary>
         internal SourceDisc[] Sources;
 
         /// <summary>
-        /// <c>SimulateWater</c> の唯一の引数 <c>m_finalPollutionDisposeRate</c>（IL_02D1-02E8）。
-        /// 汚染は水の動きに影響しないので、既定の 1 のままでよい。
+        /// <c>m_finalPollutionDisposeRate</c>, the only argument of <c>SimulateWater</c>
+        /// (IL_02D1-02E8). Pollution does not affect the motion of the water, so the default
+        /// of 1 is fine.
         /// </summary>
         public int PollutionDisposeRate = 1;
 
-        // ── 診断用カウンタ（ゲームには存在しない）────────────────────────
-        //   ★ 物理には一切触らない。総水量の増減を「どこで起きたか」に分解する
-        //     ためだけの数え上げ。理屈の上では
+        // ── Diagnostic counters (no counterpart in the game) ────────────────────────
+        //   ★ They never touch the physics. They only break the change in total water volume
+        //     down by "where it happened". In principle
         //       dV = RingAdded - RingRemoved - EvapRemoved - SatLost + SatGained
-        //     が**恒等式**になるはずで、ならなければどこかに未知の漏れがある。
-        public long RingAdded;      // 外周の輪が湧かせた量
-        public long RingRemoved;    // 外周の輪が捨てた量
-        public long EvapRemoved;    // 蒸発で消えた量
-        public long SatLost;        // Max(h-m,0) で消えた量（水の無いセルから汲んだぶん）
-        public long SatGained;      // Min(h+m,65535) で捨てた量（65535 で溢れたぶん）→ 実際は損失
+        //     should be an **identity**; if it is not, there is an unknown leak somewhere.
+        public long RingAdded;      // water created by the outer ring
+        public long RingRemoved;    // water discarded by the outer ring
+        public long EvapRemoved;    // water lost to evaporation
+        public long SatLost;        // water lost to Max(h-m,0) (drawn from a cell with no water)
+        public long SatGained;      // water discarded by Min(h+m,65535) (the overflow past
+                                    // 65535) -> in fact a loss
 
         public int Size { get { return _n; } }
         public int LastIndex { get { return _last; } }
@@ -108,11 +119,11 @@ namespace DisasterPlus.Tools.WaterSolverSim
         public Cell[] Cells { get { return _current; } }
         public int StepIndex { get { return _stepIndex; } }
 
-        /// <param name="n">一辺のセル数。実機は 1081。確認用は 512 で足りる。</param>
-        /// <param name="seaLevelMetres">海面（m）。実機の既定は 40f。</param>
+        /// <param name="n">Cells per side. The game uses 1081; 512 is enough for checks.</param>
+        /// <param name="seaLevelMetres">Sea level (m). The game's default is 40f.</param>
         public WaterField(int n, float seaLevelMetres)
         {
-            if (n < 4) throw new ArgumentOutOfRangeException("n", "格子が小さすぎる（外周の輪が潰れる）");
+            if (n < 4) throw new ArgumentOutOfRangeException("n", "grid too small (the outer ring collapses)");
 
             _n = n;
             _last = n - 1;
@@ -126,37 +137,40 @@ namespace DisasterPlus.Tools.WaterSolverSim
             _resetWater = false;
         }
 
-        /// <summary>海面（1/64 m）。実機の loc4 = <c>(int)(m_nextSeaLevel * 64f)</c>（IL_0036-003E）。</summary>
+        /// <summary>Sea level (1/64 m). The game's loc4 =
+        /// <c>(int)(m_nextSeaLevel * 64f)</c> (IL_0036-003E).</summary>
         public int SeaLevelUnits { get { return (int)(SeaLevel * 64f); } }
 
-        /// <summary>添字。実機は <c>z*1081 + x</c>（IL_079D-07A7）。</summary>
+        /// <summary>Index. The game uses <c>z*1081 + x</c> (IL_079D-07A7).</summary>
         public int Index(int x, int z) { return z * _n + x; }
 
-        /// <summary>水面の標高（1/64 m）＝ 地形 + 水柱。</summary>
+        /// <summary>Elevation of the water surface (1/64 m) = terrain + water column.</summary>
         public int SurfaceUnits(int x, int z)
         {
             int i = z * _n + x;
             return _terrain[i] + _current[i].Height;
         }
 
-        /// <summary>水面が海面より何 m 高いか（負なら低い）。</summary>
+        /// <summary>How many metres the water surface is above sea level (negative means
+        /// below).</summary>
         public float SurfaceAboveSeaMetres(int x, int z)
         {
             return (SurfaceUnits(x, z) - SeaLevelUnits) / (float)UnitsPerMetre;
         }
 
         /// <summary>
-        /// 平らな海を作る。地形を海面より <paramref name="depthMetres"/> だけ下げ、
-        /// 水をちょうど海面まで張る。
+        /// Builds a flat sea. Lowers the terrain <paramref name="depthMetres"/> below sea
+        /// level and fills the water exactly up to sea level.
         ///
-        /// ★ 張り方は実機の「海面パス・分岐 A」と同じ（IL_1589-15A7）:
-        ///   <c>h = min(seaLevel - terrain, 65535)</c>、0 以下ならセルごと空にする。
+        /// ★ The filling matches the game's "sea level pass, branch A" (IL_1589-15A7):
+        ///   <c>h = min(seaLevel - terrain, 65535)</c>, and if that is 0 or less the whole
+        ///   cell is cleared.
         /// </summary>
         public void FillFlatSea(float depthMetres)
         {
             int sea = SeaLevelUnits;
             int floor = sea - (int)(depthMetres * UnitsPerMetre);
-            if (floor < 0) floor = 0;              // 地形は ushort。海面より深く掘れる限界
+            if (floor < 0) floor = 0;              // terrain is ushort: max depth below sea level
             if (floor > 65535) floor = 65535;
 
             for (int i = 0; i < _terrain.Length; i++)
@@ -169,26 +183,30 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 _current[i] = c;
             }
 
-            // もう一方の配列にも同じものを入れておく。実機では「今フレーム触られなかった
-            // セル」が古い値のまま残るが、こちらは毎フレーム全セルを走査するので
-            // 1 フレーム目の書き込みで完全に上書きされる。念のため揃えておく。
+            // Put the same thing into the other array. In the game, "cells not touched this
+            // frame" keep their old values, but here every cell is visited every frame, so the
+            // writes of the first frame overwrite it completely. Match it anyway, to be safe.
             Array.Copy(_current, (_current == _bufferA) ? _bufferB : _bufferA, _current.Length);
         }
 
         /// <summary>
-        /// **深い海 → 大陸棚 → 海岸 → 陸**の断面を作る（+X 方向に浅くなる）。
+        /// Builds a **deep sea -&gt; continental shelf -&gt; shore -&gt; land** cross-section
+        /// (shallowing towards +X).
         ///
-        /// ★★ **陸の無い海で取った保証は、海岸には及ばない。**（2026-08-30）
-        ///   ソルバの流量は <c>v = min(v, m_height)</c> で<b>水深に頭打ち</b>される。
-        ///   実際の津波は浅瀬でせり上がる（shoaling）が、<b>この解法は逆に絞る</b> ——
-        ///   深い海で 20 m あった波も、10 m の棚に乗れば 1 歩に 10 m しか運べない。
-        ///   実機報告「震源では 82 m なのに海岸では高潮程度」はこれで説明が付く。
-        ///   だから<b>海岸で何 m 届くか</b>を測れるようにする。
+        /// ★★ **A guarantee obtained on a sea with no land does not extend to the shore.**
+        ///   (2026-08-30)
+        ///   The solver's flow is <b>capped by the water depth</b> via
+        ///   <c>v = min(v, m_height)</c>. A real tsunami piles up in shallow water (shoaling),
+        ///   but <b>this scheme does the opposite and throttles it</b> —— a wave that was 20 m
+        ///   in deep water can only carry 10 m per step once it is on a 10 m shelf.
+        ///   That explains the report from the game: "82 m at the epicentre but only about
+        ///   storm-surge height at the coast". So we make it possible to measure <b>how many
+        ///   metres actually arrive at the shore</b>.
         /// </summary>
-        /// <param name="deepMetres">沖の水深（m）。</param>
-        /// <param name="shelfStartCells">この列より +X 側で浅くなりはじめる。</param>
-        /// <param name="shoreCells">この列で水深 0（＝汀線）。以降は陸。</param>
-        /// <param name="landRiseMetres">汀線から先、1 セルあたり何 m 上がるか。</param>
+        /// <param name="deepMetres">Offshore water depth (m).</param>
+        /// <param name="shelfStartCells">Shallowing begins on the +X side of this column.</param>
+        /// <param name="shoreCells">Depth is 0 at this column (the shoreline). Beyond it is land.</param>
+        /// <param name="landRiseMetres">How many metres it rises per cell beyond the shoreline.</param>
         public void FillShelf(float deepMetres, int shelfStartCells, int shoreCells,
                               float landRiseMetres)
         {
@@ -212,7 +230,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     }
                     else
                     {
-                        // 陸。汀線から離れるほど高い。
+                        // Land. The further from the shoreline, the higher.
                         depth = -(x - shoreCells) * landRiseMetres;
                     }
 
@@ -234,7 +252,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
                        _current.Length);
         }
 
-        /// <summary>その列の海面が平常からどれだけ上がっているか（m）。</summary>
+        /// <summary>How far the water surface in that column has risen above its normal
+        /// level (m).</summary>
         public float ColumnRiseMetres(int x, int z)
         {
             int i = z * Size + x;
@@ -245,13 +264,14 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
-        /// そのセルに乗っている水の厚み（m）。
+        /// Thickness of the water sitting on that cell (m).
         ///
-        /// ★★ **陸を測るときは必ずこちらを使う。**<see cref="ColumnRiseMetres"/> は
-        ///   地形＋水柱から海面を引くので、<b>水の無い陸でも標高ぶん正の値を返す</b>。
-        ///   浸水距離をあれで測っていたせいで、どの条件でも「陸を全部飲んだ」と
-        ///   出ていた（2026-08-31 に判明。実機側の <c>SeaWatch</c> で踏んだのと
-        ///   まったく同じ穴である）。
+        /// ★★ **Always use this one when measuring over land.** <see cref="ColumnRiseMetres"/>
+        ///   subtracts sea level from terrain + water column, so <b>it returns a positive
+        ///   value equal to the elevation even on dry land</b>. Measuring the inundation
+        ///   distance with that was why every condition reported "the whole of the land was
+        ///   swallowed" (found on 2026-08-31; exactly the same pitfall that was hit in
+        ///   <c>SeaWatch</c> on the game side).
         /// </summary>
         public float WaterDepthMetres(int x, int z)
         {
@@ -261,15 +281,15 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
-        /// <b>1 回の <c>SimulateWater</c>。</b>
+        /// <b>One call of <c>SimulateWater</c>.</b>
         /// </summary>
-        /// <param name="impulses">この 1 フレームに効かせる TYPE_IMPACT の波。null 可。</param>
+        /// <param name="impulses">The TYPE_IMPACT waves to apply on this one frame. May be null.</param>
         public void Step(List<Impulse> impulses)
         {
-            // ── 海面のラッチ（IL_0000-004C）────────────────────────────
-            //   ★ 先頭で m_currentSeaLevel ← m_nextSeaLevel を**即座に**書く。
-            //     つまり oldSea は「前フレームの海面」で、seaLevelPass は
-            //     海面が変わったフレームにちょうど 1 回だけ立つ。
+            // ── Latching the sea level (IL_0000-004C) ────────────────────────────
+            //   ★ At the very top it writes m_currentSeaLevel <- m_nextSeaLevel **immediately**.
+            //     So oldSea is "the previous frame's sea level", and seaLevelPass is raised
+            //     exactly once, on the frame where the sea level changed.
             float oldSea = _appliedSeaLevel;
             float newSea = SeaLevel;
             bool reset = _resetWater;
@@ -280,38 +300,42 @@ namespace DisasterPlus.Tools.WaterSolverSim
             int newSea64 = (int)(newSea * 64f);
             bool seaLevelPass = (newSea64 != oldSea64) || reset;   // loc5, IL_0040-004C
 
-            // ── 位相マスク（IL_0234-02B8）──────────────────────────────
-            //   4 つのうち<b>ちょうど 1 つだけ</b>が全ビット 1 になる。
-            //   これは流量を按分するときの割り算を「切り上げ」に変える項で、
-            //   4 方向を 1 ステップずつ順に切り上げることで**丸めの偏りを消す**。
-            //   ★ ここを落とすと水が系統的に減り、津波の高さが合わなくなる。
+            // ── Phase masks (IL_0234-02B8) ──────────────────────────────
+            //   <b>Exactly one</b> of the four is all-bits-one.
+            //   This is the term that turns the division used to apportion flow into a
+            //   "round up", and rounding up one direction per step in turn **cancels the
+            //   rounding bias**.
+            //   ★ Drop this and water is lost systematically, and the tsunami height no
+            //     longer matches.
             int phase = _stepIndex & 3;
-            int mask0 = (phase == 0) ? int.MaxValue : 0;   // loc33 → 左隣の velocityX
-            int mask1 = (phase == 1) ? int.MaxValue : 0;   // loc34 → 自分の velocityX
-            int mask2 = (phase == 2) ? int.MaxValue : 0;   // loc35 → 上隣の velocityZ
-            int mask3 = (phase == 3) ? int.MaxValue : 0;   // loc36 → 自分の velocityZ
+            int mask0 = (phase == 0) ? int.MaxValue : 0;   // loc33 -> left neighbour's velocityX
+            int mask1 = (phase == 1) ? int.MaxValue : 0;   // loc34 -> own velocityX
+            int mask2 = (phase == 2) ? int.MaxValue : 0;   // loc35 -> upper neighbour's velocityZ
+            int mask3 = (phase == 3) ? int.MaxValue : 0;   // loc36 -> own velocityZ
             int maskPollution = (phase <= 1) ? int.MaxValue : 0;  // loc37, IL_029F-02B8
 
-            // ── 蒸発（IL_02BA-02CF、適用は IL_07D4 ほか）────────────────
-            //   ★ **4 フレームに 1 回、水のあるセルから 1/64 m ずつ減る。**
-            //     津波の寿命のあいだ効き続ける、無視できない排水である。
+            // ── Evaporation (IL_02BA-02CF, applied at IL_07D4 and others) ────────────────
+            //   ★ **Once every four frames, every cell with water loses 1/64 m.**
+            //     It keeps acting for the whole life of the tsunami; it is drainage that
+            //     cannot be ignored.
             ushort evaporation = (ushort)((phase == 0) ? 1 : 0);
             ushort pollutionDecay = (ushort)(((_stepIndex & 15) < PollutionDisposeRate) ? 1 : 0);
 
-            // ── 乱数（IL_02EA-0300）────────────────────────────────────
-            //   種は**増やす前**の m_stepIndex。1 フレームに 1 個だけ作る。
-            _rng = new Lcg((ulong)(long)_stepIndex);   // Randomizer::.ctor(Int32) は conv.i8（符号拡張）
+            // ── Random numbers (IL_02EA-0300) ────────────────────────────────────
+            //   The seed is m_stepIndex **before** it is incremented. Only one is made per frame.
+            _rng = new Lcg((ulong)(long)_stepIndex);   // Randomizer::.ctor(Int32) uses conv.i8 (sign extension)
             _stepIndex = _stepIndex + 1;
 
-            // ── 二重バッファ（IL_0213-0232）────────────────────────────
-            //   流速パスは src を読んで dst に書く。輸送・海面・外周は dst を
-            //   読み書きする。**同じ配列 1 本では再現できない。**
+            // ── Double buffering (IL_0213-0232) ────────────────────────────
+            //   The velocity pass reads src and writes dst. Transfer, sea level and the outer
+            //   ring read and write dst. **A single array cannot reproduce this.**
             Cell[] src = _current;
             Cell[] dst = (src == _bufferA) ? _bufferB : _bufferA;
 
-            // ── 唯一の外側ループ（IL_049D / IL_181B）──────────────────
-            //   実機は -5 から始めるが、先頭の 2 反復は描画タイル段のためだけの
-            //   助走で、物理には効かない。ここでは流速段の助走ぶん -3 から。
+            // ── The single outer loop (IL_049D / IL_181B) ──────────────────
+            //   The game starts at -5, but the first two iterations are run-up for the render
+            //   tile stage only and have no effect on the physics. Here we start at -3, the
+            //   run-up needed for the velocity stage.
             for (int cursor = -3; cursor <= _last; cursor++)
             {
                 int zFlow = cursor + 3;                     // IL_0670-0674
@@ -332,11 +356,11 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
             _current = dst;
 
-            // ★★ 水源は輪のあと（IL_184A は外周ループ IL_1690-1810 より後ろ）。
-            //    **_current の入れ替えより後**でなければならない —— 前に置くと
-            //    書き込み先が「今フレームで捨てられるほうの配列」になり、
-            //    水源が<b>まるごと無かったことになる</b>（2026-08-31 に踏んだ:
-            //    強度 100 と 255 が 1 ビットも違わない出力になって気付いた）。
+            // ★★ The water sources come after the ring (IL_184A is after the outer-ring loop
+            //    IL_1690-1810). It **must** be after the swap of _current —— put it before and
+            //    the writes land in "the array that gets thrown away this frame", so the water
+            //    source <b>amounts to nothing at all</b> (hit on 2026-08-31: noticed when
+            //    intensity 100 and 255 produced output that did not differ by a single bit).
             if (Sources != null)
             {
                 for (int k = 0; k < Sources.Length; k++) Sources[k].Apply(this);
@@ -345,9 +369,10 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
-        /// 海面パス（IL_153C-168B）。<b>海面が動いたフレームだけ</b>走る。
-        /// 海面を固定して回すぶんには一度も走らない —— つまり内側のセルには
-        /// 「海面へ引き戻す力」が<b>まったく無い</b>。波はそれ自体の慣性だけで走る。
+        /// The sea level pass (IL_153C-168B). Runs <b>only on frames where the sea level
+        /// moved</b>. Running with a fixed sea level, it never runs at all —— that is, the
+        /// interior cells have <b>no "force pulling them back to sea level" whatsoever</b>.
+        /// The wave travels on its own inertia alone.
         /// </summary>
         private void SeaLevelRow(int z, Cell[] buf, int oldSea64, int newSea64, bool reset)
         {
@@ -360,17 +385,19 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
                 if (c.Height == 0 || reset)
                 {
-                    // 分岐 A: 乾いたセル、または全面リセット。新しい海面まで一気に張る。
-                    // ★ 汚染と流速は**消さない**（IL_1598-15A7 は m_height しか書かない）。
+                    // Branch A: dry cell, or a full reset. Fill straight up to the new sea level.
+                    // ★ Pollution and velocity are **not** cleared (IL_1598-15A7 only writes
+                    //   m_height).
                     int h = newSea64 - terrain;
                     if (h > 0) c.Height = (ushort)Math.Min(h, 65535);
-                    else c = new Cell();               // initobj: 4 フィールドとも 0（IL_15D4）
+                    else c = new Cell();               // initobj: all four fields 0 (IL_15D4)
                 }
                 else
                 {
-                    // 分岐 B: 水のあるセル。海面の差ぶんだけずらすが、
-                    // **旧海面より 128（= 2 m）以上高い水面は差を減らして守る**（IL_15E7-1634）。
-                    // 山の上の湖が海面変動で溢れないための細工。
+                    // Branch B: a cell with water. Shift it by the sea level difference, but
+                    // **a surface more than 128 (= 2 m) above the old sea level is protected by
+                    // reducing that difference** (IL_15E7-1634). A trick to keep lakes up in the
+                    // mountains from overflowing when the sea level changes.
                     int delta = newSea64 - oldSea64;
                     if (surface > oldSea64 + 128)
                     {
@@ -387,14 +414,16 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
-        /// 外周の輪（IL_1690-1810）。<b>毎フレーム走る Dirichlet 境界。</b>
+        /// The outer ring (IL_1690-1810). <b>A Dirichlet boundary that runs every frame.</b>
         ///
-        /// 実機ではここが<b>津波の唯一の入口</b>で、<c>WaterWave.GetSeaLevel</c> を通した
-        /// 海面へ外周セルを強制的に合わせる。こちらは外力（<see cref="Impulse"/>）で
-        /// 内側から駆動するので、輪は<b>ただの海面固定</b>として使う —— 要件どおり。
+        /// In the game this is <b>the tsunami's only entrance</b>: it forces the outermost
+        /// cells to match the sea level as returned by <c>WaterWave.GetSeaLevel</c>. Here we
+        /// drive from the inside with an external force (<see cref="Impulse"/>), so the ring
+        /// is used as <b>nothing more than a sea level clamp</b> —— as required.
         ///
-        /// ★ z が 0 か最終行のときだけ全 x を回り、それ以外の行では x = 0 と x = 最終列
-        ///   だけを触る（IL_1699-16B1 の歩幅）。つまり触るのはちょうど盤面の縁だけ。
+        /// ★ Only when z is 0 or the last row does it walk every x; on other rows it touches
+        ///   only x = 0 and x = the last column (the stride at IL_1699-16B1). In other words
+        ///   it touches exactly the edge of the board.
         /// </summary>
         private void RingRow(int z, Cell[] buf, int baseLevel, int maskPollution)
         {
@@ -403,8 +432,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
             for (int x = 0; x <= _last; x += step, i += step)
             {
-                // ★★ 実機はここで WaterWave.GetSeaLevel を通す（IL_16C7-16F9）。
-                //    津波の入口はこの 1 行だけである。
+                // ★★ Here the game goes through WaterWave.GetSeaLevel (IL_16C7-16F9).
+                //    This single line is the tsunami's entrance.
                 int level = (Edge == null) ? baseLevel : Edge.LevelAt(x, z, baseLevel);
 
                 Cell c = buf[i];
@@ -412,12 +441,13 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
                 if (excess > 0 && c.Height != 0)
                 {
-                    // 余った水は**捨てる**。波は縁から出ていって戻ってこない。
+                    // Surplus water is **discarded**. A wave leaves through the edge and
+                    // never comes back.
                     if (excess > c.Height) excess = c.Height;
                     if (c.Pollution != 0)
                     {
                         int p = (excess * c.Pollution + ((c.Height - 1) & maskPollution)) / c.Height;
-                        c.Pollution = (ushort)(c.Pollution - p);   // ★ この汚染はどこにも行かず消滅する
+                        c.Pollution = (ushort)(c.Pollution - p);   // ★ this pollution goes nowhere; it vanishes
                     }
                     c.Height = (ushort)(c.Height - excess);
                     RingRemoved += excess;
@@ -425,14 +455,16 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 }
                 else if (excess < 0)
                 {
-                    // 足りなければ**湧かせる**。結果はちょうど level - terrain。
-                    // ★ ここに 65535 の頭打ちが無いのは IL のまま（IL_17B9-17C6 は conv.u2 だけ）。
+                    // If there is not enough, water is **created**. The result is exactly
+                    // level - terrain.
+                    // ★ The absence of a 65535 clamp here is as in the IL (IL_17B9-17C6 is
+                    //   just a conv.u2).
                     int before = c.Height;
                     c.Height = (ushort)(c.Height - excess);
-                    RingAdded += c.Height - before;   // ushort へ落ちたあとの実増分で数える
+                    RingAdded += c.Height - before;   // count the real gain after truncation to ushort
                     buf[i] = c;
                 }
-                // excess == 0、または excess > 0 で水が無い場合は何もしない。
+                // When excess == 0, or excess > 0 with no water, nothing is done.
             }
         }
     }

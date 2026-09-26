@@ -3,59 +3,64 @@ using System;
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// 1 回きりの録音から、**継ぎ目の無いループ**を切り出す純粋な関数。
-    /// エンジンに依らない（<c>UnityEngine</c> も Cities API も無し、net35 / net8.0 両対応）。
+    /// A pure function that cuts a **seamless loop** out of a one-shot recording.
+    /// Engine-free (no <c>UnityEngine</c>, no Cities API; works on both net35 and net8.0).
     ///
-    /// ── なぜ要るのか（実測）──────────────────────────────
+    /// ── Why it is needed (measured) ──────────────────────────────
     ///
-    /// 同梱した <c>erupting-volcano.wav</c> は、名前に反して**定常のアンビエンスではない**。
-    /// 1 秒ごとの RMS を測ると
+    /// The bundled <c>erupting-volcano.wav</c> is, despite its name, **not a steady
+    /// ambience**. Measure its RMS a second at a time and you get
     ///
     /// <code>
     /// 0.04 0.11 0.21 0.26 0.28 0.27 0.27 0.24 … 0.21 … 0.08 … 0.01 0.006 0.002 0.001
-    /// └ 立ち上がり ┘└──── 山（3〜13 秒）────┘└──── 減衰して無音（36 秒）────┘
+    /// └ onset ┘└──── the peak (3-13 s) ────┘└──── decaying into silence (36 s) ────┘
     /// </code>
     ///
-    /// つまり**噴火 1 回ぶんの録音**である。そのままループすると、36 秒ごとに
-    /// 「無音まで落ちて、いきなり大音量に戻る」を繰り返す。継ぎ目を消しても
-    /// この脈打ちは消えない —— 消すには**山の部分だけを回す**しかない。
+    /// In other words, it is **a recording of one eruption**. Loop it as it stands and
+    /// every 36 seconds it repeats "fall away to silence, then jump straight back to full
+    /// volume". Removing the seam does not remove that pulsing — the only cure is to
+    /// **loop the peak alone**.
     ///
-    /// 録音全体が持っている「立ち上がり → 山 → 減衰」の弧は捨てていない。
-    /// **その弧は⑤自身が既に持っている**（<c>VolcanoEruption.Envelope</c>）ので、
-    /// 音量の変化はそちらが与え、この波形は**質感だけ**を与える。役割を二重に持たせない。
+    /// The "onset → peak → decay" arc the whole recording carries is not thrown away.
+    /// **⑤ already has that arc of its own** (<c>VolcanoEruption.Envelope</c>), so the
+    /// volume shape comes from there and this waveform supplies **texture only**. No
+    /// giving one job to two places.
     ///
-    /// ── 継ぎ目の消し方 ─────────────────────────────────
+    /// ── How the seam is removed ─────────────────────────────────
     ///
-    /// ループ本体を <c>[start, start+length)</c> とし、その**先頭 <c>fade</c> フレーム**へ
-    /// 「ループ末尾のすぐ後ろに続いていたはずの音」<c>[start+length, start+length+fade)</c> を
-    /// 混ぜる:
+    /// Take the loop body as <c>[start, start+length)</c> and mix into its **first
+    /// <c>fade</c> frames** "the sound that would have carried on just past the end of the
+    /// loop", <c>[start+length, start+length+fade)</c>:
     ///
     /// <code>
     /// out[i] = src[start+i]                                        (i >= fade)
     /// out[i] = src[start+i]·√t + src[start+length+i]·√(1−t)        (i &lt; fade, t = i/fade)
     /// </code>
     ///
-    /// 再生が末尾から先頭へ戻る瞬間、出力は <c>src[start+length]</c>（＝末尾の続き）から
-    /// 始まり、<c>fade</c> かけて <c>src[start]</c> へ移る。**波形が跳ばないのでクリックが出ない。**
-    /// 重みが <c>√</c> なのは、無相関な雑音的素材でエネルギーを一定に保つためである
-    /// （線形にすると継ぎ目で音圧が凹む）。
+    /// At the instant playback wraps from the end back to the start, the output begins at
+    /// <c>src[start+length]</c> (i.e. the continuation of the end) and moves over to
+    /// <c>src[start]</c> across <c>fade</c>. **The waveform never jumps, so there is no
+    /// click.** The weights are <c>√</c> so that energy stays constant for uncorrelated
+    /// noise-like material (do it linearly and the level dips at the seam).
     ///
-    /// ★ <b>切り出せないときは元の配列をそのまま返す。</b> 短い wav に差し替えた人へ
-    ///   「無音」ではなく「継ぎ目のあるループ」を返すほうが、常にましである。
+    /// ★ <b>When it cannot cut a loop, it returns the original array as it stands.</b>
+    ///   For someone who swapped in a short wav, handing back "a loop with a seam" is
+    ///   always better than handing back silence.
     /// </summary>
     public static class LoopSlice
     {
         /// <summary>
-        /// ループを切り出す。**投げない。**
+        /// Cuts the loop. **It never throws.**
         /// </summary>
-        /// <param name="samples">インターリーブ済みのサンプル。</param>
-        /// <param name="channels">チャンネル数（1 以上）。</param>
-        /// <param name="startFrame">ループ先頭のフレーム番号。</param>
-        /// <param name="lengthFrames">ループの長さ（フレーム）。</param>
-        /// <param name="fadeFrames">継ぎ目に使うクロスフェード長（フレーム）。</param>
+        /// <param name="samples">Interleaved samples.</param>
+        /// <param name="channels">Channel count (1 or more).</param>
+        /// <param name="startFrame">The frame number where the loop starts.</param>
+        /// <param name="lengthFrames">The loop's length (frames).</param>
+        /// <param name="fadeFrames">The crossfade length used at the seam (frames).</param>
         /// <returns>
-        /// 切り出したインターリーブ配列。素材が足りない・引数がおかしいときは
-        /// <paramref name="samples"/> をそのまま返す（**null は返さない**）。
+        /// The interleaved array that was cut. If there is not enough material, or the
+        /// arguments make no sense, <paramref name="samples"/> comes back as it stands
+        /// (**it never returns null**).
         /// </returns>
         public static float[] Build(float[] samples, int channels,
                                     int startFrame, int lengthFrames, int fadeFrames)
@@ -67,7 +72,8 @@ namespace DisasterPlus.Core.Common
 
             int totalFrames = samples.Length / channels;
 
-            // 継ぎ目に混ぜる素材はループ末尾の**後ろ**から取る。そこまで無いなら切らない。
+            // The material mixed into the seam is taken from **past** the end of the loop.
+            // If there is not that much, do not cut at all.
             long needed = (long)startFrame + lengthFrames + fadeFrames;
             if (needed > totalFrames) return samples;
 
@@ -81,7 +87,8 @@ namespace DisasterPlus.Core.Common
             int tail = (startFrame + lengthFrames) * channels;
             for (int f = 0; f < fadeFrames; f++)
             {
-                // t は 0 → 1。t=0 で「末尾の続き」だけ、t=1 でループ先頭だけになる。
+                // t runs 0 → 1. At t=0 it is only "the continuation of the end", at t=1
+                // only the head of the loop.
                 double t = (f + 1) / (double)(fadeFrames + 1);
                 float headWeight = (float)Math.Sqrt(t);
                 float tailWeight = (float)Math.Sqrt(1.0 - t);
@@ -98,8 +105,9 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// 秒で指定する版。<paramref name="sampleRate"/> が 0 以下なら切らない。
-        /// **これが実際に使われる口**である（定数を秒で書けるほうが読める）。
+        /// The version that takes seconds. If <paramref name="sampleRate"/> is 0 or less,
+        /// it does not cut. **This is the entry point that actually gets used** (constants
+        /// written in seconds read better).
         /// </summary>
         public static float[] Build(float[] samples, int channels, int sampleRate,
                                     float startSeconds, float lengthSeconds, float fadeSeconds)

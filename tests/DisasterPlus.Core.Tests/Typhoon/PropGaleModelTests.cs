@@ -4,12 +4,13 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// 所有者の依頼（2026-08-22）「街に暴風および大雨による小さな建物の破壊や
-    /// 看板プロップの破壊…を発生させることです」。
+    /// The owner's request (2026-08-22): "to make the gale and the heavy rain destroy small
+    /// buildings and sign props… in the city".
     ///
-    /// ★★ <c>PropManager.ReleaseProp</c> は<b>取り消せない</b>。だからここが
-    ///    固定するのは「壊れること」より<b>壊れすぎないこと</b>である ——
-    ///    「台風が来たら看板が全部消える」は直せない壊れ方である。
+    /// ★★ <c>PropManager.ReleaseProp</c> <b>cannot be undone</b>. So what is pinned down
+    ///    here is less "that things break" than <b>that they do not break too much</b> ——
+    ///    "every sign in the city disappears when a typhoon comes" is a breakage that cannot
+    ///    be repaired.
     /// </summary>
     public class PropGaleModelTests
     {
@@ -18,16 +19,16 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void SignsGoAndBigThingsStay()
         {
-            Assert.Equal(1f, PropGaleModel.FragilityOf(1.2f), 4);      // 標識
-            Assert.Equal(1f, PropGaleModel.FragilityOf(3f), 4);        // 看板
-            Assert.Equal(0f, PropGaleModel.FragilityOf(12f), 4);       // 給水塔
-            Assert.InRange(PropGaleModel.FragilityOf(6f), 0.01f, 0.99f); // 街灯
+            Assert.Equal(1f, PropGaleModel.FragilityOf(1.2f), 4);      // a road sign
+            Assert.Equal(1f, PropGaleModel.FragilityOf(3f), 4);        // a billboard
+            Assert.Equal(0f, PropGaleModel.FragilityOf(12f), 4);       // a water tower
+            Assert.InRange(PropGaleModel.FragilityOf(6f), 0.01f, 0.99f); // a street light
         }
 
         [Fact]
         public void NothingMovesInAnOrdinaryBreeze()
         {
-            // ★ 台風の外側では 1 つも飛ばないこと。
+            // ★ Outside the typhoon not a single prop may be carried off.
             Assert.Equal(0f, PropGaleModel.TakeChance(10f, 1f), 5);
             Assert.Equal(0f, PropGaleModel.TakeChance(PropGaleModel.MinWindMetresPerSecond, 1f), 5);
         }
@@ -35,7 +36,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void EvenTheWorstStormNeverTakesEverythingAtOnce()
         {
-            // ★★ **ここが本丸である。** 1 回の判定で全部持っていかない。
+            // ★★ **This is the crux.** A single pass must never take everything.
             float worst = PropGaleModel.TakeChance(500f, 1f);
             Assert.True(worst <= PropGaleModel.MaxTakeRatio + 1e-4f,
                         "a single pass can take " + (worst * 100f) + "% of the props");
@@ -73,7 +74,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ALaterRoundGivesASurvivorAnotherChance()
         {
-            // ★ 回を進めないと、1 度助かった看板は二度と飛ばない（風が強くなっても）。
+            // ★ Without advancing the round, a sign that survived once is never carried off
+            //   again (however much the wind picks up).
             int changed = 0;
             for (ushort id = 1; id < 200; id++)
             {
@@ -100,7 +102,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void AboutHalfTheSignsSurviveTheWorstPass()
         {
-            // 実際に数える。**割合の式が意図どおりか**を、式ではなく結果で見る。
+            // Count them for real. We check **whether the ratio formula does what we meant**
+            // by the result rather than by the formula.
             int taken = 0;
             const int Count = 2000;
             for (ushort id = 1; id <= Count; id++)

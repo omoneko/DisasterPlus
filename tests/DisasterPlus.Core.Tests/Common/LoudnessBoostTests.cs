@@ -4,24 +4,27 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Common
 {
     /// <summary>
-    /// 所有者の依頼（2026-08-22）「噴火の音が…もう倍くらいの音量に」。
-    /// 素材のピークは既に -1.55 dBFS なので、**素直に 2 倍すると割れる**。
-    /// ここが固定するのは「小さい音は厳密に 2 倍、ピークは割れない」の 2 点である。
+    /// Owner's request (2026-08-22): "the eruption sound... make it about twice as loud".
+    /// The material already peaks at -1.55 dBFS, so **naively doubling it clips**.
+    /// What is pinned down here are two points: "quiet samples are multiplied by exactly
+    /// two, and the peak does not clip".
     /// </summary>
     public class LoudnessBoostTests
     {
-        /// <summary>同梱 erupting-volcano.wav の実測（peak 27412/32767、RMS 5330/32767）。</summary>
+        /// <summary>
+        /// Measured from the bundled erupting-volcano.wav (peak 27412/32767, RMS 5330/32767).
+        /// </summary>
         private const float MaterialPeak = 0.8366f;
         private const float MaterialRms = 0.1627f;
 
         [Fact]
         public void QuietSamplesAreMultipliedExactly()
         {
-            // RMS のあたりは膝より遥かに下なので、厳密に gain 倍でなければならない。
+            // The RMS region is far below the knee, so it must be exactly gain times.
             Assert.Equal(MaterialRms * 2f, LoudnessBoost.Shape(MaterialRms, 2f), 5);
             Assert.Equal(-MaterialRms * 2f, LoudnessBoost.Shape(-MaterialRms, 2f), 5);
 
-            // 膝のちょうど手前まで線形である。
+            // It is linear right up to just before the knee.
             float justBelow = LoudnessBoost.Threshold / 2f;
             Assert.Equal(LoudnessBoost.Threshold, LoudnessBoost.Shape(justBelow, 2f), 5);
         }
@@ -38,7 +41,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void NothingEverLeavesTheLegalRange()
         {
-            // 素材が差し替えられて既に割れかけていても、出力は必ず [-1,1] に収まる。
+            // Even if the material is swapped for one that is already close to clipping,
+            // the output always stays within [-1,1].
             foreach (float g in new[] { 1.5f, 2f, 4f, 100f })
             {
                 for (int i = -20; i <= 20; i++)
@@ -61,7 +65,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void LouderInputStaysLouderOutput()
         {
-            // 膝の中でも順序が入れ替わらない（入れ替わると波形が壊れる）。
+            // The ordering never swaps even inside the knee
+            // (if it swapped, the waveform would be broken).
             float previous = -1f;
             for (int i = 0; i <= 100; i++)
             {
@@ -74,7 +79,7 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void AGainOfOneOrLessChangesNothing()
         {
-            // 「小さくする」用途はこの型に無い。黙って縮めない。
+            // This type has no "make it quieter" use case. It never silently shrinks.
             Assert.Equal(0.4f, LoudnessBoost.Shape(0.4f, 1f), 6);
             Assert.Equal(0.4f, LoudnessBoost.Shape(0.4f, 0.5f), 6);
 

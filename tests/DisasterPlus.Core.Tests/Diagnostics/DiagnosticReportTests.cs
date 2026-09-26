@@ -45,7 +45,7 @@ namespace DisasterPlus.Core.Tests.Diagnostics
         [Fact]
         public void NullCollections_AreTreatedAsEmpty()
         {
-            // Game 層がうっかり null を渡してもオーバーレイが落ちないこと。
+            // The overlay must not fall over even if the Game layer carelessly passes null.
             var r = new DiagnosticReport(null, null, null);
             Assert.NotNull(r.Header);
             Assert.NotNull(r.Assumptions);
@@ -77,9 +77,9 @@ namespace DisasterPlus.Core.Tests.Diagnostics
         [Fact]
         public void Report_DefensivesCopy_ProtectsAgainstMutation()
         {
-            // 呼び出し元がリストを変更しても、レポートの counts は不変のままであること。
-            // これは sim スレッドで作ったレポートが、元のリストをクリアする level unload を
-            // 経ても正しい values を返し続ける必要があるから。
+            // Even if the caller modifies the list, the report's counts must stay unchanged.
+            // This is because a report built on the sim thread has to keep returning the
+            // correct values across a level unload that clears the original list.
             var assumptions = new List<AssumptionResult>
             {
                 new AssumptionResult("a", true, ""),
@@ -91,13 +91,13 @@ namespace DisasterPlus.Core.Tests.Diagnostics
             Assert.Equal(1, r.FailedCount);
             Assert.Equal(2, r.Assumptions.Count);
 
-            // 元のリストをクリア。
+            // Clear the original list.
             assumptions.Clear();
 
-            // レポートの counts は不変のまま。
+            // The report's counts are unchanged.
             Assert.Equal(1, r.PassedCount);
             Assert.Equal(1, r.FailedCount);
-            // レポートのコピーも元のリストの変更は反映されない。
+            // The report's copy does not reflect changes to the original list either.
             Assert.Equal(2, r.Assumptions.Count);
         }
 

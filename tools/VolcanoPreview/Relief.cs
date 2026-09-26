@@ -7,48 +7,52 @@ using DisasterPlus.Core.Volcano;
 namespace DisasterPlus.Tools.VolcanoPreview
 {
     /// <summary>
-    /// 「どこまで細かくできるか」を**数えて**決めるための計測。
+    /// A measurement that settles "how fine can we go" by **counting**.
     ///
-    /// 起伏を細かくしたくなるたびに「16 m 格子だから無理」と言うだけでは、
-    /// どこが本当の床なのかが誰にも分からない。ここでは
-    /// <see cref="VolcanoRelief.ValueNoise"/>（**実物**。書き直した近似ではない）を
-    /// ゲームと同じ 16 m 格子で標本化して、**極値密度**を数える。
+    /// Merely saying "impossible, it is a 16 m grid" every time someone wants finer relief
+    /// leaves nobody knowing where the real floor is. Here
+    /// <see cref="VolcanoRelief.ValueNoise"/> (**the real thing**, not a rewritten
+    /// approximation) is sampled on the same 16 m grid as the game and the **density of
+    /// extrema** is counted.
     ///
     /// <code>
-    /// 極値密度 = (1 セル進むごとに斜面の向きが反転した回数) / (セル数)
+    /// extrema density = (times the slope direction reverses per cell) / (number of cells)
     /// </code>
     ///
-    ///   - 滑らかな波なら 1 波長に 2 個 ＝ 2 / (波長 ÷ 16 m)
-    ///   - **市松模様なら 1 セルに 1 個 ＝ 0.5**（＝ 折り返している）
+    ///   - for a smooth wave, 2 per wavelength = 2 / (wavelength / 16 m)
+    ///   - **for a checkerboard, 1 per cell = 0.5** (i.e. it is aliasing)
     ///
-    /// この 1 つの数で「起伏か、ノイズか」を切り分けられる。
+    /// This single number separates "relief" from "noise".
     /// </summary>
     internal static class Relief
     {
         private const float Cell = VolcanoShape.RawCellSizeMetres;
 
         /// <summary>
-        /// 谷を数えるときの不感帯（m）。**これより小さい上下は起伏と数えない。**
-        /// 滑らかな円錐の円周は定数なので、無いと float の丸めを谷として数えてしまう。
+        /// The dead band when counting troughs (m). **Rises and falls smaller than this do not
+        /// count as relief.** The circumference of a smooth cone is constant, so without it
+        /// float rounding would be counted as troughs.
         /// </summary>
         private const float DeadBandMetres = 0.05f;
 
-        /// <summary>試す波長（m）。16 m 格子で 2 / 3 / 4 / 5 / 7 / 11 セル。</summary>
+        /// <summary>The wavelengths tried (m). On a 16 m grid: 2 / 3 / 4 / 5 / 7 / 11
+        /// cells.</summary>
         private static readonly float[] Wavelengths = { 32f, 48f, 64f, 80f, 110f, 170f };
 
         /// <summary>
-        /// **谷が「線」として繋がっているか。** 2026-08-22 のレビューが差し戻した点で、
-        /// ここまでの計測（1 本のノイズの極値密度）では捕まえられなかったものである。
+        /// **Whether the gullies join up as "lines".** This is what the review of 2026-08-22
+        /// sent back, and what the measurements up to that point (the extrema density of a
+        /// single noise source) could not catch.
         ///
-        /// 谷は半径方向に走るので:
+        /// The gullies run radially, so:
         ///
         /// <code>
-        /// 谷に沿って（半径方向）の極値密度 = 破線度。0 に近いほど溝が繋がっている
-        /// 谷を横切って（方位方向）の極値の数 = 谷の本数。多いほど細かい
+        /// extrema density along a groove (radial)  = dashedness. Closer to 0 = a joined groove
+        /// number of extrema across the grooves (azimuthal) = how many gullies. More = finer
         /// </code>
         ///
-        /// 破線に見えるのは**前者が大きいとき**である。後者だけを見ていると
-        /// 「本数は増えたが 1 本 1 本が点線」を緑にしてしまう。
+        /// It looks dashed **when the former is large**. Looking only at the latter, one ends
+        /// up passing "more of them, but each one a dotted line" as green.
         /// </summary>
         public static void Continuity(StringBuilder log, string label, VolcanoRelief relief,
                                       VolcanoForm form, float r, float h)
@@ -61,8 +65,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// 谷に沿って（半径方向）16 m ごとに歩いたときの極値密度。
-        /// 滑らかな円錐なら 0（単調に下るだけ）。
+        /// The extrema density when walking along a groove (radially) in 16 m steps.
+        /// For a smooth cone it is 0 (it only descends monotonically).
         /// </summary>
         private static float AlongGroove(VolcanoRelief relief, float r, float h,
                                          float fromFraction, float toFraction)
@@ -100,7 +104,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
             return counted > 0 ? reversals / (float)counted : 0f;
         }
 
-        /// <summary>半径 <paramref name="fraction"/>R の円周に沿った谷（極小）の数。</summary>
+        /// <summary>The number of troughs (minima) around the circle at radius
+        /// <paramref name="fraction"/>R.</summary>
         private static int Troughs(VolcanoRelief relief, float r, float h, float fraction)
         {
             float ring = fraction * r;
@@ -108,7 +113,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             int sign = 0;
             float previous = 0f;
 
-            // 円周を 16 m 刻みで歩く（ゲームの格子と同じ密度で数える）。
+            // Walk the circle in 16 m steps (count at the same density as the game's grid).
             int steps = (int)(2.0 * Math.PI * ring / Cell);
             if (steps < 16) steps = 16;
 
@@ -119,9 +124,10 @@ namespace DisasterPlus.Tools.VolcanoPreview
                                                   (float)(Math.Sin(th) * ring), r, h);
                 if (a > 0)
                 {
-                    // ★ 不感帯。滑らかな円錐の円周は定数なので、差は float の丸め
-                    //   （±1e-7 m）だけになって符号がでたらめに反転する。
-                    //   不感帯が無いと**起伏 0 の山が 83 本の谷を持つ**と報告した（実際に出た）。
+                    // ★ The dead band. The circumference of a smooth cone is constant, so the
+                    //   difference is nothing but float rounding (+/-1e-7 m) and the sign flips
+                    //   at random. Without the dead band it reported **a mountain with 0 relief
+                    //   as having 83 gullies** (that actually happened).
                     float delta = v - previous;
                     int next = delta > DeadBandMetres ? 1
                              : (delta < -DeadBandMetres ? -1 : sign);
@@ -164,17 +170,18 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// 4 km の直線に沿って 16 m ごとに <see cref="VolcanoRelief.ValueNoise"/> を
-        /// 標本化し、極値（1 階差分の符号反転）の密度を返す。
-        /// 格子に平行でない向き（斜め）で測る —— 平行に測ると格子点の上を通るので、
-        /// いちばん都合のよい値が出る。
+        /// Samples <see cref="VolcanoRelief.ValueNoise"/> every 16 m along a 4 km line and
+        /// returns the density of extrema (sign reversals of the first difference).
+        /// Measured along a direction that is not parallel to the grid (a diagonal) —— measure
+        /// it parallel and the samples land on grid points, which gives the most flattering
+        /// value possible.
         /// </summary>
         private static float ExtremaDensity(float wavelengthMetres)
         {
             const int Samples = 256;
             const uint Seed = 0x5EEDF14Eu;
 
-            // 斜め（1, 0.37）方向。格子と通約でない向きを選ぶ。
+            // The diagonal (1, 0.37) direction. A direction incommensurate with the grid.
             float ux = 1f, uz = 0.37f;
             float len = (float)Math.Sqrt(ux * ux + uz * uz);
             ux /= len; uz /= len;

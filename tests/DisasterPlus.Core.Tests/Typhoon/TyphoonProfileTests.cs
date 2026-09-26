@@ -5,16 +5,16 @@ namespace DisasterPlus.Core.Tests.Typhoon
 {
     public class TyphoonProfileTests
     {
-        // 実測されるまでプレハブ半径は不明。テストでは仮の値を渡し、
-        // 「この値に比例する」ことだけを固定する。
+        // The prefab radius is unknown until it has been measured. The tests pass a
+        // placeholder value and pin down only "it is proportional to this value".
         private const float Radius = 1000f;
 
         [Fact]
         public void StormRadiusUsesTheVanillaScatterFormula()
         {
             // §A-1 / §A-2: R = m_radius * (0.25 + intensity * 0.0075)
-            // ④の暴風域をこの式に合わせておくと、バニラが塗るハザード円盤と
-            // ④が表示する暴風域が同じ大きさになる。
+            // Matching feature no. 4's storm area to this formula makes the hazard disc
+            // vanilla paints and the storm area feature no. 4 displays the same size.
             Assert.Equal(Radius * 0.25f, TyphoonProfile.StormRadiusOf(0, Radius), 3);
             Assert.Equal(Radius * 1.0f, TyphoonProfile.StormRadiusOf(100, Radius), 3);
             Assert.Equal(Radius * 2.1625f, TyphoonProfile.StormRadiusOf(255, Radius), 3);
@@ -23,8 +23,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void UnknownPrefabRadiusGivesZeroNotAGuess()
         {
-            // ★ プレハブ値が読めない環境では、暴風域も強風域も 0 になり、
-            //    呼び出し側は何もしない。設計書 §6。
+            // ★ In an environment where the prefab value cannot be read, both the storm area
+            //    and the gale area become 0 and the caller does nothing. Design doc §6.
             Assert.Equal(0f, TyphoonProfile.StormRadiusOf(255, 0f), 4);
             Assert.Equal(0f, TyphoonProfile.GaleRadiusOf(255, 0f), 4);
             Assert.Equal(0f, TyphoonProfile.WindAt(0f, 255, 0f), 4);
@@ -74,7 +74,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void GarbageInputIsZeroNotNaN()
         {
-            // 壊れた読み取りで「風速 NaN」を表示しない。
+            // Never display "wind speed NaN" because of a broken reading.
             Assert.Equal(0f, TyphoonProfile.WindAt(float.NaN, 100, Radius), 4);
             Assert.Equal(0f, TyphoonProfile.WindAt(-1f, 100, Radius), 4);
         }
@@ -98,8 +98,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void BarIsAsciiOnlyAndItsLengthIsFixed()
         {
-            // ①の HazardLevel / ②の SeismicScale と同じ判断。
-            // CS の UI フォントに罫線素片がある保証は無い。
+            // The same decision as feature no. 1's HazardLevel and no. 2's SeismicScale.
+            // There is no guarantee that CS's UI font has box-drawing characters.
             for (int i = 0; i <= 1000; i += 13)
             {
                 string bar = TyphoonProfile.BarOf(i / 1000f);

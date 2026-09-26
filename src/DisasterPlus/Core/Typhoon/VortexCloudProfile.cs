@@ -1,91 +1,99 @@
 namespace DisasterPlus.Core.Typhoon
 {
     /// <summary>
-    /// 渦の雲の粒 1 個ぶんの性質。**バニラの <c>ParticleEffect</c> ＋ <c>ParticleSystem</c> の
-    /// 複製へそのまま書き込む数値表**である（<c>Game/Typhoon/TyphoonCloudFx.Clones</c>）。
+    /// The properties of one particle of the vortex cloud. **A table of numbers written
+    /// straight into clones of vanilla's <c>ParticleEffect</c> + <c>ParticleSystem</c>**
+    /// (<c>Game/Typhoon/TyphoonCloudFx.Clones</c>).
     ///
-    /// ── なぜ Core に在るのか ─────────────────────────────────
+    /// ── Why it lives in Core ─────────────────────────────────
     ///
-    /// ⑤の <c>EruptionAshProfile</c> とまったく同じ理由である。これらは
-    /// 「粒子がどう見えるか」を決める④の演出値であって Unity の API ではない。
-    /// Core に置いてあるので <c>tools/TyphoonPreview</c> が**ゲームを起動せずに
-    /// 同じ数字で渦を描ける** ——「見た目の変更は自分でオフラインに描画・計測してから
-    /// 実機テストを頼む」というこのプロジェクトの決まりは、数字が 2 か所にあると
-    /// 成立しない。
+    /// Exactly the same reason as ⑤'s <c>EruptionAshProfile</c>. These are ④'s presentation
+    /// values deciding "how the particles look"; they are not a Unity API.
+    /// Because they live in Core, <c>tools/TyphoonPreview</c> can **draw the vortex with the
+    /// same numbers without launching the game** — this project's rule, "for a visual change,
+    /// render and measure it yourself offline before asking for a test on real hardware",
+    /// does not hold if the numbers live in two places.
     ///
-    /// ── 実機側の対応（エフェクト実測文書 §A-6 / §B-4）────────────────────
+    /// ── What they map to in-game (measured-effects document §A-6 / §B-4) ─────────
     ///
     /// <code>
     /// LifeMinSeconds / LifeMaxSeconds  -> ParticleEffect.m_min/maxLifeTime
     /// SpeedMin / SpeedMax              -> ParticleEffect.m_min/maxStartSpeed
     /// SpawnAngleMinDegrees / Max       -> ParticleEffect.m_min/maxSpawnAngle
-    /// SizeFraction x 渦の外周半径       -> ParticleSystem.main.startSize
+    /// SizeFraction x the vortex's outer radius -> ParticleSystem.main.startSize
     /// GravityModifier                  -> ParticleSystem.main.gravityModifier
-    /// RateOverTime                     -> ParticleSystem.emission.rateOverTime  ★ 0 にしない
+    /// RateOverTime                     -> ParticleSystem.emission.rateOverTime  ★ never 0
     /// MaxParticles                     -> ParticleSystem.main.maxParticles
-    /// Red/Green/Blue Bright/Dark       -> ParticleSystem.main.startColor（2 色の階調）
+    /// Red/Green/Blue Bright/Dark       -> ParticleSystem.main.startColor (a gradient between two colours)
     /// </code>
     ///
-    /// <c>rateOverTime</c> を 0 にすると 1 粒も出ない（<c>emission.enabled</c> が false でも
-    /// <c>EmitParticles</c> が粒子数の乗数として読み続ける）。いちばん踏みやすい罠である。
+    /// Set <c>rateOverTime</c> to 0 and not a single particle is emitted (even with
+    /// <c>emission.enabled</c> false, <c>EmitParticles</c> keeps reading it as the particle
+    /// count multiplier). It is the easiest trap of all to fall into.
     ///
-    /// ── ★ 色は「入道雲」そのものである ────────────────────────────
+    /// ── ★ The colours are those of a cumulonimbus, exactly ───────────────────
     ///
-    /// 積乱雲は<b>上が日に照らされて白く、下は自分の厚みで光を通さず暗い</b>。
-    /// 粒子の色は <c>ParticleSystem</c> 側の共有状態で <c>RenderEffect</c> ごとには
-    /// 変えられない（§B-4）ので、**明るさを変えたい単位がそのまま複製の数**になる。
-    /// ④は 3 つ（雲底・塔・かなとこ）に割った。
+    /// A cumulonimbus is <b>white on top where the sun catches it, and dark underneath where
+    /// its own thickness stops the light</b>. Particle colour is shared state on the
+    /// <c>ParticleSystem</c> and cannot be varied per <c>RenderEffect</c> (§B-4), so
+    /// **the number of units whose brightness we want to vary is exactly the number of
+    /// clones**. ④ splits it into three (deck, tower, anvil).
     ///
-    /// 旧実装は 1 つの複製に <c>(0.60, 0.62, 0.66, 0.62)</c> という均一な灰色を入れていた。
-    /// 明暗が無いので、どんな形に置いても**煙の塊**にしか見えない。
+    /// The old implementation put a uniform grey, <c>(0.60, 0.62, 0.66, 0.62)</c>, into a
+    /// single clone. With no light and shade, whatever shape you arrange it into it only
+    /// ever looks like **a blob of smoke**.
     /// </summary>
     public struct VortexCloudProfile
     {
-        /// <summary>寿命の下限（秒）。</summary>
+        /// <summary>The lower bound on lifetime (seconds).</summary>
         public readonly float LifeMinSeconds;
 
-        /// <summary>寿命の上限（秒）。</summary>
+        /// <summary>The upper bound on lifetime (seconds).</summary>
         public readonly float LifeMaxSeconds;
 
-        /// <summary>初速の下限（m/秒）。**渦の形は初速ではなく「どこに湧かせるか」で作る。**</summary>
+        /// <summary>The lower bound on initial speed (m/s). **The vortex's shape comes from
+        /// where we spawn particles, not from their initial speed.**</summary>
         public readonly float SpeedMin;
 
-        /// <summary>初速の上限（m/秒）。</summary>
+        /// <summary>The upper bound on initial speed (m/s).</summary>
         public readonly float SpeedMax;
 
-        /// <summary>放出角の下限（度）。0 が軸方向（＝上）、90 が真横である。</summary>
+        /// <summary>The lower bound on the emission angle (degrees). 0 is along the axis
+        /// (i.e. up) and 90 is straight out sideways.</summary>
         public readonly float SpawnAngleMinDegrees;
 
-        /// <summary>放出角の上限（度）。</summary>
+        /// <summary>The upper bound on the emission angle (degrees).</summary>
         public readonly float SpawnAngleMaxDegrees;
 
-        /// <summary>粒 1 個の大きさ ÷ 渦の外周半径。</summary>
+        /// <summary>One particle's size ÷ the vortex's outer radius.</summary>
         public readonly float SizeFraction;
 
-        /// <summary>重力の倍率（負なら浮く）。</summary>
+        /// <summary>The gravity multiplier (negative to float upwards).</summary>
         public readonly float GravityModifier;
 
-        /// <summary>粒子数の乗数。**0 にしない。**</summary>
+        /// <summary>The particle count multiplier. **Never 0.**</summary>
         public readonly float RateOverTime;
 
-        /// <summary>この粒子系が抱える粒の上限。超えた分は自動で絞られる（§B-4）。</summary>
+        /// <summary>The cap on particles this system holds. Anything beyond it is throttled
+        /// automatically (§B-4).</summary>
         public readonly int MaxParticles;
 
-        /// <summary>明るい側の色（0..1）。</summary>
+        /// <summary>The colour on the bright side (0..1).</summary>
         public readonly float BrightRed;
 
         public readonly float BrightGreen;
 
         public readonly float BrightBlue;
 
-        /// <summary>暗い側の色（0..1）。<c>startColor</c> はこの 2 色のあいだで抽選される。</summary>
+        /// <summary>The colour on the dark side (0..1). <c>startColor</c> is drawn from
+        /// between these two colours.</summary>
         public readonly float DarkRed;
 
         public readonly float DarkGreen;
 
         public readonly float DarkBlue;
 
-        /// <summary>不透明度（0..1）。**重なって濃くなる**ので 1 にはしない。</summary>
+        /// <summary>Opacity (0..1). Never 1, because **they stack up and get denser**.</summary>
         public readonly float Alpha;
 
         public VortexCloudProfile(float lifeMinSeconds, float lifeMaxSeconds,
@@ -117,10 +125,11 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// <b>雲底</b>。**暗い青灰色**で、大きく、ほとんど動かず、わずかに沈む。
-        /// 入道雲の下面は雨を降らせている側なので、いちばん暗い。
-        /// 放出角を広く取って**横に平たく**広がらせる（軸は上向きなので、
-        /// 角度が大きいほど横向きの初速になる）。
+        /// <b>The deck.</b> **A dark blue-grey**, large, barely moving, sinking slightly.
+        /// The underside of a cumulonimbus is the side dropping the rain, so it is the
+        /// darkest.
+        /// The emission angle is wide so it spreads out **flat and sideways** (the axis
+        /// points up, so the larger the angle the more sideways the initial speed).
         /// </summary>
         public static VortexCloudProfile Deck
         {
@@ -136,10 +145,11 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// <b>塔</b>。**明るい灰白色**で、粒が小さく、上へ盛り上がる。
-        /// 放出角を狭く（0〜38 度）取ってあるので粒は上向きに散り、
-        /// <see cref="VortexPuffLayout"/> が積んだ 2 段の帯とあわせて
-        /// <b>もこもこした縦の塊</b>になる。
+        /// <b>The tower.</b> **A bright grey-white**, with smaller particles, billowing
+        /// upwards. The emission angle is narrow (0-38 degrees) so the particles scatter
+        /// upwards, and together with the two stacked bands
+        /// <see cref="VortexPuffLayout"/> lays down they make <b>a billowing vertical
+        /// mass</b>.
         /// </summary>
         public static VortexCloudProfile Tower
         {
@@ -155,9 +165,10 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// <b>かなとこ</b>。**いちばん白く、いちばん大きく、いちばん長生き**（26〜48 秒）。
-        /// 放出角 70〜100 度＝**ほぼ水平に広がる**。滞留して積み上がることで
-        /// 平たい天蓋になる（⑤の噴煙の傘と同じ作り）。
+        /// <b>The anvil.</b> **The whitest, the largest and the longest-lived** (26-48
+        /// seconds). An emission angle of 70-100 degrees = **spreading out almost
+        /// horizontally**. By lingering and piling up it forms a flat canopy (built the same
+        /// way as ⑤'s plume umbrella).
         /// </summary>
         public static VortexCloudProfile Canopy
         {
@@ -172,7 +183,8 @@ namespace DisasterPlus.Core.Typhoon
             }
         }
 
-        /// <summary>層から数値表を引く。**Game も preview もここを通る。**</summary>
+        /// <summary>Looks up the table of numbers by layer. **Both Game and the preview go
+        /// through here.**</summary>
         public static VortexCloudProfile Of(VortexCloudLayer layer)
         {
             if (layer == VortexCloudLayer.Deck) return Deck;

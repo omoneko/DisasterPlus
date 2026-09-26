@@ -4,7 +4,7 @@ using DisasterPlus.Core.Typhoon;
 
 namespace DisasterPlus.Tools.TyphoonPreview
 {
-    /// <summary>1 粒子ぶん（描画用）。</summary>
+    /// <summary>One particle (for rendering).</summary>
     internal struct Speck
     {
         public float X;
@@ -18,39 +18,42 @@ namespace DisasterPlus.Tools.TyphoonPreview
     }
 
     /// <summary>
-    /// <see cref="VortexPuffLayout"/> と <see cref="VortexCloudProfile"/> が決めた渦を、
-    /// **バニラの <c>ParticleEffect.EmitParticles</c> の IL 実測（エフェクト実測文書 §B-4）を
-    /// そのまま写して**粒子の雲に展開する。ゲームは起動しない。
+    /// Expands the vortex laid out by <see cref="VortexPuffLayout"/> and
+    /// <see cref="VortexCloudProfile"/> into a cloud of particles, **copied straight from the
+    /// IL measurements of vanilla's <c>ParticleEffect.EmitParticles</c> (the effects
+    /// measurement document, §B-4)**. The game is not launched.
     ///
     /// <code>
-    /// 位置 = 段の中心 + 円盤(半径 disc) + 上 × [0, band)
-    /// 速度 = 段の velocity + (上·cos a + 横·sin a) × speed        a = 放出角
-    /// 年齢 = [0, 寿命) の一様分布（＝定常状態の分布）
-    /// 数   ∝ max(100, π disc²) × magnitude × rateOverTime × 寿命
+    /// position = puff centre + disc(radius disc) + up × [0, band)
+    /// velocity = puff velocity + (up·cos a + sideways·sin a) × speed   a = spawn angle
+    /// age      = uniform over [0, lifetime), i.e. the steady-state distribution
+    /// count    ∝ max(100, π disc²) × magnitude × rateOverTime × lifetime
     /// </code>
     ///
-    /// ★ 実機では <c>maxParticles</c> の自動絞り込み（<c>pps ×= 1 − fill²</c>）が効いて
-    ///   **必ず頭打ちになる**ので、ここでも層ごとの粒子総数を
-    ///   <c>VortexCloudProfile.MaxParticles</c> に固定し、段ごとの配分だけを
-    ///   <c>magnitude × disc²</c>（＝ 実機の 1 秒あたりの湧き数）× 寿命の比で決める。
-    ///   これが実機の定常状態である。
+    /// ★ In the game the automatic throttling of <c>maxParticles</c>
+    ///   (<c>pps ×= 1 − fill²</c>) kicks in and **always caps it**, so here too the total
+    ///   particle count per layer is fixed at <c>VortexCloudProfile.MaxParticles</c> and only
+    ///   the distribution across puffs is decided by the ratio of <c>magnitude × disc²</c>
+    ///   (i.e. the game's spawns per second) × lifetime.
+    ///   This is the game's steady state.
     ///
-    /// ★ 乱数は <see cref="DeterministicRandom"/> だけ（Core と同じ規律）。
-    ///   同じ絵が何度でも出る。
+    /// ★ The only randomness is <see cref="DeterministicRandom"/> (the same discipline as
+    ///   Core). The same picture comes out every time.
     /// </summary>
     internal static class Vortex
     {
-        /// <summary>実機の <c>TyphoonCloudFx.VortexRadiusMetres</c> と同じ規則。</summary>
+        /// <summary>The same rule as the game's
+        /// <c>TyphoonCloudFx.VortexRadiusMetres</c>.</summary>
         internal const float VortexRadiusFactor = 1.35f;
 
-        // ★ ゲーム側（TyphoonCloudFx.MaxVortexRadiusMetres）と同じ値にしておくこと。
-        //   2026-08-22 に 6000 → 8640（マップ半辺）へ上げた ——
-        //   6000 で切っていた頃は、強度 111 より上で雲が大きくならなかった。
+        // ★ Keep this the same as the game side (TyphoonCloudFx.MaxVortexRadiusMetres).
+        //   On 2026-08-22 it was raised from 6000 to 8640 (half the map's side) ——
+        //   while it was clamped at 6000, the cloud stopped growing above intensity 111.
         internal const float MaxVortexRadiusMetres = 8640f;
 
         internal const float MinVortexRadiusMetres = 900f;
 
-        /// <summary>暴風域半径（m）から渦の外周半径（m）を出す。</summary>
+        /// <summary>Derives the vortex's outer radius (m) from the storm radius (m).</summary>
         internal static float RadiusOf(float stormRadiusMetres)
         {
             float r = stormRadiusMetres * VortexRadiusFactor;
@@ -59,10 +62,11 @@ namespace DisasterPlus.Tools.TyphoonPreview
             return r;
         }
 
-        /// <summary>この重力（m/s²）に <c>GravityModifier</c> が掛かる（Unity と同じ）。</summary>
+        /// <summary><c>GravityModifier</c> multiplies this gravity (m/s²), as in Unity.</summary>
         private const float Gravity = 9.81f;
 
-        /// <summary>実機の <c>TyphoonCloudFx</c> と同じ値。**ずらさないこと。**</summary>
+        /// <summary>The same value as the game's <c>TyphoonCloudFx</c>. **Do not let it
+        /// drift.**</summary>
         internal const float ThicknessMetres = 2200f;
 
         internal const float SwirlMetresPerSecond = 34f;
@@ -80,8 +84,9 @@ namespace DisasterPlus.Tools.TyphoonPreview
         internal const float MaxSizeMetres = 900f;
 
         /// <summary>
-        /// 渦ぜんぶを粒子へ展開する。<paramref name="radius"/> は強風域半径（m）。
-        /// <paramref name="spinDegrees"/> は渦の回転角（実機の <c>TyphoonCloud</c> と同じ）。
+        /// Expands the whole vortex into particles. <paramref name="radius"/> is the gale
+        /// radius (m). <paramref name="spinDegrees"/> is the vortex's rotation angle (the same
+        /// as the game's <c>TyphoonCloud</c>).
         /// </summary>
         internal static Speck[] Build(float radius, float spinDegrees, uint seed)
         {
@@ -92,7 +97,8 @@ namespace DisasterPlus.Tools.TyphoonPreview
                 var layer = (VortexCloudLayer)layerIndex;
                 VortexCloudProfile profile = VortexCloudProfile.Of(layer);
 
-                // 段ごとの配分（1 秒あたりの湧き数 × 寿命 ＝ 定常状態の在庫の比）。
+                // The distribution across puffs (spawns per second x lifetime = the ratio of
+                // the steady-state population).
                 var share = new float[VortexPuffLayout.PuffCount];
                 float total = 0f;
                 for (int i = 0; i < VortexPuffLayout.PuffCount; i++)
@@ -156,14 +162,15 @@ namespace DisasterPlus.Tools.TyphoonPreview
                         float u7 = DeterministicRandom.Unit(seed, draw * 9u + 7u);
                         float u8 = DeterministicRandom.Unit(seed, draw * 9u + 8u);
 
-                        // 湧く場所: 円盤 × [0, band)（IL 実測の EmitParticles と同じ）。
+                        // Spawn position: disc × [0, band) (the same as EmitParticles as
+                        // measured from the IL).
                         double theta = 2.0 * Math.PI * u1;
                         float rr = (float)Math.Sqrt(u2) * disc;
                         float px = centreX + (float)Math.Cos(theta) * rr;
                         float py = centreY + u3 * band;
                         float pz = centreZ + (float)Math.Sin(theta) * rr;
 
-                        // 初速: 軸（上）を放出角ぶん傾けた向き。
+                        // Initial velocity: the axis (up) tilted by the spawn angle.
                         float ang = (profile.SpawnAngleMinDegrees
                                      + (profile.SpawnAngleMaxDegrees
                                         - profile.SpawnAngleMinDegrees) * u4)
@@ -184,7 +191,8 @@ namespace DisasterPlus.Tools.TyphoonPreview
                         py += vy * age - 0.5f * Gravity * profile.GravityModifier * age * age;
                         pz += vz * age;
 
-                        // 色は 2 色の階調から 1 つ（ParticleSystem.MinMaxGradient と同じ）。
+                        // The colour is one point on a two-colour gradient (the same as
+                        // ParticleSystem.MinMaxGradient).
                         float k = DeterministicRandom.Unit(seed + 1u, draw);
                         var speck = new Speck();
                         speck.X = px;

@@ -5,11 +5,12 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// <b>地図に引く進路。</b>（2026-09-02、所有者「台風の進路…を都市マップ上に示す」）
+    /// <b>The track drawn on the map.</b> (2026-09-02, owner: "show the typhoon's
+    /// track ... on the city map")
     ///
-    /// ★ 経路そのものは <see cref="TyphoonTrackTests"/> が固定している。
-    ///   ここが守るのは<b>描画側との約束</b>だけ ——
-    ///   読めない値では 1 本も引かないこと、確保しないこと、溢れないこと。
+    /// ★ The path itself is pinned down by <see cref="TyphoonTrackTests"/>.
+    ///   What is guarded here is only the <b>contract with the drawing side</b> ——
+    ///   from unreadable values draw not a single line, allocate nothing, overflow nothing.
     /// </summary>
     public class TyphoonTrackPlanTests
     {
@@ -25,7 +26,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void It_agrees_with_the_track_it_came_from()
         {
-            // ★★ **描画が別の式で線を引いたら、地図の線と実際の台風がずれる。**
+            // ★★ **If the drawing side draws the line with a different formula, the line
+            //    on the map and the actual typhoon drift apart.**
             var origin = new Vec2(1000f, -500f);
             var plan = Plan(origin, 42u);
 
@@ -47,8 +49,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void An_unreadable_prefab_draws_nothing()
         {
-            // ★★ 速度 0 は「持続時間が読めなかった」であって「止まっている」ではない。
-            //    読めていない値から線を引いたら、推測を地図に描くことになる。
+            // ★★ Speed 0 means "the lifetime could not be read", not "it is standing still".
+            //    Drawing a line from a value we never read means painting a guess on the map.
             var dead = new TyphoonTrackPlan(new Vec2(0f, 0f), 1u, 0f, 0u, Lifetime);
             Assert.False(dead.Usable);
             Assert.Equal(0, dead.Sample(new Vec2[16], 16, 0u, Lifetime));
@@ -69,7 +71,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
             int n = plan.Sample(buffer, 40, 0u, Lifetime);
             Assert.Equal(40, n);
 
-            // 端がちょうど from と to であること（線が途中で始まったり終わったりしない）。
+            // The ends are exactly from and to (the line does not start or end part-way).
             var first = plan.CentreAt(0u);
             var last = plan.CentreAt(Lifetime);
             Assert.Equal(first.X, buffer[0].X, 3);
@@ -82,7 +84,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
             var plan = Plan(new Vec2(0f, 0f), 3u);
             var small = new Vec2[8];
 
-            // 要求が配列より大きくても、配列の長さで止まること。
+            // Even when more is requested than the array holds, it stops at the array length.
             Assert.Equal(8, plan.Sample(small, 999, 0u, Lifetime));
 
             Assert.Equal(0, plan.Sample(null, 8, 0u, Lifetime));
@@ -102,15 +104,15 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void A_long_span_does_not_overflow()
         {
-            // ★ span * i を uint のまま計算すると、寿命が長く count が大きいときに
-            //   溢れて**経路が折り返す**。long で割ってから戻している。
+            // ★ Computing span * i in uint overflows when the lifetime is long and count
+            //   is large, and **the track folds back**. We divide in long and cast back.
             var plan = new TyphoonTrackPlan(new Vec2(0f, 0f), 9u, 3f, 0u, uint.MaxValue / 2u);
             var buffer = new Vec2[256];
 
             int n = plan.Sample(buffer, 256, 0u, uint.MaxValue / 2u);
             Assert.Equal(256, n);
 
-            // 単調に進んでいること（折り返していたら、どこかで戻る）。
+            // It advances monotonically (a fold-back would go backwards somewhere).
             uint previous = 0u;
             for (int i = 1; i < n; i++)
             {

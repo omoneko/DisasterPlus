@@ -5,36 +5,41 @@ using DisasterPlus.Core.Typhoon;
 namespace DisasterPlus.Tools.TyphoonPreview
 {
     /// <summary>
-    /// <b>吹き付ける雨</b>（<see cref="SquallLayout"/>）を、
-    /// <c>ParticleEffect.EmitParticles</c> の IL 実測（§B-4）をそのまま写して
-    /// 粒子に展開する。ゲームは起動しない。数式は <see cref="Vortex"/> と同じ。
+    /// Expands the <b>driving rain</b> (<see cref="SquallLayout"/>) into particles, copied
+    /// straight from the IL measurements of <c>ParticleEffect.EmitParticles</c> (§B-4).
+    /// The game is not launched. The maths is the same as <see cref="Vortex"/>.
     ///
-    /// ★ 実機と違うのは 1 点だけ: <c>maxParticles</c> の自動絞り込みを、
-    ///   ここでは「総数を <c>SquallLayout.MaxParticles</c> に固定して段の比だけ使う」
-    ///   という形で再現している。定常状態の絵はこれで一致する。
+    /// ★ There is only one difference from the game: the automatic throttling of
+    ///   <c>maxParticles</c> is reproduced here as "fix the total at
+    ///   <c>SquallLayout.MaxParticles</c> and use only the ratio between patches".
+    ///   The steady-state picture matches with that.
     /// </summary>
     internal static class Squall
     {
         private const float Gravity = 9.81f;
 
         /// <summary>
-        /// カメラの高さ <paramref name="cameraHeight"/> m、吹き付けの強さ
-        /// <paramref name="strength"/> [0,1] のときの飛沫。原点はカメラの真下の地面。
+        /// The spray at a camera height of <paramref name="cameraHeight"/> m and a squall
+        /// strength of <paramref name="strength"/> [0,1]. The origin is the ground directly
+        /// below the camera.
         /// </summary>
         internal static Speck[] Build(float cameraHeight, float strength, uint seed)
         {
             var list = new System.Collections.Generic.List<Speck>();
             if (!(strength > 0f)) return list.ToArray();
 
-            // 風は +X 向き（真横から吹いてくる絵にする）。実機は台風の接線＋吸い込み。
+            // The wind blows towards +X (so the picture shows it coming in from the side). In
+            // the game it is the typhoon's tangential component plus the inflow.
             float drift = SquallLayout.DriftMetresPerSecond * strength;
             float driftX = drift;
             float driftZ = 0f;
 
-            // ★ 実機と同じ規則。原点はカメラの真下の**地面**（y = 0）である。
+            // ★ The same rule as the game. The origin is the **ground** directly below the
+            //   camera (y = 0).
             float spread = SquallLayout.SpreadFor(cameraHeight);
 
-            // 段ごとの配分（1 秒あたりの湧き数 × 寿命 ＝ 定常状態の在庫の比）。
+            // The distribution across patches (spawns per second x lifetime = the ratio of the
+            // steady-state population).
             var share = new float[SquallLayout.PatchCount];
             float total = 0f;
             for (int i = 0; i < SquallLayout.PatchCount; i++)

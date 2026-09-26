@@ -1,79 +1,89 @@
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// バニラの強度スライダーの生値（0〜255）を、⑤の「山の大きさの倍率」に読み替える。
+    /// Reinterprets the raw value of vanilla's intensity slider (0-255) as ⑤'s "multiplier
+    /// on the size of the mountain".
     ///
-    /// ── なぜ倍率なのか ───────────────────────────────────
+    /// ── Why a multiplier ───────────────────────────────────
     ///
-    /// バニラの災害は「タイルを選ぶ → 強度スライダー → 地図をクリック」で起きる。
-    /// ⑤にも同じ流れを与える、というのが所有者の依頼である。ところが⑤には
-    /// 「強度」に相当する量が無い —— ⑤が持っているのは<b>形態・半径・最終高</b>で、
-    /// それは設定画面にある。そこでスライダーを<b>設定のサイズに対する倍率</b>として読む。
+    /// A vanilla disaster happens via "pick a tile → intensity slider → click the map".
+    /// The owner asked for ⑤ to have the same flow. But ⑤ has no quantity corresponding to
+    /// "intensity" — what ⑤ has is <b>form, radius and final height</b>, and those live in
+    /// the settings screen. So we read the slider as <b>a multiplier on the configured
+    /// size</b>.
     ///
-    ///   - <see cref="AnchorRaw"/>（55、表示 5.5。ゲーム自身の既定値）＝ <b>推奨サイズ</b>
-    ///   - 生値が 2 倍なら山も 2 倍（半径も最終高も同じ倍率で伸びる）
+    ///   - <see cref="AnchorRaw"/> (55, displayed as 5.5; the game's own default) =
+    ///     <b>the recommended size</b>
+    ///   - Double the raw value and the mountain doubles (the radius and the final height
+    ///     both grow by the same factor)
     ///
-    /// ── ★★ 基準は**形態ごとの推奨値**である（2026-08-22）──────────
+    /// ── ★★ The baseline is **the recommended value per form** (2026-08-22) ──────
     ///
-    /// 以前は設定画面の「半径」「最終高」のスライダーが基準だった。所有者の指摘:
+    /// The baseline used to be the "radius" and "final height" sliders on the settings
+    /// screen. The owner pointed out:
     ///
-    /// > Option 画面で噴火半径と高さを変えられるようにしていますが、
-    /// > これだとスケール調整が意味なくなるので、推奨設定でここは固定してほしい
+    /// > You've made the eruption radius and height adjustable on the Options screen, but
+    /// > that makes the scale adjustment meaningless — please fix these at the recommended
+    /// > settings.
     ///
-    /// そのとおりで、**同じ量を 2 つのつまみで決めさせていた**。今の基準は
-    /// <c>VolcanoShape.DefaultRadiusOf</c> / <c>DefaultHeightOf</c>（形態ごとの推奨値）で、
-    /// 大きさを決めるつまみは<b>スライダー 1 本だけ</b>である。
-    /// 実際に何メートルになるかは
-    /// 形態ごとの帯（<see cref="VolcanoShape.RadiusFor"/> /
-    /// <see cref="VolcanoShape.HeightFor"/>）が最後にクランプし、
-    /// **クランプ後の実寸は火山タブの影響範囲の行と診断ダンプが名乗る**
-    /// （2026-08-21 に確認の窓を撤去したので、実寸を先に見せる段はもう無い）。
+    /// Quite right: **we were making the same quantity be decided by two knobs.** The
+    /// baseline is now <c>VolcanoShape.DefaultRadiusOf</c> / <c>DefaultHeightOf</c> (the
+    /// recommended values per form), and the size is decided by <b>a single slider and
+    /// nothing else</b>.
+    /// How many metres it actually comes out at is clamped at the end by the per-form band
+    /// (<see cref="VolcanoShape.RadiusFor"/> / <see cref="VolcanoShape.HeightFor"/>), and
+    /// **the post-clamp real size is stated by the affected-area line on the volcano tab and
+    /// by the diagnostic dump** (the confirmation window was removed on 2026-08-21, so there
+    /// is no longer a step that shows the real size beforehand).
     ///
-    /// ── 倍率の帯 ────────────────────────────────────
+    /// ── The band of multipliers ────────────────────────────────────
     ///
-    /// 生値 0 でも <see cref="MinScale"/> より小さくしない。0 倍は「山を作らない」で
-    /// あって「小さい山」ではなく、押しても何も起きない操作を作ることになる。
-    /// 上は <see cref="MaxScale"/> で切る（形態ごとの帯がどうせ切るが、
-    /// **NaN や桁違いの値をそのまま掛けない**）。
+    /// Even at a raw value of 0 we never go below <see cref="MinScale"/>. A multiplier of 0
+    /// means "build no mountain", not "a small mountain", and would create a control that
+    /// does nothing when pressed. The top is cut at <see cref="MaxScale"/> (the per-form
+    /// band will cut it anyway, but **we do not multiply straight through a NaN or a value
+    /// orders of magnitude out**).
     /// </summary>
     public static class VolcanoSizeScale
     {
-        /// <summary>倍率 1.0 に対応する生値。ゲーム自身の災害の既定強度と同じ 55。</summary>
+        /// <summary>The raw value corresponding to a multiplier of 1.0. 55, the same as the
+        /// game's own default disaster intensity.</summary>
         public const int AnchorRaw = 55;
 
         /// <summary>
-        /// バニラのスライダーの**下端の生値**（表示 1.0）。
-        /// バニラの災害パネルはここより小さい値を選べない。
+        /// **The raw value at the bottom** of vanilla's slider (displayed as 1.0).
+        /// Vanilla's disaster panel cannot select anything below this.
         /// </summary>
         public const int MinRaw = 10;
 
         /// <summary>
-        /// 解放後の**上端の生値**（表示 25.5）。
-        /// <c>IntensityUnlock</c> が 100 → 255 へ上げている（強度は byte）。
+        /// **The raw value at the top** once unlocked (displayed as 25.5).
+        /// <c>IntensityUnlock</c> raises it from 100 to 255 (the intensity is a byte).
         /// </summary>
         public const int MaxRaw = 255;
 
         /// <summary>
-        /// いちばん小さくしたときの倍率。**スライダーの下端そのもの**である
-        /// （<see cref="MinRaw"/> / <see cref="AnchorRaw"/> ≒ 0.18）。
-        /// 0 倍（＝何も起きない）にはしない。
+        /// The multiplier at the smallest setting. **It is exactly the bottom of the
+        /// slider** (<see cref="MinRaw"/> / <see cref="AnchorRaw"/> ≒ 0.18).
+        /// We never make it 0 (= nothing happens).
         /// </summary>
         public const float MinScale = MinRaw / (float)AnchorRaw;
 
         /// <summary>
-        /// いちばん大きくしたときの倍率。**スライダーの上端そのもの**である
-        /// （<see cref="MaxRaw"/> / <see cref="AnchorRaw"/> ≒ 4.64）。
+        /// The multiplier at the largest setting. **It is exactly the top of the slider**
+        /// (<see cref="MaxRaw"/> / <see cref="AnchorRaw"/> ≒ 4.64).
         ///
-        /// ★★ <b>ここを 4 で切っていた頃は、スライダーの 22.0 以上が死んでいた</b>
-        ///   （2026-08-22 に直した）。形態ごとの帯（<c>VolcanoShape</c>）がどうせ切るので、
-        ///   ここで先に切る意味は無い —— 切ると「スライダーを動かしても何も変わらない帯」
-        ///   ができるだけである。
+        /// ★★ <b>Back when this was cut at 4, everything above 22.0 on the slider was
+        ///   dead</b> (fixed on 2026-08-22). The per-form band (<c>VolcanoShape</c>) cuts it
+        ///   anyway, so there is no point cutting it earlier here — all that does is create
+        ///   a band where moving the slider changes nothing.
         /// </summary>
         public const float MaxScale = MaxRaw / (float)AnchorRaw;
 
         /// <summary>
-        /// 生値から倍率へ。範囲外・負の値は帯へクランプする
-        /// （スライダーの上限は他 MOD が動かしうるので、読み捨てない）。
+        /// Raw value → multiplier. Out-of-range and negative values are clamped into the
+        /// band (another mod could move the slider's upper limit, so we do not simply
+        /// discard them).
         /// </summary>
         public static float ScaleFor(int raw)
         {
@@ -86,8 +96,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 倍率から生値へ（スライダーに初期値を入れるときの逆写像）。
-        /// <see cref="ScaleFor"/> と往復しても帯の中では値が変わらない。
+        /// Multiplier → raw value (the inverse map, for filling the slider's initial value).
+        /// A round trip through <see cref="ScaleFor"/> leaves the value unchanged inside the
+        /// band.
         /// </summary>
         public static int RawFor(float scale)
         {
@@ -100,9 +111,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// メートル値に倍率を掛ける。**NaN と負の入力をそのまま通さない** ——
-        /// .cgs は手で編集されうるし、掛け算の結果が NaN になると
-        /// 形態ごとのクランプが既定値へ落として、原因が分からなくなる。
+        /// Multiplies a value in metres by the multiplier. **NaN and negative inputs are not
+        /// passed straight through** — the .cgs can be hand-edited, and if the product came
+        /// out NaN the per-form clamp would drop it to the default and the cause would be
+        /// impossible to find.
         /// </summary>
         public static float Apply(float metres, float scale)
         {

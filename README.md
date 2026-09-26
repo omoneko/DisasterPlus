@@ -31,6 +31,27 @@ Steam Workshop: <https://steamcommunity.com/sharedfiles/filedetails/?id=37944092
 各機能に個別の ON/OFF があり、被害の種類ごとに **0 まで下げられる強さのスライダー**
 がある —— 演出だけ残して破壊を切る（その逆も）ことができる。
 
+## ソースを読むときに
+
+コメントは英語だが、5 つの機能を指す**丸数字**がそのまま使われている。
+ファイルをまたいだ相互参照の短縮記号で、grep しやすいように字形のまま残してある。
+
+| 記号 | 機能 | 主な場所 |
+|---|---|---|
+| ① | 天気予報 | `Game/Forecast/` |
+| ② | 地震・津波 | `Game/Earthquake/`, `Core/Earthquake/` |
+| ③ | 火災旋風 | `Game/FireWhirl/`, `Core/FireWhirl/` |
+| ④ | 台風 | `Game/Typhoon/`, `Core/Typhoon/` |
+| ⑤ | 火山 | `Game/Volcano/`, `Core/Volcano/` |
+
+コメント中の **★** は「重要」、**★★** は「ここを踏むと壊れる」の印である。
+`§A-3` のような参照は、ゲーム本体の IL を読んで確かめた事実をまとめた
+設計文書（`docs/`）の節番号を指す。
+
+`Core/` はエンジン非依存（UnityEngine もゲーム API も使わない）で、
+net35 の MOD 本体と net8.0 の xunit プロジェクトの**両方**にコンパイルされる。
+だからゲームを起動せずにルールを検証できる。
+
 ## 必要なもの
 
 - Cities: Skylines 1

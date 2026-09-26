@@ -5,48 +5,54 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="VolcanoVanillaFx"/> のうち<b>「借りたプレハブの、どこを変えるか」</b>。
-    /// **main スレッド専用。**
+    /// The part of <see cref="VolcanoVanillaFx"/> covering <b>"what gets changed on a borrowed
+    /// prefab"</b>. **Main thread only.**
     ///
-    /// 引き方・寿命・後始末は本体側にある。ここに在るのは
-    /// <b>複製 1 個ぶんの数値表</b>と、複製が実際に使える状態になったかの検査だけである。
-    /// 分けてあるのは 800 行の上限のためだけではない ——
-    /// 見た目を調整するときに読むのはこのファイルだけで済む。
+    /// Looking them up, their lifetime and the cleanup are in the main file. What is here is only
+    /// <b>the table of numbers for one clone</b> and the check that the clone actually ended up
+    /// usable.
+    /// The split is not only about the 800-line limit — when you come to adjust the look, this is
+    /// the only file you need to read.
     ///
-    /// ── ★ ここで変えてよいのは複製だけである（§D-5）─────────────────────
+    /// ── ★ only the clone may be changed here (§D-5) ───────────────────────────────────────
     ///
-    /// <c>ParticleSystem.main.startColor</c> / <c>startSize</c> や
-    /// <c>ParticleEffect.m_minLifeTime</c> は**そのプレハブの共有状態**である。
-    /// 元のプレハブを書き換えると<b>街じゅうの建物火災や工場の煙が道連れになり</b>、
-    /// しかもセーブではなくメモリ上に残る。この 3 つは全部**複製に対して**書いている。
-    /// 炎（<c>Fire Particles</c>）はここに出てこない ——
-    /// あれは複製せず、1 バイトも書き換えないから共有して安全である。
+    /// <c>ParticleSystem.main.startColor</c> / <c>startSize</c> and
+    /// <c>ParticleEffect.m_minLifeTime</c> are **shared state on that prefab**.
+    /// Rewrite the original prefab and <b>every building fire and factory plume in the city goes
+    /// with it</b>, and it lingers in memory (though not in the save). All three of these write
+    /// **to clones**.
+    /// The flames (<c>Fire Particles</c>) do not appear here —
+    /// they are not cloned, and since not one byte of them is rewritten, sharing is safe.
     ///
-    /// ── ★★ <c>emission.rateOverTime</c> を 0 にしないこと ─────────────────
+    /// ── ★★ do not set <c>emission.rateOverTime</c> to 0 ──────────────────────────────────
     ///
-    /// <c>ParticleEffect.CreateEffect</c> は内側の複製の <c>emission.enabled</c> を
-    /// <c>false</c> にするが、<c>EmitParticles</c> は
-    /// <c>emission.rateOverTime.constant</c> を<b>粒子数の乗数として読み続ける</b>
-    /// （IL 実測）。0 にすると 1 粒も出ない。いちばん踏みやすい罠である。
+    /// <c>ParticleEffect.CreateEffect</c> sets the inner clone's <c>emission.enabled</c> to
+    /// <c>false</c>, but <c>EmitParticles</c> <b>goes on reading
+    /// <c>emission.rateOverTime.constant</c> as a multiplier on the particle count</b>
+    /// (measured in IL). Set it to 0 and not one particle is emitted. It is the easiest trap to
+    /// fall into.
     /// </summary>
     internal static partial class VolcanoVanillaFx
     {
         /// <summary>
-        /// 噴煙<b>柱</b>の複製。**高く・長く・遠くから見えるように**する。
-        /// <c>Factory Smoke</c> の素の可視距離は 1000 m しかなく、火山の噴煙は
-        /// 遠景から見えてほしい。
+        /// The clone for the plume <b>column</b>. Make it **tall, long-lived and visible from a
+        /// distance**. <c>Factory Smoke</c>'s stock visibility distance is only 1000 m, and a
+        /// volcanic plume should be visible from far away.
         ///
-        /// ★★ <b>初速を 26-48 m/s から 3-11 m/s へ落としてある</b>（2026-08-22、指摘③）。
-        ///   柱の形はもう「どこに湧かせるか」で作っている（<c>Core/Volcano/EruptionColumn</c>
-        ///   の 9 段）ので、粒子自身が上がり続けると**傘に天井が出来ない** ——
-        ///   中立浮力高度で止まって横へ広がるのが噴火柱の姿である。
-        ///   寿命も 7-16s から 4-9s へ短くした。段に湧いた粒子はその場で消え、
-        ///   毎フレーム湧き直すことで<b>供給され続ける柱</b>になる。
+        /// ★★ <b>The initial speed has been dropped from 26-48 m/s to 3-11 m/s</b>
+        ///   (2026-08-22, report ③).
+        ///   The column's shape is now made by "where we well them up" (the 9 segments of
+        ///   <c>Core/Volcano/EruptionColumn</c>), so if the particles themselves keep rising
+        ///   **the umbrella never gets a ceiling** — stopping at the neutral buoyancy height and
+        ///   spreading sideways is what an eruption column looks like.
+        ///   The lifetime was also shortened from 7-16 s to 4-9 s. Particles welled up in a
+        ///   segment die there, and by being re-welled every frame they make
+        ///   <b>a column with a continuing supply</b>.
         ///
-        /// 色は暗い灰褐色。**噴出口の近くほど濃く暗い**のは段ごとの密度が担っていて
-        /// （下の段ほど重みが大きい）、色はここで 1 つに決める ——
-        /// <c>startColor</c> は <c>ParticleSystem</c> 側の共有状態で、
-        /// <c>RenderEffect</c> の呼び出しごとには変えられない（IL 実測 §B-4）。
+        /// The colour is a dark grey-brown. **Being denser and darker nearer the vent** is carried
+        /// by the per-segment density (the lower segments have more weight), and the colour is
+        /// fixed once here — <c>startColor</c> is shared state on the <c>ParticleSystem</c> side
+        /// and cannot be changed per <c>RenderEffect</c> call (measured in IL, §B-4).
         /// </summary>
         private static GameObject CloneAsh(ParticleEffect source)
         {
@@ -57,8 +63,8 @@ namespace DisasterPlus.Game
             var particles = go.GetComponent<ParticleSystem>();
             if (effect == null || particles == null) return Reject(go);
 
-            // ★ 数値表は Core にある（EruptionAshProfile）。tools/VolcanoPreview が
-            //   同じ数字で噴煙柱を描くので、**ここに直書きしない**。
+            // ★ The table of numbers is in Core (EruptionAshProfile). tools/VolcanoPreview draws
+            //   the plume column with the same numbers, so **do not hard-code them here**.
             Apply(effect, particles, EruptionAshProfile.Column, 10000f);
 
             var main = particles.main;
@@ -69,21 +75,25 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴煙柱の<b>傘</b>の複製。中立浮力高度で横へ広がる、淡くて大きくて長生きの灰。
+        /// The clone for the plume column's <b>umbrella</b>. Pale, large, long-lived ash that
+        /// spreads sideways at the neutral buoyancy height.
         ///
-        /// 柱と分けてあるのは <c>startColor</c> / <c>startSize</c> / 寿命が
-        /// <c>ParticleSystem</c> 側の**共有状態**で、<c>RenderEffect</c> の呼び出しごとには
-        /// 変えられないからである（IL 実測 §B-4）。傘は
+        /// It is kept separate from the column because <c>startColor</c> / <c>startSize</c> and
+        /// the lifetime are **shared state** on the <c>ParticleSystem</c> side and cannot be
+        /// changed per <c>RenderEffect</c> call (measured in IL, §B-4). The umbrella is
         ///
         /// <list type="bullet">
-        /// <item>柱より<b>淡い</b>（薄く広がった灰は空に対して明るい）</item>
-        /// <item>粒が 3 倍以上<b>大きい</b>（半径 500 m 級の面を粒 30 で埋めると数が要る）</item>
-        /// <item><b>長生き</b>（18-34s）。滞留して積み上がることで平たい面になる</item>
-        /// <item>放出角 55-95°。<b>ほぼ水平に広がる</b> ——
-        ///   <c>direction</c> が上なので、この角度がそのまま横向きの初速になる</item>
+        /// <item><b>paler</b> than the column (thinly spread ash is bright against the sky)</item>
+        /// <item>more than three times <b>larger</b> in particle size (filling a 500 m-class
+        ///   surface with 30 particles takes size)</item>
+        /// <item><b>long-lived</b> (18-34 s). It lingers and piles up into a flat surface</item>
+        /// <item>emission angle 55-95°. It <b>spreads almost horizontally</b> —
+        ///   <c>direction</c> is up, so this angle becomes the sideways initial velocity
+        ///   directly</item>
         /// </list>
         ///
-        /// 引けなくても⑤は止まらない（柱の複製で代用する。<c>AshUmbrella</c> の doc）。
+        /// ⑤ does not stop if it cannot be looked up (the column's clone stands in; see the doc of
+        /// <c>AshUmbrella</c>).
         /// </summary>
         private static GameObject CloneAshUmbrella(ParticleEffect source)
         {
@@ -104,9 +114,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴石の複製。素の <c>Medium Explosion Particles</c> は
-        /// <c>gravityModifier = -1</c>（＝上向き）で粒径 60 の**爆炎**なので、
-        /// 重力を下向きに戻し粒を小さくして「弧を描いて落ちる破片」にする。
+        /// The clone for the ejecta. Stock <c>Medium Explosion Particles</c> is a **fireball**
+        /// with <c>gravityModifier = -1</c> (i.e. upwards) and a particle size of 60, so the
+        /// gravity is put back downwards and the particles shrunk to give "debris falling in an
+        /// arc".
         /// </summary>
         private static GameObject CloneEjecta(ParticleEffect source)
         {
@@ -124,14 +135,15 @@ namespace DisasterPlus.Game
             effect.m_minSpawnAngle = 0f;
             effect.m_maxSpawnAngle = 42f;
             effect.m_maxVisibilityDistance = 10000f;
-            // ★ 素は 1.0 秒。継続モードで自分で窓を作るので 0 に落とす。
+            // ★ Stock is 1.0 seconds. We make the window ourselves in continuous mode, so drop it
+            //   to 0.
             effect.m_renderDuration = 0f;
 
             var main = particles.main;
             main.startColor = new ParticleSystem.MinMaxGradient(
                 new Color(1f, 0.86f, 0.42f, 1f), new Color(0.62f, 0.16f, 0.05f, 1f));
             main.startSize = 6f;
-            main.gravityModifier = 1.6f;     // ★ 落ちる。素は -1（上向き）
+            main.gravityModifier = 1.6f;     // ★ It falls. Stock is -1 (upwards)
             main.maxParticles = 3000;
 
             var emission = particles.emission;
@@ -141,9 +153,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 火砕流もどきの複製。**ほぼ水平に広がり、ゆっくり沈む灰**にする。
-        /// 素の <c>Collapse Particles</c> は放出角 50–80°（ほぼ横）で既に近いが、
-        /// 寿命が短く、可視距離が 1000 m しかない。
+        /// The clone for the pyroclastic lookalike. Make it **ash that spreads almost horizontally
+        /// and settles slowly**.
+        /// Stock <c>Collapse Particles</c> is already close, with an emission angle of 50–80°
+        /// (nearly sideways), but its lifetime is short and its visibility distance is only
+        /// 1000 m.
         /// </summary>
         private static GameObject CloneDust(ParticleEffect source)
         {
@@ -156,8 +170,9 @@ namespace DisasterPlus.Game
 
             effect.m_minLifeTime = 4.5f;
             effect.m_maxLifeTime = 9f;
-            // ★ ベジェ帯では速さが**上向き成分にしか入らない**（IL 実測）。
-            //   横へ流すのは RenderEffect の velocity 引数のほうなので、ここは小さく。
+            // ★ On a bezier band the speed **only goes into the upward component** (measured in
+            //   IL). Pushing sideways is what RenderEffect's velocity argument is for, so keep
+            //   this small.
             effect.m_minStartSpeed = 2f;
             effect.m_maxStartSpeed = 7f;
             effect.m_minSpawnAngle = 70f;
@@ -169,7 +184,7 @@ namespace DisasterPlus.Game
             main.startColor = new ParticleSystem.MinMaxGradient(
                 new Color(0.30f, 0.27f, 0.25f, 1f), new Color(0.13f, 0.12f, 0.11f, 1f));
             main.startSize = 28f;
-            main.gravityModifier = 0.12f;    // ゆっくり沈む
+            main.gravityModifier = 0.12f;    // settles slowly
             main.maxParticles = 6000;
 
             var emission = particles.emission;
@@ -179,13 +194,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// Core の数値表（<see cref="EruptionAshProfile"/>）を複製へ書き写す。
+        /// Copy Core's table of numbers (<see cref="EruptionAshProfile"/>) onto the clone.
         ///
-        /// ★ <c>m_renderDuration</c> は必ず 0 にする。継続モード（<c>timeOffset &lt; 0</c>）で
-        ///   回すので、0 以外だと <c>m_intensityCurve</c> の位相ゲートが掛かる。
-        /// ★★ <c>rateOverTime</c> を 0 にしないこと。<c>emission.enabled</c> が false でも
-        ///   <c>EmitParticles</c> は <c>rateOverTime.constant</c> を**粒子数の乗数として
-        ///   読み続ける**（IL 実測）。0 にすると 1 粒も出ない。
+        /// ★ Always set <c>m_renderDuration</c> to 0. We run in continuous mode
+        ///   (<c>timeOffset &lt; 0</c>), so anything other than 0 applies
+        ///   <c>m_intensityCurve</c>'s phase gate.
+        /// ★★ Do not set <c>rateOverTime</c> to 0. Even with <c>emission.enabled</c> false,
+        ///   <c>EmitParticles</c> **goes on reading <c>rateOverTime.constant</c> as a multiplier
+        ///   on the particle count** (measured in IL). Set it to 0 and not one particle is
+        ///   emitted.
         /// </summary>
         private static void Apply(ParticleEffect effect, ParticleSystem particles,
                                   EruptionAshProfile profile, float visibilityMetres)
@@ -209,9 +226,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// プレハブを 1 個複製する。内部フィールドは全て <c>[NonSerialized]</c> なので、
-        /// 複製は**未初期化状態**で始まり、元のプレハブと <c>ParticleSystem</c> を
-        /// 共有する事故は起きない（IL 実測）。
+        /// Clone one prefab. All the internal fields are <c>[NonSerialized]</c>, so the clone
+        /// starts **uninitialised** and there is no accident of it sharing a
+        /// <c>ParticleSystem</c> with the original prefab (measured in IL).
         /// </summary>
         private static GameObject CloneObject(ParticleEffect source, string name)
         {
@@ -221,12 +238,13 @@ namespace DisasterPlus.Game
                 if (go == null) return null;
 
                 go.name = name;
-                // レベルアンロードでゲームに消させない（自分で消す。Destroy() を見よ）。
+                // Do not let the game destroy it on level unload (we destroy it ourselves; see
+                // Destroy()).
                 UnityEngine.Object.DontDestroyOnLoad(go);
 
-                // ★ 複製そのものは「型紙」であって、これ自身は 1 粒も出さない
-                //   （粒子が湧くのは InitializeEffect が作る内側の複製である）。
-                //   放っておくと型紙が地図の原点で煙を吐く。
+                // ★ The clone itself is "the template" and emits not one particle of its own
+                //   (the particles well up in the inner clone that InitializeEffect creates).
+                //   Leave it alone and the template puffs smoke at the map origin.
                 var particles = go.GetComponent<ParticleSystem>();
                 if (particles != null)
                 {
@@ -248,9 +266,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>InitializeEffect()</c> を呼び、粒子系が実際に出来たかを確かめる。
-        /// **出来ていない複製を描画へ渡すと <c>EmitParticles</c> の中で NRE になる**
-        /// （あちらは <c>m_particleSystem</c> を null 検査なしで参照する。IL 実測）。
+        /// Call <c>InitializeEffect()</c> and confirm the particle system was actually built.
+        /// **Hand a clone that was not built to the drawing path and you get an NRE inside
+        /// <c>EmitParticles</c>** (that one dereferences <c>m_particleSystem</c> without a null
+        /// check. Measured in IL).
         /// </summary>
         private static GameObject Initialize(GameObject go, ParticleEffect effect)
         {
@@ -269,12 +288,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// その <c>ParticleEffect</c> の <c>m_particleSystem</c> が実際に出来ているか。
+        /// Whether that <c>ParticleEffect</c>'s <c>m_particleSystem</c> has actually been built.
         ///
-        /// ★★ 複製にも**共有プレハブにも**掛ける。<c>EffectCollection</c> は名前を
-        ///   辞書へ入れるだけで <c>InitializeEffect()</c> を呼ばない（IL 実測）ので、
-        ///   「引けた」と「粒子系が在る」は別である。初期化されていないものを
-        ///   <c>RenderEffect</c> へ渡すと <c>EmitParticles</c> の中で NRE になる。
+        /// ★★ Apply it to clones **and to shared prefabs**. <c>EffectCollection</c> only puts the
+        ///   name into a dictionary and never calls <c>InitializeEffect()</c> (measured in IL), so
+        ///   "it was looked up" and "it has a particle system" are different things. Hand an
+        ///   uninitialised one to <c>RenderEffect</c> and you get an NRE inside
+        ///   <c>EmitParticles</c>.
         /// </summary>
         private static bool Ready(ParticleEffect effect)
         {
@@ -282,8 +302,8 @@ namespace DisasterPlus.Game
 
             try
             {
-                // ★ ParticleSystem へ落としてから比較する。object のまま != null で見ると
-                //   Unity の破棄済み（fake-null）を「在る」と読んでしまう。
+                // ★ Cast down to ParticleSystem before comparing. Test != null while it is still
+                //   an object and a Unity destroyed (fake-null) object reads as "present".
                 var particles = ParticleSystemField.GetValue(effect) as ParticleSystem;
                 return particles != null;
             }
@@ -293,7 +313,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>作りかけを捨てる。**中途半端な複製を残さない。**</summary>
+        /// <summary>Throw away a half-built one. **Do not leave a half-finished clone behind.**</summary>
         private static GameObject Reject(GameObject go)
         {
             try
@@ -303,7 +323,7 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // 解放できなくても GameObject は消す。
+                // Destroy the GameObject even if it cannot be released.
             }
 
             UnityEngine.Object.Destroy(go);

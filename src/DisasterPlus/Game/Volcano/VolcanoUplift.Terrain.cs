@@ -6,26 +6,29 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 隆起のうち**地形を実際に触る部分**（高さの書き込み・<c>UpdateArea</c>・火口）。
-    /// <c>VolcanoUplift.cs</c> から切り出したのは、あのファイルがプロジェクト規約の
-    /// 800 行を超えたためで、**内容は 1 文字も変えていない**
-    /// （<c>VolcanoClearing.Sweep.cs</c> / <c>VolcanoLava.Ignite.cs</c> と同じ形）。
+    /// The part of the uplift that **actually touches terrain** (writing heights,
+    /// <c>UpdateArea</c>, the crater).
+    /// It was split out of <c>VolcanoUplift.cs</c> because that file went past the project's
+    /// 800-line rule, and **not one character of the content was changed**
+    /// (the same shape as <c>VolcanoClearing.Sweep.cs</c> / <c>VolcanoLava.Ignite.cs</c>).
     ///
-    /// 規律は本体側のクラス doc がすべて持っている。特にここで守るのは 3 つ:
-    ///   - <c>UpdateArea</c> は **1 tick にちょうど 1 回**（罠 3）
-    ///   - <c>MakeCrater</c> は**呼ばない**（火口は高さプロファイルの一部。指摘①）
-    ///   - <c>Begin/EndUpdateArea</c> は**呼ばない**（§D-12）
+    /// The main file's class doc holds all of the discipline. The three things to keep here in
+    /// particular:
+    ///   - <c>UpdateArea</c> **exactly once per tick** (trap 3)
+    ///   - **Never call** <c>MakeCrater</c> (the crater is part of the height profile. Report ①)
+    ///   - **Never call** <c>Begin/EndUpdateArea</c> (§D-12)
     ///
-    /// **sim スレッド専用。**
+    /// **Sim thread only.**
     /// </summary>
     public static partial class VolcanoUplift
     {
         /// <summary>
-        /// 準備が届いた範囲の全セルに、**その時刻における絶対目標**を書く（罠 2）。
+        /// Write **the absolute target at this instant** to every cell within the range the
+        /// clearing has reached (trap 2).
         ///
-        /// **書き込みだけで <c>UpdateArea</c> は呼ばない。** 書いた人が <c>UpdateArea</c> を
-        /// 呼ぶまで誰も読まないのが地形の規律で（§D-12）、こちらは全域へ先に行き、
-        /// 表示がタイル 1 枚ずつ追いつく形になる。
+        /// **It only writes; it does not call <c>UpdateArea</c>.** The terrain's discipline is
+        /// that nobody reads what was written until the writer calls <c>UpdateArea</c> (§D-12), so
+        /// this one goes over the whole area first and the display catches up one tile at a time.
         /// </summary>
         private static bool WriteHeights(VolcanoFootprint footprint)
         {
@@ -66,36 +69,43 @@ namespace DisasterPlus.Game
 
                     int cell = rowBase + (x - _minX);
 
-                    // ★★ **山頂から外へ広がる**（UpliftSchedule.GrowthMetresAt の doc）。
-                    //    profile × progress ではない —— あれは山全体が一様に膨らむ。
+                    // ★★ **It spreads outwards from the summit** (the doc of
+                    //    UpliftSchedule.GrowthMetresAt).
+                    //    Not profile × progress — that makes the whole mountain swell uniformly.
                     //
-                    // ★★ <b>その規則は円錐にしか当てはまらない。</b>（2026-08-22）
-                    //    <c>GrowthMetresAt</c> は <c>profileMetres &lt;= 0</c> で 0 を返すので、
-                    //    **カルデラ（負のプロファイル）はこれでは 1 mm も掘れない。**
-                    //    膨らみと陥没は「全体が一様に」動くのが正しい姿でもあるので、
-                    //    素直に <c>profile × progress</c> で書く。
+                    // ★★ <b>That rule only applies to the cone.</b> (2026-08-22)
+                    //    <c>GrowthMetresAt</c> returns 0 for <c>profileMetres &lt;= 0</c>, so
+                    //    **the caldera (a negative profile) would not be dug by a single
+                    //    millimetre this way.**
+                    //    And "the whole thing moves uniformly" is also the correct picture for the
+                    //    inflation and the foundering, so write them plainly as
+                    //    <c>profile × progress</c>.
                     float grown = _stage == UpliftStage.Cone
                         ? UpliftSchedule.GrowthMetresAt(_profile[cell], height, _progress)
                         : _profile[cell] * _progress;
 
-                    // 絶対目標なので progress は 1 を渡す（grown が既に「今の高さ」である）。
+                    // This is an absolute target, so pass 1 for the progress (grown is already
+                    // "the height right now").
                     ushort target = UpliftSchedule.RawTargetAt(_baseRaw[cell], grown, 1f);
 
-                    // ★★ **ゲームの高さの天井（1023.98 m）に当たったかを数える。**
-                    //    当たれば山頂はそこで平らになる。**黙って平らな山を出さない** ——
-                    //    プレイヤーからは「高さの設定が効いていない」にしか見えない。
-                    //    天井を上げられない理由は <c>UpliftSchedule.CeilingClipped</c> の doc。
+                    // ★★ **Count whether it hit the game's height ceiling (1023.98 m).**
+                    //    If it does, the summit goes flat there. **Do not present a flat mountain
+                    //    silently** — all the player can see is "the height setting is not
+                    //    working".
+                    //    The reason the ceiling cannot be raised is in the doc of
+                    //    <c>UpliftSchedule.CeilingClipped</c>.
                     if (UpliftSchedule.CeilingClipped(_baseRaw[cell], grown, 1f)) clipped++;
 
                     int index = rowRaw + x;
-                    // ★ バニラの MakeCrater と同じ「変わったときだけ書く」（§C-8 IL_01E7）。
+                    // ★ The same "write only when it changed" as vanilla's MakeCrater (§C-8 IL_01E7).
                     if (raw[index] == target) continue;
 
                     raw[index] = target;
                     written++;
 
-                    // ★ **流すのは実際に変わった範囲だけ**（クラス doc）。
-                    //   ここで数えた外接矩形が、そのまま UpdateArea の対象になる。
+                    // ★ **Flush only the range that actually changed** (class doc).
+                    //   The bounding rectangle counted here becomes the target of UpdateArea
+                    //   directly.
                     if (!_dirtyValid)
                     {
                         _dirtyValid = true;
@@ -120,22 +130,24 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **まだ画面に出ていない範囲を 1 tick に 1 回だけ** <c>UpdateArea</c> する（罠 3）。
+        /// <c>UpdateArea</c> **the range not yet on screen, exactly once per tick** (trap 3).
         ///
-        /// 手順:
-        ///   1. この tick に書き換えた矩形（<see cref="_dirtyValid"/>）を、
-        ///      まだ流し切っていない矩形へ union で足す。
-        ///   2. 溜まった矩形が 1 回で出せるなら（<c>TileSplit.FitsSinglePass</c>）
-        ///      そのまま出して**溜まりを空にする**。隆起の前半はここを通るので、
-        ///      **変わった全域が毎 tick 画面に出る**。
-        ///   3. 出せないならタイルを 1 枚ずつ総当たりし、一周したところで空にする。
+        /// The procedure:
+        ///   1. Union the rectangle rewritten this tick (<see cref="_dirtyValid"/>) into the
+        ///      rectangle not yet fully flushed.
+        ///   2. If the accumulated rectangle can be emitted in one go
+        ///      (<c>TileSplit.FitsSinglePass</c>), emit it as is and **empty the accumulator**.
+        ///      The first half of the uplift goes through here, so
+        ///      **the whole changed area reaches the screen every tick**.
+        ///   3. If it cannot, go round the tiles one at a time and empty it once a lap is done.
         ///
-        /// **<c>TileAt</c> / <c>ExpandForPass</c> が返すのは「そのまま渡す矩形」である。**
-        /// ここで margin を足し直してはいけない —— 足すと 103×103 = 10609 セルになり、
-        /// 10000 の閾値を跨いで毎回フラッシュする（<c>TileSplit</c> のクラス doc）。
+        /// **What <c>TileAt</c> / <c>ExpandForPass</c> return is "the rectangle to pass straight
+        /// through".** Do not add the margin again here — add it and you get
+        /// 103×103 = 10609 cells, crossing the 10000 threshold and flushing every time
+        /// (the class doc of <c>TileSplit</c>).
         ///
-        /// <c>surface</c> / <c>zones</c> を false にしてあるのはバニラの <c>MakeCrater</c> /
-        /// <c>MakeCrack</c> と同じ引数だからである（§C-8 IL_021C）。
+        /// <c>surface</c> / <c>zones</c> are false because those are the same arguments vanilla's
+        /// <c>MakeCrater</c> / <c>MakeCrack</c> use (§C-8 IL_021C).
         /// </summary>
         private static void FlushPending()
         {
@@ -146,14 +158,16 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 返ってきた矩形を**そのまま**渡す。margin を足し直さないこと
-            //   （足すと 10000 の閾値を跨いで毎回途中フラッシュする）。
+            // ★ Pass the returned rectangle through **as is**. Do not add the margin again
+            //   (add it and it crosses the 10000 threshold and mid-batch flushes every time).
             TerrainModify.UpdateArea(tMinX, tMinZ, tMaxX, tMaxZ, true, false, false);
         }
 
-        // ★★ かつてここに CarveCrater（DisasterHelpers.MakeCrater を 1 回）が在った。
-        //    火口は高さプロファイルの一部になったので消した（2026-08-22、実機の指摘①）。
-        //    **戻さないこと** —— 戻すと窪みの生まれる時刻がまた「隆起の最後」になり、
-        //    しかも強制フラッシュが 1 回増える。形は Core/Volcano/VolcanoCrater にある。
+        // ★★ CarveCrater (one call to DisasterHelpers.MakeCrater) used to live here.
+        //    It was deleted once the crater became part of the height profile (2026-08-22, live
+        //    report ①).
+        //    **Do not put it back** — putting it back makes the hollow come into being at "the end
+        //    of the uplift" again, and adds one more forced flush. The shape is in
+        //    Core/Volcano/VolcanoCrater.
     }
 }

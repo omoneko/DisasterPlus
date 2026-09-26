@@ -3,59 +3,63 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ⑤が地形を書けるかどうか。**Task 2 の主目的そのもの**である。
+    /// Whether ⑤ can write terrain. **This is the whole point of Task 2.**
     ///
-    /// ①はバニラのハザードマップを、②はバニラの決定論的な被害モデルを見せた。
-    /// ④は嵐プレハブの実数値を実機で測った。**⑤が実機でしか測れないのはこれ** ——
-    /// <c>RawHeights</c> の実寸と、地形を書き換える 4 つの到達経路である。
-    /// ここが揃わなければ⑤は 1 メートルも山を上げない（<see cref="Usable"/>）。
+    /// ① showed vanilla's hazard map, ② vanilla's deterministic damage model, and ④ measured the
+    /// real values of the storm prefabs in the live game. **What only the live game can tell ⑤ is
+    /// this** — the real dimensions of <c>RawHeights</c> and the four reach paths that rewrite the
+    /// terrain.
+    /// Without all of this, ⑤ does not raise the ground by a single metre (<see cref="Usable"/>).
     ///
-    /// struct にしているのは④の <see cref="TyphoonPrefabFacts"/> と同じ理由
-    /// （bool と int しか持たないので、キャッシュしても Unity の fake-null
-    /// 自己修復問題を持ち込まない）。既定値は全て false ＝「まだ／もう読めていない」。
+    /// It is a struct for the same reason as ④'s <see cref="TyphoonPrefabFacts"/>
+    /// (it holds nothing but bools and ints, so caching it does not drag in Unity's fake-null
+    /// self-repair problem). All defaults are false = "not read yet / no longer readable".
     ///
-    /// **フラグは 1 本にまとめない。** 山（<see cref="HeightsResolved"/> /
-    /// <see cref="UpdateAreaResolved"/>）・溶岩の焦げ（<see cref="BurnGroundResolved"/>）・
-    /// 溶岩の流路（<see cref="SlopeSampleResolved"/>）は
-    /// 独立に壊れうる。まとめると「溶岩が流れないだけ」の環境で山まで止まる。
+    /// **Do not merge the flags into one.** The mountain (<see cref="HeightsResolved"/> /
+    /// <see cref="UpdateAreaResolved"/>), the lava's scorching (<see cref="BurnGroundResolved"/>)
+    /// and the lava's path (<see cref="SlopeSampleResolved"/>) can break independently. Merge them
+    /// and an environment where only the lava cannot flow stops the mountain too.
     /// </summary>
     public struct VolcanoTerrainFacts
     {
-        /// <summary>マップ全体の raw セル数（1081²）。§A-1 の <c>TerrainManager.Awake</c> 実測。</summary>
+        /// <summary>Raw cells across the whole map (1081²). Measured in <c>TerrainManager.Awake</c>, §A-1.</summary>
         public const int ExpectedRawArrayLength = 1168561;
 
-        /// <summary><c>TerrainManager.RawHeights</c>（<c>ushort[]</c>）を取れたか。</summary>
+        /// <summary>Whether <c>TerrainManager.RawHeights</c> (<c>ushort[]</c>) could be obtained.</summary>
         public readonly bool HeightsResolved;
 
         /// <summary>
-        /// <c>RawHeights.Length</c>。**1081² = 1168561 でなければ以後のセル計算が全部ずれる**
-        /// （<c>index = z*1081 + x</c>）。読めなかったときは 0。
+        /// <c>RawHeights.Length</c>. **Unless it is 1081² = 1168561, every subsequent cell
+        /// calculation is off** (<c>index = z*1081 + x</c>). 0 when it could not be read.
         /// </summary>
         public readonly int RawArrayLength;
 
         /// <summary>
-        /// <c>TerrainModify.UpdateArea(int,int,int,int,bool,bool,bool)</c> を解決できたか。
-        /// **書いた高さをゲームへ反映する唯一の経路**（§A-1）。
+        /// Whether <c>TerrainModify.UpdateArea(int,int,int,int,bool,bool,bool)</c> could be
+        /// resolved. **The only path that gets written heights into the game** (§A-1).
         /// </summary>
         public readonly bool UpdateAreaResolved;
 
-        // ★ かつてここに CraterResolved（DisasterHelpers.MakeCrater が引けるか）が在った。
-        //   火口は高さプロファイルの一部になり（Core/Volcano/VolcanoCrater）、⑤は
-        //   MakeCrater をもうどこからも呼ばない。**誰も門にしない事実を測り続けない。**
+        // ★ CraterResolved (whether DisasterHelpers.MakeCrater could be looked up) used to live
+        //   here. The crater became part of the height profile (Core/Volcano/VolcanoCrater) and ⑤
+        //   no longer calls MakeCrater from anywhere. **Do not keep measuring a fact nobody
+        //   gates on.**
 
-        /// <summary><c>DisasterHelpers.BurnGround(Vector2,float,float)</c>（§B-7b。**DLC 不要**）。</summary>
+        /// <summary><c>DisasterHelpers.BurnGround(Vector2,float,float)</c> (§B-7b. **No DLC needed**).</summary>
         public readonly bool BurnGroundResolved;
 
         /// <summary>
-        /// <c>TerrainManager.SampleDetailHeight(Vector3, out float, out float)</c>（§B-6）。
-        /// **溶岩が下り方向を見つける唯一の経路。** 山と準備と噴火はこれに依存しない。
+        /// <c>TerrainManager.SampleDetailHeight(Vector3, out float, out float)</c> (§B-6).
+        /// **The only path by which the lava finds downhill.** The mountain, the clearing and the
+        /// eruption do not depend on it.
         /// </summary>
         public readonly bool SlopeSampleResolved;
 
         /// <summary>
-        /// Natural Disasters DLC を持っているか。**⑤は DLC を要らない**（設計書 §1.4）。
-        /// 分岐するのは樹木の着火だけ（<c>TreeManager.BurnTree</c> は DLC ゲート、§B-7c）なので、
-        /// **false でも FAIL 扱いにしない。**
+        /// Whether the Natural Disasters DLC is owned. **⑤ does not need the DLC** (design doc
+        /// §1.4). The only thing that branches on it is igniting trees
+        /// (<c>TreeManager.BurnTree</c> is DLC-gated, §B-7c), so
+        /// **false is not treated as a FAIL.**
         /// </summary>
         public readonly bool NaturalDisastersOwned;
 
@@ -73,16 +77,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ⑤が山を 1 つでも作ってよいか。**これが⑤全体の門である。**
+        /// Whether ⑤ may build even one mountain. **This is the gate for the whole of ⑤.**
         ///
-        /// 配列そのものと、書いた値をゲームへ反映する経路の 2 つが要る。
-        /// 長さが 1081² でないときに「とりあえず書く」をやると、
-        /// <c>z*1081 + x</c> の添字が別のセルを指し、**マップの無関係な場所が隆起する**。
-        /// 推測で代替しない（設計書 §6）。
+        /// Two things are needed: the array itself, and the path that gets written values into the
+        /// game. Do a "write it anyway" when the length is not 1081² and the
+        /// <c>z*1081 + x</c> index points at a different cell, so
+        /// **an unrelated part of the map is uplifted**.
+        /// Do not substitute a guess (design doc §6).
         ///
-        /// **前提検証（<c>Assumptions.Volcano</c>）はこの式そのものを述語にすること。**
-        /// 「フィールドが解決した」を述語にすると、値が使えない場合に PASS が出る
-        /// （④のレビューと②の監査が同じ欠陥を見つけている）。
+        /// **The assumption check (<c>Assumptions.Volcano</c>) must use this very expression as
+        /// its predicate.** Use "did the field resolve" as the predicate and a PASS comes out when
+        /// the value is unusable (④'s review and ②'s audit found the same defect).
         /// </summary>
         public bool Usable
         {
@@ -96,201 +101,207 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// sim スレッドで作り main スレッドで読む不変スナップショット。
-    /// ①の <c>WeatherSnapshot</c>・②の <c>EarthquakeSnapshot</c>・
-    /// ④の <see cref="TyphoonSnapshot"/> と同じ規律で、**一度作ったら書き換えない**。
+    /// The immutable snapshot built on the sim thread and read on the main thread.
+    /// The same discipline as ①'s <c>WeatherSnapshot</c>, ②'s <c>EarthquakeSnapshot</c> and ④'s
+    /// <see cref="TyphoonSnapshot"/>: **once built it is never rewritten**.
     ///
-    /// **T3 以降がフィールドを足していく。追加は必ず ctor の末尾に付けること**
-    /// （既存の呼び出し側を全部直させないため）。
+    /// **T3 onwards add fields. Always append them at the end of the ctor** (so that every
+    /// existing call site does not have to be changed).
     ///
-    /// ⑤の表示規約: ここに載る値のうちバニラの実測なのは
-    /// <see cref="Terrain"/>（配列の実寸と到達経路）と <see cref="GameMode"/> だけで、
-    /// それ以外は全て本 MOD が決めた量である（設計書 §7.4）。
+    /// ⑤'s display convention: of the values carried here, the only vanilla measurements are
+    /// <see cref="Terrain"/> (the array's real dimensions and the reach paths) and
+    /// <see cref="GameMode"/>; everything else is a quantity this mod chose (design doc §7.4).
     /// </summary>
     public class VolcanoSnapshot
     {
-        /// <summary>読み取りに成功したか。false なら表示側は「読み取れません」と出す。</summary>
+        /// <summary>Whether the read succeeded. If false, the display side says "cannot be read".</summary>
         public readonly bool Valid;
 
-        /// <summary>地形 API の実測。**⑤が動けるかどうかはここだけで決まる。**</summary>
+        /// <summary>The terrain API measurements. **Whether ⑤ can run at all is decided here and nowhere else.**</summary>
         public readonly VolcanoTerrainFacts Terrain;
 
-        /// <summary><c>SimulationManager.m_currentFrameIndex</c>。</summary>
+        /// <summary><c>SimulationManager.m_currentFrameIndex</c>.</summary>
         public readonly uint CurrentFrame;
 
         /// <summary>
-        /// ゲームモードか（マップエディタなら false）。
-        /// <c>m_blockHeights</c> の追随速度がゲームで上へ 2 m、エディタで 8 m に変わる（§A-2）。
-        /// **読めなければゲームモードとみなす**（遅いほうを名乗る）。
+        /// Whether this is game mode (false in the map editor).
+        /// The catch-up speed of <c>m_blockHeights</c> upwards changes from 2 m in the game to
+        /// 8 m in the editor (§A-2).
+        /// **If it cannot be read, assume game mode** (report the slower one).
         /// </summary>
         public readonly bool GameMode;
 
         /// <summary>
-        /// この tick の頭での位相（T4 以降）。
+        /// The phase at the top of this tick (T4 onwards).
         ///
-        /// ★ <b>これは 1 tick 前の状態である。</b> <c>VolcanoFeature.OnSimulationTick</c> は
-        /// 「読んで publish する」をポーズガードより上で行い、位相を進める
-        /// <c>VolcanoState.Tick</c> はその下にある。ポーズ中でもパネルが凍らないよう
-        /// この順序にしてあるので、位相の反映は設計上 1 tick 遅れる
-        /// （④の <see cref="TyphoonSnapshot"/> も同じ扱い）。
+        /// ★ <b>This is the state of one tick ago.</b> <c>VolcanoFeature.OnSimulationTick</c> does
+        /// "read and publish" above the pause guard, and <c>VolcanoState.Tick</c>, which advances
+        /// the phase, sits below it. That ordering is there so the panel does not freeze while
+        /// paused, so by design the phase is reflected one tick late
+        /// (④'s <see cref="TyphoonSnapshot"/> is handled the same way).
         /// </summary>
         public readonly VolcanoPhase Phase;
 
-        /// <summary>直近の調査結果。<c>Valid == false</c> なら「まだ調べていない」。</summary>
+        /// <summary>The latest survey result. <c>Valid == false</c> means "not surveyed yet".</summary>
         public readonly VolcanoFootprint Footprint;
 
         /// <summary>
-        /// 隆起の進捗 [0,1]。**T6 が動かすまで常に 0 である。**
-        /// <b>0 のうちは行にしないこと</b>（<see cref="VolcanoState.ProgressUnit"/> の doc）。
+        /// Uplift progress [0,1]. **Always 0 until T6 moves it.**
+        /// <b>Do not show a row for it while it is 0</b> (the doc of
+        /// <see cref="VolcanoState.ProgressUnit"/>).
         /// </summary>
         public readonly float ProgressUnit;
 
-        /// <summary>直近に断った理由（**英語・診断用**）。断っていなければ null。</summary>
+        /// <summary>The most recent reason for a refusal (**English, for diagnostics**). null if nothing was refused.</summary>
         public readonly string Refusal;
 
-        // ── T5（準備）が足した 7 つ ────────────────────────────────
+        // ── the seven T5 (clearing) added ───────────────────────────────────────────────────
 
         /// <summary>
-        /// 準備の走査が届いた半径（m）。**T6 が隆起してよい半径そのもの**である
-        /// （<c>VolcanoClearing.ClearedRadiusMetres</c>）。**表示専用のコピーであり、
-        /// T6 はこれではなく sim 側の static を読むこと**（スナップショットは
-        /// 設計上 1 tick 遅れる）。
+        /// The radius the clearing sweep reached (m). **It is precisely the radius T6 may uplift**
+        /// (<c>VolcanoClearing.ClearedRadiusMetres</c>). **It is a display-only copy, and T6 must
+        /// read the sim-side static rather than this** (the snapshot is one tick late by design).
         /// </summary>
         public readonly float ClearedRadiusMetres;
 
-        /// <summary>準備が山の半径まで届いたか。</summary>
+        /// <summary>Whether the clearing reached the mountain's radius.</summary>
         public readonly bool ClearingComplete;
 
-        /// <summary>この火山でこれまでに取り除いた建物数。</summary>
+        /// <summary>Buildings removed so far for this volcano.</summary>
         public readonly int BuildingsDestroyed;
 
-        /// <summary>この火山でこれまでに取り除いた道路セグメント数。</summary>
+        /// <summary>Road segments removed so far for this volcano.</summary>
         public readonly int SegmentsDestroyed;
 
         /// <summary>
-        /// 直近の走査でバニラが取り除きを断った建物数。**0 でないのは異常ではない**が、
-        /// その足元だけは地形が元の高さに残る（<c>VolcanoClearing</c> のクラス doc）。
+        /// Buildings vanilla refused to remove in the last sweep. **A non-zero value is not an
+        /// anomaly**, but the terrain under them alone stays at its original height (the class doc
+        /// of <c>VolcanoClearing</c>).
         /// </summary>
         public readonly int BuildingsRefused;
 
-        /// <summary>直近の走査が 1 回ぶんの上限で打ち切られたか。</summary>
+        /// <summary>Whether the last sweep was cut short by the per-sweep limit.</summary>
         public readonly bool ClearingCapped;
 
         /// <summary>
-        /// 準備（道路と建物を取り除くこと）の経路がこのゲームのビルドで成立するか。
-        /// **false なら⑤は火山を 1 つも作らない**（設計書 §1.2）。
+        /// Whether the clearing path (removing roads and buildings) holds in this build of the
+        /// game. **If false, ⑤ creates no volcano at all** (design doc §1.2).
         ///
-        /// ★ 道路だけでなく建物側（<c>CollapseBuilding</c>）も含む
-        /// （全体レビュー M9。<c>VolcanoClearing.ClearingPathAvailable</c> の doc）。
+        /// ★ It covers the building side (<c>CollapseBuilding</c>) as well as the roads
+        /// (whole-project review M9. The doc of
+        /// <c>VolcanoClearing.ClearingPathAvailable</c>).
         /// </summary>
         public readonly bool ClearingPathAvailable;
 
-        // ── T6（隆起）が足した 6 つ ────────────────────────────────
+        // ── the six T6 (uplift) added ───────────────────────────────────────────────────────
         //
-        // ★ 隆起の進捗そのものは新しいフィールドを作らず <see cref="ProgressUnit"/> を
-        //   使う（T2 から在って T5 まで常に 0 だった）。進捗を 2 つ持つと、
-        //   いつか片方だけ更新される。
+        // ★ The uplift progress itself does not get a new field; it uses
+        //   <see cref="ProgressUnit"/> (which has existed since T2 and was always 0 up to T5).
+        //   Hold two progresses and one day only one of them will be updated.
 
-        /// <summary>今の山頂の盛り上がり（m）。**元の地形高さからの相対量**である。</summary>
+        /// <summary>The current rise of the summit (m). **Relative to the original terrain height.**</summary>
         public readonly float SummitMetres;
 
         /// <summary>
-        /// 今この tick に上げてよい半径（m）＝**準備が届いた範囲**。
-        /// パネルはそう添えて出す —— 罠 1（準備より先に上げる）を実機で目で
-        /// 確かめられる唯一の行である。
+        /// The radius that may be raised this tick (m) = **the range the clearing has reached**.
+        /// The panel says so alongside it — it is the only row that lets you verify trap 1
+        /// (raising ahead of the clearing) with your own eyes in the live game.
         /// </summary>
         public readonly float ActiveRadiusMetres;
 
-        /// <summary>隆起が終わったか。</summary>
+        /// <summary>Whether the uplift has finished.</summary>
         public readonly bool UpliftComplete;
 
         /// <summary>
-        /// 山頂の窪みが満杯の深さに達したか。**「彫ったか」ではない** ——
-        /// 火口は高さプロファイルの一部で、隆起の最初の tick から在る
-        /// （<c>Core/Volcano/VolcanoCrater</c>）。
+        /// Whether the summit hollow has reached its full depth. **Not "whether it was carved"** —
+        /// the crater is part of the height profile and is there from the uplift's very first tick
+        /// (<c>Core/Volcano/VolcanoCrater</c>).
         /// </summary>
         public readonly bool CraterFormed;
 
-        /// <summary>影響矩形を覆うタイル数。</summary>
+        /// <summary>The number of tiles covering the affected rectangle.</summary>
         public readonly int UpliftTileCount;
 
-        /// <summary>次に <c>UpdateArea</c> するタイルの番号。</summary>
+        /// <summary>The index of the tile to <c>UpdateArea</c> next.</summary>
         public readonly int UpliftTileCursor;
 
-        // ── T7（噴火）が足した 3 つ ────────────────────────────────
+        // ── the three T7 (eruption) added ───────────────────────────────────────────────────
         //
-        // ★ この 3 つは**描画のためだけ**に在る。ゲームの状態を 1 つも表さないので、
-        //   sim 側（VolcanoState / VolcanoClearing / VolcanoUplift）はこれを読まない。
+        // ★ These three exist **purely for drawing**. They represent no game state at all, so the
+        //   sim side (VolcanoState / VolcanoClearing / VolcanoUplift) does not read them.
 
-        /// <summary>噴火が進行中か。main の <c>VolcanoEruptionFx.Update</c> の唯一の門。</summary>
+        /// <summary>Whether an eruption is in progress. The only gate for main's <c>VolcanoEruptionFx.Update</c>.</summary>
         public readonly bool EruptionActive;
 
         /// <summary>
-        /// 噴出の強さ <c>[0,1]</c>。**本 MOD が決めた量**であって、ゲームが
-        /// 計算した値ではない（設計書 §7.4）。実在の物理単位は名乗らない。
+        /// The eruption strength <c>[0,1]</c>. **A quantity this mod chose**, not a value the
+        /// game computed (design doc §7.4). It does not quote a real physical unit.
         /// </summary>
         public readonly float EruptionIntensityUnit;
 
         /// <summary>
-        /// 噴出口のワールド座標。<c>Y</c> は<b>火口の底</b>（<c>SampleDetailHeight</c> ＋
-        /// 少しの浮き）で、**山頂の縁ではない**（実機の指摘②）。
-        /// sim が読んだ値を main がそのまま使う ——
-        /// **main スレッドから地形を引き直さない**（経路を 1 本にする）。
+        /// The vent's world coordinates. <c>Y</c> is <b>the crater floor</b>
+        /// (<c>SampleDetailHeight</c> plus a small lift), **not the summit rim** (live report ②).
+        /// Main uses the value sim read, as is —
+        /// **the main thread does not re-sample the terrain** (keep it to one path).
         /// </summary>
         public readonly Vec3 VentWorld;
 
         /// <summary>
-        /// **カルデラ形成期の大爆発の最中か**（<c>VolcanoEruption.InClimax</c>）。
-        /// 破局噴火（スライダー上端）でしか true にならない。
+        /// **Whether we are in the middle of the caldera-forming great explosion**
+        /// (<c>VolcanoEruption.InClimax</c>).
+        /// Only ever true for a super-eruption (the slider at its top).
         /// </summary>
         public readonly bool SupereruptionClimax;
 
         /// <summary>
-        /// 環状火口列の半径（m）。**0 なら「環は無い」**（中央火口だけ）。
+        /// The radius of the ring of fissures (m). **0 means "there is no ring"** (the central
+        /// vent only).
         ///
-        /// カルデラ形成期の噴火は中央火口ではなく<b>陥没する屋根のふちの
-        /// 環状断層に沿って</b>噴き上がる。爆発の何割かをこの環へ配らないと、
-        /// 半径 5 km のカルデラのどこにも爆発が見えない
-        /// （<c>Core.Volcano.BlastCluster</c> のクラス doc）。
+        /// An eruption in the caldera-forming stage does not come up through the central vent but
+        /// <b>along the ring fault at the edge of the foundering roof</b>. Without distributing
+        /// some share of the blasts around this ring, no blast is visible anywhere on a caldera
+        /// 5 km across (the class doc of <c>Core.Volcano.BlastCluster</c>).
         /// </summary>
         public readonly float RingFissureRadiusMetres;
 
-        // ── T8（溶岩）が足した 9 つ ───────────────────────────────
+        // ── the nine T8 (lava) added ────────────────────────────────────────────────────────
 
-        /// <summary>火口から出した流れの本数（設定の値。0 なら完全に無効）。</summary>
+        /// <summary>Number of flows emitted from the crater (the setting's value; 0 disables it entirely).</summary>
         public readonly int LavaFlowCount;
 
-        /// <summary>まだ動いている流れの本数。</summary>
+        /// <summary>Number of flows still moving.</summary>
         public readonly int LavaAliveCount;
 
-        /// <summary>いちばん長く流れた距離（m）。</summary>
+        /// <summary>The longest distance any flow travelled (m).</summary>
         public readonly float LavaLongestMetres;
 
-        /// <summary>これまでに火を付けた建物の数。</summary>
+        /// <summary>Number of buildings set alight so far.</summary>
         public readonly int LavaBuildingsIgnited;
 
-        /// <summary>これまでに火を付けた木の数（ND 非所持なら常に 0）。</summary>
+        /// <summary>Number of trees set alight so far (always 0 without ND).</summary>
         public readonly int LavaTreesIgnited;
 
-        /// <summary>木に火を付けられる環境か（＝ ND DLC を持っているか。§B-7c）。</summary>
+        /// <summary>Whether trees can be set alight in this environment (i.e. whether the ND DLC is owned. §B-7c).</summary>
         public readonly bool LavaTreesAvailable;
 
         /// <summary>
-        /// 全流路の軌跡点を連結した**不変配列**。T9 の描画が読む唯一の口である。
+        /// An **immutable array** concatenating the trail points of all the flows. It is the only
+        /// entry point T9's rendering reads.
         ///
-        /// ★ <b>計画は <c>LavaHeads</c>（1 本の <c>Vec2[]</c>）と書いていたが、
-        /// 点列と本数の 2 つに分けてある。</b> 1 本の配列では **N 本の別々の折れ線を
-        /// 表せない** —— 別の流れの先端どうしを繋いだリボンは、流れの間を
-        /// 飛び回る帯になる。<see cref="LavaTrailCounts"/> が境目を持つ。
+        /// ★ <b>The plan said <c>LavaHeads</c> (a single <c>Vec2[]</c>), but this is split into
+        /// the points and the counts.</b> A single array **cannot represent N separate
+        /// polylines** — a ribbon joining the heads of different flows comes out as a band flying
+        /// back and forth between them. <see cref="LavaTrailCounts"/> holds the boundaries.
         /// </summary>
         public readonly Vec2[] LavaTrailPoints;
 
-        /// <summary>各流路の点数（**不変配列**）。合計が <see cref="LavaTrailPoints"/> の長さ。</summary>
+        /// <summary>The point count of each flow (**an immutable array**). The total is the length of <see cref="LavaTrailPoints"/>.</summary>
         public readonly int[] LavaTrailCounts;
 
         /// <summary>
-        /// 冷え具合 <c>[0,1]</c>。1 が「まだ熱い」、0 が「冷え切った」。
-        /// T9 の描画がこれで色を落とす（止まった溶岩が永久に光っていないこと）。
+        /// How cool it is, <c>[0,1]</c>. 1 is "still hot", 0 is "cooled out".
+        /// T9's rendering fades the colour with this (so stopped lava does not glow for ever).
         /// </summary>
         public readonly float LavaCoolUnit;
 
@@ -351,12 +362,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 読み取りに失敗したときの 1 個。**0 を並べた「それらしい」値を作らない。**
+        /// The one used when the read failed. **Do not fabricate "plausible" values out of a row
+        /// of zeroes.**
         ///
-        /// ★ <see cref="ClearingPathAvailable"/> だけ <b>true</b> を入れる。ここが false だと
-        /// パネルは「取り除けないので火山は作りません」という**確定的な断り**を
-        /// 出すが、この 1 個が言えるのは「今回の読み取りが失敗した」だけである。
-        /// 読めなかったことを、測って分かった結論として名乗らない。
+        /// ★ Only <see cref="ClearingPathAvailable"/> is set to <b>true</b>. With that false, the
+        /// panel emits a **definitive refusal**, "they cannot be removed, so no volcano will be
+        /// built", whereas all this object can say is "this particular read failed".
+        /// Do not present "could not be read" as a conclusion arrived at by measurement.
         /// </summary>
         public static VolcanoSnapshot Invalid()
         {

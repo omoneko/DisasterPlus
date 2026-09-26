@@ -7,13 +7,16 @@ namespace DisasterPlus.Core.FireWhirl
     }
 
     /// <summary>
-    /// 火災旋風 1 基の寿命。3 段構えで消える。
-    ///   1. 発生元の火災が続いている限り存続
-    ///   2. 発生条件を割り込んだ状態が猶予を超えて続いたら消滅
-    ///   3. 絶対上限に達したら、火災が続いていても必ず打ち切る
+    /// The lifetime of one fire whirl. It dies in three stages.
+    ///   1. It lives on as long as the fire that spawned it keeps burning
+    ///   2. It dissipates once the spawn condition has been unmet for longer than the grace
+    ///      period
+    ///   3. Once the absolute cap is reached it is always cut off, even if the fire
+    ///      continues
     ///
-    /// 3 は必須。延焼拡大は「延焼が増える → 条件を満たし続ける → 旋風が延命する」という
-    /// 自己強化ループを作るので、上限が唯一の安全弁になる。
+    /// Stage 3 is essential. Fire spread creates a self-reinforcing loop — "more fire
+    /// spread → the condition keeps being met → the whirl lives longer" — so the cap is
+    /// the only safety valve.
     /// </summary>
     public struct FireWhirlLifecycle
     {
@@ -31,12 +34,14 @@ namespace DisasterPlus.Core.FireWhirl
             return new FireWhirlLifecycle(0f, 0f);
         }
 
-        /// <param name="conditionMet">この時点でまだ発生条件（R 内に N 棟）を満たしているか。</param>
+        /// <param name="conditionMet">Whether the spawn condition (N buildings within R) is
+        /// still met at this point.</param>
         public FireWhirlLifecycle Advance(float deltaMinutes, bool conditionMet)
         {
             if (deltaMinutes <= 0f) return this;
 
-            // 条件が戻ったら猶予カウンタをリセットする。火勢のちらつきで消えないように。
+            // Reset the grace counter once the condition comes back, so a flicker in the
+            // fire's strength does not kill the whirl.
             float broken = conditionMet ? 0f : ConditionBrokenMinutes + deltaMinutes;
             return new FireWhirlLifecycle(ElapsedMinutes + deltaMinutes, broken);
         }

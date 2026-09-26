@@ -2,7 +2,7 @@ using DisasterPlus.Core.Common;
 
 namespace DisasterPlus.Core.FireWhirl
 {
-    /// <summary>延焼拡大の判定対象になる建物 1 棟。</summary>
+    /// <summary>One building considered for fire spread.</summary>
     public struct IgnitionCandidate
     {
         public readonly ushort Id;

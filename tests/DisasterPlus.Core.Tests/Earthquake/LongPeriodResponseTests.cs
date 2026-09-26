@@ -4,23 +4,26 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// **ここで固定しているのは「バニラと一致すること」ではない。**
-    /// バニラに長周期地震動は存在しないので（IL 事実文書 §A-7）、突き合わせる相手が
-    /// そもそも無い。固定するのは 3 つだけ:
+    /// **What is pinned down here is not "agreement with vanilla".**
+    /// Vanilla has no long-period ground motion (IL facts document §A-7), so there is
+    /// nothing to compare against in the first place. Only three things are pinned down:
     ///
-    ///   1. 「長周期」を名乗る資格（バニラの 2 成分より十分遅いこと）
-    ///   2. 追加被害が 0 になる境界（低層・範囲外・強さ 0）が確実に 0 であること
-    ///   3. 追加確率が上限を超えず負にもならないこと
+    ///   1. the right to call itself "long-period" (far slower than vanilla's two components)
+    ///   2. that the boundaries where the extra damage is 0 (low buildings, out of range,
+    ///      strength 0) really do give 0
+    ///   3. that the extra probability neither exceeds the cap nor goes negative
     ///
-    /// 2 と 3 は**実際に建物を壊す値**なので、ここが崩れると都市が壊れる。
+    /// 2 and 3 are **values that actually destroy buildings**, so if they break, the city
+    /// breaks.
     /// </summary>
     public class LongPeriodResponseTests
     {
         [Fact]
         public void WavePeriodIsWellBelowTheVanillaComponents()
         {
-            // バニラは 0.63 rad/frame（周期 ≒10）と 0.17（≒37）の 2 本だけ。
-            // 「長周期」を名乗る以上、それより十分長いこと自体をテストで固定する。
+            // Vanilla has only two: 0.63 rad/frame (period ≈10) and 0.17 (≈37).
+            // Since we call this "long-period", the test pins down that it really is far
+            // longer than those.
             double fast = 2.0 * System.Math.PI / ShakeWaveform.FastRate;
             double slow = 2.0 * System.Math.PI / ShakeWaveform.SlowRate;
             Assert.True(LongPeriodResponse.WavePeriodFrames > slow * 4.0,
@@ -63,14 +66,17 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void LowBuildingsAndFarBuildingsGetNothing()
         {
-            // 低層は対象外。範囲外も 0。ここが 0 にならないと「全部壊れる」になる。
+            // Low buildings are out of scope. Out of range is 0 too. If these are not 0 it
+            // becomes "everything collapses".
             Assert.Equal(0f, LongPeriodResponse.ExtraCollapseChance(
                 LongPeriodResponse.MinHeightMetres - 1f, 100f, 100, 10f), 5);
             Assert.Equal(0f, LongPeriodResponse.ExtraCollapseChance(
                 60f, LongPeriodResponse.RangeOf(100) + 1f, 100, 10f), 5);
-            // 強さ 0 は完全に無効（設定で切れることを保証する）。
+            // Strength 0 disables it entirely (this guarantees it can be switched off in
+            // the settings).
             Assert.Equal(0f, LongPeriodResponse.ExtraCollapseChance(60f, 100f, 100, 0f), 5);
-            // 高さが読めなかったとき（0）も必ず 0。**推測した高さで建物を壊さない。**
+            // When the height could not be read (0) it is always 0 too.
+            // **Never destroy a building on a guessed height.**
             Assert.Equal(0f, LongPeriodResponse.ExtraCollapseChance(0f, 100f, 100, 10f), 5);
         }
 
@@ -90,8 +96,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void GarbageInputIsZeroNotNaN()
         {
-            // 壊れた読み取りで建物を壊さない。NaN を確率として使うと比較が全て false に
-            // なるので「何も起きない」に倒れるが、それは偶然であって設計ではない。
+            // Never destroy a building on a broken reading. Using a NaN as a probability
+            // makes every comparison false, so it does collapse into "nothing happens" ——
+            // but that is an accident, not a design.
             Assert.Equal(0f, LongPeriodResponse.ExtraCollapseChance(float.NaN, 100f, 100, 10f), 5);
             Assert.Equal(0f, LongPeriodResponse.ExtraCollapseChance(60f, float.NaN, 100, 10f), 5);
             Assert.Equal(0f, LongPeriodResponse.ExtraCollapseChance(60f, 100f, 100, float.NaN), 5);
@@ -99,10 +106,11 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         /// <summary>
-        /// **実際に使われる上限は 0.25 ではない**（第 2 層レビュー M8）。
-        /// 呼び出し側は <see cref="LongPeriodResponse.MaxExtraChance"/> のクランプの
-        /// **後**に時間帯係数を掛けるので、画面と被害選定に出る上限は 0.2875 である。
-        /// doc と診断ダンプがこの数字を名乗っているので、値そのものを固定しておく。
+        /// **The ceiling actually in force is not 0.25** (tier-2 review M8).
+        /// The caller multiplies by the time-of-day factor **after** the
+        /// <see cref="LongPeriodResponse.MaxExtraChance"/> clamp, so the ceiling that shows
+        /// up on screen and in the damage selection is 0.2875. The doc and the diagnostic
+        /// dump quote this figure, so the value itself is pinned down.
         /// </summary>
         [Fact]
         public void TheCeilingActuallyAppliedIncludesTheTimeOfDayFactor()

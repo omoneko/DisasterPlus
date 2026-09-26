@@ -3,23 +3,26 @@ using DisasterPlus.Core.Common;
 
 namespace DisasterPlus.Core.Volcano
 {
-    /// <summary>雲の塊 1 個ぶん（描画用）。位置は**噴出口からの相対**（m）。</summary>
+    /// <summary>One cloud parcel (for rendering). The position is **relative to the vent**
+    /// (m).</summary>
     public struct PlumeParcel
     {
         public readonly float X;
         public readonly float Y;
         public readonly float Z;
 
-        /// <summary>塊の半径（m）。描画側は直径に直すこと。</summary>
+        /// <summary>The parcel's radius (m). The rendering side must convert to a
+        /// diameter.</summary>
         public readonly float RadiusMetres;
 
-        /// <summary>不透明度 <c>[0,1]</c>。生まれと終わりで 0 になる。</summary>
+        /// <summary>Opacity <c>[0,1]</c>. It is 0 at birth and at the end.</summary>
         public readonly float Alpha;
 
-        /// <summary>明るさ <c>[0,1]</c>。0 が噴出口近くの黒、1 が傘の白。</summary>
+        /// <summary>Brightness <c>[0,1]</c>. 0 is the black near the vent, 1 the white of the
+        /// umbrella.</summary>
         public readonly float Brightness;
 
-        /// <summary>回転角（度）。塊ごとにゆっくり回る。</summary>
+        /// <summary>The rotation angle (degrees). Each parcel turns slowly.</summary>
         public readonly float RotationDegrees;
 
         public PlumeParcel(float x, float y, float z, float radiusMetres,
@@ -36,119 +39,135 @@ namespace DisasterPlus.Core.Volcano
     }
 
     /// <summary>
-    /// 噴煙を<b>塊（parcel）の群れ</b>として動かす。**エンジン非依存の純関数だけ。**
+    /// Animates the plume as <b>a swarm of parcels</b>. **Pure, engine-free functions only.**
     ///
-    /// ── なぜ作り直したのか（2026-08-22、所有者の指摘）─────────────────────
+    /// ── Why it was rebuilt (2026-08-22, the owner's observation) ─────────────────
     ///
-    /// &gt; 噴煙のアニメーションもまだまだリアルではありません。幾何的なものではなく
-    /// &gt; もっと自然的なカオスな煙のアニメーションを作ってほしいです。煙のエフェクトに
-    /// &gt; 加えて核キノコ雲（MissileDisaster）のエフェクトも一部利用してリアルにして
-    /// &gt; ください。
+    /// &gt; The plume animation still isn't realistic enough either. Rather than something
+    /// &gt; geometric, I'd like a more natural, chaotic smoke animation. On top of the smoke
+    /// &gt; effect, please also use parts of the nuclear mushroom cloud (MissileDisaster)
+    /// &gt; effect to make it realistic.
     ///
-    /// <see cref="EruptionColumn"/> は柱を<b>9 段の円盤</b>に割って、そこへゲームの
-    /// 粒子エフェクトを湧かせている。断面（教科書の 3 区間）としては正しいが、
-    /// <b>段は動かない</b> —— 湧く場所が固定なので、遠目には「積み上がった 9 枚の板」
-    /// に見える。**指摘のとおり幾何的である。**
+    /// <see cref="EruptionColumn"/> splits the column into <b>9 stacked discs</b> and spawns
+    /// the game's particle effects at them. As a cross-section (the textbook's three
+    /// regions) that is correct, but <b>the discs do not move</b> — the spawn points are
+    /// fixed, so from a distance it looks like "9 stacked plates". **Geometric, exactly as
+    /// observed.**
     ///
-    /// ── ★★ 何を変えたのか: オイラー的 → ラグランジュ的 ──────────────────
+    /// ── ★★ What changed: Eulerian → Lagrangian ──────────────────
     ///
     /// <list type="bullet">
-    /// <item><b>前</b>（オイラー的）… 空間に固定した 9 個の枠。そこを煙が通過する</item>
-    /// <item><b>今</b>（ラグランジュ的）… <b>塊そのものを追いかける。</b>
-    ///   1 個 1 個が火口で生まれ、上がり、膨らみ、風に流され、薄くなって消える</item>
+    /// <item><b>Before</b> (Eulerian) … 9 frames fixed in space, with smoke passing through
+    ///   them</item>
+    /// <item><b>Now</b> (Lagrangian) … <b>we follow the parcels themselves.</b>
+    ///   Each one is born at the crater, rises, swells, is carried by the wind, thins out
+    ///   and disappears</item>
     /// </list>
     ///
-    /// 塊が個別の一生を持つと、群れは勝手にカオスになる ——
-    /// **乱数で「がたつき」を足しているのではない。** 位相のずれた何百個の一生が
-    /// 重なると、噴煙の縁で絶えず新しい瘤が湧いては崩れる、あの見え方になる。
+    /// Once parcels have individual lives, the swarm becomes chaotic of its own accord —
+    /// **we are not adding "jitter" with random numbers.** Hundreds of lives at different
+    /// phases overlapping give you that look where new lobes keep welling up and collapsing
+    /// along the plume's edge.
     ///
-    /// ── 使うのは MissileDisaster の<b>作り方</b>である ─────────────────────
+    /// ── What we use from MissileDisaster is <b>the technique</b> ────────────────
     ///
-    /// キノコ雲の <c>MushroomCloudPuffsFx</c> から借りるのは
-    /// 「<b>放出を止めた <c>ParticleSystem</c> を描画係として使い、粒を毎フレーム
-    /// <c>SetParticles</c> でこちらが置く</b>」という一点である
-    /// （④の <c>TyphoonVortexPuffFx</c> と同じ。あちらで一度通した道である）。
-    /// これでゲームの粒子プレハブの制約（粒の大きさが固定）から外れて、
-    /// **塊を何百 m の大きさで描ける**。
+    /// The one thing we borrow from the mushroom cloud's <c>MushroomCloudPuffsFx</c> is
+    /// "<b>use a <c>ParticleSystem</c> with emission switched off as a renderer, and place
+    /// the particles ourselves every frame with <c>SetParticles</c></b>"
+    /// (the same as ④'s <c>TyphoonVortexPuffFx</c> — a road we have been down once already).
+    /// That frees us from the game particle prefab's constraint (a fixed particle size) and
+    /// lets us **draw parcels hundreds of metres across**.
     ///
-    /// ★★ <b>形は借りない。</b> 核の雲は単発の泡（細い柄＋丸い笠）で、
-    ///   火山は供給が続く柱である（<see cref="EruptionColumn"/> のクラス doc）。
-    ///   ここが写すのはその <see cref="EruptionColumn"/> の断面のほうである。
+    /// ★★ <b>We do not borrow the shape.</b> A nuclear cloud is a single bubble (a thin stem
+    ///   plus a round cap), whereas a volcano is a column with a continuous supply (see
+    ///   <see cref="EruptionColumn"/>'s class doc).
+    ///   What this copies is <see cref="EruptionColumn"/>'s cross-section.
     ///
-    /// ── 1 個の塊の一生 ─────────────────────────────────────────
+    /// ── The life of one parcel ─────────────────────────────────────────
     ///
     /// <code>
-    /// age = 0            火口の中で生まれる（半径 = 火口 × VentRadiusFactor）
-    ///   ↓ 上昇は減速する（RiseDecayPower。ガス推力 → 浮力 → 中立）
-    ///   ↓ 半径は巻き込みで増える（EntrainmentSlope）
-    ///   ↓ 風下へ倒れる（BendPower。高いほど強い ＝ 風のシアー）
-    ///   ↓ 渦にもまれる（TurbulenceOctaves。**これがカオスの実体**）
-    /// age = life         傘の高さで横へ広がりきり、薄くなって消える
+    /// age = 0            born inside the crater (radius = crater × VentRadiusFactor)
+    ///   ↓ the rise decelerates (RiseDecayPower: gas thrust → buoyancy → neutral)
+    ///   ↓ the radius grows by entrainment (EntrainmentSlope)
+    ///   ↓ it leans downwind (BendPower: stronger the higher it is = wind shear)
+    ///   ↓ it is churned by eddies (TurbulenceOctaves — **this is what the chaos actually is**)
+    /// age = life         it has spread fully sideways at the umbrella height, thins out and disappears
     /// </code>
     ///
-    /// 塊の位相は種から決まるので、**同じ噴火は何度でも同じように見える**
-    /// （<see cref="DeterministicRandom"/> だけ。この MOD の乱数の規律）。
+    /// A parcel's phase is determined by the seed, so **the same eruption looks the same
+    /// however many times you run it** (<see cref="DeterministicRandom"/> alone — this mod's
+    /// discipline about randomness).
     /// </summary>
     public static class PlumeParcels
     {
-        /// <summary>塊の総数。**増やす前に実機の描画負荷を測ること。**</summary>
+        /// <summary>The total number of parcels. **Measure the rendering cost on real
+        /// hardware before raising it.**</summary>
         public const int Count = 560;
 
-        /// <summary>1 個の塊が生まれてから消えるまで（秒）。</summary>
+        /// <summary>How long one parcel lives from birth to disappearance (seconds).</summary>
         public const float LifeSeconds = 26f;
 
         /// <summary>
-        /// 塊 1 個の半径が<b>そこでの柱の半径</b>の何倍か。
+        /// How many times <b>the column's radius at that point</b> one parcel's radius is.
         ///
-        /// ★★ <b>火口の半径を基準にしないこと。</b>（2026-08-22、オフラインで描いて
-        ///   気づいた）柱は上へ行くほど太るので、火口基準で決めると
-        ///   <b>根元では塊が柱よりでかく、傘では砂粒になる</b>。
-        ///   高さごとの柱の太さに比例させれば、どこでも同じ「粒立ち」に見える。
+        /// ★★ <b>Do not base it on the crater's radius.</b> (Noticed on 2026-08-22 by
+        ///   rendering it offline.) The column gets fatter as it rises, so basing it on the
+        ///   crater makes <b>parcels bigger than the column at its foot and mere grains of
+        ///   sand at the umbrella</b>.
+        ///   Make it proportional to the column's width at each height and the "graininess"
+        ///   looks the same everywhere.
         /// </summary>
         public const float ParcelRadiusRatio = 0.34f;
 
-        /// <summary>塊ごとの大きさのばらつき（<see cref="ParcelRadiusRatio"/> に対する比）。</summary>
+        /// <summary>The spread of sizes between parcels (as a ratio of
+        /// <see cref="ParcelRadiusRatio"/>).</summary>
         public const float ParcelRadiusSpread = 0.55f;
 
-        /// <summary>年を取るほど少しずつ膨らむ量（1 秒あたり、比）。</summary>
+        /// <summary>How much they swell as they age (per second, as a ratio).</summary>
         public const float GrowthPerSecond = 0.022f;
 
         /// <summary>
-        /// 乱れを重ねる回数。**1 では足りない**（きれいな波になる）。
-        /// 3 で周期の違う渦が噛み合って、繰り返しが目で追えなくなる。
+        /// How many layers of turbulence we stack. **One is not enough** (it comes out as a
+        /// clean wave). At three, eddies of differing periods interlock and the eye can no
+        /// longer follow the repetition.
         /// </summary>
         public const int TurbulenceOctaves = 3;
 
         /// <summary>
-        /// 乱れの大きさ（そのときの柱の半径に対する比）。
-        /// **柱の太さに比例させる** —— 絶対値で足すと、細い根元だけが暴れる。
+        /// The size of the turbulence (as a ratio of the column's radius at that point).
+        /// **Make it proportional to the column's width** — add it as an absolute value and
+        /// only the narrow foot thrashes about.
         /// </summary>
         public const float TurbulenceRatio = 0.30f;
 
-        /// <summary>いちばんゆっくりした渦の周期（秒）。</summary>
+        /// <summary>The period of the slowest eddy (seconds).</summary>
         public const float TurbulenceBaseSeconds = 9f;
 
-        /// <summary>塊が回る速さ（度／秒）の上限。</summary>
+        /// <summary>The cap on how fast a parcel turns (degrees per second).</summary>
         public const float SpinDegreesPerSecond = 11f;
 
-        /// <summary>生まれてから濃くなりきるまでの一生に対する割合。</summary>
+        /// <summary>The fraction of a parcel's life it takes to reach full opacity from
+        /// birth.</summary>
         public const float FadeInFraction = 0.06f;
 
-        /// <summary>薄くなりはじめる一生に対する割合。</summary>
+        /// <summary>The fraction of its life at which it starts to thin out.</summary>
         public const float FadeOutFraction = 0.62f;
 
-        /// <summary>いちばん濃いときの不透明度。</summary>
+        /// <summary>The opacity at its densest.</summary>
         public const float PeakAlpha = 0.82f;
 
         /// <summary>
-        /// 塊 1 個ぶんの状態。<paramref name="index"/> は <c>[0, <see cref="Count"/>)</c>。
+        /// The state of one parcel. <paramref name="index"/> is
+        /// <c>[0, <see cref="Count"/>)</c>.
         /// </summary>
-        /// <param name="timeSeconds">噴火が始まってからの秒数（連続で増える値）。</param>
-        /// <param name="ventRadiusMetres">火口の半径（m）。</param>
-        /// <param name="columnHeightMetres">柱の高さ（m。<see cref="EruptionColumn"/> と同じ）。</param>
-        /// <param name="windX">風の向きと速さ（m/秒）。</param>
-        /// <param name="windZ">同上。</param>
-        /// <param name="seed">この火山の種。</param>
+        /// <param name="timeSeconds">Seconds since the eruption began (a continuously
+        /// increasing value).</param>
+        /// <param name="ventRadiusMetres">The crater's radius (m).</param>
+        /// <param name="columnHeightMetres">The column's height (m; the same as
+        /// <see cref="EruptionColumn"/>'s).</param>
+        /// <param name="windX">The wind's direction and speed (m/s).</param>
+        /// <param name="windZ">The same.</param>
+        /// <param name="seed">This volcano's seed.</param>
         public static PlumeParcel At(int index, float timeSeconds, float ventRadiusMetres,
                                      float columnHeightMetres, float windX, float windZ,
                                      uint seed)
@@ -164,26 +183,29 @@ namespace DisasterPlus.Core.Volcano
 
             uint draw = (uint)index * 11u + 3u;
 
-            // ★★ **位相をずらすのがカオスの入口である。** 全部を同時に生まれさせると、
-            //    群れ全体が一斉に脈打つ（それこそ「幾何的」に見える）。
+            // ★★ **Staggering the phases is the way into the chaos.** Have them all born at
+            //    the same moment and the whole swarm pulses in unison (which looks
+            //    "geometric" if anything does).
             float phase = DeterministicRandom.Unit(seed, draw);
             float age = Frac(t / LifeSeconds + phase) * LifeSeconds;
             float w = age / LifeSeconds;
 
-            // ── 上昇（減速する）──────────────────────────────
-            // w^(1/RiseDecayPower) 型。下で速く、上でゆるむ。
+            // ── The rise (decelerating) ──────────────────────────────
+            // Of the form w^(1/RiseDecayPower): fast low down, easing off higher up.
             float climb = Pow(w, 1f / EruptionColumn.RiseDecayPower);
             float y = climb * height;
 
-            // ── 柱の断面のどこに居るか ──────────────────────────
+            // ── Where in the column's cross-section it sits ──────────────────────
             //
-            // ★★ **向きと「軸からの割合」だけを引く。** 実距離は
-            //    <see cref="ColumnRadiusAt"/>（＝その高さでの柱の半径）に掛けて出す。
-            //    はじめ「火口の中の点 × 太り率 × 傘の広がり率」で置いていたが、
-            //    <b>広がりを 2 度掛けていた</b>ので、柱ではなく画面いっぱいの
-            //    塊になった（tools/PlumePreview で気づいた）。
-            //    軸からの割合は一生変わらない —— 塊は柱と一緒に広がるのであって、
-            //    柱の中を横切っていくわけではない。
+            // ★★ **Draw only a direction and a "fraction of the way out from the axis".**
+            //    The actual distance comes from multiplying by
+            //    <see cref="ColumnRadiusAt"/> (the column's radius at that height).
+            //    Originally we placed them as "a point inside the crater × the widening
+            //    factor × the umbrella's spread factor", but that <b>applied the spread
+            //    twice</b>, so we got a blob filling the screen rather than a column
+            //    (noticed in tools/PlumePreview).
+            //    The fraction out from the axis never changes over a parcel's life — a parcel
+            //    spreads out together with the column; it does not travel across it.
             float birthAngle = DeterministicRandom.Unit(seed, draw + 1u) * 6.2831853f;
             float axisFraction = (float)Math.Sqrt(DeterministicRandom.Unit(seed, draw + 2u));
 
@@ -192,16 +214,16 @@ namespace DisasterPlus.Core.Volcano
             float x = (float)Math.Cos(birthAngle) * axisFraction * columnRadius;
             float z = (float)Math.Sin(birthAngle) * axisFraction * columnRadius;
 
-            // ── 風下へ倒れる（高いほど強い ＝ 風のシアー）─────────────
+            // ── Leaning downwind (stronger the higher it is = wind shear) ─────────────
             float bend = Pow(climb, EruptionColumn.BendPower)
                          * EruptionColumn.BendFactor * height
                          / EruptionColumn.ReferenceWindMetresPerSecond;
             x += wx * bend;
             z += wz * bend;
 
-            // ── ★★ 乱れ。**ここが「カオスな煙」の実体である。** ─────────
-            //    周期の違う 3 つの渦を重ねる。塊ごとに種が違うので、
-            //    隣り合う塊が別々の向きへ捻れる。
+            // ── ★★ The turbulence. **This is what "chaotic smoke" actually is.** ────
+            //    We stack three eddies of differing periods. Each parcel has its own seed,
+            //    so neighbouring parcels twist in different directions.
             float scale = columnRadius * TurbulenceRatio;
             for (int o = 0; o < TurbulenceOctaves; o++)
             {
@@ -219,20 +241,20 @@ namespace DisasterPlus.Core.Volcano
                 z += (float)Math.Sin(k * age + pz) * amp;
             }
 
-            // ── 塊そのものの大きさ（**そこでの柱の太さに比例**）──────────
+            // ── The parcel's own size (**proportional to the column's width there**) ────
             float sizePick = DeterministicRandom.Unit(seed, draw + 8u);
             float radius = columnRadius * ParcelRadiusRatio
                            * (1f - ParcelRadiusSpread * 0.5f + ParcelRadiusSpread * sizePick)
                            * (1f + GrowthPerSecond * age);
 
-            // ── 濃さ（生まれと終わりで 0）──────────────────────
+            // ── The density (0 at birth and at the end) ──────────────────────
             float alpha;
             if (w < FadeInFraction) alpha = w / FadeInFraction;
             else if (w > FadeOutFraction) alpha = (1f - w) / (1f - FadeOutFraction);
             else alpha = 1f;
             alpha *= PeakAlpha;
 
-            // ── 明るさ。噴出口の近くは黒く、上は日を受けて白い ────────────
+            // ── Brightness. Black near the vent, white up top where the sun catches it ────
             float brightness = Clamp01(climb * 1.25f);
 
             float spin = (DeterministicRandom.Unit(seed, draw + 6u) * 2f - 1f)
@@ -243,9 +265,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 柱がその高さで持つ半径（m）。<paramref name="climbUnit"/> は
-        /// <c>高さ / 柱の高さ</c>。<see cref="EruptionColumn"/> の断面と同じ形にする ——
-        /// **2 つの表現が違う太さを名乗ると、灰の柱と塊の群れがずれて見える。**
+        /// The column's radius (m) at a given height. <paramref name="climbUnit"/> is
+        /// <c>height / column height</c>. It matches <see cref="EruptionColumn"/>'s
+        /// cross-section — **if the two representations claim different widths, the ash
+        /// column and the swarm of parcels look misaligned.**
         /// </summary>
         public static float ColumnRadiusAt(float climbUnit, float ventRadiusMetres,
                                            float columnHeightMetres)
@@ -264,12 +287,13 @@ namespace DisasterPlus.Core.Volcano
                 return base0 + (gasTopRadius - base0) * k;
             }
 
-            // 対流域: 1 m 上がるごとに EntrainmentSlope だけ太る。
+            // The convective region: it widens by EntrainmentSlope for every metre of rise.
             float rise = (c - gasTop) * height;
             float r = gasTopRadius + rise * EruptionColumn.EntrainmentSlope;
 
-            // ★★ **傘はここで 1 度だけ広げる。** 呼び出し側でも掛けると
-            //    二乗になって、柱ではなく塊になる（このクラスの置き方の doc）。
+            // ★★ **The umbrella is spread exactly once, here.** Multiply on the caller's
+            //    side as well and it gets squared, giving a blob instead of a column (see
+            //    the doc on how this class places things).
             if (c > EruptionColumn.UmbrellaBaseFraction)
             {
                 float umbrella = (c - EruptionColumn.UmbrellaBaseFraction)

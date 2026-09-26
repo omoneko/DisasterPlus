@@ -4,10 +4,12 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// 所有者の指示（2026-08-25）「時々台風の雲の中から稲妻を発生させる」。
+    /// Owner's instruction (2026-08-25): "Occasionally make lightning appear from
+    /// inside the typhoon's clouds."
     ///
-    /// ★★ 固定するのは<b>雲の中に収まっていること</b>である。はみ出したら、
-    ///    直そうとしていた症状（雷が雲の外で光る）に戻る。
+    /// ★★ What is pinned is that it <b>stays inside the cloud</b>. If it strays out, we
+    ///    are back to the symptom we were trying to fix (lightning flashing outside the
+    ///    cloud).
     /// </summary>
     public class TyphoonBoltTests
     {
@@ -35,12 +37,13 @@ namespace DisasterPlus.Core.Tests.Typhoon
                     float d = (float)System.Math.Sqrt(path[i].X * path[i].X
                                                       + path[i].Z * path[i].Z);
 
-                    // ★ 渦の外へ出ない。
+                    // ★ Do not go outside the vortex.
                     Assert.True(d <= Radius,
                                 "slot " + slot + " point " + i + " reached " + d
                                 + " m, outside the storm at " + Radius);
 
-                    // ★★ **雲の厚みから出ない。** ここが破れると雷が雲の上か下で光る。
+                    // ★★ **Do not leave the thickness of the cloud.** If this breaks,
+                    //    the lightning flashes above or below the cloud.
                     Assert.InRange(path[i].Y, 0f, Thickness);
                 }
             }
@@ -49,7 +52,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void NoBoltStrikesInsideTheEye()
         {
-            // 目は晴れている。そこで光ったら台風に見えない。
+            // The eye is clear. A flash there would not look like a typhoon.
             var path = Buffer();
             float eye = TyphoonCloudParcels.EyeFraction * Radius;
 
@@ -58,7 +61,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
                 int n = TyphoonBolt.PathInto(path, Seed, slot, Radius, Thickness);
                 if (n == 0) continue;
 
-                // 中心（折れ線の真ん中）が目の外にあること。
+                // The centre (the middle of the polyline) must lie outside the eye.
                 TyphoonBoltPoint mid = path[TyphoonBolt.PointCount / 2];
                 float d = (float)System.Math.Sqrt(mid.X * mid.X + mid.Z * mid.Z);
 
@@ -70,12 +73,13 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheBoltIsCrookedNotStraight()
         {
-            // 2 点の直線は雷に見えない。途中の点が軸から外れていること。
+            // A straight line through 2 points does not look like lightning. The points
+            // in between must sit off the axis.
             var path = Buffer();
             Assert.Equal(TyphoonBolt.PointCount,
                          TyphoonBolt.PathInto(path, Seed, 7, Radius, Thickness));
 
-            // 端点を結ぶ線からの最大のずれ。
+            // The largest deviation from the line joining the end points.
             TyphoonBoltPoint a = path[0];
             TyphoonBoltPoint b = path[TyphoonBolt.PointCount - 1];
 
@@ -98,13 +102,13 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ItFlashesSometimesNotConstantly()
         {
-            // 「時々」である。全部の枠で光ると忙しない。
+            // It is "occasionally". Lighting up in every slot is restless.
             int lit = 0;
             const int Slots = 300;
 
             for (int slot = 0; slot < Slots; slot++)
             {
-                // その枠のいちばん明るくなりうる時刻を探す。
+                // Find the moment in that slot where it can be at its brightest.
                 float best = 0f;
                 for (int k = 0; k <= 40; k++)
                 {
@@ -146,7 +150,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ABoltNeverOutlivesItsFlash()
         {
-            // 光っている時間は FlashSeconds を超えないこと。
+            // The time it spends lit must not exceed FlashSeconds.
             for (int slot = 0; slot < 60; slot++)
             {
                 float first = -1f, last = -1f;
@@ -184,7 +188,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void AnUnreadableThicknessStillDrawsSomethingSane()
         {
-            // 厚みが読めなくても、渦の半径から代わりの厚みを作って描く。
+            // Even when the thickness cannot be read, derive a substitute thickness from
+            // the vortex radius and draw anyway.
             var path = Buffer();
             int n = TyphoonBolt.PathInto(path, Seed, 3, Radius, float.NaN);
 

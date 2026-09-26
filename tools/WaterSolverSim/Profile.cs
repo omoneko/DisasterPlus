@@ -3,24 +3,26 @@ using System;
 namespace DisasterPlus.Tools.WaterSolverSim
 {
     /// <summary>
-    /// 水面を<b>中心からの距離ごと</b>にならしたもの。
+    /// The water surface averaged <b>by distance from the centre</b>.
     ///
-    /// 津波は同心円で走るので、1 本の断面（例えば x 軸上）だけを見ると
-    /// 格子由来のギザギザと乱数の粒が乗る。**同じ半径のセルを全部平均する**と
-    /// 波頭の位置と高さがきれいに読める。
+    /// A tsunami runs in concentric circles, so looking at a single cross-section (along the
+    /// x axis, say) picks up grid-induced jaggedness and the grain of the random numbers.
+    /// **Averaging every cell at the same radius** makes the position and height of the wave
+    /// front easy to read off.
     /// </summary>
     internal sealed class Profile
     {
-        /// <summary>半径 r セルの平均水面（海面より上を正、m）。</summary>
+        /// <summary>Mean water surface at radius r cells (positive above sea level, m).</summary>
         public readonly float[] MeanMetres;
 
-        /// <summary>その半径に入ったセル数。0 のところは値が無い。</summary>
+        /// <summary>Number of cells that fell into that radius. Where it is 0 there is no
+        /// value.</summary>
         public readonly int[] Count;
 
-        /// <summary>いちばん高い輪の半径（セル）。見つからなければ -1。</summary>
+        /// <summary>Radius of the highest ring (cells). -1 if none was found.</summary>
         public readonly int PeakRadiusCells;
 
-        /// <summary>その輪の高さ（m）。</summary>
+        /// <summary>Height of that ring (m).</summary>
         public readonly float PeakMetres;
 
         private Profile(float[] mean, int[] count, int peakR, float peakM)
@@ -32,8 +34,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
         }
 
         /// <summary>
-        /// <paramref name="field"/> の水面を (cx, cz) 中心で半径方向にならす。
-        /// 半径は 1 セル（16 m）刻みで、四捨五入した整数距離で束ねる。
+        /// Averages the water surface of <paramref name="field"/> radially about (cx, cz).
+        /// The radius steps in units of one cell (16 m), binned by the rounded integer distance.
         /// </summary>
         public static Profile Build(WaterField field, int cx, int cz)
         {
@@ -73,7 +75,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 if (count[r] == 0) continue;
                 mean[r] = (float)(sum[r] / count[r]);
 
-                // ★ 波頭は中心そのものではなく「輪」なので r >= 1 から探す。
+                // ★ The wave front is a "ring", not the centre itself, so search from r >= 1.
                 if (r >= 1 && (peakR < 0 || mean[r] > peakM))
                 {
                     peakR = r;
@@ -84,7 +86,8 @@ namespace DisasterPlus.Tools.WaterSolverSim
             return new Profile(mean, count, peakR, peakM);
         }
 
-        /// <summary>中心から <paramref name="metres"/> の地点の平均水面（m）。範囲外なら NaN。</summary>
+        /// <summary>Mean water surface (m) at <paramref name="metres"/> from the centre.
+        /// NaN if out of range.</summary>
         public float AtMetres(float metres)
         {
             int r = (int)(metres / WaterField.CellSizeMetres + 0.5f);

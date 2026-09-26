@@ -3,44 +3,47 @@ namespace DisasterPlus.Core.Typhoon
     using DisasterPlus.Core.Common;
 
     /// <summary>
-    /// <b>台風の経路を、これから先まで引くのに必要な値ひとそろい。</b>**エンジン非依存。**
+    /// <b>Everything needed to draw a typhoon's track onwards into the future.</b> **Engine-free.**
     ///
-    /// ── なぜ要るのか（2026-09-02、所有者の依頼）────────────────────────
+    /// ── Why it is needed (2026-09-02, the owner's request) ────────────────────────
     ///
-    /// &gt; 台風の進路、暴風域、風の分布を都市マップ上に示すボタンを配置して、
-    /// &gt; 機能するようにしてください
+    /// &gt; Put a button on the city map that shows the typhoon's track, its gale radius and
+    /// &gt; the wind distribution, and make it work.
     ///
-    /// 「今どこにいるか」はスナップショットの <c>Centre</c> で足りるが、
-    /// <b>「これからどこへ行くか」は経路そのものを引き直さないと出ない</b>。
-    /// <see cref="TyphoonTrack"/> はそれを
-    /// <c>(origin, seed, speed, approachFrames)</c> の 4 つから決めているので、
-    /// その 4 つを描画側へ運ぶ箱がこれである。
+    /// "Where it is now" is covered by the snapshot's <c>Centre</c>, but
+    /// <b>"where it is going" cannot be had without re-deriving the track itself</b>.
+    /// <see cref="TyphoonTrack"/> decides that from four things,
+    /// <c>(origin, seed, speed, approachFrames)</c>, so this is the box that carries those
+    /// four over to the drawing side.
     ///
-    /// ★★ **描画は main スレッド、経路は sim スレッドが決める。**
-    ///   だから <c>TyphoonController</c> の static を描画から直接読んではいけない
-    ///   （このプロジェクトのスレッド境界の規律）。**スナップショットに載せて運ぶ。**
-    ///   一度作ったら書き換えない値の組なので、struct で足りる。
+    /// ★★ **Drawing happens on the main thread; the track is decided on the sim thread.**
+    ///   That is why the drawing code must not read <c>TyphoonController</c>'s statics
+    ///   directly (this project's thread-boundary discipline). **Put it on the snapshot and
+    ///   carry it across.** It is a set of values never rewritten once made, so a struct
+    ///   suffices.
     ///
-    /// ★ 予測できるのは<b>経路だけ</b>である。強度は上陸減衰
-    ///   （<see cref="TyphoonTrack.DecayAfter"/>）を含み、それは
-    ///   「これから陸の上を通るか」に依存するので、**先の強度は名乗らない**。
-    ///   暴風域の円は「今の強度での今の半径」だけを描く。
+    /// ★ Only <b>the track</b> can be predicted. The intensity includes landfall decay
+    ///   (<see cref="TyphoonTrack.DecayAfter"/>), which depends on "will it pass over land
+    ///   from here on", so **we do not claim a future intensity**. The gale-radius circle
+    ///   only ever draws "the current radius at the current intensity".
     /// </summary>
     public struct TyphoonTrackPlan
     {
-        /// <summary>プレイヤーがクリックした地点（＝経路の基準点）。</summary>
+        /// <summary>The spot the player clicked (i.e. the track's reference point).</summary>
         public readonly Vec2 Origin;
 
-        /// <summary>経路の乱数種。方位と曲率がここから決まる。</summary>
+        /// <summary>The track's random seed. The bearing and the curvature come out of
+        /// this.</summary>
         public readonly uint Seed;
 
-        /// <summary>進行速度（m/frame）。**0 は「持続時間が読めなかった」の意味。**</summary>
+        /// <summary>Travel speed (m/frame). **0 means "the duration could not be read".**</summary>
         public readonly float Speed;
 
-        /// <summary>クリック地点に着くまでのフレーム数（マップ外から来るぶん）。</summary>
+        /// <summary>How many frames until it reaches the clicked spot (the leg in from off the
+        /// map).</summary>
         public readonly uint ApproachFrames;
 
-        /// <summary>寿命（フレーム）。経路をどこまで引くかの終端。</summary>
+        /// <summary>Lifetime (frames). The far end of how much track to draw.</summary>
         public readonly uint TotalFrames;
 
         public TyphoonTrackPlan(Vec2 origin, uint seed, float speed,
@@ -54,35 +57,36 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 経路を引けるか。**false のときは 1 本も線を描かないこと** ——
-        /// 速度 0 は「プレハブの持続時間が読めなかった」であって「止まっている」
-        /// ではない（<see cref="TyphoonTrack.SpeedFor"/> の doc）。
-        /// 読めていない値から線を引くと、それは推測を地図に描くことになる。
+        /// Whether the track can be drawn. **When this is false, do not draw a single line** —
+        /// a speed of 0 means "the prefab's duration could not be read", not "it is standing
+        /// still" (see the doc on <see cref="TyphoonTrack.SpeedFor"/>).
+        /// Drawing a line from a value you could not read means drawing a guess on the map.
         /// </summary>
         public bool Usable
         {
             get { return Speed > 0f && TotalFrames > 0u; }
         }
 
-        /// <summary>台風が生まれてから <paramref name="elapsedFrames"/> 後の中心。</summary>
+        /// <summary>The centre <paramref name="elapsedFrames"/> after the typhoon was
+        /// born.</summary>
         public Vec2 CentreAt(uint elapsedFrames)
         {
             return TyphoonTrack.CentreAt(Origin, Seed, elapsedFrames, Speed, ApproachFrames);
         }
 
-        /// <summary>同じ時刻の進行方位（rad）。</summary>
+        /// <summary>The bearing of travel (rad) at that same moment.</summary>
         public float HeadingAt(uint elapsedFrames)
         {
             return TyphoonTrack.HeadingAt(Origin, Seed, elapsedFrames, Speed, ApproachFrames);
         }
 
         /// <summary>
-        /// 経路上の点を <paramref name="into"/> へ書く。**確保しない**
-        /// （描画は毎フレームなので、呼び出し側が配列を使い回す）。
+        /// Writes points along the track into <paramref name="into"/>. **It allocates
+        /// nothing** (drawing happens every frame, so the caller reuses the array).
         ///
-        /// <paramref name="fromFrames"/> から <paramref name="toFrames"/> までを
-        /// <paramref name="count"/> 等分して書き、実際に書いた数を返す。
-        /// <see cref="Usable"/> が false なら 0。
+        /// Writes <paramref name="count"/> evenly spaced points from
+        /// <paramref name="fromFrames"/> to <paramref name="toFrames"/> and returns how many
+        /// were actually written. 0 if <see cref="Usable"/> is false.
         /// </summary>
         public int Sample(Vec2[] into, int count, uint fromFrames, uint toFrames)
         {
@@ -100,8 +104,8 @@ namespace DisasterPlus.Core.Typhoon
             uint span = toFrames - fromFrames;
             for (int i = 0; i < count; i++)
             {
-                // ★ long で割ってから戻す。span は寿命ぶん（数万）まで行くので、
-                //   span * i を uint のまま計算すると大きな count で溢れる。
+                // ★ Divide in long and come back. span runs to the whole lifetime (tens of
+                //   thousands), so computing span * i in uint overflows at large counts.
                 uint at = fromFrames + (uint)((long)span * i / (count - 1));
                 into[i] = CentreAt(at);
             }
@@ -109,7 +113,8 @@ namespace DisasterPlus.Core.Typhoon
             return count;
         }
 
-        /// <summary>読めなかったときの値。<see cref="Usable"/> は false になる。</summary>
+        /// <summary>The value to use when nothing could be read. <see cref="Usable"/> comes
+        /// out false.</summary>
         public static TyphoonTrackPlan None
         {
             get { return new TyphoonTrackPlan(new Vec2(0f, 0f), 0u, 0f, 0u, 0u); }

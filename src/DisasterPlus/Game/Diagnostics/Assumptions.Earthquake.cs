@@ -4,36 +4,39 @@ using System.Reflection;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="Assumptions"/> のうち②地震 の前提。
+    /// The part of <see cref="Assumptions"/> covering the ② earthquake.
     ///
-    /// **このファイルには検証しか置かない。** <c>Check</c> / <c>SetResult</c> /
-    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> は本体側の private のままで、
-    /// partial なので可視性を 1 つも上げずに使える（分割の要件そのもの）。
+    /// **This file holds nothing but checks.** <c>Check</c> / <c>SetResult</c> /
+    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> stay private on the main side, and
+    /// because this is partial they can be used without raising a single visibility
+    /// (that is exactly the requirement behind the split).
     ///
-    /// 件数は <see cref="EarthquakeCheckCount"/> がこのファイルの中で宣言する。
-    /// **検証を足したらここも増やすこと** —— 本体の <c>TotalCheckCount</c> は
-    /// これらの和である。
+    /// The count is declared inside this file by <see cref="EarthquakeCheckCount"/>.
+    /// **If you add a check, bump it here too** — the main file's <c>TotalCheckCount</c> is
+    /// the sum of these.
     /// </summary>
     public static partial class Assumptions
     {
-        /// <summary>このファイルが持つ検証の数。</summary>
+        /// <summary>The number of checks this file holds.</summary>
         private const int EarthquakeCheckCount = 11;
 
         private static void RunEarthquake()
         {
-            // --- ②地震（Task 3）ここから ---
+            // --- ② earthquake (Task 3) starts here ---
 
-            // このプロジェクトで唯一「実行時にしか値が取れない」前提。
-            // m_crackLength / m_crackWidth / m_emergingDuration / m_activeDuration の
-            // 実数値は DLL に無く（プレハブのシリアライズ値、IL 事実文書 §A-0）、
-            // UnityPy による sharedassets の読み出しも失敗している。②の以後の
-            // 持続時間の設計は全てこの 4 値の上に乗るので、読めないなら読めないと
-            // 名指しする以外に防波堤が無い。
+            // The only assumption in this project whose value can be obtained at runtime and
+            // nowhere else. The actual values of m_crackLength / m_crackWidth /
+            // m_emergingDuration / m_activeDuration are not in the DLL (they are prefab
+            // serialised values, IL findings document §A-0), and reading them out of
+            // sharedassets with UnityPy has failed too. Every duration ② designs from here on
+            // rests on these four numbers, so if they cannot be read there is no breakwater
+            // other than naming that fact.
             //
-            // DLC 非所持環境ではこれが FAIL するのが正常。TornadoAI の項目が既に
-            // 同じ性質を持っており、それが確立した扱い。母数からは外さない
-            // （ReportSliderNotApplicable 方式にしない）——地震機能そのものが
-            // DLC 依存なので、「使えない」と名指しするのが正しい。
+            // FAIL is the normal outcome in an environment without the DLC. The TornadoAI
+            // entry already has the same character, and that is the established treatment.
+            // It is not taken out of the denominator (no ReportSliderNotApplicable approach
+            // here) — the earthquake feature itself depends on the DLC, so naming it
+            // "unavailable" is the right thing to do.
             Check("EarthquakeAI disaster prefab exposes its four tuning fields and "
                   + "m_activeDuration is non-zero",
                   "no earthquake durations or fault geometry can be read; every duration in this "
@@ -49,23 +52,26 @@ namespace DisasterPlus.Game
                       {
                           return false;
                       }
-                      // 副作用の無い純粋な走査を使う。EarthquakeReader の内部キャッシュは
-                      // sim スレッドが回しており、main スレッドのここから巻き戻してはいけない
-                      // （FireWhirlSpawner.HasTornadoPrefab と同じ理由）。
+                      // Use a pure, side-effect-free scan. EarthquakeReader's internal cache
+                      // is turned by the sim thread and must not be wound back from here on
+                      // the main thread (the same reason as
+                      // FireWhirlSpawner.HasTornadoPrefab).
                       //
-                      // ★★ **Resolved だけを見ない**（全体レビュー C1 の監査で見つかった
-                      //    3 件目）。Resolved は「オブジェクトが見つかり 4 値を読み終えた」
-                      //    だけで立ち、**中身を 1 バイトも見ていない**。②で実際に振る舞いを
-                      //    決めているのは 4 箇所の `Resolved || ActiveDuration == 0u` という
-                      //    ゲート（CameraShakeBooster / EarthquakeFeature /
-                      //    EarthquakePanel / EarthquakeSensorRows）である。
-                      //    m_activeDuration が 0 だと波形もカメラ補正も地震計も黙って
-                      //    止まるのに、この検証だけ PASS を出していた。
+                      // ★★ **Do not look at Resolved alone** (the third such case found in
+                      //    the audit for overall review C1). Resolved is set merely because
+                      //    "the object was found and the four values were read"; it
+                      //    **has not looked at one byte of the contents**. What actually
+                      //    decides ②'s behaviour are the four gates of the form
+                      //    `Resolved || ActiveDuration == 0u` (CameraShakeBooster /
+                      //    EarthquakeFeature / EarthquakePanel / EarthquakeSensorRows).
+                      //    With m_activeDuration at 0, the waveform, the camera correction
+                      //    and the seismographs all stop silently, and yet this check alone
+                      //    was emitting a PASS.
                       //
-                      //    m_crackLength / m_crackWidth は**ゲートに含めない**。
-                      //    こちらは 0 のとき表示側が「unknown」と名乗る経路を既に持って
-                      //    いる（EarthquakeFeature の "fault (L/W)" 行）ので、
-                      //    黙って壊れる値ではない。
+                      //    m_crackLength / m_crackWidth are **not part of the gate**.
+                      //    Those already have a path where the display side says "unknown"
+                      //    when they are 0 (EarthquakeFeature's "fault (L/W)" row), so they
+                      //    are not values that break silently.
                       var quake = EarthquakeReader.ScanPrefabFacts();
                       return quake.Resolved && quake.ActiveDuration > 0u;
                   },
@@ -82,8 +88,9 @@ namespace DisasterPlus.Game
                           && HasField(t, "m_angle", typeof(float));
                   });
 
-            // 列挙メンバは文字列で見る。コード内の直接参照はコンパイル時に整数へ
-            // 畳み込まれるので、名前の変更を検出できない（SubInfoMode の検証と同じ理由）。
+            // Enum members are checked by string. A direct reference in code is folded down
+            // to an integer at compile time, so a rename cannot be detected (the same reason
+            // as the SubInfoMode check).
             Check("ImmaterialResourceManager.Resource.EarthquakeCoverage exists and "
                   + "CheckLocalResource is resolvable",
                   "seismograph coverage cannot be read, so the mod cannot explain why the hazard map is empty",
@@ -105,14 +112,15 @@ namespace DisasterPlus.Game
                           null) != null;
                   });
 
-            // sim スレッドの時計。ここが解決できないと、残るのは main スレッドが書く
-            // m_currentDayTimeHour だけになる——それはスレッド境界を跨ぐ上に、
-            // m_referenceFrameIndex（描画補間側）由来の別の量である（§F-1）。
+            // The sim thread's clock. If this cannot be resolved, all that is left is
+            // m_currentDayTimeHour, which the main thread writes — that crosses the thread
+            // boundary, and on top of that it is a different quantity, derived from
+            // m_referenceFrameIndex (the render-interpolation side) (§F-1).
             //
-            // なお m_enableDayNight が false であること自体は前提の破れではない
-            // （プレイヤーが選べる正当な設定で、hour が 12.0 に固定されるだけ）。
-            // ここで FAIL にすると偽 FAIL になるので、その事実は診断ダンプの
-            // "sim clock" 行とパネルで名乗る。
+            // Note that m_enableDayNight being false is not itself a broken assumption
+            // (it is a legitimate choice the player can make, and hour is simply pinned at
+            // 12.0). Making it a FAIL here would be a false FAIL, so that fact is stated on
+            // the "sim clock" row of the diagnostic dump and in the panel.
             Check("SimulationManager exposes m_dayTimeFrame / DAYTIME_FRAME_TO_HOUR / m_enableDayNight",
                   "the sim-thread clock cannot be read; the mod would have to fall back to "
                   + "m_currentDayTimeHour, which is written by the main thread",
@@ -124,15 +132,15 @@ namespace DisasterPlus.Game
                           && HasStaticField(t, "DAYTIME_FRAME_TO_HOUR", typeof(float));
                   });
 
-            // --- ②地震（Task 3）ここまで ---
+            // --- ② earthquake (Task 3) ends here ---
 
-            // --- ②地震（Task 4）ここから ---
+            // --- ② earthquake (Task 4) starts here ---
 
-            // 地震のハザードビューへの切替と、そこに何かを塗る側の両方。
-            // ここが FAIL すると「ハザードマップが空である理由」——本機能が出す
-            // いちばん重要な説明——を、そもそも見せる場所が無くなる。
-            // 列挙メンバは文字列で見る（コード内の直接参照はコンパイル時に整数へ
-            // 畳み込まれるので、名前の変更を検出できない）。
+            // Both switching to the earthquake hazard view and the side that paints anything
+            // on to it. If this FAILs there is nowhere left to show "why the hazard map is
+            // empty" — the single most important explanation this feature produces.
+            // Enum members are checked by string (a direct reference in code is folded down
+            // to an integer at compile time, so a rename cannot be detected).
             Check("SubInfoMode.EarthquakeHazard exists and EarthquakeAI.UpdateHazardMap exists",
                   "the earthquake hazard heatmap cannot be shown, so the mod cannot explain "
                   + "the Located gate",
@@ -142,25 +150,27 @@ namespace DisasterPlus.Game
                           && HasUpdateHazardMap(typeof(EarthquakeAI));
                   });
 
-            // --- ②地震（Task 4）ここまで ---
+            // --- ② earthquake (Task 4) ends here ---
 
-            // --- ②地震（Task 5）ここから ---
+            // --- ② earthquake (Task 5) starts here ---
 
-            // **これが Task 1 のビット一致を実際に保証する唯一の検査である。**
-            // 建物ごとの倒壊判定は全て VanillaRandomizer の再現の上に乗っており、
-            // 1 ビットずれても何も壊れない——もっともらしい数字が出続けたまま、
-            // パネルの断定だけが全部嘘になる。ユニットテストは LCG の定義からの
-            // 逸脱しか捕まえられない（本物の DLL を参照できない）ので、
-            // ゲーム本体との一致はここでしか見られない。
+            // **This is the only check that actually guarantees Task 1's bit-for-bit match.**
+            // Every per-building collapse verdict rests on the reproduction in
+            // VanillaRandomizer, and if a single bit is off nothing breaks — plausible numbers
+            // go on appearing while every assertion in the panel becomes a lie. Unit tests can
+            // only catch a deviation from the definition of the LCG (they cannot reference the
+            // real DLL), so agreement with the game itself can only be seen here.
             Check("VanillaRandomizer reproduces ColossalFramework.Math.Randomizer bit for bit",
                   "every per-building collapse verdict is wrong; the panel would keep showing "
                   + "plausible numbers that do not match what the game draws",
                   delegate
                   {
-                      // 本物と自前の実装を並べて回す。ビット列だけでなく「引く順序」も見る
-                      // （1 個ずれる壊れ方をこの検査で捕まえるため、必ず 2 回以上引く）。
-                      // Randomizer は struct なので、必ずローカル変数に置いて使うこと
-                      // （プロパティやフィールド経由で呼ぶとコピーが進んで列が分岐する）。
+                      // Run the real one and our own implementation side by side. Look not
+                      // just at the bits but at "the order of the draws" (always draw at
+                      // least twice, so this check catches a breakage that is off by one).
+                      // Randomizer is a struct, so always put it in a local variable
+                      // (call it through a property or a field and a copy advances instead,
+                      // so the sequences diverge).
                       int[] seeds = { 0, 1, -1, 12345, 0x00070000 | 1234, int.MinValue, int.MaxValue };
                       for (int i = 0; i < seeds.Length; i++)
                       {
@@ -174,19 +184,19 @@ namespace DisasterPlus.Game
                       return true;
                   });
 
-            // --- ②地震（Task 5）ここまで ---
+            // --- ② earthquake (Task 5) ends here ---
 
-            // --- ②地震（Task 6）ここから ---
+            // --- ② earthquake (Task 6) starts here ---
 
-            // カメラの揺れの補正は、この 2 つの public フィールドの上にしか成り立たない。
-            // どちらも Harmony を使わずに触れることが前提で（§A-7）、片方でも
-            // 非公開化・改名・型変更されると CameraShakeBooster は例外を 1 回吐いた後
-            // 黙って何も足さなくなる——そして**追加分 0 は強度 55 では正常な状態**
-            // なので、画面を見ても機能が死んでいることに気付けない。
+            // The camera-shake correction stands on nothing but these two public fields.
+            // Both are assumed to be touchable without Harmony (§A-7), and if either is made
+            // non-public, renamed or retyped, CameraShakeBooster throws once and then quietly
+            // adds nothing — and since **an addition of 0 is the normal state at intensity
+            // 55**, you cannot tell from the screen that the feature is dead.
             //
-            // m_disableCameraShake の方が重い。読めなければ「揺らすな」という
-            // プレイヤーの明示的な選択を無視して足すことになるので、
-            // CameraShakeBooster は読めない場合に**何も足さない**側へ倒している。
+            // m_disableCameraShake is the heavier of the two. If it cannot be read we would be
+            // adding shake in defiance of the player's explicit choice of "do not shake", so
+            // CameraShakeBooster falls to the **add nothing** side when it cannot be read.
             Check("CameraController.m_cameraShake and DisasterManager.m_disableCameraShake "
                   + "are public fields",
                   "camera shake cannot be scaled with intensity and distance, and the mod cannot "
@@ -202,24 +212,25 @@ namespace DisasterPlus.Game
                       return disable != null && disable.FieldType == typeof(bool);
                   });
 
-            // --- ②地震（Task 6）ここまで ---
+            // --- ② earthquake (Task 6) ends here ---
 
-            // --- ②地震（震度分布の地図オーバーレイ）ここから ---
+            // --- ② earthquake (the intensity distribution map overlay) starts here ---
 
-            // **この機能はまるごとこの 4 つの API の上に乗っている。**
-            // どれか 1 つでも消えると、オーバーレイは例外を 1 回吐いた後
-            // 黙って何も描かなくなる —— そして「何も描かない」は
-            // 「地震が無い」「トグルが OFF」とも見分けが付かない。
+            // **This feature rests entirely on these four APIs.**
+            // If even one of them disappears, the overlay throws once and then quietly draws
+            // nothing — and "draws nothing" is indistinguishable from "there is no earthquake"
+            // and "the toggle is OFF".
             //
-            // IL 実測（この機能の着手時に自分で逆アセンブルして確認した）:
-            //   RenderManager::RegisterRenderableManager  public static、m_renderables へ Add するだけ
+            // Measured from the IL (disassembled and confirmed by hand when this feature was
+            // started):
+            //   RenderManager::RegisterRenderableManager  public static, just Adds to m_renderables
             //   OverlayEffect::OnPostRender  IL_00A3  → RenderManager::Managers_RenderOverlay
-            //   Managers_RenderOverlay       IL_0050  → 各 IRenderableManager::EndOverlay
-            //   OverlayEffect::DrawCircle / DrawQuad → DrawEffect → Graphics::DrawMeshNow（即時描画）
+            //   Managers_RenderOverlay       IL_0050  → each IRenderableManager::EndOverlay
+            //   OverlayEffect::DrawCircle / DrawQuad → DrawEffect → Graphics::DrawMeshNow (immediate draw)
             //
-            // 列挙メンバではなくメソッドなので、型引数まで込みで照合する
-            // （オーバーロードが増えたときに GetMethod(name) が
-            //  AmbiguousMatchException を投げて偽 FAIL になるのを避ける）。
+            // These are methods rather than enum members, so match on the argument types as
+            // well (to avoid GetMethod(name) throwing AmbiguousMatchException and producing a
+            // false FAIL once an overload is added).
             Check("RenderManager overlay drawing API is reachable "
                   + "(RegisterRenderableManager / OverlayEffect.DrawCircle / DrawQuad)",
                   "the earthquake intensity distribution cannot be drawn on the map at all; "
@@ -259,34 +270,37 @@ namespace DisasterPlus.Game
                           }, null) != null;
                   });
 
-            // --- ②地震（震度分布の地図オーバーレイ）ここまで ---
+            // --- ② earthquake (the intensity distribution map overlay) ends here ---
 
-            // --- ②地震（Task 9: 第 2 層 — 海中震源からの津波連鎖）ここから ---
+            // --- ② earthquake (Task 9: second layer — the tsunami chain from an undersea
+            //     epicentre) starts here ---
 
-            // **DLC が無い環境ではここが FAIL するのが正常である。** TsunamiAI の
-            // *型* は DLC の有無に関わらず Assembly-CSharp に同梱されているので、
-            // 型の存在検査は通ってしまう。実在を決めるのは PrefabCollection に
-            // TsunamiAI を持つ DisasterInfo が居るかどうかで（§B-5）、
-            // ModCompat.NaturalDisastersOwned は UI を出すかどうかの事前判定にすぎない。
-            // 影響の文にその期待を書いておかないと、正常な環境の FAIL が不具合に見える。
+            // **FAIL is the normal outcome here in an environment without the DLC.** The
+            // *type* TsunamiAI ships inside Assembly-CSharp whether or not the DLC is owned,
+            // so a type-existence check would pass regardless. What decides whether it really
+            // exists is whether PrefabCollection holds a DisasterInfo with a TsunamiAI (§B-5),
+            // and ModCompat.NaturalDisastersOwned is no more than an advance check on whether
+            // to show the UI.
+            // Without writing that expectation into the impact sentence, a FAIL in a perfectly
+            // normal environment looks like a fault.
             //
-            // 走査は副作用の無い純粋な問い合わせを使う（FireWhirlSpawner.HasTornadoPrefab
-            // と同じ理由。ここは main スレッドで、sim スレッドのキャッシュを
-            // 巻き戻してはいけない）。
+            // The scan uses a pure, side-effect-free query (the same reason as
+            // FireWhirlSpawner.HasTornadoPrefab. This is the main thread, and the sim thread's
+            // cache must not be wound back).
             Check("TsunamiAI disaster prefab is available",
                   "the tsunami chain cannot run (this also FAILs when the Natural Disasters DLC "
                   + "is not owned, which is expected)",
                   delegate { return TsunamiChain.HasTsunamiPrefab(); },
                   true);
 
-            // 津波連鎖の入口と出口。HasWater が解決できなければ「震源が水中か」を
-            // 判断できず、m_waveIndex が読めなければ「波が実際に立ったか」を判断できない
-            // ——後者が読めないと、内陸マップの正常な「何も起きない」を
-            // 「起こしたつもり」と取り違える。
+            // The entry and exit of the tsunami chain. Without HasWater resolving we cannot
+            // decide "is the epicentre under water", and without reading m_waveIndex we cannot
+            // decide "did a wave actually rise" — and if the latter cannot be read, an inland
+            // map's perfectly normal "nothing happens" is mistaken for "we think we raised one".
             //
-            // 引数の型まで込みで照合する（オーバーロードが 2 つあり、名前だけで
-            // GetMethod を引くと AmbiguousMatchException で偽 FAIL になる。
-            // 実測: HasWater(Vector2) と HasWater(Segment2, float, bool)）。
+            // Match on the argument types as well (there are two overloads, and looking
+            // GetMethod up by name alone gives an AmbiguousMatchException and a false FAIL.
+            // Measured: HasWater(Vector2) and HasWater(Segment2, float, bool)).
             Check("TerrainManager.HasWater is resolvable and DisasterData exposes m_waveIndex",
                   "the mod cannot tell whether the epicentre is under water, nor whether a wave "
                   + "was actually raised",
@@ -302,32 +316,34 @@ namespace DisasterPlus.Game
                       return wave != null && wave.FieldType == typeof(ushort);
                   });
 
-            // --- ②地震（Task 9）ここまで ---
+            // --- ② earthquake (Task 9) ends here ---
 
-            // --- ②地震（Task 10: 第 2 層 — 長周期地震動）ここから ---
+            // --- ② earthquake (Task 10: second layer — long-period ground motion) starts here ---
 
-            // **この機能は建物を実際に壊す。** だから前提が破れたときに
-            // 「静かに違う挙動」になることを許さない。見るのは 2 つ:
+            // **This feature really does destroy buildings.** So it does not permit "quietly
+            // different behaviour" when an assumption breaks. Two things are checked:
             //
-            //   1. BuildingAI.CollapseBuilding が引数まで込みで解決できるか。
-            //      DisasterHelpers を経由しないのが NDR 回避の要点（§E-2）なので、
-            //      迂回先そのものが消えていないかを名指しする。
-            //   2. 建物の高さが読めるか。**Building 構造体に高さのフィールドは無い**
-            //      （IL 実測。あるのは m_baseHeight / m_width / m_length だけ）。
-            //      高さはプレハブ側の BuildingInfo.m_size（Vector3、m）の y で、
-            //      InitializePrefab が m_generatedInfo.m_size から入れる（IL_09BE）。
-            //      単位がメートルであることは CommonBuildingAI.CollapseIfFlooded の
-            //      `waterLevel > m_position.y + Max(4f, m_collisionHeight)` で確定
-            //      （m_collisionHeight の出発点が m_size.y。BuildingHeight の
-            //      クラス doc に IL 全文がある）。
+            //   1. Whether BuildingAI.CollapseBuilding resolves, argument types included.
+            //      Not going through DisasterHelpers is the crux of avoiding NDR (§E-2), so
+            //      name whether the detour's destination itself has disappeared.
+            //   2. Whether a building's height can be read. **The Building struct has no
+            //      height field** (measured from the IL. All it has is m_baseHeight /
+            //      m_width / m_length).
+            //      The height is the y of BuildingInfo.m_size (Vector3, m) on the prefab side,
+            //      which InitializePrefab fills from m_generatedInfo.m_size (IL_09BE).
+            //      That the unit is metres is settled by
+            //      `waterLevel > m_position.y + Max(4f, m_collisionHeight)` in
+            //      CommonBuildingAI.CollapseIfFlooded (m_collisionHeight starts from m_size.y.
+            //      The full IL is in the BuildingHeight class doc).
             //
-            //      ★ **m_collisionHeight は見ない**（第 2 層レビュー I2）。あちらは
-            //      CheckReferences が敷地のプロップと樹木の上端まで Mathf.Max で
-            //      取り込むので、平屋が 20 m 以上を名乗る。読めるかを確かめる相手は、
-            //      実際に使うフィールドでなければ意味が無い。
+            //      ★ **Do not look at m_collisionHeight** (second-layer review I2). Over
+            //      there, CheckReferences folds in the tops of the props and trees on the plot
+            //      with Mathf.Max, so a single-storey building claims 20 m or more. Confirming
+            //      that something is readable is meaningless unless it is the field actually
+            //      used.
             //
-            // ここが FAIL したとき LongPeriodDamage は**何もしない**（推測した高さで
-            // 建物を壊さない）ので、影響の文にもそう書く。
+            // When this FAILs, LongPeriodDamage does **nothing** (it does not destroy
+            // buildings using a guessed height), so the impact sentence says as much.
             Check("BuildingAI.CollapseBuilding is resolvable and building height can be read",
                   "long-period damage cannot be applied; the feature disables itself rather than "
                   + "guessing a height",
@@ -353,14 +369,14 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      // 予備経路（BuildingHeight.MetresOf）が使う出所そのもの。
+                      // The very source the fallback path (BuildingHeight.MetresOf) uses.
                       var generated = typeof(BuildingInfo).GetField("m_generatedInfo",
                           BindingFlags.Public | BindingFlags.Instance);
                       return generated != null
                              && typeof(BuildingInfoGen).IsAssignableFrom(generated.FieldType);
                   });
 
-            // --- ②地震（Task 10）ここまで ---
+            // --- ② earthquake (Task 10) ends here ---
         }
     }
 }

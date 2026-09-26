@@ -5,68 +5,73 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ⑤を構えているあいだだけ、**バニラの強度スライダーの数字を「山の大きさ」に
-    /// 読み替えて表示する。** main スレッド専用、毎フレーム。
+    /// While ⑤ is armed, and only then, **re-read the number on vanilla's intensity slider
+    /// as "the size of the mountain" and show that instead.** Main thread only, every frame.
     ///
-    /// ── なぜ要るのか（2026-08-22、所有者の指摘）─────────────────────
+    /// ── Why it is needed (2026-08-22, the owner's remark) ─────────────────────
     ///
-    /// > 火山の大きさをスケールで調整できるようにしてほしい。
+    /// > I'd like to be able to adjust the size of the volcano with a scale.
     ///
-    /// **スライダーは既に大きさのつまみで、既に効いている。** 実機ログがそれを示している:
+    /// **The slider is already the size knob, and it already works.** The log from the game
+    /// shows it:
     ///
     /// <code>
     /// volcano placed at (88,-398): Strato r=829 m h=415 m
     /// </code>
     ///
-    /// 既定は r = 1200 / h = 600 なので、これは 0.69 倍 —— スライダーはちょうど
-    /// 仕事をしていた（<see cref="VolcanoSizeScale"/> は生値 55 を 1.0 倍に写す）。
-    /// **足りなかったのは 2 つ目のつまみではなく、画面の側である:**
+    /// The defaults are r = 1200 / h = 600, so that is 0.69× — the slider was doing exactly
+    /// its job (<see cref="VolcanoSizeScale"/> maps raw 55 to 1.0×).
+    /// **What was missing was not a second knob but the screen:**
     ///
-    ///   - ラベルには <c>5.5</c> とだけ出ていた。これは<b>バニラの強度の表示規則</b>
-    ///     （生値 ÷ 10）であって、⑤にとっては何の意味も無い数である
-    ///   - **押す前に何メートルの山になるのかが、どこにも出ていなかった**
-    ///     （確認の窓は 2026-08-21 に撤去してある。戻さない）
+    ///   - the label only showed <c>5.5</c>. That is <b>vanilla's display rule for intensity</b>
+    ///     (raw ÷ 10), a number that means nothing to ⑤
+    ///   - **nowhere did it say how many metres of mountain you would get before pressing**
+    ///     (the confirmation window was removed on 2026-08-21. It is not coming back)
     ///
-    /// そこでこの型は、構えているあいだだけラベルを
+    /// So while the tool is armed this type swaps the label for
     ///
     /// <code>
     /// 1.40x  r1680  h840 m
     /// </code>
     ///
-    /// に差し替える。**倍率と、実際に届く実寸（形態ごとの帯でクランプ済み）**である。
-    /// 言葉はスライダーのツールチップ 1 行だけに置く（所有者は文章を減らせと繰り返している）。
+    /// — **the multiplier, and the real dimensions you will actually get (already clamped to
+    /// the band for the form)**. The only words go in a single line of slider tooltip (the
+    /// owner keeps asking for less prose).
     ///
-    /// ── 高さは「地形の天井」を引く前の値である ────────────────────────
+    /// ── The height is the value before the terrain ceiling is subtracted ────────────────
     ///
-    /// <c>VolcanoShape.HeightFor</c> は起点の地形高さから天井（§C-10）を引くが、
-    /// **押す前はどの地点かが決まっていない**ので引きようがない。ここに出るのは
-    /// 帯でクランプしただけの値で、標高の高い場所ではこれより低くなりうる。
-    /// **その差は火山タブと診断ダンプが実測で名乗る**（そちらは押した後の話である）。
-    /// 出さないよりよほど良い —— 出さなかったのが今回の指摘そのものである。
+    /// <c>VolcanoShape.HeightFor</c> subtracts the ceiling (§C-10) from the terrain height at
+    /// the origin, but **before you press there is no chosen spot**, so there is nothing to
+    /// subtract. What appears here is only clamped to the band, and somewhere high up it may
+    /// come out lower than this. **The volcano tab and the diagnostic dump report that
+    /// difference from measurement** (those come after the press). Far better than showing
+    /// nothing — showing nothing was the very thing that was raised here.
     ///
-    /// ── 元に戻す（★ ここを飛ばすとバニラの災害の表示を壊す）──────────────
+    /// ── Putting it back (★ skip this and you break the display for vanilla's disasters) ──
     ///
-    /// <c>DisastersOptionPanel</c> はスライダー 1 本を全ての災害で共有していて、
-    /// ラベルを書き換えるのは <c>OnSliderValueChanged</c> **だけ**である（IL 実測）。
-    /// つまり⑤を降りたあとバニラの災害を選んでも、**プレイヤーがスライダーを
-    /// 動かすまでこちらの文字が残る。** 降りた瞬間にバニラの表示規則
-    /// （生値 ÷ 10 を <c>"F1"</c>）へ書き戻す。
+    /// <c>DisastersOptionPanel</c> shares a single slider across every disaster, and the
+    /// label is rewritten **only** by <c>OnSliderValueChanged</c> (measured from the IL).
+    /// So even after leaving ⑤ and selecting a vanilla disaster, **our text stays there until
+    /// the player moves the slider.** Write it back to vanilla's display rule
+    /// (raw ÷ 10 as <c>"F1"</c>) the moment the tool is dropped.
     ///
-    /// ── 毎フレームの費用 ─────────────────────────────────
+    /// ── The per-frame cost ─────────────────────────────────
     ///
-    /// <c>ToolsModifierControl.toolController</c> 1 回と <c>UISlider.value</c> 1 回。
-    /// **文字列を組むのは生値が変わったフレームだけ**（<see cref="_lastRaw"/>）なので、
-    /// 動かしていないあいだのヒープ確保は 0 バイトである。
-    /// パネルの探索（<c>Resources.FindObjectsOfTypeAll</c>）は毎フレームやらない ——
-    /// 参照 1 個ずつで持ち、**配列にはしない**（③が出荷した fake-null の罠）。
+    /// One <c>ToolsModifierControl.toolController</c> and one <c>UISlider.value</c>.
+    /// **The string is only built on frames where the raw value changed**
+    /// (<see cref="_lastRaw"/>), so while it is not being moved the heap allocation is 0 bytes.
+    /// Looking the panel up (<c>Resources.FindObjectsOfTypeAll</c>) does not happen every
+    /// frame — hold individual references and **never an array** (the fake-null trap that ③
+    /// shipped).
     /// </summary>
     public static class VolcanoSizeReadout
     {
-        /// <summary>「まだ 1 度も読んでいない」を表す生値。0〜255 に無い値を選ぶ。</summary>
+        /// <summary>The raw value meaning "not read even once yet". Pick one outside 0-255.</summary>
         private const int NoRaw = -1;
 
-        // ★ 配列にしない。参照 1 個ずつ持ち、毎回 Unity の == null で見る
-        //   （破棄済みなら fake-null になるので、そのフレームで引き直す）。
+        // ★ Not an array. Hold individual references and test each one with Unity's == null
+        //   every time (a destroyed object comes back fake-null, so we look it up again on
+        //   that frame).
         private static UISlider _slider;
         private static UILabel _label;
 
@@ -74,10 +79,10 @@ namespace DisasterPlus.Game
         private static int _lastRaw = NoRaw;
         private static bool _lookupFailedLogged;
 
-        /// <summary>直近に出した文字（診断用。**英語ではなく数字だけ**）。</summary>
+        /// <summary>The text last shown (for diagnostics. **Numbers only, not English**).</summary>
         public static string LastText { get; private set; }
 
-        /// <summary>**main スレッド、毎フレーム。**</summary>
+        /// <summary>**Main thread, every frame.**</summary>
         public static void Update()
         {
             try
@@ -86,7 +91,7 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 毎フレームの経路。Warn も Error も鳴らさない（キー単位で 1 行）。
+                // A per-frame path. Sound neither Warn nor Error (one line per key).
                 Log.Diag("volcanoSize", "size readout failed: " + e.GetType().Name);
                 _applied = false;
                 _lastRaw = NoRaw;
@@ -115,15 +120,16 @@ namespace DisasterPlus.Game
             LastText = Compose(raw);
             _label.text = LastText;
 
-            // ★ 言葉はここ 1 行だけ。ラベルは数字だけにする。
+            // ★ The only words are this one line. The label stays numbers only.
             _slider.tooltip = Strings.VolcanoSizeSliderTooltip;
             _label.tooltip = Strings.VolcanoSizeSliderTooltip;
         }
 
         /// <summary>
-        /// 「倍率と実寸」の 1 行。**形態ごとの帯でクランプした後の値**を出す ——
-        /// クランプ前を出すと、上限に張り付いてから先はスライダーを動かしても
-        /// 表示だけが伸びる（＝嘘の readout になる）。
+        /// The one line of "multiplier and real dimensions". Show **the value after clamping
+        /// to the band for the form** — show it before the clamp and, once it has pinned to
+        /// the ceiling, moving the slider would grow the display alone (i.e. a readout
+        /// that lies).
         /// </summary>
         private static string Compose(int raw)
         {
@@ -133,23 +139,24 @@ namespace DisasterPlus.Game
             float r = VolcanoShape.RadiusFor(
                 form, VolcanoSizeScale.Apply(VolcanoShape.DefaultRadiusOf(form), scale));
 
-            // ★ 地形の天井は引けない（地点が決まっていない）。クラス doc の注記のとおり、
-            //   0 m 起点＝帯のクランプだけを掛けた値である。
+            // ★ The terrain ceiling cannot be subtracted (no spot has been chosen). As the
+            //   class doc notes, this is from a 0 m origin, i.e. only the band clamp applied.
             float h = VolcanoShape.HeightFor(
                 form, VolcanoSizeScale.Apply(VolcanoShape.DefaultHeightOf(form), scale), 0f);
 
-            // ★★ **バニラと同じ数字を先頭に出す**（生値 ÷ 10 を "F1"）。
-            //    以前は "1.00x" という**この MOD だけの単位**を出しており、
-            //    他の災害のスライダーと見比べられなかった
-            //    （所有者の指摘「バニラ同様 1.0-10.0(25.5) にしてほしい」）。
-            //    実寸はそのあとに添える —— 形態ごとの帯でクランプした後の値である。
+            // ★★ **Lead with the same number vanilla shows** (raw ÷ 10 as "F1").
+            //    It used to show "1.00x", **a unit unique to this mod**, which could not be
+            //    compared against the sliders of the other disasters
+            //    (the owner's remark: "make it 1.0-10.0 (25.5) like vanilla").
+            //    The real dimensions follow — the values after clamping to the band for
+            //    the form.
             return (raw / 10f).ToString("F1") + "  r" + r.ToString("F0")
                    + "  h" + h.ToString("F0") + " m";
         }
 
         /// <summary>
-        /// バニラの表示規則（生値 ÷ 10 を <c>"F1"</c>）へ書き戻す。冪等。
-        /// **⑤を降りたら必ず通ること**（クラス doc）。
+        /// Write back vanilla's display rule (raw ÷ 10 as <c>"F1"</c>). Idempotent.
+        /// **Must always run once ⑤ is dropped** (see the class doc).
         /// </summary>
         private static void Restore()
         {
@@ -174,8 +181,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルアンロードと、機能を切ったとき。**Unity オブジェクトには触らない**
-        /// （もう破棄されている可能性がある）。参照を手放すだけ。
+        /// On level unload, and when the feature is switched off. **Do not touch Unity
+        /// objects** (they may already be destroyed). Just let go of the references.
         /// </summary>
         public static void Reset()
         {
@@ -184,12 +191,12 @@ namespace DisasterPlus.Game
             _applied = false;
             _lastRaw = NoRaw;
             LastText = null;
-            // _lookupFailedLogged は戻さない（ゲームのビルドに対する事実である）。
+            // _lookupFailedLogged is not reset (it is a fact about the game build).
         }
 
         /// <summary>
-        /// スライダーとラベルを引く。**引けているあいだは探し直さない。**
-        /// どちらか破棄されていれば（fake-null）その場で引き直す。
+        /// Resolve the slider and the label. **Do not look them up again while they resolve.**
+        /// If either has been destroyed (fake-null), look it up again there and then.
         /// </summary>
         private static bool Resolve()
         {
@@ -208,9 +215,10 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★ 名前は <c>DisastersOptionPanel.Awake</c> が使っているものそのもの
-            //   （IL 実測: Find<UISlider>("Slider") / Find<UILabel>("LabelIntensity")）。
-            //   m_slider / m_label のフィールド自体は private なので触れない。
+            // ★ The names are exactly the ones <c>DisastersOptionPanel.Awake</c> uses
+            //   (measured from the IL: Find<UISlider>("Slider") /
+            //   Find<UILabel>("LabelIntensity")).
+            //   The m_slider / m_label fields themselves are private, so they are off limits.
             _slider = panel.Find<UISlider>("Slider");
             _label = panel.Find<UILabel>("LabelIntensity");
 

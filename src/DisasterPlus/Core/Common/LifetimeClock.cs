@@ -1,8 +1,8 @@
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// ゲーム内時間（分）の経過を貯める不変の時計。
-    /// 実時間ではない。ポーズ中は Advance(0) が呼ばれるだけで何も進まない。
+    /// An immutable clock that accumulates elapsed in-game time (minutes).
+    /// Not real time. While paused, Advance(0) is all that gets called and nothing moves on.
     /// </summary>
     public struct LifetimeClock
     {
@@ -19,8 +19,8 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// 経過を足した新しい時計を返す。負の delta は無視する
-        /// （セーブロードやポーズ解除でフレーム差が巻き戻ることがあるため）。
+        /// Returns a new clock with the elapsed time added. A negative delta is ignored
+        /// (loading a save or unpausing can make the frame difference run backwards).
         /// </summary>
         public LifetimeClock Advance(float deltaMinutes)
         {

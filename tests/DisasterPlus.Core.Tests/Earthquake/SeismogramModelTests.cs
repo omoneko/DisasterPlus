@@ -5,18 +5,18 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// 合成記象（P 波・S 波・コーダ）を固定する。
+    /// Pins down the synthetic seismogram (P wave, S wave and coda).
     ///
-    /// **いちばん重要なのは 3 件:**
-    ///   - <see cref="ShapeNeverLeavesMinusOneToOne"/> —— 満目盛りが
-    ///     <c>ShakeWaveform.MaxDisplacement</c> のままであることの根拠。
-    ///     これが崩れると、バニラの線と並べたときの縦の尺度が嘘になる。
-    ///   - <see cref="ArrivalsSeparateWithDistance"/> —— このモデルの看板。
-    ///     初期微動継続時間が距離とともに開かなくなったら、絵が
-    ///     「それらしいだけ」に落ちる。
-    ///   - <see cref="EveryCarrierStaysWellBelowNyquist"/> —— 折り返し防止。
-    ///     速い成分を足すと、第 1 層のグラフに第 2 層（長周期地震動）と
-    ///     見分けの付かない偽の波が出る（全体レビュー I5 の再発）。
+    /// **The three most important cases:**
+    ///   - <see cref="ShapeNeverLeavesMinusOneToOne"/> —— the grounds for the full scale
+    ///     staying at <c>ShakeWaveform.MaxDisplacement</c>. Break this and the vertical
+    ///     scale becomes a lie when the trace is set beside the vanilla line.
+    ///   - <see cref="ArrivalsSeparateWithDistance"/> —— the headline of this model. Once
+    ///     the preliminary-tremor duration stops widening with distance, the picture drops
+    ///     to being "merely plausible".
+    ///   - <see cref="EveryCarrierStaysWellBelowNyquist"/> —— aliasing prevention. Add a
+    ///     fast component and the tier-1 graph grows a spurious wave indistinguishable from
+    ///     tier 2 (long-period ground motion) —— a recurrence of overall review I5.
     /// </summary>
     public class SeismogramModelTests
     {
@@ -30,7 +30,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void ShortOrMissingWindowProducesNothing()
         {
-            // m_activeDuration が読めていない（0）ときに勝手な窓を決め打ちしない。
+            // When m_activeDuration cannot be read (0) we must not hard-code a window of our own.
             Assert.False(SeismogramModel.For(1u, 0u).Valid);
             Assert.False(SeismogramModel.For(1u, SeismogramModel.MinWindowFrames - 1u).Valid);
             Assert.Equal(0f, SeismogramModel.For(1u, 0u).DisplacementAt(1000f, 50f));
@@ -57,8 +57,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void DisplacementSharesVanillaFullScale()
         {
-            // 距離 0 の理論最大がちょうど MaxDisplacement（0.60）。バニラの波形と
-            // 同じ満目盛りで描けることの根拠。
+            // The theoretical maximum at distance 0 is exactly MaxDisplacement (0.60).
+            // These are the grounds for drawing at the same full scale as the vanilla waveform.
             for (uint seed = 0; seed < 12; seed++)
             {
                 var model = Model(seed);
@@ -113,10 +113,11 @@ namespace DisasterPlus.Core.Tests.Earthquake
                 previous = gap;
             }
 
-            // 震源直上では P と S が同時に着く（S-P = 0）。これは近似ではない。
+            // Directly above the hypocentre P and S arrive together (S-P = 0).
+            // This is not an approximation.
             Assert.Equal(0f, model.SMinusPFrames(0f), 4);
 
-            // S は必ず P の √3 倍の時刻。
+            // S always arrives at √3 times the time of P.
             Assert.Equal(model.PArrivalFrames(4000f) * SeismogramModel.VpOverVs,
                          model.SArrivalFrames(4000f), 3);
         }
@@ -129,7 +130,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
             float cap = SeismogramModel.MaxSArrivalFraction * Window;
             Assert.True(model.SArrivalFrames(1000000f) <= cap + 1e-3f);
 
-            // 頭打ちに達した先では距離を増やしても開かない（doc の明示的な制限）。
+            // Past the cap, more distance no longer widens the gap
+            // (an explicit limitation stated in the doc).
             Assert.Equal(model.SMinusPFrames(1000000f), model.SMinusPFrames(2000000f), 3);
         }
 
@@ -165,7 +167,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void SameQuakeGivesTheSameRecordEveryTime()
         {
-            // 閉じた式であること（飛んだフレームをあとから埋めても同じ値）。
+            // It must be a closed-form expression (filling in a skipped frame later gives
+            // the same value).
             var a = SeismogramModel.For(4242u, Window);
             var b = SeismogramModel.For(4242u, Window);
 
@@ -194,11 +197,11 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void EveryCarrierStaysWellBelowNyquist()
         {
-            // 標本間隔は 1 フレーム（SeismographRecorder が飛んだフレームを埋める）ので
-            // ナイキストは π rad/frame。1 周期あたり 6 点は取れることを要求する。
-            const float limit = 6.2831853f / 6f;   // ≒1.047 rad/frame
+            // The sample interval is 1 frame (SeismographRecorder fills in skipped frames),
+            // so Nyquist is π rad/frame. We demand at least 6 samples per cycle.
+            const float limit = 6.2831853f / 6f;   // ≈1.047 rad/frame
 
-            float fastestP = SeismogramModel.BasePRate * 1.08f;      // For() のゆらぎの上限
+            float fastestP = SeismogramModel.BasePRate * 1.08f;      // upper bound of For()'s jitter
             float fastestS = SeismogramModel.BaseSRate * 1.10f * 1.618f;
 
             Assert.True(fastestP < limit, "the P carrier is too fast: " + fastestP);
@@ -210,8 +213,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void SampledOnceAPerFrameTheRecordDoesNotFold()
         {
-            // 1 フレーム刻みで隣り合うサンプルの差が満目盛りを跨がないこと。
-            // 跨ぐようなら、その成分は 2 フレームより速い＝折り返している。
+            // Stepping one frame at a time, the difference between adjacent samples must not
+            // span the full scale. If it does, that component is faster than 2 frames, i.e.
+            // it is aliasing.
             var model = Model(17u);
             const float distance = 1000f;
 
@@ -240,16 +244,16 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.Equal(0f, model.ShapeAt(float.NaN, 100f));
             Assert.Equal(0f, model.PArrivalFrames(float.NaN));
 
-            // 負の距離は 0 として扱う（呼び出し側で符号を持たない量）。
+            // A negative distance is treated as 0 (on the caller's side it is an unsigned quantity).
             Assert.Equal(model.PArrivalFrames(0f), model.PArrivalFrames(-500f));
         }
 
         [Fact]
         public void TheVanillaDefaultIntensityStillScalesToExactlyOne()
         {
-            // カメラの差し替えは合計を「合成記象 × (1 + IntensityFactor)」にする。
-            // 強度 55（バニラ既定）でこれがちょうど 1 でなければ、既定の地震が
-            // 意図せず強く／弱くなる。
+            // Swapping the camera makes the total "synthetic seismogram × (1 + IntensityFactor)".
+            // Unless this is exactly 1 at intensity 55 (the vanilla default), the default
+            // earthquake becomes unintentionally stronger or weaker.
             float scale = 1f + ShakeWaveform.IntensityFactor(
                 SeismicIntensity.VanillaDefaultIntensity);
             Assert.Equal(1f, scale);

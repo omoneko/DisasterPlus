@@ -4,10 +4,12 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// これは「バニラと同じ値が出るか」の最終検査ではない（それは実行時に
-    /// Assumptions が本物の ColossalFramework.Math.Randomizer と突き合わせる、Task 5）。
-    /// ここで固定するのは、実装が LCG の定義から外れないこと、特に
-    /// 「戻り値は種を進める前に作る」という順序と、ctor の符号拡張。
+    /// This is not the final check on "does it give the same values as vanilla" (that is
+    /// done at run time, where Assumptions compares against the real
+    /// ColossalFramework.Math.Randomizer —— Task 5).
+    /// What is pinned down here is that the implementation does not depart from the
+    /// definition of the LCG, in particular the ordering "the return value is built before
+    /// the seed is advanced" and the sign extension in the constructor.
     /// </summary>
     public class VanillaRandomizerTests
     {
@@ -28,8 +30,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Ctor_NegativeValue_SignExtendsToSixtyFourBits()
         {
-            // IL は conv.i8（符号拡張）。ゼロ拡張で書くと別の種になり、
-            // disasterID >= 0x8000 の合成種で全部ずれる。
+            // The IL is conv.i8 (sign extension). Write it as zero extension and you get a
+            // different seed, and every combined seed with disasterID >= 0x8000 drifts.
             ulong signExtended = unchecked(VanillaRandomizer.Multiplier * ulong.MaxValue
                                            + VanillaRandomizer.Increment);
             ulong zeroExtended = unchecked(VanillaRandomizer.Multiplier * (ulong)uint.MaxValue
@@ -42,8 +44,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Int32_ReturnsTheValueBuiltBeforeAdvancingTheSeed()
         {
-            // 順序を入れ替えると全ての引きが 1 個ずれる。実装の中で
-            // いちばん壊しやすく、いちばん気付きにくい 1 行。
+            // Swap the order and every draw is off by one. It is the single easiest line in
+            // the implementation to break and the hardest to notice.
             var r = new VanillaRandomizer(12345);
             ulong before = r.Seed;
 
@@ -93,8 +95,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void GoldenSequence_MatchesTheLcgDefinitionStepByStep()
         {
-            // 実装の内部構造に依存せず、LCG の定義だけから期待値を組み立てて突き合わせる。
-            // 実装を「速くする」書き換えで黙って別物にならないための固定。
+            // Build the expected values from the definition of the LCG alone, independently
+            // of the implementation's internals, and compare. This pins it down so that a
+            // rewrite to "make it faster" cannot silently turn it into something else.
             ulong seed = unchecked(VanillaRandomizer.Multiplier * 4242UL + VanillaRandomizer.Increment);
             var r = new VanillaRandomizer(4242);
 

@@ -5,7 +5,7 @@ namespace DisasterPlus.Core.Tests.Volcano
 {
     public class UpliftScheduleTests
     {
-        private const ushort BaseRaw = 2560;   // 40 m（海面）。§D-4 と同じ換算。
+        private const ushort BaseRaw = 2560;   // 40 m (sea level). Same conversion as §D-4.
 
         [Fact]
         public void ProgressZeroIsTheOriginalGroundAndProgressOneIsTheFinalHeight()
@@ -17,10 +17,10 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSummitAdvancesByAtLeastOneRawUnitEveryTick()
         {
-            // ★ 罠 2。1 tick の変化が 1/64 m 未満だと丸めで消え、隆起が無言で完全停止する
-            //   （§C-8 の `if (n != raw)`）。TotalTicksFor がそれを構造で防いでいる。
-            //   この検査を通すために「増分」を大きくするのではなく、
-            //   **tick 数のほうを切り詰める**のが正しい直し方である。
+            // ★ Trap 2. If one tick changes by less than 1/64 m it vanishes in the rounding
+            //   and the uplift stops dead, silently (the `if (n != raw)` of §C-8).
+            //   TotalTicksFor prevents that structurally. The right fix to make this check
+            //   pass is not to enlarge the "increment" but to **cut down the tick count**.
             const float h = 300f;
             int total = UpliftSchedule.TotalTicksFor(h, 100000);
             ushort previous = UpliftSchedule.RawTargetAt(BaseRaw, h, UpliftSchedule.ProgressAt(0, total));
@@ -36,11 +36,12 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void AskingForMoreTicksThanTheQuantumAllowsIsTruncated()
         {
-            // 20 m の山は最大 20*64 = 1280 tick でしか刻めない。
+            // A 20 m mountain can only be sliced into at most 20*64 = 1280 ticks.
             Assert.True(UpliftSchedule.TotalTicksFor(20f, 100000) <= 1280);
-            // 十分に短い要求はそのまま通る。
+            // A sufficiently short request passes through unchanged.
             Assert.Equal(600, UpliftSchedule.TotalTicksFor(600f, 600));
-            // 0 や負の要求でも 1 tick は返す（0 除算を作らない）。
+            // Even a request of 0 or a negative one returns at least 1 tick
+            // (so no division by zero is created).
             Assert.True(UpliftSchedule.TotalTicksFor(600f, 0) >= 1);
             Assert.True(UpliftSchedule.TotalTicksFor(600f, -5) >= 1);
             Assert.True(UpliftSchedule.TotalTicksFor(0f, 500) >= 1);
@@ -49,7 +50,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void WalkingEveryTickReachesExactlyTheFinalRawValue()
         {
-            // 絶対目標なので、途中で何 tick 動かなかったセルがあっても最後は必ず一致する。
+            // The target is absolute, so however many ticks a cell failed to move along the
+            // way, the final value always matches.
             const float h = 173.4f;
             int total = UpliftSchedule.TotalTicksFor(h, 900);
             ushort last = 0;
@@ -63,7 +65,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheRawTargetSaturatesAtTheCeilingInsteadOfWrapping()
         {
-            // ushort の巻き戻り（山頂が海面に戻る）がいちばん痛い壊れ方。
+            // A ushort wrap-around (the summit dropping back to sea level) is the most
+            // painful way for this to break.
             Assert.Equal((ushort)UpliftSchedule.MaxRaw,
                          UpliftSchedule.RawTargetAt(60000, 400f, 1f));
             Assert.Equal((ushort)0, UpliftSchedule.RawTargetAt(0, -400f, 1f));
@@ -72,8 +75,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NothingIsRaisedOutsideTheClearedRadius()
         {
-            // ★ 罠 1。準備が届いていない場所を持ち上げると、道路と建物が毎フラッシュ
-            //   地形を押し戻し（§A-2）、山の中に平らな溝とすり鉢が残る。
+            // ★ Trap 1. Raise a place the preparation has not reached and the roads and
+            //   buildings push the terrain back on every flush (§A-2), leaving flat trenches
+            //   and craters inside the mountain.
             Assert.Equal(300f, UpliftSchedule.ActiveRadiusMetres(1200f, 300f), 3);
             Assert.Equal(1200f, UpliftSchedule.ActiveRadiusMetres(1200f, 5000f), 3);
         }
@@ -81,8 +85,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void WithNothingClearedYetTheActiveRadiusIsZero()
         {
-            // ★ 罠 1 のいちばん危ない入口。「まだ 1 本も壊していない」を
-            //   「制限なし」と取り違えると、隆起がいきなり全域を持ち上げる。
+            // ★ The most dangerous way into trap 1. Mistake "nothing has been demolished yet"
+            //   for "no limit" and the uplift suddenly raises the whole area.
             Assert.Equal(0f, UpliftSchedule.ActiveRadiusMetres(1200f, 0f), 4);
             Assert.Equal(0f, UpliftSchedule.ActiveRadiusMetres(1200f, -1f), 4);
             Assert.Equal(0f, UpliftSchedule.ActiveRadiusMetres(1200f, float.NaN), 4);
@@ -101,14 +105,14 @@ namespace DisasterPlus.Core.Tests.Volcano
                 Assert.InRange(front, 0f, r);
             }
             Assert.Equal(r, UpliftSchedule.ClearingFrontMetres(r, 1f, lead), 3);
-            // 先行量が 0 でも後ろへ下がらない。
+            // Even with a lead of 0 it never falls behind.
             Assert.True(UpliftSchedule.ClearingFrontMetres(r, 0.5f, 0f) >= r * 0.5f);
         }
 
         [Fact]
         public void TheBlockHeightCatchUpIsTwoMetresPerSixtyFourFrames()
         {
-            // §A-2: ゲームモードでは上へ 2 m / 64 sim フレーム。300 m なら 9600 フレーム。
+            // §A-2: in game mode it rises by 2 m / 64 sim frames. 300 m takes 9600 frames.
             Assert.Equal(9600, UpliftSchedule.BlockHeightCatchUpFrames(300f));
             Assert.Equal(64, UpliftSchedule.BlockHeightCatchUpFrames(2f));
             Assert.Equal(128, UpliftSchedule.BlockHeightCatchUpFrames(2.5f));
@@ -134,7 +138,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.Equal(0f, UpliftSchedule.ProgressAt(5, -3), 4);
             Assert.Equal(0.5f, UpliftSchedule.ProgressAt(50, 100), 4);
         }
-        // ── 山頂から外へ広がる隆起（GrowthMetresAt）──────────────────
+        // ── Uplift spreading outward from the summit (GrowthMetresAt) ──────────────────
 
         [Fact]
         public void GrowthStartsAtNothingAndEndsAtTheFinalProfile()
@@ -147,8 +151,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSummitStillRisesInProportionToProgress()
         {
-            // 山頂のプロファイルは H なので、山頂の盛り上がりは H×progress のままである
-            // （パネルと診断が出している「今の山頂」の意味を変えない）。
+            // The profile at the summit is H, so the summit's rise stays H×progress
+            // (this does not change the meaning of the "current summit" the panel and the
+            // diagnostics report).
             for (float p = 0f; p <= 1f; p += 0.05f)
             {
                 Assert.Equal(600f * p, UpliftSchedule.GrowthMetresAt(600f, 600f, p), 3);
@@ -158,8 +163,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheFrontExpandsOutwardAsProgressAdvances()
         {
-            // ★★ 本タスクそのもの。山が一様に膨らむのではなく、山頂から外へ広がること。
-            //    直線の円錐（成層）なら、progress p で地表に出ているのは d < R·p である。
+            // ★★ The task itself. The mountain must not swell uniformly; it must spread
+            //    outward from the summit. For a straight cone (stratovolcano), what has
+            //    surfaced at progress p is d < R·p.
             const float r = 1200f, h = 600f;
             float previousFront = -1f;
 
@@ -174,7 +180,7 @@ namespace DisasterPlus.Core.Tests.Volcano
 
                 Assert.True(front > previousFront, "the front went backwards at p=" + p);
                 Assert.True(front <= r, "the front left the radius at p=" + p);
-                // 直線の円錐なら前線はちょうど R·p（走査の刻み 1 m ぶんだけ内側で見つかる）。
+                // For a straight cone the front is exactly R·p (found one 1 m scan step inside).
                 Assert.InRange(front, r * p - 2f, r * p);
                 previousFront = front;
             }
@@ -183,9 +189,10 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void EveryGrowingCellRisesByTheSameAmountEachTick()
         {
-            // ★★ 罠 2 に対してむしろ強い。profile × progress では外周ほど 1 tick の
-            //    変化が小さく、合計の盛り上がりが小さいセルは丸めで消えていた。
-            //    この式では育っているセルはどれも H/totalTicks だけ上がる。
+            // ★★ This is if anything stronger against trap 2. With profile × progress, the
+            //    further out you go the smaller one tick's change becomes, and cells whose
+            //    total rise was small vanished in the rounding. With this formula every
+            //    growing cell rises by H/totalTicks.
             const float h = 600f;
             int ticks = UpliftSchedule.TotalTicksFor(h, 85);
             float expected = h / ticks;
@@ -203,7 +210,7 @@ namespace DisasterPlus.Core.Tests.Volcano
                                   UpliftSchedule.ProgressAt(t, ticks));
 
                     Assert.True(b >= a, "a cell went down between ticks");
-                    // 育っている最中（0 でも頭打ちでもない）なら、上がる量は H/ticks である。
+                    // While still growing (neither 0 nor capped), the rise is H/ticks.
                     if (a > 0f && b < profile) Assert.Equal(expected, b - a, 2);
                 }
             }

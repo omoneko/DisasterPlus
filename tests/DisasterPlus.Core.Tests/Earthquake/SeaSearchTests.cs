@@ -4,12 +4,13 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// 所有者の指示（2026-08-22）「発生は、アイコンクリック→左クリックした場所に
-    /// 一番近い海で発生にしてください」。
+    /// The owner's instruction (2026-08-22): "for the trigger, please make it happen in
+    /// the sea nearest to the place that was left-clicked after clicking the icon".
     ///
-    /// ★★ <b>「近い順」は実機では確かめられない。</b> 順序が壊れていても海は
-    ///    どこかで見つかるので、<b>少し遠い海が選ばれるだけ</b>で誰も気づけない。
-    ///    だから順序そのものをここで固定する。
+    /// ★★ <b>"Nearest first" cannot be confirmed in the running game.</b> Even with the
+    ///    order broken the sea is still found somewhere, so <b>a slightly more distant
+    ///    sea is simply picked</b> and nobody can notice. That is why the order itself
+    ///    is pinned down here.
     /// </summary>
     public class SeaSearchTests
     {
@@ -25,8 +26,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void EveryPlaceIsCheckedBeforeAnyPlaceFurtherOut()
         {
-            // ★★ これが「一番近い海」の中身である。リングは正方形なので
-            //    厳密な最近傍ではないが、**外側のリングは必ず内側より後**である。
+            // ★★ This is what "the nearest sea" actually amounts to. The rings are square,
+            //    so it is not a strict nearest neighbour, but **an outer ring always comes
+            //    after an inner one**.
             int previousRing = -1;
 
             for (int i = 0; i < SeaSearch.Count; i++)
@@ -64,7 +66,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheSearchReachesRightAcrossTheMap()
         {
-            // マップ半辺は 8640 m。どこを指しても、海があるなら届くこと。
+            // The map half-extent is 8640 m. Wherever you point, if there is a sea, the
+            // search must reach it.
             float reach = SeaSearch.StepMetres * SeaSearch.MaxRing;
             Assert.True(reach > 8640f,
                         "the search only reaches " + reach + " m; the map half-extent is 8640");
@@ -73,7 +76,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheStepIsFineEnoughNotToJumpOverAnInlet()
         {
-            // 刻みが粗すぎると、狭い入り江を跨いで遠い外海が選ばれる。
+            // Too coarse a step strides over a narrow inlet and picks the distant open sea.
             Assert.True(SeaSearch.StepMetres <= 128f,
                         "the step is " + SeaSearch.StepMetres + " m; narrow inlets fall through");
         }
@@ -81,7 +84,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void AnOutOfRangeOrdinalIsRefusedRatherThanFaked()
         {
-            // **「それらしい 0」を返さない。**
+            // **Do not return a plausible-looking 0.**
             float dx, dz;
             Assert.False(SeaSearch.At(-1, out dx, out dz));
             Assert.False(SeaSearch.At(SeaSearch.Count, out dx, out dz));

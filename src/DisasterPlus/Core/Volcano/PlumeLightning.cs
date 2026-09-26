@@ -3,17 +3,17 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 稲妻 1 本の 1 点。<see cref="PlumeLightning"/> が組み立てる。
+    /// One point of one bolt. Assembled by <see cref="PlumeLightning"/>.
     /// </summary>
     public struct LightningPoint
     {
-        /// <summary>火口を原点とした水平方向のずれ（m）。</summary>
+        /// <summary>The horizontal offset with the crater as the origin (m).</summary>
         public readonly float X;
 
-        /// <summary>火口からの高さ（m）。</summary>
+        /// <summary>Height above the crater (m).</summary>
         public readonly float Y;
 
-        /// <summary>同上、もう 1 軸（m）。</summary>
+        /// <summary>The same as above, on the other axis (m).</summary>
         public readonly float Z;
 
         public LightningPoint(float x, float y, float z)
@@ -25,102 +25,115 @@ namespace DisasterPlus.Core.Volcano
     }
 
     /// <summary>
-    /// 「高さの比 <c>[0,1]</c> → その高さでの柱の半径（m）」。
-    /// <see cref="PlumeLightning.PathInto"/> が柱の形を知るための唯一の口である
-    /// （Core から <c>EruptionColumn</c> の内部にも呼び出し側の状態にも触らせない）。
+    /// "Height fraction <c>[0,1]</c> → the column's radius (m) at that height".
+    /// The one and only way <see cref="PlumeLightning.PathInto"/> learns the column's shape
+    /// (Core is not allowed to touch <c>EruptionColumn</c>'s internals or the caller's state).
     /// </summary>
     public delegate float RadiusAtFraction(float heightFraction);
 
     /// <summary>
-    /// **噴煙の中の雷。** <b>Core なのでエンジンには一切触らない。</b>
+    /// **Lightning inside the ash plume.** <b>This is Core, so it touches the engine not at
+    /// all.</b>
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── The request (2026-08-22) ─────────────────────────────────
     ///
-    /// > 噴煙の中で雷（噴石同士が当たって生じるやつ）が発生するのを再現してほしい
+    /// > I'd like you to reproduce the lightning that happens inside the ash plume (the kind
+    /// > caused by the ejecta colliding with each other).
     ///
-    /// 火山雷である。噴煙の中で火山灰と噴石がぶつかり合って電荷が分かれ、
-    /// 柱の中で放電する —— **雲から地面へ落ちる普通の雷とは別の現象**で、
-    /// 大半は<b>柱の内側で完結する</b>。だからここは地面まで届く経路を作らない。
+    /// This is volcanic lightning. Ash and ejecta collide inside the plume, the charge
+    /// separates, and it discharges within the column — **a different phenomenon from
+    /// ordinary cloud-to-ground lightning**, and one that <b>mostly completes inside the
+    /// column</b>. So this does not build a path that reaches the ground.
     ///
-    /// ── ★★ 状態を 1 つも持たない ─────────────────────────────
+    /// ── ★★ It holds no state at all ─────────────────────────────
     ///
-    /// <see cref="VolcanicTremor"/> と同じ作りである。時間を <see cref="SlotSeconds"/> の
-    /// 枠に切り、**枠ごとに 1 本**、種と枠番号だけから形と時刻を決める。
-    /// 「起きるか起きないか」を活動度で決めない —— 決めると<b>活動度が変わった瞬間に、
-    /// もう光っている過去の閃光が消える</b>。代わりに<b>明るさ</b>を活動度に比例させ、
-    /// 弱いときは<b>ほとんど見えない放電が時々ある</b>という姿にする。
+    /// It is built the same way as <see cref="VolcanicTremor"/>. Time is cut into slots of
+    /// <see cref="SlotSeconds"/>, **one bolt per slot**, and the shape and the timing are
+    /// decided from the seed and the slot number alone.
+    /// "Does it happen or not" is not decided by the activity level — decide it that way
+    /// and <b>a flash already glowing in the past disappears the instant the activity
+    /// changes</b>. Instead the activity scales <b>the brightness</b>, so that when it is
+    /// weak you get <b>the occasional barely visible discharge</b>.
     ///
-    /// ── 形 ───────────────────────────────────────
+    /// ── The shape ───────────────────────────────────────
     ///
-    /// 折れ線 1 本。**柱の中の 2 点を結ぶ**（火山雷は柱内で完結する）。
-    /// 途中の点は <see cref="JitterRatio"/> のぶん柱の半径方向へ振る。
-    /// 枝分かれは作らない（頂点が増えるわりに、あの大きさでは見分けが付かない）。
+    /// A single polyline. **It joins two points inside the column** (volcanic lightning
+    /// completes within it). The intermediate points are shaken radially by
+    /// <see cref="JitterRatio"/> of the column's radius.
+    /// No branching (it adds vertices without being distinguishable at that size).
     ///
-    /// ── 光り方 ───────────────────────────────────
+    /// ── How it glows ───────────────────────────────────
     ///
-    /// **立ち上がりは瞬時、消えるのに <see cref="FlashSeconds"/>。**
-    /// 実際の放電と同じで、じわっと明るくなる閃光は無い。
-    /// 消え際に 1 度だけ弱く再点灯する（多重放電）。
+    /// **The rise is instantaneous; it takes <see cref="FlashSeconds"/> to go out.**
+    /// Just like a real discharge, there is no flash that brightens gradually.
+    /// It relights once, weakly, as it fades (a multiple stroke).
     /// </summary>
     public static class PlumeLightning
     {
-        /// <summary>放電の枠（秒）。**1 枠にちょうど 1 本。**</summary>
+        /// <summary>The discharge slot (seconds). **Exactly one bolt per slot.**</summary>
         public const float SlotSeconds = 1.15f;
 
-        /// <summary>1 本が光っている長さ（秒）。</summary>
+        /// <summary>How long one bolt glows (seconds).</summary>
         public const float FlashSeconds = 0.34f;
 
-        /// <summary>同時に見えうる本数（＝さかのぼって見る枠の数）。</summary>
+        /// <summary>How many can be visible at once (i.e. how many slots we look back
+        /// over).</summary>
         public const int MaxBolts = 3;
 
-        /// <summary>折れ線の点の数。**2 では真っ直ぐで雷に見えない。**</summary>
+        /// <summary>The number of points in the polyline. **At 2 it is straight and does not
+        /// read as lightning.**</summary>
         public const int PointCount = 9;
 
-        /// <summary>途中の点を振る量（その高さでの柱の半径に対する比）。</summary>
+        /// <summary>How far the intermediate points are shaken (as a fraction of the column's
+        /// radius at that height).</summary>
         public const float JitterRatio = 0.55f;
 
-        /// <summary>放電が起きる高さの下限（柱の高さに対する比）。</summary>
+        /// <summary>The lowest height at which a discharge occurs (as a fraction of the column
+        /// height).</summary>
         public const float LowFraction = 0.10f;
 
-        /// <summary>放電が起きる高さの上限（柱の高さに対する比）。</summary>
+        /// <summary>The highest height at which a discharge occurs (as a fraction of the
+        /// column height).</summary>
         public const float HighFraction = 0.72f;
 
-        /// <summary>1 本の長さの下限（柱の高さに対する比）。</summary>
+        /// <summary>The floor on one bolt's length (as a fraction of the column height).</summary>
         public const float MinSpanFraction = 0.10f;
 
-        /// <summary>活動度 1 のときのいちばん明るい放電。</summary>
+        /// <summary>The brightest discharge at activity 1.</summary>
         public const float MaxBrightness = 1f;
 
-        /// <summary>いちばん弱い放電の明るさ（活動度 1 のとき）。</summary>
+        /// <summary>The brightness of the faintest discharge (at activity 1).</summary>
         public const float MinBrightness = 0.22f;
 
         private const uint TimeSalt = 0x4C544D45u;
         private const uint ShapeSalt = 0x4C545348u;
         private const uint PickSalt = 0x4C545049u;
 
-        /// <summary>時刻 <paramref name="seconds"/> が入る枠。</summary>
+        /// <summary>The slot the time <paramref name="seconds"/> falls in.</summary>
         public static int SlotAt(float seconds)
         {
             if (IsBad(seconds) || seconds < 0f) return 0;
             return (int)(seconds / SlotSeconds);
         }
 
-        /// <summary>枠 <paramref name="slot"/> の放電が始まる時刻（秒）。</summary>
+        /// <summary>The time (seconds) at which slot <paramref name="slot"/>'s discharge
+        /// begins.</summary>
         public static float StartOf(uint seed, int slot)
         {
             if (slot < 0) return 0f;
 
-            // 枠の中のどこで起きるか。**枠の端に寄せない**（拍が見えてしまう）。
+            // Where within the slot it happens. **Do not push it to the slot boundary**
+            // (the beat becomes visible).
             float u = DeterministicRandom.Unit(seed, unchecked((uint)slot ^ TimeSalt));
             return slot * SlotSeconds + u * (SlotSeconds - FlashSeconds);
         }
 
         /// <summary>
-        /// 枠 <paramref name="slot"/> の放電の、時刻 <paramref name="seconds"/> における
-        /// 明るさ <c>[0,1]</c>。光っていなければ 0。
+        /// The brightness <c>[0,1]</c> of slot <paramref name="slot"/>'s discharge at the
+        /// time <paramref name="seconds"/>. 0 if it is not glowing.
         ///
-        /// <paramref name="activityUnit"/> は噴出の強さで、**明るさだけを決める**
-        /// （起きる／起きないは決めない。クラス doc）。
+        /// <paramref name="activityUnit"/> is the eruption strength and **decides the
+        /// brightness only** (it does not decide whether it happens; see the class doc).
         /// </summary>
         public static float BrightnessAt(uint seed, int slot, float seconds,
                                          float activityUnit)
@@ -135,11 +148,11 @@ namespace DisasterPlus.Core.Volcano
 
             float t = age / FlashSeconds;
 
-            // 立ち上がりは瞬時。あとは落ちるだけ。
+            // The rise is instantaneous. After that it only falls.
             float decay = 1f - t;
             decay *= decay;
 
-            // 多重放電。消え際に 1 度だけ弱く戻る。
+            // The multiple stroke. It comes back once, weakly, as it fades.
             if (t > 0.55f && t < 0.72f) decay += 0.28f * (1f - t);
 
             float u = DeterministicRandom.Unit(seed, unchecked((uint)slot ^ PickSalt));
@@ -149,12 +162,14 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 枠 <paramref name="slot"/> の放電の折れ線を <paramref name="into"/> へ書く。
-        /// 書いた点数を返す（<paramref name="into"/> が足りなければ 0）。
+        /// Writes the polyline of slot <paramref name="slot"/>'s discharge into
+        /// <paramref name="into"/>. Returns how many points were written (0 if
+        /// <paramref name="into"/> is too short).
         ///
-        /// <paramref name="plumeHeightMetres"/> は柱の全高、
-        /// <paramref name="radiusAtFraction"/> は「高さの比 → その高さでの柱の半径（m）」で、
-        /// 呼び出し側が <c>EruptionColumn.RadiusAt</c> を包んで渡す。
+        /// <paramref name="plumeHeightMetres"/> is the column's total height, and
+        /// <paramref name="radiusAtFraction"/> is "height fraction → the column's radius (m)
+        /// at that height", which the caller supplies by wrapping
+        /// <c>EruptionColumn.RadiusAt</c>.
         /// </summary>
         public static int PathInto(LightningPoint[] into, uint seed, int slot,
                                    float plumeHeightMetres,
@@ -178,7 +193,7 @@ namespace DisasterPlus.Core.Volcano
                 if (highT > HighFraction) highT = HighFraction;
             }
 
-            // 折れ線がどの向きに走るか（水平の基準方向）。
+            // Which way the polyline runs (the horizontal reference direction).
             float angle = 6.2831853f * DeterministicRandom.Unit(seed, shape + 31u);
             float dirX = (float)System.Math.Cos(angle);
             float dirZ = (float)System.Math.Sin(angle);
@@ -192,7 +207,8 @@ namespace DisasterPlus.Core.Volcano
                 float radius = radiusAtFraction(t);
                 if (IsBad(radius) || radius < 0f) radius = 0f;
 
-                // 端は柱の中心寄り、真ん中ほど大きく振れる（放電路が膨らむ）。
+                // The ends stay nearer the column's axis and the middle swings widest
+                // (the discharge path bulges out).
                 float bulge = 4f * s * (1f - s);
 
                 float j1 = DeterministicRandom.Unit(seed, shape + (uint)(i * 131 + 7)) - 0.5f;

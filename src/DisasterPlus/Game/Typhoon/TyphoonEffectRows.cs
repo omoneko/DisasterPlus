@@ -4,34 +4,37 @@ using DisasterPlus.Core.Typhoon;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 「台風がもたらすもの」の節 —— 各要素が今どう動いているかを出す行。
-    /// **main スレッド専用。**
+    /// The "what the typhoon brings" section — the rows that show how each element is
+    /// behaving right now. **Main thread only.**
     ///
-    /// **T7〜T10 はこのファイルに行を足す。** T7 は風害、T8 は河川氾濫、T9 は雲、
-    /// T10 は随伴竜巻。**800 行を超えたら分割すること**（要素ごとにファイルを分け、
-    /// このファイルは並べる順序だけを持つ形にする）。
+    /// **T7 to T10 add rows to this file.** T7 is wind damage, T8 river flooding, T9 the
+    /// clouds and T10 the accompanying tornadoes. **Split it once it passes 800 lines**
+    /// (one file per element, leaving this file holding only the order they appear in).
     ///
-    /// ── ここでも行ごとの印は付けない（④の表示規約）─────────────────
+    /// ── No per-row markers here either (④'s display convention) ──────────
     ///
-    /// この節に出る数字は、④が自分で数えている台帳と、バニラの式から見積もった上限で
-    /// ある。**どれも「ゲームが計算して公開している値」ではない。** 出所はパネルの
-    /// 出所は影響のある行に付く <c>[実測]</c> の印が名乗るので、
-    /// ここでは <see cref="TyphoonRows.AddRow(UIPanel,string,ref float)"/> と
-    /// <see cref="TyphoonRows.SetPlain"/> しか使わない。
-    /// **<see cref="TyphoonRows.SetMeasured"/> をこのファイルから呼ばないこと。**
+    /// The numbers in this section come from the ledger ④ keeps itself, and from ceilings
+    /// estimated from vanilla's formulae. **None of them is "a value the game calculated
+    /// and published".** The provenance is named by the <c>[measured]</c> marker that
+    /// goes on the rows it affects, so here we use nothing but
+    /// <see cref="TyphoonRows.AddRow(UIPanel,string,ref float)"/> and
+    /// <see cref="TyphoonRows.SetPlain"/>.
+    /// **Do not call <see cref="TyphoonRows.SetMeasured"/> from this file.**
     ///
-    /// ── 数字が 0 のときも出す ────────────────────────────────
+    /// ── Show the numbers even when they are 0 ────────────────────────────
     ///
-    /// ③は「延焼が動いているか診断から一切見えなかった」という失敗をしている。
-    /// 落雷が 0 発なのか、そもそも撒いていないのか、上限に当たって捨てられているのかは
-    /// 画面上どれも同じ顔（何も起きない）になるので、**台風が動いている間は必ず
-    /// 4 つの数を出す**。
+    /// ③ made the mistake of "you could not tell from the diagnostics at all whether
+    /// fire spread was running". Whether lightning struck 0 times, or we never scattered
+    /// any in the first place, or it was thrown away against a ceiling, all look
+    /// identical on screen (nothing happens), so **while a typhoon is running we always
+    /// show all four numbers**.
     /// </summary>
     internal static class TyphoonEffectRows
     {
         private static UILabel _lightningLabel;
 
-        /// <summary>宿主の嵐に枠を全部譲っている間だけ出す行（全体レビュー I4）。</summary>
+        /// <summary>A row shown only while we are yielding the whole budget to the host
+        /// storm (whole-project review I4).</summary>
         private static UILabel _lightningYieldedLabel;
         private static UILabel _windLabel;
         private static UILabel _floodLabel;
@@ -39,46 +42,53 @@ namespace DisasterPlus.Game
         private static UILabel _gustLabel;
         private static UILabel _cloudNoteLabel;
 
-        /// <summary>パネル構築時に 1 回。</summary>
+        /// <summary>Once, when the panel is built.</summary>
         internal static void Build(UIPanel p, ref float y)
         {
-            // ★★ **常設の説明は外した**（2026-08-22、所有者の依頼
-            //    「台風タブのたくさんの説明も不要だと思います」）。
-            //    内容は <c>TyphoonFeature.WriteDiagnostics</c> の診断ダンプにある。
-            //    残してあるのは**今の状態**と**「なぜ起きていないか」の行**だけで、
-            //    後者は実際に起きていないときしか場所を取らない。
+            // ★★ **The permanent explanations have been taken out** (2026-08-22, at the
+            //    owner's request: "I think the many explanations on the typhoon tab are
+            //    not needed either"). The content lives in the diagnostics dump in
+            //    <c>TyphoonFeature.WriteDiagnostics</c>. What is left is only **the
+            //    current state** and **the "why is this not happening" rows**, and the
+            //    latter only take up space when it really is not happening.
 
             TyphoonRows.AddSectionHeader(p, "EffectsHeader", ref y, Strings.TyphoonEffectsHeader);
 
             _lightningLabel = TyphoonRows.AddRow(p, "Lightning", ref y);
 
-            // ★ 「④の落雷が 1 発も出ていない」を出す行。**中身は Refresh が
-            //    出し入れする** —— 常設にすると、譲っていない普通の強度でも
-            //    「譲っています」と読める。高さは 4 行に折り返すぶんを確保する。
+            // ★ The row that says "④ has not produced a single lightning strike".
+            //    **Refresh puts the text in and takes it out** — make it permanent and it
+            //    reads as "we are yielding" even at an ordinary intensity where we are
+            //    not. The height reserves room for wrapping onto four lines.
             _lightningYieldedLabel = TyphoonRows.AddRow(p, "LightningYielded", ref y, 72f);
 
             _windLabel = TyphoonRows.AddRow(p, "Wind", ref y);
 
             _floodLabel = TyphoonRows.AddRow(p, "Flood", ref y);
 
-            // 「なぜ氾濫しなかったか」の行。**中身は状態によって出し入れする**
-            // （設計書 §7.4）。高さは説明文が 3 行に折り返すぶんを確保する。
+            // The "why did it not flood" row. **The text goes in and out depending on
+            // the state** (design doc §7.4). The height reserves room for the explanation
+            // to wrap onto three lines.
             _floodReasonLabel = TyphoonRows.AddRow(p, "FloodReason", ref y, 56f);
 
             _gustLabel = TyphoonRows.AddRow(p, "Gust", ref y);
 
-            // ★ 雲は行を持たない（画面を見れば出ているかどうか分かる）。**出ない理由**
-            //    だけを出す —— バニラ空の雲の設定がこの環境に無いのは正当な状態で
-            //    （§C-2、PARTIAL）、それを黙っていると「④の雲が壊れている」と読まれる。
+            // ★ The clouds get no row of their own (you can see whether they are there by
+            //    looking at the screen). We show only **the reason they are not** — the
+            //    vanilla sky's cloud settings being absent in this environment is a
+            //    legitimate state (§C-2, PARTIAL), and staying quiet about it reads as
+            //    "④'s clouds are broken".
             _cloudNoteLabel = TyphoonRows.AddRow(p, "CloudNote", ref y, 40f);
         }
 
-        /// <summary>パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。</summary>
+        /// <summary>Every frame while the panel is showing. <paramref name="s"/> may be
+        /// null.</summary>
         internal static void Refresh(TyphoonSnapshot s)
         {
             if (s == null || !s.Valid || !s.Active)
             {
-                // 台風が居ないときに 0 を並べない（「撒いていない」と「0 発だった」は違う）。
+                // Do not line up zeroes when there is no typhoon ("we never scattered
+                // any" and "there were 0 of them" are different things).
                 TyphoonRows.SetPlain(_lightningLabel, "");
                 TyphoonRows.SetPlain(_lightningYieldedLabel, "");
                 TyphoonRows.SetPlain(_windLabel, "");
@@ -89,17 +99,19 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 並びは Strings.TyphoonLightningRow が語で名乗っている順:
-            // 飛行中 / 累計 / 宿主の嵐に残している数 / 捨てられた数。
+            // The order is the one Strings.TyphoonLightningRow names in words:
+            // in flight / cumulative / how many are left to the host storm / rejected.
             TyphoonRows.SetPlain(_lightningLabel,
                 Strings.TyphoonLightningRow + ": "
                 + s.LightningInFlight + " / " + s.LightningTotal + " / "
                 + s.LightningVanillaReserve + " / " + s.LightningRejected);
 
-            // ★ 「宿主に全部譲っていて④は 1 発も撃っていない」を名指しする
-            //    （全体レビュー I4）。判定は在庫（一時的に 0）ではなく**宿主の
-            //    取り分だけ**を見る —— 前者は次の tick で戻るが、後者は強度を
-            //    下げるまで戻らない。区別は LightningBudget.YieldsCompletely の doc。
+            // ★ Name the case "we are yielding everything to the host and ④ has not fired
+            //    a single bolt" (whole-project review I4). The test looks only at **the
+            //    host's share**, not at the stock on hand (which can be 0 temporarily) —
+            //    the former comes back on the next tick, the latter does not come back
+            //    until you lower the intensity. The distinction is in the doc on
+            //    LightningBudget.YieldsCompletely.
             TyphoonRows.SetPlain(_lightningYieldedLabel,
                 LightningBudget.YieldsCompletely(s.LightningVanillaReserve)
                     ? Strings.TyphoonLightningYielded
@@ -112,16 +124,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 雲の行（T9）。**出ているときは何も言わない** —— 空を見れば分かる。
-        /// バニラ空の雲の増強がこの環境で使えないときだけ、その理由を出す
-        /// （<c>DayNightDynamicCloudsProperties</c> は DLC・グラフィック設定によっては
-        /// 存在しない。§C-2、PARTIAL。**不具合ではない**）。
+        /// The cloud row (T9). **When they are showing it says nothing** — you can see
+        /// that by looking at the sky. It gives a reason only when the vanilla sky cloud
+        /// boost is unavailable in this environment
+        /// (<c>DayNightDynamicCloudsProperties</c> does not exist under some DLC and
+        /// graphics settings. §C-2, PARTIAL. **This is not a fault**).
         /// </summary>
         private static void RefreshCloud()
         {
-            // ★ 渦が出ているのは「粒」でも「退避のメッシュ」でも同じ扱いにする。
-            //   ここが名乗るのはバニラ空の増強が使えないことだけで、
-            //   どちらの経路で渦を出しているかは診断ダンプの担当である。
+            // ★ Treat the vortex being on screen the same way whether it is drawn with
+            //   "puffs" or with the fallback mesh. All this row names is that the vanilla
+            //   sky boost is unavailable; which of the two paths is drawing the vortex is
+            //   the diagnostics dump's business.
             bool drawing = TyphoonCloud.State == TyphoonCloudState.Puffs
                            || TyphoonCloud.State == TyphoonCloudState.Drawing;
 
@@ -135,10 +149,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 竜巻並みの局所被害の行。**竜巻の実体は 1 つも作っていない。**
+        /// The row for tornado-grade local damage. **Not one actual tornado is
+        /// created.**
         ///
-        /// <c>0</c> 個生きている状態は普通である（パッチは間隔をあけて生まれる）ので、
-        /// 「今は無い」と「機能が死んでいる」を倒壊の累計で見分けられるようにする。
+        /// Having <c>0</c> alive is normal (patches are born with gaps between them), so
+        /// the cumulative collapse count is what lets you tell "there are none right now"
+        /// from "the feature is dead".
         /// </summary>
         private static void RefreshGust(TyphoonSnapshot s)
         {
@@ -149,8 +165,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 並びは Strings.TyphoonGustRow が語で名乗っている順:
-            // 今生きているパッチ / 直近の走査の倒壊 / 累計 / ゲームに断られた棟数。
+            // The order is the one Strings.TyphoonGustRow names in words:
+            // patches alive now / collapses in the last sweep / cumulative / buildings
+            // the game refused.
             TyphoonRows.SetPlain(_gustLabel,
                 Strings.TyphoonGustRow + ": "
                 + s.GustActive + " / " + s.GustLastCollapsed + " / "
@@ -158,11 +175,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 河川氾濫の行（設計書 §7.4 の 5 状態）。
+        /// The river flooding row (the five states in design doc §7.4).
         ///
-        /// **<c>NoSources</c> のとき理由を出すのがこの機能の要件である。**
-        /// 対象マップに自然水源が無ければ正常に何も起きないので、
-        /// 空欄のままにすると「壊れている」と読まれる。
+        /// **Giving a reason in the <c>NoSources</c> case is a requirement of this
+        /// feature.** If the map in question has no natural water sources then nothing
+        /// happening is correct, so leaving the row blank reads as "it is broken".
         /// </summary>
         private static void RefreshFlood(TyphoonSnapshot s)
         {
@@ -178,7 +195,8 @@ namespace DisasterPlus.Game
             {
                 case TyphoonFloodState.NoSources:
                     TyphoonRows.SetPlain(_floodLabel, Strings.TyphoonFloodRow + ": -");
-                    // ★ 「なぜ起きないか」を出す。不具合ではない（設計書 §7.4）。
+                    // ★ Say "why it is not happening". This is not a fault (design doc
+                    //   §7.4).
                     TyphoonRows.SetPlain(_floodReasonLabel, Strings.TyphoonFloodNoSources);
                     return;
 
@@ -196,8 +214,8 @@ namespace DisasterPlus.Game
                     return;
 
                 default:
-                    // Idle（まだ強風域に入っていない）と Failed（理由は診断へ）は
-                    // どちらも行を出さない。
+                    // Idle (the gale radius has not reached anything yet) and Failed (the
+                    // reason goes to the diagnostics) both show no row at all.
                     TyphoonRows.SetPlain(_floodLabel, "");
                     TyphoonRows.SetPlain(_floodReasonLabel, "");
                     return;
@@ -205,11 +223,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 風害の行。**倒壊 0 のときも数を出す** —— 「効いていない」と「近くに建物が
-        /// 無い」を画面上で区別できるようにするため（<c>scanned</c> がその手がかり）。
+        /// The wind damage row. **It shows the numbers even when 0 collapsed** — so that
+        /// "it is not working" and "there are no buildings nearby" can be told apart on
+        /// screen (<c>scanned</c> is the clue).
         ///
-        /// 設定で切っているときは数字を並べず、切っていることを言う
-        /// （0 を並べると「動いているのに 1 棟も倒れない」と読める）。
+        /// When the setting is off it does not line up numbers but says it is off
+        /// (a line of zeroes reads as "it is running and yet not one building falls").
         /// </summary>
         private static void RefreshWind(TyphoonSnapshot s)
         {
@@ -220,26 +239,29 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 並びは Strings.TyphoonWindRow が語で名乗っている順:
-            // 直近の走査の倒壊 / 累計 / 調べた棟数 / ゲームに断られた棟数。
+            // The order is the one Strings.TyphoonWindRow names in words:
+            // collapses in the last sweep / cumulative / buildings examined / buildings
+            // the game refused.
             string text = Strings.TyphoonWindRow + ": "
                 + s.WindLastCollapsed + " / " + s.WindTotalCollapsed + " / "
                 + s.WindLastScanned + " / " + s.WindLastRefused
-                // ★ 危険半円の向き。**左右が逆でもプレイヤーには気付けない**ので、
-                //   風害が動いているあいだは常に出す。
+                // ★ Which side the dangerous semicircle is on. **The player cannot tell
+                //   if we have left and right the wrong way round**, so show it the whole
+                //   time wind damage is running.
                 + "   " + (ModSettings.TyphoonSouthernHemisphere.value
                     ? Strings.TyphoonDangerousSideLeft
                     : Strings.TyphoonDangerousSideRight);
 
-            // 外縁がまだ判定されていないことを黙って隠さない（巨大都市で起きる）。
+            // Do not quietly hide the fact that the outer rim has not been checked yet
+            // (this happens in very large cities).
             if (s.WindLastCapped) text += "   " + Strings.TyphoonWindCapped;
 
             TyphoonRows.SetPlain(_windLabel, text);
         }
 
         /// <summary>
-        /// レベルアンロード時。**参照を捨てるだけ**（実体はパネルの GameObject と
-        /// 一緒に消える）。
+        /// On level unload. **Only drops the references** (the objects themselves go with
+        /// the panel's GameObject).
         /// </summary>
         internal static void Destroy()
         {

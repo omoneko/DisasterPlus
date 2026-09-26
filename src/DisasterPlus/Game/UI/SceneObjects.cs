@@ -3,23 +3,23 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// シーン上の UI コンポーネントを探す。main スレッド専用。
+    /// Finds UI components in the scene. Main thread only.
     ///
-    /// Object.FindObjectOfType は使わない。Unity 5.6 の同 API は
-    /// <b>非アクティブな GameObject 上のコンポーネントを返さない</b>。CS の各パネルは
-    /// 「作られてはいるがまだ非アクティブ」という状態を普通に取るので、その瞬間に
-    /// 探しに行った MOD は「まだ無い」と判断し、以後アクティブになっても再取得できる保証がない
-    /// （最悪、その都市では機能が無言で入らない）。
+    /// Object.FindObjectOfType is not used. On Unity 5.6 that API
+    /// <b>does not return components on inactive GameObjects</b>. CS panels routinely sit in
+    /// the state "constructed but not active yet", so a mod that goes looking at that moment
+    /// decides "it is not there", with no guarantee it can fetch it again once the panel does
+    /// become active (worst case, the feature silently never loads in that city).
     ///
-    /// Resources.FindObjectsOfTypeAll&lt;T&gt;() は非アクティブも返す（Unity 5.6 に
-    /// ジェネリック版が存在することをアセンブリのリフレクションで確認済み）。
-    /// ただしシーンに属さないプレハブやアセットも一緒に返ってくるので、
-    /// gameObject.scene.IsValid() でシーン上の実体だけに絞る
-    /// （GameObject.scene / Scene.IsValid も同じく実在を確認済み）。
+    /// Resources.FindObjectsOfTypeAll&lt;T&gt;() returns inactive ones too (the generic form was
+    /// confirmed to exist on Unity 5.6 by reflecting over the assembly).
+    /// It does, however, also return prefabs and assets that do not belong to the scene, so
+    /// narrow it to the real things in the scene with gameObject.scene.IsValid()
+    /// (GameObject.scene / Scene.IsValid were likewise confirmed to exist).
     /// </summary>
     public static class SceneObjects
     {
-        /// <summary>シーン上の T を 1 つ返す。見つからなければ null。</summary>
+        /// <summary>Returns one T from the scene, or null if none is found.</summary>
         public static T FindInScene<T>() where T : Component
         {
             var all = Resources.FindObjectsOfTypeAll<T>();
@@ -28,11 +28,11 @@ namespace DisasterPlus.Game
             for (int i = 0; i < all.Length; i++)
             {
                 T c = all[i];
-                if (c == null) continue;   // Unity のフェイク null（破棄済み）も弾く
+                if (c == null) continue;   // also rejects Unity's fake null (destroyed)
 
                 GameObject go = c.gameObject;
                 if (go == null) continue;
-                if (!go.scene.IsValid()) continue;   // プレハブ / アセット由来
+                if (!go.scene.IsValid()) continue;   // comes from a prefab / asset
 
                 return c;
             }

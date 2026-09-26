@@ -5,147 +5,162 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 津波連鎖が今どうなっているか。**表示側はこれを必ず名乗る。**
+    /// Where the tsunami chain currently stands. **The display must always state this.**
     /// </summary>
     public enum TsunamiChainState
     {
-        /// <summary>予約も発生もしていない（陸の震源を含む）。行を出さない。</summary>
+        /// <summary>Nothing scheduled and nothing raised (including an inland hypocentre). No row is shown.</summary>
         Idle,
 
-        /// <summary>海中の震源を見つけ、遅延の満了を待っている。</summary>
+        /// <summary>An undersea hypocentre was found and we are waiting for the delay to elapse.</summary>
         Scheduled,
 
-        /// <summary>津波を起こし、波が実際に立った（<c>m_waveIndex != 0</c>）。</summary>
+        /// <summary>The tsunami was triggered and a wave really was raised (<c>m_waveIndex != 0</c>).</summary>
         Raised,
 
         /// <summary>
-        /// 起こしたが <c>FindSea</c> が海側区間を見つけられず、波が立たなかった。
-        /// **これは失敗ではない。** 内陸マップでは正常な結果である（§B-3）。
+        /// It was triggered, but <c>FindSea</c> could not find a sea-side stretch and no
+        /// wave was raised. **This is not a failure.** On an inland map it is the correct
+        /// outcome (§B-3).
         /// </summary>
         NoSea,
 
-        /// <summary>Natural Disasters DLC が無く、<c>TsunamiAI</c> のプレハブが存在しない（§B-5）。</summary>
+        /// <summary>The Natural Disasters DLC is not owned and there is no <c>TsunamiAI</c> prefab (§B-5).</summary>
         NoDlc,
 
-        /// <summary>災害スロットが満杯など。理由は診断へ出し、パネルには行を出さない。</summary>
+        /// <summary>The disaster slots are full, or similar. The reason goes to the diagnostics; no row is shown in the panel.</summary>
         Failed
     }
 
     /// <summary>
-    /// **第 2 層の 1 つ目。海中で地震が起きたら、遅れて津波を起こす。**
-    /// <b>sim スレッド専用。</b>既定 OFF。
+    /// **The first part of layer 2. When an earthquake happens under the sea, raise a
+    /// tsunami after a delay.** <b>Sim thread only.</b> Off by default.
     ///
-    /// ── できることと、できないこと（UI の文言はこれで決まる） ──────────────
+    /// ── What is and is not possible (it decides the UI's wording) ──────────
     ///
-    /// 依頼は「海中で地震を起こしてもプレート境界型の津波が来ない」だった。
-    /// **「震源から波が広がる」は <c>TsunamiAI</c> では literally 不可能である**（§B-3）:
+    /// The request was "trigger an earthquake under the sea and no plate-boundary tsunami
+    /// arrives". **"The wave spreads from the hypocentre" is literally impossible with
+    /// <c>TsunamiAI</c>** (§B-3):
     ///
-    ///   - <c>FindSea</c> は**マップ外周セルしか候補にしない**（1080 &lt;&lt; 3 = 4320 個）
-    ///   - <c>m_targetPosition</c> は「どの外周区間を選ぶか」のヒントにしかならず、
-    ///     開始時に原点セルの座標で**上書きされる**（IL_03D3–0426）
-    ///   - <c>m_angle</c> も区間の内向き法線から導出されて**上書きされる**（IL_042B–0438）
+    ///   - <c>FindSea</c> **considers only cells on the map's border**
+    ///     (1080 &lt;&lt; 3 = 4320 of them)
+    ///   - <c>m_targetPosition</c> is no more than a hint about which border stretch to
+    ///     pick, and at start it is **overwritten** with the origin cell's position
+    ///     (IL_03D3-0426)
+    ///   - <c>m_angle</c> is likewise derived from the stretch's inward normal and
+    ///     **overwritten** (IL_042B-0438)
     ///
-    /// したがって実現するのは「**震源に最も近い海側の外周から津波が来る**」であり、
-    /// パネルはそう書く（<c>Strings.EarthquakeTsunamiFromShore</c>）。
+    /// So what can be delivered is "**the tsunami arrives from the sea-side border
+    /// nearest the hypocentre**", and the panel says exactly that
+    /// (<c>Strings.EarthquakeTsunamiFromShore</c>).
     ///
-    /// ★★ **2026-08-29、そこはもう当てはまらない。** <c>TsunamiAI</c> は使わず、
-    ///    <c>TsunamiWave</c> が <c>TYPE_IMPACT</c> の水波を震源に置く。
-    ///    波は震源から同心円状に広がる。
-    /// **「震源から波が広がります」と書いてはいけない。**
+    /// ★★ **As of 2026-08-29 that no longer applies.** <c>TsunamiAI</c> is not used;
+    ///    <c>TsunamiWave</c> places a <c>TYPE_IMPACT</c> water wave at the hypocentre and
+    ///    the wave spreads out in circles from it.
+    /// **Never write "the wave spreads from the hypocentre".**
     ///
-    /// ── 4 つの罠（全部 IL で確定済み） ────────────────────────────
+    /// ── Four traps (all pinned down in the IL) ─────────────────────────
     ///
-    /// 1. <c>m_flags |= SelfTrigger (64)</c> は**必須**。<c>TsunamiAI.StartDisaster</c> は
-    ///    IL_000E でこのビットを見て、立っていなければ即 return する（§B-2）。
-    ///    そのとき波は 1 つも作られない。
-    ///    <b>ただし地震と違い、津波は「Emerging で固まる」わけではない</b> ——
-    ///    本タスクで再実測したところ、<c>TsunamiAI.IsStillEmerging</c> /
-    ///    <c>IsStillActive</c> / <c>IsStillClearing</c> はどれも
-    ///    <c>m_activationFrame</c> を**一度も読まない**（使うのは <c>m_startFrame</c> と
-    ///    <c>m_angle</c> と <c>m_targetPosition</c> だけ）。設計書 §4.1 は
-    ///    「立てないと災害が Emerging のまま永久に固まる（地震・津波の両方）」と
-    ///    書いているが、**後半は津波には当てはまらない**。結論（必ず立てる）は同じ。
-    /// 2. <c>CreateDisaster</c> の**戻り値を必ず見る**。false のとき出力は 0 になり、
-    ///    そのまま書き込むと**他人の災害スロットを書き潰す**（§E-1、上限 256）。
-    /// 3. <c>FindDisasterInfo&lt;TsunamiAI&gt;()</c> が null なら DLC が無い（§B-5）。
-    ///    <c>ModCompat.NaturalDisastersOwned</c> は事前判定にすぎず、
-    ///    **実行直前の権威はこの走査**である。
-    /// 4. <c>FindSea</c> は海側区間が 10 セル未満だと false を返し、津波は起きない（§B-3）。
-    ///    **内陸マップでは正常に何も起きない。これを失敗として扱わない。**
+    /// 1. <c>m_flags |= SelfTrigger (64)</c> is **mandatory**.
+    ///    <c>TsunamiAI.StartDisaster</c> checks that bit at IL_000E and returns
+    ///    immediately if it is not set (§B-2). No wave is created at all in that case.
+    ///    <b>Unlike an earthquake, though, a tsunami does not "get stuck in
+    ///    Emerging"</b> — re-measured as part of this task,
+    ///    <c>TsunamiAI.IsStillEmerging</c>, <c>IsStillActive</c> and
+    ///    <c>IsStillClearing</c> **never once read** <c>m_activationFrame</c> (they use
+    ///    only <c>m_startFrame</c>, <c>m_angle</c> and <c>m_targetPosition</c>). Design
+    ///    doc §4.1 says "without it the disaster is stuck in Emerging forever (both
+    ///    earthquake and tsunami)", but **the second half does not apply to tsunamis**.
+    ///    The conclusion (always set it) is unchanged.
+    /// 2. **Always check <c>CreateDisaster</c>'s return value.** On false the output is 0,
+    ///    and writing to it anyway **overwrites somebody else's disaster slot**
+    ///    (§E-1; the limit is 256).
+    /// 3. If <c>FindDisasterInfo&lt;TsunamiAI&gt;()</c> is null, the DLC is not owned
+    ///    (§B-5). <c>ModCompat.NaturalDisastersOwned</c> is only a pre-check;
+    ///    **this scan is the authority at the moment of use.**
+    /// 4. <c>FindSea</c> returns false when the sea-side stretch is under 10 cells, and no
+    ///    tsunami happens (§B-3).
+    ///    **On an inland map, nothing happening is correct. Do not treat it as a failure.**
     ///
-    /// ── <c>FindSea</c> が失敗したときの後始末（計画 Step 1 の結論） ─────────────
+    /// ── Cleaning up after <c>FindSea</c> fails (the conclusion of plan Step 1) ─────
     ///
-    /// 計画は「後始末の方法を IL で確定させてから決める」としていた。実測した結果:
+    /// The plan said to decide only after pinning the clean-up down in the IL. Measured:
     ///
     /// ```
-    /// TsunamiAI.StartDisaster   IL_0003 base.StartDisaster（★ SelfTrigger の判定より前）
+    /// TsunamiAI.StartDisaster   IL_0003 base.StartDisaster (★ before the SelfTrigger check)
     ///                           IL_000E if ((m_flags & 64) == 0) return
-    ///                           IL_003D if (!FindSea(...)) return      ← ここで抜ける
+    ///                           IL_003D if (!FindSea(...)) return      ← we bail out here
     /// DisasterAI.StartDisaster  m_flags = (m_flags & 0xFFFC88C7) | Emerging(4)
-    ///                           m_startFrame = m_currentFrameIndex     ★ 必ず入る
-    ///                           （m_activationFrame には一切書かない）
+    ///                           m_startFrame = m_currentFrameIndex     ★ always populated
+    ///                           (it never writes m_activationFrame at all)
     /// TsunamiAI.IsStillEmerging elapsed = currentFrame - m_startFrame
     ///                           travel  = elapsed * 0.125
     ///                           dir     = (-sin(m_angle), 0, cos(m_angle))
-    ///                           corner  = 進行方向と逆側の ±4800
+    ///                           corner  = the ±4800 on the side away from the direction of travel
     ///                           return dot(corner - m_targetPosition, dir) > travel
-    /// IsStillActive / IsStillClearing も同じ形（Active は travel から 3000 を引き、
-    /// Clearing は corner を進行方向側に取る）。**3 つとも m_activationFrame を読まない。**
+    /// IsStillActive / IsStillClearing have the same shape (Active subtracts 3000 from
+    /// travel, and Clearing takes the corner on the side it is travelling towards).
+    /// **None of the three reads m_activationFrame.**
     /// ```
     ///
-    /// つまり波が立たなくても位相は <c>m_startFrame</c> を基準に自然に進み、
-    /// <c>Finished</c> になった時点で <c>DisasterManager.SimulationStepImpl</c> が
-    /// <c>ReleaseDisaster</c> を呼んでスロットを解放する（§E-1）。
-    /// 最悪でも 107520 フレーム（≒39 ゲーム内時間）で消える。
-    /// → 計画の対応表の 1 行目「**何もしない（ログのみ）**」を採る。
+    /// So even with no wave raised, the phase advances naturally relative to
+    /// <c>m_startFrame</c>, and once it reaches <c>Finished</c>,
+    /// <c>DisasterManager.SimulationStepImpl</c> calls <c>ReleaseDisaster</c> and frees
+    /// the slot (§E-1). At worst it is gone within 107,520 frames (about 39 game hours).
+    /// → We take the first row of the plan's decision table: **do nothing (log only)**.
     ///
-    /// <c>DisasterManager.ReleaseDisaster(ushort)</c> は public であることも確認したが、
-    /// **使わない**。<c>base.StartDisaster</c> は既に
-    /// <c>DisasterWrapper.OnDisasterStarted(id)</c> を呼んでおり、その直後に
-    /// スロットを消すのは <c>IDisastersExtension</c> を実装した MOD から見て
-    /// 「開始したのに何の終了通知も無い災害」になる。固まらないと分かっている以上、
-    /// 検証していない副作用を足す理由が無い。
+    /// <c>DisasterManager.ReleaseDisaster(ushort)</c> was also confirmed to be public,
+    /// but **we do not use it**. <c>base.StartDisaster</c> has already called
+    /// <c>DisasterWrapper.OnDisasterStarted(id)</c>, and deleting the slot straight after
+    /// that looks, to a mod implementing <c>IDisastersExtension</c>, like "a disaster that
+    /// started and never announced an ending". Since we know it will not get stuck, there
+    /// is no reason to add an unverified side effect.
     ///
-    /// **いずれにせよ <c>m_waveIndex == 0</c> の判定は必ず行う**（<c>DisasterData.m_waveIndex</c>
-    /// は public UInt16、本タスクで実測）。波が立たなかったことを
-    /// <see cref="TsunamiChainState.NoSea"/> として UI に理由付きで出す。
+    /// **Either way, always check <c>m_waveIndex == 0</c>** (<c>DisasterData.m_waveIndex</c>
+    /// is a public UInt16, measured as part of this task). The fact that no wave was
+    /// raised is reported to the UI, with a reason, as
+    /// <see cref="TsunamiChainState.NoSea"/>.
     ///
-    /// ── 監視するのは 1 個だけ ────────────────────────────────
+    /// ── Only one is tracked ──────────────────────────────────────
     ///
-    /// 同時に複数の地震から津波を出さない。②が上限 256 の災害スロットを
-    /// 食い潰す形を作らないための制限である。
+    /// We never raise tsunamis from several earthquakes at once. This limit stops ② from
+    /// eating into the 256-slot disaster limit.
     /// </summary>
     public static class TsunamiChain
     {
         /// <summary>
-        /// 海溝型地震のあと津波が来るまで（ゲーム内分）。
+        /// How long after a trench earthquake the tsunami arrives (in game minutes).
         ///
-        /// ★ 設定の <c>eqTsunamiDelay</c> がこれより長ければ、海溝型に限って
-        ///   こちらまで縮める。**短く設定している人の値は尊重する**（縮めるだけ）。
+        /// ★ If the <c>eqTsunamiDelay</c> setting is longer than this, it is shortened to
+        ///   this value — but for trench quakes only. **A shorter value set by the player
+        ///   is respected** (we only ever shorten).
         /// </summary>
         internal const int TrenchDelayMinutes = 3;
 
         /// <summary>
-        /// 強度の下限。強度 0 の津波は波高が 0 になり（<c>m_delta = m_height * 1024 * i / 55</c>、
-        /// §B-3）、「起こしたのに何も起きない」という原因の分からない状態になる。
+        /// The lower bound on intensity. A tsunami at intensity 0 has a wave height of 0
+        /// (<c>m_delta = m_height * 1024 * i / 55</c>, §B-3), giving the inexplicable
+        /// state "it was triggered and nothing happened".
         /// </summary>
         /// <summary>
-        /// これ未満の震度では津波を予約しない。
+        /// Below this intensity no tsunami is scheduled.
         ///
-        /// ★★ **長らく誰も見ていなかった。**（2026-08-31、第 4 回検証）
-        ///   doc には「起こしたのに何も来ない状態を作らないため」と書いてあったのに、
-        ///   どこからも参照されていなかった。震度 1 でも予約が通り、
-        ///   蓋が下限の 1 m になって<b>本当に何も来なかった</b>。
+        /// ★★ **For a long time nobody looked at this.** (2026-08-31, fourth round of
+        ///   verification) The doc said it was there "so we never create a state where it
+        ///   is triggered and nothing arrives", and yet nothing referenced it. Even
+        ///   intensity 1 got scheduled, the cap fell to its lower bound of 1 m, and
+        ///   <b>genuinely nothing arrived</b>.
         /// </summary>
         private const byte MinIntensity = 10;
 
         /// <summary>
-        /// <b>波を立て終えた地震の番号。</b>
+        /// <b>The number of the earthquake whose wave has been raised.</b>
         ///
-        /// ★★ <c>_quakeId</c> は地震の相が終わると <c>Forget()</c> で 0 に戻るが、
-        ///   波はそのあと 10 分以上走る。それだけを見ていたので、パネルが
-        ///   <b>「津波発生」から「到達予定」へ巻き戻って</b>見えた
-        ///   （2026-08-31、第 6 回検証）。**立てた事実は別に覚える。**
+        /// ★★ <c>_quakeId</c> goes back to 0 in <c>Forget()</c> once the earthquake's
+        ///   phase ends, but the wave travels for over 10 minutes after that. Watching
+        ///   only that made the panel look like it was <b>winding back from "tsunami
+        ///   raised" to "expected"</b> (2026-08-31, sixth round of verification).
+        ///   **Remember the fact that one was raised separately.**
         /// </summary>
         private static ushort _raisedQuakeId;
 
@@ -155,36 +170,38 @@ namespace DisasterPlus.Game
         private static uint _dueFrame;
         private static TsunamiChainState _state;
 
-        /// <summary>例外を 1 回だけ <c>Log.Error</c> で出したか（以後は Diag へ落とす）。</summary>
+        /// <summary>Whether an exception has been reported once with <c>Log.Error</c> (after which we drop to Diag).</summary>
         private static bool _errorLogged;
 
         /// <summary>
-        /// 今の状態。**sim スレッドが書き、<see cref="EarthquakeReader"/> が同じ
-        /// スレッドで読んでスナップショットへ載せる。** main スレッドはここを直接読まない。
+        /// The current state. **Written by the sim thread and read on that same thread by
+        /// <see cref="EarthquakeReader"/>, which puts it on the snapshot.** The main
+        /// thread never reads it directly.
         /// </summary>
         public static TsunamiChainState State { get { return _state; } }
 
-        /// <summary>予約の満了フレーム。<see cref="State"/> が Scheduled のときだけ意味を持つ。</summary>
+        /// <summary>The frame the schedule comes due. Only meaningful while <see cref="State"/> is Scheduled.</summary>
         public static uint DueFrame { get { return _dueFrame; } }
 
         /// <summary>
-        /// この地震に<b>まだ津波を負っているか</b>。
+        /// Whether we <b>still owe this earthquake a tsunami</b>.
         ///
-        /// ★★ **2 つ目の海溝型を断る判定はこれで行う。**
-        ///   理由は「追える津波が 1 本だけ」であって、地震のスロットが
-        ///   17〜35 実分も生きることではない（<c>TrenchQuakeSlot.RaiseCore</c> の ★★）。
+        /// ★★ **This is the check that refuses a second trench quake.**
+        ///   The reason is "only one tsunami can be tracked", not the fact that the
+        ///   earthquake's slot lives for 17-35 real minutes (see the ★★ in
+        ///   <c>TrenchQuakeSlot.RaiseCore</c>).
         ///
-        /// ★★ <b>「予約済みか波が出ている最中か」だけでは足りない。</b>
-        ///   （2026-08-30、Codex P1）地震が Emerging のあいだ、こちらはまだ
-        ///   その地震を拾っていないので状態は Idle である。そこで 2 発目を通すと
-        ///   <b>1 発目の印が奪われ、しかも 2 発目は拾われない</b>。
-        ///   だから<b>決着（Raised / NoSea / NoDlc / Failed）が付くまで</b>
-        ///   負っていることにする。
+        /// ★★ <b>"Is it scheduled or is a wave out?" is not enough.</b>
+        ///   (2026-08-30, Codex P1) While the earthquake is Emerging we have not picked it
+        ///   up yet, so the state is Idle. Let a second one through there and
+        ///   <b>the first one's marker is stolen and the second is never picked up
+        ///   either</b>. So we count it as owed <b>until it is settled (Raised / NoSea /
+        ///   NoDlc / Failed)</b>.
         ///
-        /// ★ 災害スロットが空けば <c>IsTrenchQuake</c> が忘れるので、
-        ///   この錠が地震より長生きすることはない。
+        /// ★ Once the disaster slot is freed, <c>IsTrenchQuake</c> forgets it, so this
+        ///   lock can never outlive the earthquake.
         /// </summary>
-        /// <summary>その地震にはもう波を立てたか。**パネルの文言を選ぶために要る。**</summary>
+        /// <summary>Whether a wave has already been raised for that earthquake. **Needed to choose the panel's wording.**</summary>
         public static bool HasRaisedFor(ushort quakeId)
         {
             return quakeId != 0 && _raisedQuakeId == quakeId;
@@ -195,7 +212,7 @@ namespace DisasterPlus.Game
             if (quakeId == 0) return false;
             if (TsunamiRing.Running) return true;
 
-            // まだ拾っていない（Emerging の最中など）。負っている。
+            // Not picked up yet (mid-Emerging, say). We owe it.
             if (_quakeId != quakeId) return true;
 
             return _state == TsunamiChainState.Idle
@@ -203,43 +220,44 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **新しい海溝型地震が起きたときに呼ぶ（sim スレッド）。**
-        /// 追いかける相手を捨てて、次の tick から拾い直せるようにする。
+        /// **Call this when a new trench earthquake starts (sim thread).**
+        /// It drops whatever we were tracking so that the next tick can pick up afresh.
         ///
-        /// ★★ これが無いと、前の地震が Clearing で生きているあいだ
-        ///   <c>PickCandidate</c> は<b>古い相手を追い続け</b>、新しい海溝型は
-        ///   Emerging→Active の瞬間を見逃されて<b>津波を取りこぼす</b>
-        ///   （2026-08-30、Codex P1）。前の津波は既に出し終えている
-        ///   （<see cref="StillOwes"/> がそれを保証する）ので、捨ててよい。
+        /// ★★ Without it, while the previous earthquake is still alive in Clearing,
+        ///   <c>PickCandidate</c> <b>keeps tracking the old one</b> and the new trench
+        ///   quake's Emerging→Active moment is missed, so <b>its tsunami is dropped</b>
+        ///   (2026-08-30, Codex P1). The previous tsunami has already been delivered
+        ///   (<see cref="StillOwes"/> guarantees that), so it is safe to drop.
         /// </summary>
         public static void Retarget()
         {
             Forget();
         }
 
-        /// <summary>監視している地震（災害バッファ上の添字）。0 なら監視していない。</summary>
+        /// <summary>The earthquake being tracked (an index into the disaster buffer). 0 means none.</summary>
         public static ushort QuakeId { get { return _quakeId; } }
 
         /// <summary>
-        /// **レベルアンロードで必ず呼ぶ。** 予約は都市をまたいで残らない
-        /// （セッション状態であって、セーブにも入れない）。
+        /// **Always call this on level unload.** A schedule never survives from one city
+        /// to the next (it is session state and is not put in the save either).
         /// </summary>
         public static void Reset()
         {
             Forget();
-            // ★ _errorLogged は戻さない（第 2 層レビュー M4）。
-            //    「この経路は投げる」は、この DLL が参照しているゲームのビルドに対する
-            //    事実であって都市ごとの状態ではないので、都市を替えても変わらない。
-            //    前例は EarthquakeReader._readErrorLogged / LongPeriodDamage._errorLogged
-            //    で、どちらもレベルアンロードで戻していない。ここだけ戻していたのは
-            //    取りこぼしで、同じ質問に 2 つの逆の答えが doc として書かれていた。
+            // ★ _errorLogged is not reset (layer-2 review M4).
+            //    "This path throws" is a fact about the game build this DLL is
+            //    referencing, not per-city state, so changing city changes nothing.
+            //    The precedents are EarthquakeReader._readErrorLogged and
+            //    LongPeriodDamage._errorLogged, neither of which resets on level unload.
+            //    Resetting it here alone was an oversight, and it left two opposite
+            //    answers to the same question written down as documentation.
         }
 
         /// <summary>
-        /// 監視をやめて表示も畳む。<see cref="_errorLogged"/> は
-        /// 触らない —— あれは「同じ例外で output_log を埋めない」ための
-        /// **ゲームのビルドに対する事実**で、地震 1 個が終わるたびに巻き戻すと
-        /// <c>Log.Error</c> の連投を許してしまう。
+        /// Stops tracking and folds the display away. <see cref="_errorLogged"/> is left
+        /// alone — it is **a fact about the game build**, there to stop the same exception
+        /// burying output_log, and winding it back every time an earthquake ends would
+        /// let <c>Log.Error</c> fire over and over.
         /// </summary>
         private static void Forget()
         {
@@ -252,9 +270,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 前提検証用。**副作用なしに** <c>TsunamiAI</c> のプレハブが在るかだけを返す。
-        /// キャッシュを書き換える関数へ委譲しない（<c>FireWhirlSpawner.HasTornadoPrefab</c>
-        /// と同じ理由。あちらは sim スレッドのキャッシュを main から巻き戻していた）。
+        /// For the assumption checks. Returns **without side effects** whether a
+        /// <c>TsunamiAI</c> prefab exists, and nothing else. It does not delegate to a
+        /// function that writes a cache (the same reason as
+        /// <c>FireWhirlSpawner.HasTornadoPrefab</c>, which used to wind back the sim
+        /// thread's cache from the main thread).
         /// </summary>
         public static bool HasTsunamiPrefab()
         {
@@ -262,9 +282,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>EarthquakeFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から呼ぶこと**（ポーズ中に予約が進むと、止めているはずのゲーム内時間で
-        /// 津波が来る）。設定が OFF のときは呼び出し側が呼ばない。
+        /// Sim thread. **Always call it below the pause guard in
+        /// <c>EarthquakeFeature.OnSimulationTick</c>** (let the schedule advance while
+        /// paused and the tsunami arrives during game time that is supposed to be
+        /// stopped). When the setting is off, the caller does not call it.
         /// </summary>
         public static void Tick(EarthquakeSnapshot snapshot, uint frame)
         {
@@ -291,10 +312,11 @@ namespace DisasterPlus.Game
 
         private static void Step(EarthquakeSnapshot snapshot, uint frame)
         {
-            // ★★ 追っている地震が<b>本当に同じ地震か</b>を種でも確かめる
-            //    （2026-08-30、第 5 回検証）。災害の番号は使い回されるので、
-            //    番号だけで追うと<b>別の地震に津波を付けかねない</b>。
-            //    海溝型を追っているときだけ効く（バニラの地震は元々採らない）。
+            // ★★ Confirm by seed as well that the earthquake being tracked <b>really is
+            //    the same one</b> (2026-08-30, fifth round of verification). Disaster
+            //    numbers are reused, so tracking by number alone <b>risks attaching the
+            //    tsunami to a different earthquake</b>. This only applies while tracking
+            //    a trench quake (vanilla earthquakes are never picked up anyway).
             if (_quakeId != 0 && _quakeId == TrenchQuakeSlot.LastId
                 && !TrenchQuakeSlot.IsTrenchQuake(_quakeId))
             {
@@ -304,9 +326,9 @@ namespace DisasterPlus.Game
             var quake = FindTracked(snapshot);
             if (quake == null)
             {
-                // 監視対象が消えた（Finished またはバッファから消えた）。
-                // 表示していた結果もここで畳む —— 終わった地震について
-                // 「30 分後に津波」と出し続ける方が悪い。
+                // What we were tracking is gone (Finished, or removed from the buffer).
+                // Fold the displayed result away here too — going on saying "tsunami in
+                // 30 minutes" about an earthquake that has ended is worse.
                 if (_quakeId != 0) Forget();
                 quake = PickCandidate(snapshot);
                 if (quake == null) return;
@@ -320,8 +342,8 @@ namespace DisasterPlus.Game
 
             if (_state == TsunamiChainState.Scheduled)
             {
-                // uint の巻き戻り（約 4739 年）はゲーム内で起きないが、
-                // 引き算ではなく比較で書いておく。
+                // A uint wrap-around (about 4,739 years) does not happen in game, but
+                // write it as a comparison rather than a subtraction anyway.
                 if (frame >= _dueFrame) Raise(quake);
                 _lastPhase = quake.Phase;
                 return;
@@ -339,7 +361,7 @@ namespace DisasterPlus.Game
             _havePhase = true;
         }
 
-        /// <summary>監視中の地震をスナップショットから引く。位相が終わっていれば null。</summary>
+        /// <summary>Looks the tracked earthquake up in the snapshot. Null once its phase has ended.</summary>
         private static EarthquakeReading FindTracked(EarthquakeSnapshot snapshot)
         {
             if (_quakeId == 0) return null;
@@ -358,9 +380,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 新しく監視する地震を 1 個選ぶ。**Emerging のものだけ**を採る ——
-        /// 本震（Emerging → Active）の瞬間を観測できないと、連鎖の起点が決まらない。
-        /// 途中から見た地震について「今が本震だ」と決めつけない。
+        /// Picks one new earthquake to track. **Only ones in Emerging** — without
+        /// observing the moment of the main shock (Emerging → Active) there is no
+        /// starting point for the chain. Never assume "the main shock is now" about an
+        /// earthquake we started watching part way through.
         /// </summary>
         private static EarthquakeReading PickCandidate(EarthquakeSnapshot snapshot)
         {
@@ -369,15 +392,18 @@ namespace DisasterPlus.Game
             {
                 if (quakes[i].Phase != EarthquakePhase.Emerging) continue;
 
-                // ★★ **津波が付くのは海溝型地震だけである**（2026-08-22、所有者の指示）。
+                // ★★ **Only trench earthquakes get a tsunami** (2026-08-22, the owner's
+                //    instruction).
                 //
-                //    > バニラの地震では津波は発生させず、新たに新設する海溝型地震
-                //    > （アイコンも新規で）でのみ発生するようにしてください。
+                //    > Do not raise a tsunami for vanilla earthquakes; raise one only for
+                //    > the new trench earthquake (with a new icon too).
                 //
-                //    見分けは<b>災害 ID</b>で行う（<c>TrenchQuakeSlot.IsTrenchQuake</c>）。
-                //    ★ **震源が海の上かどうかで判定しない。** プレイヤーがバニラの
-                //      災害パネルから海に地震を置くこともでき、それは断層型のつもりで
-                //      置いたものである。位置で見るとそこにも津波が付いてしまう。
+                //    They are told apart by <b>disaster ID</b>
+                //    (<c>TrenchQuakeSlot.IsTrenchQuake</c>).
+                //    ★ **Never decide it from whether the hypocentre is over water.** The
+                //      player can place an earthquake out at sea from vanilla's disaster
+                //      panel, and that was placed as a fault quake. Go by position and
+                //      those get a tsunami too.
                 if (!TrenchQuakeSlot.IsTrenchQuake(quakes[i].DisasterId)) continue;
 
                 return quakes[i];
@@ -386,15 +412,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 本震の瞬間。震源が水中なら遅延を予約する。
+        /// The moment of the main shock. Schedules the delay if the hypocentre is
+        /// underwater.
         ///
-        /// 陸の震源では <see cref="TsunamiChainState.Idle"/> のまま何も出さない ——
-        /// 「陸だったので津波はありません」は当たり前のことであり、
-        /// 毎回の地震でそれを名乗ると、本当に言うべきこと（海だったのに海が無い）が埋もれる。
+        /// For an inland hypocentre it stays <see cref="TsunamiChainState.Idle"/> and
+        /// shows nothing — "it was on land, so there is no tsunami" is self-evident, and
+        /// declaring it for every earthquake buries the thing that really does need
+        /// saying (it was at sea, and yet there is no sea).
         /// </summary>
         private static void Schedule(EarthquakeReading quake, uint frame)
         {
-            // DLC の権威はプレハブの実在（§B-5）。ModCompat は UI を出すかどうかの事前判定。
+            // The authority on the DLC is whether the prefab exists (§B-5). ModCompat is
+            // only a pre-check for whether to show the UI.
             if (FindTsunamiInfo() == null)
             {
                 _state = TsunamiChainState.NoDlc;
@@ -411,16 +440,19 @@ namespace DisasterPlus.Game
             float framesPerMinute = FeatureHost.FramesPerMinute;
             if (framesPerMinute <= 0f) return;
 
-            // .cgs の値は公開契約なので読み捨てないが、負の値を uint へ落とすと
-            // 巨大なフレーム数になり、予約が事実上永久に満了しなくなる。
-            // 範囲はスライダーが 5〜120 に縛っているものの、手で編集された
-            // 設定ファイルに対してもここが破綻しないようにする。
-            // ★★ **海溝型地震の津波は「すぐ」である。**（2026-08-25、所有者の指示）
+            // The value in the .cgs is a public contract so it is not discarded, but a
+            // negative value cast to uint becomes an enormous frame count and the
+            // schedule effectively never comes due. The slider constrains the range to
+            // 5-120, but this must not fall apart for a hand-edited settings file either.
+            // ★★ **A trench earthquake's tsunami is "soon".** (2026-08-25, the owner's
+            //    instruction)
             //
-            //    <c>eqTsunamiDelay</c> の既定は 30 ゲーム内分だった。あれは
-            //    「遠地津波が届くまで」の感覚で置いた値だが、海溝型は<b>沖合すぐ</b>
-            //    で起きるので、実際にも数分で第一波が来る。
-            //    設定を触っていない人には <see cref="TrenchDelayMinutes"/> を使う。
+            //    <c>eqTsunamiDelay</c> defaulted to 30 game minutes. That value was
+            //    chosen with "how long a distant tsunami takes to arrive" in mind, but a
+            //    trench quake happens <b>just offshore</b>, so in reality the first wave
+            //    arrives within minutes.
+            //    For anyone who has not touched the setting we use
+            //    <see cref="TrenchDelayMinutes"/>.
             int minutes = ModSettings.EarthquakeTsunamiDelayMinutes.value;
             if (TrenchQuakeSlot.IsTrenchQuake(quake.DisasterId)
                 && minutes > TrenchDelayMinutes)
@@ -432,7 +464,7 @@ namespace DisasterPlus.Game
             uint delay = (uint)(minutes * framesPerMinute);
             uint baseFrame = quake.ActivationScheduled ? quake.ActivationFrame : frame;
             _dueFrame = baseFrame + delay;
-            // ★★ 弱すぎる地震では予約しない（MinIntensity の doc）。
+            // ★★ Do not schedule for an earthquake that is too weak (see MinIntensity's doc).
             if (quake.Intensity < MinIntensity)
             {
                 _state = TsunamiChainState.NoSea;
@@ -447,9 +479,9 @@ namespace DisasterPlus.Game
 
             _state = TsunamiChainState.Scheduled;
 
-            // ★★ **海溝型なら必ず出す。**（第 3 回検証）Diag だけだと
-            //    LogChannel.DefaultMask は General だけなので、既定では
-            //    「いつ波が来るのか」がどこにも残らない。
+            // ★★ **For a trench quake, always report it.** (third round of verification)
+            //    With Diag alone, LogChannel.DefaultMask is only General, so by default
+            //    "when is the wave coming?" is recorded nowhere at all.
             Log.Info("tsunami scheduled for quake #" + quake.DisasterId + " at frame "
                      + _dueFrame + " (" + minutes
                      + " in-game minutes from now). After that the source runs for "
@@ -464,65 +496,73 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 震源が水中か。<c>TerrainManager.HasWater(Vector2)</c> は public インスタンス
-        /// メソッドで、引数は**ワールド XZ 座標**（本タスクで IL 実測）:
+        /// Whether the hypocentre is underwater. <c>TerrainManager.HasWater(Vector2)</c>
+        /// is a public instance method whose argument is a **world XZ position**
+        /// (measured in the IL as part of this task):
         ///
         /// ```
-        /// x = FloorToInt((position.x + 8640) * 16) >> 8   // = 16 m セル、[0,1080] にクランプ
+        /// x = FloorToInt((position.x + 8640) * 16) >> 8   // = a 16 m cell, clamped to [0,1080]
         /// z = FloorToInt((position.y + 8640) * 16) >> 8
-        /// 4 隅のセルを WaterSimulation.BeginRead() の配列から読み、
-        /// m_height が全て 0 なら false（水がまったく無い）。
-        /// そうでなければ水面高と地形高を双一次補間し、差が 8（＝ 1/64 m 単位で 0.125 m）
-        /// 以上なら true。
+        /// Read the four corner cells from WaterSimulation.BeginRead()'s array; if every
+        /// m_height is 0, return false (there is no water at all).
+        /// Otherwise bilinearly interpolate the water surface and the terrain height, and
+        /// return true if the difference is at least 8 (i.e. 0.125 m in units of 1/64 m).
         /// ```
         ///
-        /// <c>BeginRead()</c> / <c>EndRead()</c> を取るので**sim スレッドから呼ぶこと**。
+        /// It takes <c>BeginRead()</c> / <c>EndRead()</c>, so **call it from the sim thread**.
         /// </summary>
         private static bool IsUnderWater(DisasterPlus.Core.Common.Vec3 epicentre)
         {
             if (!Singleton<TerrainManager>.exists) return false;
-            // VectorUtils.XZ(Vector3) と同じ変換（x, z）。型を 1 つ減らすために直接組む。
+            // The same conversion as VectorUtils.XZ(Vector3) (x, z). Written out directly
+            // to avoid pulling in one more type.
             return Singleton<TerrainManager>.instance.HasWater(
                 new Vector2(epicentre.X, epicentre.Z));
         }
 
         /// <summary>
-        /// 津波を起こす。<c>DisasterTool.&lt;CreateDisaster&gt;c__Iterator0.MoveNext</c> の
-        /// IL_0071–01E8 をそのまま写した手順である（§A-1）。
+        /// Raises the tsunami. The procedure is copied straight from IL_0071-01E8 of
+        /// <c>DisasterTool.&lt;CreateDisaster&gt;c__Iterator0.MoveNext</c> (§A-1).
         /// </summary>
         private static void Raise(EarthquakeReading quake)
         {
-            // ★★ **DLC の津波（TsunamiAI）はもう使わない。**（2026-08-25、所有者の指示）
+            // ★★ **The DLC's tsunami (TsunamiAI) is no longer used.** (2026-08-25, the
+            //    owner's instruction)
             //
-            //    > DLC の津波を使うのをやめましょう。代わりに海溝型地震の震源地付近を
-            //    > 中心とした領域で一定時間持続的な海面上昇（震源地を中心に
-            //    > ２-3 個の連続する山状：実際の津波メカニズムで）を発生させてください。
+            //    > Let's stop using the DLC tsunami. Instead, raise a sustained rise in
+            //    > sea level over a region centred near the trench earthquake's
+            //    > hypocentre (2-3 successive hills centred on the hypocentre: the real
+            //    > tsunami mechanism).
             //
-            //    <c>TsunamiAI</c> は<b>震源から波を出せない</b> —— <c>FindSea</c> が
-            //    候補にするのはマップ外周のセルだけで、<c>m_targetPosition</c> は
-            //    開始時に原点セルの座標で上書きされる（§B-3、IL_03D3-0426）。
-            //    つまり「沖合の震源から同心円状に広がる波」は原理的に作れなかった。
+            //    <c>TsunamiAI</c> <b>cannot emit a wave from the hypocentre</b> —
+            //    <c>FindSea</c> only considers cells on the map's border, and
+            //    <c>m_targetPosition</c> is overwritten at start with the origin cell's
+            //    position (§B-3, IL_03D3-0426). So "a wave spreading out in circles from
+            //    an offshore hypocentre" was impossible in principle.
             //
-            //    いまは <c>TsunamiWave</c> が震源に <c>TYPE_IMPACT</c> の水波を
-            //    1 個置き、<c>Core.Earthquake.TsunamiSource</c> の式でその外力を
-            //    毎 tick 書き換える。IMPACT はマップのどこにでも置けて、
-            //    <b>そこに水の山があるかのように水面の傾きを足す</b>
-            //    ＝ 海底の隆起と同じ外力である（IL 実測、
-            //    docs/superpowers/specs/2026-08-29-tsunami-il-facts.md）。
-            //    **同心円状の水の壁は、そのあとゲーム自身の浅水ソルバが作る**
-            //    —— バニラの津波の水の壁とまったく同じ経路である。
+            //    Now <c>TsunamiWave</c> places one <c>TYPE_IMPACT</c> water wave at the
+            //    hypocentre and rewrites its force every tick using
+            //    <c>Core.Earthquake.TsunamiSource</c>'s formula. IMPACT can be placed
+            //    anywhere on the map and <b>adds a slope to the water surface as though
+            //    there were a hill of water there</b> — the same force as the sea floor
+            //    rising (measured in the IL,
+            //    docs/superpowers/specs/2026-08-29-tsunami-il-facts.md).
+            //    **The concentric wall of water is then built by the game's own
+            //    shallow-water solver** — exactly the same path as vanilla's tsunami wall.
             uint frame = 0u;
             if (Singleton<SimulationManager>.exists)
             {
                 frame = Singleton<SimulationManager>.instance.m_currentFrameIndex;
             }
 
-            // ★ 上の doc が <c>TYPE_IMPACT</c> の話をしていたら、それは古い。
-            //   いま立てるのは <see cref="TsunamiRing"/>（震源に置く WaterSource）である。
+            // ★ Where the note above talks about <c>TYPE_IMPACT</c>, it is out of date.
+            //   What is raised now is <see cref="TsunamiRing"/> (a WaterSource placed at
+            //   the hypocentre).
             if (!TsunamiRing.Begin(quake.Epicentre, quake.Intensity, frame))
             {
-                // ★ 海が無い／水シミュが読めない。**失敗ではない場合がある**ので、
-                //   理由をそのまま持ち帰る（TsunamiRing.Detail）。
+                // ★ There is no sea, or the water simulation could not be read. **It is
+                //   not always a failure**, so carry the reason back as it is
+                //   (TsunamiRing.Detail).
                 _state = TsunamiChainState.NoSea;
                 Log.Info("tsunami NOT raised: "
                          + (TsunamiRing.Detail ?? "the wave could not be raised"));
@@ -536,10 +576,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>TsunamiAI</c> を持つ災害プレハブ。**キャッシュしない。**
-        /// <c>FindDisasterInfo&lt;T&gt;</c> は <c>PrefabCollection</c> を舐めるだけの
-        /// public static な走査（§B-5）で、呼ぶのは前提検証と津波を起こす瞬間だけである。
-        /// キャッシュを持つと、それを main スレッドの前提検証と共有することになる。
+        /// The disaster prefab that has a <c>TsunamiAI</c>. **Never cached.**
+        /// <c>FindDisasterInfo&lt;T&gt;</c> is a public static scan that does nothing but
+        /// walk <c>PrefabCollection</c> (§B-5), and it is only called by the assumption
+        /// checks and at the moment a tsunami is raised. Keeping a cache would mean
+        /// sharing it with the main thread's assumption checks.
         /// </summary>
         private static DisasterInfo FindTsunamiInfo()
         {
@@ -549,7 +590,8 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // プレハブ走査で落ちても機能を巻き込まない（壊れた MOD の DisasterInfo 等）。
+                // A failure in the prefab scan must not take the feature down with it
+                // (a broken mod's DisasterInfo, for instance).
                 return null;
             }
         }

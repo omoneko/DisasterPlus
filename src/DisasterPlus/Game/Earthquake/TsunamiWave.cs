@@ -6,28 +6,35 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>海溝型地震の津波。</b>**sim スレッド専用。**
+    /// <b>The trench earthquake's tsunami.</b> **Sim thread only.**
     ///
-    /// 形と時計は <see cref="TsunamiSource"/>（Core・テスト付き）が持つ。
-    /// ここは<b>それをゲームの水シミュへ渡し、効き具合を測って返す</b>だけである。
+    /// The shape and the clock belong to <see cref="TsunamiSource"/> (in Core, with
+    /// tests). This file does nothing but <b>hand that to the game's water simulation and
+    /// measure how well it worked</b>.
     ///
-    /// ── 何を作り直したか（2026-08-29）───────────────────────────
+    /// ── What was rebuilt (2026-08-29) ───────────────────────────
     ///
-    /// 研究は <c>docs/superpowers/specs/2026-08-29-tsunami-il-facts.md</c>。要点:
+    /// The research is in <c>docs/superpowers/specs/2026-08-29-tsunami-il-facts.md</c>.
+    /// The gist:
     ///
-    /// &gt; バニラの津波は<b>外周の一区画で海面を 1.5 周期上下させる境界条件</b>で、
-    /// &gt; 水の壁はすべてゲームの浅水ソルバの伝播である。発生源は 256 フレームしかない。
+    /// &gt; Vanilla's tsunami is <b>a boundary condition that raises and lowers the sea
+    /// &gt; over 1.5 cycles in one section of the map border</b>, and the wall of water is
+    /// &gt; entirely the propagation of the game's shallow-water solver. The source lasts
+    /// &gt; only 256 frames.
     ///
-    /// ソルバには<b>マップのどこにでも置ける外力</b>があり（<c>TYPE_IMPACT</c>）、
-    /// それは「そこに水の山があるかのように水面の傾きを足す」——
-    /// <b>海底の隆起と同じ</b>、津波の教科書どおりの発生源である。
-    /// だから震源にそれを置けば、同心円状の水の壁は<b>ソルバが作ってくれる</b>。
+    /// The solver has <b>an external force that can be placed anywhere on the map</b>
+    /// (<c>TYPE_IMPACT</c>), which "adds a slope to the water surface as though there
+    /// were a hill of water there" — <b>the same thing as the sea floor rising</b>, the
+    /// textbook source of a tsunami. So put one at the hypocentre and <b>the solver builds
+    /// the concentric wall of water for us</b>.
     ///
-    /// ── ★★ 「発生しない」の真因（2026-08-30）──────────────────────────
+    /// ── ★★ The real cause of "it does not happen" (2026-08-30) ─────────────
     ///
-    /// 所有者:「海溝型地震による津波は実装されていますか？発生しないんですが。」
+    /// The owner: "Is the tsunami from a trench earthquake implemented? It is not
+    /// happening."
     ///
-    /// 実機ログでは<b>動いていた</b>。動いたうえで 0.7 m しか上がらなかった:
+    /// The in-game log showed it <b>was</b> running. It ran, and raised the sea by all of
+    /// 0.7 m:
     ///
     /// <code>
     ///   tsunami started at (-7204,-44) ... peak drive 7447 units
@@ -35,147 +42,161 @@ namespace DisasterPlus.Game
     ///       Highest sea seen over the epicentre was 0.7 m above sea level
     /// </code>
     ///
-    /// 原因は 2 つで、**どちらも読みだけでは分からず、ゲームの水ソルバを
-    /// オフラインで再現して（<c>tools/WaterSolverSim</c>）はじめて分かった**:
+    /// There were two causes, and **neither could be seen by reading alone; both only
+    /// emerged once the game's water solver was reproduced offline**
+    /// (<c>tools/WaterSolverSim</c>):
     ///
     /// <list type="number">
-    /// <item><b>時計が 64 倍速かった。</b><c>SimulateWater</c> は 64 sim フレームに
-    ///   1 回しか走らない（<see cref="FramesPerWaterStep"/>）。「1080 フレーム押す」は
-    ///   水ステップにして 17 回でしかなかった</item>
-    /// <item><b>押しっぱなしは波にならない。</b>定常的な外力は定常的な流出を作る ——
-    ///   それは波ではなく穴である。外力は「引き→押し→引き」でなければならない
-    ///   （<see cref="TsunamiSource"/> のクラス doc）</item>
+    /// <item><b>The clock was 64 times too fast.</b> <c>SimulateWater</c> runs only once
+    ///   every 64 sim frames (<see cref="FramesPerWaterStep"/>). "Drive it for 1080
+    ///   frames" was, in water steps, 17 of them.</item>
+    /// <item><b>Pushing continuously does not make a wave.</b> A steady external force
+    ///   makes a steady outflow — that is a hole, not a wave. The force has to go
+    ///   pull, push, pull (see <see cref="TsunamiSource"/>'s class doc).</item>
     /// </list>
     ///
-    /// ★ Int16 の上限（32767）を超える外力が要りうるので、
-    ///   <b>同じ原点・同じ半径の波を重ねる</b>（外力は波ごとに加算される）。
+    /// ★ A force beyond Int16's limit (32767) can be needed, so
+    ///   <b>waves with the same origin and radius are stacked</b> (the forces add up
+    ///   across waves).
     ///
-    /// ── ★★ 守ること ────────────────────────────────────────
+    /// ── ★★ Rules to keep ────────────────────────────────────────
     ///
     /// <list type="bullet">
-    /// <item><c>WaterWave</c> は<b>セーブに焼き付く</b>。<see cref="Reset"/> で問答無用に解放する</item>
-    /// <item><c>m_duration</c> は<b>短く有限に</b>し、書き換えで延命する ——
-    ///   ロードでハンドルを失っても、ソルバが 1 秒で片付けてくれる</item>
-    /// <item><c>m_delta</c> の書き換えは <c>m_waterWaves</c> の
-    ///   <c>Monitor.TryEnter</c> の中で行う（水スレッドが同じ配列を読む）</item>
+    /// <item>A <c>WaterWave</c> is <b>baked into the save</b>. <see cref="Reset"/> releases
+    ///   them unconditionally.</item>
+    /// <item>Keep <c>m_duration</c> <b>short and finite</b> and extend its life by
+    ///   rewriting it — that way, even if the handles are lost on load, the solver clears
+    ///   up within a second.</item>
+    /// <item>Write <c>m_delta</c> inside a <c>Monitor.TryEnter</c> on <c>m_waterWaves</c>
+    ///   (the water thread reads the same array).</item>
     /// </list>
     /// </summary>
     public static class TsunamiWave
     {
-        // ★★ **2026-08-31 以降、この経路で津波は立たない。**
-        //    <c>TYPE_IMPACT</c> は水を押しのけるだけで作らないので、汀線まで持たない
-        //    （オフライン実測: 汀線 19.3 m 対 DLC 84.8 m）。いまの津波は
-        //    <see cref="TsunamiRing"/>（震源に置く WaterSource）である。
-        //    ここに残しているのは
-        //      1. <see cref="DepthAt"/> —— 水深はソルバと同じ量で測る必要があり、
-        //         その式がここにある（TrenchQuakeSlot も使う）
-        //      2. <see cref="Reset"/> —— 旧版で置いた水波が残っている都市の後始末
-        //    の 2 つだけである。**Begin は誰も呼ばない。**
+        // ★★ **Since 2026-08-31 this path no longer raises a tsunami.**
+        //    <c>TYPE_IMPACT</c> only displaces water rather than creating it, so it does
+        //    not survive to the shoreline (measured offline: 19.3 m at the shoreline
+        //    against the DLC's 84.8 m). The current tsunami is <see cref="TsunamiRing"/>
+        //    (a WaterSource placed at the hypocentre).
+        //    Only two things are kept here:
+        //      1. <see cref="DepthAt"/> — the depth has to be measured with the same
+        //         quantity the solver uses, and that formula lives here (TrenchQuakeSlot
+        //         uses it too)
+        //      2. <see cref="Reset"/> — cleaning up cities that still hold water waves
+        //         placed by the old version
+        //    **Nobody calls Begin.**
 
-        /// <summary><c>WaterWave.m_type</c> の <c>TYPE_IMPACT</c>（IL 実測）。</summary>
+        /// <summary><c>TYPE_IMPACT</c> for <c>WaterWave.m_type</c> (measured in the IL).</summary>
         private const ushort TypeImpact = 2;
 
-        /// <summary>16 m セルの数。<c>(world + 8640) / 16</c> でセルになる（IL 実測）。</summary>
+        /// <summary>The number of 16 m cells. <c>(world + 8640) / 16</c> gives the cell (measured in the IL).</summary>
         private const int GridCells = 1080;
 
-        /// <summary>マップ半辺（m）。<c>SplashWater</c> の IL 実測にある 8640 と同じ。</summary>
+        /// <summary>Half the map's extent (m). The same 8640 found in <c>SplashWater</c>'s IL.</summary>
         private const float MapHalfExtent = 8640f;
 
         /// <summary>
-        /// 1 水ステップぶんの sim フレーム数。
+        /// How many sim frames make one water step.
         ///
-        /// ★★ **64 である。1 ではない。**（2026-08-30）
-        ///   <c>SimulateWater</c> は終わりに <c>m_waterFrameIndex</c> を
-        ///   <c>start + 64</c> にし、水スレッドはそれが
-        ///   <c>m_simulationFrameIndex</c> に追い越されるまで回らない。
-        ///   ＝ **ソルバは 64 sim フレームに 1 回しか進まない。**
+        /// ★★ **It is 64, not 1.** (2026-08-30)
+        ///   <c>SimulateWater</c> ends by setting <c>m_waterFrameIndex</c> to
+        ///   <c>start + 64</c>, and the water thread does not run again until
+        ///   <c>m_simulationFrameIndex</c> overtakes that.
+        ///   I.e. **the solver advances only once every 64 sim frames.**
         ///
-        ///   前の版はここを 8 にしていたので、
-        ///   <b>水が 1 度も動かないうちに外力を 8 回書き換えていた</b>。
-        ///   （<see cref="TsunamiSource"/> のクラス doc に裏取り 2 件）
+        ///   The previous version had 8 here, so it was
+        ///   <b>rewriting the force 8 times before the water moved even once</b>.
+        ///   (Two corroborations in <see cref="TsunamiSource"/>'s class doc.)
         /// </summary>
         private const int FramesPerWaterStep = 64;
 
         /// <summary>
-        /// <c>m_duration</c>（<c>m_currentTime</c> は<b>毎水ステップ</b> +64）。
-        /// 128 ＝ **3 水ステップ ≒ 3.2 実秒**（m_currentTime は 0 から 64, 128, 192 と
-        /// 進み、192 > 128 で初めて解放される。2 ではなく 3 —— 安全側に 1 歩多い）。
+        /// <c>m_duration</c> (<c>m_currentTime</c> gains 64 **per water step**).
+        /// 128 = **3 water steps ≈ 3.2 real seconds** (m_currentTime goes 0, 64, 128, 192,
+        /// and it is only released once 192 > 128. Three, not two — one step on the safe
+        /// side).
         ///
-        /// ★★ 4096 -> 128（2026-08-30、最終検証）。4096 を「1 実秒」と書いていたが
-        ///   <b>64 倍まちがっていた</b>: 4096/64 ＝ 64 水ステップ ＝ 4096 sim フレーム
-        ///   ＝ **68 実秒**。ロードでハンドルを失った波が、最後に書かれた外力
-        ///   （最大で drive の 1.5 倍）で<b>1 分以上も海を押し続ける</b>ことになる。
-        ///   <see cref="Write"/> が毎水ステップ <c>m_currentTime</c> を 0 に戻すので、
-        ///   短くしても走行中は何も困らない。
+        /// ★★ 4096 -> 128 (2026-08-30, final verification). 4096 was written up as "one
+        ///   real second", which was <b>wrong by a factor of 64</b>: 4096/64 = 64 water
+        ///   steps = 4096 sim frames = **68 real seconds**. A wave whose handle was lost
+        ///   on load would go on <b>pushing the sea for over a minute</b> with whatever
+        ///   force was last written (up to 1.5× the drive). <see cref="Write"/> resets
+        ///   <c>m_currentTime</c> to 0 every water step, so shortening it causes no
+        ///   trouble while it is running.
         ///
-        /// ★★ **必ず有限にし、しかも短くする。**（Codex レビュー P1）
-        ///   <c>WaterWave</c> はセーブに焼き付くのに <see cref="_waves"/> は静的変数なので
-        ///   <b>ロードでは戻らない</b>。65535 にすると <c>m_currentTime</c> は
-        ///   <c>Min(currentTime + 64, 65535)</c> で<b>張り付き</b>、
-        ///   <c>currentTime &gt; duration</c> が永久に成立しない ——
-        ///   **津波の最中にセーブした都市は外力を永久に抱える。**
+        /// ★★ **Always keep it finite, and keep it short.** (Codex review P1)
+        ///   A <c>WaterWave</c> is baked into the save, but <see cref="_waves"/> is a
+        ///   static, so <b>it does not come back on load</b>. Set it to 65535 and
+        ///   <c>m_currentTime</c> <b>sticks</b> at <c>Min(currentTime + 64, 65535)</c>, so
+        ///   <c>currentTime &gt; duration</c> is never satisfied —
+        ///   **a city saved mid-tsunami carries the force forever.**
         /// </summary>
         private const ushort WaveDurationTicks = 128;
 
-        // ── 状態 ──────────────────────────────────────────────
+        // ── State ─────────────────────────────────────────────────
 
-        /// <summary>重ねた波のハンドル。**0 は「その枠は使っていない」。**</summary>
+        /// <summary>The handles of the stacked waves. **0 means "that slot is unused".**</summary>
         private static readonly ushort[] _waves =
             new ushort[TsunamiSource.MaxStackedWaves];
 
         /// <summary>
-        /// その枠が<b>まだ自分の波であること</b>を確かめるための指紋。
+        /// A fingerprint for confirming that a slot is <b>still our own wave</b>.
         ///
-        /// ★★ **<c>m_type == TYPE_IMPACT</c> だけでは足りない。**（2026-08-30、最終検証）
-        ///   IL: <c>CreateWaterWave</c> は <c>m_type == 0</c> の枠を<b>使い回す</b>し、
-        ///   <c>ReleaseWaterWave</c> は所有者を確かめずに <c>m_type</c> を 0 にして
-        ///   末尾の空き枠を詰める。さらにソルバは
-        ///   <c>m_currentTime &gt; m_duration</c> で<b>勝手に解放する</b>。
-        ///   一方 <c>DisasterHelpers.SplashWater</c> は<b>まさに TYPE_IMPACT</b> の波を
-        ///   作る（隕石・地震の水柱）ので、生きた都市では同じ型の枠が絶えず
-        ///   入れ替わる。指紋が合わない枠は<b>他人のもの</b>である ——
-        ///   書いても解放してもいけない。
+        /// ★★ **<c>m_type == TYPE_IMPACT</c> alone is not enough.** (2026-08-30, final
+        ///   verification) In the IL, <c>CreateWaterWave</c> <b>reuses</b> slots with
+        ///   <c>m_type == 0</c>, and <c>ReleaseWaterWave</c> sets <c>m_type</c> to 0
+        ///   without checking the owner and compacts the free slots at the end. On top of
+        ///   that, the solver <b>releases them of its own accord</b> once
+        ///   <c>m_currentTime &gt; m_duration</c>. Meanwhile
+        ///   <c>DisasterHelpers.SplashWater</c> creates waves of <b>precisely
+        ///   TYPE_IMPACT</b> (the water plumes from meteors and earthquakes), so in a live
+        ///   city slots of this same type are constantly turning over. A slot whose
+        ///   fingerprint does not match is <b>somebody else's</b> — neither write to it
+        ///   nor release it.
         /// </summary>
         private static readonly int[] _fingerprints =
             new int[TsunamiSource.MaxStackedWaves];
 
         /// <summary>
-        /// 外力を切ったあとも<b>波を追いかけて記録する</b>フレーム数（水ステップ）。
+        /// How many frames (water steps) we go on <b>following and recording the wave</b>
+        /// after the force is switched off.
         ///
-        /// ★★ **これが 2026-08-30 の「震源では 82 m なのに海岸では高潮」を
-        ///   詰めるための唯一の道具である。**（オフライン再現は海岸で 20〜28 m を
-        ///   出すのに、実機ではそう見えない。**再現とゲームが食い違っている**ので、
-        ///   ゲームの中で測るしかない。）
-        ///   波は 8.2 m/水ステップで進むので、900 歩 ＝ 7.4 km ぶん。
+        /// ★★ **This is the only tool for pinning down 2026-08-30's "82 m at the
+        ///   hypocentre but only a storm surge at the coast".** (The offline reproduction
+        ///   gives 20-28 m at the coast, yet the game does not look like that.
+        ///   **The reproduction and the game disagree**, so there is nothing for it but to
+        ///   measure inside the game.)
+        ///   The wave advances 8.2 m per water step, so 900 steps is 7.4 km.
         /// </summary>
         private const int WatchSteps = 900;
 
         /// <summary>
-        /// 途中経過を出す間隔（水ステップ）。
+        /// The interval (water steps) for reporting progress.
         ///
-        /// ★★ **最後に 1 行だけ出す作りは失敗だった。**（2026-08-31）
-        ///   900 歩 ＝ 16 実分。所有者はその前にゲームを閉じ、
-        ///   <b>1 行も残らなかった</b>。測る道具が「最後まで座っていること」を
-        ///   要求してはいけない。120 歩（≒2 実分）ごとに出す ——
-        ///   2 km は 2 分、4 km は 6 分で読めるようになる。
+        /// ★★ **The design that printed one line at the end was a failure.**
+        ///   (2026-08-31) 900 steps is 16 real minutes. The owner closed the game before
+        ///   then, and <b>not one line survived</b>. A measuring tool must not demand
+        ///   that somebody sit through to the end. It reports every 120 steps (about 2
+        ///   real minutes) — so 2 km is readable after 2 minutes and 4 km after 6.
         /// </summary>
         private const int WatchReportEvery = 120;
 
-        /// <summary>測る半径（m）。**街がありそうな距離**を並べる。</summary>
+        /// <summary>The radii measured (m). They span **the distances a city is likely to be at**.</summary>
         private static readonly float[] WatchRadii = { 2000f, 4000f, 6000f, 8000f };
 
-        /// <summary>その半径で見た最高の海面（m）。</summary>
+        /// <summary>The highest sea level seen at that radius (m).</summary>
         private static readonly float[] _watchPeak = new float[4];
 
-        /// <summary>それを見た水ステップ。</summary>
+        /// <summary>The water step it was seen on.</summary>
         private static readonly int[] _watchPeakStep = new int[4];
 
-        /// <summary>その半径のいちばん浅い水深（m）。**棚で波が絞られるかを見る。**</summary>
+        /// <summary>The shallowest depth on that radius (m). **It shows whether a shelf throttles the wave.**</summary>
         private static readonly float[] _watchMinDepth = new float[4];
 
         /// <summary>
-        /// その半径で<b>海だった方位の数</b>（<see cref="WatchAzimuths"/> のうち）。
-        /// **0 ならそのリングは全部陸で、そこには波の届きようがない。**
+        /// How many azimuths at that radius <b>were sea</b> (out of
+        /// <see cref="WatchAzimuths"/>).
+        /// **0 means that ring is all land and no wave can possibly arrive there.**
         /// </summary>
         private static readonly int[] _watchSeaAzimuths = new int[4];
 
@@ -194,25 +215,25 @@ namespace DisasterPlus.Game
         private static Vec3 _centre;
         private static bool _errorLogged;
 
-        /// <summary>今 津波が動いているか（診断・表示用）。</summary>
+        /// <summary>Whether a tsunami is running right now (for diagnostics and display).</summary>
         public static bool Running { get { return _running; } }
 
-        /// <summary>今の外力（<c>m_delta</c> の単位。負＝中心へ、正＝外へ）。</summary>
+        /// <summary>The current force (in <c>m_delta</c>'s units; negative = inwards, positive = outwards).</summary>
         public static int DeltaUnits { get { return _delta; } }
 
-        /// <summary>実測から決めた外力の大きさ（同上、符号なし）。</summary>
+        /// <summary>The magnitude of the force, decided by measurement (same units, unsigned).</summary>
         public static int DriveUnits { get { return _drive; } }
 
-        /// <summary>震源で観測したいちばん高い海面（m、診断用）。</summary>
+        /// <summary>The highest sea level observed over the hypocentre (m, for diagnostics).</summary>
         public static float PeakRiseMetres { get { return _peakRiseMetres; } }
 
-        /// <summary>発生源の縁（＝環ができるところ）で観測した最高（m、診断用）。</summary>
+        /// <summary>The highest observed at the source's rim, where the ring forms (m, for diagnostics).</summary>
         public static float PeakRingMetres { get { return _peakRingMetres; } }
 
-        /// <summary>震源の水深（m、診断用）。**ソルバの流量の上限そのもの。**</summary>
+        /// <summary>The water depth at the hypocentre (m, for diagnostics). **It is the solver's flow cap, exactly.**</summary>
         public static float DepthMetres { get { return _depthMetres; } }
 
-        /// <summary>今どの段か（**英語・診断用**）。</summary>
+        /// <summary>Which stage we are in (**English, for diagnostics**).</summary>
         public static string Stage
         {
             get
@@ -224,12 +245,13 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>直近の顛末（**英語・診断用**）。断ったときは必ず入る。</summary>
+        /// <summary>How the last attempt turned out (**English, for diagnostics**). Always populated on a refusal.</summary>
         public static string Detail { get; private set; }
 
         /// <summary>
-        /// **レベルのロード／アンロードで必ず呼ぶ。** 置いた波を<b>問答無用で解放する</b>。
-        /// 呼び忘れるとセーブに残る（クラス doc）。
+        /// **Always call this on level load and unload.** It releases any waves placed,
+        /// <b>unconditionally</b>. Forget to call it and they stay in the save (see the
+        /// class doc).
         /// </summary>
         public static void Reset()
         {
@@ -250,8 +272,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **sim スレッド。** 震源 <paramref name="epicentre"/> で津波を起こす。
-        /// 既に動いていれば何もしない（同時に 1 本だけ）。
+        /// **Sim thread.** Raises a tsunami at the hypocentre
+        /// <paramref name="epicentre"/>. Does nothing if one is already running (only one
+        /// at a time).
         /// </summary>
         public static bool Begin(Vec3 epicentre, byte intensity, uint frame)
         {
@@ -279,7 +302,7 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★ 陸の上に置いても水は動かない（ソルバは水深で流量を頭打ちにする）。
+            // ★ Placed on land, nothing moves (the solver caps the flow at the depth).
             if (!terrain.HasWater(new Vector2(epicentre.X, epicentre.Z)))
             {
                 Detail = "the epicentre is not on open water; no tsunami";
@@ -294,11 +317,13 @@ namespace DisasterPlus.Game
             _peakRingMetres = 0f;
             _lastCentreMetres = 0f;
 
-            // ★★ **水深を先に測る。外力はそれで割る。**
-            //    ソルバの流量は v = min(v, m_height) で水深に頭打ちされるので、
-            //    浅い海に深い海用の外力を出すと<b>震源が海底むき出しになる</b>
-            //    （オフライン再現: 水深 10 m で 136 水ステップ ≒ 145 実秒）。
-            //    ログにも必ず出す —— 「押しても動かない」の第一容疑者だからである。
+            // ★★ **Measure the depth first; the force is divided by it.**
+            //    The solver's flow is capped at the depth by v = min(v, m_height), so
+            //    applying a deep-water force in a shallow sea <b>lays the sea floor bare
+            //    at the hypocentre</b> (offline reproduction: 136 water steps ≈ 145 real
+            //    seconds at a depth of 10 m).
+            //    Always log it too — it is the prime suspect whenever "we push and
+            //    nothing moves".
             _depthMetres = DepthAt(terrain, epicentre.X, epicentre.Z);
             _drive = TsunamiSource.DriveUnitsFor(intensity, _depthMetres);
 
@@ -315,7 +340,8 @@ namespace DisasterPlus.Game
             _lastFrame = frame;
             Detail = null;
 
-            // ★ バニラと同じ物差しで自分の波も測る（SeaWatch のクラス doc）。
+            // ★ Measure our own wave with the same ruler as vanilla's (see SeaWatch's
+            //   class doc).
             SeaWatch.Arm("Disaster+ trench tsunami, drive " + _drive + " units", frame);
 
             Log.Info("tsunami started at (" + epicentre.X.ToString("F0") + ","
@@ -337,7 +363,7 @@ namespace DisasterPlus.Game
             return true;
         }
 
-        /// <summary>**sim スレッド、ポーズガードより下。** 外力を進める。</summary>
+        /// <summary>**Sim thread, below the pause guard.** Advances the force.</summary>
         public static void Tick(uint frame)
         {
             if (!_running && !_watching) return;
@@ -356,8 +382,9 @@ namespace DisasterPlus.Game
                     Log.Error("tsunami failed", e);
                 }
 
-                // ★★ **落ちたら畳む。** 外力を書き換える経路が止まったまま波が残ると、
-                //    海がずっと押され続ける。
+                // ★★ **If it falls over, fold it up.** With the path that rewrites the
+                //    force stopped and the waves still in place, the sea would be pushed
+                //    forever.
                 ReleaseAll();
                 _running = false;
             }
@@ -376,7 +403,7 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ **水ステップに直す。** ソルバはこの単位でしか進まない。
+            // ★★ **Convert to water steps.** The solver advances in no other unit.
             float elapsed = (frame - _startFrame) / (float)FramesPerWaterStep;
 
             Observe(terrain);
@@ -395,20 +422,22 @@ namespace DisasterPlus.Game
                 ReleaseAll();
                 _running = false;
 
-                // ★★ **ここで終わりにしない。** 波がどこまで届くかを測る。
+                // ★★ **Do not stop here.** Measure how far the wave reaches.
                 BeginWatch(frame);
                 return;
             }
 
-            // ★★ 閉ループはやめた（2026-08-30）。ソルバの応答は 100 歩ほど遅れるので、
-            //    測って上げる制御は必ず巻き上がる（オフライン再現で確認:
-            //    2000 -> 139,516 units、中心が -40 m ＝ 海底まで掘れた）。
-            //    いまの外力は <c>tools/WaterSolverSim</c> で測って決めた開ループの定数。
+            // ★★ The closed loop was abandoned (2026-08-30). The solver's response lags
+            //    by about 100 steps, so any measure-and-increase control is certain to
+            //    wind up (confirmed in the offline reproduction: 2000 -> 139,516 units,
+            //    with the centre at -40 m, i.e. dug down to the sea floor).
+            //    The force is now an open-loop constant measured with
+            //    <c>tools/WaterSolverSim</c>.
             _delta = TsunamiSource.DeltaAt(elapsed, _drive);
             Write(terrain, _delta);
         }
 
-        /// <summary>監視を始める。水深はここで 1 度だけ測る（地形は動かない）。</summary>
+        /// <summary>Starts watching. The depths are measured once, here (the terrain does not move).</summary>
         private static void BeginWatch(uint frame)
         {
             TerrainManager terrain = Singleton<TerrainManager>.instance;
@@ -433,7 +462,7 @@ namespace DisasterPlus.Game
                     if (z < -MapHalfExtent || z > MapHalfExtent) continue;
                     if (!terrain.HasWater(new Vector2(x, z))) continue;
 
-                    // ★ 陸を水深 0 として混ぜない（「棚だ」と誤読する）。
+                    // ★ Do not mix land in as depth 0 (it would be misread as a shelf).
                     if (IsLand(terrain, x, z)) continue;
 
                     float d = DepthAt(terrain, x, z);
@@ -456,10 +485,10 @@ namespace DisasterPlus.Game
                      + "hitting a mountain would otherwise read as a huge false wave");
         }
 
-        /// <summary>方位の数。**円周のどこかで高ければ、そこへ届いている。**</summary>
+        /// <summary>The number of azimuths. **If it is high anywhere on the circle, the wave got there.**</summary>
         private const int WatchAzimuths = 12;
 
-        /// <summary>**sim スレッド。** 波を追いかけて、半径ごとの最高を覚える。</summary>
+        /// <summary>**Sim thread.** Follows the wave and remembers the peak at each radius.</summary>
         private static void Watch(uint frame)
         {
             if (frame - _lastFrame < FramesPerWaterStep) return;
@@ -482,7 +511,7 @@ namespace DisasterPlus.Game
                                         _centre.X + Mathf.Cos(ang) * WatchRadii[r],
                                         _centre.Z + Mathf.Sin(ang) * WatchRadii[r]);
 
-                    if (rise < 0f) continue;   // 陸。混ぜない
+                    if (rise < 0f) continue;   // Land. Do not mix it in.
                     seaCount++;
                     if (rise > best) best = rise;
                 }
@@ -496,7 +525,7 @@ namespace DisasterPlus.Game
                 }
             }
 
-            // ★★ 途中経過。閉じられても、そこまでは分かる。
+            // ★★ Progress so far. Even if the game is closed, we know this much.
             if (step > 0 && step % WatchReportEvery == 0)
             {
                 Log.Info("tsunami watch @step " + step + " ("
@@ -514,7 +543,7 @@ namespace DisasterPlus.Game
                      + "to carry the wave.");
         }
 
-        /// <summary>リングごとの一行（途中経過と結びで同じ形にする）。</summary>
+        /// <summary>One line per ring (the same shape for the progress reports and the closing one).</summary>
         private static string Rings()
         {
             string t = "";
@@ -533,18 +562,20 @@ namespace DisasterPlus.Game
 
 
         /// <summary>
-        /// 震源とその縁の海面をのぞく。
-        /// **これが実機で「効いたのか」を答える唯一の数字**なので必ず出す。
+        /// Looks at the sea level at the hypocentre and at its rim.
+        /// **This is the only number that answers "did it work?" in the running game**,
+        /// so it is always reported.
         /// </summary>
         private static void Observe(TerrainManager terrain)
         {
-            // ★ NotSea(-1) は混ぜない（上の RiseAt の ★★）。
+            // ★ Do not mix in NotSea(-1) (see the ★★ in RiseAt above).
             float centre = RiseAt(terrain, _centre.X, _centre.Z);
             _lastCentreMetres = centre > 0f ? centre : 0f;
             if (centre > _peakRiseMetres) _peakRiseMetres = centre;
 
-            // ★ 環ができるのは<b>発生源の縁</b>である。中心だけ見ていると
-            //   ②③ に入った瞬間「効いていない」と読み違える（中心は下がるので）。
+            // ★ The ring forms at <b>the source's rim</b>. Watch only the centre and, the
+            //   moment stages ② and ③ begin, you misread it as "not working" (because the
+            //   centre goes down).
             float ring = 0f;
             for (int i = 0; i < 4; i++)
             {
@@ -560,23 +591,25 @@ namespace DisasterPlus.Game
             if (ring > _peakRingMetres) _peakRingMetres = ring;
         }
 
-        /// <summary>海の上でない地点。**平均や最大に混ぜてはいけない。**</summary>
+        /// <summary>A point that is not over sea. **Never mix it into an average or a maximum.**</summary>
         private const float NotSea = -1f;
 
         /// <summary>
-        /// 海面が平常からどれだけ上がっているか（m）。
-        /// **海の上でないところは <see cref="NotSea"/> を返す**（呼び出し側は捨てる）。
+        /// How far the sea has risen above its resting level (m).
+        /// **Returns <see cref="NotSea"/> anywhere that is not over sea** (the caller
+        /// discards those).
         ///
-        /// ★★ **陸の標高を「波」と読んではいけない。**（2026-08-31、実機の計測で発覚）
-        ///   <c>TerrainManager.WaterLevel</c> は<b>地形の高さ + 水柱</b>を返す。
-        ///   海面 207 m のマップで標高 277 m の山を叩けば、水が 1 滴も無くても
-        ///   <c>WaterLevel - seaLevel = +70 m</c> になる。実際そうなった ——
-        ///   「4 km 地点に 70.3 m の波、ただし水深 2 m」という<b>ありえない組</b>で
-        ///   気づいた。あれは波ではなく山だった。
+        /// ★★ **Never read land elevation as "the wave".** (2026-08-31, found by
+        ///   measuring in the running game) <c>TerrainManager.WaterLevel</c> returns
+        ///   <b>terrain height + water column</b>. On a map with a sea level of 207 m,
+        ///   sampling a 277 m mountain gives <c>WaterLevel - seaLevel = +70 m</c> without
+        ///   a drop of water. That is exactly what happened — we noticed it from the
+        ///   <b>impossible pairing</b> "a 70.3 m wave at 4 km, in 2 m of water". That was
+        ///   not a wave; it was a mountain.
         ///
-        /// ★ 海底が海面より高いセルは陸である。そこは測らない。
-        ///   （岸に乗り上げた水を測るには別の物差しが要る。ここで見たいのは
-        ///    <b>沖で波が生きているか</b>である。）
+        /// ★ A cell whose sea floor is above sea level is land, and is not measured.
+        ///   (Measuring water that has run up onto the shore needs a different ruler.
+        ///    What we want to see here is <b>whether the wave is alive offshore</b>.)
         /// </summary>
         private static float RiseAt(TerrainManager terrain, float x, float z)
         {
@@ -593,7 +626,7 @@ namespace DisasterPlus.Game
             return rise < 0f ? 0f : rise;
         }
 
-        /// <summary>海底が海面より高いか（＝陸か）。**ソルバと同じ配列で見る。**</summary>
+        /// <summary>Whether the sea floor is above sea level (i.e. land). **Read from the same array as the solver.**</summary>
         private static bool IsLand(TerrainManager terrain, float x, float z)
         {
             ushort[] block = terrain.BlockHeights;
@@ -606,17 +639,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// その地点の水深（m）。**ソルバの流量の上限そのもの**なので、
-        /// <b>ソルバが使っているのと同じ量で測らなければならない。</b>
+        /// The water depth at that point (m). It **is the solver's flow cap, exactly**, so
+        /// <b>it must be measured with the same quantity the solver uses.</b>
         ///
-        /// ★★ <c>SampleRawHeightSmooth</c> で引いてはいけない（2026-08-30、最終検証）。
-        ///   IL: <c>WaterSimulation.Initialize</c> が受け取る地形配列は
-        ///   <c>TerrainManager.m_blockHeights</c> であり、
-        ///   <c>WaterLevel</c> も <c>blockHeights + Cell.m_height</c> を返す。
-        ///   ところが <c>SampleRawHeightSmooth</c> は <c>m_rawHeights2</c> を読む。
-        ///   両者は<b>岸壁・ダム・護岸・道路の基礎</b>で食い違うので、
-        ///   引き算すると水柱ではなく <c>m_height + (block - raw)</c> になる。
-        ///   **過大に出た水深はそのまま外力の過大につながり、掘り抜きを招く。**
+        /// ★★ Never subtract using <c>SampleRawHeightSmooth</c> (2026-08-30, final
+        ///   verification). In the IL, the terrain array
+        ///   <c>WaterSimulation.Initialize</c> receives is
+        ///   <c>TerrainManager.m_blockHeights</c>, and <c>WaterLevel</c> likewise returns
+        ///   <c>blockHeights + Cell.m_height</c>. <c>SampleRawHeightSmooth</c>, however,
+        ///   reads <c>m_rawHeights2</c>. The two disagree at <b>quay walls, dams, sea
+        ///   defences and road foundations</b>, so subtracting gives not the water column
+        ///   but <c>m_height + (block - raw)</c>.
+        ///   **An overstated depth feeds straight into an overstated force, and that digs
+        ///   a hole through the sea.**
         /// </summary>
         internal static float DepthAt(TerrainManager terrain, float x, float z)
         {
@@ -625,8 +660,8 @@ namespace DisasterPlus.Game
             ushort[] block = terrain.BlockHeights;
             if (block == null) return 0f;
 
-            // ★ セルの index は TsunamiAI.FindSea の IL 実測と同じ:
-            //   (world + 8640) / 16 を 0..1080 に丸め、z * 1081 + x で引く。
+            // ★ The cell index is the same as measured in TsunamiAI.FindSea's IL:
+            //   round (world + 8640) / 16 into 0..1080 and look up z * 1081 + x.
             int cx = CellOf(x);
             int cz = CellOf(z);
             int at = cz * (GridCells + 1) + cx;
@@ -638,7 +673,7 @@ namespace DisasterPlus.Game
             return float.IsNaN(depth) || depth < 0f ? 0f : depth;
         }
 
-        /// <summary>重ねる波をまとめて作る。**1 個でも作れれば成功。**</summary>
+        /// <summary>Creates the stacked waves in one go. **Creating even one counts as success.**</summary>
         private static bool CreateAll(TerrainManager terrain)
         {
             int cx = CellOf(_centre.X);
@@ -649,24 +684,25 @@ namespace DisasterPlus.Game
             data.m_origX = (ushort)cx;
             data.m_origZ = (ushort)cz;
 
-            // ★ IL: R = 1 + max(maxX - origX, origX - minX) —— **X しか見ない。**
+            // ★ IL: R = 1 + max(maxX - origX, origX - minX) — **it looks only at X.**
             data.m_minX = (ushort)Clamp(cx - TsunamiSource.RadiusCells, 0, GridCells);
             data.m_maxX = (ushort)Clamp(cx + TsunamiSource.RadiusCells, 0, GridCells);
             data.m_minZ = (ushort)Clamp(cz - TsunamiSource.RadiusCells, 0, GridCells);
             data.m_maxZ = (ushort)Clamp(cz + TsunamiSource.RadiusCells, 0, GridCells);
 
-            data.m_dirX = 0;      // IMPACT では読まれない（IL 実測）
+            data.m_dirX = 0;      // Not read for IMPACT (measured in the IL)
             data.m_dirZ = 0;
             data.m_delta = 0;
             data.m_duration = WaveDurationTicks;
             data.m_currentTime = 0;
 
-            // ★★ **要る本数だけ作る。**（2026-08-30、最終検証）
-            //    外力の最大は drive × PushOvershoot なので、いまの帯（≦900）では
-            //    Int16 の上限（32767）に遠く届かず、**8 本中 7 本は常に 0** だった。
-            //    それでもソルバは<b>全セルで全波の bbox を見に行く</b>ので、
-            //    ただの無駄である。使わない波を作らなければ、
-            //    <b>ハンドルが迷子になる面積も 8 分の 1</b>になる。
+            // ★★ **Create only as many as are needed.** (2026-08-30, final verification)
+            //    The force peaks at drive × PushOvershoot, which in the current band
+            //    (≤900) comes nowhere near Int16's limit (32767), so **7 of the 8 were
+            //    always 0**. The solver still <b>checks every wave's bbox for every
+            //    cell</b>, so they were pure waste. Not creating the unused waves also
+            //    cuts <b>the surface area over which a handle can go missing by a factor
+            //    of 8</b>.
             int needed = TsunamiSource.WavesNeeded(
                 (int)(_drive * TsunamiSource.PushOvershoot) + 1);
             if (needed < 1) needed = 1;
@@ -676,8 +712,9 @@ namespace DisasterPlus.Game
             {
                 ushort handle;
 
-                // ★★ **戻り値を必ず見る。** false は「上限に達した」で、
-                //    無視して 0 を持つと、他人の波を解放しに行くことになる。
+                // ★★ **Always check the return value.** false means "the limit was
+                //    reached", and ignoring it and holding a 0 means going off to release
+                //    somebody else's wave.
                 if (!terrain.WaterSimulation.CreateWaterWave(out handle, data) || handle == 0)
                 {
                     break;
@@ -698,12 +735,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 外力を配る。<paramref name="total"/> を <c>MaxDeltaUnits</c> ずつ分けて
-        /// 重ねた波に入れる（余った波は 0）。
+        /// Distributes the force. <paramref name="total"/> is split into
+        /// <c>MaxDeltaUnits</c> chunks across the stacked waves (any left over get 0).
         ///
-        /// ★★ <c>m_waterWaves</c> は public な <c>FastList</c> で、水スレッドは
-        ///   <c>Monitor.TryEnter(m_waterWaves, 0)</c> のスピンロックで守って読む
-        ///   （IL_0333–033F）。**同じ錠を取ってから書く。**
+        /// ★★ <c>m_waterWaves</c> is a public <c>FastList</c>, and the water thread reads
+        ///   it under a <c>Monitor.TryEnter(m_waterWaves, 0)</c> spin lock (IL_0333-033F).
+        ///   **Take the same lock before writing.**
         /// </summary>
         private static void Write(TerrainManager terrain, int total)
         {
@@ -720,12 +757,12 @@ namespace DisasterPlus.Game
                     int at = _waves[i] - 1;
                     if (at < 0 || at >= list.m_size)
                     {
-                        // ★ 台帳から外れた ＝ もう自分の枠ではない。忘れる。
+                        // ★ Off the register means the slot is no longer ours. Forget it.
                         _waves[i] = 0;
                         continue;
                     }
 
-                    // ★★ **指紋で本人確認する**（<see cref="_fingerprints"/>）。
+                    // ★★ **Verify identity by fingerprint** (<see cref="_fingerprints"/>).
                     if (Fingerprint(list.m_buffer[at]) != _fingerprints[i])
                     {
                         _waves[i] = 0;
@@ -735,7 +772,8 @@ namespace DisasterPlus.Game
                     list.m_buffer[at].m_delta =
                         (short)TsunamiSource.DeltaForWave(i, total);
 
-                    // ★ 寿命を巻き戻して、ソルバの自動解放に先を越されないようにする。
+                    // ★ Wind the lifetime back so the solver's automatic release does not
+                    //   get there first.
                     list.m_buffer[at].m_currentTime = 0;
                 }
             }
@@ -746,8 +784,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// その波が「自分のもの」だと言えるだけの特徴を 1 つの int に畳む。
-        /// <c>m_delta</c> と <c>m_currentTime</c> は毎歩書き換えるので<b>入れない</b>。
+        /// Folds into a single int just enough of a wave's characteristics to say it is
+        /// ours. <c>m_delta</c> and <c>m_currentTime</c> are rewritten every step, so they
+        /// are <b>left out</b>.
         /// </summary>
         private static int Fingerprint(WaterWave w)
         {
@@ -763,8 +802,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 置いた波を全部解放する。**冪等。例外を投げない。**
-        /// ここが最後の砦である —— 通らないとセーブに波が残る。
+        /// Releases every wave placed. **Idempotent. Never throws.**
+        /// This is the last line of defence — if it is not reached, the waves stay in the
+        /// save.
         /// </summary>
         private static void ReleaseAll()
         {
@@ -783,9 +823,10 @@ namespace DisasterPlus.Game
                     {
                         if (_waves[i] == 0) continue;
 
-                        // ★★ **指紋が合う枠だけ解放する。**（2026-08-30、最終検証）
-                        //    合わない枠を解放すると<b>他人の波を消す</b> ——
-                        //    ReleaseWaterWave は所有者を確かめないからである。
+                        // ★★ **Release only slots whose fingerprint matches.**
+                        //    (2026-08-30, final verification) Release a slot that does not
+                        //    match and you <b>destroy somebody else's wave</b> — because
+                        //    ReleaseWaterWave does not check the owner.
                         int at = _waves[i] - 1;
                         bool mine = list != null && at >= 0 && at < list.m_size
                                     && Fingerprint(list.m_buffer[at]) == _fingerprints[i];
@@ -803,7 +844,7 @@ namespace DisasterPlus.Game
             for (int i = 0; i < _waves.Length; i++) { _waves[i] = 0; _fingerprints[i] = 0; }
         }
 
-        /// <summary>ワールド座標を 16 m セルへ（<c>SplashWater</c> の IL 実測と同じ式）。</summary>
+        /// <summary>World coordinate to a 16 m cell (the same formula measured in <c>SplashWater</c>'s IL).</summary>
         private static int CellOf(float world)
         {
             return Clamp((int)((world + MapHalfExtent) / 16f + 0.5f), 0, GridCells);

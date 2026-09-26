@@ -28,7 +28,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void EmptyColumnsAreMarkedMinusOne()
         {
-            // サンプルが届いていない列を「値 0」として描くと、揺れていないように見える。
+            // Drawing a column no sample has reached as "value 0" makes it look like there
+            // is no shaking at all.
             uint[] f; float[] v;
             Fill(out f, out v, 2, 1u);
             int[] cols = WaveformPlot.Columns(f, v, 2, 0u, 1000u, width: 16, height: 20, scale: 1f);
@@ -41,17 +42,17 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void BucketsByFrameNotByIndex()
         {
-            // ゲーム速度でサンプル間隔が変わっても、時間軸が伸び縮みしないこと。
-            // 同じフレーム範囲を、密なサンプルと疎なサンプルで埋めて比べる。
+            // The time axis must not stretch or shrink when the game speed changes the
+            // sample interval. Fill the same frame range densely and sparsely, then compare.
             uint[] dense; float[] dv;
             Fill(out dense, out dv, 64, 1u);            // frame 0..63
             uint[] sparse; float[] sv;
-            Fill(out sparse, out sv, 8, 9u);            // frame 0..63（9 フレーム刻み）
+            Fill(out sparse, out sv, 8, 9u);            // frame 0..63 (in steps of 9 frames)
 
             int[] a = WaveformPlot.Columns(dense, dv, 64, 0u, 63u, 8, 10, 1f);
             int[] b = WaveformPlot.Columns(sparse, sv, 8, 0u, 63u, 8, 10, 1f);
 
-            // どちらも全列が埋まる（＝時間軸の広がりが同じ）。
+            // Both fill every column (= the time axis spans the same range).
             foreach (int c in a) Assert.True(c >= 0);
             foreach (int c in b) Assert.True(c >= 0);
         }
@@ -87,8 +88,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void SameColumnKeepsTheLargestMagnitude()
         {
-            // 1 列に複数サンプルが落ちるのは、ゲーム速度 1 で窓より密なとき常に起きる。
-            // 最後の 1 個を採ると、たまたま零交差に当たった列で揺れが消える。
+            // Several samples landing in one column always happens at game speed 1, when
+            // they are denser than the window. Taking the last one makes the shaking vanish
+            // in whichever column happens to land on a zero crossing.
             uint[] f = { 0u, 1u, 2u, 3u };
             float[] v = { 0.1f, -0.9f, 0.2f, 0f };
             int[] cols = WaveformPlot.Columns(f, v, 4, 0u, 3u, width: 1, height: 20, scale: 1f);
@@ -101,14 +103,16 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void SamplesOutsideTheWindowAreIgnored()
         {
-            // リングバッファは窓より長い履歴を持ちうる。窓の外のサンプルを
-            // 端の列へ寄せると、そこだけ古い揺れが積み上がった柱になる。
+            // The ring buffer can hold more history than the window. Pushing samples from
+            // outside the window into the end column turns that one column into a pillar of
+            // piled-up old shaking.
             uint[] f = { 0u, 50u, 100u, 500u };
             float[] v = { 1f, 0f, 0f, 1f };
             int[] cols = WaveformPlot.Columns(f, v, 4, 50u, 100u, width: 2, height: 20, scale: 1f);
 
             Assert.Equal(2, cols.Length);
-            // 窓内の 2 件はどちらも 0 なので中央行。窓外の 1.0 が混ざれば 0 行になる。
+            // Both samples inside the window are 0, so the middle row. If the 1.0 from
+            // outside the window crept in, it would be row 0.
             Assert.Equal(10, cols[0]);
             Assert.Equal(10, cols[1]);
         }

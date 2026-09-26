@@ -1,9 +1,9 @@
 name: Core tests
 
-# 走るのは Core のユニットテストだけ。MOD 本体はゲームの再配布不可な net35 DLL に
-# 依存するため、GitHub のランナーではビルドできない。
-# 緑は「純ロジックが健全」を意味するのであって、「MOD がビルドできる」ではない。
-# ビルドの確認はローカルの build.ps1 で行う。
+# Only the Core unit tests run here. The mod itself depends on net35 DLLs from the game that
+# cannot be redistributed, so it cannot be built on a GitHub runner.
+# Green means "the pure logic is sound", it does not mean "the mod builds".
+# Building is verified locally with build.ps1.
 on:
   push:
     branches: [ master, main ]

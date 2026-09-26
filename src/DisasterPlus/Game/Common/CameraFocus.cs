@@ -3,22 +3,24 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>いまカメラが見ている地点を、sim スレッドから読めるようにしておく箱。</b>
+    /// <b>A box that keeps the spot the camera is currently looking at readable from the sim
+    /// thread.</b>
     ///
-    /// ── なぜ要るのか（2026-09-02、所有者の指示）────────────────────────
+    /// ── Why it is needed (2026-09-02, the owner's instruction) ────────────────────────
     ///
-    /// &gt; 重くなるのは避けたいので拡大して描画されているものにだけ
-    /// &gt; 影響が出るようにするのがいいんでしょうか。
+    /// &gt; I want to avoid it getting heavy, so would it be better to only affect
+    /// &gt; the things being drawn up close?
     ///
-    /// **その通りである。** マップ全体を相手にすると費用が都市の規模に比例するが、
-    /// <b>カメラの周りだけ</b>なら<b>ズームアウトしても増えない</b>（遠景では
-    /// 対象そのものが減る）。見えないところの演出は誰も得をしない。
+    /// **Exactly so.** Take on the whole map and the cost scales with the size of the city,
+    /// whereas <b>around the camera only</b> <b>does not grow when you zoom out</b> (in a
+    /// distant view there are fewer subjects in the first place). Effects nobody can see
+    /// benefit nobody.
     ///
-    /// ★★ ただし <c>Camera.main</c> は<b>main スレッドからしか触れない</b>。
-    ///   sim スレッドから呼ぶと、例外が出ないまま値が壊れる類の事故になる
-    ///   （このプロジェクトの「スレッド境界」の規則）。だから
-    ///   <b>main で書いて、sim で読む</b>。1 フレーム古い位置を読んでも、
-    ///   風が当たる場所が 1 フレームぶんずれるだけなので錠は要らない。
+    /// ★★ But <c>Camera.main</c> <b>can only be touched from the main thread</b>.
+    ///   Call it from the sim thread and you get the kind of accident where the value is
+    ///   corrupted with no exception raised (this project's "thread boundary" rule). So
+    ///   <b>write on main and read on sim</b>. Reading a position one frame old only shifts
+    ///   where the wind lands by one frame, so no lock is needed.
     /// </summary>
     public static class CameraFocus
     {
@@ -27,22 +29,22 @@ namespace DisasterPlus.Game
         private static float _z;
         private static float _height;
 
-        /// <summary>カメラの地点が取れているか。</summary>
+        /// <summary>Whether the camera's spot has been obtained.</summary>
         public static bool Valid { get { return _valid; } }
 
-        /// <summary>カメラの真下あたりのワールド X。</summary>
+        /// <summary>World X roughly below the camera.</summary>
         public static float X { get { return _x; } }
 
-        /// <summary>同 Z。</summary>
+        /// <summary>The same for Z.</summary>
         public static float Z { get { return _z; } }
 
         /// <summary>
-        /// カメラの高さ（m）。**見えている範囲の広さの目安**に使う ——
-        /// 引いているほど広く映るので、影響範囲もそれに比例させる。
+        /// The camera's height (m). Used as **a guide to how wide the visible area is** —
+        /// the further back you are the wider the view, so the affected area scales with it.
         /// </summary>
         public static float Height { get { return _height; } }
 
-        /// <summary>**main スレッド。** 毎フレーム呼んでよい。</summary>
+        /// <summary>**Main thread.** Safe to call every frame.</summary>
         public static void Update()
         {
             Camera cam = Camera.main;
@@ -51,8 +53,9 @@ namespace DisasterPlus.Game
             Vector3 at = cam.transform.position;
             Vector3 forward = cam.transform.forward;
 
-            // ★ カメラは斜め下を向いているので、真下ではなく<b>見ている先</b>を採る。
-            //   地面と交わるところまで前方へ伸ばす（水平に近いときは伸ばしすぎない）。
+            // ★ The camera looks down at an angle, so take <b>where it is looking</b> rather
+            //   than straight below. Extend forwards to where it meets the ground (do not
+            //   extend too far when it is near horizontal).
             float drop = at.y;
             float down = -forward.y;
 
@@ -69,7 +72,7 @@ namespace DisasterPlus.Game
             _valid = true;
         }
 
-        /// <summary>都市を出るときに呼ぶ。</summary>
+        /// <summary>Call when leaving the city.</summary>
         public static void Reset()
         {
             _valid = false;

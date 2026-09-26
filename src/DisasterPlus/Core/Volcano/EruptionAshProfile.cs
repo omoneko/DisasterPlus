@@ -1,17 +1,19 @@
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 噴煙の粒子 1 個ぶんの性質。**バニラの <c>ParticleEffect</c> ＋ <c>ParticleSystem</c> の
-    /// 複製へそのまま書き込む数値表**である（<c>Game/Volcano/VolcanoVanillaFx.Clones</c>）。
+    /// The properties of a single ash-plume particle. **This is a table of numbers written
+    /// straight into the clones of vanilla's <c>ParticleEffect</c> + <c>ParticleSystem</c>**
+    /// (see <c>Game/Volcano/VolcanoVanillaFx.Clones</c>).
     ///
-    /// ── なぜ Core に在るのか ─────────────────────────────────
+    /// ── Why it lives in Core ─────────────────────────────────
     ///
-    /// これらは「粒子がどう見えるか」を決める⑤の演出値であって、Unity の API ではない。
-    /// Core に置いてあるので <c>tools/VolcanoPreview</c> が**ゲームを起動せずに同じ数字で
-    /// 噴煙柱を描ける** ——「見た目の変更は自分でオフラインに描画・計測してから実機テストを
-    /// 頼む」というこのプロジェクトの決まりは、数字が 2 か所にあると成立しない。
+    /// These are ⑤'s presentation values, deciding "how the particles look"; they are not
+    /// Unity API. Keeping them in Core is what lets <c>tools/VolcanoPreview</c> **draw the
+    /// eruption column with the same numbers without launching the game** — this project's
+    /// rule that "a visual change gets rendered and measured offline by me before I ask for
+    /// a playtest" cannot hold if the numbers live in two places.
     ///
-    /// ── 実機側の対応（IL 実測 §A-6 / §B-4）────────────────────────
+    /// ── What they map to in the game (measured from IL, §A-6 / §B-4) ────────────
     ///
     /// <code>
     /// LifeMinSeconds / LifeMaxSeconds  -> ParticleEffect.m_min/maxLifeTime
@@ -19,43 +21,47 @@ namespace DisasterPlus.Core.Volcano
     /// SpawnAngleMinDegrees / Max       -> ParticleEffect.m_min/maxSpawnAngle
     /// SizeMetres                       -> ParticleSystem.main.startSize
     /// GravityModifier                  -> ParticleSystem.main.gravityModifier
-    /// RateOverTime                     -> ParticleSystem.emission.rateOverTime  ★ 0 にしない
+    /// RateOverTime                     -> ParticleSystem.emission.rateOverTime  ★ never 0
     /// MaxParticles                     -> ParticleSystem.main.maxParticles
     /// </code>
     ///
-    /// <c>rateOverTime</c> を 0 にすると 1 粒も出ない（<c>emission.enabled</c> が false でも
-    /// <c>EmitParticles</c> が粒子数の乗数として読み続ける）。いちばん踏みやすい罠である。
+    /// Set <c>rateOverTime</c> to 0 and not one particle comes out (even with
+    /// <c>emission.enabled</c> false, <c>EmitParticles</c> keeps reading it as a multiplier
+    /// on the particle count). It is the easiest trap here to fall into.
     /// </summary>
     public struct EruptionAshProfile
     {
-        /// <summary>寿命の下限（秒）。</summary>
+        /// <summary>Lower bound on lifetime (seconds).</summary>
         public readonly float LifeMinSeconds;
 
-        /// <summary>寿命の上限（秒）。</summary>
+        /// <summary>Upper bound on lifetime (seconds).</summary>
         public readonly float LifeMaxSeconds;
 
-        /// <summary>初速の下限（m/秒）。**柱の形は初速ではなく「どこに湧かせるか」で作る。**</summary>
+        /// <summary>Lower bound on initial speed (m/s). **The column's shape comes from where
+        /// the particles are spawned, not from their initial speed.**</summary>
         public readonly float SpeedMin;
 
-        /// <summary>初速の上限（m/秒）。</summary>
+        /// <summary>Upper bound on initial speed (m/s).</summary>
         public readonly float SpeedMax;
 
-        /// <summary>放出角の下限（度）。0 が軸方向（＝上）、90 が真横である。</summary>
+        /// <summary>Lower bound on emission angle (degrees). 0 is along the axis (i.e. up), 90
+        /// is straight sideways.</summary>
         public readonly float SpawnAngleMinDegrees;
 
-        /// <summary>放出角の上限（度）。</summary>
+        /// <summary>Upper bound on emission angle (degrees).</summary>
         public readonly float SpawnAngleMaxDegrees;
 
-        /// <summary>粒 1 個の大きさ（m）。</summary>
+        /// <summary>The size of one particle (m).</summary>
         public readonly float SizeMetres;
 
-        /// <summary>重力の倍率（負なら浮く）。</summary>
+        /// <summary>Gravity multiplier (negative means it floats up).</summary>
         public readonly float GravityModifier;
 
-        /// <summary>粒子数の乗数。**0 にしない。**</summary>
+        /// <summary>Multiplier on the particle count. **Never 0.**</summary>
         public readonly float RateOverTime;
 
-        /// <summary>この粒子系が抱える粒の上限。超えた分は自動で絞られる（§B-4）。</summary>
+        /// <summary>The cap on how many particles this system holds. Anything past it is
+        /// throttled automatically (§B-4).</summary>
         public readonly int MaxParticles;
 
         public EruptionAshProfile(float lifeMinSeconds, float lifeMaxSeconds,
@@ -77,14 +83,16 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// <b>柱</b>の粒子。暗い灰褐色で、**短命**（4〜9 秒）で、ほとんど自走しない。
+        /// The <b>column</b> particles. Dark greyish-brown, **short-lived** (4-9 s), and
+        /// barely self-propelled.
         ///
-        /// ★★ 初速を落としてあるのが指摘③の直しの中身である。素の
-        ///   <c>Factory Smoke</c> は 10〜15 m/s、⑤も以前は 26〜48 m/s を入れていた。
-        ///   粒子が自分で上がり続けると**傘に天井が出来ない** ——
-        ///   中立浮力高度で止まって横へ広がるのが噴火柱の姿である。
-        ///   いまは形を <see cref="EruptionColumn"/> の 9 段が決め、粒子は
-        ///   湧いた場所で少し膨らんで消えるだけにする。
+        /// ★★ Cutting the initial speed is the substance of the fix for point ③. The
+        ///   stock <c>Factory Smoke</c> is 10-15 m/s, and ⑤ itself used to put 26-48 m/s
+        ///   in. If the particles keep climbing under their own steam, **the umbrella
+        ///   never gets a ceiling** — stopping at the level of neutral buoyancy and
+        ///   spreading sideways is what an eruption column actually looks like.
+        ///   Now the shape is decided by <see cref="EruptionColumn"/>'s nine tiers, and
+        ///   the particles just swell a little where they were spawned and disappear.
         /// </summary>
         public static EruptionAshProfile Column
         {
@@ -92,9 +100,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// <b>傘</b>の粒子。淡くて大きくて**長生き**（18〜34 秒）で、
-        /// 放出角 55〜95 度＝**ほぼ水平に広がる**（軸が上向きなので、この角度が
-        /// そのまま横向きの初速になる）。滞留して積み上がることで平たい面になる。
+        /// The <b>umbrella</b> particles. Pale, large and **long-lived** (18-34 s), with an
+        /// emission angle of 55-95 degrees, i.e. **spreading out almost horizontally**
+        /// (the axis points up, so that angle becomes sideways initial speed as it stands).
+        /// They linger and stack up, which is what makes the flat sheet.
         /// </summary>
         public static EruptionAshProfile Umbrella
         {

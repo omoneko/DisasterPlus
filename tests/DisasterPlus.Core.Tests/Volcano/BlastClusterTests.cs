@@ -4,17 +4,18 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 実機報告（2026-08-22）「爆発のエフェクトがスケール通りではない、
-    /// 特に破局噴火の時の爆発がしょぼすぎます」。
+    /// In-game report (2026-08-22): "the explosion effect is not in proportion to the
+    /// scale; the explosion during a supereruption in particular is far too feeble".
     ///
-    /// ★★ <b>ここが固定するのは「大きい火山ほど発が増える」ことである。</b>
-    ///    以前は <c>DispatchEffect</c> 1 回きりで、スライダーを上げても
-    ///    <c>SpawnArea</c> の半径が広がるだけだった —— <b>粒は大きくならないので、
-    ///    同じ大きさの粒が薄く散る</b>（＝しょぼくなる）。
+    /// ★★ <b>What is pinned down here is that a bigger volcano gets more bursts.</b>
+    ///    It used to be a single <c>DispatchEffect</c>, and raising the slider only
+    ///    widened the radius of the <c>SpawnArea</c> —— <b>the particles do not get
+    ///    any bigger, so particles of the same size just scatter more thinly</b>
+    ///    (= it looks feeble).
     /// </summary>
     public class BlastClusterTests
     {
-        private const float Crater = 351f;   // 成層 25.5 の火口
+        private const float Crater = 351f;   // the crater of a stratovolcano at 25.5
         private const uint Seed = 4242u;
 
         [Fact]
@@ -30,7 +31,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSupereruptionIsOverwhelminglyBiggerThanAnyNormalOne()
         {
-            // ★ 「破局噴火の爆発がしょぼすぎる」への答え。
+            // ★ The answer to "the supereruption's explosion is far too feeble".
             int normal = BlastCluster.CountFor(1f, 1f, false);
             int climax = BlastCluster.CountFor(1f, 1f, true);
 
@@ -38,7 +39,8 @@ namespace DisasterPlus.Core.Tests.Volcano
                         "the supereruption (" + climax + ") is not overwhelmingly bigger than "
                         + "a normal one (" + normal + ")");
 
-            // ★ いちばん小さい火山の 10 倍以上は出ること（「しょぼい」の反対側）。
+            // ★ It must produce at least 10 times the smallest volcano's count
+            //   (the opposite end from "feeble").
             Assert.True(climax > BlastCluster.CountFor(1f, 0f, false) * 10,
                         "the supereruption is only " + climax + " bursts");
         }
@@ -62,8 +64,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheBurstsDoNotAllLandOnTheSameSpotOrTheSameFrame()
         {
-            // 同じ場所・同じフレームに積むと、大きい爆発ではなく
-            // **1 個の平たい円盤**に見える。
+            // Stacking them on the same spot and the same frame looks like
+            // **one flat disc** rather than a big explosion.
             int count = BlastCluster.CountFor(1f, 1f, false);
 
             float firstX = 0f, firstZ = 0f;
@@ -95,7 +97,8 @@ namespace DisasterPlus.Core.Tests.Volcano
                 BlastBurst b = BlastCluster.For(i, count, 1f, 1f, false, Crater, 4000f, Seed);
                 float d = (float)System.Math.Sqrt(b.OffsetX * b.OffsetX + b.OffsetZ * b.OffsetZ);
 
-                // 環（4000 m）を渡しても、**大爆発でなければ使わない。**
+                // Even when the ring (4000 m) is passed in, **it is not used unless
+                // this is the great explosion.**
                 Assert.True(d <= Crater * BlastCluster.SpreadRatio + 1f,
                             "a normal eruption threw a burst " + d + " m from the vent");
             }
@@ -104,7 +107,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSupereruptionAlsoEruptsFromTheRingFissure()
         {
-            // ★★ カルデラのふちで噴かないと、半径 5 km の穴のどこにも爆発が見えない。
+            // ★★ Without erupting at the caldera rim, no explosion is visible
+            //    anywhere in a hole of 5 km radius.
             const float ring = 5563f;
             int count = BlastCluster.CountFor(1f, 1f, true);
 
@@ -170,7 +174,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.Equal(1f, BlastCluster.SizeUnitOf(5600f, 1200f, 5600f), 4);
             Assert.InRange(BlastCluster.SizeUnitOf(3400f, 1200f, 5600f), 0.4f, 0.6f);
 
-            // 帯が壊れていても 0（＝「大きくない」）へ落ちる。
+            // Even with a broken band it falls back to 0 (= "not big").
             Assert.Equal(0f, BlastCluster.SizeUnitOf(9000f, 5600f, 1200f), 4);
             Assert.Equal(0f, BlastCluster.SizeUnitOf(float.NaN, 1200f, 5600f), 4);
         }
@@ -178,7 +182,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheClimaxIsDenserPerBurstNotJustMoreNumerous()
         {
-            // 発を増やしたぶん 1 発を薄くしたら、増やした意味が打ち消される。
+            // If each burst is thinned out by as much as the count went up, the
+            // point of increasing it is cancelled out.
             BlastBurst normal = BlastCluster.For(0, 10, 1f, 1f, false, Crater, 0f, Seed);
             BlastBurst climax = BlastCluster.For(0, 10, 1f, 1f, true, Crater, 0f, Seed);
 

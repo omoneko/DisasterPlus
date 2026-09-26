@@ -1,28 +1,32 @@
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ④台風。バニラの雷雨災害スロット 1 個を土台に、④が経路・天候・落雷・風害・
-    /// 河川氾濫・巨大な回転雲を毎 tick 駆動する**移動する台風**。
+    /// ④ Typhoon. Built on top of one vanilla thunderstorm disaster slot, ④ drives the
+    /// track, weather, lightning, wind damage, river flooding and a huge rotating cloud
+    /// every tick — **a typhoon that moves**.
     ///
-    /// **①②と違い、④はバニラに原資が無い。** 台風という現象はバニラに存在せず、
-    /// 風による破壊機構も、ワールド座標を持つ雲も、洪水災害も存在しない
-    /// （IL 事実文書 §B5 / §C7 / §D9）。したがって④が出す数値は**原則すべて本 MOD のもの**で、
-    /// パネルは見出しで一度だけそう名乗り、行ごとの印は付けない（設計書 §1.2 / §7）。
-    /// 例外は <c>WeatherManager</c> から読んだ雨量・雲量だけである。
+    /// **Unlike ① and ②, ④ has no source material in vanilla.** The typhoon phenomenon
+    /// does not exist in vanilla, and neither does a wind destruction mechanism, a cloud
+    /// with world coordinates, or a flood disaster (IL facts document §B5 / §C7 / §D9).
+    /// So the numbers ④ shows are **as a rule all of them this mod's own**; the panel
+    /// says so once in a heading and puts no marker on individual rows (design doc §1.2 /
+    /// §7). The only exception is the rainfall and cloud cover read from
+    /// <c>WeatherManager</c>.
     ///
-    /// このタスク（Task 2）の時点では**パネルも台風も無い機能**である。やることは
-    /// sim スレッドで読んで <see cref="TyphoonHub"/> へ publish することと、
-    /// **プレハブ 6 値を診断ダンプに出すこと**だけ。その 6 値
-    /// （<c>ThunderStormAI</c> の <c>m_radius</c> / <c>m_emergingDuration</c> /
-    /// <c>m_activeDuration</c> と、<c>VortexAI</c> の <c>m_destructionRadiusMin</c> /
-    /// <c>m_destructionRadiusMax</c>、<c>VehicleInfo.m_maxSpeed</c>）は
-    /// **DLL に実数値が無く**（§A-0 / §B-1、どちらも PARTIAL）、④の以後の
-    /// 持続時間・落雷本数・破壊半径・移動速度が全てその上に乗るので、先に実機で 1 回測る。
+    /// As of this task (Task 2) it is **a feature with neither a panel nor a typhoon**.
+    /// All it does is read on the sim thread and publish to <see cref="TyphoonHub"/>, and
+    /// **put the six prefab values into the diagnostics dump**. Those six values
+    /// (<c>ThunderStormAI</c>'s <c>m_radius</c> / <c>m_emergingDuration</c> /
+    /// <c>m_activeDuration</c>, plus <c>VortexAI</c>'s <c>m_destructionRadiusMin</c> /
+    /// <c>m_destructionRadiusMax</c> and <c>VehicleInfo.m_maxSpeed</c>) **have no actual
+    /// values in the DLL** (§A-0 / §B-1, both PARTIAL), and everything ④ does later —
+    /// duration, number of strikes, destruction radius, travel speed — rides on top of
+    /// them, so we measure them once in the game first.
     ///
-    /// <see cref="IPausedTickFeature"/> を実装しているのは①②と同じ理由
-    /// （ロード直後にポーズしたままパネルを開くと全行が「読み取れません」になる）。
-    /// **ただし④は T3 以降でゲームの状態を進める。** その契約を守る仕掛けは
-    /// <see cref="OnSimulationTick"/> の中にある。
+    /// It implements <see cref="IPausedTickFeature"/> for the same reason ① and ② do
+    /// (open the panel while still paused right after a load and every row reads "cannot
+    /// be read"). **④ does, however, advance game state from T3 onwards.** The machinery
+    /// that keeps that contract is inside <see cref="OnSimulationTick"/>.
     /// </summary>
     public partial class TyphoonFeature : IDisasterFeature, IPausedTickFeature
     {
@@ -37,68 +41,77 @@ namespace DisasterPlus.Game
             TyphoonController.Reset();
             TyphoonWeather.Reset();
 
-            // ★★ **毎レベルロードで登録し直すこと。** ToolController.m_tools は Awake で
-            //    一度だけ構築され、ToolsModifierControl.SetTool<T> は静的辞書を引くだけ
-            //    なので、登録しないと**黙って空振りする**（「タイルは押せるのに
-            //    カーソルが変わらない」という、例外の出ない壊れ方）。
-            //    ToolController は都市ごとに作り直されるので前の都市の登録は使えない。
+            // ★★ **Register again on every level load.** ToolController.m_tools is built
+            //    once in Awake and ToolsModifierControl.SetTool<T> only looks up a static
+            //    dictionary, so without registering it **silently does nothing** (a kind
+            //    of breakage with no exception: "the tile presses but the cursor never
+            //    changes"). ToolController is rebuilt per city, so the previous city's
+            //    registration is no use.
             ToolRegistration.Register<TyphoonPlacementTool>();
         }
 
         /// <summary>
-        /// sim スレッド。<c>DisasterManager</c> / <c>WeatherManager</c> /
-        /// <c>SimulationManager</c> の読み取りは必ずここで行う。
+        /// Sim thread. Always read <c>DisasterManager</c> / <c>WeatherManager</c> /
+        /// <c>SimulationManager</c> here.
         ///
-        /// ポーズ中（deltaMinutes == 0）にも呼ばれる（<see cref="IPausedTickFeature"/>）。
+        /// It is also called while paused (deltaMinutes == 0)
+        /// (<see cref="IPausedTickFeature"/>).
         /// </summary>
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
             if (!ModSettings.TyphoonEnabled.value)
             {
-                // ★★ 機能を切っても、**触ったものは全部返す。** プレイヤーが台風の
-                //    最中にこの設定を切ると、以降この tick は 1 行も走らなくなるので、
-                //    ここで返さなかったものは（都市を出るか保存するまで）返す機会が
-                //    無くなる。3 つとも台帳が空なら 1 命令で返るので、毎 tick 通っても
-                //    構わない（ログも確保も走らない）。
+                // ★★ Even with the feature switched off, **give back everything we
+                //    touched.** If the player switches this setting off in the middle of a
+                //    typhoon, not one line of this tick runs afterwards, so anything not
+                //    given back here has no chance of being given back (until they leave
+                //    the city or save). All three return in a single instruction when
+                //    their ledgers are empty, so running them every tick is fine (no log,
+                //    no allocation).
                 //
-                //    ここはポーズガードより上だが、**どれも「④が握っていたものを
-                //    手放す」方向**であって進行ではないので IPausedTickFeature の
-                //    契約は破らない（むしろポーズ中に切られたときに手放せるほうが
-                //    正しい）。竜巻の StopAll はバニラの終了経路（DeactivateNow /
-                //    ReleaseDisaster）を呼ぶので**状態は変わる**が、変わるのは
-                //    「④が作ったものが畳まれる」ことだけで、ゲームが先へ進むわけではない。
+                //    This sits above the pause guard, but **all of it is in the direction
+                //    of "let go of what ④ was holding"** rather than progress, so it does
+                //    not break the IPausedTickFeature contract (indeed, being able to let
+                //    go when switched off while paused is the correct behaviour). The
+                //    tornadoes' StopAll calls vanilla's ending routes (DeactivateNow /
+                //    ReleaseDisaster) so **state does change**, but the only change is
+                //    "what ④ made gets packed away"; the game does not move forward.
                 TyphoonFlood.RestoreAll();
 
-                // ★★ 局所被害のカウンタと天候も返す（全体レビュー C2）。以前ここは
-                //    水位しか戻しておらず、天候を握ったまま台風だけが止まった
-                //    （雨がやまなくなる）。Reset / Release はどちらも冪等である。
+                // ★★ Give back the local-damage counters and the weather too
+                //    (whole-project review C2). This used to restore only the water level,
+                //    so the weather stayed held while the typhoon alone stopped (the rain
+                //    would never end). Reset and Release are both idempotent.
                 TyphoonGust.Reset();
                 TyphoonWeather.Release();
 
-                // ★ 風害の走査位置とカウンタも畳む。走査そのものはもう呼ばれないが、
-                //   **診断が最後の走査の数字を抱えたままだと「切ったのにまだ
-                //   壊している」と読める**（局所被害と同じ理由）。Reset は冪等で、
-                //   台帳を持たないので毎 tick 通ってよい。
+                // ★ Pack away the wind sweep's cursor and counters as well. The sweep
+                //   itself is no longer called, but **if the diagnostics keep holding the
+                //   last sweep's numbers it reads as "we switched it off and it is still
+                //   destroying things"** (the same reason as the local damage). Reset is
+                //   idempotent and holds no ledger, so it is fine every tick.
                 TyphoonWind.Reset();
                 TyphoonTreeWindPatch.Clear();
-            // ★ 飛ばしたプロップは戻らない。ここで畳むのは走査のカーソルと
-            //   診断の数だけである。
+            // ★ Props that were blown away do not come back. All we pack away here is the
+            //   sweep cursor and the diagnostic counts.
             TyphoonPropDamage.Reset();
                 return;
             }
 
-            // ここまでが「読んで publish するだけ」。ポーズ中もここは通る。
+            // Everything to this point is "just read and publish". This runs while paused
+            // too.
             var snapshot = TyphoonReader.Read();
             TyphoonHub.Publish(snapshot);
 
-            // Typhoon チャンネルは既定 OFF。この if が無いと、下の ToString と
-            // 文字列連結が毎 sim tick（通常速度でおよそ 50 回/秒）実行されてから
-            // Log.Diag に捨てられる——C# は引数を呼び出し前に評価し切るので、
-            // Diag の内側のマスク判定では手遅れになる。
+            // The Typhoon channel is off by default. Without this if, the ToString calls
+            // and string concatenation below would run on every sim tick (about 50 times
+            // a second at normal speed) only to be thrown away by Log.Diag — C# evaluates
+            // the arguments fully before the call, so the mask check inside Diag is far
+            // too late.
             //
-            // ①の ForecastFeature と違い、ここは early-return にしてはいけない。
-            // 下のポーズガードと全要素の処理を丸ごと飛ばすことになる
-            // （②の EarthquakeFeature が同じ注記を持っている）。
+            // Unlike ①'s ForecastFeature, this must not be an early return. That would
+            // skip the pause guard below and all the per-element processing along with it
+            // (②'s EarthquakeFeature carries the same note).
             if (Log.DiagEnabled(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon))
             {
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "typhoon",
@@ -109,80 +122,93 @@ namespace DisasterPlus.Game
                         : "snapshot invalid");
             }
 
-            // ★ ここから下は状態を進める。ポーズ中（deltaMinutes == 0）は絶対に通さない。
-            //    T3〜T10 が足す処理は必ずこの行より下に置くこと。
-            //    このコメントを消すと「ポーズ中に台風が動き、建物が倒れ、川が溢れる」が起きる。
+            // ★ Everything below this advances state. It must never run while paused
+            //    (deltaMinutes == 0). Anything T3 to T10 adds must go below this line.
+            //    Delete this comment and you get "the typhoon moves, buildings fall and
+            //    rivers burst their banks while the game is paused".
             if (deltaMinutes <= 0f) return;
 
             TyphoonController.Tick(snapshot, frameIndex, deltaMinutes);
             if (TyphoonController.Active)
             {
                 TyphoonWeather.Drive(snapshot, deltaMinutes);
-                // ★★ **バニラの落雷はもう積まない。**（2026-08-25、所有者の指示）
+                // ★★ **We no longer queue vanilla lightning.** (2026-08-25, the owner's
+                //    instruction.)
                 //
-                //    > いっそのこと「雷雨」にせずに「雨」だけにして、時々台風の
-                //    > 雲の中から稲妻を発生させる方がうまくいくかもしれません
+                //    &gt; It might work better to drop the "thunderstorm" and have just
+                //    &gt; "rain", with lightning occasionally coming out of the typhoon's
+                //    &gt; clouds
                 //
-                //    <c>WeatherManager.QueueLightningStrike</c> が落とす雷の高さは
-                //    ゲームのレンダラが決めており、**MOD から動かせない。**
-                //    雲を 1200 m まで上げてもまだ上から降ってきた（実機報告）。
+                //    The height at which <c>WeatherManager.QueueLightningStrike</c> drops
+                //    a bolt is decided by the game's renderer and **cannot be moved from
+                //    a mod.** Even with the cloud raised to 1200 m it still came down from
+                //    above (in-game report).
                 //
-                //    いまは⑤の噴煙と同じく<b>雲の中に自分で描く</b>
-                //    （<c>TyphoonBoltFx</c>、main スレッド）。ゲーム自身の自動落雷も
-                //    <c>TyphoonWeather</c> が雨を 0.8 で止めることで起きない
-                //    （IL_09D3: <c>m_currentRain &gt; 0.8</c> が唯一の条件）。
+                //    Now, like ⑤'s ash plume, we <b>draw it inside the cloud ourselves</b>
+                //    (<c>TyphoonBoltFx</c>, main thread). The game's own automatic
+                //    lightning does not happen either, because <c>TyphoonWeather</c> stops
+                //    the rain at 0.8 (IL_09D3: <c>m_currentRain &gt; 0.8</c> is the only
+                //    condition).
                 //
-                //    ★ <c>TyphoonLightning</c> は消していない —— バニラのキューの
-                //      予算計算と診断の実測がそこに書いてあり、**再び使う日が来たら
-                //      あの調査からやり直すことになる**からである。呼ばないだけ。
+                //    ★ <c>TyphoonLightning</c> has not been deleted — the budget
+                //      calculation for vanilla's queue and the measured diagnostics are
+                //      written there, and **if the day comes when we use it again we would
+                //      have to redo that investigation from scratch**. We simply do not
+                //      call it.
 
-                // ★ 風害は設定で切れる（既定 ON。強さ 0 でも完全に無効）。
-                //   切ったときに Apply を呼ばないのは②の第 2 層と同じ形で、
-                //   走査そのものを起こさないためである。
+                // ★ Wind damage can be switched off in the settings (on by default; a
+                //   strength of 0 also disables it completely). Not calling Apply when it
+                //   is off is the same shape as ②'s second layer, so that the sweep never
+                //   starts at all.
                 if (ModSettings.TyphoonWindStrength.value > 0)
                 {
                     TyphoonWind.Apply(snapshot, deltaMinutes);
 
-                    // ★★ **看板などのプロップも飛ばす**（2026-08-22、所有者の依頼
-                    //    「看板プロップの破壊」）。風害と同じ設定に載せる ——
-                    //    「風で壊れるもの」を 2 つのつまみに割らない。
-                    //    ★ ReleaseProp は取り消せないので、しきい値は渋め
-                    //      （PropGaleModel のクラス doc）。
+                    // ★★ **Blow away props such as signs too** (2026-08-22, the owner's
+                    //    request "destruction of billboard props"). Put it on the same
+                    //    setting as wind damage — do not split "things the wind breaks"
+                    //    across two knobs.
+                    //    ★ ReleaseProp cannot be undone, so the thresholds are mean
+                    //      (PropGaleModel's class doc).
                     TyphoonPropDamage.Tick(snapshot, frameIndex);
                 }
 
-                // ★ 竜巻並みの局所被害（既定 ON。強さ 0 でも完全に無効）。
-                //   **竜巻の実体は 1 つも作らない**（TyphoonGust のクラス doc）。
+                // ★ Tornado-grade local damage (on by default; a strength of 0 also
+                //   disables it completely). **Not one actual tornado is created**
+                //   (TyphoonGust's class doc).
                 if (ModSettings.TyphoonGustStrength.value > 0)
                 {
                     TyphoonGust.Tick(snapshot, frameIndex, deltaMinutes);
                 }
 
-                // ★ 暴風雨の吹き飛ばし（市民と車だけ）。**風害とは別の設定**で、
-                //   建物・道路・樹木には一切触れない（ModSettings.TyphoonStormFx の doc）。
-                //   走査ではないので、風害を切っていても吹く。
+                // ★ The storm's blow-away (citizens and vehicles only). **A separate
+                //   setting from wind damage**, and it touches neither buildings, roads
+                //   nor trees (the doc on ModSettings.TyphoonStormFx). It is not a sweep,
+                //   so it blows even with wind damage switched off.
                 if (ModSettings.TyphoonStormFx.value)
                 {
                     TyphoonWind.Gale(snapshot, deltaMinutes);
                 }
 
-                // ★★ **木を揺らす。**（2026-09-02、所有者「木がもっと激しく揺れるように」）
-                //    木の揺れはバニラでは<b>遮蔽の高さだけ</b>で決まり、天候に
-                //    まったく反応しない。しかも <c>GetWindSpeed</c> は末尾で
-                //    <c>Clamp(…, 0, 2)</c> するので、遮蔽を下げる手では
-                //    <b>平常の 2 倍で頭打ち</b>になる（最初にそれを実装して、足りなかった）。
-                //    <c>TyphoonTreeWindPatch</c> は<b>そのクランプの外側</b>で掛ける。
-                //    セーブに焼き付く <c>m_windGrid</c> には 1 バイトも触らない。
+                // ★★ **Shake the trees.** (2026-09-02, the owner: "make the trees sway
+                //    much harder".) In vanilla, tree sway is decided by <b>the shelter
+                //    height alone</b> and does not react to the weather at all. On top of
+                //    that <c>GetWindSpeed</c> ends with <c>Clamp(…, 0, 2)</c>, so lowering
+                //    the shelter <b>tops out at twice the normal sway</b> (we implemented
+                //    that first, and it was not enough). <c>TyphoonTreeWindPatch</c>
+                //    multiplies <b>outside that clamp</b>. It does not touch a single byte
+                //    of <c>m_windGrid</c>, which is burnt into the save.
                 TyphoonTreeWindPatch.SetStorm(
                     snapshot.Centre.X, snapshot.Centre.Z, snapshot.GaleRadius,
                     TreeSwayGainFor(snapshot.Intensity));
             }
 
-            // ★ 河川氾濫は台風が居なくても呼ぶ。**持ち上げた水位を戻すのが
-            //    この経路の仕事でもある**（TyphoonController.Forget が既に
-            //    RestoreAll を呼んでいるが、取りこぼしをここで拾う）。
-            //    設定を OFF にした瞬間に呼ばれなくなると川が溢れたままになるので、
-            //    OFF のときも「台帳が空でなければ戻す」ところまでは通す。
+            // ★ River flooding is called even with no typhoon. **Putting back the water
+            //    level we raised is part of this route's job too** (TyphoonController.
+            //    Forget already calls RestoreAll, but we catch the leftovers here).
+            //    If it stopped being called the moment the setting went OFF, the rivers
+            //    would stay burst, so even when OFF we go as far as "restore if the ledger
+            //    is not empty".
             if (ModSettings.TyphoonFloodStrength.value > 0)
             {
                 TyphoonFlood.Tick(snapshot, frameIndex, deltaMinutes);
@@ -192,11 +218,13 @@ namespace DisasterPlus.Game
                 TyphoonFlood.RestoreAll();
             }
 
-            // ★★ 台風が居ない／設定を切ったときは**必ずここを通してカウンタを畳む**。
-            //    パッチそのものは台風の経過フレームの関数なので台風が無ければ
-            //    存在しないが、**診断が「直近の走査」の数字を抱えたままだと
-            //    「台風が去ったのにまだ壊している」ように読める**。
-            //    Reset は台帳を持たないので 1 命令で返る（毎 tick 通ってよい）。
+            // ★★ When there is no typhoon, or the setting is off, **always come through
+            //    here and pack the counters away**. The patches themselves are a function
+            //    of the typhoon's elapsed frames, so with no typhoon they do not exist —
+            //    but **if the diagnostics keep holding the "last sweep" numbers it reads
+            //    as "the typhoon has gone and it is still destroying things"**.
+            //    Reset holds no ledger, so it returns in a single instruction (fine every
+            //    tick).
             if (!TyphoonController.Active || ModSettings.TyphoonGustStrength.value <= 0)
             {
                 TyphoonGust.Reset();
@@ -204,32 +232,34 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// main スレッド。**ここから sim 側の型（<see cref="TyphoonController"/> /
-        /// <see cref="TyphoonWeather"/>）を呼ばないこと。** 読むのは
-        /// <see cref="TyphoonHub.Latest"/> のスナップショットだけである。
+        /// Main thread. **Do not call the sim-side types (<see cref="TyphoonController"/> /
+        /// <see cref="TyphoonWeather"/>) from here.** All we read is the snapshot from
+        /// <see cref="TyphoonHub.Latest"/>.
         /// </summary>
         /// <summary>
-        /// 震度から木の揺れの倍率を出す。
+        /// Work out the tree-sway multiplier from the intensity.
         ///
-        /// ★★ **平常が 1.0、バニラの上限が 2.0** である（<c>GetWindSpeed</c> の
-        ///   末尾のクランプ）。<c>TyphoonTreeWindPatch</c> はその外側で掛けるので、
-        ///   ここで返す値がそのまま「平常の何倍揺れるか」になる。
+        /// ★★ **Calm is 1.0 and vanilla's ceiling is 2.0** (the clamp at the end of
+        ///   <c>GetWindSpeed</c>). <c>TyphoonTreeWindPatch</c> multiplies outside that, so
+        ///   the value returned here is directly "how many times the calm sway".
         ///
-        /// ★★ **近くの木にしか効かない。**（2026-09-02、IL で確定）
-        ///   木の描画は 2 経路あり、遠景の<b>まとめ描画</b>は
-        ///   <c>Color32.a = Clamp(round(wind * 128), 0, 255)</c> と
-        ///   <b>バイトに詰める</b>ので（<c>TreeInstance.PopulateGroupData</c>
-        ///   IL_00CE-00E5）、そちらは何を返しても 1.99 で頭打ちになる。
-        ///   近くの木が通る <c>RenderInstance</c> は <c>Color.a</c>（float）を
-        ///   <c>MaterialPropertyBlock</c> へ渡すので、<b>そこには上限が無い</b>。
+        /// ★★ **It only affects nearby trees.** (2026-09-02, settled from the IL.)
+        ///   There are two tree rendering paths, and the <b>batched draw</b> used for
+        ///   distant trees <b>packs it into a byte</b> as
+        ///   <c>Color32.a = Clamp(round(wind * 128), 0, 255)</c>
+        ///   (<c>TreeInstance.PopulateGroupData</c> IL_00CE-00E5), so whatever we return,
+        ///   that path tops out at 1.99. The <c>RenderInstance</c> path that nearby trees
+        ///   take passes <c>Color.a</c> (a float) to a <c>MaterialPropertyBlock</c>, and
+        ///   <b>there is no ceiling there</b>.
         ///
-        ///   所有者の指示は「見えている範囲だけでも派手に」なので、
-        ///   <b>近くの木に全振りする</b>。
+        ///   The owner's instruction was "make it dramatic at least within view", so
+        ///   <b>we put everything into the nearby trees</b>.
         ///
-        /// ★ 既定のスライダー（55）で 7 倍、上限（100 以上）で 12 倍。
-        ///   遠景は 2 倍で止まるため、近景との差は出る。
-        ///   **シェーダ側にさらに上限があれば、そこで頭打ちになる** ——
-        ///   それは実機でしか分からないので、まず大きく振って見てもらう。
+        /// ★ 7× at the default slider (55), 12× at the ceiling (100 and above).
+        ///   Distant trees stop at 2×, so near and far will differ visibly.
+        ///   **If the shader has a further ceiling of its own, that is where it will top
+        ///   out** — and that can only be found out in the game, so we swing big first and
+        ///   ask them to look.
         /// </summary>
         private static float TreeSwayGainFor(byte intensity)
         {
@@ -239,23 +269,23 @@ namespace DisasterPlus.Game
 
         public void OnMainThreadUpdate()
         {
-            // ★★ **main スレッドでしか Camera.main に触れない**（CameraFocus の doc）。
-            //    sim スレッドの吹き飛ばしが、ここで置いた値を読む。
+            // ★★ **Camera.main is only ever touched on the main thread** (CameraFocus's
+            //    doc). The sim thread's blow-away reads the value we put here.
             CameraFocus.Update();
 
-            // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
+            // The buttons are all four held by DisasterPanelBar (FeatureHost calls it).
             TyphoonPanel.Tick();
 
-            // ★ 雲は main スレッドだけの機能で、**sim 側からは 1 度も呼ばれない。**
-            //   それが T9 を④の他の要素から独立させている実体である
-            //   （TyphoonCloud のクラス doc）。台風が終わったときの後始末も
-            //   TyphoonCloud.Update が自分で行う——TyphoonController.Forget の
-            //   後始末列にこの型を足さないこと。
-            //   ★ TyphoonEnabled も見ること。機能そのものを切ると OnSimulationTick が
-            //     早期 return して TyphoonHub.Latest が更新されなくなるので、最後に
-            //     publish された「Active な」スナップショットが残り続ける ——
-            //     見ないと**止まった雲が画面に貼り付いたまま**になる
-            //     （TyphoonPanel が同じガードを持っている）。
+            // ★ The cloud is a main-thread-only feature and **is never once called from
+            //   the sim side**. That is what makes T9 independent of ④'s other elements
+            //   (TyphoonCloud's class doc). TyphoonCloud.Update also does its own cleanup
+            //   when the typhoon ends — do not add this type to
+            //   TyphoonController.Forget's cleanup list.
+            //   ★ Look at TyphoonEnabled as well. Switching the feature itself off makes
+            //     OnSimulationTick return early so TyphoonHub.Latest stops being updated,
+            //     and the last published "Active" snapshot stays there for ever — without
+            //     this check **a frozen cloud stays pasted on the screen**
+            //     (TyphoonPanel has the same guard).
             if (ModSettings.TyphoonEnabled.value && ModSettings.TyphoonCloudEnabled.value)
             {
                 TyphoonCloud.Update(TyphoonHub.Latest);
@@ -265,10 +295,10 @@ namespace DisasterPlus.Game
                 TyphoonCloud.Destroy();
             }
 
-            // ★ 横殴りの飛沫も main スレッドだけの機能である（雲とまったく同じ扱い）。
-            //   sim 側からは 1 度も呼ばれないので、TyphoonController.Forget の
-            //   後始末列にこの型を足さないこと。台風が終わったフレームには
-            //   Active でないスナップショットが渡り、あちらが自分で出すのをやめる。
+            // ★ The driving spray is also a main-thread-only feature (treated exactly like
+            //   the cloud). It is never once called from the sim side, so do not add this
+            //   type to TyphoonController.Forget's cleanup list. On the frame the typhoon
+            //   ends it is handed a snapshot that is not Active and stops drawing itself.
             if (ModSettings.TyphoonEnabled.value && ModSettings.TyphoonStormFx.value)
             {
                 TyphoonSquallFx.Update(TyphoonHub.Latest);
@@ -278,9 +308,10 @@ namespace DisasterPlus.Game
                 TyphoonSquallFx.Destroy();
             }
 
-            // ★ 風の音も main スレッドだけ（Unity のオーディオ資産は全て main）。
-            //   1 フレームに 1 回だけ AddEvent を積む —— sim スレッドから呼ぶと
-            //   速度 3 で 1 フレームに複数回積まれ、EffectGroup の席を潰す。
+            // ★ The wind sound is main thread only too (all of Unity's audio assets are).
+            //   Queue AddEvent once per frame and no more — call it from the sim thread
+            //   and at speed 3 it queues several times in one frame and eats the
+            //   EffectGroup's seats.
             if (ModSettings.TyphoonEnabled.value && ModSettings.TyphoonStormSound.value)
             {
                 TyphoonStormAudio.Update(TyphoonHub.Latest);
@@ -293,49 +324,57 @@ namespace DisasterPlus.Game
 
         public void OnLevelUnloading()
         {
-            // ★★ 配置ツールが選ばれたまま都市を出させない。次の都市でカーソルが
-            //    「台風を置く」のまま始まると、プレイヤーが意図せず地点を指しうる。
-            //    **アクティブでないときは何もしない**ので、他 MOD が選んでいたツールを
-            //    横から戻すことはない（⑤と同じ）。
+            // ★★ Do not let them leave the city with the placement tool still selected.
+            //    If the next city starts with the cursor still on "place a typhoon", the
+            //    player could point at a spot without meaning to. **It does nothing when
+            //    it is not active**, so it never reaches in and undoes a tool another mod
+            //    had selected (the same as ⑤).
             TyphoonPlacementTool.Deactivate();
 
-            // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
-            //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
-            //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
+            // ★ Pack up the UI first, so the second city starts with **one button and one
+            //    panel** (leave them and one more piles up every time a city is loaded).
+            //    Removing the button is done by FeatureHost.LevelUnloading through
+            //    DisasterPanelBar.Remove.
             TyphoonPanel.Destroy();
-            // ★ Mesh も Material も Component ではないので、GameObject を消しても
-            //    道連れにならない。**自分で Object.Destroy する**（TyphoonCloud の
-            //    クラス doc）。バニラ空の雲の設定もここで元へ戻る。
+            // ★ Neither Mesh nor Material is a Component, so destroying the GameObject
+            //    does not take them with it. **Object.Destroy them ourselves**
+            //    (TyphoonCloud's class doc). The vanilla sky's cloud settings are put back
+            //    here too.
             TyphoonCloud.Destroy();
-            // ★ 飛沫の複製も都市をまたがない（雲と同じ。破棄済みの粒子系を撃ちに行く）。
+            // ★ The spray clones do not cross cities either (same as the cloud; they would
+            //   go and fire a destroyed particle system).
             TyphoonSquallFx.Destroy();
-            // ★ 音のクリップと AudioInfo も都市をまたがない（借り物のクリップは
-            //   破棄しない。TyphoonStormAudio のクラス doc）。
+            // ★ The sound clips and AudioInfo do not cross cities either (we do not
+            //   destroy borrowed clips; TyphoonStormAudio's class doc).
             TyphoonStormAudio.Destroy();
 
             TyphoonHub.Clear();
             TyphoonReader.Reset();
-            // 予約も進行中の台風も都市をまたいで残らない。
+            // Neither a booking nor a typhoon in progress survives across cities.
             TyphoonController.Reset();
-            // ★ 天候の上書きは必ずここでも戻す。都市を出た瞬間に台風が消えても、
-            //    m_targetRain を握ったままにしない。
+            // ★ Always put the weather overrides back here as well. Even if the typhoon
+            //    disappears the moment they leave the city, do not stay holding
+            //    m_targetRain.
             TyphoonWeather.Reset();
-            // ★ 落雷の在庫も持ち越さない。持ち越すと次の都市の台風が、実際には
-            //    空いているキューを「埋まっている」と見て撃たなくなる。
+            // ★ Do not carry the lightning stock over either. Carry it over and the next
+            //    city's typhoon sees a queue that is actually free as "full" and never
+            //    fires.
             TyphoonLightning.Reset();
-            // ★ 風害の走査位置とカウンタも都市をまたがない。持ち越すと次の都市で
-            //    前の都市の序数から走り出す（＝中心の周りが 1 度も判定されない）。
+            // ★ The wind sweep's cursor and counters do not cross cities either. Carry them
+            //    over and the next city starts sweeping from the previous city's ordinal
+            //    (i.e. the area around the centre is never checked once).
             TyphoonWind.Reset();
             TyphoonTreeWindPatch.Clear();
             CameraFocus.Reset();
-            // ★★ 河川の水位を必ず戻す（罠 4 の復元経路 2 本目）。
-            //    ここを忘れると、次に開いた都市で**前の都市のハンドル**を復元しに行き、
-            //    無関係な川の水位を書き換える。TyphoonFlood.Reset は内部で
-            //    RestoreAll を呼んでから台帳を捨てる。
+            // ★★ Always put the river water levels back (the second of the two restore
+            //    routes for trap 4). Forget this and the next city you open will go and
+            //    restore **the previous city's handles**, rewriting the level of an
+            //    unrelated river. TyphoonFlood.Reset calls RestoreAll internally before
+            //    throwing the ledger away.
             TyphoonFlood.Reset();
-            // ★ 局所被害のカウンタと借りたエフェクトの参照も都市をまたがない。
-            //   持ち越すと、次の都市で**前の都市の粒子エフェクト**（破棄済み）を
-            //   撃ちに行く。
+            // ★ The local-damage counters and the references to borrowed effects do not
+            //   cross cities either. Carry them over and the next city goes and fires
+            //   **the previous city's particle effect** (already destroyed).
             TyphoonGust.Reset();
         }
     }

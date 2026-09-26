@@ -4,43 +4,49 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="DisasterPanelBar"/> の**退避先**だけを切り出した半分。
+    /// The half of <see cref="DisasterPanelBar"/> that carves out **the fallback** and
+    /// nothing else.
     ///
-    /// バニラの災害パネルがどうしても見つからない環境で、④⑤のタイルを
-    /// 画面に浮かぶ 1 本のバーに置く。**ボタンが 1 個も出ない方が悪い**という
-    /// 判断で在る経路であり、通常のプレイでは 1 度も通らない。
+    /// In an environment where vanilla's disaster panel simply cannot be found, it puts the
+    /// ④ and ⑤ tiles on a single bar floating over the screen. It is a path that exists on
+    /// the judgement that **not showing a single button would be worse**, and normal play
+    /// never goes through it once.
     ///
-    /// ★ ファイルを分けたのは 800 行の上限のためだけで、**規律は本体と同じ**である
-    ///   —— 位置を決める主体は 1 つ、探索は起点 1 点についてだけ、
-    ///   <see cref="InfoHub"/> の真下から探す（<see cref="EnsureFallbackBar"/> の doc）。
+    /// ★ The file was split purely because of the 800-line limit; **the discipline is the
+    ///   same as the main file** — one thing decides positions, the search covers a single
+    ///   origin point only, and it searches from directly below <see cref="InfoHub"/>
+    ///   (see the <see cref="EnsureFallbackBar"/> doc).
     /// </summary>
     public static partial class DisasterPanelBar
     {
         // ------------------------------------------------------------------
-        // 退避先（バニラのパネルが見つからない環境）
+        // The fallback (environments where vanilla's panel is not found)
         // ------------------------------------------------------------------
 
         /// <summary>
-        /// 災害パネルが見つからないまま <see cref="FallbackAfterAttempts"/> 回過ぎたら、
-        /// 画面に浮かぶ 1 本のバーへ退避する。**ボタンが 1 個も出ない方が悪い。**
+        /// Once <see cref="FallbackAfterAttempts"/> attempts have passed without the disaster
+        /// panel being found, fall back to a single bar floating over the screen.
+        /// **Not showing a single button would be worse.**
         ///
-        /// ★★ **ここは <see cref="FreeSlotFinder"/> の 2 番目の呼び出し元である。**
-        /// 1 番目は <see cref="InfoHub"/>（左上のショートカット）で、あちらは常に
-        /// 画面に居る。<c>FreeSlotFinder</c> のクラス doc が「呼び出し元は 1 か所だけ」と
-        /// 定めているのは、**全員が空きを見つけられなかったときに全員が同じ
-        /// preferred へ落ちる**からである —— 初回の実機テストで 4 個のボタンが
-        /// (8,50) に積み上がったのがそれだった。
+        /// ★★ **This is <see cref="FreeSlotFinder"/>'s second caller.**
+        /// The first is <see cref="InfoHub"/> (the top-left shortcut), which is always on
+        /// screen. The <c>FreeSlotFinder</c> class doc lays down "only one caller" because
+        /// **when none of them can find a free slot, they all fall back to the same
+        /// preferred** — which is exactly how four buttons piled up at (8,50) in the first
+        /// playtest.
         ///
-        /// そこでこのバーは**自分で preferred を決めない。**
-        /// <see cref="InfoHub.TryGetBelowAnchor"/> が返す「ショートカットより下」の
-        /// 点から探し始める。探索は下方向にしか進まないので、
-        /// **このバーがショートカットの位置を返すことは構造として起きない。**
-        /// ショートカットがまだ置かれていないあいだは**作らずに待つ**
-        /// （<see cref="InfoHub.Abandoned"/> なら、そもそもボタンが存在しないので
-        /// 従来どおりの preferred から探してよい）。
+        /// So this bar **does not decide a preferred of its own.**
+        /// It starts searching from the "below the shortcut" point that
+        /// <see cref="InfoHub.TryGetBelowAnchor"/> returns. The search only ever moves
+        /// downwards, so **it is structurally impossible for this bar to return the
+        /// shortcut's position.**
+        /// While the shortcut has not been placed yet, **wait rather than building**
+        /// (if <see cref="InfoHub.Abandoned"/>, no button exists at all, so it is fine to
+        /// search from the old preferred).
         ///
-        /// 呼ぶのは **バー全体の起点 1 点** についてだけで、2 個ぶんの探索はしない ——
-        /// 中のボタンは起点からの相対位置に 1 回のループで並べる。
+        /// It is called for **the single origin point of the whole bar** and never searches
+        /// for two — the buttons inside are laid out at positions relative to the origin in
+        /// one loop.
         /// </summary>
         private static void EnsureFallbackBar()
         {
@@ -58,13 +64,13 @@ namespace DisasterPlus.Game
             {
                 if (!InfoHub.Abandoned)
                 {
-                    // ショートカットの位置が決まるまで待つ。**先に置くと、
-                    // あちらが後からこのバーを避けることになり、探索する主体が
-                    // 2 つある状態そのものが戻る。**
+                    // Wait until the shortcut's position is settled. **Place first and the
+                    // shortcut ends up avoiding this bar afterwards, which brings back the
+                    // very state of having two things doing the searching.**
                     Log.Diag("panelBar", "waiting for the info shortcut before placing the fallback bar");
                     return;
                 }
-                // ショートカットは置かれない（画面にボタンは存在しない）。
+                // The shortcut will not be placed (no button exists on screen).
                 preferred = new Vector2(8f, 50f);
             }
 
@@ -80,8 +86,8 @@ namespace DisasterPlus.Game
             Vector2 size = new Vector2(w + pad * 2f, wanted * h + (wanted - 1) * gap + pad * 2f);
 
             bool foundFree;
-            // owner は null。バーはこの呼び出しの後に生成されるので、除外すべき
-            // 「自分自身」がまだ画面に存在しない（FreeSlotFinder.Find の doc）。
+            // owner is null. The bar is created after this call, so the "itself" that would
+            // be excluded does not exist on screen yet (see the FreeSlotFinder.Find doc).
             Vector2 origin = FreeSlotFinder.Find(preferred, size, h + gap, 30, null, out foundFree);
             _fallbackOrigin = origin;
             _fallbackFoundFreeSlot = foundFree;
@@ -91,7 +97,7 @@ namespace DisasterPlus.Game
             bar.size = size;
             bar.relativePosition = new Vector3(origin.x, origin.y);
             bar.backgroundSprite = "GenericPanel";
-            // 中は下のループが完全に決めきるので autolayout には任せない。
+            // The loop below decides the contents completely, so do not leave it to autolayout.
             bar.autoLayout = false;
             _fallbackBar = bar;
 
@@ -119,8 +125,9 @@ namespace DisasterPlus.Game
                 placed++;
             }
 
-            // ★ 1 回だけ。設定を切り替えるたびにバーを作り直すので（RebuildFallbackBar）、
-            //   ここで無条件に Warn を出すと、スロットルの無い警告が繰り返し出る。
+            // ★ Once only. The bar is rebuilt every time a setting is toggled
+            //   (RebuildFallbackBar), so warning unconditionally here would repeat a warning
+            //   that has no throttle.
             if (_fallbackAnnounced) return;
             _fallbackAnnounced = true;
             Log.Warn("the vanilla disasters panel was not found after " + _attempts
@@ -129,9 +136,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 退避先のバーを作り直す。設定で機能を切った／入れたときに呼ばれる。
-        /// **バーごと作り直す**のは、行に置く場合と同じ理由 —— 足りない分だけ
-        /// 後ろに足すと、切り替えた順序で並び順が変わる。
+        /// Rebuilds the fallback bar. Called when a feature is switched off or on in the
+        /// settings. **The whole bar is rebuilt** for the same reason as when placing in the
+        /// row — appending only the missing ones would make the order depend on the order
+        /// things were toggled.
         /// </summary>
         private static void RebuildFallbackBar()
         {
@@ -143,7 +151,7 @@ namespace DisasterPlus.Game
             EnsureFallbackBar();
         }
 
-        /// <summary>行が見つかったので浮遊バーを畳む。ボタンは同じ保守パスで行の側に作り直す。</summary>
+        /// <summary>The row was found, so fold the floating bar away. The buttons are rebuilt on the row side in the same maintenance pass.</summary>
         private static void DismissFallbackBar()
         {
             for (int i = 0; i < Entries.Count; i++) Detach(Entries[i], true, false);

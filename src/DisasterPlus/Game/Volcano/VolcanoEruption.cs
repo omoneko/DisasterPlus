@@ -7,94 +7,104 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 山頂の噴火の<b>進行そのもの</b>（強さの包絡線と噴出口の座標）。**sim スレッド専用。**
+    /// <b>The progression itself</b> of the summit eruption (the strength envelope and the vent's
+    /// coordinates). **Sim thread only.**
     ///
     /// <code>
-    /// [sim ] Tick()   噴出の強さと山頂座標を決めるだけ。Unity オブジェクトを 1 つも作らない
-    /// [main]          描くのは VolcanoEruptionFx / VolcanoPyroclasticFx（別の型）
+    /// [sim ] Tick()   only decides the eruption strength and the summit coordinates. It builds no Unity object
+    /// [main]          the drawing is done by VolcanoEruptionFx / VolcanoPyroclasticFx (separate types)
     /// </code>
     ///
-    /// ── ★ 描画はこの型から出ていった ──────────────────────────
+    /// ── ★ the drawing moved out of this type ──────────────────────────────────────────────
     ///
-    /// かつてここは自前の <c>ParticleSystem</c> ＋ 自前 <c>Material</c> で噴煙を描き、
-    /// その上に <c>BuildingProperties.m_fireEffect</c> を重ねていた。
-    /// **実機では 1 粒も描かれていなかった** —— <c>Shader.Find</c> が組み込みの
-    /// <c>"Standard"</c> を含めて全ての名前に null を返す環境だったためである。
-    /// いまは<b>ゲーム自身の粒子エフェクト</b>を借りて描く。その一式は
-    /// <see cref="VolcanoEruptionFx"/> と <see cref="VolcanoPyroclasticFx"/> にあり、
-    /// **この型は Unity のオブジェクトを 1 つも持たない。**
-    /// 借り物の選び方・複製・後始末は <see cref="VolcanoVanillaFx"/> の 1 か所にある。
+    /// This used to draw the plume with its own <c>ParticleSystem</c> and its own
+    /// <c>Material</c>, with <c>BuildingProperties.m_fireEffect</c> layered on top.
+    /// **In the live game not one particle was ever drawn** — because it was an environment where
+    /// <c>Shader.Find</c> returned null for every name, including the built-in
+    /// <c>"Standard"</c>.
+    /// It now draws by borrowing <b>the game's own particle effects</b>. That set lives in
+    /// <see cref="VolcanoEruptionFx"/> and <see cref="VolcanoPyroclasticFx"/>, and
+    /// **this type holds not a single Unity object.**
+    /// Choosing, cloning and cleaning up the borrowings all live in one place,
+    /// <see cref="VolcanoVanillaFx"/>.
     ///
-    /// ── 音の経路（実測に合わせた記述）───────────────────────────
+    /// ── the audio path (described to match the measurements) ───────────────────────────────
     ///
-    /// <c>FireEffect.RenderEffect</c> は <c>m_soundEffect</c> に 1 度も触れない（IL 実測）。
-    /// **粒子を描く経路から音は出ない。** ⑤の噴火音は
-    /// <see cref="VolcanoEruptionAudio"/> が同梱 wav をゲームの効果音グループへ流す
-    /// 別経路である。
+    /// <c>FireEffect.RenderEffect</c> never touches <c>m_soundEffect</c> (measured in IL).
+    /// **The particle drawing path emits no sound.** ⑤'s eruption sound is a separate path, where
+    /// <see cref="VolcanoEruptionAudio"/> feeds the bundled wav into the game's sound-effects
+    /// group.
     ///
-    /// ── 毎 tick の費用（sim）───────────────────────────────
+    /// ── the per-tick cost (sim) ────────────────────────────────────────────────────────────
     ///
-    /// <c>SampleDetailHeight</c> 1 回（4 読み ＋ 3 <c>Lerp</c>、§B-6）と float 20 本ほど。
-    /// **確保は 0 バイト。** 山頂の高さを毎 tick 引き直すのは、火口を彫った
-    /// <c>UpdateArea</c> が <c>m_detailHeights</c> に反映されるのが数フレーム遅れるためで、
-    /// 1 回だけ読むと**火口を彫る前の高さに噴煙が張り付く**。
+    /// One <c>SampleDetailHeight</c> (4 reads + 3 <c>Lerp</c>s, §B-6) and about 20 floats.
+    /// **Zero bytes of allocation.** The summit height is re-sampled every tick because the
+    /// <c>UpdateArea</c> that carved the crater takes a few frames to reach
+    /// <c>m_detailHeights</c>; read it just once and **the plume sticks to the height from before
+    /// the crater was carved**.
     /// </summary>
     public static class VolcanoEruption
     {
-        /// <summary>噴火が続くゲーム内時間（分）。**⑤が決めた演出値。**</summary>
+        /// <summary>The in-game time an eruption lasts (minutes). **A presentation value ⑤ chose.**</summary>
         private const float TotalMinutes = 24f;
 
-        /// <summary>強さを引き直す 1 区切り（ゲーム内分）。**フレーム番号は混ぜない。**</summary>
+        /// <summary>The segment at which the strength is re-drawn (in-game minutes). **Never mix in the frame number.**</summary>
         private const float BurstMinutes = 2f;
 
-        /// <summary>立ち上がりに使う割合（0〜この値で 0 → 1）。</summary>
+        /// <summary>The fraction used for the rise (0 → 1 between 0 and this value).</summary>
         private const float RiseFraction = 0.08f;
 
-        /// <summary>衰退が始まる割合（ここから 1 へ向けて 1 → 0）。</summary>
+        /// <summary>The fraction at which the decay starts (1 → 0 from here towards 1).</summary>
         private const float DecayFraction = 0.65f;
 
-        /// <summary>強さの下限側のゆらぎ（1 区切りごとに <c>[Floor, 1]</c> を引く）。</summary>
+        /// <summary>The lower end of the strength jitter (each segment draws from <c>[Floor, 1]</c>).</summary>
         private const float JitterFloor = 0.62f;
 
         /// <summary>
-        /// 山が育っているあいだの強さの下限（持続レベルに対する比）。
-        /// **噴火は山ができてから始まるのではなく、噴火が山を積み上げる**（SimCity 4 の順序）。
-        /// 隆起の最初から噴煙と発光を出し、隆起の進みとともにここから 1 へ上げる。
+        /// The floor on the strength while the mountain is growing (as a fraction of the sustain
+        /// level).
+        /// **The eruption does not start once the mountain is built; the eruption builds the
+        /// mountain** (SimCity 4's ordering).
+        /// The plume and the glow are emitted from the very start of the uplift, and the strength
+        /// rises from here to 1 as the uplift progresses.
         /// </summary>
         private const float BuildFloor = 0.35f;
 
         /// <summary>
-        /// 噴出口を火口の底からどれだけ上げるか（m）。
-        /// **「山頂から」ではない**（<see cref="SampleVent"/>）。
+        /// How far above the crater floor the vent sits (m).
+        /// **Not "above the summit"** (<see cref="SampleVent"/>).
         /// </summary>
         private const float VentLiftMetres = 6f;
 
-        // ── 破局噴火の「大爆発」（2026-08-22、所有者の指摘）────────────────
+        // ── the super-eruption's "great explosion" (2026-08-22, owner's report) ──────────────
         //
-        // > カルデラ形成時は、山体が大きく落ち込んで大爆発するんじゃないでしょうか…？
+        // > When the caldera forms, doesn't the cone body drop a long way and explode massively…?
         //
-        // そのとおりで、以前は「噴火が終わってから、静かに山が沈む」順序だった。
-        // **実際のカルデラ形成では、屋根が落ちること自体が大爆発を起こす** ——
-        // 空になりかけたマグマだまりに山体が 1 枚の板として落ち込み、
-        // ピストンのように残りのマグマを押し出す。噴火史でいちばん激しい瞬間は
-        // 陥没の**最中**であって、その後ではない。
+        // Quite so, and the old ordering was "once the eruption has finished, the mountain quietly
+        // sinks".
+        // **In a real caldera formation, the roof falling is itself what causes the great
+        // explosion** — the cone body drops as a single slab into the nearly-emptied magma chamber
+        // and pushes the remaining magma out like a piston. The most violent moment in the
+        // eruption's history is **during** the foundering, not after it.
         //
-        // だから⑤では、陥没のあいだ包絡線を<b>持続の天井に固定し</b>、
-        // 区切り（＝爆発）の間隔を詰める。陥没が終わってから衰退が始まる。
+        // So in ⑤ the envelope is <b>pinned to the ceiling of the sustain phase</b> throughout the
+        // foundering, and the segments (i.e. the explosions) are packed closer together. The decay
+        // begins once the foundering has finished.
 
         /// <summary>
-        /// 陥没を始めてよくなる経過の割合。持続に入ってしばらく吐き出した頃
-        /// （＝マグマだまりが空きはじめた頃）である。**演出値。**
+        /// The fraction of elapsed time after which the foundering may start. It is the point some
+        /// way into the sustain phase, after a good deal has been ejected (i.e. when the magma
+        /// chamber has started to empty). **A presentation value.**
         /// </summary>
         private const float ClimaxFraction = 0.40f;
 
-        /// <summary>大爆発のあいだ、区切りをどれだけ詰めるか。</summary>
+        /// <summary>How much the segments are packed together during the great explosion.</summary>
         private const float ClimaxBurstScale = 0.4f;
 
-        /// <summary>大爆発のあいだの強さのゆらぎの下限（ほぼ振り切ったままにする）。</summary>
+        /// <summary>The floor on the strength jitter during the great explosion (keep it nearly pegged).</summary>
         private const float ClimaxJitterFloor = 0.9f;
 
-        // ── sim 側の状態 ──────────────────────────────────────
+        // ── sim-side state ──────────────────────────────────────────────────────────────────
 
         private static bool _started;
         private static bool _active;
@@ -104,17 +114,17 @@ namespace DisasterPlus.Game
         private static float _elapsedMinutes;
 
         /// <summary>
-        /// 実時間の積算（ゲーム内分）。<see cref="_elapsedMinutes"/> は山が育っている
-        /// あいだ持続の入口で止めるので、**ゆらぎの区切りにはこちらを使う** ——
-        /// 止まったほうを使うと、育っているあいだ強さが 1 度も引き直されず、
-        /// 噴煙が完全に静止して見える。
+        /// The accumulated real time (in-game minutes). <see cref="_elapsedMinutes"/> is held at
+        /// the entrance to the sustain phase while the mountain is growing, so
+        /// **use this one for the jitter segments** — use the stopped one and the strength is
+        /// never re-drawn while it is growing, and the plume looks completely frozen.
         /// </summary>
         private static float _clockMinutes;
 
-        /// <summary>山がまだ育っているか（＝隆起と同時に噴いている）。</summary>
+        /// <summary>Whether the mountain is still growing (i.e. it is erupting while it uplifts).</summary>
         private static bool _building;
 
-        /// <summary>陥没と同時に起きている大爆発の最中か（<see cref="BeginClimax"/>）。</summary>
+        /// <summary>Whether we are in the great explosion that accompanies the foundering (<see cref="BeginClimax"/>).</summary>
         private static bool _climax;
         private static float _intensity;
         private static int _burstIndex;
@@ -123,35 +133,36 @@ namespace DisasterPlus.Game
         private static string _lastFailure;
         private static bool _errorLogged;
 
-        /// <summary>噴火が進行中か（**sim が決め、スナップショットに載る**）。</summary>
+        /// <summary>Whether an eruption is in progress (**decided by sim and carried in the snapshot**).</summary>
         public static bool Active { get { return _active; } }
 
-        /// <summary>噴火が終わったか。<see cref="VolcanoState"/> が次の位相へ進む合図。</summary>
+        /// <summary>Whether the eruption has finished. The cue for <see cref="VolcanoState"/> to move to the next phase.</summary>
         public static bool Finished { get { return _finished; } }
 
         /// <summary>
-        /// 山をまだ積み上げている最中か（＝隆起と同時に噴いている）。
-        /// **SimCity 4 と同じ順序**で、噴火は山ができてから始まるのではなく、
-        /// 噴火が山を積み上げる。
+        /// Whether the mountain is still being piled up (i.e. it is erupting while it uplifts).
+        /// **The same ordering as SimCity 4**: the eruption does not start once the mountain is
+        /// built; the eruption builds the mountain.
         /// </summary>
         public static bool Building { get { return _building; } }
 
-        /// <summary>今の噴出の強さ <c>[0,1]</c>。**⑤が決めた量**で、ゲームの値ではない。</summary>
+        /// <summary>The current eruption strength <c>[0,1]</c>. **A quantity ⑤ chose**, not a value from the game.</summary>
         public static float IntensityUnit { get { return _intensity; } }
 
         /// <summary>
-        /// 噴出口のワールド座標。<c>Y</c> は<b>火口の底</b>（＋少しの浮き）である。
-        /// **山頂（縁）ではない** —— 縁に乗せると、炎も噴煙も噴石も窪みの上に浮く
-        /// （2026-08-22、実機の指摘②「噴火口の炎が浮いて見える」）。
+        /// The vent's world coordinates. <c>Y</c> is <b>the crater floor</b> (plus a small lift).
+        /// **Not the summit (the rim)** — put it on the rim and the flames, the plume and the
+        /// ejecta all float above the hollow
+        /// (2026-08-22, live report ②: "the flames in the crater look like they are floating").
         /// </summary>
         public static Vec3 VentWorld { get { return _vent; } }
 
-        /// <summary>これまでに強さを引き直した回数（診断用）。</summary>
+        /// <summary>How many times the strength has been re-drawn so far (for diagnostics).</summary>
         public static int BurstsSoFar { get { return _bursts; } }
 
         /// <summary>
-        /// マグマだまりが空きはじめ、**屋根が落ちてよい頃合いか**
-        /// （<see cref="ClimaxFraction"/>）。破局噴火の <c>VolcanoState</c> だけが読む。
+        /// Whether the magma chamber has started to empty and **it is time for the roof to fall**
+        /// (<see cref="ClimaxFraction"/>). Only the super-eruption's <c>VolcanoState</c> reads it.
         /// </summary>
         public static bool ReadyForCollapse
         {
@@ -159,13 +170,14 @@ namespace DisasterPlus.Game
                          && _elapsedMinutes >= ClimaxFraction * TotalMinutes; }
         }
 
-        /// <summary>大爆発の最中か。表示と診断が使う。</summary>
+        /// <summary>Whether we are in the great explosion. Used by the display and the diagnostics.</summary>
         public static bool InClimax { get { return _climax; } }
 
         /// <summary>
-        /// **山体が落ち込みはじめた。** 包絡線を持続の天井で止め、区切りを詰める。
-        /// 陥没が終わるまで<b>噴火は終わらない</b> ——
-        /// 終わってしまうと、いちばん激しいはずの瞬間に噴煙が消える。
+        /// **The cone body has started to founder.** Hold the envelope at the sustain ceiling and
+        /// pack the segments together.
+        /// <b>The eruption does not end</b> until the foundering has finished — if it did, the
+        /// plume would disappear at what should be the most violent moment.
         /// </summary>
         public static void BeginClimax()
         {
@@ -173,25 +185,26 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **落ち切った。** 包絡線を解いて衰退へ向かわせる。
-        /// ここから <see cref="TotalMinutes"/> までの残りが噴火の終わりである。
+        /// **It has finished falling.** Release the envelope and let it head into the decay.
+        /// What is left between here and <see cref="TotalMinutes"/> is the end of the eruption.
         /// </summary>
         public static void EndClimax()
         {
             _climax = false;
         }
 
-        /// <summary>直近の失敗（**英語・診断用**）。無ければ null。</summary>
+        /// <summary>The most recent failure (**English, for diagnostics**). null if there is none.</summary>
         public static string LastFailure { get { return _lastFailure; } }
 
         /// <summary>
-        /// **sim スレッド。** 噴出の予定を決めるだけで、Unity オブジェクトを 1 つも作らない。
-        /// <see cref="VolcanoState"/> の位相分岐からのみ呼ぶこと。
+        /// **Sim thread.** It only decides the plan for the ejecta and builds not a single Unity
+        /// object. Call it only from <see cref="VolcanoState"/>'s phase branches.
         /// </summary>
         /// <param name="buildProgressUnit">
-        /// 隆起の進捗 [0,1]。**1 未満なら「山はまだ育っている」**という意味で、
-        /// 包絡線は持続の入口で止まり、強さは進捗に合わせて上がる。
-        /// 隆起が終わっている位相からは 1 を渡すこと。
+        /// Uplift progress [0,1]. **Below 1 means "the mountain is still growing"**, so the
+        /// envelope is held at the entrance to the sustain phase and the strength rises with the
+        /// progress.
+        /// Pass 1 from phases where the uplift has finished.
         /// </param>
         public static void Tick(VolcanoFootprint footprint, uint frame, float deltaMinutes,
                                 float buildProgressUnit)
@@ -205,8 +218,8 @@ namespace DisasterPlus.Game
             {
                 _lastFailure = "the eruption tick threw " + e.GetType().Name;
                 _active = false;
-                // ★ 例外で位相を止めない。噴火は演出であって、ここで固まると
-                //   プレイヤーは 2 つ目の火山を永久に置けなくなる。
+                // ★ Do not stall the phase on an exception. The eruption is presentation, and if
+                //   it wedges here the player can never place a second volcano.
                 _finished = true;
 
                 if (!_errorLogged)
@@ -239,19 +252,22 @@ namespace DisasterPlus.Game
                 _clockMinutes += deltaMinutes;
             }
 
-            // ★★ **山が育っているあいだは包絡線を持続の入口で止める。**
-            //    止めないと、隆起（既定 30 ゲーム内分）のほうが噴火（24 分）より長いので、
-            //    山ができあがったときには噴火がもう終わっている。
-            //    止めるのは包絡線だけで、_clockMinutes は進み続ける（ゆらぎのため）。
+            // ★★ **While the mountain is growing, hold the envelope at the entrance to the
+            //    sustain phase.** Without that, the uplift (30 in-game minutes by default) is
+            //    longer than the eruption (24 minutes), so by the time the mountain is finished
+            //    the eruption is already over.
+            //    Only the envelope is held; _clockMinutes keeps advancing (for the jitter).
             if (_building)
             {
                 float sustainStart = RiseFraction * TotalMinutes;
                 if (_elapsedMinutes > sustainStart) _elapsedMinutes = sustainStart;
             }
 
-            // ★★ **大爆発のあいだも同じように止める**（<see cref="BeginClimax"/>）。
-            //    陥没は準備の走査を待つので、噴火（24 分）より長くなりうる。
-            //    止めないと、<b>山が落ちている最中に噴煙だけ消える</b>。
+            // ★★ **Hold it the same way during the great explosion** (<see cref="BeginClimax"/>).
+            //    The foundering waits on the clearing sweep, so it can run longer than the
+            //    eruption (24 minutes).
+            //    Without holding it, <b>the plume alone disappears while the mountain is
+            //    falling</b>.
             if (_climax)
             {
                 float decayStart = DecayFraction * TotalMinutes;
@@ -266,14 +282,16 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ 噴出口は毎 tick 引き直す。**山はまだ育っていて、火口の底も
-            //    一緒に上がっている**（VolcanoCrater のクラス doc）ので、
-            //    1 回しか読まないと炎が置き去りになって宙に浮く（指摘②）。
+            // ★★ Re-sample the vent every tick. **The mountain is still growing and the crater
+            //    floor is rising with it** (the class doc of VolcanoCrater), so reading it once
+            //    leaves the flames behind, floating in mid-air (report ②).
             _vent = SampleVent(footprint);
 
-            // ★ 区切りは経過ゲーム内時間から出す。**frameIndex % N で組まない**
-            //   （DAYTIME_FRAMES = 65536、1 ゲーム内分 ≒ 45.51 フレーム。火災旋風 付録 A-4）。
-            // ★ 大爆発のあいだは区切りを詰める（＝爆発が立て続けに起きる）。
+            // ★ The segments come from elapsed in-game time. **Do not build it from
+            //   frameIndex % N** (DAYTIME_FRAMES = 65536, one in-game minute ≒ 45.51 frames;
+            //   firestorm appendix A-4).
+            // ★ During the great explosion the segments are packed together (i.e. the explosions
+            //   come one after another).
             float burstMinutes = _climax ? BurstMinutes * ClimaxBurstScale : BurstMinutes;
             int burst = (int)(_clockMinutes / burstMinutes);
             if (burst != _burstIndex)
@@ -282,15 +300,17 @@ namespace DisasterPlus.Game
                 _bursts++;
             }
 
-            // ★ 乱数にフレーム番号を混ぜない（計画「2 つの乱数生成器」）。混ぜると
-            //   同じ噴火が tick ごとに抽選し直され、強さが毎フレーム跳ねる。
+            // ★ Do not mix the frame number into the randomness (the plan's "two random number
+            //   generators"). Mix it in and the same eruption is re-drawn every tick, so the
+            //   strength jumps about every frame.
             float floor = _climax ? ClimaxJitterFloor : JitterFloor;
             float jitter = floor
                            + (1f - floor)
                              * DeterministicRandom.Unit(_seed, (uint)_burstIndex);
 
             float envelope = Envelope(_elapsedMinutes / TotalMinutes);
-            // 育っているあいだは山の大きさに合わせて強くしていく（小さい山に巨大な噴煙は乗らない）。
+            // While it is growing, build the strength up in step with the mountain's size
+            // (a huge plume does not sit on a small mountain).
             if (_building) envelope *= BuildFloor + (1f - BuildFloor) * build;
 
             _intensity = Clamp01(envelope * jitter);
@@ -298,8 +318,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 立ち上がり → 持続 → 衰退の包絡線 <c>[0,1]</c>。
-        /// **物理量ではない**（設計書 §7.4 / 計画「出してよい断定の範囲」の 5）。
+        /// The rise → sustain → decay envelope <c>[0,1]</c>.
+        /// **It is not a physical quantity** (design doc §7.4 / item 5 of the plan's "the range of
+        /// assertions we may make").
         /// </summary>
         private static float Envelope(float t)
         {
@@ -318,23 +339,26 @@ namespace DisasterPlus.Game
             _centre = footprint.Centre;
             _vent = SampleVent(footprint);
 
-            // 地点から決まる種。**都市をまたいでも同じ地点なら同じ噴火**になる
-            // （DeterministicRandom は状態を持たないハッシュ）。
+            // The seed is decided by the location. **The same spot gives the same eruption even
+            // across cities** (DeterministicRandom is a stateless hash).
             _seed = DeterministicRandom.Hash(
                 unchecked((uint)Mathf.RoundToInt(footprint.Centre.X)),
                 unchecked((uint)Mathf.RoundToInt(footprint.Centre.Z)));
         }
 
         /// <summary>
-        /// 噴出口（＝**火口の底**）のワールド座標。**sim スレッド専用**（<c>TerrainManager</c>）。
+        /// The world coordinates of the vent (= **the crater floor**). **Sim thread only**
+        /// (<c>TerrainManager</c>).
         ///
-        /// 中心の地形高さをそのまま読めばよい —— 火口は高さプロファイルの一部なので
-        /// （<c>Core/Volcano/VolcanoCrater</c>）、**中心のセルはもう火口の底そのもの**である。
-        /// 育っているあいだも毎 tick 読み直すので、底が上がれば噴出口も上がる。
+        /// Simply reading the terrain height at the centre is enough — the crater is part of the
+        /// height profile (<c>Core/Volcano/VolcanoCrater</c>), so **the centre cell already is the
+        /// crater floor**. It is re-read every tick while it grows, so if the floor rises the vent
+        /// rises with it.
         ///
-        /// 読めなければ「調査時の地形高さ ＋ 出来上がりの火口の底」で代用する ——
-        /// **0 を並べた「それらしい」座標を作らない**（地面の中で噴火することになる）し、
-        /// **山頂で代用もしない**（それが指摘②の見え方そのものである）。
+        /// If it cannot be read, stand in with "the terrain height at survey time + the finished
+        /// crater's floor" — **do not fabricate "plausible" coordinates out of a row of zeroes**
+        /// (that would erupt inside the ground), and **do not stand in with the summit** (that is
+        /// exactly the look of report ②).
         /// </summary>
         private static Vec3 SampleVent(VolcanoFootprint footprint)
         {
@@ -363,9 +387,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// sim 側の状態を捨てる。**レベルアンロードと、新しい火山の開始で呼ぶ。**
-        /// <c>_errorLogged</c> は戻さない（ゲームのビルドに対する事実であって
-        /// 都市ごとの状態ではない）。
+        /// Discard the sim-side state. **Call on level unload and when a new volcano starts.**
+        /// <c>_errorLogged</c> is not reset (it is a fact about the build of the game, not
+        /// per-city state).
         /// </summary>
         public static void Reset()
         {

@@ -31,7 +31,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void EveryTriangleIndexIsInsideTheVertexArray()
         {
-            // 範囲外の添字は Unity 側で例外を出さず、静かに描画を壊す。
+            // An out-of-range index raises no exception on the Unity side; it quietly breaks
+            // the rendering.
             Vec3[] v; float[] uv; int[] tri;
             Assert.True(BuildStraight(24, out v, out uv, out tri));
             Assert.Equal(0, tri.Length % 3);
@@ -46,7 +47,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         {
             Vec3[] v; float[] uv; int[] tri;
             Assert.True(BuildStraight(4, out v, out uv, out tri));
-            // 最初の 2 頂点は 1 点目の左右。X 方向へ進む折れ線なので Z が ±10。
+            // The first two vertices are the left and right of the first point. The polyline
+            // runs along X, so Z is ±10.
             float span = System.Math.Abs(v[0].Z - v[1].Z);
             Assert.Equal(20f, span, 2);
         }
@@ -65,7 +67,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheGeometryIsDeterministicAndHasNoNaN()
         {
-            // 「都市を読み直したら溶岩の形が変わった」を起こさない。
+            // Never cause "the shape of the lava changed after reloading the city".
             Vec3[] a; float[] uvA; int[] triA;
             Vec3[] b; float[] uvB; int[] triB;
             Assert.True(BuildStraight(20, out a, out uvA, out triA));
@@ -95,7 +97,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void RepeatedPointsDoNotProduceNaNNormals()
         {
-            // 溶岩が止まると同じ点が続く。方向が 0 になっても壊れないこと。
+            // When the lava stops, the same point repeats. It must not break when the
+            // direction becomes 0.
             Vec2[] pts = new Vec2[] { new Vec2(0f, 0f), new Vec2(0f, 0f), new Vec2(12f, 0f) };
             float[] widths = new float[] { 20f, 20f, 20f };
             Vec3[] v; float[] uv; int[] tri;
@@ -112,7 +115,8 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.InRange(LavaRibbon.MaxPoints, 2, 4096);
             Assert.True(LavaRibbon.MinWidthMetres > 0f);
 
-            // 上限を超える点数は上限で切る（配列を無限に伸ばさない）。
+            // A point count over the limit is cut at the limit (the arrays never grow without
+            // bound).
             int over = LavaRibbon.MaxPoints + 50;
             Vec2[] pts = new Vec2[over];
             float[] widths = new float[over];

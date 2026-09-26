@@ -3,33 +3,37 @@ using DisasterPlus.Core.Common;
 
 namespace DisasterPlus.Core.Volcano
 {
-    /// <summary>火口から放り出された岩塊 1 個の弾道。**純粋な値**（Unity も乱数も出てこない）。</summary>
+    /// <summary>The trajectory of one block thrown out of the crater. **A pure value** (no
+    /// Unity, no random numbers).</summary>
     public struct EjectaBlock
     {
-        /// <summary>この枠が使えるか。false なら**何も描かない**（0 で代用しない）。</summary>
+        /// <summary>Whether this slot is usable. If false, **draw nothing** (do not substitute
+        /// 0).</summary>
         public readonly bool Valid;
 
-        /// <summary>水平の向き（単位ベクトル）。</summary>
+        /// <summary>The horizontal direction (a unit vector).</summary>
         public readonly float DirX;
 
         public readonly float DirZ;
 
-        /// <summary>水平の初速（m/秒）。</summary>
+        /// <summary>Horizontal initial speed (m/s).</summary>
         public readonly float HorizontalSpeed;
 
-        /// <summary>鉛直の初速（m/秒、上が正）。</summary>
+        /// <summary>Vertical initial speed (m/s, up is positive).</summary>
         public readonly float VerticalSpeed;
 
         /// <summary>
-        /// 岩塊の大きさ <c>[0,1]</c>。**大きいほど遠くへ飛ぶ**（所有者の依頼どおり）。
-        /// 描画側は粒の量と着弾の煙の広さにこれを掛ける。
+        /// The block's size <c>[0,1]</c>. **The bigger it is the further it flies** (as the
+        /// owner asked). The drawing side multiplies the particle count and the width of the
+        /// impact dust by this.
         /// </summary>
         public readonly float SizeUnit;
 
-        /// <summary>着弾までの秒数。<see cref="EjectaBallistics.Plan"/> が山肌と交差させて出す。</summary>
+        /// <summary>Seconds until impact. <see cref="EjectaBallistics.Plan"/> derives it by
+        /// intersecting the flanks.</summary>
         public readonly float FlightSeconds;
 
-        /// <summary>着弾点の火口からの水平距離（m）。</summary>
+        /// <summary>The impact point's horizontal distance from the crater (m).</summary>
         public readonly float RangeMetres;
 
         public EjectaBlock(float dirX, float dirZ, float horizontalSpeed, float verticalSpeed,
@@ -47,116 +51,132 @@ namespace DisasterPlus.Core.Volcano
     }
 
     /// <summary>
-    /// **噴石（ballistic blocks）の弾道。** エンジン非依存の純関数だけで、
-    /// Unity の型もゲームの型も <c>System.Random</c> も出てこない。
+    /// **The trajectories of ballistic blocks.** Pure engine-free functions only; no Unity
+    /// types, no game types and no <c>System.Random</c> appear here.
     ///
-    /// ── なぜ Core に置くのか ─────────────────────────────────
+    /// ── Why it lives in Core ─────────────────────────────────
     ///
-    /// 2026-08-22 の所有者の依頼:
+    /// The owner's request of 2026-08-22:
     ///
-    /// > 噴火の際に爆発＋噴石のアニメーションも実装してほしいです。
+    /// > I'd like an explosion plus flying-rock animation implemented for the eruption too.
     ///
-    /// 今までの「噴石」は火口の上で粒子を湧かせ続けるだけで、
-    /// **1 個 1 個の岩が飛んで落ちてはいなかった**。飛ばすとなると
-    /// 「どこへ何秒で落ちるか」を決める必要があり、それは**ただの放物線**である ——
-    /// つまり実機を起動しないと 1 行も確かめられない理由が無い。ここに集めてテストで固定する。
+    /// The "ejecta" up to now only kept spawning particles above the crater, and
+    /// **individual rocks were never flying and landing**. To make them fly you have to
+    /// decide "where does it land and how long does it take", and that is **just a
+    /// parabola** — so there is no reason a single line of it cannot be checked without
+    /// launching the game. Gather it here and pin it with tests.
     ///
-    /// ── 何が本物で、何が⑤の演出値か ─────────────────────────────
+    /// ── What is real and what is ⑤'s presentation value ─────────────────────────────
     ///
-    ///   - <see cref="GravityMetresPerSecondSquared"/> = 9.81 は**実在の物理**である
-    ///   - 放出角 <see cref="MinElevationDegrees"/>〜<see cref="MaxElevationDegrees"/>
-    ///     （55〜80°）も実際の噴石の観測に近い（火口から急角度で出る）
-    ///   - **飛距離は初速からではなく、先に決める。** 山の半径に対する比
-    ///     （<see cref="MinRangeFraction"/>〜<see cref="MaxRangeFraction"/>）で決めてから
-    ///     <c>v = sqrt(range·g / sin 2φ)</c> で初速を逆算する。
-    ///     こうしないと**山の大きさに追従しない** —— 半径 350 m の溶岩ドームから
-    ///     2.7 km 岩が飛ぶことになる。⑤はプレイヤーが大きさを選べる機能なので、
-    ///     そこは物理より先に画面の要求が来る。実測（成層、R = 1200 m）で
-    ///     **着弾 255〜1642 m（平均 876 m）、2 割が裾の外、最長の滞空 27 秒**である
-    ///   - 空気抵抗は入れない。入れると「大きいほど遠い」を作るのに終端速度が要り、
-    ///     数が 3 つ増えて**どれも実測できない**。大小の差は飛距離の比で直接つける
+    ///   - <see cref="GravityMetresPerSecondSquared"/> = 9.81 is **real physics**
+    ///   - The launch angles <see cref="MinElevationDegrees"/> to
+    ///     <see cref="MaxElevationDegrees"/> (55-80°) are also close to real observations of
+    ///     ejecta (they leave the crater at steep angles)
+    ///   - **The range is decided first, not derived from the initial speed.** It is fixed
+    ///     as a fraction of the mountain's radius (<see cref="MinRangeFraction"/> to
+    ///     <see cref="MaxRangeFraction"/>) and then the initial speed is worked backwards as
+    ///     <c>v = sqrt(range·g / sin 2φ)</c>.
+    ///     Without that it **does not follow the mountain's size** — you would have rocks
+    ///     flying 2.7 km out of a lava dome with a 350 m radius. ⑤ is a feature where the
+    ///     player picks the size, so there the screen's requirements come before physics.
+    ///     Measured (stratovolcano, R = 1200 m): **impacts at 255-1642 m (mean 876 m), 20%
+    ///     land beyond the foot, and the longest flight is 27 seconds**
+    ///   - No air resistance. Adding it means needing a terminal velocity to produce "the
+    ///     bigger the further", which adds three numbers **none of which can be measured**.
+    ///     The difference between large and small is made directly through the range
+    ///     fraction
     ///
-    /// ── 着弾はどこか ────────────────────────────────────────
+    /// ── Where it lands ────────────────────────────────────────
     ///
-    /// **火口を含んだ山肌**（<c>VolcanoCrater</c> の天井で切った円錐。起伏を掛ける前）と
-    /// 放物線の交点である。
+    /// The intersection of the parabola with **the flanks including the crater** (the cone
+    /// cut by <c>VolcanoCrater</c>'s ceiling, before the relief is applied).
     ///
-    /// ★★ <b>火口を含めるのを忘れないこと。</b> <c>VolcanoShape.ProfileAt</c> だけを
-    ///   地面にすると <c>d = 0</c> で山頂の高さ H が返るのに、噴出口は**火口の底**に在る ——
-    ///   打ち上げた瞬間に「地面より下」と判定されて、**噴石が 1 個も飛ばない**
-    ///   （実際にそうなった。テストが捕まえた）。
+    /// ★★ <b>Do not forget to include the crater.</b> Make the ground
+    ///   <c>VolcanoShape.ProfileAt</c> alone and it returns the summit height H at
+    ///   <c>d = 0</c>, whereas the vent is at **the crater floor** — so the instant a rock
+    ///   is launched it is judged "below the ground" and **not one block flies**
+    ///   (it actually happened; a test caught it).
     ///
-    /// 起伏（<c>VolcanoRelief</c>）は削る向きにしか働かないので、
-    /// **実際の地面はここで使う面と同じか低い** —— つまり噴石は谷の中では
-    /// 数 m 手前・数 m 上で止まる。着弾の土煙は 1 秒足らずで消えるので、
-    /// 起伏を評価し直す価値は無い（<c>VolcanoRelief.ProfileAt</c> は 1 回 300 flop で、
-    /// ここは 1 個あたり 170 回評価する）。
+    /// The relief (<c>VolcanoRelief</c>) only ever works in the direction of shaving away,
+    /// so **the real ground is at or below the surface used here** — meaning a block stops a
+    /// few metres short and a few metres high inside a gully. The impact dust vanishes in
+    /// under a second, so re-evaluating the relief is not worth it
+    /// (<c>VolcanoRelief.ProfileAt</c> is about 300 flops a call, and this evaluates it 170
+    /// times per block).
     ///
-    /// 半径の外では円錐は 0 なので、**元の地形の高さ**（＝火山を置いた地点の地面）で
-    /// 止まる。起伏のある土地では実際の地面と数 m ずれるが、そこもやはり
-    /// 1 秒足らずの土煙である。
+    /// Outside the radius the cone is 0, so it stops at **the original terrain height**
+    /// (i.e. the ground at the point where the volcano was placed). On uneven ground that
+    /// is a few metres off the real ground, but again that is under a second of dust.
     ///
-    /// ── 乱数 ────────────────────────────────────────────
+    /// ── Random numbers ────────────────────────────────────────────
     ///
-    /// <see cref="DeterministicRandom"/> だけ。**フレーム番号を種に混ぜない** ——
-    /// 混ぜると同じ岩が毎フレーム抽選し直され、飛んでいる途中で行き先が変わる。
-    /// 種は「火山の地点 × 噴出の回数 × 岩の番号」だけから決まる。
+    /// <see cref="DeterministicRandom"/> only. **Do not mix the frame number into the
+    /// seed** — mix it in and the same rock is re-drawn every frame, changing where it is
+    /// going mid-flight.
+    /// The seed is decided from "the volcano's location × the eruption number × the block
+    /// number" alone.
     /// </summary>
     public static class EjectaBallistics
     {
-        /// <summary>重力加速度（m/秒²）。**ここだけは実在の物理。**</summary>
+        /// <summary>Gravitational acceleration (m/s²). **This alone is real physics.**</summary>
         public const float GravityMetresPerSecondSquared = 9.81f;
 
-        /// <summary>1 回の噴出で放り出す岩の数の下限（＝いちばん弱いとき）。</summary>
+        /// <summary>The floor on how many blocks one eruption throws out (i.e. at its
+        /// weakest).</summary>
         public const int MinBlocksPerBlast = 5;
 
-        /// <summary>同上の上限。**これが同時に描く粒子系の数の上限でもある。**</summary>
+        /// <summary>The ceiling on the same. **It is also the cap on how many particle systems
+        /// are drawn at once.**</summary>
         public const int MaxBlocksPerBlast = 16;
 
         /// <summary>
-        /// いちばん小さい岩の飛距離（山の半径に対する比）。
-        /// **ここは「平地に落ちるとしたときの」比である** —— 実際は火口の底から
-        /// 出て、それより低い斜面と裾へ落ちるので、着弾はこれより 3〜4 割遠い。
+        /// The smallest block's range (as a fraction of the mountain's radius).
+        /// **This is the fraction "as if it landed on the flat"** — in practice it leaves
+        /// the crater floor and lands on the flanks and the foot below that, so the impact
+        /// is 30-40% further out than this.
         /// </summary>
         public const float MinRangeFraction = 0.25f;
 
-        /// <summary>いちばん大きい岩の飛距離（同上）。**裾より外まで飛ぶ。**</summary>
+        /// <summary>The largest block's range (as above). **It flies beyond the foot.**</summary>
         public const float MaxRangeFraction = 0.90f;
 
-        /// <summary>放出角の下限（度、水平から）。</summary>
+        /// <summary>The floor on the launch angle (degrees from the horizontal).</summary>
         public const float MinElevationDegrees = 42f;
 
         /// <summary>
-        /// 放出角の上限（度）。**80° まで上げない。**
-        /// 同じ飛距離でも角度が立つほど初速も滞空時間も伸びる。80° を許した版では
-        /// 48 秒の弾道が出た（tools/VolcanoPreview の実測）——
-        /// 物理としては正しい（実際の噴石も 20〜40 秒かかる）が、画面では
-        /// 「岩が止まって見える」時間である。65° で最長 27 秒に収まる。
+        /// The ceiling on the launch angle (degrees). **Do not raise it to 80°.**
+        /// For the same range, the steeper the angle the greater both the initial speed and
+        /// the time aloft. The version that allowed 80° produced a 48-second trajectory
+        /// (measured in tools/VolcanoPreview) — physically correct (real ejecta do take
+        /// 20-40 seconds), but on screen that is a length of time where "the rock looks like
+        /// it has stopped". At 65° the longest comes in at 27 seconds.
         /// </summary>
         public const float MaxElevationDegrees = 65f;
 
-        /// <summary>飛距離のばらつき幅（±この割合）。</summary>
+        /// <summary>The spread of ranges (± this fraction).</summary>
         public const float RangeJitter = 0.18f;
 
-        /// <summary>噴出の強さ 0 のときの飛距離の比（強さ 1 で 1.0）。</summary>
+        /// <summary>The range fraction at eruption strength 0 (it is 1.0 at strength 1).</summary>
         public const float WeakRangeScale = 0.55f;
 
-        /// <summary>弾道を刻む歩幅（秒）。細かくしても着弾点は数 m しか動かない。</summary>
+        /// <summary>The step used to march the trajectory (seconds). Making it finer moves the
+        /// impact point by only a few metres.</summary>
         private const float MarchSeconds = 0.25f;
 
         /// <summary>
-        /// これ以上は飛ばさない（秒）。**無限ループにしない**ための帽子であって、
-        /// 演出値ではない —— 上の帯（飛距離 0.9R、角度 65°）でいちばん長い弾道でも
-        /// 27 秒なので、**ここに当たる弾道は在ってはならない**
-        /// （テストが最長を測って固定している）。
+        /// No flight goes beyond this (seconds). **A cap to prevent an infinite loop**, not a
+        /// presentation value — the longest trajectory within the bands above (range 0.9R,
+        /// angle 65°) is 27 seconds, so **no trajectory should ever hit this**
+        /// (a test measures the longest and pins it).
         /// </summary>
         public const float MaxFlightSeconds = 60f;
 
-        /// <summary>二分法の回数。歩幅 0.25 秒を 11 回割ると 0.12 ms。</summary>
+        /// <summary>The bisection count. Splitting the 0.25 s step 11 times gives 0.12
+        /// ms.</summary>
         private const int RefineSteps = 11;
 
         /// <summary>
-        /// 1 回の噴出で放り出す岩の数。強いほど多い。
+        /// How many blocks one eruption throws out. The stronger it is, the more.
         /// </summary>
         public static int BlocksPerBlast(float unit)
         {
@@ -169,13 +189,15 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 岩 1 個の弾道を決める。**同じ (種, 噴出番号, 岩番号) なら必ず同じ弾道。**
+        /// Decides one block's trajectory. **The same (seed, eruption number, block number)
+        /// always gives the same trajectory.**
         ///
-        /// <paramref name="ventAboveBaseMetres"/> は噴出口が「山を置いた地点の地面」から
-        /// 何 m 上かである（＝火口の底の高さ）。0 以下や NaN は 0 に落とす。
+        /// <paramref name="ventAboveBaseMetres"/> is how many metres the vent sits above
+        /// "the ground at the point the mountain was placed" (i.e. the crater floor's
+        /// height). Values of 0 or less, and NaN, fall to 0.
         ///
-        /// 山の半径・最終高が読めていない（0 以下）ときは
-        /// <c>Valid == false</c> を返す —— **0 で代用しない。**
+        /// When the mountain's radius or final height cannot be read (0 or less) it returns
+        /// <c>Valid == false</c> — **it does not substitute 0.**
         /// </summary>
         public static EjectaBlock Plan(uint seed, int blastIndex, int blockIndex, float unit,
                                        VolcanoForm form, float radiusMetres, float heightMetres,
@@ -198,7 +220,8 @@ namespace DisasterPlus.Core.Volcano
 
             float u = Clamp01(unit);
 
-            // ★ 大きいほど遠い（所有者の依頼）。強さは全体を縮める向きにだけ効く。
+            // ★ The bigger the further (the owner's request). The strength only ever works
+            //   in the direction of shrinking the whole thing.
             float fraction = MinRangeFraction
                              + (MaxRangeFraction - MinRangeFraction) * sizeUnit;
             fraction *= 1f + RangeJitter * (jitterUnit * 2f - 1f);
@@ -214,8 +237,9 @@ namespace DisasterPlus.Core.Volcano
             float sin2 = (float)Math.Sin(2.0 * elevation);
             if (!(sin2 > 0.02f)) sin2 = 0.02f;
 
-            // 平地に落ちるとしたときの初速。実際は火口の底から出て斜面に落ちるので、
-            // 下の March がそれより手前（斜面）でも先（裾の外）でも正しく止める。
+            // The initial speed as if it landed on the flat. In practice it leaves the
+            // crater floor and lands on the flanks, so the March below correctly stops it
+            // whether that is nearer (on the slope) or further (beyond the foot).
             float speed = (float)Math.Sqrt(range * GravityMetresPerSecondSquared / sin2);
 
             float horizontal = speed * (float)Math.Cos(elevation);
@@ -232,9 +256,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 噴出口から見た岩の位置（m）。<paramref name="t"/> は打ち上げからの秒数。
-        /// **<c>t</c> が飛行時間を超えていても計算はする**（呼び出し側が
-        /// <see cref="EjectaBlock.FlightSeconds"/> で切ること）。
+        /// The block's position as seen from the vent (m). <paramref name="t"/> is seconds
+        /// since launch.
+        /// **It still computes a value when <c>t</c> is past the flight time** (the caller
+        /// cuts it off with <see cref="EjectaBlock.FlightSeconds"/>).
         /// </summary>
         public static void OffsetAt(EjectaBlock block, float t,
                                     out float dx, out float dy, out float dz)
@@ -250,8 +275,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 放物線と山肌（**起伏を掛ける前の円錐**）の交点までの秒数。
-        /// 見つからなければ <see cref="MaxFlightSeconds"/> で切る。
+        /// The seconds until the parabola meets the flanks (**the cone before the relief is
+        /// applied**).
+        /// If none is found, it is cut off at <see cref="MaxFlightSeconds"/>.
         /// </summary>
         private static float March(VolcanoForm form, float radiusMetres, float heightMetres,
                                    float ventAboveBase, float horizontal, float vertical)
@@ -278,7 +304,7 @@ namespace DisasterPlus.Core.Volcano
             return MaxFlightSeconds;
         }
 
-        /// <summary>時刻 <paramref name="t"/> で岩が地面より下にいるか。</summary>
+        /// <summary>Whether the block is below the ground at time <paramref name="t"/>.</summary>
         private static bool Below(VolcanoForm form, float radiusMetres, float heightMetres,
                                   float ventAboveBase, float horizontal, float vertical, float t)
         {
@@ -289,10 +315,11 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 中心から <paramref name="distanceMetres"/> の地面（**火口を含む**、起伏なし）。
-        /// <c>VolcanoCrater.ProfileAt</c> と同じ 2 つの式の小さいほうで、
-        /// あちらと違って <c>VolcanoRelief</c> を要らない（起伏は削る向きだけなので、
-        /// これは必ず実際の地面以上である）。
+        /// The ground at <paramref name="distanceMetres"/> from the centre (**including the
+        /// crater**, without the relief).
+        /// It is the smaller of the same two expressions as <c>VolcanoCrater.ProfileAt</c>,
+        /// and unlike that one it needs no <c>VolcanoRelief</c> (the relief only works in
+        /// the direction of shaving away, so this is always at or above the real ground).
         /// </summary>
         public static float GroundAt(VolcanoForm form, float distanceMetres,
                                      float radiusMetres, float heightMetres)

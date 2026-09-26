@@ -1,6 +1,6 @@
 namespace DisasterPlus.Core.Earthquake
 {
-    /// <summary>災害の進行位相。</summary>
+    /// <summary>How far along a disaster is.</summary>
     public enum EarthquakePhase
     {
         Unknown,
@@ -11,14 +11,15 @@ namespace DisasterPlus.Core.Earthquake
     }
 
     /// <summary>
-    /// DisasterData.m_flags のビットと、そこから導ける判定。
+    /// The bits of DisasterData.m_flags, and what can be derived from them.
     ///
-    /// Core に置いているのは、これがゲームの型に一切依存しない整数演算であり、
-    /// **ここを取り違えると全てが静かに壊れる**からユニットテストで固定したいため。
-    /// Game 側は <c>(int)data.m_flags</c> を渡すだけにして、フラグの意味を
-    /// 2 箇所に書かない。
+    /// This lives in Core because it is integer arithmetic that depends on none of the
+    /// game's types, and because **get this wrong and everything breaks silently**, so we
+    /// want it pinned by unit tests. The Game side only passes in
+    /// <c>(int)data.m_flags</c>, so the meaning of the flags is never written down in two
+    /// places.
     ///
-    /// 典拠: IL 事実文書 §A-1（位相機械）/ §A-6（ハザードマップの 2 段ゲート）。
+    /// Sources: IL findings doc §A-1 (the phase machine) / §A-6 (the hazard map's two-stage gate).
     /// </summary>
     public static class DisasterPhases
     {
@@ -30,22 +31,22 @@ namespace DisasterPlus.Core.Earthquake
         public const int Finished = 32;
 
         /// <summary>
-        /// これが立っていないと EarthquakeAI.StartDisaster / TsunamiAI.StartDisaster は
-        /// 即 return し、m_activationFrame が 0 のまま **Emerging で永久に固まる**（§A-1）。
-        /// 災害を起こす側（Task 9）は必ず立てる。読む側（Task 3）は
-        /// m_activationFrame == 0 を「未定」として扱う。
+        /// Without this bit set, EarthquakeAI.StartDisaster / TsunamiAI.StartDisaster return
+        /// immediately, m_activationFrame stays 0 and the disaster **sticks in Emerging for
+        /// ever** (§A-1). Whoever starts a disaster (Task 9) must always set it. Whoever
+        /// reads one (Task 3) treats m_activationFrame == 0 as "not decided yet".
         /// </summary>
         public const int SelfTrigger = 64;
 
         public const int Significant = 256;
 
         /// <summary>
-        /// 測位済み。地震にこれを立てるのは、震央の EarthquakeCoverage != 0、
-        /// すなわち**地震計だけ**（§A-2 / §C-2）。
+        /// Located. For an earthquake this only gets set when EarthquakeCoverage at the
+        /// epicentre is != 0, which means **seismometers and nothing else** (§A-2 / §C-2).
         /// </summary>
         public const int Located = 4096;
 
-        /// <summary>進んでいる方から順に見る。</summary>
+        /// <summary>Checked in order, furthest-along first.</summary>
         public static EarthquakePhase PhaseOf(int flags)
         {
             if ((flags & Finished) != 0) return EarthquakePhase.Finished;
@@ -55,7 +56,8 @@ namespace DisasterPlus.Core.Earthquake
             return EarthquakePhase.Unknown;
         }
 
-        /// <summary>IL: (m_flags &amp; 3) == 1。バニラ自身の走査条件をそのまま写す。</summary>
+        /// <summary>IL: (m_flags &amp; 3) == 1. A straight copy of vanilla's own sweep
+        /// condition.</summary>
         public static bool IsAlive(int flags)
         {
             return (flags & (Created | Deleted)) == Created;
@@ -67,9 +69,9 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// この災害が今ハザードマップに何かを塗るか。
-        /// **嵐（ThunderStormAI / TornadoAI）とバイト単位で同一のゲート**（§A-6）。
-        /// これが false なのにグリッドが 0 だからといって「安全」と読ませてはいけない。
+        /// Whether this disaster is painting anything onto the hazard map right now.
+        /// **Byte-for-byte the same gate as the storms (ThunderStormAI / TornadoAI)** (§A-6).
+        /// When this is false, a grid reading of 0 must not be shown to the player as "safe".
         /// </summary>
         public static bool PaintsHazardMap(int flags)
         {
@@ -77,19 +79,21 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 同じゲートを、既に位相へ畳んだ読み取り結果（<c>EarthquakeReading</c>）から見る版。
+        /// The same gate, seen from a reading that has already been folded down to a phase
+        /// (<c>EarthquakeReading</c>).
         ///
-        /// **計画の変更ファイル一覧に無い追加である。** それでもここに置くのは、
-        /// これを呼ぶ側（Task 4 のパネルと診断）が生の m_flags を持っていないためで、
-        /// 同じ条件を Game 側の 2 箇所へ書き写すと、①が直したばかりの
-        /// 「ゲートを別の場所で読み替えて数値を出す」欠陥をそのまま再生産する。
+        /// **This is an addition that was not on the plan's list of files to change.** It
+        /// is here anyway because its callers (Task 4's panel and diagnostics) do not hold
+        /// the raw m_flags, and copying the same condition into two places on the Game side
+        /// would simply reproduce the very defect ① has only just fixed: reading the gate
+        /// somewhere else and reporting a number off the back of it.
         ///
-        /// <see cref="PaintsHazardMap(int)"/> と一致することは、位相のビットが
-        /// **互いに排他**であることに依る（IL 事実文書 §A-1:
-        /// <c>ActivateDisaster</c> は <c>(m_flags &amp; ~4) | 8</c>、
-        /// <c>DeactivateDisaster</c> は <c>(m_flags &amp; ~12) | 16</c> と、
-        /// 遷移のたびに前の位相ビットを落としている）。
-        /// この前提はユニットテストで固定してある。
+        /// That it agrees with <see cref="PaintsHazardMap(int)"/> rests on the phase bits
+        /// being **mutually exclusive** (IL findings doc §A-1:
+        /// <c>ActivateDisaster</c> does <c>(m_flags &amp; ~4) | 8</c> and
+        /// <c>DeactivateDisaster</c> does <c>(m_flags &amp; ~12) | 16</c>, so every
+        /// transition drops the previous phase bit).
+        /// That assumption is pinned by unit tests.
         /// </summary>
         public static bool PaintsHazardMap(bool located, EarthquakePhase phase)
         {

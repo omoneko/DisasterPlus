@@ -3,47 +3,55 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 噴煙柱を 1 段ぶん湧かすための指示。**Unity の型は 1 つも出てこない。**
-    /// <c>Game/Volcano/VolcanoEruptionFx</c> がこれを
-    /// <c>EffectInfo.SpawnArea(position, Vector3.up, radius, halfHeight)</c> ＋
-    /// <c>RenderEffect</c> の <c>velocity</c> 引数へそのまま写す。
+    /// The instructions for spawning one segment of the plume column. **Not one Unity type
+    /// appears here.**
+    /// <c>Game/Volcano/VolcanoEruptionFx</c> copies it straight into
+    /// <c>EffectInfo.SpawnArea(position, Vector3.up, radius, halfHeight)</c> and
+    /// <c>RenderEffect</c>'s <c>velocity</c> argument.
     /// </summary>
     public struct EruptionColumnSegment
     {
-        /// <summary>噴出口からの水平オフセット（m。風下へずれる量）。</summary>
+        /// <summary>The horizontal offset from the vent (m; how far it leans
+        /// downwind).</summary>
         public readonly float OffsetX;
 
-        /// <summary>噴出口からの高さ（m）。**この段の下端**である。</summary>
+        /// <summary>The height above the vent (m). **This is the segment's lower
+        /// edge.**</summary>
         public readonly float OffsetY;
 
-        /// <summary>噴出口からの水平オフセット（m）。</summary>
+        /// <summary>The horizontal offset from the vent (m).</summary>
         public readonly float OffsetZ;
 
-        /// <summary>湧かす円盤の半径（m）。</summary>
+        /// <summary>The radius (m) of the disc we spawn in.</summary>
         public readonly float RadiusMetres;
 
         /// <summary>
-        /// 軸（上）方向の伸び（m）。<c>SpawnArea</c> の第 4 引数はこの向きへ
-        /// <c>[0, halfHeight]</c> の一様乱数で散らす（**中心対称ではない**。IL 実測 §B-4）ので、
-        /// <see cref="OffsetY"/> を下端にすれば段がちょうど積み上がる。
+        /// The extent along the axis (upwards) in m. <c>SpawnArea</c>'s fourth argument
+        /// scatters in that direction with a uniform random value in
+        /// <c>[0, halfHeight]</c> (**it is not symmetric about the centre**; measured from
+        /// the IL, §B-4), so making <see cref="OffsetY"/> the lower edge stacks the segments
+        /// exactly.
         /// </summary>
         public readonly float HalfHeightMetres;
 
-        /// <summary>粒子へ足す速度（m/秒）。上昇と風下への流されはここで出す。</summary>
+        /// <summary>The velocity added to the particles (m/s). The rise and the downwind
+        /// drift come from here.</summary>
         public readonly float DriftX;
 
-        /// <summary>同上（鉛直）。</summary>
+        /// <summary>The same, vertically.</summary>
         public readonly float DriftY;
 
-        /// <summary>同上。</summary>
+        /// <summary>The same.</summary>
         public readonly float DriftZ;
 
-        /// <summary><c>RenderEffect</c> の <c>magnitude</c>（＝粒子密度。大きさではない）。</summary>
+        /// <summary><c>RenderEffect</c>'s <c>magnitude</c> (i.e. the particle density, not a
+        /// size).</summary>
         public readonly float Magnitude;
 
         /// <summary>
-        /// 傘（umbrella）の段か。<c>true</c> なら**別の複製**で描く ——
-        /// 傘は色が淡く、粒が大きく、寿命が長い（<c>VolcanoVanillaFx.CloneAshUmbrella</c>）。
+        /// Whether this is an umbrella segment. If <c>true</c> it is drawn with **a different
+        /// clone** — the umbrella is paler, has larger particles and a longer lifetime
+        /// (<c>VolcanoVanillaFx.CloneAshUmbrella</c>).
         /// </summary>
         public readonly bool Umbrella;
 
@@ -66,174 +74,211 @@ namespace DisasterPlus.Core.Volcano
     }
 
     /// <summary>
-    /// <b>噴火柱</b>（eruption column）の形と密度。**エンジン非依存の純関数だけ。**
-    /// ④の <c>TyphoonSpiral</c> と③の <c>CloudAnimation</c>（ミサイル MOD）と同じ扱いで、
-    /// **状態は Core に、粒子は Game に**置く。
+    /// The shape and density of the <b>eruption column</b>. **Pure, engine-free functions
+    /// only.** Treated the same way as ④'s <c>TyphoonSpiral</c> and ③'s
+    /// <c>CloudAnimation</c> (the missile mod): **the state lives in Core and the particles
+    /// in Game**.
     ///
-    /// ── なぜ作り直したのか（2026-08-22、実機の指摘③）─────────────────────
+    /// ── Why it was rebuilt (2026-08-22, on-hardware observation ③) ────────────────
     ///
-    /// > 噴煙がただの煙だまりになってしまっています。これは MissileMOD のキノコ雲の
-    /// > Method を参考にリアルな噴煙（キノコ雲ではない、火山噴火の映像をみて挙動を
-    /// > 学習・再現してほしい）を作ってほしいです。
+    /// > The plume has ended up as just a puddle of smoke. I'd like you to take the method
+    /// > from the MissileMOD's mushroom cloud as a reference and build a realistic plume
+    /// > (not a mushroom cloud — please study footage of volcanic eruptions and reproduce
+    /// > the behaviour).
     ///
-    /// 以前の噴煙は <c>RenderEffect</c> **1 回**で、噴出口の真上に半径 40〜80 m の円盤を
-    /// 置いて煙を湧かせていただけだった。粒子は自分の初速（26〜48 m/s）で 7〜16 秒
-    /// 上がって消えるので、出来上がるのは<b>火口の上に浮いた煙の塊</b>である。
-    /// 柱にも傘にもならない。**指摘のとおりである。**
+    /// The old plume was **one** <c>RenderEffect</c> call, placing a disc of radius 40-80 m
+    /// directly above the vent and spawning smoke in it. The particles rise on their own
+    /// initial speed (26-48 m/s) for 7-16 seconds and then vanish, so what you get is
+    /// <b>a blob of smoke floating over the crater</b>.
+    /// It becomes neither a column nor an umbrella. **Exactly as observed.**
     ///
-    /// ── ★★ キノコ雲ではない。噴火柱である ────────────────────────────
+    /// ── ★★ It is not a mushroom cloud. It is an eruption column ─────────────────
     ///
-    /// ミサイル MOD の <c>CloudAnimation</c> / <c>CloudPuffs</c> から**借りるのは作り方**
-    /// （時間を引数にした純粋な状態を Core に置き、Game は毎フレームそれを写すだけ）で、
-    /// **形は借りない**。核の雲と噴火柱は物理が違う:
+    /// From the missile mod's <c>CloudAnimation</c> / <c>CloudPuffs</c> **we borrow the
+    /// technique** (keep pure state parameterised by time in Core and have Game merely copy
+    /// it every frame); **we do not borrow the shape**. A nuclear cloud and an eruption
+    /// column are different physics:
     ///
     /// <list type="bullet">
-    /// <item><b>核</b>: 一度の火球が離れて上がる<b>単発の泡</b>。だから細い柄と丸い笠に
-    ///   なり、柄は「もう供給が無い」ので痩せて消える</item>
-    /// <item><b>火山</b>: 火口から<b>供給され続ける</b>。柱は途切れず、上へ行くほど
-    ///   周囲の空気を巻き込んで（entrainment）太くなる</item>
+    /// <item><b>Nuclear</b>: <b>a single bubble</b>, one fireball detaching and rising. Hence
+    ///   the thin stem and the round cap, and the stem thins away and vanishes because "there
+    ///   is no more supply"</item>
+    /// <item><b>Volcanic</b>: <b>continuously supplied</b> from the crater. The column is
+    ///   unbroken and gets fatter as it rises by entraining the surrounding air</item>
     /// </list>
     ///
-    /// この型が組む断面は、火山学の教科書どおりの 3 区間である:
+    /// The cross-section this type builds is the three regions straight out of a volcanology
+    /// textbook:
     ///
     /// <code>
-    /// 1. ガス推力域 (gas thrust)   0 〜 0.11 H   噴出の運動量で上がる。細くて速い
-    /// 2. 対流域     (convective)  0.11 〜 0.78 H 浮力で上がる。減速しながら
-    ///                                            dr/dz ≒ 0.14 でほぼ直線的に太る
-    /// 3. 傘         (umbrella)    0.78 〜 1.00 H 中立浮力高度。上がるのをやめて
-    ///                                            横へ広がる。柱より遥かに広く、平たい
+    /// 1. gas thrust region   0 - 0.11 H     rises on the eruption's momentum. Narrow and fast
+    /// 2. convective region   0.11 - 0.78 H  rises by buoyancy. While decelerating, it widens
+    ///                                       almost linearly at dr/dz ≒ 0.14
+    /// 3. umbrella            0.78 - 1.00 H  the level of neutral buoyancy. It stops rising and
+    ///                                       spreads sideways. Far wider and flatter than the column
     /// </code>
     ///
-    /// そのうえで<b>風下へ倒れる</b>。倒れ方は高いほど強い（<c>(z/H)^1.5</c>）ので、
-    /// 柱はまっすぐではなく弓なりになる。傘からは灰が落ちるので、
-    /// **風下側だけが長く、低く、薄い** —— 傘を 3 つの段（本体・風下・落下の尾）に
-    /// 分けてあるのはそのためである。
+    /// On top of that it <b>leans downwind</b>. The lean is stronger the higher it is
+    /// (<c>(z/H)^1.5</c>), so the column bows rather than standing straight. Ash falls out of
+    /// the umbrella, so **only the downwind side is long, low and thin** — which is why the
+    /// umbrella is split into three segments (the body, the downwind side and the fallout
+    /// tail).
     ///
-    /// ── 段に分ける（＝バニラの粒子エフェクトで柱を描く方法）──────────────────
+    /// ── Splitting into segments (how to draw a column with vanilla particle effects) ────
     ///
-    /// 自前の <c>ParticleSystem</c> は使わない。<c>Shader.Find</c> はこの環境で
-    /// <c>"Standard"</c> を含めて全滅する（IL 事実 §D-3 / <c>ShaderPool</c>）ので、
-    /// 描けているのは**ゲーム自身の粒子エフェクト**だけである。
-    /// そこで柱を <see cref="MaxSegments"/> 段に割り、段ごとに
-    /// <c>SpawnArea(位置, 上, 半径, 高さ)</c> の**円柱**を 1 個ずつ湧かす。
-    /// 形は「どこに湧かせるか」で作り、粒子自身の初速には頼らない ——
-    /// 頼ると寿命ぶん上がり続けて、傘に天井が出来ない。
+    /// We do not use our own <c>ParticleSystem</c>. <c>Shader.Find</c> fails for everything
+    /// in this environment, <c>"Standard"</c> included (IL facts §D-3 / <c>ShaderPool</c>),
+    /// so the only thing we can actually draw with is **the game's own particle effects**.
+    /// So we split the column into <see cref="MaxSegments"/> segments and, for each one,
+    /// spawn a single <b>cylinder</b> via
+    /// <c>SpawnArea(position, up, radius, height)</c>.
+    /// The shape comes from "where we spawn", never from the particles' own initial speed —
+    /// rely on that and they keep rising for their whole lifetime, and the umbrella gets no
+    /// ceiling.
     ///
-    /// ── 密度は面積で正規化する（**ここを外すと粒子が溢れる**）───────────────
+    /// ── The density is normalised by area (**get this wrong and the particles flood**) ────
     ///
-    /// 1 フレームに湧く粒子数は <c>max(100, π r²) × dt × magnitude × 0.01 × rateOverTime</c>
-    /// である（IL 実測 §B-4）。半径 700 m の傘に柱と同じ magnitude を渡すと、
-    /// 面積比で **70 倍**の粒子を撃つことになる。<see cref="SegmentAt"/> は
+    /// The number of particles spawned per frame is
+    /// <c>max(100, π r²) × dt × magnitude × 0.01 × rateOverTime</c>
+    /// (measured from the IL, §B-4). Hand a 700 m umbrella the same magnitude as the column
+    /// and, by area, you fire **70 times** as many particles. <see cref="SegmentAt"/> returns
     ///
     /// <code>
     /// magnitude_i = (refRadius² × PlumeMagnitude(unit)) × weight_i / radius_i²
     /// </code>
     ///
-    /// を返すので、**段ごとの粒子数は半径によらず weight_i に比例する**。
-    /// 全段の重みの和は 1 なので、<b>柱ぜんぶで従来の 1 回ぶんと同じ量</b>である。
-    /// <c>refRadius</c> と <c>PlumeMagnitude</c> は今までの噴煙と同じ
-    /// <see cref="EruptionEffectPlan"/> から取る ——
-    /// **噴火の強さの包絡線は 1 本のままにする。**
+    /// so **each segment's particle count is proportional to weight_i regardless of its
+    /// radius**. The weights sum to 1, so <b>the whole column stays within the same budget as
+    /// the old single call</b>.
+    /// <c>refRadius</c> and <c>PlumeMagnitude</c> come from the same
+    /// <see cref="EruptionEffectPlan"/> as the old plume —
+    /// **the eruption's strength envelope stays a single curve.**
     /// </summary>
     public struct EruptionColumn
     {
-        /// <summary>段の数（柱 <see cref="ColumnSegments"/> ＋ 傘 <see cref="UmbrellaSegments"/>）。</summary>
+        /// <summary>The number of segments (<see cref="ColumnSegments"/> for the column plus
+        /// <see cref="UmbrellaSegments"/> for the umbrella).</summary>
         public const int MaxSegments = 9;
 
-        /// <summary>柱の段数。**下ほど短く刻む**（変化が速いのは噴出口の近くである）。</summary>
+        /// <summary>The number of column segments. **They are shorter lower down** (things
+        /// change fastest near the vent).</summary>
         public const int ColumnSegments = 6;
 
-        /// <summary>傘の段数（本体・風下・落下の尾）。</summary>
+        /// <summary>The number of umbrella segments (the body, the downwind side and the
+        /// fallout tail).</summary>
         public const int UmbrellaSegments = 3;
 
-        /// <summary>いちばん弱い噴火の柱の高さ（m）。**⑤が決めた演出値。**</summary>
+        /// <summary>The column height (m) of the weakest eruption. **A presentation value ⑤
+        /// chose.**</summary>
         public const float HeightMinMetres = 420f;
 
-        /// <summary>いちばん強い噴火の柱の高さ（m）。同上。</summary>
+        /// <summary>The column height (m) of the strongest eruption. Likewise.</summary>
         public const float HeightMaxMetres = 1800f;
 
-        /// <summary>高さを火口の大きさで加減する基準（m）。既定の成層火山の火口半径。</summary>
+        /// <summary>The reference (m) for adjusting the height by the crater's size. The
+        /// default stratovolcano's crater radius.</summary>
         public const float ReferenceVentRadiusMetres = 144f;
 
-        /// <summary>火口の大きさによる高さの倍率の下限。</summary>
+        /// <summary>The floor on the height multiplier from the crater's size.</summary>
         public const float MinVentScale = 0.6f;
 
-        /// <summary>同上の上限。</summary>
+        /// <summary>The ceiling on the same.</summary>
         public const float MaxVentScale = 1.4f;
 
-        /// <summary>ガス推力域の上端（柱の高さに対する比）。</summary>
+        /// <summary>The top of the gas thrust region (as a ratio of the column's
+        /// height).</summary>
         public const float GasThrustFraction = 0.11f;
 
-        /// <summary>傘の下端（同上）。ここが中立浮力高度である。</summary>
+        /// <summary>The bottom of the umbrella (same units). This is the level of neutral
+        /// buoyancy.</summary>
         public const float UmbrellaBaseFraction = 0.78f;
 
-        /// <summary>噴出口での柱の半径（火口半径に対する比）。火口いっぱいには噴かない。</summary>
+        /// <summary>The column's radius at the vent (as a ratio of the crater's radius). It
+        /// does not erupt across the crater's full width.</summary>
         public const float VentRadiusFactor = 0.60f;
 
-        /// <summary>ガス推力域の上端での半径（同上）。まだほとんど太らない。</summary>
+        /// <summary>The radius at the top of the gas thrust region (same units). It has
+        /// barely widened yet.</summary>
         public const float GasTopRadiusFactor = 0.95f;
 
         /// <summary>
-        /// 対流域で 1 m 上がるごとに太る量（無次元）。周囲の空気の巻き込みで、
-        /// 噴煙柱の半径は高さにほぼ比例して増える。**演出値だが、桁は教科書の 0.1 前後。**
+        /// How much it widens per metre of rise in the convective region (dimensionless).
+        /// By entraining the surrounding air, the plume column's radius grows roughly in
+        /// proportion to the height. **It is a presentation value, but the order of magnitude
+        /// matches the textbook's, around 0.1.**
         /// </summary>
         public const float EntrainmentSlope = 0.14f;
 
-        /// <summary>傘の半径が対流域の上端の何倍か。</summary>
+        /// <summary>How many times the radius at the top of the convective region the
+        /// umbrella's radius is.</summary>
         public const float UmbrellaSpread = 2.8f;
 
-        /// <summary>柱の刻みを下へ寄せる指数（1 なら等間隔）。</summary>
+        /// <summary>The exponent biasing the column's divisions downwards (1 gives even
+        /// spacing).</summary>
         public const float SegmentBias = 1.35f;
 
-        /// <summary>風下へ倒れる量（柱の高さに対する比。基準風速のとき）。</summary>
+        /// <summary>How far it leans downwind (as a ratio of the column's height, at the
+        /// reference wind speed).</summary>
         public const float BendFactor = 0.30f;
 
-        /// <summary>倒れ方の指数。**大きいほど「上だけ流される」**（風のシアー）。</summary>
+        /// <summary>The lean's exponent. **The larger it is, the more "only the top gets
+        /// carried away"** (wind shear).</summary>
         public const float BendPower = 1.5f;
 
-        /// <summary>倒れ方の基準になる風速（m/秒）。</summary>
+        /// <summary>The reference wind speed for the lean (m/s).</summary>
         public const float ReferenceWindMetresPerSecond = 12f;
 
-        /// <summary>風で流される速さが高さとともに強くなる指数。</summary>
+        /// <summary>The exponent by which the wind's carrying speed grows with
+        /// height.</summary>
         public const float WindSharePower = 0.7f;
 
-        /// <summary>噴出口での上昇の速さ（m/秒）。**演出値。**</summary>
+        /// <summary>The rise speed at the vent (m/s). **A presentation value.**</summary>
         public const float RiseVentMetresPerSecond = 34f;
 
-        /// <summary>上昇が止まるまでの減速の指数（大きいほど下で速く、上で急に止まる）。</summary>
+        /// <summary>The deceleration exponent until the rise stops (the larger it is, the
+        /// faster low down and the more abruptly it stops up top).</summary>
         public const float RiseDecayPower = 1.3f;
 
-        /// <summary>傘のゆっくりした沈み（m/秒）。灰が落ちる側である。</summary>
+        /// <summary>The umbrella's slow sinking (m/s). This is the side the ash falls
+        /// from.</summary>
         public const float FalloutMetresPerSecond = 2.5f;
 
-        /// <summary>柱がゆっくり左右に振れる周期（秒）。**点滅ではなく、ゆらぎである。**</summary>
+        /// <summary>The period (seconds) over which the column sways slowly from side to
+        /// side. **A drift, not a flicker.**</summary>
         public const float SwaySeconds = 37f;
 
         /// <summary>
-        /// 同上の振れ幅（ラジアン）。**風向きそのものを回す**ので、傘のいちばん遠い端は
-        /// この角度 × その距離だけ横へ動く（既定で ±230 m ほど）。傘の半径より小さいので
-        /// 「輪郭がゆっくりぼやける」に見える。**これ以上大きくしないこと** ——
-        /// 大きくすると傘が首を振り、湧かす場所の移動が風速そのものより速くなる。
+        /// The sway's amplitude (radians). **It rotates the wind direction itself**, so the
+        /// furthest edge of the umbrella moves sideways by this angle × that distance
+        /// (about ±230 m by default). Being smaller than the umbrella's radius, it reads as
+        /// "the outline slowly blurring". **Do not make it any larger** — larger and the
+        /// umbrella swings its head about, moving the spawn region faster than the wind speed
+        /// itself.
         /// </summary>
         public const float SwayRadians = 0.10f;
 
-        /// <summary>半径がこれを下回ったら使わない（m）。<see cref="EruptionEffectPlan"/> と同じ下限。</summary>
+        /// <summary>A radius below this is not used (m). The same floor as
+        /// <see cref="EruptionEffectPlan"/>'s.</summary>
         public const float MinRadiusMetres = EruptionEffectPlan.MinRadiusMetres;
 
         /// <summary>
-        /// 段ごとの重み（粒子数の配分）。**和は 1。** 前 <see cref="ColumnSegments"/> 個が柱で、
-        /// 残りが傘である。下ほど濃いのは、噴出口の近くほど灰が密で暗いからである。
+        /// The per-segment weights (how the particle count is shared out). **They sum to 1.**
+        /// The first <see cref="ColumnSegments"/> are the column and the rest the umbrella.
+        /// It is denser lower down because the ash is denser and darker nearer the vent.
         ///
-        /// ★ **柱と傘は別の粒子系（別の複製）なので、両者の配分の比は実機では効かない** ——
-        ///   どちらも <c>maxParticles</c> で頭打ちになるからである。効くのは
-        ///   <b>同じ系の中での比</b>で、柱 6 段のあいだ／傘 3 段のあいだの濃さを決めている。
-        ///   柱の重みを平らに寄せてあるのは、下だけが濃くて中ほどがすかすかに見えたため
-        ///   （<c>tools/VolcanoPreview</c> の plume 画像で確認した）。
+        /// ★ **The column and the umbrella are separate particle systems (separate clones),
+        ///   so the ratio between the two has no effect on real hardware** — both are capped
+        ///   by <c>maxParticles</c>. What does have an effect is <b>the ratio within one
+        ///   system</b>, which sets the density across the column's 6 segments and across the
+        ///   umbrella's 3.
+        ///   The column's weights were flattened out because only the bottom looked dense
+        ///   while the middle looked sparse (confirmed in the plume images from
+        ///   <c>tools/VolcanoPreview</c>).
         /// </summary>
         private static readonly float[] Weights =
         {
-            0.16f, 0.14f, 0.13f, 0.12f, 0.11f, 0.10f,   // 柱（下 → 上）
-            0.11f, 0.08f, 0.05f,                        // 傘（本体・風下・尾）
+            0.16f, 0.14f, 0.13f, 0.12f, 0.11f, 0.10f,   // the column (bottom → top)
+            0.11f, 0.08f, 0.05f,                        // the umbrella (body, downwind, tail)
         };
 
         private readonly float _ventRadius;
@@ -248,29 +293,35 @@ namespace DisasterPlus.Core.Volcano
         private readonly float _windSpeed;
         private readonly float _budget;
 
-        /// <summary>柱の高さ（m。傘の天面まで）。</summary>
+        /// <summary>The column's height (m, up to the top of the umbrella).</summary>
         public float HeightMetres { get { return _height; } }
 
-        /// <summary>傘の半径（m）。</summary>
+        /// <summary>The umbrella's radius (m).</summary>
         public float UmbrellaRadiusMetres { get { return _umbrellaRadius; } }
 
-        /// <summary>傘の下端の高さ（m）＝中立浮力高度。</summary>
+        /// <summary>The height of the umbrella's bottom (m) = the level of neutral
+        /// buoyancy.</summary>
         public float UmbrellaBaseMetres { get { return _umbrellaBase; } }
 
-        /// <summary>柱の頂が風下へずれる量（m）。</summary>
+        /// <summary>How far the column's top is displaced downwind (m).</summary>
         public float BendMetres { get { return _bendMetres; } }
 
-        /// <summary>段の数。**常に <see cref="MaxSegments"/>**（配列を作らないための固定長）。</summary>
+        /// <summary>The number of segments. **Always <see cref="MaxSegments"/>** (a fixed
+        /// length, so that no array need be allocated).</summary>
         public int SegmentCount { get { return MaxSegments; } }
 
         /// <summary>
-        /// 噴火柱を 1 本組む。**ヒープ確保は 0**（<c>struct</c>）なので毎フレーム作ってよい。
+        /// Builds one eruption column. **Zero heap allocation** (it is a <c>struct</c>), so
+        /// it is fine to build one every frame.
         /// </summary>
-        /// <param name="ventRadiusMetres">火口の半径（m）。柱の太さと高さの基準。</param>
-        /// <param name="intensityUnit">噴出の強さ <c>[0,1]</c>（<c>VolcanoEruption.IntensityUnit</c>）。</param>
-        /// <param name="windX">風向き（単位ベクトル。長さは内部で正規化する）。</param>
-        /// <param name="windZ">同上。</param>
-        /// <param name="windMetresPerSecond">風速（m/秒）。</param>
+        /// <param name="ventRadiusMetres">The crater's radius (m). The reference for the
+        /// column's width and height.</param>
+        /// <param name="intensityUnit">The eruption's strength <c>[0,1]</c>
+        /// (<c>VolcanoEruption.IntensityUnit</c>).</param>
+        /// <param name="windX">The wind direction (a unit vector; we normalise inside, so the
+        /// length does not matter).</param>
+        /// <param name="windZ">The same.</param>
+        /// <param name="windMetresPerSecond">The wind speed (m/s).</param>
         public EruptionColumn(float ventRadiusMetres, float intensityUnit,
                               float windX, float windZ, float windMetresPerSecond)
         {
@@ -291,7 +342,7 @@ namespace DisasterPlus.Core.Volcano
             float convectiveTop = _gasTopRadius + EntrainmentSlope * (_umbrellaBase - _gasTop);
             _umbrellaRadius = convectiveTop * UmbrellaSpread;
 
-            // 風。長さ 0（無風）は「倒れない」であって NaN ではない。
+            // The wind. A length of 0 (no wind) means "it does not lean", not NaN.
             float length = (float)Math.Sqrt(windX * windX + windZ * windZ);
             if (IsBad(length) || length <= 0f)
             {
@@ -312,14 +363,16 @@ namespace DisasterPlus.Core.Volcano
             _bendMetres = _height * BendFactor
                           * (_windSpeed / ReferenceWindMetresPerSecond);
 
-            // ★ 粒子の予算は今までの噴煙 1 回ぶんと同じ（クラス doc の正規化）。
+            // ★ The particle budget is the same as one call's worth of the old plume (the
+            //   normalisation in the class doc).
             float refRadius = EruptionEffectPlan.PlumeRadiusMetres(vent, unit);
             _budget = refRadius * refRadius * EruptionEffectPlan.PlumeMagnitude(unit);
         }
 
         /// <summary>
-        /// <paramref name="index"/> 段目の湧かし方。**範囲外は密度 0 の段**を返す
-        /// （呼び出し側は <c>Magnitude &gt; 0</c> のときだけ描けばよい）。
+        /// How to spawn segment number <paramref name="index"/>. **Out of range it returns a
+        /// segment with a density of 0** (so the caller need only draw while
+        /// <c>Magnitude &gt; 0</c>).
         /// </summary>
         public EruptionColumnSegment SegmentAt(int index)
         {
@@ -332,7 +385,8 @@ namespace DisasterPlus.Core.Volcano
             return index < ColumnSegments ? ColumnSegment(index) : UmbrellaSegment(index);
         }
 
-        /// <summary>柱の 1 段。下端 <c>z0</c> から上端 <c>z1</c> までの円柱である。</summary>
+        /// <summary>One segment of the column: a cylinder from its lower edge <c>z0</c> to its
+        /// upper edge <c>z1</c>.</summary>
         private EruptionColumnSegment ColumnSegment(int index)
         {
             float z0 = ColumnBoundary(index);
@@ -353,8 +407,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 傘の 1 段。<b>0 = 本体、1 = 風下、2 = 落下の尾</b>で、風下ほど低く・薄い
-        /// （傘の底から灰が落ちるので、風下側だけが長く尾を引く）。
+        /// One segment of the umbrella. <b>0 = the body, 1 = the downwind side, 2 = the
+        /// fallout tail</b>, getting lower and thinner the further downwind (ash falls from
+        /// the umbrella's underside, so only the downwind side trails out long).
         /// </summary>
         private EruptionColumnSegment UmbrellaSegment(int index)
         {
@@ -382,7 +437,8 @@ namespace DisasterPlus.Core.Volcano
                 MagnitudeFor(index, radius), true);
         }
 
-        /// <summary>柱の <paramref name="index"/> 番目の境目の高さ（m）。下ほど細かい。</summary>
+        /// <summary>The height (m) of the column's <paramref name="index"/>-th boundary.
+        /// Finer divisions lower down.</summary>
         public float ColumnBoundary(int index)
         {
             if (index <= 0) return 0f;
@@ -393,8 +449,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 高さ <paramref name="metres"/> での柱の半径（m）。
-        /// ガス推力域はほぼ一定、対流域は<b>高さにほぼ比例して太る</b>（巻き込み）。
+        /// The column's radius (m) at a height of <paramref name="metres"/>.
+        /// Almost constant in the gas thrust region; in the convective region it <b>widens
+        /// roughly in proportion to the height</b> (entrainment).
         /// </summary>
         public float RadiusAt(float metres)
         {
@@ -416,12 +473,14 @@ namespace DisasterPlus.Core.Volcano
                 r = _gasTopRadius + EntrainmentSlope * (top - _gasTop);
             }
 
-            // ★ 下限は 1 か所で掛ける。**半径 0 を渡しても粒子は湧く**（面積の床が
-            //   max(100, πr²) なので、1 点から噴くことになる。§B-4）。
+            // ★ Apply the floor in exactly one place. **Particles spawn even if you pass a
+            //   radius of 0** (the area floor is max(100, πr²), so it would erupt from a
+            //   single point; §B-4).
             return r < MinRadiusMetres ? MinRadiusMetres : r;
         }
 
-        /// <summary>高さ <paramref name="metres"/> での風下へのずれ（m）。</summary>
+        /// <summary>The downwind displacement (m) at a height of
+        /// <paramref name="metres"/>.</summary>
         public float BendAt(float metres)
         {
             if (IsBad(metres) || metres <= 0f || !(_height > 0f)) return 0f;
@@ -431,7 +490,8 @@ namespace DisasterPlus.Core.Volcano
             return _bendMetres * (float)Math.Pow(t, BendPower);
         }
 
-        /// <summary>高さ <paramref name="metres"/> での上昇の速さ（m/秒）。傘では 0。</summary>
+        /// <summary>The rise speed (m/s) at a height of <paramref name="metres"/>. 0 in the
+        /// umbrella.</summary>
         public float RiseAt(float metres)
         {
             if (IsBad(metres) || !(_umbrellaBase > 0f)) return 0f;
@@ -442,7 +502,8 @@ namespace DisasterPlus.Core.Volcano
             return RiseVentMetresPerSecond * (float)Math.Pow(left, RiseDecayPower);
         }
 
-        /// <summary>高さ <paramref name="metres"/> で風にどれだけ流されるか <c>[0,1]</c>。</summary>
+        /// <summary>How much the wind carries it at a height of <paramref name="metres"/>,
+        /// in <c>[0,1]</c>.</summary>
         public float WindShareAt(float metres)
         {
             if (IsBad(metres) || metres <= 0f || !(_height > 0f)) return 0f;
@@ -453,8 +514,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 段の密度。**面積で正規化する**ので、粒子数は半径によらず重みに比例する
-        /// （クラス doc）。異常な半径でも 0 除算を外へ出さない。
+        /// A segment's density. **Normalised by area**, so the particle count is proportional
+        /// to the weight regardless of the radius (see the class doc). A bad radius never
+        /// lets a division by zero out.
         /// </summary>
         public float MagnitudeFor(int index, float radiusMetres)
         {
@@ -471,9 +533,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 柱がゆっくり左右に振れる角度（ラジアン）。**周期 <see cref="SwaySeconds"/> の
-        /// 正弦 1 本だけ**である —— 速い成分を足すと「ゆらぎ」ではなく「点滅」になる
-        /// （溶岩の発光で同じ失敗をしている。<c>LavaGlow</c> のクラス doc）。
+        /// The angle (radians) by which the column sways slowly from side to side.
+        /// **A single sine of period <see cref="SwaySeconds"/> and nothing more** — add a
+        /// faster component and it becomes "a flicker" rather than "a drift"
+        /// (we made the same mistake with the lava's glow; see <c>LavaGlow</c>'s class doc).
         /// </summary>
         public static float SwayAt(float clockSeconds)
         {

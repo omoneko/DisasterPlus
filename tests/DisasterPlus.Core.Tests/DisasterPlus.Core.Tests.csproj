@@ -7,11 +7,12 @@
     <RootNamespace>DisasterPlus.Core.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Core だけを直接コンパイルする。ゲーム DLL は net35 で読めないため
-         プロジェクト参照は張らない。 -->
+    <!-- Compile only Core, directly. The game DLLs are net35 and cannot be read here, so
+         no project reference is set up. -->
     <Compile Include="..\..\src\DisasterPlus\Core\**\*.cs" />
-    <!-- EnableDefaultCompileItems=false は既定の include だけでなく既定の exclude も無効にする。
-         bin/obj を明示的に除かないと obj\**\*.AssemblyInfo.cs を拾って重複属性でビルドが壊れる。 -->
+    <!-- EnableDefaultCompileItems=false disables not only the default includes but the
+         default excludes as well. Without excluding bin/obj explicitly it picks up
+         obj\**\*.AssemblyInfo.cs and the build breaks on duplicate attributes. -->
     <Compile Include="**\*.cs" Exclude="bin\**\*.cs;obj\**\*.cs" />
   </ItemGroup>
   <ItemGroup>

@@ -3,8 +3,9 @@ using System.Collections.Generic;
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// 点を正方セルに投票し、ある地点の近傍セルを引けるようにする。
-    /// 全建物同士の総当たり（O(n^2)）を避けるためだけの構造で、それ以上の意味はない。
+    /// Votes points into square cells so that the cells near a given spot can be pulled out.
+    /// It exists purely to avoid an all-pairs sweep over every building (O(n^2)); there is
+    /// nothing more to it than that.
     /// </summary>
     public class GridVote
     {
@@ -13,13 +14,15 @@ namespace DisasterPlus.Core.Common
 
         public GridVote(float cellSize)
         {
-            // 0 除算とセル爆発を防ぐ。呼び出し側の設定ミスをここで吸収する。
+            // Guards against division by zero and against the cell count exploding.
+            // A caller that configured this wrongly gets absorbed here.
             _cellSize = cellSize < 1f ? 1f : cellSize;
         }
 
         private long KeyOf(int cx, int cz)
         {
-            // int 2 つを long 1 つに詰める。負座標があるので unchecked キャストで畳む。
+            // Pack two ints into one long. Coordinates can be negative, so fold with an
+            // unchecked cast.
             return ((long)cx << 32) ^ (uint)cz;
         }
 
@@ -28,7 +31,8 @@ namespace DisasterPlus.Core.Common
             return (int)System.Math.Floor(v / _cellSize);
         }
 
-        /// <summary>インデックス index の点を position のセルに登録する。</summary>
+        /// <summary>Registers the point with index <c>index</c> in the cell containing
+        /// <c>position</c>.</summary>
         public void Add(int index, Vec2 position)
         {
             long key = KeyOf(CellOf(position.X), CellOf(position.Z));
@@ -42,8 +46,9 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// position から radius 以内にありうる点のインデックスを集める。
-        /// セル単位の粗い絞り込みなので、呼び出し側で実距離を必ず再判定すること。
+        /// Gathers the indices of the points that could be within <c>radius</c> of
+        /// <c>position</c>. This is a coarse, cell-granularity filter, so the caller must
+        /// always re-check the real distance.
         /// </summary>
         public void CollectNear(Vec2 position, float radius, List<int> into)
         {

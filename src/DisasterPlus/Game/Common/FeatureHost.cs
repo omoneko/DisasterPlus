@@ -4,55 +4,59 @@ using DisasterPlus.Core.Diagnostics;
 
 namespace DisasterPlus.Game
 {
-    /// <summary>機能の登録と、例外を 1 機能に閉じ込めたディスパッチ。</summary>
+    /// <summary>Feature registration, plus dispatch that confines an exception to one feature.</summary>
     public static class FeatureHost
     {
         private static readonly List<IDisasterFeature> _features = new List<IDisasterFeature>();
         private static uint _lastFrame;
         private static bool _hasLastFrame;
 
-        // 機能ごとの例外記録。レベルアンロードでリセットする。
-        // NoteFailure は main スレッド（OnMainThreadUpdate 等）からも sim スレッド
-        // （OnSimulationTick）からも呼ばれ、BuildReport は sim スレッドで読む。
-        // DiagnosticsHub の lock とは別に、この 2 つの Dictionary 専用の gate で守る
-        // （FeatureHost はここで DiagnosticsHub にも触るため、lock の順序問題を避けて gate を分ける）。
+        // Per-feature record of exceptions. Reset on level unload.
+        // NoteFailure is called from both the main thread (OnMainThreadUpdate and the like)
+        // and the sim thread (OnSimulationTick), and BuildReport reads it on the sim thread.
+        // These two Dictionaries are guarded by their own gate, separate from DiagnosticsHub's
+        // lock (FeatureHost also touches DiagnosticsHub here, so the gates are kept apart to
+        // avoid a lock-ordering problem).
         private static readonly object _errorGate = new object();
         private static readonly Dictionary<string, int> _errorCounts = new Dictionary<string, int>();
         private static readonly Dictionary<string, string> _lastErrors = new Dictionary<string, string>();
 
-        // 例外を伴わない「振る舞いの異常」の記録。例外が出ないまま静かに壊れるのが
-        // このプロジェクトで実際に 3 回起きた失敗の形なので、機能側から明示的に
-        // Degraded を申告できる口を用意する。_errorCounts と同じ gate で守り、
-        // レベルアンロードで一緒に消す。
+        // A record of "misbehaviour" that comes with no exception. Breaking quietly with no
+        // exception is the shape of failure that actually happened three times in this
+        // project, so features are given an explicit inlet to declare themselves Degraded.
+        // Guarded by the same gate as _errorCounts and cleared along with it on level unload.
         //
-        // 機能名 → (申告キー → 理由) の 2 段。1 機能が複数の理由で同時に Degraded に
-        // なりうる（③なら「終了処理が詰まった」と「延焼が空振り」）ので、単純な
-        // 機能名 1 本のキーだと後勝ちで上書きされ、しかも回復時に取り下げると
-        // 他方の申告まで巻き添えで消える。
+        // Two levels: feature name → (note key → reason). One feature can be Degraded for
+        // several reasons at once (for ③, "the finishing sequence is stuck" and "the spread
+        // came up empty"), so a single feature-name key would be overwritten last-wins, and
+        // withdrawing one on recovery would take the other declaration down with it.
         private static readonly Dictionary<string, Dictionary<string, string>> _degradeNotes =
             new Dictionary<string, Dictionary<string, string>>();
 
         /// <summary>
-        /// LevelLoaded() を通過済みか。
+        /// Whether LevelLoaded() has been passed.
         ///
-        /// _features は都市をまたいで生き残る static なのに、sim tick の入口
-        /// （SimulationManager.SimulationStep）は LoadingManager.m_simulationDataLoaded を
-        /// 見ているだけで、これは OnLevelLoaded を起こすコルーチンより先に立つ。
-        /// このフラグが無いと、2 つ目の都市をロードした直後の数秒間、前の都市の
-        /// スキャナカーソル・prefab キャッシュを抱えたまま機能が回り続ける。
-        /// アセット／マップエディタ（DisasterPlusLoading.OnLevelLoaded が早期 return する）
-        /// でも同じ経路で回ってしまうので、そこも同時に塞ぐ。
+        /// _features is a static that survives across cities, yet the entry to the sim tick
+        /// (SimulationManager.SimulationStep) only looks at
+        /// LoadingManager.m_simulationDataLoaded, which goes up before the coroutine that
+        /// raises OnLevelLoaded.
+        /// Without this flag, for the few seconds right after loading a second city the
+        /// features keep turning while still holding the previous city's scanner cursors and
+        /// prefab caches.
+        /// The same path would also turn in the asset / map editor (where
+        /// DisasterPlusLoading.OnLevelLoaded returns early), so this closes that off too.
         /// </summary>
         private static bool _levelReady;
 
         public static IList<IDisasterFeature> Features { get { return _features; } }
 
         /// <summary>
-        /// 1 ゲーム内分あたりの sim フレーム数。
+        /// Sim frames per in-game minute.
         ///
-        /// IL 実測: SimulationManager.DAYTIME_FRAMES は 65536（public static UInt32）。
-        /// 1 日 = 1440 分なので 1 分 = 65536 / 1440 ≒ 45.51 フレーム。
-        /// 定数を直書きせず毎回この値から割ることで、ゲーム更新で変わっても黙ってずれない。
+        /// Measured from the IL: SimulationManager.DAYTIME_FRAMES is 65536 (public static
+        /// UInt32). A day is 1440 minutes, so one minute = 65536 / 1440 ≈ 45.51 frames.
+        /// Dividing from this value each time, rather than hard-coding a constant, means it
+        /// will not drift silently if a game update changes it.
         /// </summary>
         public static float FramesPerMinute
         {
@@ -79,7 +83,7 @@ namespace DisasterPlus.Game
                 }
             }
 
-            // 全機能のリセットが済んでから初めて tick を許可する。
+            // Only allow ticks once every feature has finished resetting.
             _levelReady = true;
         }
 
@@ -89,7 +93,8 @@ namespace DisasterPlus.Game
 
             uint frame = SimulationManager.instance.m_currentFrameIndex;
 
-            // ゲーム内時間の経過（分）を出す。ポーズ中はフレームが進まないので 0 になる。
+            // Work out the in-game time elapsed (minutes). While paused the frame does not
+            // advance, so this comes out 0.
             float framesPerMinute = FramesPerMinute;
 
             float deltaMinutes = 0f;
@@ -100,36 +105,38 @@ namespace DisasterPlus.Game
             _lastFrame = frame;
             _hasLastFrame = true;
 
-            // main スレッド（Ctrl+ホットキー）からの依頼を、この pause guard より前で拾う。
-            // OnAfterSimulationTick はポーズ中も呼ばれ続ける（止まるのはゲーム内時間の
-            // 進みだけで、sim スレッド自体は止まらない）。この guard が守っているのは
-            // 「経過 0 分で機能の状態を進めない」ことであって、スレッドの所有権とは
-            // 無関係。ダンプはどの機能の状態も変更しないので、guard より前で
-            // BuildReport() してもここが守ろうとしているものを壊さない。
+            // Pick up requests from the main thread (Ctrl+hotkey) before this pause guard.
+            // OnAfterSimulationTick goes on being called while paused (what stops is the
+            // advance of in-game time; the sim thread itself does not stop). What this guard
+            // protects is "do not advance feature state on a 0-minute step", which has nothing
+            // to do with thread ownership. A dump modifies no feature's state, so calling
+            // BuildReport() before the guard breaks nothing the guard is protecting.
             //
-            // ここで ConsumeRequest() を呼ぶのは 1 回だけ（このメソッド内で 2 度呼ぶと
-            // 依頼を取りこぼす側が out-of-sync になる）。ポーズ中／非ポーズのどちらの
-            // 経路でも、この 1 個の dumpRequested を CollectAndPublish に渡す。
+            // ConsumeRequest() is called exactly once here (call it twice in this method and
+            // whichever side misses the request goes out of sync). On both the paused and the
+            // unpaused path, this single dumpRequested is what is passed to CollectAndPublish.
             bool dumpRequested = DiagnosticDump.ConsumeRequest();
 
             if (deltaMinutes <= 0f)
             {
-                // ポーズ中でも収集はする。状態を進める機能の OnSimulationTick は
-                // 呼ばない（＝機能の状態は進めない）ので、pause guard 本来の目的は保たれる。
+                // Keep collecting even while paused. OnSimulationTick is not called for
+                // features that advance state (i.e. feature state does not advance), so the
+                // pause guard's original purpose is preserved.
                 //
-                // 収集をダンプ依頼のときだけにしてはいけない。プレイヤーが
-                // 手を止めて中を見るためにポーズしてオーバーレイを開く、というのが
-                // 最も自然な使い方で、そこで箱が空のまま更新されないのでは
-                // オーバーレイの意味が無い。
+                // Collection must not be limited to when a dump is requested. The most natural
+                // way to use this is for the player to stop, pause and open the overlay to
+                // look inside, and an overlay whose box sits there empty and unrefreshed at
+                // that moment is pointless.
                 //
-                // 同じ理屈が表示専用の機能にも当てはまる（全体レビュー指摘）。
-                // ロード直後の最初の tick は必ず 0 分なので、ここで一律に返すと
-                // ロードしてすぐポーズしている間、天気予報パネルは 1 度もデータを
-                // 受け取れず全行が「読み取れません」になる。IPausedTickFeature を
-                // 名乗る機能（状態を進めないことを自分で保証する機能）だけは通す。
+                // The same reasoning applies to display-only features (raised in the overall
+                // review). The first tick after a load is always 0 minutes, so returning
+                // uniformly here means that while you load and stay paused, the forecast panel
+                // never receives data once and every row reads "unavailable". Let through only
+                // those features that declare IPausedTickFeature (features that guarantee for
+                // themselves that they do not advance state).
                 TickPausedFeatures(frame);
                 CollectAndPublish(dumpRequested);
-                return;   // ポーズ中は機能の状態を進めない。負にも絶対にしない。
+                return;   // While paused, do not advance feature state. Never go negative either.
             }
 
             for (int i = 0; i < _features.Count; i++)
@@ -146,11 +153,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ポーズ中（ゲーム内経過 0 分）でも tick を受け取る機能だけを回す。sim スレッド専用。
+        /// Turns only those features that take a tick while paused (0 in-game minutes
+        /// elapsed). Sim thread only.
         ///
-        /// deltaMinutes は 0f を渡す。<see cref="IPausedTickFeature"/> を名乗る機能は
-        /// 「deltaMinutes で状態を進めない」ことを契約として保証している
-        /// （そちらの doc 参照）。ここで別の値を渡してはいけない。
+        /// deltaMinutes is passed as 0f. A feature that declares
+        /// <see cref="IPausedTickFeature"/> guarantees as part of the contract that it does
+        /// not advance state from deltaMinutes (see the doc over there).
+        /// Never pass a different value here.
         /// </summary>
         private static void TickPausedFeatures(uint frame)
         {
@@ -168,11 +177,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 診断を 1 回集めて公開する。sim スレッド専用。
-        /// BuildReport() は WriteDiagnostics 経由で機能の内部状態を読むだけで
-        /// 書き換えないので、OnSimulationTick を呼ばないポーズ経路から呼んでも安全。
+        /// Collects the diagnostics once and publishes them. Sim thread only.
+        /// BuildReport() only reads feature internal state through WriteDiagnostics and never
+        /// writes it, so it is safe to call from the paused path that does not call
+        /// OnSimulationTick.
         ///
-        /// オーバーレイが閉じていてダンプ依頼も無ければ何もしない（収集コストはゼロ）。
+        /// Does nothing if the overlay is closed and no dump was requested (zero collection
+        /// cost).
         /// </summary>
         private static void CollectAndPublish(bool dumpRequested)
         {
@@ -182,8 +193,8 @@ namespace DisasterPlus.Game
             {
                 var report = BuildReport();
                 DiagnosticsHub.Publish(report);
-                // ファイル I/O はここでは行わない。main スレッドの
-                // DiagnosticDump.FlushPendingWrite() に不変レポートを渡すだけ。
+                // No file I/O happens here. It only hands the immutable report to the main
+                // thread's DiagnosticDump.FlushPendingWrite().
                 if (dumpRequested) DiagnosticDump.SubmitReport(report);
             }
             catch (System.Exception e) { Log.Error("diagnostics collection failed", e); }
@@ -193,24 +204,28 @@ namespace DisasterPlus.Game
         {
             if (!_levelReady) return;
 
-            // オーバーレイの生成・破棄は「ロード時の設定値」ではなく「現在の設定値」に従う。
-            // ロード時に一度だけ見ていた頃は、途中で ON にしても何も起きず、しかも
-            // ダンプの書き出しがオーバーレイの Update に相乗りしていたため
-            // Ctrl+ホットキーまで無反応になっていた。
+            // Creating and destroying the overlay follows "the current setting", not "the
+            // setting as of load time". Back when it was looked at once at load time,
+            // switching it ON later did nothing — and because writing the dump rode along on
+            // the overlay's Update, even Ctrl+hotkey stopped responding.
             SyncOverlay();
 
-            // sim スレッドが組み立て終えたダンプをここ（main スレッド）で書き出す。
-            // オーバーレイの有無に依存させない（依存させると上記の事故が戻る）。
+            // The dump the sim thread finished assembling is written out here (main thread).
+            // Do not make it depend on whether the overlay exists (do that and the accident
+            // above comes back).
             DiagnosticDump.FlushPendingWrite();
 
-            // 災害パネルはロード直後にはまだ無いことがある。見つかるまで間隔をあけて再試行する。
+            // The disaster panel may not be there yet right after a load. Retry at intervals
+            // until it is found.
             IntensityUnlock.Tick();
 
-            // ④⑤のタイル（災害を起こす側）はこの 1 か所が持つ。機能ごとに Tick を
-            // 呼ばせると、位置を決める主体がまた増える（DisasterPanelBar のクラス doc）。
+            // The ④⑤ tiles (the side that raises disasters) are owned by this one place. Have
+            // each feature call Tick and the number of things deciding positions grows again
+            // (see the DisasterPanelBar class doc).
             DisasterPanelBar.Tick();
 
-            // 読む側（①②④⑤と診断）は左上のボタン 1 個から開く。**ここも 1 か所である。**
+            // The reading side (①②④⑤ and the diagnostics) opens from a single button in the
+            // top-left. **This too is one place.**
             InfoHub.Tick();
             DiagnosticsPanel.Tick();
 
@@ -227,7 +242,7 @@ namespace DisasterPlus.Game
 
         public static void LevelUnloading()
         {
-            // 解体を始める前に tick を止める。
+            // Stop ticking before dismantling begins.
             _levelReady = false;
 
             for (int i = 0; i < _features.Count; i++)
@@ -242,14 +257,15 @@ namespace DisasterPlus.Game
 
             _hasLastFrame = false;
             IntensityUnlock.Reset();
-            // 機能の解体が済んでから撤去する。次の都市が必ず「1 個ずつ・重複なし」で
-            // 始まるようにするのはここ 1 か所の責任。
+            // Remove it after the features have been dismantled. Making sure the next city
+            // always starts "one of each, no duplicates" is the responsibility of this one
+            // place.
             DisasterPanelBar.Remove();
-            // ★ タイルの絵（Texture2D 2 枚）も自分で消す。Component では無いので
-            //   GameObject の道連れにならない —— 飛ばすと都市を出入りする
-            //   たびに 128 KB ずつ残る。
+            // ★ Destroy the tile artwork (two Texture2Ds) ourselves too. They are not
+            //   Components, so the GameObject does not take them with it — skip this and
+            //   128 KB is left behind every time you enter and leave a city.
             DisasterTileIcons.Destroy();
-            // ★ 的に使う DisasterInfo の参照も持ち越さない。
+            // ★ Do not carry over the DisasterInfo reference used for the marker either.
             PlacementMarker.Reset();
             InfoHub.Remove();
             DiagnosticsPanel.Destroy();
@@ -262,11 +278,12 @@ namespace DisasterPlus.Game
                 _degradeNotes.Clear();
             }
             DiagnosticsHub.Clear();
-            // テアダウン中に立ったダンプ依頼・組み立て済みレポートを次の都市へ持ち越さない。
+            // Do not carry a dump request raised during teardown, or an assembled report, over
+            // to the next city.
             DiagnosticDump.Reset();
         }
 
-        /// <summary>既存の catch 節から呼ぶ。呼び出しは止めない。main / sim どちらのスレッドからも呼ばれる。</summary>
+        /// <summary>Call from an existing catch clause. Does not stop the calls. Called from both the main and sim threads.</summary>
         private static void NoteFailure(string featureName, System.Exception e)
         {
             lock (_errorGate)
@@ -279,15 +296,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 例外は出ていないが振る舞いがおかしいことを機能が自己申告する口。
-        /// 同じ (featureName, noteKey) に複数回呼ぶと直近の理由で上書きされる。
-        /// noteKey が違えば併記される。
-        /// ClearDegraded か レベルアンロードまで残る。
-        /// main / sim どちらのスレッドから呼んでもよい。
+        /// The inlet by which a feature declares for itself that, while no exception has been
+        /// raised, its behaviour is wrong.
+        /// Calling it several times for the same (featureName, noteKey) overwrites with the
+        /// most recent reason. Different noteKeys are listed alongside each other.
+        /// It persists until ClearDegraded or level unload.
+        /// Safe to call from either the main or the sim thread.
         /// </summary>
         /// <param name="noteKey">
-        /// 申告の識別子。回復時に <see cref="ClearDegraded"/> へ同じ値を渡して
-        /// 「自分が立てた分だけ」を取り下げる。
+        /// The declaration's identifier. On recovery, pass the same value to
+        /// <see cref="ClearDegraded"/> to withdraw "only what I raised".
         /// </param>
         public static void NoteDegraded(string featureName, string noteKey, string reason)
         {
@@ -305,13 +323,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 自己申告した Degraded を取り下げる。無かった場合は何もしない。
+        /// Withdraws a self-declared Degraded. Does nothing if there was none.
         ///
-        /// 回復経路が無いと、症状が消えた後もバッジだけが Degraded のまま残り、
-        /// 本文（症状の行）が消えているのに見出しは赤い、という自己矛盾した
-        /// オーバーレイになる。狼少年を作らないのがこの基盤の目的なので、
-        /// 立てた側は必ず下ろす経路も持つこと。
-        /// main / sim どちらのスレッドから呼んでもよい。
+        /// Without a recovery path, the badge alone stays Degraded after the symptom has gone,
+        /// giving a self-contradictory overlay where the body (the symptom line) has
+        /// disappeared but the heading is still red. The purpose of this infrastructure is not
+        /// to cry wolf, so whoever raises one must also have a path to lower it.
+        /// Safe to call from either the main or the sim thread.
         /// </summary>
         public static void ClearDegraded(string featureName, string noteKey)
         {
@@ -326,14 +344,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 全機能の診断を集めて 1 つの不変レポートにする。sim スレッドから呼ぶこと。
+        /// Collects the diagnostics of every feature into one immutable report. Call from the
+        /// sim thread.
         /// </summary>
         public static DiagnosticReport BuildReport()
         {
             var header = new List<DiagnosticLine>();
-            // バージョンは先頭に置く。「ゲームが下で変わった」を前提にした基盤なのに
-            // どのゲームビルドの記録なのか分からないダンプは、いちばん重要な欄が
-            // 抜けている（設計書 8）。オーバーレイも同じ header を描くので両方に出る。
+            // The version goes first. For infrastructure built on the premise that "the game
+            // changed underneath us", a dump that does not say which game build it records is
+            // missing its single most important field (design doc 8). The overlay draws the
+            // same header, so it appears in both.
             header.Add(new DiagnosticLine(0, "Mod", ModVersion()));
             header.Add(new DiagnosticLine(0, "Game", GameVersion()));
             header.Add(new DiagnosticLine(0, "DLC:ND",
@@ -347,14 +367,16 @@ namespace DisasterPlus.Game
             var sections = new List<DiagnosticSection>();
             var builder = new DiagnosticBuilder();
 
-            // _errorCounts / _lastErrors は先に丸ごとスナップショットしてから lock を離れる。
-            // f.WriteDiagnostics は任意の機能コードで、FeatureHost へコールバックする可能性が
-            // ゼロではない（例えば Log.Diag 経由の何か）。lock を持ったまま呼ぶと、そのコード経路が
-            // 同じ _errorGate を取ろうとした瞬間にデッドロックしうるので、ここでは絶対に避ける。
-            // 名前も lock の外で先に確保する。IDisasterFeature.Name は契約上「任意の
-            // 機能コード」であり（②〜⑤はこのファイルを手本に書かれる）、_errorGate を
-            // 持ったまま呼べば同じ規律違反になる。プロパティが投げても診断全体を
-            // 落とさないよう、ここで個別に受け止めておく。
+            // Snapshot _errorCounts / _lastErrors wholesale first, then leave the lock.
+            // f.WriteDiagnostics is arbitrary feature code, and the chance of it calling back
+            // into FeatureHost is not zero (something via Log.Diag, say). Call it while
+            // holding the lock and that code path could deadlock the moment it tries to take
+            // the same _errorGate, so it is absolutely avoided here.
+            // The names are obtained outside the lock beforehand too. IDisasterFeature.Name is
+            // by contract "arbitrary feature code" (② to ⑤ are written with this file as the
+            // model), and calling it while holding _errorGate would be the same breach of
+            // discipline. So that a throwing property does not bring down the whole
+            // diagnostics, each is caught individually here.
             var names = new string[_features.Count];
             for (int i = 0; i < _features.Count; i++)
             {
@@ -381,7 +403,8 @@ namespace DisasterPlus.Game
                         notes[i] = errors + " errors, last: " + last;
                     }
 
-                    // 例外を伴わない自己申告（NoteDegraded）。例外記録と両方あれば併記する。
+                    // Self-declarations with no exception (NoteDegraded). If there is also an
+                    // exception record, both are listed.
                     string degraded = JoinDegradeNotes(names[i]);
                     if (degraded.Length > 0)
                     {
@@ -402,8 +425,9 @@ namespace DisasterPlus.Game
                 }
                 catch (System.Exception e)
                 {
-                    // 診断の失敗で他機能の診断まで巻き込まない。
-                    // バッジが本文と矛盾しないよう、この機能の health も Degraded にする。
+                    // Do not let one feature's diagnostics failure take the others' with it.
+                    // So the badge does not contradict the body, mark this feature's health
+                    // Degraded as well.
                     builder.Line(1, "diagnostics failed", e.GetType().Name);
                     health = FeatureHealth.Degraded;
                 }
@@ -415,11 +439,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 機能ぶんの自己申告を 1 本の文にまとめる。_errorGate を持ったまま呼ぶこと。
+        /// Joins one feature's self-declarations into a single sentence. Call while holding
+        /// _errorGate.
         ///
-        /// 申告キーで並べ替えてから連結する。Dictionary の列挙順は取り下げ
-        /// （ClearDegraded）を挟むと変わりうるので、そのままだとオーバーレイの
-        /// 1 行が理由もなく入れ替わって見える。
+        /// They are sorted by note key before being joined. A Dictionary's enumeration order
+        /// can change once a withdrawal (ClearDegraded) is involved, so without the sort a
+        /// line in the overlay would appear to swap around for no reason.
         /// </summary>
         private static string JoinDegradeNotes(string featureName)
         {
@@ -438,7 +463,7 @@ namespace DisasterPlus.Game
             return sb.ToString();
         }
 
-        /// <summary>MOD 版。アセンブリのバージョンをそのまま出す（AssemblyInfo.cs が唯一の情報源）。</summary>
+        /// <summary>The mod version. Prints the assembly version as-is (AssemblyInfo.cs is the single source).</summary>
         private static string ModVersion()
         {
             try
@@ -450,12 +475,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ゲーム版。
+        /// The game version.
         ///
-        /// IL 実測: BuildConfig.applicationVersion は public static な String プロパティで、
-        /// 中身は BuildConfig.VersionToString(APPLICATION_VERSION, false) を返すだけ
-        /// （フル版が要るときは applicationVersionFull）。static なのでインスタンスも
-        /// シングルトンも要らず、どのタイミングでも読める。
+        /// Measured from the IL: BuildConfig.applicationVersion is a public static String
+        /// property whose body just returns BuildConfig.VersionToString(APPLICATION_VERSION,
+        /// false) (use applicationVersionFull when the full version is needed). Being static,
+        /// it needs neither an instance nor a singleton and can be read at any moment.
         /// </summary>
         private static string GameVersion()
         {
@@ -464,8 +489,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 設定に合わせてオーバーレイを生成・破棄する。main スレッド専用。
-        /// Create / Destroy はどちらも「既にその状態なら即 return」なので毎フレーム呼んでよい。
+        /// Creates or destroys the overlay to match the setting. Main thread only.
+        /// Both Create and Destroy return immediately if already in that state, so this is
+        /// safe to call every frame.
         /// </summary>
         private static void SyncOverlay()
         {

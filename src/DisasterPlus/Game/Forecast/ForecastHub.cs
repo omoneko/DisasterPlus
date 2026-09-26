@@ -1,9 +1,10 @@
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// sim スレッドが Publish し main スレッドが Latest を読む。
-    /// DiagnosticsHub / FireWhirlRegistry と同じ形（net35 に Concurrent は無いので素の lock）。
-    /// WeatherSnapshot は不変なので参照を渡すだけで安全。
+    /// The sim thread calls Publish and the main thread reads Latest.
+    /// The same shape as DiagnosticsHub / FireWhirlRegistry (net35 has no Concurrent
+    /// collections, so a plain lock). WeatherSnapshot is immutable, so handing over the
+    /// reference is safe on its own.
     /// </summary>
     public static class ForecastHub
     {
@@ -15,13 +16,13 @@ namespace DisasterPlus.Game
             lock (_gate) { _latest = snapshot; }
         }
 
-        /// <summary>まだ publish されていなければ null。呼び出し側で判定すること。</summary>
+        /// <summary>Null until something has been published. The caller must check.</summary>
         public static WeatherSnapshot Latest
         {
             get { lock (_gate) { return _latest; } }
         }
 
-        /// <summary>レベルアンロード時。都市をまたいで状態を持ち越さない。</summary>
+        /// <summary>On level unload. State is never carried across cities.</summary>
         public static void Clear()
         {
             lock (_gate) { _latest = null; }

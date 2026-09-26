@@ -11,18 +11,19 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void FacingNorthTheRightSideIsEast()
         {
-            // クラス doc の検算そのもの。ここを取り違えると偏りが左右反対になる。
-            // 北へ進む = heading 90 度（(cos, sin) = (0, 1) = +Z）。
-            Assert.Equal(1f, TrackBias.SideOf(HalfPi, 100f, 0f), 4);    // 東 = 真右
-            Assert.Equal(-1f, TrackBias.SideOf(HalfPi, -100f, 0f), 4);  // 西 = 真左
-            Assert.Equal(0f, TrackBias.SideOf(HalfPi, 0f, 100f), 4);    // 北 = 正面
-            Assert.Equal(0f, TrackBias.SideOf(HalfPi, 0f, -100f), 4);   // 南 = 真後ろ
+            // Exactly the worked example in the class doc. Get this the wrong way round and
+            // the bias ends up on the opposite side.
+            // Travelling north = heading 90 degrees ((cos, sin) = (0, 1) = +Z).
+            Assert.Equal(1f, TrackBias.SideOf(HalfPi, 100f, 0f), 4);    // east = directly right
+            Assert.Equal(-1f, TrackBias.SideOf(HalfPi, -100f, 0f), 4);  // west = directly left
+            Assert.Equal(0f, TrackBias.SideOf(HalfPi, 0f, 100f), 4);    // north = straight ahead
+            Assert.Equal(0f, TrackBias.SideOf(HalfPi, 0f, -100f), 4);   // south = directly behind
         }
 
         [Fact]
         public void FacingEastTheRightSideIsSouth()
         {
-            // 東へ進む = heading 0 度（(1, 0) = +X）。右は南（-Z）。
+            // Travelling east = heading 0 degrees ((1, 0) = +X). Right is south (-Z).
             Assert.Equal(1f, TrackBias.SideOf(0f, 0f, -100f), 4);
             Assert.Equal(-1f, TrackBias.SideOf(0f, 0f, 100f), 4);
         }
@@ -30,19 +31,20 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheBiasTurnsWithTheTrack()
         {
-            // ★ これが「曲がる経路に付いてくる」ことの試験である。
-            //   同じ点でも進行方位が回れば、危険半円のどちらに入るかが変わる。
+            // ★ This is the test for "it follows a curving track".
+            //   Even at the same point, which half of the dangerous semicircle it falls in
+            //   changes as the heading rotates.
             const float dx = 100f;
             const float dz = 0f;
 
-            // 北向き: 東の点は真右 = 強化される。
+            // Heading north: a point to the east is directly right = it gets boosted.
             Assert.True(TrackBias.RadiusFactor(HalfPi, dx, dz, false) > 1f);
 
-            // 半周して南向きになると、同じ点は真左 = 強化されない。
+            // Turn half a circle to face south and the same point is directly left = no boost.
             Assert.Equal(1f, TrackBias.RadiusFactor(-HalfPi, dx, dz, false), 5);
             Assert.Equal(1f, TrackBias.RadiusFactor(HalfPi + Pi, dx, dz, false), 5);
 
-            // 少しずつ回すと連続に落ちていく（段差が無い）。
+            // Rotating a little at a time, it falls off continuously (there is no step).
             float previous = TrackBias.RadiusFactor(HalfPi, dx, dz, false);
             for (int i = 1; i <= 18; i++)
             {
@@ -56,7 +58,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheLeftSideIsNeverWeakenedAndTheRightIsNeverExtreme()
         {
-            // 指示は「右側を若干強化」であって「左側を弱める」ではない。
+            // The instruction was "boost the right side slightly", not "weaken the left side".
             for (int i = 0; i < 72; i++)
             {
                 float angle = 6.2831853f * i / 72f;
@@ -74,13 +76,13 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheSouthernHemisphereMirrorsTheDangerousSemicircle()
         {
-            const float heading = HalfPi;   // 北向き
+            const float heading = HalfPi;   // heading north
 
-            // 北半球は右（東）。
+            // In the northern hemisphere it is the right (east).
             Assert.True(TrackBias.DangerousSideOf(heading, 100f, 0f, false) > 0.99f);
             Assert.Equal(0f, TrackBias.DangerousSideOf(heading, -100f, 0f, false), 5);
 
-            // 南半球は左（西）。
+            // In the southern hemisphere it is the left (west).
             Assert.Equal(0f, TrackBias.DangerousSideOf(heading, 100f, 0f, true), 5);
             Assert.True(TrackBias.DangerousSideOf(heading, -100f, 0f, true) > 0.99f);
         }
@@ -88,7 +90,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheEyeItselfAndBrokenInputsGetNoBias()
         {
-            // 中心そのもの（長さ 0）で 0 除算しない。
+            // At the centre itself (length 0) it must not divide by zero.
             Assert.Equal(0f, TrackBias.SideOf(1f, 0f, 0f), 6);
             Assert.Equal(1f, TrackBias.RadiusFactor(1f, 0f, 0f, false), 6);
 
@@ -101,7 +103,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheBoostIsModest()
         {
-            // 「気付く程度であって別の台風ではない」ことを数字で固定する。
+            // Pins down in numbers that it is "noticeable, but not a different typhoon".
             Assert.True(TrackBias.MaxRadiusBoost > 0.05f);
             Assert.True(TrackBias.MaxRadiusBoost <= 0.25f);
             Assert.True(TrackBias.MaxChanceBoost > 0.10f);

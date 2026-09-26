@@ -5,60 +5,65 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="VolcanoClearing"/> のうち、**実際にグリッドを辿って取り除く部分**。
-    /// **sim スレッド専用。**
+    /// The part of <see cref="VolcanoClearing"/> that **actually walks the grid and removes
+    /// things**. **Sim thread only.**
     ///
-    /// 分割してあるのは 800 行の規則のためで、意味の境目でもある ——
-    /// 本体（<c>VolcanoClearing.cs</c>）が「いつ・どこまで走るか」を決め、
-    /// こちらが「どう辿って、何を呼ぶか」を持つ。**判断は 1 つも増やさないこと。**
-    /// 走査の形（セル 64・オフセット 135・<c>[0,269]</c>・<c>z*270+x</c>・
-    /// <c>OutwardCellOrder</c>・次の ID を行動前に控える）は
-    /// <c>VolcanoSurvey</c> / <c>TyphoonWind</c> / <c>LongPeriodDamage</c> と同じである。
+    /// The split is for the 800-line rule, but it is also a boundary in meaning — the main file
+    /// (<c>VolcanoClearing.cs</c>) decides "when and how far to run", and this one holds
+    /// "how to walk and what to call". **Do not add a single decision here.**
+    /// The shape of the sweep (64 m cells, offset 135, <c>[0,269]</c>, <c>z*270+x</c>,
+    /// <c>OutwardCellOrder</c>, note the next ID before acting) is the same as in
+    /// <c>VolcanoSurvey</c> / <c>TyphoonWind</c> / <c>LongPeriodDamage</c>.
     ///
-    /// ★★ <b>「何が範囲に入っているか」はこのファイルが決めていない。</b>
-    /// マスクも余白も当たり判定も <see cref="VolcanoScan"/> にあり、
-    /// **調査（<see cref="VolcanoSurvey"/>）が同じものを使う** ——
-    /// 数える側と壊す側の述語が二度とずれないための構造である（全体レビュー I2 / I4）。
+    /// ★★ <b>"What is inside the range" is not decided by this file.</b>
+    /// The masks, the margins and the hit test are all in <see cref="VolcanoScan"/>, and
+    /// **the survey (<see cref="VolcanoSurvey"/>) uses the same ones** —
+    /// a structure that stops the counting side's and the destroying side's predicates ever
+    /// drifting apart again (whole-project review I2 / I4).
     ///
-    /// ── 1 回の走査で壊す数の上限（全体レビュー M16）─────────────────
+    /// ── the limit on how much one sweep destroys (whole-project review M16) ────────────────
     ///
-    /// 上限の判定は<b>連結リストを辿る途中にも置く</b>。セルの先頭でしか見ないと、
-    /// 1 つのセルに数百棟ぶら下がっている密集地で予算を大きく踏み越える。
-    /// 途中で打ち切ったセルは<b>次回の走査で先頭からやり直す</b>
-    /// （<c>ordinal</c> を 1 つ戻す）—— 途中まで進んだセルを終わったことにすると、
-    /// そのセルに残った建物の足元だけ地形が固定されたまま隆起する。
-    /// やり直しても二重に壊すことは無い（<c>Demolishing</c> はマスクが弾く）。
+    /// The limit is tested <b>partway through walking the linked list as well</b>. Test it only at
+    /// the head of a cell and a dense area with several hundred buildings hanging off one cell
+    /// blows well past the budget.
+    /// A cell cut short partway is <b>redone from the head on the next sweep</b>
+    /// (<c>ordinal</c> is stepped back by one) — treat a partly-processed cell as finished and the
+    /// terrain stays pinned under the buildings left in it while the uplift goes ahead.
+    /// Redoing it never destroys anything twice (the mask excludes <c>Demolishing</c>).
     ///
-    /// > ★★ <b>やり直すのは「このセルで 1 つでも壊せたとき」だけである。</b>
-    /// > 壊せたものはマスクから外れるので、やり直しは必ず有限回で終わる。
-    /// > 無条件にやり直すと、**バニラが断る建物が 1 セルに予算ぶん並んでいるだけで
-    /// > 準備が永久に足踏みし、位相が <c>Clearing</c> のまま二度と進まない**
-    /// > （断られた建物は <c>Created</c> のままなので、次の走査も同じ数を数える）。
+    /// > ★★ <b>It is only redone when at least one thing in that cell could be destroyed.</b>
+    /// > What was destroyed drops out of the mask, so the redoing always terminates after a finite
+    /// > number of times.
+    /// > Redo it unconditionally and **one cell holding a budget's worth of buildings that vanilla
+    /// > refuses is enough to make the clearing mark time for ever, and the phase never moves on
+    /// > from <c>Clearing</c>** (a refused building stays <c>Created</c>, so the next sweep counts
+    /// > exactly the same number).
     /// </summary>
     public static partial class VolcanoClearing
     {
         /// <summary>
-        /// 建物の走査。<c>demolish: true</c> / <c>burnAmount: 0</c>（クラス doc）。
+        /// The building sweep. <c>demolish: true</c> / <c>burnAmount: 0</c> (class doc).
         ///
-        /// **dry-run はフィルタに使わない。** <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> /
-        /// <c>MonorailPylonAI</c> は <c>if (testOnly) return false;</c> の直後に本物の倒壊を
-        /// 行う（④ §F-2）ので、dry-run を信じて呼ばないと送電柱を 1 本も取り除けない。
-        /// ⑤は本番だけを呼び、**その戻り値をそのまま「取り除けたか」とする**。
+        /// **The dry run is not used as a filter.** <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> /
+        /// <c>MonorailPylonAI</c> perform the real collapse immediately after
+        /// <c>if (testOnly) return false;</c> (④ §F-2), so trusting the dry run and not calling
+        /// would leave every power pole standing.
+        /// ⑤ calls only for real, and **takes that return value as "was it removed"**.
         /// </summary>
         private static int ClearBuildings(VolcanoFootprint footprint, out bool capped,
                                           out float reachedRadius)
         {
             capped = false;
 
-            // ★★ **届いた半径の初期値は 0 である**（全体レビュー M7）。
-            //    以前はここで _frontRadius を入れていたので、下の「読めなかった」
-            //    3 つの return が**前線まで走査し終えたと名乗り**、T6 に
-            //    1 棟も壊れていない街の上を隆起させる許可を出していた。
-            //    実際に走れたと分かってから _frontRadius に上げる。
+            // ★★ **The initial value of the radius reached is 0** (whole-project review M7).
+            //    This used to be set to _frontRadius, so the three "could not read" returns below
+            //    **claimed the sweep had reached the front** and gave T6 permission to uplift a
+            //    city where not one building had been destroyed.
+            //    Raise it to _frontRadius only once we know it actually ran.
             reachedRadius = 0f;
 
-            // ★ Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-            //    new GameObject を走らせる main スレッド専用 API なので exists で先に見る。
+            // ★ Singleton<T>.instance is a main-thread-only API that runs FindObjectOfType and
+            //    new GameObject when sInstance is null, so check exists first.
             if (!Singleton<BuildingManager>.exists)
             {
                 _lastFailure = "BuildingManager is not available; nothing was cleared";
@@ -80,10 +85,11 @@ namespace DisasterPlus.Game
                 return 0;
             }
 
-            // ★ 実測した長さと合わなければ走らない（推測で走らない。設計書 §6）。
-            //   このとき**届いた半径は 0 にする** —— 前線に届いたことにすると、
-            //   T6 が壊れていない場所を上げる。準備は Clearing のまま止まり、
-            //   理由は LastFailure と診断に出る。
+            // ★ Do not run if it does not match the measured length (do not run on a guess.
+            //   Design doc §6).
+            //   **The radius reached is 0 here** — claim it reached the front and T6 raises ground
+            //   that has not been cleared. The clearing stalls at Clearing and the reason goes
+            //   into LastFailure and the diagnostics.
             if (grid.Length != GridSide * GridSide)
             {
                 _lastFailure = "the building grid is not 270x270 in this build; "
@@ -91,10 +97,11 @@ namespace DisasterPlus.Game
                 return 0;
             }
 
-            // ★ この 1 周が言える半径の上限（全体レビュー M8）。カーソルの途中から
-            //   再開したパスは、[0, cursor) を**そのときの（より小さい）前線**で
-            //   走査し終えている。今の前線でその内側まで走査したことにすると、
-            //   前回より外へ出た分の建物が残ったまま隆起が追い越す。
+            // ★ The upper bound on the radius this lap may claim (whole-project review M8). A pass
+            //   resumed from partway through the cursor has swept [0, cursor) at
+            //   **the front as it was then** (which was smaller). Claim we swept inside that at
+            //   today's front and the buildings that have since come outside the old front are
+            //   left standing while the uplift overtakes them.
             float passFront = PassFront(_buildingCursor, ref _buildingPassFront);
 
             int minX, maxX, minZ, maxZ, centreX, centreZ;
@@ -143,17 +150,17 @@ namespace DisasterPlus.Game
 
                 while (id != 0 && id < buildings.Length)
                 {
-                    // ★ 次の ID は**行動する前に**控える（②④と同じ）。倒壊は建物を
-                    //    解放しうるし、道路側の解放が建物を巻き込むこともある
-                    //    （NetManager.ReleaseNodeImplementation → ReleaseBuilding）。
+                    // ★ Note the next ID **before acting** (the same as ② and ④). A collapse can
+                    //    release the building, and releasing a road can take buildings with it
+                    //    (NetManager.ReleaseNodeImplementation → ReleaseBuilding).
                     ushort next = buildings[id].m_nextGridBuilding;
 
-                    // ★ 述語は調査とまったく同じもの（VolcanoScan）。
+                    // ★ The predicate is exactly the survey's (VolcanoScan).
                     if (VolcanoScan.IsCandidate(buildings[id].m_flags)
                         && VolcanoScan.BuildingInside(buildings[id].m_position, origin,
                                                       radiusSquared))
                     {
-                        // ★ 予算は**壊す直前**に見る（クラス doc の M16）。
+                        // ★ Check the budget **immediately before destroying** (M16 in the class doc).
                         if (scanned >= MaxBuildingsPerPass)
                         {
                             budgetHit = true;
@@ -173,14 +180,16 @@ namespace DisasterPlus.Game
                 {
                     capped = true;
 
-                    // ★★ **やり直すのは、このセルで 1 棟でも壊せたときだけ**である。
-                    //    壊せた建物は Demolishing が立ってマスクから外れるので、
-                    //    やり直しは必ず有限回で終わる。**1 棟も壊せなかったセルで
-                    //    やり直すと、そこで永久に足踏みする** —— バニラが断る建物が
-                    //    1 セルに予算ぶん並んでいるだけで、準備が二度と前へ進まなくなる
-                    //    （断られた建物は Created のままなので、次回も同じ数だけ数える）。
-                    //    断られたものはこの先も断られる。その足元だけ地形が残るのは
-                    //    既知の帰結で、refused に積んで診断とパネルに出している。
+                    // ★★ **Redo it only when at least one building in this cell was destroyed.**
+                    //    A destroyed building gets Demolishing set and drops out of the mask, so
+                    //    the redoing always terminates after a finite number of times.
+                    //    **Redo a cell where nothing could be destroyed and it marks time there
+                    //    for ever** — one cell holding a budget's worth of buildings that vanilla
+                    //    refuses is enough to stop the clearing ever moving forward again
+                    //    (refused buildings stay Created, so the next time counts the same number).
+                    //    What was refused will go on being refused. Terrain remaining under those
+                    //    alone is a known consequence, tallied into refused and reported in the
+                    //    diagnostics and on the panel.
                     if (destroyedHere > 0) ordinal--;
                     break;
                 }
@@ -194,27 +203,31 @@ namespace DisasterPlus.Game
             reachedRadius = capped ? ReachedRadius(lastRing) : _frontRadius;
             if (reachedRadius > passFront) reachedRadius = passFront;
 
-            // 一周し切ったらカーソルは 0 に戻っている。次のパスは今の前線で
-            // 全域を走査するので、上限も今の前線に戻る。
+            // Once a full lap is done the cursor is back at 0. The next pass sweeps the whole area
+            // at today's front, so the bound goes back to today's front too.
             if (_buildingCursor == 0) _buildingPassFront = 0f;
             return scanned;
         }
 
         /// <summary>
-        /// 道路の走査。<c>demolish: true</c> で <c>PlayerNetAI</c> の解放経路へ入る
-        /// （クラス doc の Step 1 の 1）。**dry-run に相当する引数がそもそも無い。**
+        /// The road sweep. <c>demolish: true</c> enters <c>PlayerNetAI</c>'s release path
+        /// (point 1 of Step 1 in the class doc). **There is no argument corresponding to a dry run
+        /// in the first place.**
         ///
-        /// 矩形は <c>VolcanoScan.SegmentGridMargin</c> セルだけ広げ、距離は
-        /// **両端ノード → 中点 → 両端ノードの折れ線**で測る（<see cref="VolcanoScan"/>）。
-        /// 中点 1 点で測っていた頃は、中心へ向かって伸びる幹線道路が取り除かれずに残り、
-        /// **完成した山の中に平らな溝が残っていた**（全体レビュー I4）。
+        /// The rectangle is widened by <c>VolcanoScan.SegmentGridMargin</c> cells, and the
+        /// distance is measured along **the polyline end node → midpoint → end node**
+        /// (<see cref="VolcanoScan"/>).
+        /// Back when it was measured at the single midpoint, arterial roads running in towards the
+        /// centre were left in place, and **a flat trench was left inside the finished mountain**
+        /// (whole-project review I4).
         /// </summary>
         private static int ClearSegments(VolcanoFootprint footprint, out bool capped,
                                          out float reachedRadius)
         {
             capped = false;
 
-            // ★★ 建物側と同じ理由で初期値は 0（全体レビュー M7）。
+            // ★★ The initial value is 0 for the same reason as the building side
+            //    (whole-project review M7).
             reachedRadius = 0f;
 
             if (!Singleton<NetManager>.exists)
@@ -238,22 +251,27 @@ namespace DisasterPlus.Game
                 return 0;
             }
 
-            // ★ 実測した長さと合わなければ走らない（推測で走らない。設計書 §6）。
-            //    合わないまま z*270+x で引くと、まったく別の場所の道路を壊す。
-            //    **届いた半径は 0**（上の建物側と同じ理由）。ここへ来る前に
-            //    ClearingPathAvailable が false になって着手そのものを断っているので、
-            //    実際にはまず到達しない二重の保険である。
+            // ★ Do not run if it does not match the measured length (do not run on a guess.
+            //    Design doc §6).
+            //    Index with z*270+x when it does not match and you destroy roads somewhere else
+            //    entirely.
+            //    **The radius reached is 0** (the same reason as the building side above). Before
+            //    we ever get here, ClearingPathAvailable has gone false and refused the placement
+            //    outright, so in practice this is a second layer of insurance that is never
+            //    reached.
             if (grid.Length != GridSide * GridSide)
             {
                 _lastFailure = "the road grid is not 270x270 in this build; no road was removed";
                 return 0;
             }
 
-            // ★ ノードのバッファ（折れ線判定）。読めなければ null のままで、
-            //   VolcanoScan が中点 1 点の判定に落ちる（調査もまったく同じ）。
+            // ★ The node buffer (for the polyline test). If it cannot be read it stays null and
+            //   VolcanoScan falls back to the single-midpoint test (the survey does exactly the
+            //   same).
             NetNode[] nodes = VolcanoScan.NodeBuffer(nm);
 
-            // ★ 建物側と同じ「このパスが言える半径の上限」（全体レビュー M8）。
+            // ★ The same "upper bound on the radius this pass may claim" as the building side
+            //   (whole-project review M8).
             float passFront = PassFront(_segmentCursor, ref _segmentPassFront);
 
             int minX, maxX, minZ, maxZ, centreX, centreZ;
@@ -301,15 +319,15 @@ namespace DisasterPlus.Game
 
                 while (id != 0 && id < segments.Length)
                 {
-                    // ★ 次の ID は**行動する前に**控える。解放はこのセルの連結リストを
-                    //    その場で繋ぎ替えるので、控えないと残りが黙って飛ぶ。
+                    // ★ Note the next ID **before acting**. Releasing re-links this cell's linked
+                    //    list on the spot, so without noting it the rest is silently skipped.
                     ushort next = segments[id].m_nextGridSegment;
 
-                    // ★ 述語は調査とまったく同じもの（VolcanoScan）。
+                    // ★ The predicate is exactly the survey's (VolcanoScan).
                     if (VolcanoScan.IsCandidate(segments[id].m_flags)
                         && VolcanoScan.SegmentInside(segments, nodes, id, origin, _frontRadius))
                     {
-                        // ★ 予算は**壊す直前**に見る（クラス doc の M16）。
+                        // ★ Check the budget **immediately before destroying** (M16 in the class doc).
                         if (scanned >= MaxSegmentsPerPass)
                         {
                             budgetHit = true;
@@ -329,10 +347,12 @@ namespace DisasterPlus.Game
                 {
                     capped = true;
 
-                    // ★★ 建物側と同じ理由で、**1 本でも解放できたときだけやり直す**。
-                    //    解放された道路は配列から消えるのでやり直しは有限回で終わる。
-                    //    断られる道路（SupportCableAI と、所有建物が倒壊を断った
-                    //    Untouchable）はこの先も断られるので、そこで足踏みしない。
+                    // ★★ For the same reason as the building side, **redo it only when at least
+                    //    one segment could be released**. A released road disappears from the
+                    //    array, so the redoing terminates after a finite number of times.
+                    //    Roads that get refused (SupportCableAI, and Untouchable ones whose owning
+                    //    building refused to collapse) will go on being refused, so do not mark
+                    //    time on them.
                     if (destroyedHere > 0) ordinal--;
                     break;
                 }
@@ -351,16 +371,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// この 1 周が「走査し終えた」と言ってよい半径の上限（m）。**全体レビュー M8。**
+        /// The upper bound on the radius this lap may claim to have "finished sweeping" (m).
+        /// **Whole-project review M8.**
         ///
-        /// カーソルが 0 でない ＝ 前のパスが上限で打ち切られ、内側のリングは
-        /// <b>そのときの前線</b>で走査済みである。前線はその後も伸びるので、
-        /// 今の前線で「一周した」と言うと、内側のリングにある
-        /// 「前回の前線より外・今の前線より内」の建物と道路が**走査されないまま
-        /// 済んだことになる**。したがって上限は関わった前線の最小値である。
+        /// A non-zero cursor means the previous pass was cut short by a limit, and the inner rings
+        /// were swept at <b>the front as it was then</b>. The front keeps growing afterwards, so
+        /// claiming "a full lap" at today's front would mean that the buildings and roads in the
+        /// inner rings that are "outside the old front but inside today's" **count as done without
+        /// ever being swept**. So the bound is the minimum of the fronts involved.
         ///
-        /// 一周し切ってカーソルが 0 に戻ると呼び出し側が控えを捨てるので、
-        /// 次のパスは今の前線をそのまま名乗れる（自己修復する）。
+        /// Once a full lap finishes and the cursor returns to 0, the caller discards the noted
+        /// value, so the next pass can claim today's front as it stands (it is self-repairing).
         /// </summary>
         private static float PassFront(int cursor, ref float carried)
         {
@@ -373,25 +394,26 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 建物を 1 棟取り除く。**<c>DisasterHelpers</c> を通らない**（§E-14）。
-        /// <c>demolish: true</c> ＝ 跡地を残さない、<c>burnAmount: 0</c> ＝ 焼損ではない。
-        /// **<c>m_fireIntensity</c> には触れない**（罠 5）。
+        /// Remove one building. **It does not go through <c>DisasterHelpers</c>** (§E-14).
+        /// <c>demolish: true</c> = leave no ruin behind, <c>burnAmount: 0</c> = this is not
+        /// scorching. **It never touches <c>m_fireIntensity</c>** (trap 5).
         /// </summary>
         private static bool Demolish(Building[] buildings, ushort id)
         {
             var info = buildings[id].Info;
             if (info == null || info.m_buildingAI == null) return false;
 
-            // group は null。⑤は災害スロットに載らないので束ねる先が無く、
-            // バニラ側は 3 箇所とも null を検査している（クラス doc の 5）。
+            // group is null. ⑤ does not occupy a disaster slot, so there is nothing to group into,
+            // and vanilla checks for null at all three sites (point 5 of the class doc).
             return info.m_buildingAI.CollapseBuilding(id, ref buildings[id], null,
                                                       false, true, 0);
         }
 
         /// <summary>
-        /// 道路セグメントを 1 本取り除く。<c>demolish: true</c> が
-        /// <c>PlayerNetAI.CollapseSegment</c> の <c>NetManager.ReleaseSegment(id, false)</c> へ
-        /// 繋がる（クラス doc の Step 1 の 1）。**<c>DisasterHelpers</c> を通らない。**
+        /// Remove one road segment. <c>demolish: true</c> leads into
+        /// <c>PlayerNetAI.CollapseSegment</c>'s <c>NetManager.ReleaseSegment(id, false)</c>
+        /// (point 1 of Step 1 in the class doc). **It does not go through
+        /// <c>DisasterHelpers</c>.**
         /// </summary>
         private static bool Demolish(NetSegment[] segments, ushort id)
         {
@@ -402,13 +424,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 上限で打ち切ったときに「確実に走査を終えた」と言える半径（m）。
+        /// The radius (m) we can claim to have "definitely finished sweeping" when cut short by a
+        /// limit.
         ///
-        /// リングは中心の**セル**を中心とした正方形なので、リング
-        /// <paramref name="lastRing"/> の途中で止まったなら完全に終わっているのは
-        /// <c>lastRing - 1</c> 本ぶんである。中心の点はそのセルの中のどこにでもありうるので、
-        /// 保証できる円の半径はさらに 1 セルぶん内側になる —— それが <c>(lastRing - 1) * 64</c>
-        /// である。**多めに言わない。** 多めに言うと T6 が壊れていない場所を上げる。
+        /// The rings are squares centred on the centre **cell**, so stopping partway through ring
+        /// <paramref name="lastRing"/> means what is fully done is <c>lastRing - 1</c> rings.
+        /// The centre point can be anywhere inside that cell, so the circle we can guarantee is a
+        /// further cell in — which is <c>(lastRing - 1) * 64</c>.
+        /// **Do not claim more.** Claim more and T6 raises ground that has not been cleared.
         /// </summary>
         private static float ReachedRadius(int lastRing)
         {
@@ -420,9 +443,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 走査する矩形とリングの中心セル。<paramref name="marginCells"/> は道路側だけ
-        /// 0 でない。矩形と同じクランプを中心にも掛けるので、中心がマップの外でも
-        /// グリッドの中に落ちる（<c>VolcanoSurvey.RectFor</c> と同じ形）。
+        /// The rectangle to sweep and the centre cell of the rings. <paramref name="marginCells"/>
+        /// is non-zero only on the road side. The same clamp as the rectangle is applied to the
+        /// centre too, so even a centre outside the map lands inside the grid (the same shape as
+        /// <c>VolcanoSurvey.RectFor</c>).
         /// </summary>
         private static void RectFor(Vec3 centre, float radius, int marginCells,
                                     out int minX, out int maxX, out int minZ, out int maxZ,

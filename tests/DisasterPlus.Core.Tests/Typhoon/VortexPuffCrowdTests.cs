@@ -4,12 +4,13 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// 所有者の指摘（2026-08-22）「まだ煙のようなものが見えるんですが、
-    /// MissileDisaster のキノコ雲のエフェクトに使っている白い雲を
-    /// 上空の方で渦上に表示させられますか？」への作り直し。
+    /// A rebuild in answer to the owner's report (2026-08-22): "I can still see something
+    /// like smoke —— could you display the white cloud used for the mushroom-cloud effect in
+    /// MissileDisaster up high, arranged as a vortex?".
     ///
-    /// ★★ ここが固定するのは<b>穴が空かないこと</b>と<b>毎フレーム同じ形であること</b>の
-    ///    2 つである。どちらも <c>tools/TyphoonPreview</c> で外して学んだ。
+    /// ★★ What is pinned down here are two things: <b>that no holes open up</b> and
+    ///    <b>that the shape is the same every frame</b>. We learned both by getting them
+    ///    wrong in <c>tools/TyphoonPreview</c>.
     /// </summary>
     public class VortexPuffCrowdTests
     {
@@ -24,8 +25,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheCrowdIsFarBiggerThanTheDiscsItCameFrom()
         {
-            // 88 個をそのまま置いた最初の版は「渦ではなく点々」だった
-            // （粒の面積 ÷ 渦の面積 = 0.41）。
+            // The first version, which simply placed the 88, gave "dots rather than a vortex"
+            // (puff area ÷ vortex area = 0.41).
             Assert.True(VortexPuffCrowd.TotalCount > VortexPuffLayout.PuffCount * 5,
                         VortexPuffCrowd.TotalCount + " puffs is not enough to fill "
                         + VortexPuffLayout.PuffCount + " discs");
@@ -36,8 +37,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         {
             CrowdPuff[] crowd = Build();
 
-            // 渦の外周（半径の比 1）に対する、粒の面積の合計。
-            // **1 を割ると穴が空く**（プレビューで実際に空いた）。
+            // The total puff area against the vortex's outer circle (radius ratio 1).
+            // **Below 1 holes open up** (they actually did in the preview).
             float area = 0f;
             foreach (CrowdPuff p in crowd)
             {
@@ -47,14 +48,16 @@ namespace DisasterPlus.Core.Tests.Typhoon
             float ratio = area / 3.14159265f;
             Assert.True(ratio > 1.2f, "coverage was only " + ratio);
 
-            // 上も見る。10 倍も覆うと、腕の形が消えて 1 枚の綿になる（2 版目がそれ）。
+            // Check the upper end too. Cover it ten times over and the shape of the arms
+            // disappears into a single sheet of wadding (that was the second version).
             Assert.True(ratio < 6f, "coverage was " + ratio + "; the arms will not read");
         }
 
         [Fact]
         public void EveryPuffIsACloudSizedTurretNotABlobTheSizeOfTheArm()
         {
-            // ★ 大きさを円盤に比例させると、外周だけ 1.8 km の塊になった（2 版目）。
+            // ★ Making the size proportional to the disc turned just the outer ring into
+            //   1.8 km blobs (the second version).
             CrowdPuff[] crowd = Build();
 
             float smallest = float.MaxValue;
@@ -74,7 +77,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheEyeStaysOpen()
         {
-            // 眼が埋まると台風に見えない。**いちばん内側の粒でも眼の外**であること。
+            // Fill in the eye and it stops looking like a typhoon. **Even the innermost puff
+            // must be outside the eye.**
             CrowdPuff[] crowd = Build();
 
             int inside = 0;
@@ -97,7 +101,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
                 Assert.False(float.IsNaN(p.RadiusFraction));
                 Assert.False(float.IsNaN(p.AngleRadians));
 
-                // 腕は外周より少しだけ出てよいが、桁で外れてはいけない。
+                // The arms may reach a little past the outer circle, but never by an order
+                // of magnitude.
                 Assert.InRange(p.RadiusFraction, 0f, 1.35f);
                 Assert.InRange(p.HeightFraction, 0f, 1.35f);
                 Assert.InRange(p.DensityFraction, 0f, 1f);
@@ -107,7 +112,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheSameCrowdComesBackEveryTime()
         {
-            // ★★ フレーム番号を混ぜていないことの担保。混ぜると砂嵐になる。
+            // ★★ The guarantee that the frame number is not mixed in. Mix it in and you get
+            //    television static.
             CrowdPuff[] a = Build();
             CrowdPuff[] b = Build();
 
@@ -123,7 +129,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void AllThreeLayersAreRepresented()
         {
-            // 甲板だけ・傘だけになると、雲の厚みが消える。
+            // Reduce it to the deck alone or the canopy alone and the cloud loses its depth.
             CrowdPuff[] crowd = Build();
 
             var seen = new bool[3];

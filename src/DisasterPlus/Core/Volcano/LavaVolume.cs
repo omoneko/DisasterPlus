@@ -3,61 +3,67 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// **噴火の規模から、流れ出る溶岩の量を決める。**
-    /// <b>Core なのでエンジンには一切触らない。</b>
+    /// **Decides how much lava flows out, from the eruption's scale.**
+    /// <b>This is Core, so it never touches the engine.</b>
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── The request (2026-08-22) ─────────────────────────────────
     ///
-    /// > 噴火の規模によって流れ出るマグマの量も変えてください。
+    /// > Please also vary the amount of magma that flows out with the eruption's scale.
     ///
-    /// それまで溶岩は**本数も長さも設定の固定値**で、スライダーを 1.0 にしても
-    /// 25.5 にしても同じ本数が同じだけ流れていた。山の大きさだけが変わって
-    /// 溶岩が変わらないのは、**大きい火山ほど溶岩が目立たなくなる**ということである。
+    /// Until then the lava's **flow count and length were both fixed by the settings**, and
+    /// whether the slider was at 1.0 or at 25.5 the same number of flows ran the same
+    /// distance. Changing only the mountain's size while the lava stays put means **the
+    /// bigger the volcano, the less noticeable the lava**.
     ///
-    /// ── 何を「規模」とするか ─────────────────────────────
+    /// ── What counts as "scale" ─────────────────────────────
     ///
-    /// <b>山の半径</b>である。⑤の大きさのつまみは強度スライダー 1 本だけで
-    /// （<see cref="VolcanoSizeScale"/>）、それは半径と最終高を同じ倍率で伸ばす。
-    /// 噴出の強さ（<c>EruptionIntensityUnit</c>）は<b>使わない</b> ——
-    /// あれは噴火のあいだ 1 区切りごとにゆらぐ量で、それで本数を決めると
-    /// **流れの本数が噴火中に増えたり減ったりする**（既に流れているものを
-    /// 消すことになる）。規模は<b>置いた瞬間に決まって二度と動かない</b>ものでなければ、
-    /// 溶岩の側が状態を持てない。
+    /// <b>The mountain's radius.</b> ⑤'s only size knob is the single intensity slider
+    /// (<see cref="VolcanoSizeScale"/>), and that grows the radius and the final height by
+    /// the same factor. The eruption's strength (<c>EruptionIntensityUnit</c>) is
+    /// <b>not used</b> — that is a quantity that fluctuates from one phase of the eruption
+    /// to the next, and deciding the flow count from it would mean **the number of flows
+    /// going up and down during the eruption** (which would mean deleting flows that are
+    /// already running). Unless the scale is something <b>fixed the moment it is placed and
+    /// never moving again</b>, the lava side cannot hold state.
     ///
-    /// ── 比 ───────────────────────────────────────
+    /// ── The ratio ───────────────────────────────────────
     ///
-    /// 本数も長さも<b>半径に比例させない</b>。半径は 250 m 〜 3000 m と 12 倍あり、
-    /// 比例させると小さい火山から溶岩が 1 本も出ず、大きい火山では
-    /// <c>MaxFlows</c> に張り付いて差が消える。<see cref="Unit"/> は
-    /// <b>基準の半径に対する平方根</b>で、12 倍の半径差を 3.5 倍に均す。
+    /// Neither the count nor the length is made <b>proportional to the radius</b>. The
+    /// radius spans 250 m to 3,000 m, a factor of 12; make it proportional and a small
+    /// volcano produces not a single lava flow while a large one pins to <c>MaxFlows</c> and
+    /// the distinction disappears. <see cref="Unit"/> is <b>the square root of the ratio to
+    /// the reference radius</b>, which flattens a 12× spread of radii into 3.5×.
     /// </summary>
     public static class LavaVolume
     {
         /// <summary>
-        /// 規模 1.0 とみなす半径（m）。成層火山の推奨値
-        /// （<c>VolcanoShape.DefaultRadiusOf(Strato)</c>）と同じにしてある ——
-        /// **既定の設定でスライダーを既定位置に置いたとき、今までどおりの本数**になる。
+        /// The radius (m) treated as scale 1.0. Set to the same value as the recommended
+        /// figure for a stratovolcano (<c>VolcanoShape.DefaultRadiusOf(Strato)</c>) — so
+        /// that **with the default settings and the slider in its default position, the flow
+        /// count is what it always was**.
         /// </summary>
         public const float ReferenceRadiusMetres = 1200f;
 
-        /// <summary>規模の下限。0 にしない（0 は「溶岩を出さない」であって小さい噴火ではない）。</summary>
+        /// <summary>The floor on the scale. Never 0 (0 means "produce no lava", not a small
+        /// eruption).</summary>
         public const float MinUnit = 0.45f;
 
-        /// <summary>規模の上限。</summary>
+        /// <summary>The ceiling on the scale.</summary>
         public const float MaxUnit = 2.0f;
 
         /// <summary>
-        /// 流れの長さの倍率の下限。**1 未満にもする** ——
-        /// 小さい火山の溶岩が裾を越えて何 km も走るのは、規模が効いていないのと同じである。
+        /// The floor on the flow-length multiplier. **It does go below 1** — lava from a
+        /// small volcano running kilometres past its foot is the same as the scale having no
+        /// effect at all.
         /// </summary>
         public const float MinLengthFactor = 0.40f;
 
-        /// <summary>流れの長さの倍率の上限。</summary>
+        /// <summary>The ceiling on the flow-length multiplier.</summary>
         public const float MaxLengthFactor = 1.8f;
 
         /// <summary>
-        /// 半径から規模 <c>[MinUnit, MaxUnit]</c> へ。
-        /// <paramref name="radiusMetres"/> が異常なら 1（＝設定どおり）。
+        /// Radius → scale, in <c>[MinUnit, MaxUnit]</c>.
+        /// If <paramref name="radiusMetres"/> is bad, returns 1 (= exactly as configured).
         /// </summary>
         public static float Unit(float radiusMetres)
         {
@@ -72,14 +78,16 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 実際に出す本数。<paramref name="configuredFlows"/> は設定の本数で、
-        /// <paramref name="maxFlows"/> は実装の上限である。
+        /// The number of flows actually produced. <paramref name="configuredFlows"/> is the
+        /// configured count and <paramref name="maxFlows"/> is the implementation's cap.
         ///
-        /// ★★ <b>設定が 0 なら 0 を返す。</b> 0 は「溶岩を完全に切っている」であって
-        ///   「いちばん小さい噴火」ではない —— 規模で 1 本に戻してはいけない。
+        /// ★★ <b>If the setting is 0, return 0.</b> 0 means "lava is switched off
+        ///   entirely", not "the smallest eruption" — the scale must never bring it back up
+        ///   to 1.
         ///
-        /// ★ 設定が 1 以上なら<b>必ず 1 本以上</b>返す。小さい火山で 0 本にすると、
-        ///   プレイヤーには「溶岩の機能が壊れている」としか見えない。
+        /// ★ If the setting is 1 or more, <b>always return at least 1</b>. Returning 0 for a
+        ///   small volcano looks to the player like nothing but "the lava feature is
+        ///   broken".
         /// </summary>
         public static int FlowCount(int configuredFlows, int maxFlows, float radiusMetres)
         {
@@ -94,15 +102,16 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 流れの長さに掛ける倍率 <c>[MinLengthFactor, MaxLengthFactor]</c>。
-        /// 本数より効き方を強くしてある（本数は整数で刻みが粗く、
-        /// **長さのほうが「量が変わった」と見えやすい**）。
+        /// The multiplier applied to a flow's length, in
+        /// <c>[MinLengthFactor, MaxLengthFactor]</c>.
+        /// It responds more strongly than the count does (the count is an integer and so
+        /// steps coarsely, and **the length reads as "the amount changed" more readily**).
         /// </summary>
         public static float LengthFactor(float radiusMetres)
         {
             float unit = Unit(radiusMetres);
 
-            // 規模 1 で 1.0。上下には規模より少しだけ強く振る。
+            // 1.0 at scale 1, swinging a little harder than the scale in both directions.
             float factor = 1f + (unit - 1f) * 1.35f;
 
             if (factor < MinLengthFactor) return MinLengthFactor;
@@ -110,22 +119,24 @@ namespace DisasterPlus.Core.Volcano
             return factor;
         }
 
-        /// <summary>流れの太さの倍率の下限。</summary>
+        /// <summary>The floor on the flow-width multiplier.</summary>
         public const float MinWidthFactor = 0.60f;
 
-        /// <summary>流れの太さの倍率の上限。</summary>
+        /// <summary>The ceiling on the flow-width multiplier.</summary>
         public const float MaxWidthFactor = 1.55f;
 
         /// <summary>
-        /// 流れの**太さ**に掛ける倍率（2026-08-22、所有者の依頼
-        /// 「溶岩流の太さを、もう少し太くしてほしいです（噴火規模に合わせて）」）。
+        /// The multiplier applied to a flow's **width** (2026-08-22, at the owner's request:
+        /// "I'd like the lava flows a bit wider, please — scaled to the eruption").
         ///
-        /// 長さ（<see cref="LengthFactor"/>）より**効き方を弱く**してある。
-        /// 太さは面積として目に入るので、長さと同じ比で振ると
-        /// 大きい火山の溶岩が山より太くなる。<c>Unit^0.75</c> で 1 へ寄せる。
+        /// It responds **more weakly** than the length (<see cref="LengthFactor"/>) does.
+        /// Width registers as area, so swinging it by the same ratio as the length would
+        /// make a large volcano's lava wider than the mountain. <c>Unit^0.75</c> pulls it
+        /// towards 1.
         ///
-        /// ★ 基準の半径で**ちょうど 1**。既定の設定で既定のスライダー位置なら、
-        ///   太さの基準値（<c>LavaPath.SpreadBaseMetres</c>）がそのまま出る。
+        /// ★ **Exactly 1** at the reference radius. With the default settings and the
+        ///   slider in its default position, the base width
+        ///   (<c>LavaPath.SpreadBaseMetres</c>) comes out unchanged.
         /// </summary>
         public static float WidthFactor(float radiusMetres)
         {
@@ -138,8 +149,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 1 本が歩いてよい歩数。<paramref name="baseSteps"/> は実装の上限
-        /// （<c>LavaPath.MaxSteps</c>）で、**それを超えない**（配列の長さがそれで決まる）。
+        /// How many steps one flow may walk. <paramref name="baseSteps"/> is the
+        /// implementation's cap (<c>LavaPath.MaxSteps</c>), and we **never exceed it** (it
+        /// is what the array lengths are sized by).
         /// </summary>
         public static int StepBudget(int baseSteps, float radiusMetres)
         {

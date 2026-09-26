@@ -1,15 +1,16 @@
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ①天気予報タブ。バニラのハザードヒートマップは自前で描かず流用し
-    /// （InfoModeSwitch / HazardMapReader）、本機能が足すのは時間軸（傾向）と
-    /// ハザード値の数値化、そして**ハザードマップが何を意味しているかの説明**
-    /// （設計書 2、および全体レビューでの前提の訂正 — ForecastPanel のクラス doc 参照）。
+    /// ① The weather forecast tab. We do not draw vanilla's hazard heatmap ourselves but
+    /// borrow it (InfoModeSwitch / HazardMapReader); what this feature adds is the time
+    /// axis (the trend), turning the hazard values into numbers, and **an explanation of
+    /// what the hazard map actually means** (design document 2, plus the correction to our
+    /// premise made during the full review — see the class doc on ForecastPanel).
     ///
-    /// IPausedTickFeature を実装しているのは、ロード直後にポーズしたままでも
-    /// パネルが「読み取れません」で埋まらないようにするため。本機能は
-    /// WeatherReader で読んで ForecastHub へ publish するだけでゲームの状態を
-    /// 一切進めないので、この印を名乗る条件を満たす（そちらの doc 参照）。
+    /// It implements IPausedTickFeature so that the panel does not fill up with "cannot
+    /// read" when you stay paused right after loading. All this feature does is read via
+    /// WeatherReader and publish to ForecastHub; it never advances any game state, so it
+    /// meets the conditions for claiming that marker (see its doc).
     /// </summary>
     public class ForecastFeature : IDisasterFeature, IPausedTickFeature
     {
@@ -19,39 +20,42 @@ namespace DisasterPlus.Game
 
         public void OnLevelLoaded()
         {
-            // ★ 地図オーバーレイ（進路・暴風域・風）。登録は②と共有する 1 個で、
-            //   都市をロードするたび全トグル OFF から始まる。
+            // ★ The map overlays (track, gale area, wind). There is one registration,
+            //   shared with ②, and every city load starts with all toggles off.
             ForecastOverlay.EnsureRegistered();
             WeatherRadarWatch.Reset();
 
             ForecastHub.Clear();
-            // ボタンの設置はここでは試みない。UIView がこの時点でまだ準備できていない
-            // ことがあるので、③のパネルボタンと同じく OnMainThreadUpdate の間引きに任せる。
+            // Do not attempt to install the button here. UIView may not be ready yet at
+            // this point, so — as with ③'s panel button — leave it to the throttled work
+            // in OnMainThreadUpdate.
         }
 
         /// <summary>
-        /// sim スレッド。WeatherManager / DisasterManager の読み取りは必ずここで行う。
-        /// main スレッドから直接触ると、スタックトレースの出ない
-        /// IndexOutOfRangeException が後から出る（WeatherReader のクラス doc 参照）。
+        /// Sim thread. Always read WeatherManager / DisasterManager here. Touch them
+        /// directly from the main thread and an IndexOutOfRangeException with no stack
+        /// trace turns up later (see the class doc on WeatherReader).
         ///
-        /// ポーズ中（deltaMinutes == 0）にも呼ばれる（IPausedTickFeature）。
-        /// deltaMinutes は使っていないので、それで挙動は変わらない。
+        /// Also called while paused (deltaMinutes == 0), via IPausedTickFeature. We do
+        /// not use deltaMinutes, so that changes nothing about the behaviour.
         /// </summary>
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
             if (!ModSettings.ForecastEnabled.value) return;
 
-            // ★ 気象レーダーの有無（「これからの天気」の解禁条件）。
-            //   中で 1 ゲーム内分に 1 回へ間引くので、毎 tick 呼んでよい。
+            // ★ Whether there is a weather radar (the unlock condition for "the weather
+            //   to come"). It throttles itself to once per in-game minute, so it is fine
+            //   to call every tick.
             WeatherRadarWatch.Poll(deltaMinutes);
 
             var snapshot = WeatherReader.Read();
             ForecastHub.Publish(snapshot);
 
-            // Forecast チャンネルは既定 OFF。この if が無いと、下の 5 回の ToString と
-            // 文字列連結が毎 sim tick（通常速度でおよそ 50 回/秒）実行されてから
-            // Log.Diag に捨てられる——C# は引数を呼び出し前に評価し切るので、
-            // Diag の内側のマスク判定では手遅れになる（全体レビュー指摘）。
+            // The Forecast channel is off by default. Without this if, the five ToString
+            // calls and the string concatenation below would run every sim tick (around
+            // 50 times a second at normal speed) only to be thrown away by Log.Diag — C#
+            // evaluates the arguments in full before the call, so the mask check inside
+            // Diag comes too late (raised in the full review).
             if (!Log.DiagEnabled(DisasterPlus.Core.Diagnostics.LogChannel.Forecast)) return;
 
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Forecast, "forecast",
@@ -66,16 +70,18 @@ namespace DisasterPlus.Game
                     : "snapshot invalid");
         }
 
-        /// <summary>main スレッド。パネル・ボタンの設置と、表示中のみの内容更新はここから。</summary>
+        /// <summary>Main thread. Installing the panel and button, and updating the contents
+        /// only while visible, all happen from here.</summary>
         public void OnMainThreadUpdate()
         {
-            // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
+            // DisasterPanelBar owns all four buttons together (FeatureHost calls it).
             ForecastPanel.Tick();
         }
 
         public void OnLevelUnloading()
         {
-            // ★ 登録は外せないので、描かないことをこちらの状態で保証する。
+            // ★ The registration cannot be removed, so we guarantee nothing is drawn
+            //   through our own state instead.
             ForecastOverlay.Reset();
             WeatherRadarWatch.Reset();
 
@@ -105,22 +111,25 @@ namespace DisasterPlus.Game
                     + " -> " + snapshot.Fog.Target.ToString("F2")
                     + "  " + snapshot.Fog.Trend);
 
-                // ハザードマップが「空」なのか「本当にリスクが低い」のかを
-                // テスターが切り分けられるようにする。0/0 なら、どこにカーソルを
-                // 置いてもグリッドは 0 で、それが正常な状態
-                // （WeatherSnapshot.LocatedLightningStorms の doc 参照）。
+                // Let a tester tell "the hazard map is empty" apart from "the risk really
+                // is low". At 0/0 the grid is 0 wherever you put the cursor, and that is
+                // the normal state (see the doc on
+                // WeatherSnapshot.LocatedLightningStorms).
                 b.Line(2, "located storms (lightning/tornado)", snapshot.DisasterInfoAvailable
                     ? snapshot.LocatedLightningStorms + " / " + snapshot.LocatedTornadoes
                     : "unavailable (DisasterManager not present)");
-                // これは「設定された確率」(m_randomDisastersProbability、0.0-1.0 の分数。
-                // *100 の妥当性はバニラの PopsTelemetryEventFormatting.DisasterProbability と
-                // 同じ変換であることを IL 実測済み、ForecastPanel 側のコメント参照)であって、
-                // DisasterManager.SimulationStepImpl が実際に tick 毎の発生判定へ使う値
-                // (この値を二乗し面積で補正してから乱数と比較する)そのものではない。
+                // This is "the configured probability" (m_randomDisastersProbability, a
+                // fraction in 0.0-1.0; the *100 is justified by the IL showing it is the
+                // same conversion vanilla's PopsTelemetryEventFormatting.DisasterProbability
+                // performs — see the comments on the ForecastPanel side). It is not the
+                // value DisasterManager.SimulationStepImpl actually uses for the per-tick
+                // spawn decision (it squares this, corrects for the area, then compares
+                // against a random number).
                 //
-                // DisasterInfoAvailable が false のときは 0f のまま「読めなかった」を
-                // 表しており、"0.0%" とだけ出すと本物のゼロ読み取りと見分けが付かない
-                // (レビュー指摘)。ここは開発者向けテキストなので明示的に unavailable と書く。
+                // When DisasterInfoAvailable is false, the untouched 0f stands for "could
+                // not read it", and printing just "0.0%" would be indistinguishable from
+                // a genuine reading of zero (review finding). This is developer-facing
+                // text, so we write unavailable explicitly.
                 b.Line(2, "disaster probability (configured)", snapshot.DisasterInfoAvailable
                     ? (snapshot.DisasterProbability * 100f).ToString("F1") + "%"
                     : "unavailable (DisasterManager not present)");
@@ -129,23 +138,24 @@ namespace DisasterPlus.Game
                     : (snapshot.DisasterCooldown > 0 ? "active (" + snapshot.DisasterCooldown + ")" : "none"));
             }
 
-            // ★ ①②のタイルは災害パネルから撤去された（読むだけのものは
-            //   左上のショートカットから開く。InfoHub のクラス doc）。
-            //   出すのは「ボタンが居るか」と「どこに居るか」だけである。
-            //   **ここは sim スレッドだが、読むのは Unity オブジェクトの
-            //   ネイティブポインタ比較と文字列だけで、UI には触らない**
-            //   （DisasterPanelBar.IsInstalled と同じ扱い）。
+            // ★ The tiles for ① and ② were removed from the disaster panel (things you
+            //   only read are opened from the shortcut in the top left; see the class doc
+            //   on InfoHub). All we report is whether the button is there and where it
+            //   is. **This is the sim thread, but all we read is a native-pointer
+            //   comparison on a Unity object plus a string; we do not touch the UI**
+            //   (handled the same way as DisasterPanelBar.IsInstalled).
             b.Line(1, "info button", (InfoHub.IsInstalled ? "installed" : "not installed")
                 + "  (" + InfoHub.Placement + ")");
 
-            // sim スレッドから main の持ち物を読んでいるが、これは InfoModeSwitch の
-            // クラス doc が IL 実測つきで明示的に許可している唯一の例外である
-            // （get_CurrentMode は単一フィールドの読み出しで、最悪でも 1 tick 古い値）。
+            // This reads something the main thread owns from the sim thread, but it is the
+            // one exception the class doc on InfoModeSwitch explicitly permits, with the
+            // IL to back it up (get_CurrentMode is a single field read, and at worst the
+            // value is one tick old).
             b.Line(1, "showing hazard view", InfoModeSwitch.IsShowingHazard ? "yes" : "no");
 
-            // ハザードの半分は DLC 依存（I2）。無い環境では「マップに表示」も
-            // カーソル位置の数値もパネルに出していないので、それが意図どおりか
-            // ダンプから分かるようにする。
+            // Half of the hazard side depends on the DLC (I2). Without it, neither "show
+            // on map" nor the figure under the cursor appears on the panel, so make it
+            // visible from the dump whether that is as intended.
             b.Line(1, "hazard rows", ModCompat.NaturalDisastersOwned
                 ? "shown"
                 : "hidden (Natural Disasters DLC not owned)");

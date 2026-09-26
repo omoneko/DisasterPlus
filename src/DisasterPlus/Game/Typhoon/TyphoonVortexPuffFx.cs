@@ -6,91 +6,103 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 台風の渦を、**自前の白い雲の粒**で組む。<b>main スレッド専用、毎フレーム。</b>
+    /// Builds the typhoon's vortex out of **our own white cloud puffs**.
+    /// <b>Main thread only, every frame.</b>
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── What was asked for (2026-08-22) ───────────────────────────
     ///
-    /// &gt; 台風の雲のエフェクトについて、まだ煙のようなものが見えるんですが、
-    /// &gt; MissileDisaster のキノコ雲のエフェクトに使っている白い雲を
-    /// &gt; 上空の方で渦上に表示させられますか？
+    /// &gt; About the typhoon cloud effect — I can still see something like smoke.
+    /// &gt; Could you display the white cloud that MissileDisaster's mushroom cloud
+    /// &gt; effect uses, in a spiral, up high?
     ///
-    /// ── ★★ 粒を「撒く」のをやめて「置く」──────────────────────────
+    /// ── ★★ Stop "scattering" the puffs and start "placing" them ──────────
     ///
-    /// 旧実装（<see cref="TyphoonCloudFx"/>）は <c>ParticleEffect.RenderEffect</c> で
-    /// バニラの粒子を**撒いていた**。撒いた粒はバニラの粒子シミュレーションのもので、
-    /// 生まれた瞬間に速度をもらってあとは漂う ——
-    /// **こちらは形を持ち続けられない**（渦は 1 フレームごとに置き直さなければ渦に見えない）。
+    /// The old implementation (<see cref="TyphoonCloudFx"/>) **scattered** vanilla
+    /// particles through <c>ParticleEffect.RenderEffect</c>. A scattered particle belongs
+    /// to vanilla's particle simulation: it is given a velocity at birth and then drifts —
+    /// **that cannot hold a shape** (a vortex only looks like a vortex if it is re-placed
+    /// every frame).
     ///
-    /// ここは <c>ParticleSystem</c> を<b>描画係としてだけ</b>使う:
+    /// Here we use <c>ParticleSystem</c> <b>purely as a renderer</b>:
     ///
-    ///   - <c>emission.enabled = false</c>（ゲームは 1 粒も生まない）
-    ///   - 粒は毎フレーム <c>SetParticles</c> で**こちらが置く**
-    ///   - 寿命は毎フレーム上限へ戻す（シミュレーションに歳を取らせない）
+    ///   - <c>emission.enabled = false</c> (the game creates not one particle)
+    ///   - **we place** the particles ourselves every frame with <c>SetParticles</c>
+    ///   - lifetimes are reset to the maximum every frame (we never let the simulation
+    ///     age them)
     ///
-    /// **ミサイル MOD の <c>MushroomCloudPuffsFx</c> と同じ手口である。**
-    /// あちらのクラス doc がこの選択の理由をそのまま書いている ——
-    /// 「A simulated particle gets a velocity at birth and drifts」。
+    /// **This is the same trick as the missile mod's <c>MushroomCloudPuffsFx</c>.**
+    /// That class's doc states the reason for this choice word for word —
+    /// "A simulated particle gets a velocity at birth and drifts".
     ///
-    /// ── 位置は既にある ──────────────────────────────────
+    /// ── The positions already exist ───────────────────────────────
     ///
-    /// 渦の形は <see cref="VortexPuffLayout"/>（Core、テスト付き）が既に持っている ——
-    /// 3 本の腕・眼の壁・4 段の高さ・粒ごとの大きさと濃さ。旧実装はこれを
-    /// 「どこに撒くか」に使っていた。**同じ表をそのまま「どこに置くか」に使う。**
-    /// 形の議論はやり直さない。
+    /// The shape of the vortex is already held by <see cref="VortexPuffLayout"/> (Core,
+    /// with tests) — the three arms, the eyewall, the four height tiers, and each puff's
+    /// size and density. The old implementation used it for "where to scatter".
+    /// **We use the very same table for "where to place".** We are not reopening the
+    /// argument about the shape.
     ///
-    /// ── 何が変わったのか（絵として）──────────────────────────
+    /// ── What changed (as a picture) ───────────────────────────────
     ///
-    /// | | 旧（借り物を撒く） | 新（自前を置く） |
+    /// | | Old (scatter borrowed particles) | New (place our own) |
     /// |---|---|---|
-    /// | 素材 | <c>Large Pool Steam</c>（不透明度 0.34-0.41） | 芯が不透明な白い雲（0.997） |
-    /// | 形 | 撒いた直後から漂って崩れる | 毎フレーム置き直すので崩れない |
-    /// | 回転 | 粒は回らない（撒く位置だけが回る） | 粒ごと回る |
+    /// | Material | <c>Large Pool Steam</c> (opacity 0.34-0.41) | White cloud with an opaque core (0.997) |
+    /// | Shape | Drifts and falls apart the moment it is scattered | Re-placed every frame, so it never falls apart |
+    /// | Rotation | The puffs do not turn (only the scatter positions turn) | Each puff turns too |
     ///
-    /// ── 引けない環境では何もしない ────────────────────────────
+    /// ── Do nothing in an environment where it cannot be drawn ─────────────
     ///
-    /// マテリアルが作れなければ <see cref="Drawing"/> が false のままで、
-    /// 呼び出し側が**借り物の粒子へ退避する**（<see cref="TyphoonCloudFx"/>）。
-    /// 黙って空にはしない。
+    /// If the material cannot be made, <see cref="Drawing"/> stays false and the caller
+    /// **falls back to borrowed particles** (<see cref="TyphoonCloudFx"/>).
+    /// We do not go quietly empty.
     /// </summary>
     public static class TyphoonVortexPuffFx
     {
         /// <summary>
-        /// 粒の色（日向側）。**真っ白にしない** —— 真っ白は光っているように見える。
+        /// The puff colour (sunlit side). **Not pure white** — pure white looks as if it
+        /// were glowing.
         ///
-        /// ★★ 2026-09-02 に (242,244,248) から下げた（所有者「もっと濃く灰色に」）。
-        ///   台風の雲は積乱雲でも<b>日向側からして鉛色</b>である。晴れた日の
-        ///   入道雲の白を基準にしていたのが、そもそもの取り違えだった。
+        /// ★★ Lowered from (242,244,248) on 2026-09-02 (the owner: "darker, greyer").
+        ///   Typhoon cloud, cumulonimbus or not, is <b>lead-grey even on the sunlit
+        ///   side</b>. Taking the white of a fair-weather thunderhead as the reference was
+        ///   the mistake in the first place.
         /// </summary>
         private static readonly Color32 SunlitColor = new Color32(168, 174, 186, 255);
 
         /// <summary>
-        /// 底面の色。雲は下から見ると暗い。上下で色を変えないと、
-        /// **平らな円盤が空に貼り付いているように見える**。
+        /// The colour of the underside. Cloud is dark seen from below. Without a colour
+        /// difference between top and bottom, **it looks like a flat disc pasted on the
+        /// sky**.
         ///
-        /// ★★ 同じく (150,156,170) から下げた。上下の差（明度差 84）は保つ ——
-        ///   差を詰めると立体感が消えて、また円盤に見える。
+        /// ★★ Lowered from (150,156,170) in the same way. The difference between top and
+        ///   bottom (84 levels of brightness) is preserved — narrow the gap and the sense
+        ///   of volume disappears and it is a disc again.
         /// </summary>
         private static readonly Color32 ShadedColor = new Color32(84, 90, 104, 255);
 
-        /// <summary>いちばん濃い粒の不透明度。芯が不透明なテクスチャなので 1 に近くてよい。</summary>
+        /// <summary>The opacity of the densest puff. The texture has an opaque core, so
+        /// close to 1 is fine.</summary>
         private const float MaxAlpha = 0.95f;
 
-        /// <summary>いちばん薄い粒の不透明度（外側の腕の先）。</summary>
+        /// <summary>The opacity of the thinnest puff (the tip of an outer arm).</summary>
         private const float MinAlpha = 0.42f;
 
         /// <summary>
-        /// 粒 1 個の見かけの大きさに掛ける倍率（<c>CrowdPuff.SizeFraction</c> に対して）。
+        /// The multiplier on one puff's apparent size (applied to
+        /// <c>CrowdPuff.SizeFraction</c>).
         ///
-        /// ★ **1 より大きい。** 粒どうしが重ならないと、雲ではなく点々に見える
-        ///   （<see cref="VortexPuffCrowd"/> のクラス doc の 0.41 がその状態）。
-        ///   重なりの量は <c>tools/TyphoonPreview</c> の
-        ///   「粒の面積 ÷ 渦の面積」で測ってある。
+        /// ★ **Greater than 1.** Unless the puffs overlap each other it looks like a
+        ///   scattering of dots rather than cloud (the 0.41 in
+        ///   <see cref="VortexPuffCrowd"/>'s class doc is that state). The amount of
+        ///   overlap was measured with "puff area ÷ vortex area" in
+        ///   <c>tools/TyphoonPreview</c>.
         /// </summary>
         private const float PuffSizeGain = 1.0f;
 
         /// <summary>
-        /// 画面に対する粒の大きさの上限（<c>ParticleSystemRenderer.maxParticleSize</c>）。
-        /// 既定の 0.5 のままだと、**近寄ったとたんに雲が縮む**。
+        /// The ceiling on a puff's size relative to the screen
+        /// (<c>ParticleSystemRenderer.maxParticleSize</c>). Left at the default of 0.5,
+        /// **the cloud shrinks the moment you move in close**.
         /// </summary>
         private const float MaxScreenFraction = 4f;
 
@@ -100,34 +112,38 @@ namespace DisasterPlus.Game
         private static bool _errorLogged;
 
         /// <summary>
-        /// この雲が生まれてからの秒数。**塊の一生を進めるのはこれである。**
+        /// Seconds since this cloud was born. **This is what advances a parcel's life.**
         ///
-        /// ★★ <b>ここが「一瞬だけ現れて消える」の直しどころだった。</b>
-        ///   （2026-08-22、所有者の報告）以前は <c>VortexPuffCrowd</c> の
-        ///   <b>添字だけで決まる静止した並び</b>を置いていたので、雲は 1 度置いたら
-        ///   二度と変わらなかった。今は毎フレーム時計が進み、塊が
-        ///   生まれ・流れ・消える（<c>Core.Typhoon.TyphoonCloudParcels</c>）。
+        /// ★★ <b>This is where "it appears for an instant and vanishes" was fixed.</b>
+        ///   (2026-08-22, reported by the owner.) Previously we placed
+        ///   <c>VortexPuffCrowd</c>'s <b>static arrangement, determined by index alone</b>,
+        ///   so once the cloud was placed it never changed again. Now the clock advances
+        ///   every frame and parcels are born, drift and die
+        ///   (<c>Core.Typhoon.TyphoonCloudParcels</c>).
         /// </summary>
         private static float _clockSeconds;
 
         /// <summary>
-        /// この台風の種。<b>1 つの台風のあいだ変わらないこと</b>が要点である
-        /// （<see cref="Step"/> の doc）。
+        /// This typhoon's seed. The point is that it <b>does not change during a single
+        /// typhoon</b> (the doc on <see cref="Step"/>).
         /// </summary>
         private static uint _seed;
 
-        /// <summary>直近のフレームで置いた粒の数（診断用）。0 は「描いていない」。</summary>
+        /// <summary>How many puffs were placed on the most recent frame (diagnostics).
+        /// 0 means "not drawing".</summary>
         public static int PuffsPlaced { get; private set; }
 
-        /// <summary>直近のフレームで描いたか。false なら呼び出し側が退避する。</summary>
+        /// <summary>Whether we drew on the most recent frame. If false the caller falls
+        /// back.</summary>
         public static bool Drawing { get; private set; }
 
         /// <summary>
-        /// **main スレッド、毎フレーム。**
-        /// <paramref name="radiusMetres"/> は渦の半径、<paramref name="spinDegrees"/> は
-        /// 渦が今どれだけ回っているか（<see cref="TyphoonCloudFx"/> と同じ値を渡すこと）。
+        /// **Main thread, every frame.**
+        /// <paramref name="radiusMetres"/> is the vortex radius and
+        /// <paramref name="spinDegrees"/> is how far the vortex has turned so far (pass
+        /// the same value as <see cref="TyphoonCloudFx"/>).
         ///
-        /// 戻り値が false なら**何も描いていない**ので、呼び出し側は退避すること。
+        /// If it returns false **nothing has been drawn**, so the caller must fall back.
         /// </summary>
         public static bool Update(TyphoonSnapshot snapshot, float radiusMetres,
                                   float spinDegrees, float altitudeMetres,
@@ -152,8 +168,8 @@ namespace DisasterPlus.Game
                     Log.Diag("typhoonCloud", "vortex cloud failed: " + e.GetType().Name);
                 }
 
-                // ★ 落ちたら畳む。**壊れた雲を出したままにしない**
-                //   （呼び出し側が借り物へ退避する）。
+                // ★ If it throws, pack up. **Do not leave a broken cloud on screen**
+                //   (the caller falls back to the borrowed particles).
                 Destroy();
                 return false;
             }
@@ -172,14 +188,16 @@ namespace DisasterPlus.Game
             Vec3 centre = snapshot.Centre;
             float spin = spinDegrees * 0.0174532925f;
 
-            // ★ 時計はここで進める。ポーズ中は spinDegrees が止まるので、
-            //   同じ扱いにするため呼び出し側の刻みではなく Time.deltaTime を使う
-            //   —— ただしポーズ判定は呼び出し側が済ませており、止まっている
-            //   フレームでも Update そのものは呼ばれる。**止まった雲を出すより、
-            //   ゆっくり動く雲のほうがましである**（噴煙も同じ扱い）。
+            // ★ The clock advances here. spinDegrees stops while the game is paused, so
+            //   to treat this the same way we use Time.deltaTime rather than the caller's
+            //   step — although the caller has already made the pause decision, Update
+            //   itself is still called on frames where things are stopped. **A slowly
+            //   moving cloud is better than a stopped one** (the ash plume is treated the
+            //   same way).
             _clockSeconds += Time.deltaTime;
 
-            // ★ 種は台風ごとに 1 度だけ決める。スロット番号が変わったら別の台風である。
+            // ★ Fix the seed once per typhoon. A different slot number means a different
+            //   typhoon.
             uint slotSeed = DeterministicRandom.Hash(snapshot.TyphoonId, 0x54595048u);
             if (slotSeed != _seed)
             {
@@ -187,16 +205,18 @@ namespace DisasterPlus.Game
                 _clockSeconds = 0f;
             }
 
-            // ★★ **種は動かしてはいけない。**（2026-08-22、実機報告
-            //    「高速回転する台風雲が一瞬現れる」）
+            // ★★ **The seed must not move.** (2026-08-22, in-game report "a typhoon cloud
+            //    spinning at high speed appears for an instant".)
             //
-            //    ここは中心の座標からハッシュを取っていた。**台風は動く**ので
-            //    毎フレーム種が変わり、<b>900 個の塊が毎フレーム別の場所へ飛んだ</b>。
-            //    渦が高速で回っているように見えたのはそれである
-            //    （⑤の噴煙は動かないので、同じ書き方でも表に出なかった）。
+            //    This used to hash the centre coordinates. **A typhoon moves**, so the
+            //    seed changed every frame and <b>all 900 parcels jumped somewhere else
+            //    every frame</b>. That is why the vortex looked as if it were spinning at
+            //    high speed (⑤'s ash plume does not move, so the same code never showed
+            //    the problem).
             //
-            //    掴んでいる災害スロットの番号を種にする。**1 つの台風のあいだ
-            //    変わらず、次の台風では変わる**という、ちょうど要る性質がある。
+            //    Seed it from the number of the disaster slot we hold. That has exactly
+            //    the property we need: **unchanging through one typhoon, different for the
+            //    next one**.
             uint seed = _seed;
 
             for (int i = 0; i < TyphoonCloudParcels.Count; i++)
@@ -209,7 +229,7 @@ namespace DisasterPlus.Game
                     altitudeMetres + p.Y,
                     centre.Z + p.Z);
 
-                // startSize は**直径**なので、半径を 2 倍する。
+                // startSize is the **diameter**, so double the radius.
                 _buffer[i].startSize = p.RadiusMetres * PuffSizeGain * 2f;
                 _buffer[i].rotation = p.RotationDegrees;
 
@@ -217,28 +237,30 @@ namespace DisasterPlus.Game
                 _buffer[i].startColor = Blend(SunlitColor, ShadedColor,
                                               1f - Clamp01(p.Brightness), alpha);
 
-                // ★ 毎フレーム上限へ戻す。**シミュレーションに歳を取らせない**
-                //   （クラス doc の「描画係としてだけ使う」の実体である）。
+                // ★ Reset to the maximum every frame. **Never let the simulation age
+                //   them** (this is what "use it purely as a renderer" in the class doc
+                //   actually means).
                 _buffer[i].remainingLifetime = 1000f;
                 _buffer[i].startLifetime = 1000f;
             }
 
             _system.SetParticles(_buffer, TyphoonCloudParcels.Count);
 
-            // ★★ **GameObject を粒のところへ動かす。**（2026-08-22、実機報告
-            //    「雷が発生した瞬間消えてしまいます」）
+            // ★★ **Move the GameObject to where the particles are.** (2026-08-22, in-game
+            //    report "it disappears the moment lightning strikes".)
             //
-            //    粒はワールド座標で置いているが（simulationSpace = World）、
-            //    <b>GameObject はずっと原点(0,0,0)に置きっぱなしだった</b>。
-            //    Unity は <c>ParticleSystemRenderer</c> を<b>transform を基準にした
-            //    境界</b>で視錐台カリングするので、**原点が画面から外れた瞬間に
-            //    システムごと消える**。
+            //    The particles are placed in world coordinates (simulationSpace = World),
+            //    but <b>the GameObject was left sitting at the origin (0,0,0) the whole
+            //    time</b>. Unity frustum-culls a <c>ParticleSystemRenderer</c> using
+            //    <b>bounds based on the transform</b>, so **the moment the origin leaves
+            //    the screen the whole system disappears**.
             //
-            //    雷が落ちるとカメラがそちらへ寄る（ゲームが災害へフォーカスする）。
-            //    そのとき原点が視界から外れて雲が丸ごと消えていた ——
-            //    「雷が発生した瞬間」という条件がそのまま手がかりだった。
+            //    When lightning strikes the camera moves towards it (the game focuses on
+            //    the disaster). At that point the origin left the view and the entire
+            //    cloud vanished — the condition "the moment lightning strikes" was itself
+            //    the clue.
             //
-            //    ★ 例外が出る経路ではないので try で包まない。
+            //    ★ This is not a path that throws, so it is not wrapped in a try.
             _object.transform.position = new Vector3(centre.X, altitudeMetres, centre.Z);
 
             PuffsPlaced = TyphoonCloudParcels.Count;
@@ -247,15 +269,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 描画係の <c>ParticleSystem</c> を用意する。**1 都市に 1 個。**
-        /// 既にあってマテリアルも生きていれば何もしない。
+        /// Set up the <c>ParticleSystem</c> we use as a renderer. **One per city.**
+        /// If it already exists and the material is alive, do nothing.
         /// </summary>
         private static bool EnsureSystem(Material material)
         {
             if (_object != null && _system != null && _buffer != null)
             {
-                // ★★ マテリアルは⑤（火山）と共有している（CloudParticleAssets）。
-                //    あちらが消したときのために毎フレーム fake-null を見る。
+                // ★★ The material is shared with ⑤ (the volcano) through
+                //    CloudParticleAssets. Check fake-null every frame in case that side
+                //    has destroyed it.
                 var live = _system.GetComponent<ParticleSystemRenderer>();
                 if (live != null && live.sharedMaterial == null) live.material = material;
                 return true;
@@ -267,21 +290,22 @@ namespace DisasterPlus.Game
             var ps = go.AddComponent<ParticleSystem>();
 
             ParticleSystem.MainModule main = ps.main;
-            // ★ 位置は**世界座標のメートル**で入れる。ローカルにすると、
-            //   台風が動くたびに GameObject を動かす必要が出る。
+            // ★ Positions go in as **metres in world space**. Make them local and the
+            //   GameObject would have to be moved every time the typhoon moves.
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.playOnAwake = false;
             main.maxParticles = TyphoonCloudParcels.Count;
             main.startLifetime = 1000f;
             main.startSpeed = 0f;
 
-            // ★★ **ゲームには 1 粒も生ませない。** 置くのはこちらである。
+            // ★★ **Let the game create not one particle.** We do the placing.
             ParticleSystem.EmissionModule emission = ps.emission;
             emission.enabled = false;
 
             var renderer = ps.GetComponent<ParticleSystemRenderer>();
             renderer.renderMode = ParticleSystemRenderMode.Billboard;
-            // ★ 大きく・柔らかく・重なる粒なので、奥行き順に並べないと縁が汚れる。
+            // ★ The puffs are large, soft and overlapping, so without depth sorting the
+            //   edges go dirty.
             renderer.sortMode = ParticleSystemSortMode.Distance;
             renderer.maxParticleSize = MaxScreenFraction;
             renderer.material = material;
@@ -295,11 +319,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **レベルアンロードと、台風が居なくなったときに呼ぶ。** 冪等。
+        /// **Call on level unload and when the typhoon is gone.** Idempotent.
         ///
-        /// <c>GameObject</c> はこちらのものなので消す。<c>Material</c> と
-        /// <c>Texture2D</c> は <see cref="CloudParticleAssets"/> のものなので**触らない**
-        /// （あちらがレベルアンロードで自分で消す）。
+        /// The <c>GameObject</c> is ours, so we destroy it. The <c>Material</c> and
+        /// <c>Texture2D</c> belong to <see cref="CloudParticleAssets"/>, so we **leave
+        /// them alone** (that side destroys them itself on level unload).
         /// </summary>
         public static void Destroy()
         {

@@ -7,71 +7,76 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **火山性地震の揺れ。** <c>Core/Volcano/VolcanicTremor</c> が出した地動を
-    /// カメラへ足す。**main スレッド専用、毎フレーム。**
+    /// **The volcanic-earthquake shake.** Adds the ground motion produced by
+    /// <c>Core/Volcano/VolcanicTremor</c> to the camera. **Main thread only, every frame.**
     ///
-    /// ── ②とどう分けたか（2026-08-22、所有者の依頼「火山性の地震の発生」）──────
+    /// ── how it is kept apart from ② (2026-08-22, the owner's request "volcanic earthquakes") ──
     ///
-    /// | 何を借りたか | どこから |
+    /// | What was borrowed | From where |
     /// |---|---|
-    /// | <c>CameraController.m_cameraShake</c> へ**足す**という手口 | ②の <c>CameraShakeBooster</c> |
-    /// | 揺れの中身（群発 ＋ 微動） | **⑤自身**（<c>VolcanoRelief</c> と同じで Core にある） |
+    /// | The technique of **adding** to <c>CameraController.m_cameraShake</c> | ②'s <c>CameraShakeBooster</c> |
+    /// | The content of the shaking (swarm + tremor) | **⑤'s own** (in Core, like <c>VolcanoRelief</c>) |
     ///
-    /// **②のコードは 1 行も呼ばないし、②の設定も 1 つも見ない。**
+    /// **It calls not one line of ②'s code and looks at not one of ②'s settings.**
     ///
-    ///   - <c>eqShakeBoost</c> / <c>eqSeismogram</c> が**両方 OFF でも火山は揺れる。**
-    ///     あちらが既定 OFF なのは<b>バニラの地震のカメラ揺れを差し替える</b>からで、
-    ///     ⑤の火山はプレイヤーが自分で起こした⑤自身の現象である
-    ///   - 逆に②が ON でも、⑤は②の合成記象を 1 度も評価しない。両方同時に起きたら
-    ///     **加算される**（<c>m_cameraShake</c> は加算で消費されるフィールドである。
-    ///     ②のクラス doc の IL 実測）。それが正しい —— 地震の最中に噴火したら両方揺れる
+    ///   - **The volcano shakes even with <c>eqShakeBoost</c> / <c>eqSeismogram</c> both OFF.**
+    ///     Those are off by default because they <b>replace vanilla's earthquake camera shake</b>,
+    ///     whereas ⑤'s volcano is ⑤'s own phenomenon that the player triggered themselves
+    ///   - Conversely, even with ② ON, ⑤ never once evaluates ②'s composite seismogram. If both
+    ///     happen at once they **add up** (<c>m_cameraShake</c> is a field consumed additively;
+    ///     see the IL measurements in ②'s class doc). That is correct — erupt during an earthquake
+    ///     and both should shake
     ///
-    /// ★ <b>バニラの <c>EarthquakeAI</c> は 1 つも起こさない。</b> あれは地図に断層の
-    ///   亀裂を刻むので、⑤が同じ地形セルへ山を書いているところへ割り込むことになる。
+    /// ★ <b>It triggers not one vanilla <c>EarthquakeAI</c>.</b> That carves fault cracks into the
+    ///   map, which would cut across the very terrain cells ⑤ is writing a mountain into.
     ///
-    /// ★ <b>建物は 1 棟も壊さない。</b> ⑤は既に<b>火山の足元をまるごと更地にしている</b>
-    ///   （準備＝ <c>VolcanoClearing</c>）ので、「小さく、山の近くだけ」の被害を足すと
-    ///   **もう何も建っていない場所を壊すことになる**。山の外まで壊すのは
-    ///   「山の近くだけ」ではない。したがってここは<b>揺れだけ</b>で、
-    ///   <c>BuildingAI.CollapseBuilding</c> も <c>DisasterHelpers</c> も呼ばない
-    ///   （<c>Building.m_fireIntensity</c> は当然 1 バイトも書かない）。
+    /// ★ <b>It destroys not one building.</b> ⑤ has already <b>levelled the whole area under the
+    ///   volcano</b> (the clearing, <c>VolcanoClearing</c>), so adding damage that is "small and
+    ///   only near the mountain" would mean **destroying a place where nothing is standing any
+    ///   more**. Destroying beyond the mountain is not "only near the mountain".
+    ///   So this is <b>shaking only</b>: it calls neither <c>BuildingAI.CollapseBuilding</c> nor
+    ///   <c>DisasterHelpers</c> (and obviously writes not one byte of
+    ///   <c>Building.m_fireIntensity</c>).
     ///
-    /// ── 残留しないことの根拠（②が IL で確定させたもの）─────────────────
+    /// ── the evidence that nothing lingers (settled by ② in IL) ─────────────────────────────
     ///
-    /// <c>CameraController.LateUpdate</c> の**最後の 1 行**が
-    /// <c>m_cameraShake = Vector3.zero</c> である。消費とリセットが毎フレーム走るので、
-    /// 足すのをやめれば次のフレームで必ず消える。だからこそ**毎フレーム足し続ける**。
+    /// <b>The very last line</b> of <c>CameraController.LateUpdate</c> is
+    /// <c>m_cameraShake = Vector3.zero</c>. The consume-and-reset runs every frame, so stop adding
+    /// and it is certain to be gone on the next frame. Which is exactly why we
+    /// **keep adding every frame**.
     ///
-    /// ── 毎フレームの費用 ─────────────────────────────────
+    /// ── the per-frame cost ─────────────────────────────────────────────────────────────────
     ///
-    /// <c>Sin</c> / <c>Exp</c> が十数回と <c>Vector3</c> 1 個。**ヒープ確保は 0 バイト、
-    /// ログは 0 行。** 噴火していないフレームは最初の 3 行で抜ける。
+    /// Around a dozen <c>Sin</c> / <c>Exp</c> calls and one <c>Vector3</c>. **Zero bytes of heap
+    /// allocation, zero lines of log.** On frames where nothing is erupting it exits in the first
+    /// three lines.
     /// </summary>
     public static class VolcanoTremorShake
     {
         /// <summary>
-        /// 揺れの最大変位。②のバニラの理論最大（<c>ShakeWaveform.MaxDisplacement</c>
-        /// ＝ 0.6）の <b>0.7 倍</b>。火山性地震は近くでは強く感じるが、
-        /// <b>本震級の断層地震ではない</b>。
-        /// オフラインの実測（<c>docs/images/volcano/tremor-waveform.png</c>）で
-        /// 地動の山は活動度 1 で 0.55 なので、火口の真下の実際の最大は
-        /// <c>0.55 × 0.42 ≒ 0.23</c> ——**バニラの本震の 4 割弱**である。
+        /// The maximum shake displacement. <b>0.7×</b> ②'s vanilla theoretical maximum
+        /// (<c>ShakeWaveform.MaxDisplacement</c> = 0.6). A volcanic earthquake feels strong up
+        /// close, but <b>it is not a main-shock fault earthquake</b>.
+        /// In the offline measurement (<c>docs/images/volcano/tremor-waveform.png</c>) the ground
+        /// motion peaks at 0.55 for an activity of 1, so the real maximum directly under the
+        /// crater is <c>0.55 × 0.42 ≒ 0.23</c> — **just under 40 % of vanilla's main shock**.
         /// </summary>
         private const float MaxDisplacement = VolcanoTremorActivity.DisplacementGain;
 
         /// <summary>
-        /// 揺れが届く距離（山の半径の何倍か）。**外はきっかり 0** ——
-        /// 街の反対側まで揺らすと「地震が起きている」ではなく「画面が壊れている」に見える。
+        /// How far the shaking carries (as a multiple of the mountain's radius). **Outside it is
+        /// exactly 0** — shake the far side of the city and it reads not as "an earthquake is
+        /// happening" but as "the screen is broken".
         /// </summary>
         private const float ReachRadiusFactor = VolcanoTremorActivity.ReachRadiusFactor;
 
-        /// <summary>反対向きの成分に使う位相差（ラジアン）。水平 2 軸を独立に見せる。</summary>
+        /// <summary>The phase offset used for the opposing component (radians). It makes the two horizontal axes look independent.</summary>
         private const float CrossPhaseSeconds = 0.37f;
 
-        /// <summary>上下動の比。実際の地震と同じく水平より小さい。</summary>
+        /// <summary>The ratio of vertical motion. Smaller than the horizontal, as in a real earthquake.</summary>
         private const float VerticalRatio = 0.45f;
 
-        /// <summary>時計（秒）。**バニラの効果時計と同じ足し方**（一時停止で止まる）。</summary>
+        /// <summary>The clock (seconds). **Advanced the same way as the vanilla effect clock** (it stops when paused).</summary>
         private static float _clockSeconds;
 
         private static float _lastActivity;
@@ -79,22 +84,23 @@ namespace DisasterPlus.Game
         private static bool _errorLogged;
 
         /// <summary>
-        /// <c>CameraController</c> の参照。②と同じ規律で、**配列にせず参照 1 個**で持ち、
-        /// 毎回 Unity の <c>== null</c>（fake-null も拾う）で確認して駄目なら引き直す。
+        /// The reference to <c>CameraController</c>. Under the same discipline as ②, it is held as
+        /// **one reference, not an array**, checked every time with Unity's <c>== null</c> (which
+        /// also catches fake-null) and looked up again if it has gone.
         /// </summary>
         private static CameraController _controller;
 
         private static Camera _mainCamera;
 
-        /// <summary>直近の活動度（診断用）。0 は「揺れていない」。</summary>
+        /// <summary>The most recent activity level (for diagnostics). 0 means "not shaking".</summary>
         public static float ActivityUnit { get { return _lastActivity; } }
 
-        /// <summary>直近のフレームで実際に足した変位の大きさ（診断用）。</summary>
+        /// <summary>The magnitude of the displacement actually added in the last frame (for diagnostics).</summary>
         public static float LastAdded { get { return _lastAdded; } }
 
         /// <summary>
-        /// **main スレッド。** レベルアンロードと、設定で切ったときに呼ぶ。
-        /// Unity のオブジェクトには触らず、参照を手放すだけ。冪等。
+        /// **Main thread.** Call on level unload and when turned off in the settings.
+        /// It touches no Unity object; it only drops the references. Idempotent.
         /// </summary>
         public static void Reset()
         {
@@ -103,10 +109,10 @@ namespace DisasterPlus.Game
             _lastAdded = 0f;
             _controller = null;
             _mainCamera = null;
-            // _errorLogged は戻さない（ゲームのビルドに対する事実である）。
+            // _errorLogged is not reset (it is a fact about the build of the game).
         }
 
-        /// <summary>**main スレッド、毎フレーム。**</summary>
+        /// <summary>**Main thread, every frame.**</summary>
         public static void Update(VolcanoSnapshot snapshot)
         {
             _lastAdded = 0f;
@@ -117,7 +123,7 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 毎フレームの経路。1 回だけ大きく鳴らし、以後はキー単位スロットルへ。
+                // A per-frame path. Sound it loudly once, then drop to per-key throttling.
                 if (!_errorLogged)
                 {
                     _errorLogged = true;
@@ -141,12 +147,12 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ プレイヤーが揺れを切っているなら、この機能は存在しない
-            //   （バニラの災害の揺れと同じ扱い。②が同じ条件で止まる）。
+            // ★ If the player has turned the shaking off, this feature does not exist
+            //   (handled the same way as vanilla's disaster shake. ② stops on the same condition).
             if (!Singleton<DisasterManager>.exists) return;
             if (Singleton<DisasterManager>.instance.m_disableCameraShake) return;
 
-            // ★ Time.deltaTime ではない。一時停止で止まり、ゲーム速度に追随する。
+            // ★ Not Time.deltaTime. It stops when paused and follows the game speed.
             float dt = VolcanoVanillaFx.EffectTimeDelta();
             if (dt > 0f) _clockSeconds += dt;
             if (dt <= 0f) return;
@@ -157,11 +163,12 @@ namespace DisasterPlus.Game
             CameraController controller = ResolveController();
             if (controller == null) return;
 
-            // ★★ **火口ではなく影響範囲の中心から測る。** <c>VolcanoSnapshot.VentWorld</c> は
-            //    噴火（正確には隆起）が始まるまで <c>(0,0,0)</c> のままである
-            //    （<c>VolcanoEruption.Tick</c> が呼ばれて初めて埋まる）。
-            //    そちらで測ると**準備の段の揺れが原点からの距離で減衰して消える** ——
-            //    「噴火の前から揺れている」がまるごと出なくなる。
+            // ★★ **Measure from the centre of the affected range, not from the crater.**
+            //    <c>VolcanoSnapshot.VentWorld</c> stays at <c>(0,0,0)</c> until the eruption (more
+            //    precisely, the uplift) begins (it is only filled once <c>VolcanoEruption.Tick</c>
+            //    has been called).
+            //    Measure from that and **the clearing stage's shaking attenuates away with the
+            //    distance from the origin** — "it shakes before the eruption" disappears entirely.
             Vec3 centre = snapshot.Footprint.Centre;
             Vector3 eye = cam.transform.position;
             float dx = eye.x - centre.X;
@@ -190,8 +197,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 今の活動度。**位相から決まる**（スナップショットは sim が書いたもので、
-        /// ここでは 1 バイトも書き換えない）。
+        /// The current activity level. **It is decided by the phase** (the snapshot is what sim
+        /// wrote, and not one byte of it is rewritten here).
         /// </summary>
         private static float ActivityFor(VolcanoSnapshot snapshot)
         {
@@ -200,9 +207,10 @@ namespace DisasterPlus.Game
             if (!ModSettings.VolcanoEnabled.value) return 0f;
             if (!ModSettings.VolcanoQuake.value) return 0f;
 
-            // ★ 対応表は <see cref="VolcanoTremorActivity"/> に 1 つだけある。
-            //   sim 側（地震計への記録）と**必ず同じ表を見る** ——
-            //   別に書くと「画面は揺れているのに記録に出ない」が起きる。
+            // ★ There is exactly one mapping table, in <see cref="VolcanoTremorActivity"/>.
+            //   The sim side (the recording onto the seismograph) **must look at the same table** —
+            //   write it separately and you get "the screen shakes but nothing appears in the
+            //   record".
             return VolcanoTremorActivity.For(snapshot.Phase, snapshot.ProgressUnit,
                                              snapshot.EruptionIntensityUnit,
                                              snapshot.LavaCoolUnit);
@@ -210,8 +218,8 @@ namespace DisasterPlus.Game
 
         private static Camera ResolveCamera()
         {
-            // Unity 5.6 の Camera.main はタグ検索なので毎フレーム呼ばない
-            // （②の CameraShakeBooster と同じ形）。
+            // Camera.main in Unity 5.6 is a tag search, so do not call it every frame
+            // (the same shape as ②'s CameraShakeBooster).
             if (_mainCamera != null) return _mainCamera;
             _mainCamera = Camera.main;
             return _mainCamera;

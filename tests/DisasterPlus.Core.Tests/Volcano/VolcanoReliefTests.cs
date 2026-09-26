@@ -6,8 +6,9 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 山肌の凹凸。**固定しているのは 2 つの硬い制約と「軸対称でないこと」**である。
-    /// 起伏の見た目そのものは tools/VolcanoPreview が描いて目で確かめる。
+    /// The relief of the mountainside. **What we pin down are two hard constraints and
+    /// "it must not be axisymmetric"**. The look of the relief itself is drawn by
+    /// tools/VolcanoPreview and checked by eye.
     /// </summary>
     public class VolcanoReliefTests
     {
@@ -19,8 +20,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void StrengthZeroIsExactlyTheProfileWeShipToday()
         {
-            // ★★ 設定を 0 にした人が得るのは「起伏の小さい山」ではなく**今日の出力そのもの**。
-            //    1 bit でもずれると「戻せる」という約束が嘘になる。
+            // ★★ Whoever sets the option to 0 gets not "a mountain with less relief" but
+            //    **exactly today's output**. One bit of drift makes the promise that you
+            //    can go back a lie.
             for (int i = 0; i < AllForms.Length; i++)
             {
                 VolcanoForm form = AllForms[i];
@@ -43,7 +45,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NegativeAndNaNStrengthFallBackToTheSmoothCone()
         {
-            // .cgs は手で編集されうる。読み捨てず、いちばん安全な側（今日の形）へ落とす。
+            // The .cgs can be edited by hand. Do not discard the value silently; fall back
+            // to the safest side (today's shape).
             foreach (float bad in new float[] { -1f, float.NaN })
             {
                 var relief = VolcanoRelief.For(VolcanoForm.Strato, Seed, bad);
@@ -63,8 +66,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NothingIsRaisedBeyondTheRadius()
         {
-            // ★★ 制約 1。半径の外に 1 mm でも残ると、準備が届いていないセルを持ち上げる
-            //    ことになり、道路が毎フラッシュ押し戻して山の中に平らな溝が残る（設計書 §1.2）。
+            // ★★ Constraint 1. If even 1 mm is left outside the radius we end up raising a
+            //    cell the preparation never reached, the roads push it back on every flush,
+            //    and a flat trench is left inside the mountain (design doc §1.2).
             for (int i = 0; i < AllForms.Length; i++)
             {
                 VolcanoForm form = AllForms[i];
@@ -72,9 +76,9 @@ namespace DisasterPlus.Core.Tests.Volcano
                 float h = VolcanoShape.DefaultHeightOf(form);
                 var relief = VolcanoRelief.For(form, Seed, VolcanoRelief.MaxStrengthUnit);
 
-                // 16 m 格子の全セルを見る。**判定は「そのセルの実際の距離」で行う** ——
-                // 極座標で作った点は丸めで半径のわずかに内側へ落ちることがあり、
-                // それは「半径の外」ではない。
+                // Walk every cell of the 16 m grid. **The test is made on that cell's actual
+                // distance** —— a point built in polar coordinates can land slightly inside
+                // the radius through rounding, and that is not "outside the radius".
                 for (float dz = -r - 64f; dz <= r + 64f; dz += 16f)
                 {
                     for (float dx = -r - 64f; dx <= r + 64f; dx += 16f)
@@ -85,7 +89,7 @@ namespace DisasterPlus.Core.Tests.Volcano
                     }
                 }
 
-                // 円周のすぐ外側も 1 mm も残らないこと。
+                // Not 1 mm may be left just outside the circumference either.
                 for (int a = 0; a < 720; a++)
                 {
                     double th = 2.0 * Math.PI * a / 720.0;
@@ -101,10 +105,10 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheProfileNeverExceedsTheFinalHeight()
         {
-            // ★★ 制約 2。HeightFor / HeadroomMetres と 1024 m の生の天井（§C-10）が
-            //    全部 H を基準に考えている。**渡された H を超えない**が約束であって、
-            //    火口のぶん立て直した仮想の頂を渡すのは呼び出し側の話である
-            //    （VolcanoCrater が必ず切り落とす）。
+            // ★★ Constraint 2. HeightFor / HeadroomMetres and the raw 1024 m ceiling (§C-10)
+            //    all reason in terms of H. The promise is **not to exceed the H we were
+            //    given**; passing a virtual summit rebuilt to allow for the crater is the
+            //    caller's business (VolcanoCrater always cuts it off).
             for (int i = 0; i < AllForms.Length; i++)
             {
                 VolcanoForm form = AllForms[i];
@@ -126,8 +130,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSummitIsStillExactlyTheFinalHeight()
         {
-            // 山頂がずれると、火口の縁が山の高さ H に届かなくなる
-            //    （VolcanoCrater.SummitScale はここが厳密に H であることを前提にしている）。
+            // If the summit drifts, the crater rim no longer reaches the mountain height H
+            //    (VolcanoCrater.SummitScale assumes this is exactly H).
             for (int i = 0; i < AllForms.Length; i++)
             {
                 var relief = VolcanoRelief.For(AllForms[i], Seed, 1f);
@@ -138,8 +142,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheShapeIsNoLongerAxisymmetric()
         {
-            // ★★ 本タスクそのもの。**同じ距離なら方位によらず同じ高さ**という
-            //    「旋盤で挽いた円錐」を壊したことを固定する。
+            // ★★ The task itself. This pins down that we have broken the "cone turned on a
+            //    lathe", where **the same distance gives the same height whatever the
+            //    bearing**.
             const float r = 1200f, h = 600f;
             var relief = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
 
@@ -161,7 +166,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheFootprintIsNotACircle()
         {
-            // 裾が真円だと「山を置いた」ではなく「円盤を置いた」に見える。
+            // If the foot is a perfect circle it looks less like "a mountain was placed"
+            // and more like "a disc was placed".
             const float r = 1200f, h = 600f;
             var relief = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
 
@@ -189,7 +195,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheGulliesAreShallowNearTheSummitAndDeepenDownslope()
         {
-            // 「上から下へ走る溝」の向きそのもの。逆になると山頂が刻まれた別の山になる。
+            // The direction of the "grooves running from top to bottom" itself. Reverse it
+            // and you get a different mountain, one carved at the summit.
             const float r = 1200f, h = 600f;
             var relief = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
 
@@ -200,12 +207,14 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheAzimuthalReliefIsSuppressedWhereItWouldAliasOnTheSixteenMetreGrid()
         {
-            // ★ 山頂に近いほど方位の波長は短い（円周 ÷ 谷の本数）。16 m 格子に
-            //   食い込むところで消していないと、山頂まわりが起伏ではなく市松模様になる。
+            // ★ The closer to the summit, the shorter the azimuthal wavelength
+            //   (circumference / number of gullies). Unless it is killed where it bites into
+            //   the 16 m grid, the area around the summit becomes a chequerboard rather
+            //   than relief.
             const float r = 1200f, h = 600f;
             var relief = VolcanoRelief.For(VolcanoForm.Strato, Seed, VolcanoRelief.MaxStrengthUnit);
 
-            // 半径 48 m（= 3 セル）のところでは方位方向の起伏がほぼ無いこと。
+            // At a radius of 48 m (= 3 cells) there must be almost no azimuthal relief.
             Assert.True(RelativeSpread(relief, r, h, 48f / r) < 0.02f,
                 "the summit ring still carries azimuthal relief and will alias");
         }
@@ -213,7 +222,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheShieldStaysCloserToTheSmoothConeThanTheStratovolcano()
         {
-            // 形態ごとの性格。盾状火山は実際になめらかで、放射谷は成層火山のものである。
+            // The character of each form. A shield volcano really is smoother, and radial
+            // gullies belong to the stratovolcano.
             var shield = VolcanoRelief.For(VolcanoForm.Shield, Seed, 1f);
             var strato = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
 
@@ -229,7 +239,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NoWavelengthGoesBelowTheGridsLimit()
         {
-            // 16 m 格子で 64 m を割る成分は起伏ではなくノイズに化ける。
+            // On a 16 m grid, a component below 64 m turns into noise rather than relief.
             for (int i = 0; i < AllForms.Length; i++)
             {
                 var relief = VolcanoRelief.For(AllForms[i], Seed, 1f);
@@ -238,7 +248,7 @@ namespace DisasterPlus.Core.Tests.Volcano
                 Assert.True(relief.FineWavelengthMetres
                             >= 4f * VolcanoShape.RawCellSizeMetres);
 
-                // ★ 4 オクターブ目（いちばん細かい肌）も同じ床を割らないこと。
+                // ★ The 4th octave (the finest skin) must not go below the same floor either.
                 Assert.True(relief.MicroWavelengthMetres >= VolcanoRelief.MinWavelengthMetres,
                     AllForms[i] + " micro octave uses " + relief.MicroWavelengthMetres + " m");
                 Assert.True(relief.MicroWavelengthMetres
@@ -249,8 +259,10 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheLowerFlankCarriesMoreChannelsThanTheMainGulliesAlone()
         {
-            // 「太い谷の筋だけ」への答え。裾の円周を回って谷の数を数えると、
-            // 主谷の本数より**多く**なければ細谷は 1 本も効いていない。
+            // The answer to "only the lines of the big valleys". Going round the
+            // circumference at the foot and counting the valleys, the count must be
+            // **greater** than the number of main gullies, or not one fine channel is
+            // taking effect.
             const float r = 1200f, h = 600f;
             var relief = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
 
@@ -261,31 +273,35 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void SmallConesGetNoRillsAtAll()
         {
-            // 溶岩ドーム（既定 R = 350 m）では方位の波長がどこでも足りない。
-            // **「無い」を黙って「在る」ことにしない。**
+            // On a lava dome (default R = 350 m) the azimuthal wavelength is insufficient
+            // everywhere. **Do not silently turn "there are none" into "there are some".**
             var relief = VolcanoRelief.For(VolcanoForm.Dome, Seed, 1f);
             float r = VolcanoShape.DefaultRadiusOf(VolcanoForm.Dome);
 
-            // ★ 方位の床のせいで、細谷は小さい山ほど外側の細い環にしか入らない。
-            //   環が細すぎると溝ではなく「裾に並んだ窪みの輪」に見えるので、
-            //   斜面の外側 3 割を取れないなら 1 本も出さない。
+            // ★ Because of the azimuthal floor, the smaller the mountain the thinner the
+            //   outer ring the rills fit into. If the ring is too thin it looks not like
+            //   grooves but like "a ring of dimples lined up at the foot", so unless we can
+            //   take the outer 30 per cent of the slope we emit none at all.
             Assert.False(relief.RillsFitOn(r),
                 "the lava dome claims rills the 16 m grid cannot carry as lines");
 
-            // ★ 出はじめの半径は方位の床（96 m）と細谷の次数だけで決まる。
-            //   16 m 格子が担げるところより内側へ勝手に降りてこないこと。
+            // ★ The radius at which they begin is decided solely by the azimuthal floor
+            //   (96 m) and the order of the rills. It must not creep in further than the
+            //   16 m grid can carry.
             Assert.True(relief.RillOnsetRadiusMetres
                         >= VolcanoRelief.MinAzimuthWavelengthMetres * relief.RillCount
                            / 6.2831853f,
                 "the onset radius is closer to the summit than the azimuthal floor allows");
 
-            // 成層火山（既定 R = 1200 m）なら入る。「どの山にも出ない」ではない。
+            // On a stratovolcano (default R = 1200 m) they do fit. This is not
+            // "they never appear on any mountain".
             var strato = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
             Assert.True(strato.RillsFitOn(VolcanoShape.DefaultRadiusOf(VolcanoForm.Strato)),
                 "the stratovolcano cannot carry rills either, so the tier is pointless");
         }
 
-        /// <summary>半径 <paramref name="fraction"/>R の円周に沿った谷の数（極小の数）。</summary>
+        /// <summary>The number of valleys (the number of minima) along the circumference at
+        /// radius <paramref name="fraction"/>R.</summary>
         private static int TroughsAround(VolcanoRelief relief, float r, float h, float fraction)
         {
             float ring = fraction * r;
@@ -314,7 +330,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSameSeedAlwaysGivesTheSameMountain()
         {
-            // 同じ地点に作り直したら同じ山が生えること（セーブ・ロードとテストの再現性）。
+            // Rebuilding at the same spot must grow the same mountain (reproducibility for
+            // save/load and for the tests).
             var a = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
             var b = VolcanoRelief.For(VolcanoForm.Strato, Seed, 1f);
             var other = VolcanoRelief.For(VolcanoForm.Strato, Seed ^ 0xFFFFu, 1f);
@@ -344,7 +361,8 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.Equal(0f, relief.ProfileAt(10f, 10f, 1200f, 0f));
         }
 
-        /// <summary>その距離の円周上での高さのばらつき（滑らかな円錐の高さに対する比）。</summary>
+        /// <summary>The spread of heights around the circumference at that distance
+        /// (as a ratio to the height of the smooth cone).</summary>
         private static float RelativeSpread(VolcanoRelief relief, float r, float h, float t)
         {
             float d = t * r;
@@ -365,8 +383,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSeedComesFromTheDeterministicHashNotSystemRandom()
         {
-            // Core は engine-free で、net35 と net8.0 で同じ値を出さなければならない。
-            // 種の作り方（DeterministicRandom.Hash(round(X), round(Z))）を固定しておく。
+            // Core is engine-free and must produce the same values on net35 and net8.0.
+            // Pin down how the seed is built (DeterministicRandom.Hash(round(X), round(Z))).
             uint seed = DeterministicRandom.Hash(275u, unchecked((uint)(-283)));
             var a = VolcanoRelief.For(VolcanoForm.Strato, seed, 1f);
             var b = VolcanoRelief.For(VolcanoForm.Strato,

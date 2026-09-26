@@ -8,8 +8,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ZeroIsRaisedToTheFloorBecauseATyphoonThatDoesNothingIsNotATyphoon()
         {
-            // バニラのスライダーは 0 まで下がる。0 のまま起こすと、災害スロットを
-            // 1 個使って何も起こさない台風になる（押した人には「効かなかった」に見える）。
+            // Vanilla's slider goes all the way down to 0. Raise it at 0 and you get a
+            // typhoon that consumes a disaster slot and does nothing (to whoever pressed the
+            // button it looks as though it "did not work").
             Assert.Equal(TyphoonIntensity.MinPeak, TyphoonIntensity.PeakOf(0));
             Assert.True(TyphoonIntensity.WasRaised(0));
         }
@@ -17,8 +18,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void NegativeAndOversizedValuesAreClampedBeforeTheByteCast()
         {
-            // ★ (byte) へのキャストの前にクランプすること。先にキャストすると
-            //   -1 が 255 になり、いちばん弱い設定がいちばん強い台風になる。
+            // ★ Clamp before the cast to (byte). Cast first and -1 becomes 255, turning the
+            //   weakest setting into the strongest typhoon.
             Assert.Equal(TyphoonIntensity.MinPeak, TyphoonIntensity.PeakOf(-1));
             Assert.Equal(TyphoonIntensity.MinPeak, TyphoonIntensity.PeakOf(int.MinValue));
             Assert.Equal(TyphoonIntensity.MaxPeak, TyphoonIntensity.PeakOf(256));

@@ -1,62 +1,70 @@
 namespace DisasterPlus.Core.Typhoon
 {
     /// <summary>
-    /// 風による倒壊確率。**これは本 MOD が発明した物理であって、バニラにも
-    /// 対応する量が無い。**
+    /// The chance of collapse from wind. **This is physics this mod invented; vanilla has no
+    /// corresponding quantity at all.**
     ///
-    /// バニラには風による破壊機構が 1 つも無く、**風速を上げるフィールドすら存在しない**
-    /// （IL 事実文書 §A-5 / §B5）。風速の読み手は風力発電の発電量・木と道路の揺れ・
-    /// 霧と雲のスクロール・ハザードマップの補正だけで、そのどれも建物を壊さない。
-    /// <c>DisasterHelpers.AddWind</c> ですら市民と車両を押すだけで無傷である。
-    /// つまりここにあるのは「可視化」ではなく「発明」である。
+    /// Vanilla has not one mechanism for wind destruction, and **there is not even a field
+    /// that raises the wind speed** (§A-5 / §B5 of the IL facts document). The only readers
+    /// of wind speed are wind turbine output, the sway of trees and roads, the scrolling of
+    /// fog and clouds, and a hazard map correction — none of which destroys a building. Even
+    /// <c>DisasterHelpers.AddWind</c> merely pushes citizens and vehicles about, unharmed.
+    /// So what we have here is not "visualisation" but "invention".
     ///
-    /// **単位は無い。** wind は [0,1] の係数、返り値は 1 回の走査あたりの確率。
-    /// **実在の風速（m/s）には対応しない**（設計書 §7.3。②が気象庁震度階級を
-    /// 名乗らなかったのと同じ理由）。呼び出し側はこの値を m/s として表示しないこと。
+    /// **There are no units.** wind is a coefficient in [0,1] and the return value is a
+    /// chance per sweep. **It does not correspond to a real wind speed (m/s)** (design
+    /// document §7.3 — the same reason ② did not claim to use the JMA seismic intensity
+    /// scale). Callers must not display this value as m/s.
     ///
-    /// 高さの扱いが②の <c>LongPeriodResponse</c> と違う点に注意する。あちらは高さが
-    /// 読めなければ何もしなかった（「高層ほど壊れる」が前提だから）が、台風は平屋も
-    /// 飛ばす。ここでは高さは**係数**であり、読めなければボーナスを辞退するだけで
-    /// 対象からは外さない。高さを推測しているわけではない。
+    /// Note that height is treated differently here than in ②'s <c>LongPeriodResponse</c>.
+    /// That one did nothing when the height could not be read (because its premise is "the
+    /// taller, the more damage"), but a typhoon blows single-storey houses away too. Here
+    /// height is a **coefficient**: if it cannot be read we merely decline the bonus, and
+    /// the building stays in scope. We are not guessing the height.
     ///
-    /// 乱数はここには無い。抽選は呼び出し側（<c>Game/Typhoon/TyphoonWind</c>）が
-    /// <c>DeterministicRandom</c> で行う —— <c>VanillaRandomizer</c> は使わない。
-    /// ここで決めるのはバニラが引く値ではなく④が発明した判断である。
+    /// There is no randomness here. The draw is done by the caller
+    /// (<c>Game/Typhoon/TyphoonWind</c>) with <c>DeterministicRandom</c> — never with
+    /// <c>VanillaRandomizer</c>. What is decided here is not a value vanilla draws but a
+    /// judgement ④ invented.
     /// </summary>
     public static class WindDamageModel
     {
         /// <summary>
-        /// これ未満の風速相当は完全に無視する。**「強風域の縁で家が飛ぶ」を作らない。**
+        /// Anything below this wind equivalent is ignored entirely. **We do not create
+        /// "houses flying away at the edge of the gale zone".**
         /// </summary>
         public const float MinWind = 0.25f;
 
         /// <summary>
-        /// 高さボーナスを掛ける前の、1 回の走査あたりの倒壊確率の上限。
+        /// The cap on the per-sweep collapse chance, before the height bonus is applied.
         ///
-        /// バニラの全体円盤（地震）が 0.02、②の長周期が 0.25 なのに対して中間に置いた。
-        /// 走査は 256 フレームに 1 回なので、台風の全期間では十分に積み上がる。
-        /// **物理定数ではない。** ④が選んだ数字である。
+        /// Vanilla's whole-quake disc (earthquake) is 0.02 and ②'s long-period is 0.25, so
+        /// we put this in between. The sweep runs once per 256 frames, which accumulates
+        /// plenty over a typhoon's whole duration.
+        /// **It is not a physical constant.** It is a number ④ chose.
         /// </summary>
         public const float MaxCollapseChance = 0.05f;
 
-        /// <summary>高さが天井に達したときの上乗せ率（＝係数 1.6 倍）。</summary>
+        /// <summary>The extra applied once the height reaches the ceiling (= a coefficient
+        /// of 1.6).</summary>
         public const float HeightBonus = 0.6f;
 
-        /// <summary>ここまでは高さボーナス無し（係数 1.0）。</summary>
+        /// <summary>Up to here there is no height bonus (coefficient 1.0).</summary>
         public const float HeightFloorMetres = 10f;
 
-        /// <summary>ここから上は伸びない。**超高層 1 棟が確率 1.0 にならないための天井。**</summary>
+        /// <summary>Above here it grows no further. **A ceiling so that a single skyscraper
+        /// never reaches a chance of 1.0.**</summary>
         public const float HeightCeilingMetres = 70f;
 
-        /// <summary>強さスライダーの最大値（0〜10）。</summary>
+        /// <summary>The maximum value of the strength slider (0-10).</summary>
         private const float MaxStrength = 10f;
 
         /// <summary>
-        /// 建物の高さ（m）から求める係数。
+        /// The coefficient derived from the building's height (m).
         ///
-        /// <paramref name="heightMetres"/> が 0（＝<c>BuildingHeight.MetresOf</c> が
-        /// 「読めなかった」と答えた）なら **1.0（ボーナス無し）** を返す。これは
-        /// 高さを推測しているのではなく、**ボーナスの適用を辞退している**（クラス doc）。
+        /// If <paramref name="heightMetres"/> is 0 (i.e. <c>BuildingHeight.MetresOf</c>
+        /// answered "could not read it"), it returns **1.0 (no bonus)**. That is not
+        /// guessing the height — it is **declining to apply the bonus** (see the class doc).
         /// </summary>
         public static float HeightFactor(float heightMetres)
         {
@@ -69,13 +77,14 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 1 回の走査あたりの倒壊確率。
+        /// The collapse chance per sweep.
         ///
-        /// <paramref name="strength"/> は設定の 0〜10。**0 で厳密に 0 を返す**
-        /// （スライダーで完全に無効化できることの保証）。<c>.cgs</c> は公開契約なので
-        /// 範囲外の値もここでクランプする。
+        /// <paramref name="strength"/> is the setting's 0-10. **At 0 it returns exactly 0**
+        /// (the guarantee that the slider can switch it off completely). The <c>.cgs</c> is
+        /// a public contract, so out-of-range values are clamped here too.
         ///
-        /// 壊れた入力（NaN・負）は 0 を返す。**「風速 NaN で全棟倒壊」を作らない。**
+        /// Bad input (NaN, negative) returns 0. **We do not create "every building collapses
+        /// because the wind speed is NaN".**
         /// </summary>
         public static float CollapseChance(float wind, float heightMetres, int strength)
         {
@@ -85,18 +94,20 @@ namespace DisasterPlus.Core.Typhoon
             if (float.IsNaN(wind) || wind <= MinWind) return 0f;
             if (wind > 1f) wind = 1f;
 
-            // ★ 高さ 0 は「不明」で、ボーナスを辞退したうえで対象に残す（クラス doc）。
-            //   高さ NaN は「不明」ではなく**壊れた読み取り**なので、こちらは弾く。
-            //   HeightFactor が NaN に 1.0 を返すのはそれ自体が意味のある既定値だが、
-            //   壊れた値を黙って既定値へ丸めて建物を倒すのは別の話である。
+            // ★ A height of 0 means "unknown": we decline the bonus but keep the building in
+            //   scope (see the class doc). A height of NaN is not "unknown" but **a broken
+            //   reading**, so we reject that one. HeightFactor returning 1.0 for NaN is a
+            //   meaningful default in its own right, but quietly rounding a broken value to
+            //   the default and then flattening a building is another matter entirely.
             if (float.IsNaN(heightMetres) || heightMetres < 0f) return 0f;
 
             float excess = (wind - MinWind) / (1f - MinWind);
             float chance = excess * HeightFactor(heightMetres)
                            * (strength / MaxStrength) * MaxCollapseChance;
 
-            // 上限は「高さボーナスを掛け切った値」。ここを MaxCollapseChance に
-            // すると高さの差が上限で潰れ、TallerBuildingsCatchMoreWind が意味を失う。
+            // The cap is "the value with the height bonus fully applied". Make it
+            // MaxCollapseChance instead and differences in height get crushed at the cap,
+            // leaving TallerBuildingsCatchMoreWind meaningless.
             float ceiling = MaxCollapseChance * (1f + HeightBonus);
             if (float.IsNaN(chance) || chance <= 0f) return 0f;
             return chance > ceiling ? ceiling : chance;

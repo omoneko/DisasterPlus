@@ -3,25 +3,25 @@ using ColossalFramework.UI;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// バニラの災害パネルの強度スライダー上限を解放する。
+    /// Unlocks the ceiling on the intensity slider in vanilla's disaster panel.
     ///
-    /// IL 実測（設計書 付録 A-2）:
+    /// Measured from the IL (design doc appendix A-2):
     ///   DisastersOptionPanel.OnSliderValueChanged(c, value):
     ///       m_label.text = (value / 10).ToString("F1")
     ///       m_disasterTool.m_intensity = (int)value
-    /// つまりスライダーの生値がそのまま byte 強度で、表示だけが /10。
-    /// set_maxValue の呼び出しはアセンブリ内に存在せず、上限は UI プレハブ側にある。
-    /// よってパッチ対象が無く、実行時に maxValue を書けばよい。
+    /// So the slider's raw value is the byte intensity as-is, and only the display is /10.
+    /// There is no call to set_maxValue anywhere in the assembly; the ceiling lives on the
+    /// UI prefab side. So there is nothing to patch — just write maxValue at runtime.
     /// </summary>
     public static class IntensityUnlock
     {
-        /// <summary>DisasterData.m_intensity は Byte。255 が真の上限で、表示は 25.5 になる。</summary>
+        /// <summary>DisasterData.m_intensity is a Byte. 255 is the true ceiling, displayed as 25.5.</summary>
         public const float MaxIntensityByte = 255f;
 
-        /// <summary>再試行の間隔（main スレッド更新の回数）。FindObjectOfType は毎フレーム回すには重い。</summary>
+        /// <summary>Retry interval (in main-thread updates). FindObjectOfType is too heavy to run every frame.</summary>
         private const int RetryIntervalFrames = 120;
 
-        /// <summary>再試行の上限。パネルが現れない環境で永久に探し続けない。</summary>
+        /// <summary>Retry limit. Do not search forever in an environment where the panel never appears.</summary>
         private const int MaxAttempts = 100;
 
         private static bool _applied;
@@ -38,10 +38,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// main スレッドから毎フレーム呼ばれる。実際の試行は RetryIntervalFrames ごと。
+        /// Called every frame from the main thread. The actual attempt happens every
+        /// RetryIntervalFrames.
         ///
-        /// 災害パネルはレベルロード時点ではまだ構築されていないことがある。
-        /// ロード時 1 回きりの試行にすると、その都市では二度と上限が上がらない。
+        /// The disaster panel may not have been built yet at the time the level loads.
+        /// Make it a single attempt at load time and the ceiling would never go up again in
+        /// that city.
         /// </summary>
         public static void Tick()
         {
@@ -52,14 +54,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// スライダーに到達できるかだけを返す（値は変えない）。副作用なし。
+        /// Only reports whether the slider can be reached (does not change the value).
+        /// No side effects.
         ///
-        /// Assumptions.Run() はこれを直接呼ばない。パネルはロード直後にはまだ
-        /// 構築されていないことがあり（このクラス自身が Apply() を最大 100 回
-        /// リトライする理由）、ロード直後の 1 回きりの呼び出しでは「まだ無いだけ」を
-        /// 「前提が破れた」と誤報しかねない。確定結果は Apply() が _applied /
-        /// _gaveUp に達した時点で Assumptions.ReportSliderOutcome() 経由で報告する。
-        /// この関数自体は将来のオーバーレイ等からの単発の生存確認用に残している。
+        /// Assumptions.Run() does not call this directly. The panel may not have been built
+        /// yet right after the load (the very reason this class retries Apply() up to 100
+        /// times), and a single call right after the load could report "it is just not there
+        /// yet" as "an assumption is broken". The settled result is reported through
+        /// Assumptions.ReportSliderOutcome() once Apply() reaches _applied / _gaveUp.
+        /// This function itself is kept for a one-shot liveness check from, say, a future
+        /// overlay.
         /// </summary>
         public static bool SliderReachable()
         {
@@ -68,7 +72,7 @@ namespace DisasterPlus.Game
             return panel.Find<ColossalFramework.UI.UISlider>("Slider") != null;
         }
 
-        /// <summary>main スレッドから呼ぶ。</summary>
+        /// <summary>Call from the main thread.</summary>
         public static void Apply()
         {
             if (_applied || _gaveUp) return;
@@ -76,11 +80,12 @@ namespace DisasterPlus.Game
             ModSettings.Ensure();
             if (!ModSettings.IntensityUnlock.value)
             {
-                // 設定でこの機能を切っている＝前提が破れたわけではない。
-                // ただし黙って諦めてはいけない。NDR を検出した環境ではこれが既定値
-                // （ModSettings: IntensityUnlock の既定は !NdrPresent）なので、
-                // 何も報告しないと「スライダー検証は保留中」が永久に残り、
-                // 検証の母数まで狂ったままになる。「対象外」として確定させる。
+                // The feature is switched off in the settings = no assumption has been broken.
+                // Even so, do not give up in silence. In an environment where NDR was
+                // detected this is the default (in ModSettings, IntensityUnlock defaults to
+                // !NdrPresent), so reporting nothing would leave "the slider check is
+                // pending" there forever and skew the total number of checks as well.
+                // Settle it as "not applicable".
                 _gaveUp = true;
                 Assumptions.ReportSliderNotApplicable();
                 return;
@@ -91,19 +96,20 @@ namespace DisasterPlus.Game
                 _gaveUp = true;
                 Log.Warn("gave up looking for the disaster intensity slider after "
                          + MaxAttempts + " attempts; cap not raised");
-                // ここは前提が本当に破れたケース（設定でこの機能を切っただけの
-                // 直前の return とは違う）。Assumptions にも確定結果として残す。
+                // This is the case where an assumption really is broken (unlike the return
+                // just above, which is only the feature being switched off in the settings).
+                // Leave it in Assumptions as a settled result too.
                 Assumptions.ReportSliderOutcome(false);
                 return;
             }
 
             try
             {
-                // FindObjectOfType は非アクティブな GameObject を返さない（SceneObjects 参照）。
+                // FindObjectOfType does not return inactive GameObjects (see SceneObjects).
                 var panel = SceneObjects.FindInScene<DisastersOptionPanel>();
                 if (panel == null)
                 {
-                    // まだ構築されていない。Tick が後で再試行する。
+                    // Not built yet. Tick will retry later.
                     Log.Diag("intensityUnlock", "DisastersOptionPanel not found yet; will retry");
                     return;
                 }
@@ -119,7 +125,7 @@ namespace DisasterPlus.Game
                 {
                     _applied = true;
                     Assumptions.ReportSliderOutcome(true);
-                    return;   // 他 MOD が既に上げている
+                    return;   // another mod has already raised it
                 }
 
                 Log.Info("raising intensity slider cap " + slider.maxValue + " -> " + MaxIntensityByte);

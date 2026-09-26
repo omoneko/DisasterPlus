@@ -6,29 +6,32 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.IconPreview
 {
     /// <summary>
-    /// 災害パネルのタイルに載せる絵を、**ゲームを起動せずに**描いて確かめる
-    /// （2026-08-22、所有者の依頼「タブアイコンの火山と台風をイラストにしてほしい」）。
+    /// Draws and checks the artwork that goes on the disaster panel's tiles, **without
+    /// launching the game** (2026-08-22, the owner's request: "please make the volcano and
+    /// typhoon tab icons into illustrations").
     ///
-    /// <b>Core の実物（<see cref="DisasterIconArt"/>）をそのままコンパイルして呼ぶ</b>ので、
-    /// 書き直した近似ではない。
+    /// It compiles and calls <b>the real thing from Core
+    /// (<see cref="DisasterIconArt"/>)</b> directly, so it is not a rewritten approximation.
     ///
-    /// ★ いちばん大事なのは<b>実寸で読めるか</b>である。タイルは 109×100 で、絵は
-    ///   その 7 割ほど ——**70 px 前後**。拡大して整っていても、実寸で潰れては意味が無い。
-    ///   だから 3 段（実寸・2 倍・6 倍）を、明るい背景と暗い背景の両方で並べる。
+    /// ★ What matters most is <b>whether it reads at actual size</b>. The tile is 109×100
+    ///   and the artwork is about 70% of that —— **around 70 px**. Looking tidy when blown up
+    ///   means nothing if it turns to mush at actual size. So three sizes (actual, 2x and 6x)
+    ///   are laid out side by side, on both a light and a dark background.
     ///
     ///   dotnet run --project tools/IconPreview -- docs/images/ui
     /// </summary>
     internal static class Program
     {
-        /// <summary>実機の絵の一辺（px）。タイル 109×100 の 7 割。</summary>
+        /// <summary>Side of the artwork in the game (px). 70% of the 109×100 tile.</summary>
         private const int ActualSize = 70;
 
-        /// <summary>テクスチャそのものの一辺（px）。実機もこれで作る。</summary>
+        /// <summary>Side of the texture itself (px). The game builds it at this size
+        /// too.</summary>
         private const int TextureSize = 128;
 
         private static readonly int[] Zooms = { 1, 2, 6 };
 
-        /// <summary>タイルの背景は明るくも暗くもなりうる。両方で見る。</summary>
+        /// <summary>The tile's background can be light or dark. Look at both.</summary>
         private static readonly byte[][] Backgrounds =
         {
             new byte[] { 218, 220, 224 },
@@ -49,8 +52,10 @@ namespace DisasterPlus.Tools.IconPreview
             return 0;
         }
 
-        /// <summary>実寸・2 倍・6 倍を、明るい背景と暗い背景で並べた 1 枚。</summary>
-        /// <summary>どの絵を焼くか。**bool 2 値では 3 つ目が足せない。**</summary>
+        /// <summary>One sheet with actual size, 2x and 6x laid out on a light and a dark
+        /// background.</summary>
+        /// <summary>Which artwork to bake. **With a two-valued bool a third one cannot be
+        /// added.**</summary>
         private enum Kind { Volcano, Typhoon, TrenchQuake }
 
         private static void Sheet(string dir, string name, Kind kind)
@@ -95,9 +100,9 @@ namespace DisasterPlus.Tools.IconPreview
         }
 
         /// <summary>
-        /// 1 枚ぶん。**実機と同じ手順**で描く ——
-        /// <see cref="TextureSize"/> のテクスチャを作ってから <paramref name="size"/> へ
-        /// 縮める（実機も 128 px のテクスチャを 70 px の枠に貼る）。
+        /// One image. Drawn by **the same procedure as the game** —— build a
+        /// <see cref="TextureSize"/> texture and then shrink it to <paramref name="size"/>
+        /// (the game likewise pastes a 128 px texture into a 70 px frame).
         /// </summary>
         private static void Draw(byte[] rgb, int width, int height, int left, int top,
                                  int size, Kind kind)
@@ -106,7 +111,7 @@ namespace DisasterPlus.Tools.IconPreview
             {
                 for (int x = 0; x < size; x++)
                 {
-                    // 縮小のときは 2x2 で平均する（実機の双一次に近い見え方にする）。
+                    // When shrinking, average over 2x2 (to look close to the game's bilinear).
                     int samples = size < TextureSize ? 2 : 1;
                     float r = 0f, g = 0f, b = 0f, a = 0f;
 

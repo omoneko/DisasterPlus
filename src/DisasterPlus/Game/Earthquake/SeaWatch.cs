@@ -4,68 +4,80 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>マップの海全体をひとつの物差しで測る。</b>**sim スレッド専用の診断。**
+    /// <b>Measures the map's entire sea with a single ruler.</b>
+    /// **A sim-thread-only diagnostic.**
     ///
-    /// ── なぜ要るのか（2026-08-31、所有者の提案）──────────────────────
+    /// ── Why it is needed (2026-08-31, the owner's suggestion) ──────────────
     ///
-    /// &gt; 実際に CS オリジナルの津波を起こすので挙動を調べてみるのはどうでしょうか？
+    /// &gt; How about actually triggering the original CS tsunami and having a look at
+    /// &gt; how it behaves?
     ///
-    /// **これが正しい。** それまでの数字はすべて「自分のものさしで測った自分の波」で、
-    /// <b>満足できる津波が数字でどう見えるのかを知らないまま</b>調整していた。
-    /// バニラの津波を<b>同じものさし</b>で測れば、初めて比べられる。
+    /// **He was right.** Until then every number was "our own wave measured with our own
+    /// ruler", and we were tuning it <b>without knowing what a satisfying tsunami looks
+    /// like as a number</b>. Measure vanilla's tsunami with <b>the same ruler</b> and, for
+    /// the first time, there is something to compare against.
     ///
-    /// ★★ だからこの計測は<b>自分の波に紐づかない</b>。海を見るだけである。
-    ///   バニラの <c>TsunamiAI</c> が動いていても、こちらの波が動いていても、
-    ///   <b>同じ 1 行</b>が出る。並べれば差が読める。
+    /// ★★ So this measurement is <b>not tied to our own wave</b>. It just watches the
+    ///   sea. Whether vanilla's <c>TsunamiAI</c> is running or ours is, <b>the same one
+    ///   line</b> comes out. Put them side by side and the difference is readable.
     ///
-    /// ── 測り方 ────────────────────────────────────────────
+    /// ── How it measures ─────────────────────────────────────────────
     ///
-    /// <c>WaterSimulation.BeginRead()</c> は<b>水セル配列そのもの</b>を返す
-    /// （IL 実測: <c>Cell[]</c>、ロックは 1 回だけ）。だから
-    /// <c>WaterLevel()</c> を何万回も呼ぶ必要はない —— **1 回借りて舐める。**
+    /// <c>WaterSimulation.BeginRead()</c> returns <b>the water cell array itself</b>
+    /// (measured in the IL: a <c>Cell[]</c>, with the lock taken just once). So there is
+    /// no need to call <c>WaterLevel()</c> tens of thousands of times — **borrow it once
+    /// and sweep across it.**
     ///
     /// <list type="bullet">
-    /// <item><b>海</b>（<c>blockHeights &lt; 海面</c>）では平常からの上がりの最大</item>
-    /// <item><b>陸</b>（<c>blockHeights &gt;= 海面</c>）では水があるセルの数
-    ///   ＝ <b>浸水面積</b>。プレイヤーが「津波だ」と思うのは結局これである</item>
+    /// <item>Over <b>sea</b> (<c>blockHeights &lt; sea level</c>): the largest rise above
+    ///   the resting level</item>
+    /// <item>Over <b>land</b> (<c>blockHeights &gt;= sea level</c>): the number of cells
+    ///   with water on them = <b>the flooded area</b>. This, in the end, is what makes a
+    ///   player think "that's a tsunami"</item>
     /// </list>
     ///
-    /// ★ 陸の標高を「波」と読まないこと。<c>WaterLevel</c> は地形＋水柱を返すので、
-    ///   海面 207 m のマップで標高 277 m の山を叩けば水無しで +70 m になる
-    ///   （<c>TsunamiWave.RiseAt</c> の ★★ で一度踏んだ）。
+    /// ★ Never read land elevation as "the wave". <c>WaterLevel</c> returns terrain plus
+    ///   water column, so on a map with a sea level of 207 m, sampling a 277 m mountain
+    ///   gives +70 m with no water at all (we walked into this once already, at the ★★ in
+    ///   <c>TsunamiWave.RiseAt</c>).
     ///
-    /// ── ★★ 基準値を引く（2026-08-31、最初の実測で判明）────────────────
+    /// ── ★★ Subtract a baseline (2026-08-31, found on the first real measurement) ──
     ///
-    /// 一度目の実装は<b>絶対値</b>を出していた。実機の 1 行目がこれである：
+    /// The first implementation printed <b>absolute</b> values. This was line 1 from the
+    /// game:
     ///
     /// <code>sea watch @0 steps: highest sea 55.1 m, land under water 3721 cells</code>
     ///
-    /// **波が来る前の 0 歩目で 55 m・15 km2。** 数えていたのは
-    /// <b>そのマップが元から持っている川と、川床が海面下に落ちる谷</b>だった。
-    /// 川は「陸のセルに水が乗っている」ので浸水と区別が付かず、
-    /// 谷は <c>ground &lt; 海面</c> なので海と区別が付かない。
+    /// **55 m and 15 km2 at step 0, before any wave had arrived.** What it was counting
+    /// was <b>the rivers the map already had, and the valleys whose beds drop below sea
+    /// level</b>. A river is "water sitting on a land cell", so it cannot be told apart
+    /// from flooding; a valley has <c>ground &lt; sea level</c>, so it cannot be told
+    /// apart from sea.
     ///
-    /// だから<b>測り始める瞬間の水面を丸ごと覚えて、以後はそこからの差だけ</b>を出す。
-    /// 覚えるのは水面（地形＋水柱）で、地形だけではない —— 川は動かないので
-    /// 差を取れば消える。バニラでもこちらでも同じ引き算をするので、比較は保たれる。
+    /// So we <b>remember the entire water surface at the moment measuring starts, and
+    /// from then on report only the difference from it</b>. What is remembered is the
+    /// water surface (terrain plus water column), not the terrain alone — rivers do not
+    /// move, so they cancel out in the difference. The same subtraction is applied to
+    /// vanilla's wave and to ours, so the comparison still holds.
     /// </summary>
     public static class SeaWatch
     {
-        /// <summary>16 m セルの数。<c>BlockHeights</c> の添字は <c>z*(1080+1)+x</c>。</summary>
+        /// <summary>The number of 16 m cells. <c>BlockHeights</c> is indexed <c>z*(1080+1)+x</c>.</summary>
         private const int GridCells = 1080;
 
-        /// <summary>何セルおきに見るか。**4 なら 1/16 の点だけ見る。**</summary>
+        /// <summary>How many cells to skip between samples. **At 4 we look at 1 point in 16.**</summary>
         private const int SampleStride = 4;
 
         /// <summary>
-        /// 何 sim フレームおきに測るか（64 ＝ 1 水ステップ）。
+        /// How many sim frames between measurements (64 = one water step).
         ///
-        /// ★ 8 歩おきだと 1 回の津波で 300 行になり、<c>output_log.txt</c> を
-        ///   埋め尽くす（2026-08-31、第 4 回検証）。60 歩 ≒ 1 実分おきで十分である。
+        /// ★ Every 8 steps gives 300 lines for a single tsunami and buries
+        ///   <c>output_log.txt</c> (2026-08-31, fourth round of verification). Every 60
+        ///   steps — roughly one real minute — is plenty.
         /// </summary>
         private const int EveryFrames = 64 * 60;
 
-        /// <summary>陸の上に水があると認める深さ（m）。**波飛沫と浸水を分ける。**</summary>
+        /// <summary>The depth (m) at which we accept there is water on land. **It separates spray from flooding.**</summary>
         private const float FloodMetres = 0.5f;
 
         private static uint _lastFrame;
@@ -78,27 +90,29 @@ namespace DisasterPlus.Game
         private static bool _sawVanilla;
 
         /// <summary>
-        /// 測り始めた瞬間の水面（1/64 m）。添字は<b>間引いた格子</b>で
-        /// <c>(z/Stride)*BaseSide + (x/Stride)</c>。null は「まだ取っていない」。
+        /// The water surface at the moment measuring started (in 1/64 m). Indexed on the
+        /// <b>sampled grid</b>: <c>(z/Stride)*BaseSide + (x/Stride)</c>. Null means "not
+        /// captured yet".
         /// </summary>
         private static int[] _base;
 
-        /// <summary>間引いた格子の一辺。</summary>
+        /// <summary>The side length of the sampled grid.</summary>
         private static readonly int BaseSide = GridCells / SampleStride + 1;
 
-        /// <summary>いま測っているか。</summary>
+        /// <summary>Whether we are measuring right now.</summary>
         public static bool Armed { get { return _armed; } }
 
-        /// <summary>これまでに見た海面の最大の上がり（m）。</summary>
+        /// <summary>The largest rise of the sea seen so far (m).</summary>
         public static float PeakRiseMetres { get { return _peakRise; } }
 
-        /// <summary>これまでに見た浸水セル数の最大。</summary>
+        /// <summary>The largest number of flooded cells seen so far.</summary>
         public static int PeakFloodCells { get { return _peakFloodCells; } }
 
-        /// <summary>レベルのロード／アンロードで呼ぶ。</summary>
+        /// <summary>Call this on level load and unload.</summary>
         public static void Reset()
         {
-            // ★ 都市をまたいで基準値を持ち越さない。地形が別物になる。
+            // ★ Never carry the baseline across cities. The terrain is a different thing
+            //   entirely.
             _base = null;
             _armed = false;
             _armedFrame = 0u;
@@ -110,8 +124,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 測りはじめる。<paramref name="reason"/> はログに出る（「誰の波か」）。
-        /// 既に測っていれば理由だけ足す。
+        /// Start measuring. <paramref name="reason"/> goes into the log ("whose wave is
+        /// this"). If we are already measuring, only the reason is appended.
         /// </summary>
         public static void Arm(string reason, uint frame)
         {
@@ -138,7 +152,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// いまの水面を丸ごと覚える。**これを取らない計測は嘘になる**（クラス doc）。
+        /// Remembers the entire current water surface. **A measurement without this is a
+        /// lie** (see the class doc).
         /// </summary>
         private static bool CaptureBaseline()
         {
@@ -179,7 +194,7 @@ namespace DisasterPlus.Game
             return true;
         }
 
-        /// <summary>測るのをやめて、結びの 1 行を出す。</summary>
+        /// <summary>Stop measuring and print the closing line.</summary>
         public static void Disarm(uint frame)
         {
             if (!_armed) return;
@@ -197,22 +212,25 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 測りっぱなしにしない上限（水ステップ）。
+        /// The ceiling (in water steps) that stops us measuring forever.
         ///
-        /// ★ 発生源が 768 歩、そのあと波がマップを渡るのに同じくらい掛かる。
-        ///   1500 では<b>浸水の最中に打ち切られる</b>ので余裕を持たせる
-        ///   （2026-08-31、相互検証）。2400 歩 ≒ 43 実分。
+        /// ★ The source runs for 768 steps, and the wave then takes about as long again
+        ///   to cross the map. At 1500 it <b>gets cut off in the middle of the
+        ///   flooding</b>, so leave some headroom (2026-08-31, cross-checked).
+        ///   2400 steps is roughly 43 real minutes.
         /// </summary>
         private const int MaxSteps = 2400;
 
-        /// <summary>バニラの <c>TsunamiAI</c> のプレハブ索引。-1 は「まだ探していない」。</summary>
+        /// <summary>The prefab index of vanilla's <c>TsunamiAI</c>. -1 means "not looked up yet".</summary>
         private static int _tsunamiPrefabIndex = -1;
 
         /// <summary>
-        /// <b>バニラの津波が動いていないか見る。</b>動いていたら勝手に測りはじめる。
+        /// <b>Checks whether vanilla's tsunami is running.</b> If it is, we start
+        /// measuring of our own accord.
         ///
-        /// ★★ 所有者が DLC の津波を起こしたとき、こちらが何もしなければ
-        ///   <b>比べる相手の数字が取れない</b>。だから自分から気づく。
+        /// ★★ When the owner triggers the DLC tsunami and we do nothing,
+        ///   <b>we never get the numbers to compare against</b>. So we notice it
+        ///   ourselves.
         /// </summary>
         private static bool VanillaTsunamiRunning()
         {
@@ -242,10 +260,10 @@ namespace DisasterPlus.Game
             return false;
         }
 
-        /// <summary>**sim スレッド。** 毎 tick 呼んでよい（自分で間引く）。</summary>
+        /// <summary>**Sim thread.** Safe to call every tick (it throttles itself).</summary>
         public static void Tick(uint frame)
         {
-            // ★ バニラの津波が始まったら、こちらから測りはじめる。
+            // ★ When vanilla's tsunami starts, we start measuring on our own initiative.
             if ((frame & 63u) == 0u)
             {
                 bool vanilla = VanillaTsunamiRunning();
@@ -256,9 +274,10 @@ namespace DisasterPlus.Game
                 }
                 else if (_armed && vanilla && !_sawVanilla)
                 {
-                    // ★★ こちらの波を測っている最中にバニラが起きても取りこぼさない。
-                    //    Arm は二度目を無視するので、ここで印を付けておかないと
-                    //    <b>比べる相手の数字が「うちの波」と札を付けて出てしまう。</b>
+                    // ★★ Don't miss it when vanilla's wave starts while we are already
+                    //    measuring ours. Arm ignores a second call, so without marking it
+                    //    here <b>the numbers we wanted for comparison come out labelled
+                    //    as our own wave.</b>
                     _sawVanilla = true;
                     _reason += " + THE DLC TSUNAMI JOINED at step "
                                + ((frame - _armedFrame) / 64);
@@ -313,8 +332,9 @@ namespace DisasterPlus.Game
             int flooded = 0;
             int floodUnits = (int)(FloodMetres * 64f);
 
-            // ★★ **1 回借りて舐める。** WaterLevel() を何万回も呼ぶと、
-            //    1 回ごとに BeginRead/EndRead の錠を取り直して水スレッドと奪い合う。
+            // ★★ **Borrow it once and sweep across it.** Calling WaterLevel() tens of
+            //    thousands of times re-takes the BeginRead/EndRead lock each time and
+            //    fights the water thread for it.
             WaterSimulation.Cell[] cells = terrain.WaterSimulation.BeginRead();
 
             try
@@ -336,19 +356,20 @@ namespace DisasterPlus.Game
 
                         int ground = block[at];
 
-                        // ★★ **平常時の水面からの差。** 絶対値ではない（クラス doc）。
+                        // ★★ **The difference from the resting water surface.** Not an
+                        //    absolute value (see the class doc).
                         int rise = ground + cells[at].m_height - was;
                         if (rise <= 0) continue;
 
                         if (ground < seaUnits)
                         {
-                            // 海。どれだけ盛り上がったか。
+                            // Sea. How far it has risen.
                             float m = rise / 64f;
                             if (m > best) { best = m; bestX = x; bestZ = z; }
                         }
                         else if (rise > floodUnits)
                         {
-                            // 陸。**元より 0.5 m 以上深くなった** ＝ 新しく浸かった。
+                            // Land. **At least 0.5 m deeper than it was** = newly flooded.
                             flooded++;
                         }
                     }

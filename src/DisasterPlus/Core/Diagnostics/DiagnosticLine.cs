@@ -1,6 +1,7 @@
 namespace DisasterPlus.Core.Diagnostics
 {
-    /// <summary>診断出力の 1 行。Indent は整形時の字下げ段数。</summary>
+    /// <summary>One line of diagnostic output. Indent is how many levels to indent when
+    /// formatting.</summary>
     public struct DiagnosticLine
     {
         public readonly int Indent;

@@ -1,8 +1,8 @@
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// 水平面（X-Z）の 2 次元ベクトル。
-    /// Core はエンジン非依存でなければならないので UnityEngine.Vector2 は使えない。
+    /// A 2D vector in the horizontal plane (X-Z).
+    /// Core has to stay engine-free, so UnityEngine.Vector2 is off limits.
     /// </summary>
     public struct Vec2
     {

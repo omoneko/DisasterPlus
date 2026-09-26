@@ -6,87 +6,95 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ④の論理オブジェクト本体 —— **台風のモデル**（経路・強度・位相・上陸予測）と、
-    /// その寿命の管理。<b>sim スレッド専用。</b>
+    /// ④'s logical object proper — **the typhoon model** (track, intensity, phase,
+    /// landfall forecast) and the management of its lifetime. <b>Sim thread only.</b>
     ///
-    /// バニラの災害バッファに触るのは <see cref="TyphoonSlot"/> の仕事で、
-    /// **このファイルには <c>DisasterManager</c> / <c>DisasterAI</c> への呼び出しが
-    /// 1 つも無い**（<see cref="DisasterData"/> の配列を <see cref="TyphoonSlot"/> から
-    /// 受け取って渡し直すだけ）。分けた理由はあちらのクラス doc。
+    /// Touching vanilla's disaster buffer is <see cref="TyphoonSlot"/>'s job, and
+    /// **there is not one call to <c>DisasterManager</c> or <c>DisasterAI</c> in this
+    /// file** (it merely takes the <see cref="DisasterData"/> array from
+    /// <see cref="TyphoonSlot"/> and hands it back). Why they are separate is in that
+    /// class's doc.
     ///
-    /// ── なぜ④が自分で動かすのか ──────────────────────────────
+    /// ── Why ④ moves it itself ────────────────────────────────────
     ///
-    /// <c>DisasterManager.SimulationStepImpl</c> は
-    /// <c>idx = m_currentFrameIndex &amp; 255</c> で 1 呼び出しにつき災害 1 個しか進めないので、
-    /// **災害 i の <c>SimulationStep</c> は 256 sim フレームに 1 回しか回らない**
-    /// （IL 事実文書 §E-2）。滑らかに動かすには④が <c>OnAfterSimulationTick</c> から
-    /// 毎 tick 座標を書くしかない。
+    /// <c>DisasterManager.SimulationStepImpl</c> advances only one disaster per call via
+    /// <c>idx = m_currentFrameIndex &amp; 255</c>, so **disaster i's
+    /// <c>SimulationStep</c> only runs once per 256 sim frames** (IL facts document
+    /// §E-2). To move it smoothly, ④ has no option but to write the coordinates every tick
+    /// from <c>OnAfterSimulationTick</c>.
     ///
-    /// ── <c>m_targetPosition</c> を書いてよい根拠（T3 で再実測した） ──────────
+    /// ── The grounds for writing <c>m_targetPosition</c> (re-measured for T3) ──
     ///
-    /// 全アセンブリで <c>stfld DisasterData::m_targetPosition</c> を走査した結果、
-    /// 書き手は 19 メソッドあるが、**既に存在する災害のそれを書くものは 1 つも無い**。
-    /// 全て「<c>CreateDisaster</c> の直後に、今作ったスロットへ初期位置を入れる」か、
-    /// セーブの <c>Deserialize</c> か、プレイヤーが移動ツールで掴んだとき
-    /// （<c>DefaultTool+&lt;EndMoving&gt;</c>）である。<c>ThunderStormAI</c> 側は
-    /// <c>SimulationStep</c> でも <c>ActivateDisaster</c> でも一切書かない。
-    /// **つまり Active 中にバニラと殴り合わない。** 位置に追随するのは落雷の散布中心・
-    /// ハザード円盤・災害マーカー・<c>FindDisaster(Vector3)</c>（§E-1）。
+    /// Scanning every assembly for <c>stfld DisasterData::m_targetPosition</c> found 19
+    /// methods that write it, but **not one of them writes it for a disaster that already
+    /// exists**. They are all either "put an initial position into the slot we just made,
+    /// immediately after <c>CreateDisaster</c>", or the save's <c>Deserialize</c>, or the
+    /// player grabbing it with the move tool (<c>DefaultTool+&lt;EndMoving&gt;</c>). The
+    /// <c>ThunderStormAI</c> side writes it neither in <c>SimulationStep</c> nor in
+    /// <c>ActivateDisaster</c>.
+    /// **In other words we are not fighting vanilla while Active.** What follows the
+    /// position is the lightning scatter centre, the hazard disc, the disaster marker and
+    /// <c>FindDisaster(Vector3)</c> (§E-1).
     ///
-    /// ── 同時に 1 個だけ ────────────────────────────────────
+    /// ── Only one at a time ───────────────────────────────────────
     ///
-    /// 既に動いていれば <see cref="TyphoonRequest.Start"/> は無視して理由を
-    /// <see cref="LastRefusal"/> に残す。②の <see cref="TsunamiChain"/> /
-    /// <c>LongPeriodDamage</c> と同じ制限で、④が上限 256 の災害スロットを
-    /// 食い潰す形を作らないためである。
+    /// If one is already running, <see cref="TyphoonRequest.Start"/> is ignored and the
+    /// reason left in <see cref="LastRefusal"/>. The same restriction as ②'s
+    /// <see cref="TsunamiChain"/> / <c>LongPeriodDamage</c>, so that ④ cannot build a
+    /// shape that eats through the 256-slot disaster cap.
     ///
-    /// ── 真の中心とクランプした写し ──────────────────────────────
+    /// ── The true centre and the clamped copy ──────────────────────────────
     ///
-    /// **④は「本当の中心」を自分で持ち、災害には <see cref="TyphoonSlot.WriteTarget"/> が
-    /// クランプした写しを書く。** 終了判定は必ずクランプ前の中心で行う（理由は
-    /// あちらの doc）。
+    /// **④ keeps "the true centre" itself, and <see cref="TyphoonSlot.WriteTarget"/>
+    /// writes a clamped copy into the disaster.** Always make the ending decision on the
+    /// centre before clamping (the reason is in that class's doc).
     /// </summary>
     public static class TyphoonController
     {
-        /// <summary>強度の下限。<c>.cgs</c> の値もタイルのスライダーの値も公開契約なので
-        /// 範囲外でも読み捨てず、使う側で引き上げる（②の
-        /// <c>EarthquakeLongPeriodStrength</c> と同じ扱い）。範囲そのものは Core の
-        /// <see cref="TyphoonIntensity"/> が持ち、テストが固定している。</summary>
+        /// <summary>The floor on the intensity. Both the <c>.cgs</c> value and the tile
+        /// slider's value are a public contract, so we do not discard out-of-range values
+        /// but lift them here, at the point of use (treated the same way as ②'s
+        /// <c>EarthquakeLongPeriodStrength</c>). The range itself belongs to Core's
+        /// <see cref="TyphoonIntensity"/> and is pinned by tests.</summary>
         private const int MinIntensity = TyphoonIntensity.MinPeak;
 
         private const int MaxIntensity = TyphoonIntensity.MaxPeak;
 
-        /// <summary>上陸予測の先読みサンプル数の上限（計画 §3.6）。</summary>
+        /// <summary>The ceiling on the number of look-ahead samples for the landfall
+        /// forecast (plan §3.6).</summary>
         private const int LandfallSamples = 64;
 
         /// <summary>
-        /// 上陸予測のサンプル間隔（フレーム）。
+        /// The sample interval for the landfall forecast (frames).
         ///
-        /// ★ **これが予測の粒度そのものである。** 256 フレーム ＝ ゲーム内でおよそ
-        ///   5.6 分なので、<see cref="MinutesToLandfall"/> の実際の分解能は
-        ///   「約 5.6 分」であって「0.1 分」ではない。値そのものは
-        ///   （経路が閉じた式なので）安定して単調に減るが、**持っていない精度を
-        ///   表示で主張しない** —— 表示は F0 に丸め、刻みを
-        ///   <see cref="LandfallStepMinutesText"/> で名乗る（全体レビュー）。
+        /// ★ **This is the granularity of the forecast.** 256 frames is about 5.6 in-game
+        ///   minutes, so <see cref="MinutesToLandfall"/>'s actual resolution is "about
+        ///   5.6 minutes", not "0.1 minutes". The value itself decreases stably and
+        ///   monotonically (the track is a closed-form expression), but **we do not claim a
+        ///   precision in the display that we do not have** — the display rounds to F0 and
+        ///   names the step through <see cref="LandfallStepMinutesText"/> (whole-project
+        ///   review).
         /// </summary>
         private const uint LandfallStepFrames = 256u;
 
         /// <summary>
-        /// 上陸予測を打ち直す間隔（フレーム）。
+        /// The interval at which the landfall forecast is recomputed (frames).
         ///
-        /// **経路は elapsedFrames の閉じた関数**（<see cref="TyphoonTrack.CentreAt"/>）
-        /// なので、上陸「フレーム」の予測値は tick が進んでも変わらない。毎 tick 打ち直すと
-        /// 同じ答えを出すために <c>HasWater</c> を 64 回（＝水シミュのロックを 64 回）
-        /// 取り直すだけになる。表示する「あと何分」は、キャッシュした上陸フレームと
-        /// 現在フレームの差から毎 tick 計算するので、値は 1 フレーム刻みで滑らかに減る。
+        /// **The track is a closed-form function of elapsedFrames**
+        /// (<see cref="TyphoonTrack.CentreAt"/>), so the predicted landfall "frame" does
+        /// not change as ticks pass. Recomputing every tick would just mean taking
+        /// <c>HasWater</c> 64 times over (i.e. taking the water simulation's lock 64 times)
+        /// to get the same answer. The "how many minutes" we display is computed every tick
+        /// from the difference between the cached landfall frame and the current frame, so
+        /// the value still decreases smoothly, one frame at a time.
         /// </summary>
         private const uint LandfallRescanFrames = 256u;
 
         private static bool _active;
 
         /// <summary>
-        /// **プレイヤーが指した発生地点**（クランプ前のワールド XZ）。
-        /// 経路はここから始まる（<c>TyphoonTrack.CentreAt</c>）。
+        /// **The point the player pointed at** (world XZ, before clamping).
+        /// The track starts here (<c>TyphoonTrack.CentreAt</c>).
         /// </summary>
         private static Vec2 _origin;
 
@@ -96,9 +104,9 @@ namespace DisasterPlus.Game
         private static uint _totalFrames;
 
         /// <summary>
-        /// クリック地点に着くまでのフレーム数。
-        /// **台風はこれだけ時計を戻した場所から入ってくる**
-        /// （<c>TyphoonTrack.ApproachFramesFor</c>）。
+        /// How many frames it takes to reach the clicked point.
+        /// **The typhoon comes in from where it would have been this far back on the
+        /// clock** (<c>TyphoonTrack.ApproachFramesFor</c>).
         /// </summary>
         private static uint _approachFrames;
         private static uint _elapsedFrames;
@@ -106,7 +114,7 @@ namespace DisasterPlus.Game
         private static float _decay;
         private static float _prefabRadius;
 
-        /// <summary>クランプ前の真の中心。マップ外にもなる。</summary>
+        /// <summary>The true centre, before clamping. It can be off the map.</summary>
         private static Vec2 _centre;
         private static float _centreHeight;
         private static float _heading;
@@ -116,7 +124,8 @@ namespace DisasterPlus.Game
         private static TyphoonPhase _phase;
         private static bool _overLand;
 
-        /// <summary>1 度でもマップの中に入ったか。終了判定に使う（<see cref="Advance"/>）。</summary>
+        /// <summary>Whether it has been inside the map even once. Used for the ending
+        /// decision (<see cref="Advance"/>).</summary>
         private static bool _wasInsideMap;
 
         private static bool _landfallKnown;
@@ -126,8 +135,9 @@ namespace DisasterPlus.Game
 
         private static string _lastRefusal;
 
-        /// <summary>例外を 1 回だけ <c>Log.Error</c> で出したか。<see cref="Reset"/> で戻さない
-        /// （ゲームのビルドに対する事実であって都市ごとの状態ではない）。</summary>
+        /// <summary>Whether an exception has been reported once through <c>Log.Error</c>.
+        /// Not reset by <see cref="Reset"/> (it is a fact about the game build, not
+        /// per-city state).</summary>
         private static bool _errorLogged;
 
         public static bool Active { get { return _active; } }
@@ -135,14 +145,16 @@ namespace DisasterPlus.Game
         public static ushort DisasterId { get { return TyphoonSlot.Id; } }
 
         /// <summary>
-        /// <c>StartDisaster</c> が予定した活性化フレーム。
-        /// **落雷の予算がバニラの取り分を見積もる起点**でもある（T6）。
+        /// The activation frame <c>StartDisaster</c> scheduled.
+        /// **Also the origin from which the lightning budget estimates vanilla's share**
+        /// (T6).
         /// </summary>
         public static uint ActivationFrame { get { return TyphoonSlot.ActivationFrame; } }
 
         /// <summary>
-        /// 真の中心（クランプ前）。Y は地形高のサンプルで、マップ外では地形グリッドが
-        /// 端でクランプされるため「いちばん近い縁の高さ」になる。
+        /// The true centre (before clamping). Y is a sample of the terrain height; off the
+        /// map the terrain grid clamps at its edge, so it becomes "the height of the
+        /// nearest edge".
         /// </summary>
         public static Vec3 Centre { get { return new Vec3(_centre.X, _centreHeight, _centre.Z); } }
 
@@ -155,14 +167,16 @@ namespace DisasterPlus.Game
         public static float GaleRadius { get { return _galeRadius; } }
 
         /// <summary>
-        /// この台風が使っている <c>ThunderStormAI.m_radius</c>（プレハブ実測値）。
-        /// **0 は「読めていない」である**（設計書 §6。<c>TyphoonPrefabFacts.Usable</c> が
-        /// false のとき台風はそもそも起きないので、Active 中は必ず正）。
+        /// The <c>ThunderStormAI.m_radius</c> this typhoon is using (the measured prefab
+        /// value). **0 means "could not be read"** (design doc §6. A typhoon cannot be
+        /// raised at all when <c>TyphoonPrefabFacts.Usable</c> is false, so while Active
+        /// this is always positive).
         ///
-        /// <see cref="StormRadius"/> / <see cref="GaleRadius"/> は今の強度での**結果**で、
-        /// こちらは <c>TyphoonProfile.WindAt</c> / <c>StormRadiusOf</c> に渡す**入力**である。
-        /// T7 の風害が距離ごとの風速相当を求めるのに要る ——
-        /// 結果から割り戻すと強度 0 のとき 0 除算になる。
+        /// <see cref="StormRadius"/> / <see cref="GaleRadius"/> are the **results** at the
+        /// current intensity; this is the **input** passed to
+        /// <c>TyphoonProfile.WindAt</c> / <c>StormRadiusOf</c>.
+        /// T7's wind damage needs it to work out the wind speed equivalent at each distance
+        /// — dividing back out of the result would divide by zero at intensity 0.
         /// </summary>
         public static float PrefabRadius { get { return _prefabRadius; } }
 
@@ -173,12 +187,14 @@ namespace DisasterPlus.Game
         public static uint TotalFrames { get { return _totalFrames; } }
 
         /// <summary>
-        /// これから先の経路を引くのに要る値ひとそろい（<see cref="TyphoonTrackPlan"/>）。
+        /// The complete set of values needed to draw the track onwards
+        /// (<see cref="TyphoonTrackPlan"/>).
         ///
-        /// ★★ **描画（main スレッド）はここを直接読んではいけない。**
-        ///   スナップショットに載って渡る。1 個の struct にまとめてあるのは、
-        ///   4 つを別々に運ぶと<b>どれか 1 つだけ古い組み合わせ</b>が起こりうるからで、
-        ///   その組で引いた経路は実在しない台風の経路になる。
+        /// ★★ **The rendering side (main thread) must not read this directly.**
+        ///   It travels on the snapshot. They are gathered into one struct because
+        ///   carrying the four separately allows <b>a combination where just one of them is
+        ///   stale</b>, and a track drawn from that combination is the track of a typhoon
+        ///   that does not exist.
         /// </summary>
         public static TyphoonTrackPlan TrackPlan
         {
@@ -191,19 +207,23 @@ namespace DisasterPlus.Game
 
         public static bool OverLand { get { return _overLand; } }
 
-        /// <summary>上陸予測が立っているか。**false は「0 分後」ではなく「このまま
-        /// 海上を通過する（か、先読みの範囲に陸が無い）」である。** 0 と混ぜないこと。</summary>
+        /// <summary>Whether a landfall forecast exists. **false means "it will pass out at
+        /// sea (or there is no land within the look-ahead)", not "in 0 minutes".** Do not
+        /// mix it up with 0.</summary>
         public static bool LandfallKnown { get { return _landfallKnown; } }
 
-        /// <summary>上陸までのゲーム内分。<see cref="LandfallKnown"/> が true のときだけ意味を持つ。
-        /// **分解能は <see cref="LandfallStepFrames"/> 刻み**（その doc）。</summary>
+        /// <summary>In-game minutes to landfall. Only meaningful when
+        /// <see cref="LandfallKnown"/> is true.
+        /// **The resolution is in steps of <see cref="LandfallStepFrames"/>** (its
+        /// doc).</summary>
         public static float MinutesToLandfall { get; private set; }
 
         /// <summary>
-        /// 上陸予測の刻み（ゲーム内分）を人が読める形で。表示側が
-        /// 「この数字はこれくらいの粒度でしか打っていない」と名乗るために使う。
-        /// <c>FramesPerMinute</c> が読めなければフレーム数のまま名乗る
-        /// （推測した分に換算しない）。
+        /// The landfall forecast's step (in-game minutes) in human-readable form. The
+        /// display side uses it to say "this number is only computed at about this
+        /// granularity".
+        /// If <c>FramesPerMinute</c> cannot be read it names the frame count as it is
+        /// (it does not convert into guessed minutes).
         /// </summary>
         public static string LandfallStepMinutesText()
         {
@@ -213,25 +233,29 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 直近で台風を起こせなかった／手放した理由（英語、診断用）。
-        /// **「起こせなかった」を「何も起きていない」と見分ける手段がここにしか無い。**
+        /// The most recent reason a typhoon could not be raised, or was let go of (English,
+        /// for diagnostics).
+        /// **This is the only means of telling "it could not be raised" from "nothing is
+        /// happening".**
         /// </summary>
         public static string LastRefusal { get { return _lastRefusal; } }
 
         /// <summary>
-        /// **レベルアンロードで必ず呼ぶ。** 進行中の台風も予約も都市をまたいで残らない。
-        /// スロットには触らない —— 前の都市の災害バッファはもう存在しない。
+        /// **Always call on level unload.** Neither a typhoon in progress nor a booking
+        /// survives across cities. It does not touch the slot — the previous city's
+        /// disaster buffer no longer exists.
         /// </summary>
         public static void Reset()
         {
             Forget();
             _lastRefusal = null;
-            // ★ _errorLogged は戻さない（クラス doc）。
+            // ★ _errorLogged is not reset (class doc).
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>TyphoonFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から呼ぶこと**（ポーズ中に台風が動く）。
+        /// Sim thread. **Always call it from below the pause guard in
+        /// <c>TyphoonFeature.OnSimulationTick</c>** (otherwise the typhoon moves while
+        /// paused).
         /// </summary>
         public static void Tick(TyphoonSnapshot snapshot, uint frame, float deltaMinutes)
         {
@@ -256,13 +280,14 @@ namespace DisasterPlus.Game
 
         private static void Step(TyphoonSnapshot snapshot, uint frame, float deltaMinutes)
         {
-            // ★ 1 tick に 1 回だけ（TyphoonHub.TakeRequest の doc）。
+            // ★ Exactly once per tick (the doc on TyphoonHub.TakeRequest).
             var request = TyphoonHub.TakeRequest();
 
             if (request.Kind == TyphoonRequest.Start)
             {
-                // ★ 依頼は**地点と強度を運ぶ**。ここで座標も強度も発明しないこと
-                //   （強度を設定画面から読み直すと「押した時と違う強度で始まる」）。
+                // ★ The request **carries the point and the intensity**. Do not invent
+                //   either of them here (re-read the intensity from the settings screen and
+                //   it "starts at a different intensity from the one you pressed").
                 Start(snapshot, frame, request.Point.ToVec2(), request.Intensity);
             }
 
@@ -280,17 +305,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 台風を起こす。<c>DisasterTool.&lt;CreateDisaster&gt;c__Iterator0.MoveNext</c> の
-        /// 手順そのまま（§E-3）で、②の <c>TsunamiChain.Raise</c> と同型である。
-        /// スロットの取得と開始は <see cref="TyphoonSlot"/> が持ち、ここは
-        /// **起こしてよいかの判断と、④のモデルの初期化**だけを行う。
+        /// Raise a typhoon. Exactly the procedure in
+        /// <c>DisasterTool.&lt;CreateDisaster&gt;c__Iterator0.MoveNext</c> (§E-3), and the
+        /// same shape as ②'s <c>TsunamiChain.Raise</c>.
+        /// Taking and starting the slot belongs to <see cref="TyphoonSlot"/>; this only
+        /// does **the decision about whether we may raise one, and the initialisation of
+        /// ④'s model**.
         /// </summary>
         private static void Start(TyphoonSnapshot snapshot, uint frame, Vec2 origin,
                                   int requestedIntensity)
         {
             if (_active)
             {
-                // 同時に 1 個だけ（クラス doc）。黙って無視しない。
+                // Only one at a time (class doc). Do not ignore it silently.
                 _lastRefusal = "a typhoon is already running; only one at a time";
                 return;
             }
@@ -304,17 +331,18 @@ namespace DisasterPlus.Game
             var prefab = snapshot.Prefab;
             if (!prefab.Usable)
             {
-                // 設計書 §6: 読めなければ推測せず何もしない。
+                // Design doc §6: if it cannot be read, do nothing rather than guess.
                 _lastRefusal = "ThunderStormAI prefab values are unreadable "
                              + "(m_radius / m_activeDuration); the mod will not guess them";
                 return;
             }
 
-            // ★★ **寿命は宿主の嵐の持続時間の <c>LifetimeMultiplier</c> 倍である**
-            //    （2026-08-22、実機報告「エフェクトがすぐに消えてしまいます／
-            //    ゆっくりと移動する様子を再現してください」）。
-            //    宿主は <c>TyphoonSlot.KeepAlive</c> が生かし続ける。
-            //    速度はこの寿命で経路長を割るので、**寿命を延ばすと自動的に遅くなる**。
+            // ★★ **The lifetime is <c>LifetimeMultiplier</c> times the host storm's
+            //    duration** (2026-08-22, in-game report "the effects disappear almost
+            //    immediately / please reproduce it moving slowly").
+            //    The host is kept alive by <c>TyphoonSlot.KeepAlive</c>.
+            //    The speed divides the track length by this lifetime, so **extending the
+            //    lifetime automatically makes it slower**.
             uint lifetime = TyphoonTrack.LifetimeFramesFor(prefab.ActiveDuration);
             float speed = TyphoonTrack.SpeedFor(lifetime);
             if (speed <= 0f)
@@ -330,14 +358,18 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 種は災害 ID。**同じセーブで同じ地点を指せば同じ経路になる**（設計書 §4.1）。
-            // 種が決めるのは進行方位と曲率だけで、出発点はプレイヤーが決める。
+            // The seed is the disaster ID. **Point at the same spot in the same save and
+            // you get the same track** (design doc §4.1).
+            // The seed decides only the heading and the curvature; the starting point is
+            // the player's.
             _seed = TyphoonSlot.Id;
             _origin = origin;
             _speed = speed;
-            // ★ 強度は**タイルのスライダーが指していた値**（依頼が運んできたもの）。
-            //   設定画面の値はスライダーが読めない環境の落とし所で、その差し替えは
-            //   配置ツール側で済んでいる（TyphoonPlacementTool.OnToolUpdate）。
+            // ★ The intensity is **the value the tile's slider was pointing at** (what the
+            //   request carried). The settings screen's value is the fallback for
+            //   environments where the slider cannot be read, and that substitution has
+            //   already been done on the placement tool side
+            //   (TyphoonPlacementTool.OnToolUpdate).
             _peakIntensity = ClampIntensity(requestedIntensity);
             _totalFrames = lifetime;
             _prefabRadius = prefab.StormRadius;
@@ -350,8 +382,8 @@ namespace DisasterPlus.Game
             _landfallScanFrame = 0u;
             MinutesToLandfall = 0f;
 
-            // ★★ **マップ端から入ってくる**（2026-09-02）。
-            //    クリック地点は出発点ではなく<b>到達点</b>になる。
+            // ★★ **It comes in from the edge of the map** (2026-09-02).
+            //    The clicked point is not the start but <b>the destination</b>.
             _approachFrames = TyphoonTrack.ApproachFramesFor(_origin, _seed, _speed,
                                                             _totalFrames);
             _centre = TyphoonTrack.CentreAt(_origin, _seed, 0u, _speed, _approachFrames);
@@ -373,11 +405,11 @@ namespace DisasterPlus.Game
             _active = true;
             _lastRefusal = null;
 
-            // ★ **強度は 2 つ書く。** 以前はランプの現在値だけを
-            //   "intensity=" として出しており、それは 0 フレーム目なので
-            //   必ず小さい—— 初回の実機テストで "intensity=0" と出て、
-            //   「スライダーが読めていない」と読まれた。
-            //   **選ばれた値（peak）と今の値を別々に名乗ること。**
+            // ★ **Write two intensities.** We used to print only the ramp's current value
+            //   as "intensity=", and at frame 0 that is necessarily small — the first
+            //   in-game test printed "intensity=0" and it was read as "the slider is not
+            //   being read".
+            //   **Name the chosen value (peak) and the current value separately.**
             Log.Info("typhoon started: disaster #" + TyphoonSlot.Id
                      + " at (" + _origin.X.ToString("F0") + "," + _origin.Z.ToString("F0") + ")"
                      + " peakIntensity=" + _peakIntensity
@@ -389,8 +421,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **黙って手放さない。** 理由を 1 行出して <see cref="Forget"/> する。
-        /// <see cref="Stop"/> ではない —— **もう④のものではないので触ってはいけない。**
+        /// **Do not let go silently.** Print one line with the reason and call
+        /// <see cref="Forget"/>.
+        /// Not <see cref="Stop"/> — **it is not ④'s any more, so we must not touch it.**
         /// </summary>
         private static void LoseSlot(string reason)
         {
@@ -400,18 +433,19 @@ namespace DisasterPlus.Game
             _lastRefusal = reason;
         }
 
-        /// <summary>毎 tick の本体（計画 §3.3）。</summary>
+        /// <summary>The per-tick body (plan §3.3).</summary>
         private static void Advance(DisasterData[] buffer, uint frame, float deltaMinutes)
         {
             if (frame > _lastFrame) _elapsedFrames += frame - _lastFrame;
             _lastFrame = frame;
 
-            // 経路は elapsedFrames の閉じた関数。積算しない（Core の doc）。
+            // The track is a closed-form function of elapsedFrames. Do not accumulate
+            // (Core's doc).
             _centre = TyphoonTrack.CentreAt(_origin, _seed, _elapsedFrames, _speed,
                                            _approachFrames);
-            // ★ 出発点を渡す。**マップを横切る向きを選ぶため**
-            //   （TyphoonTrack.BearingFrom のクラス doc）。渡さないと、端を
-            //   指されたとき台風が数百 m でマップを出て消える。
+            // ★ Pass the starting point. **So that a direction across the map is chosen**
+            //   (TyphoonTrack.BearingFrom's class doc). Without it, point at an edge and
+            //   the typhoon leaves the map and disappears after a few hundred metres.
             _heading = TyphoonTrack.HeadingAt(_origin, _seed, _elapsedFrames, _speed,
                                               _approachFrames);
 
@@ -432,13 +466,14 @@ namespace DisasterPlus.Game
 
             UpdateLandfall(frame);
 
-            // ── 終了判定。**必ずクランプ前の中心で行う**（クラス doc）。 ──────────
+            // ── The ending decision. **Always made on the centre before clamping** (class doc). ──
             //
-            // 計画 §3.5 は 1 つ目の条件を「マップの外、かつ elapsed が進入に要する
-            // フレーム数を超えた」と書いている。ここでは「1 度でも中に入ったことが
-            // あるか」（_wasInsideMap）で同じことを**推定ではなく観測で**判定する。
-            // 進入に要するフレーム数を別途見積もると、その見積りが外れたときに
-            // 「到着する前に台風が終わる」という、例外の出ない壊れ方をする。
+            // Plan §3.5 writes the first condition as "outside the map, and elapsed has
+            // passed the number of frames needed to come in". Here we decide the same thing
+            // **by observation rather than estimation**, from "has it ever been inside"
+            // (_wasInsideMap). Estimate the frames needed to come in separately and, when
+            // that estimate is wrong, you get "the typhoon ends before it arrives" — a
+            // breakage with no exception.
             if (_wasInsideMap && !inside)
             {
                 Log.Info("typhoon #" + TyphoonSlot.Id + " left the map");
@@ -455,11 +490,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 上陸予測（設計書 §7.2）。経路が閉じた式なので先読みは単なるサンプリングである。
+        /// The landfall forecast (design doc §7.2). The track is a closed-form expression,
+        /// so looking ahead is simply sampling.
         ///
-        /// <c>HasWater</c> は水シミュのロックを取るので**打ち直しは
-        /// <see cref="LandfallRescanFrames"/> フレームに 1 回・上限
-        /// <see cref="LandfallSamples"/> サンプル**に抑える（その定数の doc）。
+        /// <c>HasWater</c> takes the water simulation's lock, so **recomputation is held to
+        /// once per <see cref="LandfallRescanFrames"/> frames with a ceiling of
+        /// <see cref="LandfallSamples"/> samples** (the docs on those constants).
         /// </summary>
         private static void UpdateLandfall(uint frame)
         {
@@ -483,7 +519,8 @@ namespace DisasterPlus.Game
 
             if (_landfallFrame <= frame)
             {
-                // 予測した時刻を過ぎたのにまだ海の上。次の走査で取り直す。
+                // The predicted time has passed and we are still over water. Take it again
+                // on the next scan.
                 _landfallKnown = false;
                 MinutesToLandfall = 0f;
                 return;
@@ -521,9 +558,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 中心が水の上か。<c>TerrainManager.HasWater(Vector2)</c> は
-        /// <c>WaterSimulation.BeginRead()/EndRead()</c> を取るので **sim スレッド専用**。
-        /// 引数は**ワールド XZ**（②が IL 実測済み。<see cref="TsunamiChain"/> の doc）。
+        /// Whether the centre is over water. <c>TerrainManager.HasWater(Vector2)</c> takes
+        /// <c>WaterSimulation.BeginRead()/EndRead()</c>, so it is **sim thread only**.
+        /// The argument is **world XZ** (② measured this from the IL.
+        /// <see cref="TsunamiChain"/>'s doc).
         /// </summary>
         private static bool HasWaterAt(Vec2 centre)
         {
@@ -532,53 +570,60 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 終わり方は 2 つ（マップを抜けた／持続時間を使い切った）だが、
-        /// **後始末は必ずこの 1 本を通す。**
+        /// There are two ways it can end (it left the map, or it used up its duration), but
+        /// **the cleanup always goes through this one path.**
         ///
-        /// ★★ <b>プレイヤーが止める経路はもう無い</b>（2026-09-02、所有者
-        ///   「自然災害を止めることは誰にもできません」）。ここを呼ぶのは
-        ///   <see cref="Step"/> の中の 2 つの終端条件だけである。
-        ///   **依頼から呼べるようにし直さないこと。**
+        /// ★★ <b>There is no longer any route by which the player stops it</b>
+        ///   (2026-09-02, the owner: "Nobody can stop a natural disaster"). The only things
+        ///   that call this are the two terminating conditions inside
+        ///   <see cref="Step"/>.
+        ///   **Do not make it callable from a request again.**
         /// </summary>
         private static void Stop()
         {
-            // 1. バニラの終了経路に乗せる（スロットは解放しない。あちらの doc）。
+            // 1. Put it on vanilla's ending route (the slot is not released. That class's
+            //    doc).
             TyphoonSlot.Deactivate();
-            // ★ ここで return しない。バニラの終了経路が投げても、
-            //    ④が握っている天候は下の Forget() が必ず戻す。
+            // ★ Do not return here. Even if vanilla's ending route throws, the Forget()
+            //    below always puts back the weather ④ is holding.
 
-            // 2. 握っていたものを全部手放す（<see cref="Forget"/> が復元も持つ）。
+            // 2. Let go of everything we were holding (<see cref="Forget"/> owns the
+            //    restoration too).
             Forget();
         }
 
         /// <summary>
-        /// ④が握っていたものを全部手放す。**災害スロットには触らない**
-        /// （<see cref="Stop"/> だけがバニラの終了経路を呼ぶ）。
-        /// <see cref="LastRefusal"/> は残す（呼び出し側が理由を上書きする）。
+        /// Let go of everything ④ was holding. **It does not touch the disaster slot**
+        /// (only <see cref="Stop"/> calls vanilla's ending route).
+        /// <see cref="LastRefusal"/> is left as it is (the caller overwrites the reason).
         ///
-        /// ★ **④が触った他の系の復元はここに書くこと。<see cref="Stop"/> ではない。**
-        /// 台風を手放す経路は <see cref="Stop"/> だけではない ——
-        /// <see cref="LoseSlot"/>（災害スロットが再利用された）と
-        /// <see cref="Reset"/>（レベルアンロード）も通る。復元を <see cref="Stop"/> 側に
-        /// 置くと、スロットを奪われた瞬間に**天候を握ったまま台風だけが消える**。
+        /// ★ **Restoration of any other system ④ touched goes here, not in
+        /// <see cref="Stop"/>.**
+        /// <see cref="Stop"/> is not the only route that lets go of a typhoon —
+        /// <see cref="LoseSlot"/> (the disaster slot was reused) and
+        /// <see cref="Reset"/> (level unload) go through it too. Put the restoration on the
+        /// <see cref="Stop"/> side and, the moment the slot is taken, **the typhoon alone
+        /// disappears while the weather stays held**.
         ///
-        /// ★ **ここに <c>TyphoonCloud</c> を足さないこと。** 雲は main スレッドだけの
-        /// 機能で、sim 側からは 1 度も呼ばれない。それが T9 を他から独立させている
-        /// 実体である（<c>TyphoonCloud</c> のクラス doc）。雲の後始末は
-        /// <c>TyphoonFeature.OnMainThreadUpdate</c> が「Active でなくなったフレーム」に
-        /// 自分で行う。
+        /// ★ **Do not add <c>TyphoonCloud</c> here.** The cloud is a main-thread-only
+        /// feature and is never once called from the sim side. That is what makes T9
+        /// independent of everything else (<c>TyphoonCloud</c>'s class doc). The cloud's
+        /// cleanup is done by <c>TyphoonFeature.OnMainThreadUpdate</c> itself, on "the
+        /// frame where it stopped being Active".
         ///
-        /// 復元はどれも冪等でなければならない（<see cref="Stop"/> → <see cref="Forget"/> と
-        /// <c>TyphoonFeature.OnLevelUnloading</c> の両方から重ねて呼ばれる）。
+        /// Every restoration must be idempotent (they are called repeatedly, both from
+        /// <see cref="Stop"/> → <see cref="Forget"/> and from
+        /// <c>TyphoonFeature.OnLevelUnloading</c>).
         /// </summary>
         private static void Forget()
         {
-            // ★★ **何を返したかを 1 行だけ残す**（持ち主の指摘「台風が去ったら
-            //    暴風雨や竜巻被害がなくなるように」を実機で確かめる主経路）。
-            //    Forget は台風の一生に 1 回しか通らないので Log.Info でよい ——
-            //    毎 tick / 毎フレームの経路ではない。
-            //    **握っていたかどうかを、返す前に**読む（返したあとに読むと
-            //    全部「握っていない」になり、この行が何も証明しなくなる）。
+            // ★★ **Leave exactly one line saying what we gave back** (the main route by
+            //    which the owner's note "when the typhoon leaves, the storm and the tornado
+            //    damage should stop" is verified in the game).
+            //    Forget runs once in a typhoon's life, so Log.Info is fine — this is not a
+            //    per-tick or per-frame route.
+            //    Read **whether we were holding it before we give it back** (read it after
+            //    and everything says "was not held", and this line proves nothing).
             bool wasActive = _active;
             ushort releasedId = TyphoonSlot.Id;
             bool hadWeather = TyphoonWeather.Driving;
@@ -586,39 +631,44 @@ namespace DisasterPlus.Game
             int windTotal = TyphoonWind.TotalCollapsed;
             int gustTotal = TyphoonGust.TotalCollapsed;
 
-            // ★ バニラの DeactivateDisaster に任せない。DisasterAI.DeactivateNow は
-            //    m_flags & Active(8) が無ければ何もしないので（T3 で IL 実測）、
-            //    Emerging 中に止めた台風では m_targetRain = 0 が走らない。
+            // ★ Do not leave it to vanilla's DeactivateDisaster. DisasterAI.DeactivateNow
+            //    does nothing without m_flags & Active(8) (measured from the IL in T3), so
+            //    for a typhoon stopped while Emerging, m_targetRain = 0 never runs.
             TyphoonWeather.Release();
 
-            // ★ 落雷の在庫を次の台風へ持ち越さない。持ち越すと、次の台風は実際には
-            //    空いているキューを「埋まっている」と見て 1 発も撃たなくなる ——
-            //    そしてキューが空のままになるので、抑え込んでいたはずの環境落雷が戻る。
+            // ★ Do not carry the lightning stock over to the next typhoon. Carry it over
+            //    and the next typhoon sees a queue that is actually free as "full" and never
+            //    fires — and then the queue stays empty, so the ambient lightning we were
+            //    supposed to be suppressing comes back.
             TyphoonLightning.Reset();
 
-            // ★ 風害の走査位置も次の台風へ持ち越さない。持ち越すと、次の台風は
-            //    前の台風の中心を基準にした序数から走り出す。
+            // ★ Do not carry the wind sweep's position over to the next typhoon either.
+            //    Carry it over and the next typhoon starts from an ordinal based on the
+            //    previous typhoon's centre.
             TyphoonWind.Reset();
 
-            // ★★ 河川の水位を必ず戻す（罠 4 の復元経路 1 本目）。**Stop ではなく
-            //    ここに置く** —— 台風を手放す経路は Stop だけではなく、LoseSlot
-            //    （災害スロットを奪われた）と Reset（アンロード）も通る。Stop 側に
-            //    置くと、スロットを奪われた瞬間に**川を溢れさせたまま台風だけが消える**。
-            //    RestoreAll は冪等なので重ねて呼んでよい。
+            // ★★ Always put the river water levels back (the first of the two restore
+            //    routes for trap 4). **It goes here, not in Stop** — Stop is not the only
+            //    route that lets go of a typhoon; LoseSlot (the disaster slot was taken) and
+            //    Reset (unload) go through it too. Put it on the Stop side and, the moment
+            //    the slot is taken, **the typhoon alone disappears with the rivers still
+            //    burst**. RestoreAll is idempotent, so calling it repeatedly is fine.
             TyphoonFlood.RestoreAll();
 
-            // ★★ 竜巻並みの局所被害（パッチ）もここで畳む。**Stop ではなくここ**
-            //    （上の 3 つと同じ理由）。パッチは台帳ではなく「台風の経過フレームの
-            //    関数」なので、台風が無くなった時点で 1 個も存在しなくなる ——
-            //    ここで戻すのはカウンタと走査位置だけである。冪等。
+            // ★★ Pack away the tornado-grade local damage (the patches) here too. **Here,
+            //    not in Stop** (the same reason as the three above). A patch is not a ledger
+            //    entry but "a function of the typhoon's elapsed frames", so the moment the
+            //    typhoon is gone not one of them exists — all we reset here are the counters
+            //    and the sweep position. Idempotent.
             TyphoonGust.Reset();
 
             TyphoonSlot.Forget();
 
             _active = false;
             _seed = 0u;
-            // ★ 指された地点も持ち越さない。残すと、次に地点を運ばない経路が
-            //   足されたときに**前の台風の地点**から静かに始まる。
+            // ★ Do not carry the pointed-at location over either. Leave it and, when a route
+            //   that does not carry a location is added later, it quietly starts from
+            //   **the previous typhoon's location**.
             _origin = new Vec2(0f, 0f);
             _speed = 0f;
             _peakIntensity = 0;
@@ -658,10 +708,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>.cgs</c> の値もスライダーの値も公開契約なので範囲外でも読み捨てず、
-        /// ここで <see cref="TyphoonIntensity"/> の範囲へ引き上げる。
-        /// **<c>(byte)</c> へのキャストの前にクランプすること**（範囲外を先にキャストすると
-        /// いちばん弱い設定がいちばん強い台風になる）。
+        /// Both the <c>.cgs</c> value and the slider's value are a public contract, so we do
+        /// not discard out-of-range values but lift them here into
+        /// <see cref="TyphoonIntensity"/>'s range.
+        /// **Clamp before the cast to <c>(byte)</c>** (cast an out-of-range value first and
+        /// the weakest setting becomes the strongest typhoon).
         /// </summary>
         private static byte ClampIntensity(int value)
         {

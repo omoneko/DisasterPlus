@@ -5,106 +5,118 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>海溝型地震で、震央から遠くても火災と倒壊が起きる。</b>**sim スレッド専用。**
+    /// <b>In a trench earthquake, fires and collapses happen even far from the
+    /// epicentre.</b> **Sim thread only.**
     ///
-    /// ── 所有者の指示（2026-09-02）────────────────────────────────
+    /// ── The owner's instruction (2026-09-02) ────────────────────────────
     ///
-    /// &gt; 海溝型地震の、地震による被害が少ないです。震源から離れていても
-    /// &gt; 一定確率で火災や倒壊が起きるようにしてください（地震の規模に合わせて）
+    /// &gt; The trench earthquake does too little damage. Make fires and collapses
+    /// &gt; happen at some rate even far from the epicentre (scaled to the magnitude).
     ///
-    /// 確率のモデルと「なぜ海溝型だけ被害が少ないのか」の全文は
-    /// <see cref="DistantDamage"/> のクラス doc にある。ここは<b>それを建物に配る係</b>で、
-    /// 走査の骨格は <see cref="LongPeriodDamage"/> をそのまま写している。
+    /// The probability model, and the full explanation of why only the trench quake does
+    /// so little damage, are in <see cref="DistantDamage"/>'s class doc. This file is
+    /// <b>the part that distributes it to buildings</b>, and the skeleton of the sweep is
+    /// copied straight from <see cref="LongPeriodDamage"/>.
     ///
-    /// ── ★★ なぜ海溝型<b>だけ</b>か ─────────────────────────────
+    /// ── ★★ Why <b>only</b> the trench quake ────────────────────────────
     ///
-    /// 断層型の震央は<b>プレイヤーが指した場所</b>なので、バニラの円盤は街の上に
-    /// 落ちる。困っていないものを変えない —— 全ての地震に足すと、
-    /// <b>依頼されていない断層型の難度まで黙って上がる</b>。
+    /// A fault quake's epicentre is <b>wherever the player pointed</b>, so vanilla's disc
+    /// lands on the city. Do not change what is not broken — add this to every earthquake
+    /// and <b>the difficulty of fault quakes, which nobody asked about, quietly goes up
+    /// too</b>.
     ///
-    /// 見分けは <c>TrenchQuakeSlot.IsTrenchQuake</c>（災害 ID と乱数種の組）だけを
-    /// 使う。**震源が海の上かどうかでは判定しない** —— プレイヤーがバニラの
-    /// 災害パネルから海に置いた地震は断層型のつもりで置いたものである
-    /// （<c>TrenchQuakeSlot</c> のクラス doc が確立した規律）。
+    /// The only thing used to tell them apart is <c>TrenchQuakeSlot.IsTrenchQuake</c>
+    /// (the pair of disaster ID and random seed). **Never decide it from whether the
+    /// hypocentre is over water** — an earthquake the player placed out at sea from
+    /// vanilla's disaster panel was placed as a fault quake and meant as one (the
+    /// discipline established in <c>TrenchQuakeSlot</c>'s class doc).
     ///
-    /// ── 倒壊と火災の順序 ─────────────────────────────────────
+    /// ── The order of collapse and fire ──────────────────────────────────
     ///
-    /// 先に倒壊を引き、外れた建物だけが出火を引く。逆にはできない ——
-    /// <c>CommonBuildingAI.BurnBuilding</c> は <c>Collapsed</c> を見て断る（IL_0019）ので、
-    /// 倒れた建物は燃えない。**2 つの抽選は別の鍵で引く**
-    /// （<see cref="DistantDamage.FireSalt"/>）。同じ鍵だと
-    /// 「倒壊しなかった建物ほど燃えにくい」という相関が付いてしまう。
+    /// The collapse is drawn first, and only the buildings that miss draw for fire. It
+    /// cannot be the other way round — <c>CommonBuildingAI.BurnBuilding</c> checks
+    /// <c>Collapsed</c> and refuses (IL_0019), so a collapsed building does not burn.
+    /// **The two draws use different keys** (<see cref="DistantDamage.FireSalt"/>). With
+    /// the same key you get a correlation where a building that did not collapse is less
+    /// likely to burn.
     ///
-    /// ── 抽選は (地震, 建物) だけで決まる ──────────────────────────
+    /// ── The draw depends on (quake, building) and nothing else ──────────
     ///
-    /// ★★ **フレームも走査回数も混ぜない**（<see cref="LongPeriodDamage"/> と同じ規律）。
-    ///   混ぜると同じ建物が走査のたびに抽選し直され、<b>地震が長引くほど際限なく
-    ///   壊れる</b>。混ぜなければ、被害の総量は<b>走査が何回走っても変わらない</b>ので、
-    ///   <see cref="DistantDamage"/> の doc の目安表がそのまま実機の期待値になる。
+    /// ★★ **Never mix in the frame or the sweep count** (the same discipline as
+    ///   <see cref="LongPeriodDamage"/>). Mix them in and the same building is re-drawn
+    ///   on every sweep, so <b>the longer the quake runs the more it destroys, without
+    ///   limit</b>. Leave them out and the total damage <b>holds no matter how many
+    ///   sweeps run</b>, so the rough figures in <see cref="DistantDamage"/>'s doc are the
+    ///   expected values in the real game.
     ///
-    /// ── 足すだけ。抑えない ───────────────────────────────────
+    /// ── Additive only. Nothing is suppressed ────────────────────────────
     ///
-    /// バニラの破壊にはパッチも介入もしない。<c>DisasterHelpers</c> も経由しない
-    /// （<see cref="LongPeriodDamage"/> と同じ理由で、NDR のパッチ面を迂回する）。
+    /// Vanilla's destruction is neither patched nor interfered with. Nor do we go through
+    /// <c>DisasterHelpers</c> (for the same reason as <see cref="LongPeriodDamage"/>: to
+    /// route around NDR's patch surface).
     ///
-    /// ★★ <b><c>Building.m_fireIntensity</c> は絶対に直接書かない。</b>
-    ///   書くと誰も消さない永久の幽霊火災になり、**バニラの建物配列に入るので
-    ///   セーブに焼き付き、MOD を外しても残る**。本プロジェクトは一度これを
-    ///   出荷している。火勢の面倒はバニラ側（<c>BurnBuilding</c>）が見る。
+    /// ★★ <b>Never write <c>Building.m_fireIntensity</c> directly.</b>
+    ///   Do so and you get a permanent ghost fire that nobody puts out, and because
+    ///   **it lives in vanilla's building array it is baked into the save and survives
+    ///   removing the mod**. This project shipped exactly that once. Let vanilla
+    ///   (<c>BurnBuilding</c>) look after the fire intensity.
     ///
-    /// ── 1 tick あたりの仕事量の上限 ──────────────────────────────
+    /// ── The ceiling on work per tick ────────────────────────────────────
     ///
-    /// 到達距離は最大 21,300 m ＝ 建物グリッド（270×270、1 セル 64 m）の全域に
-    /// なりうるので、上限に達したら打ち切り、次の走査は続きから再開する。
-    /// **順序は震央から外側へ**（<see cref="OutwardCellOrder"/>）—— 行優先だと
-    /// 最初に見るのが矩形の角＝いちばん確率の低い場所になる。
+    /// The reach can be up to 21,300 m, i.e. the whole building grid (270×270 cells of
+    /// 64 m), so we cut off at the cap and the next sweep resumes where we stopped.
+    /// **The order runs outwards from the epicentre** (<see cref="OutwardCellOrder"/>) —
+    /// in row-major order the first thing you look at is the corner of the rectangle,
+    /// which is where the probability is lowest.
     /// </summary>
     public static class TrenchQuakeDistantDamage
     {
         /// <summary>
-        /// 走査の間隔（フレーム相当のゲーム内時間）。
+        /// The interval between sweeps (in game time equivalent to frames).
         ///
-        /// ★ <see cref="LongPeriodDamage"/> の 256 より短くしてある。あちらは
-        ///   地震のあいだ<b>繰り返し</b>効くが、こちらは<b>1 周で終わる</b>
-        ///   （<see cref="_circuitDone"/>）ので、<b>その 1 周が本震のあいだに
-        ///   終わらないと、遠方が一度も抽選されない</b>。
-        ///   1 周は上限に当たって 4〜5 回に分かれるので、64 なら
-        ///   ゲーム内 6 分ほどで配り終える。
+        /// ★ Shorter than <see cref="LongPeriodDamage"/>'s 256. That one applies
+        ///   <b>repeatedly</b> throughout the quake, whereas this one <b>finishes after a
+        ///   single circuit</b> (<see cref="_circuitDone"/>), so <b>if that circuit does
+        ///   not complete during the main shock, distant buildings never get drawn for at
+        ///   all</b>. A circuit hits the cap and splits into 4 or 5 passes, so at 64 the
+        ///   distribution is finished in about 6 game minutes.
         /// </summary>
         private const int IntervalFrames = 64;
 
         /// <summary>
-        /// 1 回の走査で見るグリッドセルの上限。グリッド全体は 270x270 ＝ 72,900。
+        /// The maximum number of grid cells looked at in one sweep. The whole grid is
+        /// 270x270 = 72,900.
         /// </summary>
         private const int MaxCellsPerPass = 65536;
 
         /// <summary>
-        /// 1 回の走査で調べる建物の上限。
+        /// The maximum number of buildings examined in one sweep.
         ///
-        /// ★ <see cref="LongPeriodDamage"/> の 2,048 より大きい。**1 周を本震の
-        ///   あいだに終わらせる必要がある**（<see cref="IntervalFrames"/>）ためで、
-        ///   1 棟あたりの費用は距離とハッシュ 1 回だけ（抽選に当たった棟だけが
-        ///   仮想呼び出しへ進む）なので、8,192 でも安い。
+        /// ★ Larger than <see cref="LongPeriodDamage"/>'s 2,048. **The circuit has to
+        ///   finish during the main shock** (<see cref="IntervalFrames"/>), and the cost
+        ///   per building is only a distance and one hash (only the buildings that win
+        ///   the draw go on to a virtual call), so 8,192 is still cheap.
         ///
-        ///   参考: バニラ自身の全体円盤は最大 7,172 m のグリッド走査を
-        ///   <b>1 シミュレーションステップごとに、上限なしで</b>行う（§A-3）。
+        ///   For reference: vanilla's own whole-quake disc sweeps a grid of up to 7,172 m
+        ///   <b>on every simulation step, with no cap at all</b> (§A-3).
         /// </summary>
         private const int MaxBuildingsPerPass = 8192;
 
-        /// <summary>建物グリッドの 1 辺のセル数（1 セル 64 m）。</summary>
+        /// <summary>The building grid's side length in cells (each cell is 64 m).</summary>
         private const int GridSide = 270;
 
         /// <summary>
-        /// 1 セルの連結リストを辿る回数の上限（壊れた保存データ対策）。
-        /// バニラの <c>DisasterHelpers.DestroyBuildings</c> の内側ループと同じ
-        /// 49152 ＝ 建物バッファの大きさ。
+        /// The maximum number of hops along one cell's linked list (insurance against a
+        /// corrupt save). The same 49152 as the inner loop of vanilla's
+        /// <c>DisasterHelpers.DestroyBuildings</c>, i.e. the size of the building buffer.
         /// </summary>
         private const int GridChainGuard = 49152;
 
         /// <summary>
-        /// 候補にするフラグ条件。<see cref="LongPeriodDamage"/> と同じ。
-        /// <c>Collapsed</c> を弾かないと、倒した跡地の瓦礫が毎回 refused に積まれて
-        /// 診断の数字が読めなくなる。
+        /// The flag condition for being a candidate. The same as
+        /// <see cref="LongPeriodDamage"/>. Without excluding <c>Collapsed</c>, the rubble
+        /// left where something already fell piles into `refused` every pass and the
+        /// diagnostic numbers become unreadable.
         /// </summary>
         private const Building.Flags CandidateMask =
             Building.Flags.Created | Building.Flags.Deleted
@@ -115,36 +127,42 @@ namespace DisasterPlus.Game
         private static ushort _quakeId;
 
         /// <summary>
-        /// 追っている地震の <c>StartFrame</c>。**災害 ID だけでは足りない。**
+        /// The <c>StartFrame</c> of the earthquake being tracked. **The disaster ID alone
+        /// is not enough.**
         ///
-        /// ★★ <c>DisasterManager.CreateDisaster</c> は空いた枠を<b>先頭一致で
-        ///   使い回す</b>（<c>TrenchQuakeSlot</c> のクラス doc が IL で確定させた）。
-        ///   海溝型が終わって次の海溝型が<b>同じ番号を取る</b>ことは普通に起きる。
-        ///   ID だけで見ていると <see cref="_circuitDone"/> が立ったままになり、
-        ///   <b>2 回目の海溝型地震が黙って無傷になる</b>。
-        ///   開始フレームまで見れば別人だと分かる。
+        /// ★★ <c>DisasterManager.CreateDisaster</c> <b>reuses a free slot, taking the
+        ///   first match</b> (pinned down in the IL by <c>TrenchQuakeSlot</c>'s class
+        ///   doc). One trench quake ending and the next one <b>taking the same number</b>
+        ///   happens routinely. Watch the ID alone and <see cref="_circuitDone"/> stays
+        ///   raised, so <b>the second trench earthquake quietly does no damage at all</b>.
+        ///   Look at the start frame too and it is clearly a different one.
         /// </summary>
         private static uint _quakeStartFrame;
         private static int _cursorOrdinal;
         private static bool _errorLogged;
 
         /// <summary>
-        /// この地震ぶんの配布が 1 周し終えたか。**終わったら二度と走らない。**
+        /// Whether this earthquake's distribution has completed one circuit. **Once it
+        /// has, it never runs again.**
         ///
-        /// ★★ これが無いと 2 つの壊れ方をする。（2026-09-02、実装中に気付いた）
+        /// ★★ Without this there are two ways it breaks. (2026-09-02, noticed while
+        ///   implementing it.)
         ///
-        ///   1. <b>消し止めた火事が何度でも再着火する。</b>抽選は (地震, 建物) で
-        ///      決まるので、一度「出火」と出た建物は<b>毎周また出火</b>する。
-        ///      消防が消した先から再び燃え、地震が終わるまで終わらない。
-        ///   2. バニラが断った建物（公園・瓦礫・水没中）を毎周試し続け、
-        ///      診断の refused が地震の長さに比例して膨らむ。
+        ///   1. <b>A fire that was put out reignites again and again.</b> The draw is
+        ///      decided by (quake, building), so a building that once came up "on fire"
+        ///      <b>catches fire again on every circuit</b>. It burns again the instant
+        ///      the fire service puts it out, and it does not stop until the quake ends.
+        ///   2. We keep trying buildings vanilla refuses (parks, rubble, anything under
+        ///      water) on every circuit, and the diagnostic's `refused` swells in
+        ///      proportion to the quake's length.
         ///
-        ///   被害は<b>揺れが外へ伝わるのに合わせて一度だけ</b>配る。
-        ///   それが <see cref="DistantDamage"/> の doc の目安表の前提でもある。
+        ///   The damage is distributed <b>once, as the shaking travels outwards</b>. That
+        ///   is also the premise behind the rough figures in
+        ///   <see cref="DistantDamage"/>'s doc.
         /// </summary>
         private static bool _circuitDone;
 
-        // ── 診断カウンタ（全て sim スレッドからのみ読み書きする）──────────────
+        // ── Diagnostic counters (all read and written from the sim thread only) ─────
         private static int _passes;
         private static int _lastScanned;
         private static int _lastCollapsed;
@@ -154,34 +172,35 @@ namespace DisasterPlus.Game
         private static int _totalCollapsed;
         private static int _totalIgnited;
 
-        /// <summary>これまでに走った走査の回数（セッション累計）。</summary>
+        /// <summary>How many sweeps have run so far (session total).</summary>
         public static int Passes { get { return _passes; } }
 
-        /// <summary>直近 1 回で調べた建物数（候補マスクを通り、到達範囲内にあったもの）。</summary>
+        /// <summary>Buildings examined in the last sweep (those that passed the candidate mask and were within reach).</summary>
         public static int LastScanned { get { return _lastScanned; } }
 
-        /// <summary>直近 1 回で実際に倒壊した棟数。</summary>
+        /// <summary>Buildings that actually collapsed in the last sweep.</summary>
         public static int LastCollapsed { get { return _lastCollapsed; } }
 
-        /// <summary>直近 1 回で実際に着火した棟数。</summary>
+        /// <summary>Buildings actually set alight in the last sweep.</summary>
         public static int LastIgnited { get { return _lastIgnited; } }
 
         /// <summary>
-        /// 直近 1 回で選ばれたのにバニラが断った棟数。瓦礫・公園・水没中など。
-        /// **「機能が死んでいる」と「対象が居ない」を見分ける唯一の数字。**
+        /// Buildings selected in the last sweep that vanilla then refused: rubble, parks,
+        /// anything under water. **The only number that distinguishes "the feature is
+        /// dead" from "there is nothing to act on".**
         /// </summary>
         public static int LastRefused { get { return _lastRefused; } }
 
-        /// <summary>直近 1 回が上限で打ち切られたか。</summary>
+        /// <summary>Whether the last sweep was cut off at the cap.</summary>
         public static bool LastCapped { get { return _lastCapped; } }
 
-        /// <summary>セッション累計の倒壊棟数。</summary>
+        /// <summary>Session total of buildings collapsed.</summary>
         public static int TotalCollapsed { get { return _totalCollapsed; } }
 
-        /// <summary>セッション累計の着火棟数。</summary>
+        /// <summary>Session total of buildings set alight.</summary>
         public static int TotalIgnited { get { return _totalIgnited; } }
 
-        /// <summary>レベルアンロード時。**セッション状態を 1 つも持ち越さない。**</summary>
+        /// <summary>On level unload. **Carry over no session state whatsoever.**</summary>
         public static void Reset()
         {
             _minutesSincePass = 0f;
@@ -202,8 +221,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>EarthquakeFeature.OnSimulationTick</c> の
-        /// ポーズガードより下から呼ぶこと**（ポーズ中に建物が倒れる）。
+        /// Sim thread. **Always call it below the pause guard in
+        /// <c>EarthquakeFeature.OnSimulationTick</c>** (otherwise buildings collapse while
+        /// the game is paused).
         /// </summary>
         public static void Apply(EarthquakeSnapshot snapshot, float deltaMinutes)
         {
@@ -230,7 +250,8 @@ namespace DisasterPlus.Game
 
         private static void Step(EarthquakeSnapshot snapshot, float deltaMinutes)
         {
-            // ★ 間隔の累積は**対象の地震より先に**進める（LongPeriodDamage の I3）。
+            // ★ Advance the interval accumulator **before** looking for the target
+            //   earthquake (LongPeriodDamage's I3).
             float framesPerMinute = FeatureHost.FramesPerMinute;
             float interval = framesPerMinute > 0f ? IntervalFrames / framesPerMinute : 0f;
 
@@ -246,23 +267,25 @@ namespace DisasterPlus.Game
 
             if (quake.DisasterId != _quakeId || quake.StartFrame != _quakeStartFrame)
             {
-                // ★ 地震が変わった tick は走らせない（SeismographRecorder.Rescan が
-                //    同じ tick で全スロット走査を行うので、そこへ重ねない）。
-                //    **累積は巻き戻さない。**
+                // ★ Do not sweep on the tick where the earthquake changed
+                //    (SeismographRecorder.Rescan walks every slot on that same tick, so
+                //    do not pile on top of it).
+                //    **Do not wind the accumulator back.**
                 Forget();
                 _quakeId = quake.DisasterId;
                 _quakeStartFrame = quake.StartFrame;
                 return;
             }
 
-            // ★★ この地震ぶんは配り終えている（_circuitDone の doc）。
-            //    累積だけ進めて、走査には入らない。
+            // ★★ This earthquake's distribution is already complete (see _circuitDone's
+            //    doc). Let the accumulator advance but never enter the sweep.
             if (_circuitDone) return;
 
             if (framesPerMinute <= 0f) return;
             if (_minutesSincePass < interval) return;
 
-            // 余りを繰り越さない（LongPeriodDamage / FireWhirlDamage と同じ）。
+            // Do not carry the remainder over (the same as LongPeriodDamage /
+            // FireWhirlDamage).
             _minutesSincePass = 0f;
 
             int strength = ModSettings.EarthquakeTrenchDamageStrength.value;
@@ -272,34 +295,36 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// いま被害を配るべき海溝型地震。無ければ null。
+        /// The trench earthquake that should be distributing damage right now, or null.
         ///
-        /// ★★ <c>QuakeSelection.SelectDamaging</c> は使わない。あれは「いちばん強い
-        ///   地震 1 個」を選ぶので、<b>断層型が同時に走っているとそちらが選ばれ、
-        ///   海溝型の遠地被害が黙って止まる</b>。ここが探しているのは
-        ///   「強い地震」ではなく「海溝型の地震」である。
+        /// ★★ <c>QuakeSelection.SelectDamaging</c> is not used. That picks "the single
+        ///   strongest earthquake", so <b>with a fault quake running at the same time it
+        ///   picks that one and the trench quake's distant damage quietly stops</b>. What
+        ///   this is looking for is not "the strong earthquake" but "the trench
+        ///   earthquake".
         ///
-        /// ★ <c>Active</c> だけを対象にする。バニラの破壊も <c>SimulationStep</c> の
-        ///   Active 分岐にしか無い（§A-3）ので、本震前に建物を潰すと
-        ///   <b>揺れる前に倒れる</b>ことになる。
+        /// ★ Only <c>Active</c> qualifies. Vanilla's destruction likewise exists only in
+        ///   <c>SimulationStep</c>'s Active branch (§A-3), so flattening buildings before
+        ///   the main shock would mean <b>they fall before the ground shakes</b>.
         ///
-        /// ★★ <b><c>Located</c> は見ない。絶対に足さないこと。</b>
-        ///   （2026-09-02、Codex レビューが実装中の版から掘り出した。書いた本人は
-        ///     「壊れた読み取りを弾く保険」のつもりで置いていた。）
+        /// ★★ <b>Do not look at <c>Located</c>. Never add it.</b>
+        ///   (2026-09-02; a Codex review dug it out of a work-in-progress version. The
+        ///    author had put it there thinking it was insurance against a broken read.)
         ///
-        ///   <c>Located</c>（<c>DisasterPhases.Located</c> = 4096）が立つのは
-        ///   <b>震央に地震計の観測範囲があるとき</b>だけである（§A-2 / §C-2）。
-        ///   あれは<b>ハザードマップに塗ってよいか</b>の旗であって被害の条件ではない ——
-        ///   バニラの <c>DestroyBuildings</c> も <c>QuakeSelection.SelectDamaging</c> も
-        ///   1 度も見ていない。
+        ///   <c>Located</c> (<c>DisasterPhases.Located</c> = 4096) is only set <b>when
+        ///   the epicentre falls inside a seismograph's coverage</b> (§A-2 / §C-2). It is
+        ///   a flag for <b>whether the hazard map may be painted</b>, not a condition on
+        ///   damage — neither vanilla's <c>DestroyBuildings</c> nor
+        ///   <c>QuakeSelection.SelectDamaging</c> looks at it even once.
         ///
-        ///   そして<b>海溝型の震央は数 km 沖の海の上</b>である。**そこに地震計を
-        ///   建てる人はいない。** つまりこの旗を条件にすると、
-        ///   <b>この機能はほとんどの都市で 1 度も走らない</b> ——
-        ///   例外も警告も出ないまま、依頼された被害がまるごと消える。
+        ///   And <b>a trench quake's epicentre is several kilometres out to sea</b>.
+        ///   **Nobody builds a seismograph there.** So making this flag a condition means
+        ///   <b>the feature never runs at all in most cities</b> — and the damage that was
+        ///   asked for vanishes entirely, with no exception and no warning.
         ///
-        ///   震央の座標は <c>m_targetPosition</c> から来ており（<c>EarthquakeReader</c>）、
-        ///   地震計の有無とは無関係に入っている。**見なくても何も困らない。**
+        ///   The epicentre's position comes from <c>m_targetPosition</c>
+        ///   (<c>EarthquakeReader</c>) and is populated regardless of whether there is a
+        ///   seismograph. **Nothing goes wrong by not looking at the flag.**
         /// </summary>
         private static EarthquakeReading FindTrenchQuake(EarthquakeSnapshot snapshot)
         {
@@ -319,8 +344,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 監視をやめる。**間隔の累積は触らない**（あれは地震ではなく時間の状態）。
-        /// カウンタは診断のために残す。
+        /// Stop tracking. **The interval accumulator is left alone** (it is state about
+        /// time, not about the earthquake). The counters are kept for diagnostics.
         /// </summary>
         private static void Forget()
         {
@@ -332,8 +357,8 @@ namespace DisasterPlus.Game
 
         private static void Sweep(EarthquakeReading quake, int strength)
         {
-            // ★ Singleton<T>.instance は sInstance が null のとき main スレッド専用の
-            //    経路を走らせるので、exists で先に確認する。
+            // ★ When sInstance is null, Singleton<T>.instance takes a main-thread-only
+            //    path, so check `exists` first.
             if (!Singleton<BuildingManager>.exists) return;
 
             var bm = Singleton<BuildingManager>.instance;
@@ -348,8 +373,8 @@ namespace DisasterPlus.Game
 
             var epicentre = quake.Epicentre.ToVec2();
 
-            // 建物グリッドは 1 セル 64m、270x270（バニラの DestroyBuildings と同じ
-            // セル 64・オフセット 135・[0,269]）。
+            // The building grid is 270x270 cells of 64 m (the same cell size of 64,
+            // offset of 135 and [0,269] clamp as vanilla's DestroyBuildings).
             int minX = Clamp((int)((epicentre.X - reach) / 64f + 135f));
             int maxX = Clamp((int)((epicentre.X + reach) / 64f + 135f));
             int minZ = Clamp((int)((epicentre.Z - reach) / 64f + 135f));
@@ -358,8 +383,9 @@ namespace DisasterPlus.Game
             int cellCount = (maxX - minX + 1) * (maxZ - minZ + 1);
             if (cellCount <= 0) return;
 
-            // ★ 海溝型の震央は<b>マップの外にもなる</b>（沖の海）。同じクランプを
-            //   掛けるので、リングの中心は必ずグリッドの中に落ちる。
+            // ★ A trench quake's epicentre <b>can be outside the map</b> (out at sea).
+            //   The same clamp is applied, so the ring's centre always lands inside the
+            //   grid.
             int centreX = Clamp((int)(epicentre.X / 64f + 135f));
             int centreZ = Clamp((int)(epicentre.Z / 64f + 135f));
             int ordinalCount = OutwardCellOrder.OrdinalCount(
@@ -390,7 +416,8 @@ namespace DisasterPlus.Game
                 int x = centreX + dx;
                 int z = centreZ + dz;
 
-                // ★ 矩形の外は**数えずに飛ばす**（数えると上限が目減りする）。
+                // ★ Cells outside the rectangle are **skipped without being counted**
+                //   (counting them would eat into the cap).
                 if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
 
                 cells++;
@@ -403,8 +430,9 @@ namespace DisasterPlus.Game
 
                 while (id != 0 && id < buildings.Length)
                 {
-                    // ★ 次の ID は**行動する前に**控える。倒壊で建物を解放する
-                    //    サードパーティの AI が居ると、このセルの残りが黙って飛ぶ。
+                    // ★ Take the next ID **before** doing anything. With a third-party AI
+                    //    that releases the building on collapse, the rest of this cell
+                    //    would silently be skipped.
                     ushort next = buildings[id].m_nextGridBuilding;
 
                     if ((buildings[id].m_flags & CandidateMask) == Building.Flags.Created)
@@ -425,8 +453,8 @@ namespace DisasterPlus.Game
                 }
             }
 
-            // ★ 1 周し終えたら、この地震ぶんはそこで終わり（_circuitDone の doc）。
-            //   打ち切りなら続きから。
+            // ★ Once a circuit is complete, this earthquake is finished (see
+            //   _circuitDone's doc). If we were cut off, resume where we stopped.
             bool finished = ordinal >= ordinalCount;
             _cursorOrdinal = finished ? 0 : ordinal;
             if (finished) _circuitDone = true;
@@ -439,8 +467,9 @@ namespace DisasterPlus.Game
             _totalCollapsed += collapsed;
             _totalIgnited += ignited;
 
-            // ★ 0 のときも 1 行出す。「機能が死んでいる」と「範囲に建物が無い」が
-            //   ログ上で区別できなくなる（③で実際に起きた形）。
+            // ★ Print a line even when it is 0. Otherwise "the feature is dead" and
+            //   "there are no buildings in range" become indistinguishable in the log
+            //   (the exact shape that bit us in ③).
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Earthquake, "trenchDistant",
                 "pass#" + _passes + " quake#" + quake.DisasterId
                 + " intensity=" + quake.Intensity
@@ -457,10 +486,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 棟ぶんの判定と実行。
+        /// The decision and the action for one building.
         ///
-        /// **倒壊が先、外れたら出火**（クラス doc）。倒れた建物には
-        /// <c>BurnBuilding</c> がどのみち断りを返す。
+        /// **Collapse first; fire only if that misses** (see the class doc). For a
+        /// collapsed building <c>BurnBuilding</c> would refuse anyway.
         /// </summary>
         private static void Hit(Building[] buildings, ushort id,
                                 InstanceManager.Group group, EarthquakeReading quake,
@@ -478,11 +507,12 @@ namespace DisasterPlus.Game
             if (collapseChance > 0f
                 && DeterministicRandom.Unit(quake.DisasterId, id) < collapseChance)
             {
-                // demolish: false（瓦礫を残す）、burnAmount: 0（揺れで潰れるのであって
-                // 焼損ではない）。m_fireIntensity には触れない。
+                // demolish: false (leave the rubble), burnAmount: 0 (it is crushed by the
+                // shaking, not burnt). m_fireIntensity is never touched.
                 //
-                // ★ dry-run が false でも本番は呼ぶ —— PowerPoleAI.CollapseBuilding は
-                //   `if (testOnly) return false;` の直後に本物の倒壊を行う（IL 実測）。
+                // ★ We make the real call even when the dry run returns false —
+                //   PowerPoleAI.CollapseBuilding performs the actual collapse right after
+                //   `if (testOnly) return false;` (measured in the IL).
                 bool accepted = ai.CollapseBuilding(id, ref buildings[id], group,
                                                     true, false, 0);
                 if (!accepted) refused++;
@@ -494,13 +524,15 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 判定より前に燃えている建物には何もしない（FireWhirlDamage と同じ）。
+            // Do nothing to a building that was already burning before the check (the
+            // same as FireWhirlDamage).
             if (buildings[id].m_fireIntensity != 0) return;
 
             float fireChance = DistantDamage.FireChance(distance, quake.Intensity, strength);
             if (fireChance <= 0f) return;
 
-            // ★ 倒壊と**別の鍵**で引く（DistantDamage.FireSalt の doc）。
+            // ★ Draw with **a different key** from the collapse (see
+            //   DistantDamage.FireSalt's doc).
             uint fireKey = quake.DisasterId ^ DistantDamage.FireSalt;
             if (DeterministicRandom.Unit(fireKey, id) >= fireChance) return;
 
@@ -510,9 +542,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 災害グループ。渡すとバニラ側の集計（災害ごとの被害棟数）が正しく積まれる。
-        /// <c>InstanceManager</c> がまだ居なければ null（バニラ自身も null を渡す
-        /// 経路を持つ。集計が積まれないだけで倒壊・着火は走る）。
+        /// The disaster group. Passing it makes vanilla's own tallies (buildings damaged
+        /// per disaster) add up correctly. Null if <c>InstanceManager</c> is not there yet
+        /// (vanilla itself has paths that pass null; only the tally is lost, and the
+        /// collapses and fires still happen).
         /// </summary>
         private static InstanceManager.Group GroupOf(ushort disasterId)
         {

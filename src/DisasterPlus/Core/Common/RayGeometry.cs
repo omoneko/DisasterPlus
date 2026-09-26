@@ -1,21 +1,24 @@
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// カメラレイと地形高さ場の交差。
+    /// Intersection of a camera ray with the terrain height field.
     ///
-    /// CS の地形は Unity Physics に登録されていないので Physics.Raycast では絶対に当たらない。
-    /// 粗くマーチして地面を跨いだ区間を見つけ、その中で二分法に切り替える。
+    /// CS terrain is not registered with Unity Physics, so Physics.Raycast will never hit it.
+    /// March coarsely to find the span where the ray crossed the ground, then switch to
+    /// bisection inside it.
     /// </summary>
     public static class RayGeometry
     {
-        /// <summary>粗マーチの刻み幅（メートル）。詳細マップは約 4m/セルなので 16m で跨ぎを見逃さない。</summary>
+        /// <summary>Coarse march step (metres). The detail map is about 4 m/cell, so 16 m will
+        /// not miss a crossing.</summary>
         private const float MarchStep = 16f;
 
-        /// <summary>二分法の反復回数。16m を 2^20 分割すれば十分に収束する。</summary>
+        /// <summary>Bisection iteration count. Splitting 16 m into 2^20 converges more than
+        /// far enough.</summary>
         private const int BisectionIterations = 20;
 
-        /// <param name="direction">正規化済みの方向ベクトル。</param>
-        /// <returns>地面と交差したら true。hit に交点が入る。</returns>
+        /// <param name="direction">A normalised direction vector.</param>
+        /// <returns>True if it hit the ground. hit receives the intersection point.</returns>
         public static bool IntersectTerrain(
             Vec3 origin,
             Vec3 direction,
@@ -26,14 +29,14 @@ namespace DisasterPlus.Core.Common
             hit = origin;
             if (sampler == null || maxDistance <= 0f) return false;
 
-            // 上を向いているレイは地面に当たらない。
+            // A ray pointing upwards never hits the ground.
             if (direction.Y >= 0f) return false;
 
             float prevT = 0f;
             bool prevBelow = IsBelowGround(origin, direction, 0f, sampler);
             if (prevBelow)
             {
-                // 始点が既に地中。そこを交点として扱う。
+                // The start point is already underground. Treat it as the intersection.
                 hit = PointAt(origin, direction, 0f);
                 return true;
             }
@@ -68,7 +71,7 @@ namespace DisasterPlus.Core.Common
             return p.Y <= sampler.SampleHeight(p.X, p.Z);
         }
 
-        /// <summary>lo は地上、hi は地中と分かっている区間を詰める。</summary>
+        /// <summary>Narrows a span known to have lo above ground and hi below it.</summary>
         private static Vec3 Bisect(Vec3 origin, Vec3 direction, float lo, float hi, IHeightSampler sampler)
         {
             for (int i = 0; i < BisectionIterations; i++)

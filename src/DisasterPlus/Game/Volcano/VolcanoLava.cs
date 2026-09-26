@@ -7,24 +7,24 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 溶岩の流れ 1 本。**不変の値型**で、進めるたびに新しい 1 個を作る
-    /// （この MOD の不変の規律。書き換えない）。
+    /// One lava flow. **An immutable value type**: every advance builds a new one
+    /// (this mod's immutability discipline. Never mutate it).
     /// </summary>
     public struct LavaFlow
     {
-        /// <summary>まだ動いているか。false なら <see cref="StopReason"/> に理由が入る。</summary>
+        /// <summary>Whether it is still moving. If false, <see cref="StopReason"/> holds the reason.</summary>
         public readonly bool Alive;
 
-        /// <summary>今の先端のワールド座標（<c>X</c> / <c>Z</c>）。</summary>
+        /// <summary>World coordinates of the current head (<c>X</c> / <c>Z</c>).</summary>
         public readonly Vec2 Head;
 
-        /// <summary>火口を出てからの距離（m）。広がりの計算に使う。</summary>
+        /// <summary>Distance since leaving the crater (m). Used to compute the spread.</summary>
         public readonly float TravelledMetres;
 
-        /// <summary>これまでに踏んだ歩数。<c>LavaPath.MaxSteps</c> で必ず止まる。</summary>
+        /// <summary>Steps taken so far. It always stops at <c>LavaPath.MaxSteps</c>.</summary>
         public readonly int Steps;
 
-        /// <summary>止まった理由（<see cref="VolcanoLava"/> の <c>Stop*</c> 定数）。</summary>
+        /// <summary>Why it stopped (the <c>Stop*</c> constants on <see cref="VolcanoLava"/>).</summary>
         public readonly int StopReason;
 
         public LavaFlow(bool alive, Vec2 head, float travelledMetres, int steps, int stopReason)
@@ -38,169 +38,173 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// 火口から出た溶岩の前進と着火。**sim スレッド専用。**
+    /// The advance and ignition of lava leaving the crater. **Sim thread only.**
     ///
-    /// ── 勾配の符号は本タスクで IL を読んで確定させた（推測していない）─────────
+    /// ── the sign of the gradient was settled in this task by reading IL (not guessed) ───────
     ///
-    /// 計画 §8.1 は「<c>slopeX</c> / <c>slopeZ</c> が上りか下りかを読んでいない」と
-    /// 名指ししていた。**読んだ。**
+    /// Plan §8.1 named "we have not read whether <c>slopeX</c> / <c>slopeZ</c> points uphill or
+    /// downhill". **It has now been read.**
     ///
     /// <code>
     /// TerrainManager.SampleDetailHeight(float x, float z, out slopeX, out slopeZ)
     ///   h00 = GetDetailHeight(x0, z0)   h10 = GetDetailHeight(x0+1, z0)
     ///   h01 = GetDetailHeight(x0, z0+1) h11 = GetDetailHeight(x0+1, z0+1)
-    ///   IL_0071  *slopeX = (h10 + h11 - h00 - h01) * 0.5      // = 平均 (h(x+1) - h(x))
-    ///   IL_0084  *slopeZ = (h01 + h11 - h00 - h10) * 0.5      // = 平均 (h(z+1) - h(z))
+    ///   IL_0071  *slopeX = (h10 + h11 - h00 - h01) * 0.5      // = mean (h(x+1) - h(x))
+    ///   IL_0084  *slopeZ = (h01 + h11 - h00 - h10) * 0.5      // = mean (h(z+1) - h(z))
     ///
     /// TerrainManager.SampleDetailHeight(Vector3, out slopeX, out slopeZ)
-    ///   IL_0033  戻り値 *= 0.015625       // = 1/64。raw -> メートル
-    ///   IL_003B  *slopeX *= 0.00390625    // = (1/64) / 4 m。**無次元の勾配（m/m）**
+    ///   IL_0033  return value *= 0.015625  // = 1/64. raw -> metres
+    ///   IL_003B  *slopeX *= 0.00390625     // = (1/64) / 4 m. **a dimensionless gradient (m/m)**
     ///   IL_0045  *slopeZ *= 0.00390625
     /// </code>
     ///
-    /// ★★ <b><c>slopeX</c> / <c>slopeZ</c> は「+x / +z へ進むと高さがどれだけ増えるか」
-    /// ＝ 上り方向の勾配である。したがって下り方向は符号を反転した
-    /// <c>(-slopeX, -slopeZ)</c> になる。</b> 単位は無次元（m/m）なので、
-    /// <c>LavaPath.MinSlope = 0.002</c> はそのまま「0.2 % の傾き」を意味する。
+    /// ★★ <b><c>slopeX</c> / <c>slopeZ</c> are "how much the height increases as you move
+    /// towards +x / +z" — that is, the uphill gradient. So the downhill direction is the sign
+    /// flipped: <c>(-slopeX, -slopeZ)</c>.</b> The unit is dimensionless (m/m), so
+    /// <c>LavaPath.MinSlope = 0.002</c> means exactly "a 0.2 % slope".
     ///
-    /// **それでも実行時の観測を止めない**（計画 §8.1）。最初の
-    /// <see cref="ObservationSteps"/> 歩のあいだ先端の標高が上がっていないかを見て、
-    /// 上がったらその流れを止め、<see cref="SlopeSignVerified"/> を false にして
-    /// <c>Log.Warn</c> を**1 回だけ**出す。
-    /// **符号を実行時に反転させて「直そう」としない** —— 直った気になって
-    /// 別の環境で逆に壊れる。止めて名乗るほうが正しい。
+    /// **Even so, do not stop observing it at runtime** (plan §8.1). For the first
+    /// <see cref="ObservationSteps"/> steps we watch whether the head's elevation has gone up,
+    /// and if it has, that flow is stopped, <see cref="SlopeSignVerified"/> goes false and a
+    /// <c>Log.Warn</c> is emitted **exactly once**.
+    /// **Do not try to "fix" it by flipping the sign at runtime** — it would feel fixed here and
+    /// break the other way in another environment. Stopping and saying so is the right thing.
     ///
-    /// ── 1 tick あたりの仕事量（明示的に区切る）────────────────────────
-    ///
-    /// <code>
-    /// 流れの本数            <= MaxFlows = 8            （設定の上限。0 で完全に無効）
-    /// 前進する間隔          IntervalFrames = 8 sim フレームぶんのゲーム内時間
-    /// 1 回の前進の歩数      <= MaxStepsPerTickPerFlow = 2  （1 本あたり）
-    ///  => 1 回の前進で      <= 16 歩
-    /// 1 歩あたり            SampleDetailHeight 1 回（4 読み + 3 Lerp、§B-6）
-    ///                       HasWater 1 回（BeginRead/EndRead の中で 4 セル、§A-4）
-    ///                       BurnGround 1 回（半径 <= 60 m なので 512^2 のうち高々 5x5 セル）
-    ///                       建物グリッド <= MaxBuildingCellsPerStep = 25 セル
-    ///                       樹木グリッド <= MaxTreeCellsPerStep = 49 セル
-    /// 確保                  前進した回だけ Vec2[<= 8*128] と int[<= 8]（軌跡のコピー）
-    /// </code>
-    ///
-    /// **`frameIndex % N` で周期を組まない**（1 ゲーム内分 ≒ 45.51 フレーム。
-    /// 火災旋風 付録 A-4）。間隔は経過ゲーム内時間の積算で判定する。
-    ///
-    /// ── 着火の 3 経路と、DLC 分岐は 1 つだけ（§B-7）────────────────────
+    /// ── the per-tick work (bounded explicitly) ─────────────────────────────────────────────
     ///
     /// <code>
-    /// 地面   DisasterHelpers.BurnGround(Vector2, radius, intensity)   DLC 不要
-    /// 建物   BuildingAI.BurnBuilding(id, ref b, group, testOnly)      DLC 不要
-    /// 樹木   TreeManager.BurnTree(idx, group, intensity)              ★ ND 必須
-    /// 道路   ABSENT。道路は燃えない（BurnSegment に相当する API が無い）
+    /// number of flows        &lt;= MaxFlows = 8            (the setting's ceiling. 0 disables entirely)
+    /// advance interval       IntervalFrames = in-game time worth of 8 sim frames
+    /// steps per advance      &lt;= MaxStepsPerTickPerFlow = 2  (per flow)
+    ///  => per advance        &lt;= 16 steps
+    /// per step               one SampleDetailHeight (4 reads + 3 Lerps, §B-6)
+    ///                        one HasWater (4 cells inside BeginRead/EndRead, §A-4)
+    ///                        one BurnGround (radius &lt;= 60 m, so at most 5x5 of the 512^2 cells)
+    ///                        building grid &lt;= MaxBuildingCellsPerStep = 25 cells
+    ///                        tree grid     &lt;= MaxTreeCellsPerStep = 49 cells
+    /// allocation             on advancing ticks only: Vec2[&lt;= 8*128] and int[&lt;= 8] (copying the trails)
     /// </code>
     ///
-    /// - <c>BurnGround</c> の <c>intensity</c> は **0.0–1.0 の正規化値**（§B-7b の
-    ///   IL_001E で ×255 される）。バニラは隕石が 1.0、陥没・地震・竜巻が 0.7。
-    ///   **⑤は溶岩なので 1.0** を使う。値は単調非減少で、下がることはない
-    /// - <c>BurnTree</c> の <c>intensity</c> は <c>conv.u1</c> で**切り捨てられる
-    ///   （クランプされない）**ので、呼び出し側で <c>[128, 255]</c> に収める
-    ///   （256 は 0 に、300 は 44 になる。§B-7c）
-    /// - ND 非所持なら**木は燃やさない。** <c>TreeManager.ReleaseTree</c> で消す代替は
-    ///   やらない —— 「燃えない」と「消える」は別の嘘であり、燃えないことを
-    ///   説明するほうが正しい（<c>Strings.VolcanoTreesNeedDlc</c>）
-    /// - 一度燃えた木は二度と燃えない（<c>m_flags &amp; 64 FireDamage</c>）。
-    ///   空振りを異常として数えない
+    /// **Do not build the period from `frameIndex % N`** (one in-game minute ≒ 45.51 frames;
+    /// firestorm appendix A-4). The interval is decided by accumulating elapsed in-game time.
     ///
-    /// > ★★ **罠 5。<c>BurnBuilding</c> の後で <c>Building</c> の火勢フィールドを
-    /// > 書き足さない。** 火勢は <c>GetFireParameters</c> が建物ごとに決める（§B-7a）。
-    /// > 強めたくなっても書かない —— 消費するのは <c>CommonBuildingAI</c> の系だけで、
-    /// > それ以外の AI に書くと誰も消さない永久の幽霊火災になり、バニラの建物配列に
-    /// > 入るのでセーブに焼き付き、MOD を外しても残る。**本プロジェクトは一度これを
-    /// > 出荷している。**
+    /// ── the three ignition paths, and only one of them branches on the DLC (§B-7) ──────────
+    ///
+    /// <code>
+    /// ground  DisasterHelpers.BurnGround(Vector2, radius, intensity)   no DLC needed
+    /// building BuildingAI.BurnBuilding(id, ref b, group, testOnly)     no DLC needed
+    /// trees   TreeManager.BurnTree(idx, group, intensity)              ★ ND required
+    /// roads   ABSENT. Roads do not burn (there is no API equivalent to BurnSegment)
+    /// </code>
+    ///
+    /// - <c>BurnGround</c>'s <c>intensity</c> is **a normalised 0.0–1.0 value** (it is multiplied
+    ///   by 255 at IL_001E in §B-7b). In vanilla, meteors use 1.0 and sinkholes, earthquakes and
+    ///   tornadoes use 0.7. **⑤ is lava, so it uses 1.0.** The value is monotonically
+    ///   non-decreasing and never goes down
+    /// - <c>BurnTree</c>'s <c>intensity</c> is **truncated (not clamped)** by <c>conv.u1</c>, so
+    ///   the caller keeps it within <c>[128, 255]</c>
+    ///   (256 becomes 0 and 300 becomes 44. §B-7c)
+    /// - Without ND, **do not burn trees.** Do not substitute removing them with
+    ///   <c>TreeManager.ReleaseTree</c> — "does not burn" and "disappears" are two different
+    ///   lies, and explaining that they do not burn is the right thing
+    ///   (<c>Strings.VolcanoTreesNeedDlc</c>)
+    /// - A tree that has burnt once never burns again (<c>m_flags &amp; 64 FireDamage</c>).
+    ///   Do not count those misses as anomalies
+    ///
+    /// > ★★ **Trap 5. Do not write extra to <c>Building</c>'s fire-intensity field after
+    /// > <c>BurnBuilding</c>.** The fire strength is decided per building by
+    /// > <c>GetFireParameters</c> (§B-7a). However much you want it fiercer, do not write it —
+    /// > only the <c>CommonBuildingAI</c> family consumes it, and writing it on any other AI gives
+    /// > a permanent ghost fire that nobody clears; because it goes into the vanilla building
+    /// > array it is baked into the save and survives removing the mod. **This project has
+    /// > shipped that once already.**
     /// >
-    /// > **レビューの grep（実際に走らせて 0 件を確認してある）**:
+    /// > **Review grep (actually run, with 0 hits confirmed)**:
     /// > <code>
     /// > grep -rn "m_fireIntensity" src/DisasterPlus/Game/Volcano --include=*.cs \
     /// >   | grep -v '///' | grep -v '^[^:]*:[0-9]*: *//'
-    /// > # -> 0 件（doc コメントの中の言及だけを除く。素の grep は doc の
-    /// > #    「書かない」という説明そのものに当たるので 0 件にはならない）
+    /// > # -> 0 hits (excluding the mentions inside doc comments. A plain grep hits the doc's own
+    /// > #    explanation of "do not write it", so it will not come out as 0)
     /// > </code>
     ///
-    /// > **<c>DisasterHelpers.DestroyBuildings</c> / <c>DestroyNetSegments</c> を通らない**
-    /// > （§E-14。通ると Natural Disasters Renewal の Prefix 全置換と衝突する）。
-    /// > ⑤が呼ぶのは <c>BuildingAI.BurnBuilding</c> だけである。
+    /// > **Do not go through <c>DisasterHelpers.DestroyBuildings</c> / <c>DestroyNetSegments</c>**
+    /// > (§E-14; going through them collides with Natural Disasters Renewal's wholesale Prefix
+    /// > replacement). The only thing ⑤ calls is <c>BuildingAI.BurnBuilding</c>.
     ///
-    /// ── 建物と樹木の走査を行優先にした理由（②のレビュー指摘 I1 との関係）────────
+    /// ── why the building and tree sweeps are row-major (and how that relates to ②'s review point I1) ──
     ///
-    /// ②④と T5 は <c>OutwardCellOrder</c> で中心から外へ走査している。あれは
-    /// **上限で打ち切られる大きな矩形**を扱うためで、打ち切られたときに
-    /// 「どこまで確実に終わったか」を半径で言えることが要件だった。
-    /// こちらの矩形は <c>SpreadRadiusFor</c> が最大 <c>SpreadHardMaxMetres</c> ＝ 96 m
-    /// なので、**建物グリッドで高々 4×4、樹木グリッドで高々 7×7 セル**である
-    /// （2026-08-22 に太さを規模で変えたときに 60 m から上げた）。
-    /// 上限（25 / 64）で切り捨てられる余地が構造的に無いので、行優先で足りる。
-    /// **知らずに②の指摘を破ったのではない。**
+    /// ②, ④ and T5 sweep outwards from the centre with <c>OutwardCellOrder</c>. That is for
+    /// **large rectangles that get cut short by a limit**, where the requirement was to be able to
+    /// state, in terms of a radius, "how far it definitely got" when it was cut short.
+    /// Here the rectangle comes from <c>SpreadRadiusFor</c>, at most
+    /// <c>SpreadHardMaxMetres</c> = 96 m, so it is **at most 4×4 cells on the building grid and
+    /// at most 7×7 on the tree grid** (raised from 60 m on 2026-08-22, when the width started
+    /// varying with the scale). There is structurally no room for the limits (25 / 64) to truncate
+    /// anything, so row-major is enough.
+    /// **②'s review point was not broken out of ignorance.**
     ///
-    /// ── 溶岩は地形を変えない ─────────────────────────────────
+    /// ── the lava does not change the terrain ───────────────────────────────────────────────
     ///
-    /// <c>RawHeights</c> を書くのは T6（<c>VolcanoUplift</c>）だけである。
+    /// The only thing that writes <c>RawHeights</c> is T6 (<c>VolcanoUplift</c>).
     ///
-    /// **レビューの grep（実際に走らせて件数を合わせてある。doc の言及を除く）**:
+    /// **Review grep (actually run, with the counts made to match. Excluding the doc mentions)**:
     /// <code>
     /// grep -rn "RawHeights\|TerrainModify" src/DisasterPlus/Game/Volcano/VolcanoLava*.cs \
     ///   | grep -v '///'
-    /// # -> 0 件（溶岩は地形を変えない）
+    /// # -> 0 hits (the lava does not change the terrain)
     ///
     /// grep -rn "Physics.Raycast" src/DisasterPlus/Game/Volcano --include=*.cs | grep -v '///'
-    /// # -> 0 件（地形にコライダーは無く、必ず外れる。§B-6）
+    /// # -> 0 hits (the terrain has no collider, so it always misses. §B-6)
     /// </code>
     /// </summary>
     public static partial class VolcanoLava
     {
-        /// <summary>まだ止まっていない。</summary>
+        /// <summary>Not stopped yet.</summary>
         public const int StopNone = 0;
 
-        /// <summary>勾配が <c>LavaPath.MinSlope</c> 未満（平ら・窪み）＝ 溜まった。</summary>
+        /// <summary>The gradient is below <c>LavaPath.MinSlope</c> (flat or a hollow) = it pooled.</summary>
         public const int StopFlat = 1;
 
-        /// <summary>水に触れた（設計書 §4.5）。</summary>
+        /// <summary>It touched water (design doc §4.5).</summary>
         public const int StopWater = 2;
 
-        /// <summary>歩数の上限に達した。</summary>
+        /// <summary>It hit the step limit.</summary>
         public const int StopSteps = 3;
 
-        /// <summary>マップの外へ出た。</summary>
+        /// <summary>It went off the map.</summary>
         public const int StopOffMap = 4;
 
-        /// <summary>★ 標高が上がった＝勾配の符号がこの環境では違う（§8.1）。</summary>
+        /// <summary>★ The elevation rose = the sign of the gradient is different in this environment (§8.1).</summary>
         public const int StopUphill = 5;
 
-        /// <summary>地形を読めなかった。</summary>
+        /// <summary>The terrain could not be read.</summary>
         public const int StopNoTerrain = 6;
 
-        /// <summary>流れの本数の上限。設定の上限でもある。</summary>
+        /// <summary>Maximum number of flows. It is also the setting's ceiling.</summary>
         public const int MaxFlows = 8;
 
-        /// <summary>1 本の流れが 1 回の前進で踏む歩数の上限。</summary>
+        /// <summary>Maximum steps one flow takes in a single advance.</summary>
         private const int MaxStepsPerTickPerFlow = 2;
 
-        /// <summary>前進の間隔（sim フレーム相当。**時間の積算で判定する**）。</summary>
+        /// <summary>The advance interval (in sim frames. **Decided by accumulating time**).</summary>
         private const int IntervalFrames = 8;
 
-        /// <summary>1 本あたりの軌跡の点数の上限（超えたら間引いて畳む）。</summary>
+        /// <summary>Maximum trail points per flow (fold by decimating once it is exceeded).</summary>
         private const int MaxTrailPoints = 128;
 
-        /// <summary>★ 勾配の符号を実行時に観測する歩数（クラス doc）。</summary>
+        /// <summary>★ How many steps the sign of the gradient is observed for at runtime (class doc).</summary>
         private const int ObservationSteps = 8;
 
-        /// <summary>観測で「上がった」と判定する高さの差（m）。地形の量子 1/64 m の 3 倍強。</summary>
+        /// <summary>The height difference that counts as "it went up" in the observation (m). A little over three times the terrain quantum of 1/64 m.</summary>
         private const float UphillToleranceMetres = 0.05f;
 
-        /// <summary>マップの半分の広さ（m）。17280 / 2 = 8640 の少し内側で止める。</summary>
+        /// <summary>Half the width of the map (m). Stop just inside 17280 / 2 = 8640.</summary>
         private const float MapHalfExtentMetres = 8600f;
 
-        /// <summary><c>BurnGround</c> の強さ。**0.0–1.0 の正規化値**（§B-7b）。</summary>
+        /// <summary>The strength for <c>BurnGround</c>. **A normalised 0.0–1.0 value** (§B-7b).</summary>
         private const float GroundBurnIntensity = 1f;
 
-        /// <summary>全部止まってから溶岩が冷えるまでのゲーム内時間（分）。</summary>
+        /// <summary>In-game time (minutes) from everything stopping to the lava having cooled.</summary>
         private const float CoolMinutes = 15f;
 
         private static bool _started;
@@ -227,25 +231,26 @@ namespace DisasterPlus.Game
         private static bool _outsidePurchasedArea;
 
         /// <summary>
-        /// 地形がまだ隆起で上がっている量（m / 隆起 1 tick）。
-        /// **下り勾配の符号の観測に足す許容差**であって、勾配そのものには影響しない。
-        /// 隆起が終わっていれば 0 なので、観測はこれまでどおり厳しいままである。
+        /// How much the terrain is still rising from the uplift (m per uplift tick).
+        /// **It is a tolerance added to the observation of the downhill gradient's sign**, and it
+        /// does not affect the gradient itself.
+        /// It is 0 once the uplift has finished, so the observation stays as strict as ever.
         /// </summary>
         private static float _terrainRiseMetres;
 
         /// <summary>
-        /// 1 本が歩いてよい歩数。**規模で決まる**
-        /// （<c>LavaVolume.StepBudget</c>。必ず <c>LavaPath.MaxSteps</c> 以下）。
-        /// <see cref="Reset"/> で <c>LavaPath.MaxSteps</c> に戻す ——
-        /// 0 に戻すと、何かの拍子で <c>Start</c> を通らずに進んだとき
-        /// **流れが 1 歩も進まない**。
+        /// How many steps one flow may take. **Decided by the scale**
+        /// (<c>LavaVolume.StepBudget</c>; always at most <c>LavaPath.MaxSteps</c>).
+        /// <see cref="Reset"/> puts it back to <c>LavaPath.MaxSteps</c> — put it back to 0 and if
+        /// anything ever advanced without going through <c>Start</c>,
+        /// **the flow would not move a single step**.
         /// </summary>
         private static int _stepBudget = LavaPath.MaxSteps;
 
         /// <summary>
-        /// 流れの太さの倍率。**規模で決まる**（<c>LavaVolume.WidthFactor</c>）。
-        /// <see cref="Reset"/> で 1 に戻す —— 0 に戻すと、<c>Start</c> を通らずに
-        /// 進んだ拍子に**幅 0 の溶岩**になる。
+        /// The width factor of a flow. **Decided by the scale** (<c>LavaVolume.WidthFactor</c>).
+        /// <see cref="Reset"/> puts it back to 1 — put it back to 0 and if anything ever advanced
+        /// without going through <c>Start</c>, you would get **lava of zero width**.
         /// </summary>
         private static float _widthFactor = 1f;
 
@@ -254,68 +259,70 @@ namespace DisasterPlus.Game
         private static string _lastFailure;
         private static bool _errorLogged;
 
-        /// <summary>軌跡の点（全流路を連結した**不変配列**）。main はこれを読む。</summary>
+        /// <summary>The trail points (**an immutable array** concatenating all the flows). Main reads this.</summary>
         private static Vec2[] _trailPoints = new Vec2[0];
 
-        /// <summary>各流路の点数（**不変配列**）。<see cref="_trailPoints"/> と対で使う。</summary>
+        /// <summary>The point count of each flow (**an immutable array**). Used in step with <see cref="_trailPoints"/>.</summary>
         private static int[] _trailPointCounts = new int[0];
 
-        /// <summary>火口から出した流れの本数（設定の値。0 なら完全に無効）。</summary>
+        /// <summary>Number of flows emitted from the crater (the setting's value; 0 disables it entirely).</summary>
         public static int FlowCount { get { return _flowCount; } }
 
-        /// <summary>まだ動いている流れの本数。</summary>
+        /// <summary>Number of flows still moving.</summary>
         public static int AliveCount { get { return _aliveCount; } }
 
-        /// <summary>いちばん長く流れた距離（m）。</summary>
+        /// <summary>The longest distance any flow travelled (m).</summary>
         public static float LongestMetres { get { return _longestMetres; } }
 
-        /// <summary>これまでに火を付けた建物の数。</summary>
+        /// <summary>Number of buildings set alight so far.</summary>
         public static int BuildingsIgnited { get { return _buildingsIgnited; } }
 
         /// <summary>
-        /// バニラが着火を断った**呼び出しの回数**。**0 でないのは異常ではない** ——
-        /// <c>CommonBuildingAI.BurnBuilding</c> は水没中の建物と瓦礫を断る（§B-7a）。
+        /// The number of **calls** vanilla refused to ignite. **A non-zero value is not an
+        /// anomaly** — <c>CommonBuildingAI.BurnBuilding</c> refuses flooded buildings and rubble
+        /// (§B-7a).
         ///
-        /// ★★ <b>これは「断られた建物の数」ではない</b>（全体レビュー M17）。
-        /// 溶岩は 1 歩 12 m しか進まないのに着火半径は最大 60 m なので、
-        /// **同じ建物が 1 本の流れに 5 回前後、8 本で最大 40 回叩かれる。**
-        /// 2 回目以降は既に燃えているので断られる ——
-        /// したがってこの数は<b>ほとんどが「もう燃えている建物への再着火」</b>であり、
-        /// <see cref="BuildingsIgnited"/> より遥かに大きくなるのが正常である。
-        /// **重複を数えないようにするには「どの建物に火を付けたか」を覚える必要があり、
-        /// そのための配列を⑤は持たない**（<c>m_fireIntensity</c> を読みに行くのは
-        /// 罠 5 の grep を壊すのでやらない）。数の意味のほうを正確に名乗る。
+        /// ★★ <b>This is not "the number of buildings refused"</b> (whole-project review M17).
+        /// The lava only advances 12 m per step while the ignition radius is up to 60 m, so
+        /// **the same building is hit about five times by one flow, and up to 40 times across
+        /// eight.** From the second hit on it is already burning and gets refused —
+        /// so this number is <b>mostly "re-ignitions of buildings that are already burning"</b>
+        /// and it is normal for it to be far larger than <see cref="BuildingsIgnited"/>.
+        /// **To avoid counting duplicates we would have to remember which buildings we set alight,
+        /// and ⑤ does not keep an array for that** (going to read <c>m_fireIntensity</c> would
+        /// break trap 5's grep, so we do not). Instead we state the meaning of the number
+        /// accurately.
         /// </summary>
         public static int BuildingsRefused { get { return _buildingsRefused; } }
 
-        /// <summary>これまでに火を付けた木の数。ND 非所持なら常に 0。</summary>
+        /// <summary>Number of trees set alight so far. Always 0 without ND.</summary>
         public static int TreesIgnited { get { return _treesIgnited; } }
 
-        /// <summary>木に火を付けられる環境か（＝ ND DLC を持っているか。§B-7c）。</summary>
+        /// <summary>Whether trees can be set alight in this environment (i.e. whether the ND DLC is owned. §B-7c).</summary>
         public static bool TreesAvailable { get { return _treesAvailable; } }
 
         /// <summary>
-        /// 溶岩が購入していないタイルへ出たか。**不具合ではない** ——
-        /// <c>GetDetailHeight</c> のサンプリングが 4 m から 16 m 補間に落ちる（§B-6）。
+        /// Whether the lava left the tiles you have purchased. **Not a bug** —
+        /// <c>GetDetailHeight</c>'s sampling drops from 4 m to 16 m interpolation there (§B-6).
         /// </summary>
         public static bool OutsidePurchasedArea { get { return _outsidePurchasedArea; } }
 
         /// <summary>
-        /// 勾配の符号がこの環境で確かに「下り」になっていることを、
-        /// **実行時に観測して確かめられたか**（§8.1）。
-        /// 1 本でも観測窓を無事に抜ければ true になる。
+        /// Whether we were able to **confirm by observation at runtime** that the sign of the
+        /// gradient really is "downhill" in this environment (§8.1).
+        /// It goes true as soon as any one flow gets through its observation window unharmed.
         /// </summary>
         public static bool SlopeSignVerified { get { return _slopeSignVerified; } }
 
-        /// <summary>全ての流れが止まったか（＝冷え始めてよいか）。</summary>
+        /// <summary>Whether all the flows have stopped (i.e. whether cooling may begin).</summary>
         public static bool AllStopped { get { return _started && _aliveCount == 0; } }
 
-        /// <summary>冷え切ったか（＝次の位相へ進んでよいか）。</summary>
+        /// <summary>Whether it has cooled out (i.e. whether the next phase may begin).</summary>
         public static bool Finished { get { return _finished; } }
 
         /// <summary>
-        /// 冷え具合 <c>[0,1]</c>。1 が「まだ熱い」、0 が「冷え切った」。
-        /// **T9 の描画がこれで色を落とす**（止まった溶岩が永久に光っていないこと）。
+        /// How cool it is, <c>[0,1]</c>. 1 is "still hot", 0 is "cooled out".
+        /// **T9's rendering fades the colour with this** (so stopped lava does not glow for ever).
         /// </summary>
         public static float CoolUnit
         {
@@ -323,9 +330,10 @@ namespace DisasterPlus.Game
             {
                 if (!AllStopped) return 1f;
 
-                // CoolMinutes は 0 より大きい定数である（0 にすると冷える段が
-                // 消えて、止まった瞬間に溶岩が消える）。定数なので割り算の前に
-                // 0 を検査すると、コンパイラが到達不能コードとして警告する。
+                // CoolMinutes is a constant greater than 0 (set it to 0 and the cooling stage
+                // disappears, so the lava vanishes the instant it stops). Because it is a
+                // constant, testing for 0 before the division makes the compiler warn about
+                // unreachable code.
                 float left = 1f - _cooledMinutes / CoolMinutes;
                 if (left < 0f) return 0f;
                 if (left > 1f) return 1f;
@@ -333,29 +341,30 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>直近の失敗（**英語・診断用**）。無ければ null。</summary>
+        /// <summary>The most recent failure (**English, for diagnostics**). null if there is none.</summary>
         public static string LastFailure { get { return _lastFailure; } }
 
         /// <summary>
-        /// 軌跡の点（全流路を連結した配列）。**publish 後は 1 バイトも書き換えない** ——
-        /// 前進のたびに新しい配列を作って差し替える。だから main スレッドが
-        /// 参照を持ったままでも安全で、コピーの口を別に設ける必要が無い。
+        /// The trail points (one array concatenating all the flows). **Not one byte is rewritten
+        /// after publishing** — every advance builds a new array and swaps it in. That is why it
+        /// is safe for the main thread to hold the reference, and why there is no need for a
+        /// separate copy entry point.
         ///
-        /// > 計画は <c>CopyHeads(Vec2[] into, out int count)</c> という口を挙げていたが、
-        /// > **作っていない。** 計画の意図は「sim が書き込み中の配列を main に
-        /// > 読ませない」ことで、それは「差し替えるだけで書き換えない」ことで既に
-        /// > 満たされている。使われないコピー API を 1 本置くほうが、
-        /// > 「どちらを使うのが正しいか」を次の担当者に考えさせる分だけ悪い。
+        /// > The plan listed an entry point <c>CopyHeads(Vec2[] into, out int count)</c>, but
+        /// > **it was not built.** The plan's intent was "do not let main read an array sim is
+        /// > writing into", and that is already satisfied by "swap it, never rewrite it".
+        /// > Leaving an unused copy API around would be worse, by exactly the amount of thought
+        /// > it would force on the next person about which of the two is the right one to use.
         /// </summary>
         public static Vec2[] TrailPoints { get { return _trailPoints; } }
 
-        /// <summary>各流路の点数（**不変配列**）。合計が <see cref="TrailPoints"/> の長さ。</summary>
+        /// <summary>The point count of each flow (**an immutable array**). The total is the length of <see cref="TrailPoints"/>.</summary>
         public static int[] TrailPointCounts { get { return _trailPointCounts; } }
 
         /// <summary>
-        /// レベルアンロード・新しい火山・中止で呼ぶ。**全状態を捨てる。**
-        /// <c>_errorLogged</c> / <c>_slopeSignWarned</c> は戻さない（ゲームのビルドに
-        /// 対する事実であって都市ごとの状態ではない）。
+        /// Call on level unload, on a new volcano, and on cancellation. **Discards all state.**
+        /// <c>_errorLogged</c> / <c>_slopeSignWarned</c> are not reset (they are facts about the
+        /// build of the game, not per-city state).
         /// </summary>
         public static void Reset()
         {
@@ -374,8 +383,8 @@ namespace DisasterPlus.Game
                 _lastHeight[i] = 0f;
             }
 
-            // ★ 軌跡の実体も返す（8 本 × 128 点で 8 KB）。都市をまたいで持ち越すと、
-            //   次の都市で前の都市の溶岩が描かれる。
+            // ★ Give back the trails themselves too (8 flows × 128 points = 8 KB). Carry them
+            //   across cities and the previous city's lava gets drawn in the next one.
             _trails = null;
 
             _flowCount = 0;
@@ -397,21 +406,22 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **sim スレッド。** <see cref="VolcanoState"/> の位相分岐からのみ呼ぶこと。
-        /// 例外が出ても位相を固めない（固めるとプレイヤーは 2 つ目の火山を置けなくなる）。
+        /// **Sim thread.** Call it only from <see cref="VolcanoState"/>'s phase branches.
+        /// Do not wedge the phase if an exception is thrown (wedge it and the player can never
+        /// place a second volcano).
         /// </summary>
         /// <param name="terrainRiseMetresPerFrame">
-        /// 地形が隆起で**1 sim フレーム**に上がる量（m）。
-        /// **隆起の途中に流れを出したときだけ 0 でない。**
-        /// 溶岩が進んだ先で標高が上がるのは、その場合「溶岩が登った」のではなく
-        /// 「山が育った」ためなので、その分を観測の許容差に足す
-        /// （<c>VolcanoUplift.RiseMetresPerFrame</c> をそのまま渡すこと）。
+        /// How much the terrain rises from the uplift in **one sim frame** (m).
+        /// **Non-zero only when a flow was emitted partway through the uplift.**
+        /// When the elevation rises ahead of the lava in that case it is not "the lava climbed"
+        /// but "the mountain grew", so that amount is added to the observation's tolerance
+        /// (pass <c>VolcanoUplift.RiseMetresPerFrame</c> straight through).
         ///
-        /// ★ **「1 tick あたり」を渡さないこと。** ⑤の各段は間隔が違う
-        ///   （隆起 4 フレーム、溶岩 <see cref="IntervalFrames"/> ＝ 8 フレーム）ので、
-        ///   隆起の 1 tick ぶんでは溶岩の 1 歩のあいだの上昇を下回り、
-        ///   **「溶岩が登った」の誤検出**で流れが止まる。
-        ///   ここで溶岩自身の間隔を掛け直す。
+        /// ★ **Do not pass a "per tick" value.** ⑤'s stages have different intervals
+        ///   (uplift 4 frames, lava <see cref="IntervalFrames"/> = 8 frames), so one uplift tick's
+        ///   worth falls short of the rise over one lava step and the flow stops on a
+        ///   **false detection of "the lava climbed"**.
+        ///   The lava's own interval is multiplied back in here.
         /// </param>
         public static void Tick(VolcanoFootprint footprint, uint frame, float deltaMinutes,
                                 float terrainRiseMetresPerFrame)
@@ -450,9 +460,9 @@ namespace DisasterPlus.Game
                 Start(footprint);
             }
 
-            // ★ Start は Reset を通るので、**許容差は Start より後で入れる**
-            //   （前に入れると開始した tick だけ 0 に戻る）。
-            // ★ 溶岩の 1 歩は IntervalFrames フレームぶんなので、そのあいだの上昇量に直す。
+            // ★ Start goes through Reset, so **set the tolerance after Start**
+            //   (set it before and it goes back to 0 on the tick it started).
+            // ★ One lava step is IntervalFrames frames long, so convert to the rise over that.
             _terrainRiseMetres = float.IsNaN(terrainRiseMetresPerFrame)
                                  || terrainRiseMetresPerFrame < 0f
                 ? 0f : terrainRiseMetresPerFrame * IntervalFrames;
@@ -461,13 +471,14 @@ namespace DisasterPlus.Game
 
             if (_aliveCount == 0)
             {
-                // 全部止まった。冷えるまでの時間を数えるだけ。
+                // All stopped. All that is left is counting the time until it has cooled.
                 if (deltaMinutes > 0f) _cooledMinutes += deltaMinutes;
                 if (_cooledMinutes >= CoolMinutes) _finished = true;
                 return;
             }
 
-            // ★ 間隔は経過ゲーム内時間の積算で判定する。**frameIndex % N にしない。**
+            // ★ The interval is decided by accumulating elapsed in-game time.
+            //   **Never frameIndex % N.**
             float framesPerMinute = FeatureHost.FramesPerMinute;
             float interval = framesPerMinute > 0f ? IntervalFrames / framesPerMinute : 0f;
 
@@ -482,8 +493,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 火口の縁から <see cref="MaxFlows"/> 以下の本数の流れを出す。
-        /// **本数 0 は「完全に無効」**で、着火も描画も何も起きない。
+        /// Emit at most <see cref="MaxFlows"/> flows from the crater rim.
+        /// **A count of 0 means "disabled entirely"**: no ignition, no rendering, nothing.
         /// </summary>
         private static void Start(VolcanoFootprint footprint)
         {
@@ -492,27 +503,30 @@ namespace DisasterPlus.Game
             _centre = footprint.Centre;
             _treesAvailable = ReadTreesAvailable();
 
-            // ★★ **噴火の規模で本数を変える**（2026-08-22、所有者の依頼
-            //    「噴火の規模によって流れ出るマグマの量も変えてください」）。
+            // ★★ **The number of flows varies with the scale of the eruption** (2026-08-22, the
+            //    owner's request "make the amount of magma flowing out vary with the scale of the
+            //    eruption too").
             //
-            //    規模に使うのは**山の半径**である（<c>LavaVolume</c> のクラス doc）。
-            //    噴出の強さ（<c>EruptionIntensityUnit</c>）ではない —— あれは噴火中に
-            //    ゆらぐので、それで本数を決めると**既に流れているものを消す**ことになる。
-            //    半径は置いた瞬間に決まって二度と動かない。
+            //    What is used for the scale is **the mountain's radius** (the class doc of
+            //    <c>LavaVolume</c>). Not the eruption strength (<c>EruptionIntensityUnit</c>) —
+            //    that fluctuates during the eruption, and deciding the count from it would mean
+            //    **deleting flows that are already running**.
+            //    The radius is decided the moment it is placed and never moves again.
             int flows = LavaVolume.FlowCount(ModSettings.VolcanoLavaFlows.value, MaxFlows,
                                              footprint.RadiusMetres);
 
-            // ★ 長さの上限も規模で変える。**配列の長さを決めている
-            //   <c>LavaPath.MaxSteps</c> を超えない**（<c>LavaVolume.StepBudget</c> が担保）。
+            // ★ The length limit varies with the scale too. **It never exceeds
+            //   <c>LavaPath.MaxSteps</c>, which decides the array length**
+            //   (<c>LavaVolume.StepBudget</c> guarantees that).
             _stepBudget = LavaVolume.StepBudget(LavaPath.MaxSteps, footprint.RadiusMetres);
 
-            // ★ 太さも規模で決まる。**描く側は同じ純関数を自分で呼ぶ**ので、
-            //   ここで持つのは着火（sim 側）のためだけである。
+            // ★ The width is decided by the scale too. **The drawing side calls the same pure
+            //   function itself**, so what is held here is only for the ignition (the sim side).
             _widthFactor = LavaVolume.WidthFactor(footprint.RadiusMetres);
 
             if (flows == 0)
             {
-                // 設定で切っている。**冷える時間も待たずに終わる。**
+                // Turned off in the settings. **It finishes without even waiting to cool.**
                 _flowCount = 0;
                 _aliveCount = 0;
                 _finished = true;
@@ -521,9 +535,10 @@ namespace DisasterPlus.Game
 
             _trails = new Vec2[MaxFlows][];
 
-            // ★★ 火口の**縁の外側**から出す。縁の真上は稜線なので、そこで勾配を読むと
-            //    下り方向が火口の内側を指すことがあり、溶岩が窪みへ落ちて溜まる
-            //    （LavaPath.VentRimClearanceFactor の doc）。
+            // ★★ Emit from **outside the crater rim**. Directly on the rim is a ridge line, and
+            //    reading the gradient there can make the downhill direction point into the
+            //    crater, so the lava falls into the hollow and pools
+            //    (the doc of LavaPath.VentRimClearanceFactor).
             float ventRadius = LavaPath.VentRadiusMetres(
                 VolcanoShape.CraterRadiusOf(footprint.RadiusMetres));
 
@@ -553,7 +568,7 @@ namespace DisasterPlus.Game
             RebuildTrailSnapshot();
         }
 
-        /// <summary>1 回ぶんの前進。**歩数は本数 × <see cref="MaxStepsPerTickPerFlow"/> で頭打ち。**</summary>
+        /// <summary>One advance. **The step count is capped at flows × <see cref="MaxStepsPerTickPerFlow"/>.**</summary>
         private static void Advance()
         {
             int alive = 0;
@@ -578,10 +593,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 歩。止まる条件は 6 つあり、どれも <c>StopReason</c> に記録して診断へ出す。
+        /// One step. There are six stopping conditions, all recorded in <c>StopReason</c> and
+        /// reported in the diagnostics.
         ///
-        /// ★ <b>下り方向は <c>(-slopeX, -slopeZ)</c> である</b>（クラス doc の IL 実測）。
-        ///   <c>LavaPath</c> は符号を知らないので、ここで直してから渡す。
+        /// ★ <b>The downhill direction is <c>(-slopeX, -slopeZ)</c></b> (the IL measurements in
+        ///   the class doc). <c>LavaPath</c> does not know the sign, so it is corrected here
+        ///   before being passed on.
         /// </summary>
         private static LavaFlow StepFlow(int index, LavaFlow f)
         {
@@ -591,10 +608,10 @@ namespace DisasterPlus.Game
                 return Stop(f, StopNoTerrain);
             }
 
-            // ★★ 実行時の観測（§8.1）。**符号を反転させて「直そう」としない。**
-            //    最初の ObservationSteps 歩のあいだに標高が上がったら、その流れを
-            //    止めて名乗る。IL では符号を確定させてあるので、ここが発火するのは
-            //    ゲームの更新で挙動が変わったときである。
+            // ★★ The runtime observation (§8.1). **Do not try to "fix" it by flipping the sign.**
+            //    If the elevation rises within the first ObservationSteps steps, that flow is
+            //    stopped and we say so. The sign is settled in IL, so this firing means a game
+            //    update has changed the behaviour.
             if (f.Steps > 0 && f.Steps <= ObservationSteps
                 && height > _lastHeight[index] + UphillToleranceMetres + _terrainRiseMetres)
             {
@@ -609,14 +626,15 @@ namespace DisasterPlus.Game
             if (!LavaPath.NextPosition(f.Head, new Vec2(-slopeX, -slopeZ),
                                        LavaPath.StepMetres, out next))
             {
-                // 平ら・窪み・NaN。**素通りさせずに溜まる**（LavaPath のクラス doc）。
+                // Flat, a hollow, or NaN. **It pools rather than passing through**
+                // (the class doc of LavaPath).
                 return Stop(f, StopFlat);
             }
 
             if (OffMap(next)) return Stop(f, StopOffMap);
 
-            // ★ 水は sim スレッド専用（HasWater は WaterSimulation.BeginRead/EndRead を
-            //   取る。§A-4 / ②の TsunamiChain.IsUnderWater と同じ扱い）。
+            // ★ Water is sim-thread only (HasWater takes WaterSimulation.BeginRead/EndRead.
+            //   §A-4 / handled the same way as ②'s TsunamiChain.IsUnderWater).
             if (HasWater(next)) return Stop(f, StopWater);
 
             int steps = f.Steps + 1;
@@ -637,8 +655,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 勾配の符号がこの環境では違う。**<c>Log.Warn</c> は 1 回だけ**
-        /// （ここは毎 tick の経路の内側である）。
+        /// The sign of the gradient is different in this environment. **<c>Log.Warn</c> exactly
+        /// once** (this is inside the per-tick path).
         /// </summary>
         private static void NoteUphill()
         {
@@ -655,12 +673,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 軌跡へ 1 点。**最後のスロットは常に「生きた先端」**で、
-        /// <see cref="_trailStride"/> 歩ごとにそれを確定させて次のスロットを開ける。
+        /// One point onto the trail. **The last slot is always "the live head"**, and every
+        /// <see cref="_trailStride"/> steps it is committed and the next slot opened.
         ///
-        /// 上限（<see cref="MaxTrailPoints"/>）に達したら 1 つおきに間引いて畳み、
-        /// 間隔を倍にする。**配列は伸ばさない** —— <c>MaxSteps = 512</c> なので
-        /// 畳むのは高々 2 回で、形は保たれる。
+        /// On hitting the limit (<see cref="MaxTrailPoints"/>) it folds by keeping every other
+        /// point and doubles the stride. **The array is never grown** — with
+        /// <c>MaxSteps = 512</c> it folds at most twice, and the shape is preserved.
         /// </summary>
         private static void AppendTrail(int index, Vec2 head)
         {
@@ -696,8 +714,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// main が読む不変配列を作り直す。**前進した回にだけ走る**（クラス doc の費用表）。
-        /// 既に publish した配列は 1 バイトも書き換えず、丸ごと差し替える。
+        /// Rebuild the immutable arrays main reads. **Runs only on advancing ticks** (the cost
+        /// table in the class doc). Arrays already published are not rewritten by a single byte;
+        /// they are swapped out whole.
         /// </summary>
         private static void RebuildTrailSnapshot()
         {

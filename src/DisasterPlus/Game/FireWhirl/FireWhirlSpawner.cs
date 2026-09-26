@@ -5,10 +5,11 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// バニラの竜巻災害を生成する。渦のメッシュ・音・破壊・災害通知・避難行動が
-    /// そのまま手に入る。自前で作り直すのは割に合わない。
+    /// Creates one of vanilla's tornado disasters. That gets us the vortex mesh, the
+    /// sound, the destruction, the disaster notification and the evacuation behaviour for
+    /// free; rebuilding all of it ourselves would not be worth it.
     ///
-    /// sim スレッドからのみ呼ぶこと。CreateDisaster は災害バッファを触る。
+    /// Call only from the sim thread. CreateDisaster touches the disaster buffer.
     /// </summary>
     public static class FireWhirlSpawner
     {
@@ -16,15 +17,16 @@ namespace DisasterPlus.Game
         private static bool _searched;
 
         /// <summary>
-        /// 直近の走査が失敗してから何回呼ばれたか。密集火災が続く間、
-        /// TrySpawnNew は毎 tick この関数を呼ぶので、失敗を毎回リトライすると
-        /// 全 prefab 走査が毎 tick 走り、ログも埋まる。この回数ぶんは
-        /// 「失敗キャッシュ」を効かせて呼び出しを間引く。
+        /// How many calls have come in since the last failed scan. While a dense fire
+        /// continues, TrySpawnNew calls this function every tick, so retrying on every
+        /// failure would run a full prefab sweep every tick and bury the log. For this
+        /// many calls we let a "failure cache" throttle the calls instead.
         /// </summary>
         private static int _missCallCount;
 
-        /// <summary>失敗キャッシュを効かせる呼び出し回数。0 にはしない（=毎回リトライになる）。
-        /// 大きすぎると DLC 有効化直後など prefab が後から揃うケースの再検出が遅れる。</summary>
+        /// <summary>For how many calls the failure cache holds. Never 0 (that would mean
+        /// retrying every time). Too large and re-detection is slow in cases where the
+        /// prefabs only arrive later, such as just after a DLC is enabled.</summary>
         private const int MissRetryCalls = 64;
 
         public static void Reset()
@@ -35,18 +37,21 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 竜巻の DisasterInfo を探す。
-        /// 名前ではなく AI の型で判定する。ローカライズや MOD の改名に影響されない。
-        /// TornadoAI は WeatherDisasterAI 派生であって MeteorAI(VehicleAI) の仲間ではない。
+        /// Finds the tornado's DisasterInfo.
+        /// It matches on the AI's type, not on a name, so it is unaffected by
+        /// localisation or by another mod renaming things. TornadoAI derives from
+        /// WeatherDisasterAI; it is not a relative of MeteorAI (VehicleAI).
         /// </summary>
         public static DisasterInfo FindTornadoInfo()
         {
-            // Unity のフェイク null に対応するため、参照だけでなく実体を毎回確認する。
+            // Check the object itself and not just the reference every time, to cope with
+            // Unity's fake null.
             if (_searched && _tornadoInfo != null) return _tornadoInfo;
 
-            // 直前の走査が失敗している場合は、レベルロード直後で prefab がまだ
-            // 揃っていないだけの可能性がある。「二度と探さない」にはせず、
-            // かといって毎 tick 全 prefab を舐めもしない。呼び出し回数で間引く。
+            // If the previous scan failed, it may simply be that we are right after a
+            // level load and the prefabs are not all there yet. So do not settle on
+            // "never look again", but do not sweep every prefab every tick either.
+            // Throttle by the number of calls.
             if (_searched)
             {
                 _missCallCount++;
@@ -59,7 +64,8 @@ namespace DisasterPlus.Game
 
             if (_tornadoInfo == null)
             {
-                // Warn はスロットルされないので密集火災が続く間ログを埋め尽くす。Diag に落として間引く。
+                // Warn is not throttled, so it would bury the log for as long as a dense
+                // fire lasts. Drop to Diag, which throttles.
                 Log.Diag("noTornadoPrefab",
                     "no TornadoAI DisasterInfo found; Natural Disasters DLC required for fire whirls");
             }
@@ -67,9 +73,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// prefab を走査するだけの純粋関数。キャッシュもミス回数も一切触らない。
-        /// このクラスの他のメンバーと違い、どのスレッドから呼んでもこのクラスの
-        /// 状態を壊さない（読むのは PrefabCollection だけ）。
+        /// A pure function that only sweeps the prefabs. It touches neither the cache nor
+        /// the miss count. Unlike the other members of this class, it cannot corrupt this
+        /// class's state from any thread (all it reads is PrefabCollection).
         /// </summary>
         private static DisasterInfo ScanForTornadoInfo()
         {
@@ -78,7 +84,7 @@ namespace DisasterPlus.Game
             {
                 DisasterInfo info;
                 try { info = PrefabCollection<DisasterInfo>.GetLoaded(i); }
-                catch { continue; }   // 境界チェックをしない API なので 1 件ずつ守る
+                catch { continue; }   // the API does no bounds check, so guard each one
 
                 if (info == null) continue;
                 if (info.m_disasterAI is TornadoAI) return info;
@@ -87,16 +93,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 前提検証用。副作用なしに prefab の解決可否だけを返す。
+        /// For the assumption checks. Reports only whether the prefab resolves, with no
+        /// side effects.
         ///
-        /// FindTornadoInfo() へ委譲してはいけない。あちらは _searched / _tornadoInfo /
-        /// _missCallCount を書き換える「sim スレッドからのみ呼ぶこと」の関数で、
-        /// Assumptions.Run() は _levelReady が立った後の main スレッドから呼ぶ
-        /// ＝ sim スレッドが TrySpawnNew → FindTornadoInfo を回している最中に重なる。
-        /// 破壊的ではないが、ミスキャッシュが巻き戻ったり、見つけた prefab が
-        /// 捨てられたりする。そもそも「調べるだけの関数が調べる対象を書き換える」のが
-        /// この場所では間違った形なので、純粋な走査に置き換える。
-        /// 走査コストはレベルロード 1 回ぶんなので気にしなくてよい。
+        /// Do not delegate to FindTornadoInfo(). That one writes _searched, _tornadoInfo
+        /// and _missCallCount and is a "sim thread only" function, whereas
+        /// Assumptions.Run() is called from the main thread once _levelReady is set — i.e.
+        /// it overlaps with the sim thread going round TrySpawnNew → FindTornadoInfo. It
+        /// is not destructive, but the miss cache can be rewound or a prefab we had found
+        /// can be thrown away. In any case "a function that only inspects rewrites what it
+        /// is inspecting" is the wrong shape here, so we replace it with a pure sweep.
+        /// The cost of the sweep is that of one level load, which is not worth worrying
+        /// about.
         /// </summary>
         public static bool HasTornadoPrefab()
         {
@@ -104,49 +112,55 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 火災旋風を 1 つ起こす。
+        /// Raises one fire whirl.
         ///
-        /// ── ★★ もうバニラの竜巻災害は作らない（2026-08-29、所有者の指示）──────
+        /// ── ★★ We no longer create a vanilla tornado disaster (2026-08-29, the
+        ///    owner's instruction) ────────────────────────────────────────────
         ///
-        /// &gt; 火災旋風が発生した後、別の火災旋風が発生した際に竜巻も発生する
-        /// &gt; バグを確認しました。火災旋風と竜巻は別物で考えて、
-        /// &gt; 完全に原因を除去してください。
+        /// &gt; I have confirmed a bug where, after a fire whirl has occurred, a tornado
+        /// &gt; also occurs when another fire whirl occurs. Please treat the fire whirl and
+        /// &gt; the tornado as separate things and remove the cause completely.
         ///
-        /// **原因は「竜巻災害を借りていたこと」そのものだった。** 実機ログ:
+        /// **The cause was borrowing the tornado disaster in the first place.** From the
+        /// in-game log:
         ///
         /// <code>
-        ///   fire whirl 2 is not active yet; deferring teardown   （何度も）
-        ///   fire whirl 2 attached to vortex vehicle 7917         （ようやく付く）
+        ///   fire whirl 2 is not active yet; deferring teardown   (over and over)
+        ///   fire whirl 2 attached to vortex vehicle 7917         (finally attached)
         ///   fire whirl 2 ending; both target slots moved ...
         ///   fire whirl 2 has been ending for 32.4 in-game minutes;
         ///       vanilla teardown never completed
         /// </code>
         ///
-        /// 渦車両を作るのは <c>TornadoAI.ActivateDisaster</c> で、それが走るのは
-        /// 災害が Emerging を抜けたときである。つまり
+        /// What creates the vortex vehicle is <c>TornadoAI.ActivateDisaster</c>, and that
+        /// runs when the disaster comes out of Emerging. In other words:
         ///
         /// <list type="number">
-        /// <item><b>生成から紐づけまでのあいだ、渦は誰にも固定されていない</b>
-        ///   ——その間それは<b>ただのバニラ竜巻</b>で、街を勝手に横切る</item>
-        /// <item>紐づく前に旋風の寿命が尽きると、<c>DeactivateNow</c> は
-        ///   Active でない災害に何もしないので、上のログのように延々と待つ</item>
-        /// <item>そのまま「解体が完了しない」竜巻が残る</item>
+        /// <item><b>Between creation and attachment the vortex is pinned by nobody</b> —
+        ///   for that whole time it is <b>just a vanilla tornado</b>, crossing the city
+        ///   as it pleases</item>
+        /// <item>If the whirl's lifetime runs out before it is attached,
+        ///   <c>DeactivateNow</c> does nothing to a disaster that is not Active, so we
+        ///   wait for ever, as in the log above</item>
+        /// <item>And that leaves a tornado whose teardown never completes</item>
         /// </list>
         ///
-        /// 固定の精度を上げても<b>1 番は消えない</b>（渦が生まれる瞬間はこちらの
-        /// 手の届かないところにある）。**借りるのをやめるのが唯一の根治である。**
+        /// Improving the accuracy of the pinning <b>does not remove point 1</b> (the
+        /// moment the vortex is born is out of our reach). **Giving up the borrowing is
+        /// the only real cure.**
         ///
-        /// いまの火災旋風は<b>完全に自前</b>である:
+        /// The fire whirl is now <b>entirely our own</b>:
         ///
         /// <list type="bullet">
-        /// <item>見た目 … <c>FireWhirlFlameFx</c>（自前の炎の渦）</item>
-        /// <item>被害 … <c>FireWhirlDamage</c>（自前の延焼）</item>
-        /// <item>竜巻 … <b>作らない。1 台も生まない。</b></item>
+        /// <item>appearance … <c>FireWhirlFlameFx</c> (our own whirl of flame)</item>
+        /// <item>damage … <c>FireWhirlDamage</c> (our own fire spread)</item>
+        /// <item>tornado … <b>none. Not a single one is created.</b></item>
         /// </list>
         ///
-        /// ★ 返す ID は<b>合成した番号</b>である（<see cref="SyntheticIdBase"/>）。
-        ///   災害バッファは 256 までなので、この帯とは絶対にぶつからない ——
-        ///   <c>FireWhirlPinner</c> がそれを見て「これは災害ではない」と判断する。
+        /// ★ The ID returned is <b>a synthesised number</b> (see
+        ///   <see cref="SyntheticIdBase"/>). The disaster buffer only goes up to 256, so
+        ///   it can never collide with this band — <c>FireWhirlPinner</c> looks at that to
+        ///   decide "this is not a disaster".
         /// </summary>
         public static bool TrySpawn(Vec3 center, byte intensity, out ushort disasterId)
         {
@@ -157,8 +171,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 合成 ID の下限。**災害バッファは 256 までなので絶対にぶつからない。**
-        /// <c>FireWhirlPinner.IsSynthetic</c> がこの境で見分ける。
+        /// The floor of the synthetic IDs. **The disaster buffer only goes up to 256, so
+        /// there can never be a collision.** <c>FireWhirlPinner.IsSynthetic</c> tells them
+        /// apart at this boundary.
         /// </summary>
         internal const ushort SyntheticIdBase = 40000;
 
@@ -171,10 +186,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **退役。** かつて竜巻災害を作っていた本体（上の doc）。
-        /// 呼び出し元はもう 1 つも無い。**消さずに残してあるのは、
-        /// ここに書いてある IL 実測（SelfTrigger / Significant / Emerging）が
-        /// 再び要る日に、あの調査からやり直すことになるからである。**
+        /// **Retired.** The body that used to create the tornado disaster (see the doc
+        /// above). There is not a single caller left. **It is kept rather than deleted
+        /// because on the day the IL findings written here (SelfTrigger / Significant /
+        /// Emerging) are needed again, we would otherwise have to redo that whole
+        /// investigation.**
         /// </summary>
         private static bool RetiredCreateTornadoDisaster(Vec3 center, byte intensity,
                                                          out ushort disasterId)
@@ -196,48 +212,53 @@ namespace DisasterPlus.Game
             buffer[id].m_intensity = intensity;
             buffer[id].m_angle = 0f;
 
-            // ★ SelfTrigger(64) を立てる。**これを落としていたのが第 2 層レビュー I4。**
+            // ★ Set SelfTrigger(64). **Dropping this was finding I4 of the second-layer
+            //   review.**
             //
-            //   TornadoAI.StartDisaster は基底を呼んだあと m_flags & 64 で分岐し、
-            //   立っていなければ 4 つとも行わない（IL 実測）:
+            //   TornadoAI.StartDisaster calls the base and then branches on m_flags & 64;
+            //   if it is not set, none of the four things below happen (from the IL):
             //
-            //     IL_0003  call DisasterAI::StartDisaster    ← 基底。Significant(256) を落とす
-            //     IL_000E  m_flags & 64 が 0 なら IL_0061(ret) へ
+            //     IL_0003  call DisasterAI::StartDisaster    ← the base. Clears Significant(256)
+            //     IL_000E  if m_flags & 64 is 0, go to IL_0061 (ret)
             //     IL_0016  m_targetPosition.y = TerrainManager.SampleDetailHeight(...)
             //     IL_0031  m_activationFrame = m_startFrame + m_emergingDuration
             //     IL_0044  m_flags |= 256 (Significant)
             //     IL_0056  DisasterManager.m_randomDisasterCooldown = 0
             //
-            //   このうち**効いていなかったのは Significant(256)** である。
-            //   このビットを読むのは CommonBuildingAI.HandleCommonConsumption（と
-            //   DLC の同名オーバーライド群）・CommonBuildingAI.NearObjectInFire・
-            //   FirewatchTowerAI.NearObjectInFire・DisasterManager.FollowDisaster の
-            //   4 系統（アセンブリ全走査で確認）。立っていないと近くの建物が
-            //   DetectDisaster を呼ばず、火災旋風は**発見されない** ——
-            //   ハザードマップにも通知にも出ず、カメラも追えない。
-            //   m_randomDisasterCooldown = 0 も行われず、MOD が起こした災害が
-            //   バニラのランダム災害を先送りしない。
+            //   Of these, **the one that was not taking effect was Significant(256)**.
+            //   Four things read that bit (confirmed by sweeping the whole assembly):
+            //   CommonBuildingAI.HandleCommonConsumption (and the DLCs' overrides of the
+            //   same name), CommonBuildingAI.NearObjectInFire,
+            //   FirewatchTowerAI.NearObjectInFire and DisasterManager.FollowDisaster.
+            //   Without it, nearby buildings never call DetectDisaster and the fire whirl
+            //   is **never discovered** — it appears neither on the hazard map nor in the
+            //   notifications, and the camera cannot follow it. m_randomDisasterCooldown
+            //   = 0 does not happen either, so a disaster this mod raises does not push
+            //   back vanilla's random disasters.
             //
-            //   m_targetPosition.y はこちらで入れているので上書きされても同じ値になる。
+            //   We put m_targetPosition.y in ourselves, so even when it is overwritten the
+            //   value is the same.
             //
-            // **Emerging（出現）の 256 フレームは意図して受け入れる。** 立てなければ
-            // m_activationFrame が 0 のままで、TornadoAI.IsStillEmerging は
-            // EarthquakeAI と違い「m_activationFrame == 0 なら true」の特例を持たず
-            // 素の currentFrame < m_activationFrame（clt.un、IL 実測）なので、
-            // 次のステップで即 Active になる —— つまり「出現を飛ばすために落としていた」
-            // と説明することはできた。だが Significant を失う代償が大きすぎるし、
-            // 差は最大 256 フレーム（速度 1 で約 4 秒）である。**飛ばしたいなら
-            // 明示的に飛ばす**べきで、フラグを落とした副作用として飛ばさない。
+            // **We deliberately accept the 256 frames of Emerging.** Leave the flag unset
+            // and m_activationFrame stays 0, and TornadoAI.IsStillEmerging — unlike
+            // EarthquakeAI's — has no special case for "true when m_activationFrame == 0"
+            // but just does currentFrame < m_activationFrame (clt.un, from the IL), so it
+            // becomes Active on the very next step. In other words it could have been
+            // explained as "dropped in order to skip the emergence". But the price of
+            // losing Significant is far too high, and the difference is at most 256 frames
+            // (about 4 seconds at speed 1). **If you want to skip it, skip it
+            // explicitly** — not as a side effect of dropping a flag.
             buffer[id].m_flags |= DisasterData.Flags.SelfTrigger;
 
-            // DisasterAI.StartDisaster は protected（IL 確認済み）なので直接は呼べない。
-            // 公開ラッパーの StartNow を使う。StartNow は data.m_flags & 0x3C
-            // （Emerging|Active|Clearing|Finished）が立っていなければ StartDisaster を呼ぶだけで、
-            // CreateDisaster 直後は m_flags = Created(0x01) のみなので、ここでは必ず
-            // StartDisaster が呼ばれる（IL 確認済み）。**SelfTrigger(64) は 0x3C に
-            // 含まれないので、先に立てても StartNow の判定は変わらない**（IL_0006 の
-            // ldc.i4.s 60）。起動後は StartDisaster -> ActivateDisaster の順で渦車両が
-            // 作られる。
+            // DisasterAI.StartDisaster is protected (confirmed in the IL), so we cannot
+            // call it directly. Use the public wrapper StartNow. StartNow simply calls
+            // StartDisaster unless data.m_flags & 0x3C
+            // (Emerging|Active|Clearing|Finished) is set, and immediately after
+            // CreateDisaster m_flags is only Created(0x01), so StartDisaster is always
+            // called here (confirmed in the IL). **SelfTrigger(64) is not part of 0x3C,
+            // so setting it first does not change StartNow's decision** (the ldc.i4.s 60
+            // at IL_0006). Once started, the vortex vehicle is created in the order
+            // StartDisaster -> ActivateDisaster.
             info.m_disasterAI.StartNow(id, ref buffer[id]);
 
             disasterId = id;

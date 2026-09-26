@@ -6,66 +6,70 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **火口のマグマだまり・噴煙への光・噴煙の中の雷。main スレッド専用、毎フレーム。**
+    /// **The crater's magma pool, the light on the plume, and the lightning inside the plume.
+    /// Main thread only, every frame.**
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── the request (2026-08-22) ───────────────────────────────────────────────────────────
     ///
-    /// > 噴火口のマグマだまり（溶岩同様光る）と噴煙への光の放射、
-    /// > 噴煙の中で雷（噴石同士が当たって生じるやつ）が発生するのを再現してほしい
+    /// > I'd like you to reproduce the magma pool in the crater (glowing like the lava), the
+    /// > light it casts onto the plume, and the lightning that occurs inside the plume (the kind
+    /// > caused by ejecta colliding with each other)
     ///
-    /// ── ★★ 粒子ではなく自前の <c>DrawMesh</c> である ────────────────────
+    /// ── ★★ this is our own <c>DrawMesh</c>, not particles ─────────────────────────────────
     ///
-    /// この 3 つはどれも<b>バニラの粒子エフェクトでは出せない</b>:
+    /// None of these three <b>can be done with vanilla's particle effects</b>:
     ///
-    ///   - マグマだまり … <c>Fire Particles</c> は炎であって溜まりではない。
-    ///     求められているのは<b>溶岩と同じ光り方</b>で、それは
-    ///     <see cref="VolcanoLavaFx"/> が既に自前のメッシュで出している
-    ///   - 噴煙への光 … 粒子の色はプレハブのものなので、こちらからは触れない
-    ///   - 雷 … バニラの雷（<c>Custom/Effects/Lightning</c>）は
-    ///     <b>雲から地面へ</b>のもので、火山雷は柱の中で完結する
+    ///   - the magma pool … <c>Fire Particles</c> is flame, not a pool. What is asked for is
+    ///     <b>the same glow as the lava</b>, and <see cref="VolcanoLavaFx"/> already does that
+    ///     with its own mesh
+    ///   - the light on the plume … a particle's colour belongs to its prefab, so we cannot touch
+    ///     it from here
+    ///   - the lightning … vanilla's lightning (<c>Custom/Effects/Lightning</c>) goes
+    ///     <b>from cloud to ground</b>, whereas volcanic lightning stays within the column
     ///
-    /// だから <see cref="VolcanoLavaFx"/> と同じ手口を取る ——
-    /// **シェーダだけ <see cref="ShaderPool"/> から借り、<c>Material</c> は自作する。**
-    /// CS の <c>Material</c> インスタンスを借りると自前の <c>DrawMesh</c> では
-    /// 不可視になる（罠 1。あちらのクラス doc）。
+    /// So we use the same technique as <see cref="VolcanoLavaFx"/> —
+    /// **borrow only the shader from <see cref="ShaderPool"/> and build the <c>Material</c>
+    /// ourselves.** Borrow a CS <c>Material</c> instance and it comes out invisible in our own
+    /// <c>DrawMesh</c> (trap 1; that class's doc).
     ///
-    /// ── 1 フレーム 1 回の <c>DrawMesh</c> ───────────────────────────
+    /// ── one <c>DrawMesh</c> per frame ──────────────────────────────────────────────────────
     ///
-    /// 3 つとも 1 枚のメッシュに詰める。頂点は最大で
-    /// <c>だまり 2+<see cref="PoolSegments"/> ＋ 光 <see cref="LightRings"/>×(<see cref="PoolSegments"/>+1)
-    /// ＋ 雷 <see cref="PlumeLightning.MaxBolts"/>×(<see cref="PlumeLightning.PointCount"/>-1)×4</c>
-    /// ＝ 400 弱で、**毎フレーム組み直しても問題にならない**大きさである
-    /// （雷は毎フレーム形が変わるので、組み直さない選択肢が無い）。
+    /// All three are packed into a single mesh. The vertex count is at most
+    /// <c>pool 2+<see cref="PoolSegments"/> + light <see cref="LightRings"/>×(<see cref="PoolSegments"/>+1)
+    /// + lightning <see cref="PlumeLightning.MaxBolts"/>×(<see cref="PlumeLightning.PointCount"/>-1)×4</c>
+    /// = just under 400, which is small enough that **rebuilding it every frame is not a problem**
+    /// (the lightning changes shape every frame, so there is no option not to rebuild).
     ///
-    /// ── ★★ ポーズ中は進めない ─────────────────────────────
+    /// ── ★★ do not advance while paused ───────────────────────────────────────────────────
     ///
-    /// 時計は <see cref="VolcanoVanillaFx.EffectTimeDelta"/> から進める
-    /// （<c>Time.deltaTime</c> ではない）。一時停止で雷が光り続けるのは嘘である。
+    /// The clock is advanced from <see cref="VolcanoVanillaFx.EffectTimeDelta"/>
+    /// (not <c>Time.deltaTime</c>). Lightning that keeps flashing while paused is a lie.
     ///
-    /// ── 静的キャッシュの罠 ─────────────────────────────────
+    /// ── the static cache trap ──────────────────────────────────────────────────────────────
     ///
-    /// <c>Mesh</c> / <c>Material</c> は**参照 1 個ずつ**で持つ。配列に入れると
-    /// 破棄済み（fake-null）を抱えたまま非 null になり、2 つ目の都市で無言で
-    /// 不可視になる（<see cref="VolcanoLavaFx"/> のクラス doc の実例）。
+    /// The <c>Mesh</c> / <c>Material</c> are held as **one reference each**. Put them in an array
+    /// and they stay non-null while holding a destroyed (fake-null) object, and go silently
+    /// invisible in the second city (the worked example is in the class doc of
+    /// <see cref="VolcanoLavaFx"/>).
     /// </summary>
     public static class VolcanoCraterFx
     {
-        /// <summary>だまりの円と光の輪の分割数。</summary>
+        /// <summary>The number of segments in the pool's circle and the light rings.</summary>
         private const int PoolSegments = 24;
 
-        /// <summary>光の輪の枚数（下から上へ、暗くなりながら重ねる）。</summary>
+        /// <summary>The number of light rings (stacked from the bottom up, getting darker).</summary>
         private const int LightRings = 5;
 
-        /// <summary>だまりを火口の底から浮かせる量（m）。z-fighting を避けるだけ。</summary>
+        /// <summary>How far the pool floats above the crater floor (m). Purely to avoid z-fighting.</summary>
         private const float PoolLiftMetres = 1.5f;
 
-        /// <summary>雷の帯の幅（m）。細すぎると遠景で消える。</summary>
+        /// <summary>The width of a lightning band (m). Too thin and it disappears at distance.</summary>
         private const float BoltWidthMetres = 9f;
 
-        /// <summary>描画レイヤー。<see cref="VolcanoLavaFx"/> と同じ。</summary>
+        /// <summary>The drawing layer. The same as <see cref="VolcanoLavaFx"/>.</summary>
         private const int CraterLayer = 0;
 
-        /// <summary>シェーダが引けなかったときに、次に試すまで待つフレーム数。</summary>
+        /// <summary>Frames to wait before trying again when the shader could not be looked up.</summary>
         private const int ShaderRetryFrames = 300;
 
         private static Mesh _mesh;
@@ -85,18 +89,19 @@ namespace DisasterPlus.Game
         private static readonly LightningPoint[] _boltPath =
             new LightningPoint[PlumeLightning.PointCount];
 
-        /// <summary>直近のフレームで描いた雷の本数（診断用）。</summary>
+        /// <summary>The number of bolts drawn in the last frame (for diagnostics).</summary>
         public static int BoltsDrawn { get; private set; }
 
-        /// <summary>マテリアルが作れているか（診断用）。作れなければ何も描かない。</summary>
+        /// <summary>Whether the material could be built (for diagnostics). If not, nothing is drawn.</summary>
         public static bool MaterialResolved { get { return _material != null; } }
 
-        /// <summary>直近のフレームで火口の光を描いたか（診断用）。</summary>
+        /// <summary>Whether the crater glow was drawn in the last frame (for diagnostics).</summary>
         public static bool Drawing { get; private set; }
 
         /// <summary>
-        /// **main スレッド、毎フレーム。** <paramref name="camera"/> が null のフレームは
-        /// 何も描かない（<c>DrawMesh</c> 自体はカメラを要らないが、描く理由も無い）。
+        /// **Main thread, every frame.** On frames where <paramref name="camera"/> is null,
+        /// nothing is drawn (<c>DrawMesh</c> itself does not need a camera, but there is no reason
+        /// to draw either).
         /// </summary>
         public static void Update(VolcanoSnapshot snapshot, RenderManager.CameraInfo camera,
                                   float plumeHeightMetres, EruptionColumn column)
@@ -131,8 +136,8 @@ namespace DisasterPlus.Game
             if (!ModSettings.VolcanoEruptionFx.value) return;
             if (camera == null) return;
 
-            // ★★ **噴火の段だけ。** 隆起の途中から噴煙は出ているが、
-            //    マグマだまりが見えるのは火口が彫れてからである。
+            // ★★ **The eruption stage only.** The plume has been coming out since partway through
+            //    the uplift, but the magma pool is only visible once the crater has been carved.
             if (!snapshot.EruptionActive) return;
 
             float dt = VolcanoVanillaFx.EffectTimeDelta();
@@ -166,12 +171,12 @@ namespace DisasterPlus.Game
         }
 
         // ------------------------------------------------------------------
-        // 形
+        // Shapes
         // ------------------------------------------------------------------
 
         /// <summary>
-        /// マグマだまり。火口の底に置く水平な円盤で、**中心がいちばん明るい**
-        /// （溶岩の <c>LavaGlow</c> と同じ向き）。
+        /// The magma pool. A horizontal disc laid on the crater floor, **brightest at the centre**
+        /// (the same direction as the lava's <c>LavaGlow</c>).
         /// </summary>
         private static void AppendPool(ref int v, ref int t, Vec3 vent, float radius,
                                        float brightness)
@@ -192,7 +197,8 @@ namespace DisasterPlus.Game
 
                 _vertices[v] = new Vector3(vent.X + cx * radius, y, vent.Z + cz * radius);
                 _uvs[v] = new Vector2(0.5f + cx * 0.5f, 0.5f + cz * 0.5f);
-                // ★ 縁は暗い。**縁まで同じ明るさだと、円盤の輪郭が線に見える。**
+                // ★ The rim is dark. **Keep it at the same brightness to the rim and the disc's
+                //   outline reads as a line.**
                 _colors[v] = Tint(brightness * 0.25f);
                 v++;
             }
@@ -206,9 +212,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴煙へ届く光。火口の上へ<b>水平な輪を重ねる</b>だけで、上ほど暗い。
-        /// 明るさは <c>Core/Volcano/CraterGlow.LightAt</c> が決める
-        /// （届く高さでちょうど 0 になる —— 上まで薄く光らせない）。
+        /// The light reaching the plume. Simply <b>stacks horizontal rings</b> above the crater,
+        /// darker towards the top.
+        /// The brightness is decided by <c>Core/Volcano/CraterGlow.LightAt</c>
+        /// (it reaches exactly 0 at the height it carries to — do not leave a faint glow all the
+        /// way up).
         /// </summary>
         private static void AppendLight(ref int v, ref int t, Vec3 vent, float poolRadius,
                                         float plumeHeightMetres, float brightness)
@@ -220,14 +228,14 @@ namespace DisasterPlus.Game
 
             for (int ring = 0; ring < LightRings; ring++)
             {
-                // 下の輪ほど密。光は火口の近くで急に落ちる。
+                // The lower rings are denser. The light falls off sharply near the crater.
                 float s = (ring + 1) / (float)LightRings;
                 float y = reach * s * s;
 
                 float k = CraterGlow.LightAt(y, plumeHeightMetres, brightness);
                 if (!(k > 0.01f)) continue;
 
-                // 上ほど広がる（噴煙が太るのに合わせる）。
+                // Wider towards the top (matching the plume as it thickens).
                 float radius = poolRadius * (1f + 1.6f * s);
 
                 int centre = v;
@@ -259,11 +267,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴煙の中の雷。<c>Core/Volcano/PlumeLightning</c> が枠ごとに 1 本ずつ決めた
-        /// 折れ線を、**カメラのほうを向いた帯**として描く。
+        /// The lightning inside the plume. Draws the polyline that
+        /// <c>Core/Volcano/PlumeLightning</c> decides, one per slot, as **a band facing the
+        /// camera**.
         ///
-        /// ★ 色は<b>白に近い青</b>である。マグマの橙と同じ色にすると、
-        ///   光っているのが溶岩なのか放電なのか見分けが付かない。
+        /// ★ The colour is <b>a near-white blue</b>. Make it the same colour as the magma's orange
+        ///   and you cannot tell whether what is glowing is lava or a discharge.
         /// </summary>
         private static void AppendBolts(ref int v, ref int t, Vec3 vent,
                                         float plumeHeightMetres, float unit,
@@ -279,15 +288,17 @@ namespace DisasterPlus.Game
 
             int slot = PlumeLightning.SlotAt(_clockSeconds);
 
-            // ★★ **帯はカメラのほうを向けること。**
-            //    以前は「その区間が水平に進む向きの直角」へ広げていたが、
-            //    雷はほぼ真上へ走るので水平の進みがほとんど無く、向きが安定しない。
-            //    しかも固定の向きだと、**その向きから見たときに板が真横を向いて消える**。
-            //    カメラの前向きから水平の右方向を作って、そちらへ広げる。
+            // ★★ **Make the band face the camera.**
+            //    It used to widen perpendicular to "the direction that section travels
+            //    horizontally", but lightning runs almost straight up, so there is hardly any
+            //    horizontal travel and the direction is unstable.
+            //    And with a fixed direction, **viewed from that direction the quad turns edge-on
+            //    and disappears**.
+            //    Build a horizontal right vector from the camera's forward and widen towards that.
             Vector3 right = CameraRight(camera);
 
-            // ★ 柱の形は EruptionColumn が持っている。Core にはこの 1 本の
-            //   デリゲートだけを渡す（あちらから型に触らせない）。
+            // ★ The column's shape is held by EruptionColumn. Core is handed only this one
+            //   delegate (it is never allowed to touch the type).
             EruptionColumn shape = column;
             float height = plumeHeightMetres;
             RadiusAtFraction radiusAt = delegate(float fraction)
@@ -312,8 +323,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 折れ線 1 本を帯にする。<paramref name="right"/> は**カメラから見た水平の右**で、
-        /// そちらへ広げるので、どの角度から見ても板が真横を向いて消えることが無い。
+        /// Turn one polyline into a band. <paramref name="right"/> is **horizontal right as seen
+        /// from the camera**, and since we widen towards that, the quad never turns edge-on and
+        /// disappears from any viewing angle.
         /// </summary>
         private static void AppendBolt(ref int v, ref int t, Vec3 vent, int n, float brightness,
                                        Vector3 right)
@@ -367,17 +379,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カメラから見た**水平の右向き**（長さ 1）。
+        /// **Horizontal right** as seen from the camera (unit length).
         ///
-        /// <c>RenderManager.CameraInfo.m_forward</c> の水平成分から作る。
+        /// Built from the horizontal component of <c>RenderManager.CameraInfo.m_forward</c>.
         ///
-        /// ★ <c>CameraInfo</c> には <c>m_right</c> もある（IL で確認済み）。傾いていない
-        ///   カメラでは同じ値になるが、**ロールが入ると <c>m_right</c> は水平でなくなる**。
-        ///   ここが欲しいのは「水平の右」なので、前向きから作り直す。
+        /// ★ <c>CameraInfo</c> also has <c>m_right</c> (confirmed in IL). For an untilted camera
+        ///   it gives the same value, but **<c>m_right</c> stops being horizontal once there is
+        ///   roll**. What is wanted here is "horizontal right", so it is rebuilt from the forward
+        ///   vector.
         ///
-        /// 真下を向いているフレーム（水平成分が 0）では決めようが無いので、
-        /// **適当な向きに倒す** —— 真下から見ているなら、帯がどちらを向いていても
-        /// 面積は同じである。
+        /// On a frame looking straight down (horizontal component 0) there is no way to decide, so
+        /// **fall back to an arbitrary direction** — seen from directly above, the band has the
+        /// same area whichever way it faces.
         /// </summary>
         private static Vector3 CameraRight(RenderManager.CameraInfo camera)
         {
@@ -392,7 +405,7 @@ namespace DisasterPlus.Game
         }
 
         // ------------------------------------------------------------------
-        // Unity 側
+        // The Unity side
         // ------------------------------------------------------------------
 
         private static int MaxVertices
@@ -428,11 +441,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 使った分だけをメッシュへ入れて 1 回描く。
+        /// Put only what was used into the mesh and draw once.
         ///
-        /// ★★ **余った頂点は 0 番目と同じ位置に潰す**（<see cref="VolcanoLavaFx"/> と同じ）。
-        ///   <c>(0,0,0)</c> のまま残すと、三角形が 1 つも指していなくても
-        ///   <c>RecalculateBounds</c> が**マップの原点まで境界を伸ばして視錐台カリングを殺す**。
+        /// ★★ **Collapse the leftover vertices onto vertex 0** (the same as
+        ///   <see cref="VolcanoLavaFx"/>).
+        ///   Leave them at <c>(0,0,0)</c> and, even though no triangle points at them,
+        ///   <c>RecalculateBounds</c> **stretches the bounds all the way to the map origin and
+        ///   kills frustum culling**.
         /// </summary>
         private static void UploadAndDraw(int vertexCount, int triangleCount)
         {
@@ -445,12 +460,13 @@ namespace DisasterPlus.Game
             {
                 _mesh = new Mesh();
                 _mesh.name = "DisasterPlus_VolcanoCrater";
-                // ★ 毎フレーム書き換える。Unity にそう伝えると再確保が減る。
+                // ★ It is rewritten every frame. Telling Unity so reduces reallocation.
                 _mesh.MarkDynamic();
             }
 
-            // ★ 頂点を入れる前に三角形を空にする。順序を逆にすると、前のフレームの
-            //   三角形が新しい（短い）頂点配列を指してその場で例外になる。
+            // ★ Empty the triangles before putting the vertices in. Reverse the order and the
+            //   previous frame's triangles point into the new (shorter) vertex array and throw on
+            //   the spot.
             _mesh.triangles = null;
             _mesh.vertices = _vertices;
             _mesh.uv = _uvs;
@@ -463,8 +479,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// マグマの色。**橙**（<see cref="VolcanoLavaFx"/> のティントと同じ向き）。
-        /// 加算合成なのでアルファは明るさそのものとして効く。
+        /// The magma's colour. **Orange** (the same direction as <see cref="VolcanoLavaFx"/>'s
+        /// tint). The blending is additive, so the alpha acts as the brightness itself.
         /// </summary>
         private static Color32 Tint(float k)
         {
@@ -475,7 +491,7 @@ namespace DisasterPlus.Game
                                (byte)(255f * v));
         }
 
-        /// <summary>放電の色。**白に近い青**（マグマの橙と見分けが付くこと）。</summary>
+        /// <summary>The discharge's colour. **A near-white blue** (so it is distinguishable from the magma's orange).</summary>
         private static Color32 Spark(float k)
         {
             float v = Clamp01(k);
@@ -487,7 +503,7 @@ namespace DisasterPlus.Game
 
         private static Material BuildMaterial()
         {
-            // ★ 毎フレーム探しに行かない（VolcanoLavaFx と同じ間引き）。
+            // ★ Do not go looking every frame (the same throttling as VolcanoLavaFx).
             if (_shaderMissCount > 0)
             {
                 _shaderMissCount--;
@@ -514,11 +530,12 @@ namespace DisasterPlus.Game
             if (_texture == null) _texture = BuildTexture();
             if (_texture != null && m.HasProperty("_MainTex")) m.SetTexture("_MainTex", _texture);
 
-            // ★ 借りてきた別のシェーダには掛けない（_Mode / _SrcBlend は Standard の契約）。
+            // ★ Do not apply it to some other borrowed shader (_Mode / _SrcBlend are Standard's
+            //   contract).
             if (pick.StandardFallback) ShaderPool.MakeStandardTransparent(m);
 
-            // ★ 色は頂点カラーで運ぶので、ティントは白のままにする
-            //   （ここで色を入れると頂点カラーと二重に掛かる）。
+            // ★ The colour is carried by the vertex colours, so leave the tint white
+            //   (put a colour in here and it is applied twice, on top of the vertex colours).
             if (m.HasProperty("_TintColor")) m.SetColor("_TintColor", Color.white);
             if (m.HasProperty("_Color")) m.SetColor("_Color", Color.white);
 
@@ -527,8 +544,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 中心が明るく縁が透明な 1 枚。だまりにも光の輪にも雷にも同じものを使う
-        /// （雷は帯を横切る方向にだけ使うので、縁が透ける形で足りる）。
+        /// One texture, bright in the centre and transparent at the edge. The same one is used for
+        /// the pool, the light rings and the lightning (the lightning only uses it across the
+        /// band, so an edge that fades out is enough).
         /// </summary>
         private static Texture2D BuildTexture()
         {
@@ -567,9 +585,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **レベルアンロードと、設定で切ったときに呼ぶ。** 冪等。
-        /// <c>Mesh</c> / <c>Material</c> / <c>Texture2D</c> はどれも <c>Component</c> では
-        /// ないので、親の <c>GameObject</c> の道連れにならない ——**明示的に破棄する。**
+        /// **Call on level unload and when turned off in the settings.** Idempotent.
+        /// None of <c>Mesh</c> / <c>Material</c> / <c>Texture2D</c> is a <c>Component</c>, so they
+        /// do not go down with the parent <c>GameObject</c> — **destroy them explicitly.**
         /// </summary>
         public static void Destroy()
         {
@@ -590,7 +608,7 @@ namespace DisasterPlus.Game
             _shaderMissCount = 0;
             Drawing = false;
             BoltsDrawn = 0;
-            // _shaderWarned / _errorLogged は戻さない（ゲームのビルドに対する事実である）。
+            // _shaderWarned / _errorLogged are not reset (they are facts about the build of the game).
         }
 
         private static float Clamp01(float v)

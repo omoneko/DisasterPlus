@@ -7,52 +7,56 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **画面左上のボタン 1 個と、その下に開くタブ帯 1 本。** main スレッド専用。
-    /// ①予報 ②地震 ④台風 ⑤火山 と診断の「読む側」は、全部この 1 か所から開く。
+    /// **One button in the top-left of the screen, and one tab strip that opens beneath it.**
+    /// Main thread only.
+    /// The "reading side" of ① forecast, ② earthquake, ④ typhoon, ⑤ volcano and the
+    /// diagnostics all opens from this one place.
     ///
-    /// ── 依頼 ─────────────────────────────────────────
+    /// ── The request ─────────────────────────────────────────
     ///
-    /// 「情報画面はサイレン MOD や CS:WARFRONT と同様に左上のショートカット
-    /// ボタンから開けるようにしてください」——所有者。
+    /// "Please make the information screens open from a shortcut button in the top left, like
+    /// the siren mod and CS:WARFRONT" — the owner.
     ///
-    /// ── ★★ ボタンは 1 個である（4 個にしないこと） ────────────────
+    /// ── ★★ There is one button (do not make it four) ────────────────
     ///
-    /// 以前この MOD は①②④⑤それぞれに浮遊ボタンを持っていて、4 個とも
-    /// <see cref="FreeSlotFinder"/> に同じ preferred 座標から空きを問い合わせていた。
-    /// 初回の実機テストの output_log.txt はその結果をそのまま記録している ——
-    /// <c>no free UI slot found after 30 tries</c> が 4 回出て、4 個が (8,50) に
-    /// 積み上がった。**探索が誤っていたのではなく、探索する主体が 4 つあったことが
-    /// 誤りだった**（<see cref="FreeSlotFinder"/> のクラス doc）。
+    /// This mod used to have a floating button for each of ①②④⑤, and all four asked
+    /// <see cref="FreeSlotFinder"/> for a free slot from the same preferred coordinates.
+    /// The output_log.txt from the first playtest records the result verbatim —
+    /// <c>no free UI slot found after 30 tries</c> four times, and all four piled up at
+    /// (8,50). **The search was not wrong; having four things doing the searching was**
+    /// (see the <see cref="FreeSlotFinder"/> class doc).
     ///
-    /// だからここでも <see cref="FreeSlotFinder"/> を呼ぶのは **1 回だけ**、
-    /// **ボタン 1 個ぶんについてだけ**である。タブ帯とパネルの位置はそこからの
-    /// 相対で決まる —— 2 個が同じ位置に来る経路が構造として存在しない。
-    /// **ここに 2 個目の探索を足さないこと。**
+    /// So here too, <see cref="FreeSlotFinder"/> is called **once only**, and **for one button
+    /// only**. The positions of the tab strip and the panels follow from there, relative to it
+    /// — there is structurally no path by which two land in the same place.
+    /// **Do not add a second search here.**
     ///
-    /// ── 位置を決める主体は 1 つ ──────────────────────────────
+    /// ── One thing decides positions ──────────────────────────────
     ///
-    /// ①②④⑤のパネルは自分では位置を決めなくなった（<c>MoveTo</c>）。
-    /// タブ帯の真下・同じ左端に置くのはこの型で、**同時に出るパネルは 1 枚だけ**
-    /// である。だから「互いに避ける座標」はもう要らない。
-    /// 下端がビューからはみ出すぶんは各パネルの <c>ClampToView</c> が縦に寄せる
-    /// （その挙動は以前から変わっていない）。
+    /// The ①②④⑤ panels no longer decide their own positions (<c>MoveTo</c>).
+    /// This type is what places them directly below the tab strip at the same left edge, and
+    /// **only one panel is ever shown at a time**. So "coordinates that avoid each other" are
+    /// no longer needed.
+    /// Whatever overflows the bottom of the view is nudged vertically by each panel's
+    /// <c>ClampToView</c> (that behaviour has not changed).
     ///
-    /// ── 閉じるボタンも 1 個 ──────────────────────────────
+    /// ── One close button as well ──────────────────────────────
     ///
-    /// パネルごとにあった X は撤去した。タブ帯の右端の X が全部を閉じる。
+    /// The X that each panel used to have was removed. The X at the right end of the tab strip
+    /// closes everything.
     ///
-    /// ── アイコンを推測しない ──────────────────────────────
+    /// ── Do not guess at icons ──────────────────────────────
     ///
-    /// **前景スプライトの名前を 1 つも指定しない。** スプライト名はアトラスの
-    /// データであってアセンブリからは読めないため、名前を当てにいくと
-    /// 「見えないボタン」になり得る（<c>DisasterPanelBar</c> のクラス doc）。
-    /// 見分けは <c>text</c>（短い名前）とツールチップで付ける。
+    /// **Do not specify a single foreground sprite name.** Sprite names are atlas data and
+    /// cannot be read from the assembly, so guessing at a name can give you "an invisible
+    /// button" (see the <c>DisasterPanelBar</c> class doc).
+    /// They are told apart by <c>text</c> (a short name) and the tooltip.
     ///
-    /// ── セッション状態 ────────────────────────────────
+    /// ── Session state ────────────────────────────────
     ///
-    /// <see cref="Remove"/> がボタン・タブ帯・開閉状態を全部捨てる。
-    /// 次の都市は**ボタン 1 個・タブ帯 0 本・開いているパネル 0 枚**で始まる。
-    /// Unity オブジェクトを配列に持たない（fake-null が配列越しには治らない）。
+    /// <see cref="Remove"/> throws away the button, the tab strip and the open/closed state.
+    /// The next city starts with **one button, no tab strip and no open panel**.
+    /// Do not hold Unity objects in an array (a fake-null cannot be repaired through an array).
     /// </summary>
     public static class InfoHub
     {
@@ -61,99 +65,105 @@ namespace DisasterPlus.Game
         private delegate void Command();
         private delegate float FloatSource();
 
-        /// <summary>ボタンが置けるまでの再試行間隔（main スレッド更新の回数）。</summary>
+        /// <summary>The retry interval until the button can be placed (in main-thread updates).</summary>
         private const int SearchIntervalFrames = 120;
 
-        /// <summary>設置後の保守間隔。ラベル更新・設定変更の反映。</summary>
+        /// <summary>The maintenance interval once installed. Refreshing labels, following setting changes.</summary>
         private const int MaintainIntervalFrames = 30;
 
-        /// <summary>諦めるまでの試行回数。永久に探し続けない。</summary>
+        /// <summary>How many attempts before giving up. Do not search forever.</summary>
         private const int MaxAttempts = 100;
 
         private const float ButtonSize = 32f;
         private const float StripHeight = 34f;
 
         /// <summary>
-        /// ボタンを置く**画面最上段の y**。所有者の依頼（2026-08-22）:
+        /// The **y of the screen's top row** the button goes on. The owner's request
+        /// (2026-08-22):
         ///
-        /// > D＋ボタンが左サイドメニューと重なる位置にあるので、バニラのサイドメニューを
-        /// > 操作する際に邪魔になります。CSWARFRONT ボタンや SIREN Alert ボタンと
-        /// > 同じ高さで並んで表示されるようにしてください（それぞれのボタンは一スクリプトを参照）
+        /// > The D＋ button sits where it overlaps the left side menu, which gets in the way
+        /// > when operating vanilla's side menu. Please have it shown lined up at the same
+        /// > height as the CSWARFRONT button and the SIREN Alert button (see each button's
+        /// > script).
         ///
-        /// 実際に 2 本のスクリプトを読んで合わせた値である:
+        /// This is the value arrived at by actually reading the two scripts:
         ///
-        /// | MOD | 置き方 | 大きさ | y | 中心の y |
+        /// | mod | how it places | size | y | centre y |
         /// |---|---|---|---|---|
-        /// | CS:WARFRONT (`MilitaryBuildPanel`) | 固定 `new Vector3(150f, 10f)` | 36 | 10 | 28 |
-        /// | SIREN Alert (`SirenButton`) | 最上段を左から走査 | 44 | 4 | 26 |
-        /// | ⑤これ | 最上段を左から走査 | 32 | **10** | 26 |
+        /// | CS:WARFRONT (`MilitaryBuildPanel`) | fixed `new Vector3(150f, 10f)` | 36 | 10 | 28 |
+        /// | SIREN Alert (`SirenButton`) | sweeps the top row from the left | 44 | 4 | 26 |
+        /// | ⑤ this one | sweeps the top row from the left | 32 | **10** | 26 |
         ///
-        /// ★ **x は固定しない。** CS:WARFRONT は 150 に決め打っているが、それは
-        ///   「他の MOD が居ない」を仮定している。こちらは SIREN Alert と同じく
-        ///   左から空きを探す —— 先に居る者を避けるので、3 本が同時に入っていても
-        ///   並ぶ（<see cref="FreeSlotFinder"/>）。
+        /// ★ **Do not fix x.** CS:WARFRONT pins it at 150, but that assumes "no other mod is
+        ///   there". This one searches for a free slot from the left, like SIREN Alert — it
+        ///   avoids whoever got there first, so all three line up even with all of them
+        ///   installed at once (<see cref="FreeSlotFinder"/>).
         /// </summary>
         private const float TopRowY = 10f;
 
         /// <summary>
-        /// 最上段の探索の下限 x。**既に居るボタンが 1 つも無いときだけ**ここからになる。
+        /// The lower bound on x for the top-row search. It only starts here **when there is
+        /// not a single button already there**.
         ///
-        /// ★★ <b>通常はここからは始めない。</b>（2026-08-22、所有者の実機報告
-        ///   「ボタンの位置がまだ左すぎます」）。左端から探すだけだと
-        ///   **先に置けた者がいちばん左を取る**ので、この MOD がたまたま 1 番に
-        ///   間に合うと画面の端に張り付いてしまう（実際にそうなった）。
-        ///   <c>FreeSlotFinder.RightEdgeOfBand</c> で**既に居る一団の右端**を求め、
-        ///   その右から探す。
+        /// ★★ <b>Normally it does not start here.</b> (2026-08-22, the owner's report from the
+        ///   game: "the button is still too far to the left"). Searching from the left edge
+        ///   alone means **whoever gets placed first takes the leftmost spot**, so if this mod
+        ///   happens to be first it sticks to the edge of the screen (which is what happened).
+        ///   Use <c>FreeSlotFinder.RightEdgeOfBand</c> to find **the right edge of the run
+        ///   already there** and search from the right of that.
         /// </summary>
         private const float TopRowStartX = 8f;
 
-        /// <summary>隣のボタンとの隔て（px）。SIREN Alert の <c>Gap</c> と同じ値。</summary>
+        /// <summary>The separation from the neighbouring button (px). The same value as SIREN Alert's <c>Gap</c>.</summary>
         private const float TopRowGap = 8f;
 
         /// <summary>
-        /// 最上段の帯の高さ（px）。この帯にかかっているものを「隣人」と見なす。
-        /// SIREN Alert の <c>bandBottom</c>（TopMargin 4 + Size 44 + Gap 8 = 56）と揃えてある ——
-        /// あちらの 44 px のボタンもこちらの 32 px のボタンもこの帯に入る。
+        /// The height of the top-row band (px). Anything overlapping this band counts as a
+        /// "neighbour".
+        /// Kept in line with SIREN Alert's <c>bandBottom</c>
+        /// (TopMargin 4 + Size 44 + Gap 8 = 56) — both their 44 px button and our 32 px button
+        /// fall inside this band.
         /// </summary>
         private const float TopRowBandBottom = 56f;
 
         /// <summary>
-        /// ★★ <b>置き場所は 1 度きりで、以後は動かさない。</b>（2026-08-22、実機報告
-        /// 「D＋ボタンが押すと移動していく現象が起きています。CW ボタン等の仕組みを
-        /// そのまま流用して、仕様をそろえてください」。）
+        /// ★★ <b>The position is decided once and never moved again.</b> (2026-08-22, report
+        /// from the game: "the D＋ button keeps moving when you press it. Please borrow the
+        /// mechanism of the CW button and make the behaviour match.")
         ///
-        /// ── 何が起きていたか ────────────────────────────────
+        /// ── What was happening ────────────────────────────────
         ///
-        /// 他 MOD のボタンが遅れて現れるのを避けるため、置いたあと 60/180/420/900
-        /// フレームで位置を見直していた。ところが<b>タブ帯（幅 640）は最上段の帯の
-        /// 中に入る</b>（y = 44、帯の下端は 56）。だから:
+        /// To handle other mods' buttons appearing late, the position was re-checked at
+        /// 60/180/420/900 frames after being placed. But <b>the tab strip (640 wide) falls
+        /// inside the top-row band</b> (y = 44, and the band's bottom is 56). So:
         ///
-        ///   押す → タブ帯が開く → 次の見直しが**自分のタブ帯を「隣人」と数える**
-        ///        → その右へ逃げる → また押す → また逃げる
+        ///   press → the tab strip opens → the next re-check **counts our own tab strip as a
+        ///        "neighbour"** → it escapes to the right of it → press again → escape again
         ///
-        /// CS:WARFRONT のボタンは <c>new Vector3(150f, 10f)</c> を 1 度入れるだけで
-        /// 二度と動かさない。**その仕様に揃える。** ドラッグの取っ手も外した
-        /// （あちらも「ドラッグの当たり判定がクリックを奪う」ので付けていない）。
+        /// CS:WARFRONT's button sets <c>new Vector3(150f, 10f)</c> once and never moves it
+        /// again. **Match that behaviour.** The drag handle was removed too (they do not have
+        /// one either, because "the drag hit area steals the click").
         ///
-        /// 遅れて現れた他 MOD と重なる可能性は残るが、**動き回るボタンよりましである。**
-        /// 位置が気に入らなければ、他 MOD より先に読み込まれない限り並びは安定する。
+        /// The possibility of overlapping a mod that appears late remains, but **that beats a
+        /// button that wanders.** If the position is not to your liking: as long as this is
+        /// not loaded before the other mods, the ordering is stable.
         /// </summary>
         private const bool PlaceOnce = true;
 
-        /// <summary>最上段の探索の 1 歩（px）。ボタン幅 ＋ 隙間。</summary>
+        /// <summary>One step of the top-row search (px). The button width plus the gap.</summary>
         private const float TopRowStepX = ButtonSize + TopRowGap;
 
-        /// <summary>最上段の探索の上限回数。画面の右端で <see cref="ScreenSlot"/> が先に止める。</summary>
+        /// <summary>The attempt limit for the top-row search. <see cref="ScreenSlot"/> stops it first at the right edge of the screen.</summary>
         private const int TopRowTries = 64;
         private const float TabHeight = 26f;
         private const float TabGap = 2f;
         private const float StripPad = 4f;
         private const float CloseWidth = 24f;
 
-        /// <summary>タブ帯の既定の幅（開いているパネルが無いとき）。</summary>
+        /// <summary>The tab strip's default width (when no panel is open).</summary>
         private const float DefaultStripWidth = 640f;
 
-        /// <summary>タブ 1 枚ぶんの記述。**表示文字列を値として持たない**（言語切替で凍る）。</summary>
+        /// <summary>The description of one tab. **Do not hold displayed strings as values** (they would freeze on a language change).</summary>
         private sealed class Tab
         {
             public readonly string Id;
@@ -178,11 +188,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **並ぶ順序はこの 1 本の並びだけが決める。** 足すときはここに 1 行足すこと
-        /// （座標を発明しない）。番号順（①予報 ②地震 ④台風 ⑤火山）＋診断。
+        /// **This one list is the only thing that decides the order.** To add one, add a line
+        /// here (do not invent coordinates). In numbered order (① forecast, ② earthquake,
+        /// ④ typhoon, ⑤ volcano) plus the diagnostics.
         ///
-        /// ★ ③火災旋風のタブは無い。③は自然発生しかせず、読むべき状態も
-        ///   診断のダンプにしか無い（<c>FireWhirlFeature</c> のクラス doc）。
+        /// ★ There is no ③ fire whirl tab. ③ only arises on its own, and the state worth
+        ///   reading exists only in the diagnostic dump (see the <c>FireWhirlFeature</c>
+        ///   class doc).
         /// </summary>
         private static readonly List<Tab> Tabs = new List<Tab>
         {
@@ -198,17 +210,19 @@ namespace DisasterPlus.Game
                     EarthquakePanel.Show, EarthquakePanel.Hide,
                     delegate { return EarthquakePanel.Width; }),
 
-            // ★★ **④台風・⑤火山・診断のタブは外した**（2026-08-22、所有者の依頼
-            //    「D＋ボタンで開けるのは天気予報と地震予想・震度（波形）グラフのみで
-            //    いいです。他は蛇足です」「デバッグ（F11）の部分は削除してください」）。
+            // ★★ **The ④ typhoon, ⑤ volcano and diagnostics tabs were taken out**
+            //    (2026-08-22, the owner's request: "the D＋ button only needs to open the
+            //    weather forecast and the earthquake prediction / intensity (waveform) graph.
+            //    The rest is superfluous", "please delete the debug (F11) part").
             //
-            //    ★ 診断ダンプそのものは残っている —— **F11 のホットキーで書ける**。
-            //      消したのは「タブ 1 枚」であって、状態を読む手段ではない。
+            //    ★ The diagnostic dump itself remains — **it can still be written with the
+            //      F11 hotkey**. What was deleted is "one tab", not the means of reading the
+            //      state.
             //
-            //    ★★ <b>⑤の [止める] ボタンも一緒に消えた。</b> 進行中の火山を
-            //      止める経路は、いまは「設定で⑤を切る」しか無い。
-            //      置き場所の希望があれば言ってほしい（災害パネルのタイルへ
-            //      移すのがいちばん自然である）。
+            //    ★★ <b>⑤'s [stop] button went with it.</b> The only route left for stopping a
+            //      volcano in progress is "switch ⑤ off in the settings".
+            //      If there is a preferred home for it, say so (moving it to a tile on the
+            //      disaster panel would be the most natural).
         };
 
         private static UIButton _button;
@@ -216,31 +230,32 @@ namespace DisasterPlus.Game
         private static UIButton _closeButton;
 
 
-        /// <summary>ボタンを置いてからのフレーム数。-1 は「まだ置いていない」。</summary>
+        /// <summary>Frames since the button was placed. -1 means "not placed yet".</summary>
 
-        /// <summary>次に見直す <see cref="RecheckFrames"/> の添字。</summary>
+        /// <summary>The index of the next <see cref="RecheckFrames"/> to re-check at.</summary>
 
 
-        /// <summary>いま選ばれているタブの <see cref="Tab.Id"/>。null なら未選択。</summary>
+        /// <summary>The <see cref="Tab.Id"/> of the currently selected tab. null means none is selected.</summary>
         private static string _activeId;
 
         /// <summary>
-        /// **いま実際に出しているパネル**の id。<see cref="_activeId"/> と食い違って
-        /// いるあいだだけ、パネルの <c>Show</c> / <c>Hide</c> / <c>MoveTo</c> が走る。
+        /// The id of **the panel actually being shown**. The panels' <c>Show</c> /
+        /// <c>Hide</c> / <c>MoveTo</c> only run while this disagrees with
+        /// <see cref="_activeId"/>.
         ///
-        /// ★ この 1 本が無いと、保守パス（0.5 秒ごと）が毎回 4 枚に <c>Hide()</c> を
-        ///   呼ぶことになる。②の <c>EarthquakePanel.Hide</c> は
-        ///   <c>PublishCursor</c> と <c>EarthquakeOverlay.Disable</c> まで走らせるので、
-        ///   **見ていないパネルのために 0.5 秒ごとに仕事をする**ことになっていた。
+        /// ★ Without this one field, the maintenance pass (every 0.5 s) would call
+        ///   <c>Hide()</c> on all four every time. ②'s <c>EarthquakePanel.Hide</c> also runs
+        ///   <c>PublishCursor</c> and <c>EarthquakeOverlay.Disable</c>, so it ended up
+        ///   **doing work every 0.5 seconds for a panel nobody is looking at**.
         /// </summary>
         private static string _shownId;
 
         private static bool _open;
 
-        /// <summary>例外で降りた。以後この型は何もしない。</summary>
+        /// <summary>Stood down after an exception. This type does nothing from then on.</summary>
         private static bool _dead;
 
-        /// <summary>置き場所の探索を打ち切った。</summary>
+        /// <summary>The search for a position was abandoned.</summary>
         private static bool _gaveUp;
 
         private static int _frames;
@@ -248,28 +263,30 @@ namespace DisasterPlus.Game
         private static Vector2 _origin;
         private static bool _foundFreeSlot;
 
-        /// <summary>直近に組み立てたタブの集合（設定が変わったら組み直す）。</summary>
+        /// <summary>The set of tabs last built (rebuilt when the settings change).</summary>
         private static string _builtSet;
 
-        /// <summary>診断向け。ボタンが今、画面に居るか。</summary>
+        /// <summary>For diagnostics. Whether the button is on screen right now.</summary>
         public static bool IsInstalled { get { return _button != null; } }
 
         /// <summary>
-        /// ★★ **この MOD で 2 番目に画面へ物を浮かせる者のための出口。**
+        /// ★★ **The outlet for the second thing in this mod that floats something on screen.**
         ///
-        /// <see cref="FreeSlotFinder"/> のクラス doc は「呼び出し元は 1 か所だけ」と
-        /// 定めている。理由は初回の実機テストで実証済みで、**探索する主体が複数ある
-        /// 限り、全員が空きを見つけられなかったときに全員が同じ preferred へ落ちる。**
+        /// The <see cref="FreeSlotFinder"/> class doc lays down "only one caller". The reason
+        /// was demonstrated in the first playtest: **as long as more than one thing does the
+        /// searching, they all fall back to the same preferred when none of them can find a
+        /// free slot.**
         ///
-        /// <c>DisasterPanelBar</c> の退避バー（バニラの災害パネルがどうしても
-        /// 見つからない環境でだけ現れる）が 2 番目の主体になる。そこで
-        /// **こちらのボタンより下から探し始める点**を渡す —— 探索は下方向にしか
-        /// 進まないので、退避バーがこのボタンの位置を返すことは構造として起きない。
+        /// <c>DisasterPanelBar</c>'s fallback bar (which appears only in an environment where
+        /// vanilla's disaster panel simply cannot be found) is the second such thing. So it is
+        /// handed **a point to start searching from, below this button** — the search only
+        /// ever moves downwards, so it is structurally impossible for the fallback bar to
+        /// return this button's position.
         ///
-        /// <c>false</c> を返すのは「ボタンをまだ置いていない（置けるかも分からない）」
-        /// ときで、そのあいだ**退避バーは待つべきである**。諦めたあと
-        /// （<see cref="_gaveUp"/>）はボタンが存在しないので、退避バーは自分の
-        /// 好きな位置から探してよい —— <see cref="Abandoned"/> がそれを名乗る。
+        /// It returns <c>false</c> when "the button has not been placed yet (and it is not
+        /// even known whether it can be)", and during that time **the fallback bar should
+        /// wait**. After giving up (<see cref="_gaveUp"/>) the button does not exist, so the
+        /// fallback bar may search from wherever it likes — <see cref="Abandoned"/> states that.
         /// </summary>
         public static bool TryGetBelowAnchor(out Vector2 point)
         {
@@ -281,13 +298,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ボタンを置くのを恒久的に諦めたか。<c>true</c> のあいだ画面に
-        /// このボタンは存在しないので、<see cref="TryGetBelowAnchor"/> が
-        /// <c>false</c> を返しても待つ意味は無い。
+        /// Whether placing the button has been abandoned permanently. While this is
+        /// <c>true</c> the button does not exist on screen, so there is no point waiting even
+        /// though <see cref="TryGetBelowAnchor"/> returns <c>false</c>.
         /// </summary>
         public static bool Abandoned { get { return _gaveUp || _dead; } }
 
-        /// <summary>診断向け。ボタンが今どこに居るかを 1 行で。</summary>
+        /// <summary>For diagnostics. Where the button is right now, in one line.</summary>
         public static string Placement
         {
             get
@@ -304,10 +321,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// main スレッドから毎フレーム呼ばれる。実際の仕事は間引く。
+        /// Called every frame from the main thread. The real work is thinned out.
         ///
-        /// **この経路で <c>Log.Warn</c> / <c>Log.Error</c> を毎回出さないこと**
-        /// （どちらもスロットルが無い）。恒久的な断念は状態フラグで 1 回だけに閉じる。
+        /// **Do not emit <c>Log.Warn</c> / <c>Log.Error</c> every time on this path**
+        /// (neither has a throttle). A permanent abandonment is closed off to a single
+        /// occurrence by a state flag.
         /// </summary>
         public static void Tick()
         {
@@ -325,7 +343,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>レベルアンロード時。次の都市が必ず「ボタン 1 個」で始まるようにする。</summary>
+        /// <summary>On level unload. Makes sure the next city always starts with "one button".</summary>
         public static void Remove()
         {
             DestroyTabButtons();
@@ -349,7 +367,7 @@ namespace DisasterPlus.Game
         }
 
         // ------------------------------------------------------------------
-        // 保守
+        // Maintenance
         // ------------------------------------------------------------------
 
         private static void Maintain()
@@ -360,7 +378,7 @@ namespace DisasterPlus.Game
                 if (!CreateButton()) return;
             }
 
-            // ボタンのラベルは言語切替で変わりうる。
+            // The button's label can change on a language switch.
             string tip = Strings.InfoButtonTooltip;
             if (_button.tooltip != tip) _button.tooltip = tip;
 
@@ -370,8 +388,9 @@ namespace DisasterPlus.Game
             if (_builtSet != wanted)
             {
                 RebuildStrip(wanted);
-                // 見ていたタブが設定で消えたなら、先頭へ移る。**開いたまま
-                // 中身が空になる**（タブ帯だけが残る）状態を作らない。
+                // If the tab being viewed disappeared because of a setting, move to the first.
+                // Never create a state where **it stays open with nothing inside** (just the
+                // tab strip left).
                 if (FindTab(_activeId) == null) _activeId = FirstWantedId();
             }
 
@@ -396,13 +415,15 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★★ FreeSlotFinder を呼ぶのはこの 1 行だけである（クラス doc）。
-            //    タブ帯とパネルの位置はここからの相対で決まる。
+            // ★★ This single line is the only call to FreeSlotFinder (see the class doc).
+            //    The positions of the tab strip and the panels follow from here, relative to it.
             //
-            // ★★ **横に探す。下へは 1 歩も降りない**（<see cref="TopRowY"/>）。
-            //    以前は (8,50) から下へ降りていたので、**バニラの左サイドメニュー
-            //    （縦の列）の上に必ず載った** —— 所有者の実機報告そのものである。
-            //    最上段を左から右へ探せば、CS:WARFRONT と SIREN Alert の隣に並ぶ。
+            // ★★ **Search horizontally. Do not descend a single step**
+            //    (see <see cref="TopRowY"/>).
+            //    It used to descend from (8,50), so **it always landed on top of vanilla's
+            //    left side menu (a vertical column)** — exactly the owner's report from the
+            //    game. Search the top row from left to right and it lines up next to
+            //    CS:WARFRONT and SIREN Alert.
             bool foundFree;
             _origin = SearchTopRow(null, out foundFree);
             _foundFreeSlot = foundFree;
@@ -411,7 +432,7 @@ namespace DisasterPlus.Game
             b.name = FreeSlotFinder.SelfPrefix + "InfoButton";
             b.size = new Vector2(ButtonSize, ButtonSize);
             b.relativePosition = new Vector3(_origin.x, _origin.y);
-            // ★ 前景スプライトは指定しない（クラス doc）。文字だけは必ず残る。
+            // ★ Do not specify a foreground sprite (see the class doc). The text always survives.
             b.normalBgSprite = "ButtonMenu";
             b.hoveredBgSprite = "ButtonMenuHovered";
             b.pressedBgSprite = "ButtonMenuPressed";
@@ -429,15 +450,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 最上段の空きを探す。**既に居る一団の右から始める**。
+        /// Searches for a free slot in the top row. **Starts from the right of the run already
+        /// there.**
         ///
-        /// ★★ これが「ボタンの位置がまだ左すぎます」への答えである
-        ///   （2026-08-22）。左端から探すだけの頃は、この MOD が他 MOD より
-        ///   先に間に合った場合に**画面の左端を取ってしまっていた**。
+        /// ★★ This is the answer to "the button is still too far to the left"
+        ///   (2026-08-22). Back when it only searched from the left edge, this mod
+        ///   **took the left edge of the screen** whenever it got there before the others.
         ///
-        /// ★ <paramref name="owner"/> には**自分のボタン**を渡すこと（初回は null）。
-        ///   渡さないと、見直すたびに自分の右端で自分を押しやることになり、
-        ///   ボタンが右へ逃げ続ける。
+        /// ★ Pass **our own button** as <paramref name="owner"/> (null on the first call).
+        ///   Without it, every re-check would push us along by our own right edge and the
+        ///   button would keep escaping to the right.
         /// </summary>
         private static Vector2 SearchTopRow(UIComponent owner, out bool foundFree)
         {
@@ -466,18 +488,18 @@ namespace DisasterPlus.Game
         private static void Open()
         {
             _open = true;
-            _builtSet = null;   // 次の ApplySelection の前に必ず組み直す
+            _builtSet = null;   // always rebuild before the next ApplySelection
 
             string wanted = WantedSet();
             RebuildStrip(wanted);
 
-            // 前に見ていたタブが今も居ればそれを、居なければ先頭を選ぶ。
+            // Select the tab previously viewed if it is still there, otherwise the first.
             if (FindTab(_activeId) == null) _activeId = FirstWantedId();
 
             ApplySelection();
         }
 
-        /// <summary>タブ帯と全部のパネルを畳む。**開いていたものを 1 枚も残さない。**</summary>
+        /// <summary>Folds away the tab strip and every panel. **Leaves not one of the open ones behind.**</summary>
         private static void CloseAll()
         {
             _open = false;
@@ -487,11 +509,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 選ばれているタブのパネルだけを出し、残りを畳む。
+        /// Shows the panel of the selected tab only, and folds away the rest.
         ///
-        /// ★ **パネルへの <c>Show</c> / <c>Hide</c> は選択が変わったときだけ**
-        ///   （<see cref="_shownId"/> の doc）。タブ帯の見た目は毎回そろえる
-        ///   —— 言語切替に追従するのがここだからである。
+        /// ★ **<c>Show</c> / <c>Hide</c> on a panel only when the selection changed**
+        ///   (see the <see cref="_shownId"/> doc). The tab strip's appearance is brought into
+        ///   line every time — because this is where a language change is followed.
         /// </summary>
         private static void ApplySelection()
         {
@@ -512,8 +534,8 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 幅は出しているパネルに合わせる。タブ帯だけが広いと 1 枚の
-            //   パネルには見えない（①だけ 380 幅である）。
+            // ★ Match the width to the panel being shown. With only the tab strip wide, it
+            //   does not read as one panel (① alone is 380 wide).
             float width = active.Width();
             if (width <= 0f) width = DefaultStripWidth;
             if (_strip.width != width) LayoutStrip(width);
@@ -522,8 +544,8 @@ namespace DisasterPlus.Game
 
             if (_shownId == active.Id) return;
 
-            // ★ 前面へ出すのは切り替えたときだけ。保守パスのたびに呼ぶと、
-            //   0.5 秒ごとに他 MOD の UI より前へ割り込み続けることになる。
+            // ★ Bring to front only when switching. Call it on every maintenance pass and it
+            //   would go on cutting in front of other mods' UI every 0.5 seconds.
             _strip.BringToFront();
 
             for (int i = 0; i < Tabs.Count; i++)
@@ -531,22 +553,24 @@ namespace DisasterPlus.Game
                 if (Tabs[i] != active) Tabs[i].Hide();
             }
 
-            // ★ 左上を決めてから出す。逆にすると、既定の位置に 1 フレームだけ
-            //   出てから飛ぶ。**位置を決めるのはこの 1 行だけである。**
+            // ★ Set the top-left before showing. The other way round it appears at the default
+            //   position for one frame and then jumps.
+            //   **This single line is the only thing that decides the position.**
             MoveActivePanel(active, new Vector3(_origin.x, _origin.y + ButtonSize + 2f + StripHeight));
             active.Show();
             _shownId = active.Id;
 
-            // ★ 出したあとにもう一度前へ。**閉じる X を持っているのは帯だけ**なので、
-            //   パネルが帯より手前に来ると閉じられなくなる（パネル側の
-            //   <c>ClampToView</c> が帯より上に出ないようになったので重なること自体
-            //   まず無いが、押せなくなる側に倒さない）。
+            // ★ Bring it to the front once more after showing. **Only the strip has the
+            //   closing X**, so if a panel comes in front of the strip it can no longer be
+            //   closed (the panels' <c>ClampToView</c> now keeps them from rising above the
+            //   strip, so an overlap is unlikely in the first place, but never fall on the
+            //   side of being unable to press it).
             _strip.BringToFront();
         }
 
         /// <summary>
-        /// 出すパネルの左上を決める。<c>MoveTo</c> は <c>Show</c> より先に呼ぶ ——
-        /// 逆にすると、既定の位置に 1 フレームだけ出てから飛ぶ。
+        /// Sets the top-left of the panel being shown. Call <c>MoveTo</c> before <c>Show</c> —
+        /// the other way round it appears at the default position for one frame and then jumps.
         /// </summary>
         private static void MoveActivePanel(Tab tab, Vector3 origin)
         {
@@ -558,7 +582,7 @@ namespace DisasterPlus.Game
         }
 
         // ------------------------------------------------------------------
-        // タブ帯
+        // The tab strip
         // ------------------------------------------------------------------
 
         private static void RebuildStrip(string wantedSet)
@@ -575,7 +599,7 @@ namespace DisasterPlus.Game
                 strip.name = FreeSlotFinder.SelfPrefix + "InfoTabStrip";
                 strip.backgroundSprite = "MenuPanel2";
                 strip.color = new Color32(255, 255, 255, 240);
-                // 中はこの型が完全に決めきるので autolayout には任せない。
+                // This type decides the contents completely, so do not leave it to autolayout.
                 strip.autoLayout = false;
                 strip.height = StripHeight;
                 strip.relativePosition = new Vector3(_origin.x, _origin.y + ButtonSize + 2f);
@@ -602,7 +626,8 @@ namespace DisasterPlus.Game
                 b.height = TabHeight;
                 b.text = t.Label();
                 b.tooltip = t.Label();
-                // 日本語の見出しは英語より横に長い。既定倍率だと 5 タブで溢れうる。
+                // Japanese headings run wider than English. At the default scale, five tabs
+                // can overflow.
                 b.textScale = 0.8f;
                 b.textHorizontalAlignment = UIHorizontalAlignment.Center;
                 b.textVerticalAlignment = UIVerticalAlignment.Middle;
@@ -622,8 +647,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// タブの幅を均等割りする。**1 回のループで順番に置くので、2 個が同じ位置に
-        /// 来ることが構造として起きない**（<c>DisasterPanelBar</c> と同じ規律）。
+        /// Divides the width evenly among the tabs. **They are placed in order by a single
+        /// loop, so it is structurally impossible for two to land in the same place**
+        /// (the same discipline as <c>DisasterPanelBar</c>).
         /// </summary>
         private static void LayoutStrip(float width)
         {
@@ -662,8 +688,9 @@ namespace DisasterPlus.Game
         private static void ApplyTabSprites(Tab t, bool active)
         {
             if (t.Button == null) return;
-            // 使うスプライトは既にこの MOD が使っている 3 種だけに限る。存在を
-            // 確かめていない名前を増やすと、名前が違ったときにボタンが透明になる。
+            // Limit the sprites used to the three this mod already uses. Add a name whose
+            // existence has not been confirmed and the button goes transparent when the name
+            // turns out to be wrong.
             t.Button.normalBgSprite = active ? "ButtonMenuPressed" : "ButtonMenu";
             t.Button.hoveredBgSprite = "ButtonMenuHovered";
             t.Button.pressedBgSprite = "ButtonMenuPressed";
@@ -684,9 +711,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// タブ帯を組み直すときは、出していたパネルも 1 枚残らず畳む。
-        /// **<see cref="_shownId"/> だけを消して畳み忘れると、タブが消えたのに
-        /// パネルだけが画面に残る。**
+        /// When the tab strip is rebuilt, fold away every panel that was being shown, without
+        /// exception.
+        /// **Clear <see cref="_shownId"/> alone and forget the folding, and the tab disappears
+        /// while the panel stays on screen.**
         /// </summary>
         private static void HideAllPanels()
         {
@@ -699,17 +727,17 @@ namespace DisasterPlus.Game
             for (int i = 0; i < Tabs.Count; i++)
             {
                 Tab t = Tabs[i];
-                // ★ 要素ごとに != null を見る（破棄済みの fake-null は要素側にしか出ない）。
+                // ★ Test != null per element (a destroyed fake-null only shows up on the element).
                 if (t.Button != null) UnityEngine.Object.Destroy(t.Button.gameObject);
                 t.Button = null;
             }
         }
 
         // ------------------------------------------------------------------
-        // 補助
+        // Helpers
         // ------------------------------------------------------------------
 
-        /// <summary>いま出したいタブの集合を 1 本の文字列で表す（組み直しの判定用）。</summary>
+        /// <summary>Expresses the set of tabs currently wanted as a single string (to decide on a rebuild).</summary>
         private static string WantedSet()
         {
             string s = "";

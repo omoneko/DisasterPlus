@@ -8,92 +8,96 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **震度分布を地図に描く。** 依頼文の
-    /// 「都市内での震源からの距離に応じた震度の分布の概念もありません」に
-    /// 地図として答える唯一の部分。**メインスレッド（描画）専用。**
+    /// **Draws the seismic-intensity distribution on the map.** The only part that
+    /// answers the request's "there is also no notion of intensity varying with distance
+    /// from the hypocentre within the city" with an actual map.
+    /// **Main (render) thread only.**
     ///
-    /// ── 何を描いているのか（全部バニラが計算している量）───────────────
+    /// ── What is drawn (all of it quantities vanilla computes) ───────────────
     ///
-    /// | 描くもの | 量 | 典拠 |
+    /// | What | Quantity | Source |
     /// |---|---|---|
-    /// | 青緑の同心円 | <c>s = 1 - d/R</c>、<c>R = 2000 + 20·intensity</c> | §A-3 の全体円盤 |
-    /// | 紅紫の帯 | 断層 4 円盤が落ちうる範囲（<c>1.5·w</c>、沿走 <c>0.4L + w</c>） | §A-3 ＋ 全体レビュー C1 |
-    /// | 白の点 | 震央 <c>m_targetPosition</c> | — |
-    /// | 白の線 | 断層の走向 <c>m_angle</c>、長さ <c>L</c> | §A-3 / §A-6 |
+    /// | Teal concentric circles | <c>s = 1 - d/R</c>, <c>R = 2000 + 20·intensity</c> | §A-3's whole-quake disc |
+    /// | Magenta band | Where the four fault discs could land (<c>1.5·w</c>, along strike <c>0.4L + w</c>) | §A-3 + whole-feature review C1 |
+    /// | White dot | The epicentre, <c>m_targetPosition</c> | — |
+    /// | White line | The fault's strike <c>m_angle</c>, length <c>L</c> | §A-3 / §A-6 |
     ///
-    /// <b>s は「揺れ」ではない。</b>倒壊・出火の判定に掛かる局所係数である
-    /// （全体レビュー C3）。バニラの揺れには半径の打ち切りが無い（§A-7）ので、
-    /// この円盤の外でも地面は揺れている。パネルの凡例がそれを名乗る。
+    /// <b>s is not "the shaking".</b> It is the local factor applied to the collapse and
+    /// fire checks (whole-feature review C3). Vanilla's shaking has no radius cut-off
+    /// (§A-7), so the ground still shakes outside this disc. The panel's legend states
+    /// as much.
     ///
-    /// ── 2 つの円盤を混ぜないための描き分け ──────────────────────
+    /// ── Drawing them differently so the two discs are not conflated ──────
     ///
-    /// 全体円盤は <c>probability = 0.02</c> の**ランプ**、断層 4 円盤は
-    /// <c>probability = 1</c> の**平ら**である（§A-3）。だから
-    /// **濃淡を付けるのは同心円だけ**にして、帯は一様な濃さで塗る。
-    /// 帯を「s が高い場所」として濃く描くと、2 つの別モデルが 1 本の尺度に
-    /// 見えてしまう（設計書 §3.1 の最終段落が禁じていること）。
+    /// The whole-quake disc is a **ramp** at <c>probability = 0.02</c>; the four fault
+    /// discs are **flat** at <c>probability = 1</c> (§A-3). So **only the concentric
+    /// circles are shaded**, and the band is painted at a uniform density. Draw the band
+    /// dark, as though it were "where s is high", and two separate models start to look
+    /// like one scale (which the last paragraph of design doc §3.1 forbids).
     ///
-    /// ── バニラのハザードマップとは別物 ────────────────────────
+    /// ── Not the same thing as vanilla's hazard map ──────────────────────
     ///
-    /// パネルの「マップに表示」はバニラの情報ビュー（<c>SubInfoMode.EarthquakeHazard</c>）に
-    /// 切り替えるだけで、そこに塗られるのは**別の形**である ——
-    /// 亀裂**線分**までの距離・2 次減衰・<c>Rmax = R + 400</c>、しかも
-    /// <c>Located</c>（＝地震計）が無いと 1 セルも塗られない（§A-6）。
-    /// このオーバーレイは地震計が無くても出るし、形も違う。
-    /// **同じものだと読ませないこと**が凡例の役目である。
+    /// The panel's "Show on map" only switches to vanilla's info view
+    /// (<c>SubInfoMode.EarthquakeHazard</c>), and what gets painted there is a
+    /// **different shape** — distance to the crack **line segment**, quadratic falloff,
+    /// <c>Rmax = R + 400</c>, and without <c>Located</c> (i.e. a seismograph) not a single
+    /// cell is painted (§A-6). This overlay appears with no seismograph and has a
+    /// different shape. The legend's job is to **stop them being read as the same thing**.
     ///
-    /// ── 毎フレームの経路であることの制約 ─────────────────────────
+    /// ── Constraints that come with being a per-frame path ───────────────────
     ///
-    ///   - **確保しない。** <c>Color</c> / <c>Vector3</c> / <c>Quad3</c> は全て構造体、
-    ///     地震の列挙は添字走査、断層の折れ線は <see cref="_outlines"/> に使い回し。
-    ///   - **<c>Log.Warn</c> / <c>Log.Error</c> を置かない**（スロットルされない）。
-    ///     例外は 1 回だけ大きく鳴らし、以後は <c>Log.Diag</c> のキー単位スロットルへ
-    ///     （<c>CameraShakeBooster</c> が確立した形）。
-    ///   - **描画コール数に上限を持つ**（<see cref="MaxDrawCallsPerFrame"/>）。
-    ///     地震は同時に 256 個まで存在しうる（§E-1）。
+    ///   - **No allocation.** <c>Color</c>, <c>Vector3</c> and <c>Quad3</c> are all
+    ///     structs, earthquakes are enumerated by index, and the fault polylines are
+    ///     reused from <see cref="_outlines"/>.
+    ///   - **No <c>Log.Warn</c> / <c>Log.Error</c>** (they are not throttled). Shout once
+    ///     for an exception and then drop to <c>Log.Diag</c>'s per-key throttle (the shape
+    ///     established by <c>CameraShakeBooster</c>).
+    ///   - **A ceiling on the draw calls** (<see cref="MaxDrawCallsPerFrame"/>). Up to 256
+    ///     earthquakes can exist at once (§E-1).
     /// </summary>
     public static class EarthquakeOverlay
     {
-        /// <summary>震央のマーカーの直径（m）。</summary>
+        /// <summary>The diameter of the epicentre marker (m).</summary>
         private const float EpicentreMarkerSize = 160f;
 
-        /// <summary>走向線の半幅（m）。</summary>
+        /// <summary>Half the width of the strike line (m).</summary>
         private const float StrikeLineHalfWidth = 12f;
 
         /// <summary>
-        /// 縦方向の描画帯（ワールド Y）。
+        /// The vertical slab that gets drawn (world Y).
         ///
-        /// <c>DrawCircle</c> / <c>DrawQuad</c> は <c>minY</c> / <c>maxY</c> の外を
-        /// 描かない（<c>ID_LimitsY</c>、IL_0069 / IL_00D2）。CS1 の地形は
-        /// <c>RawHeights</c> が <c>ushort/64</c> なので **0〜1024 m** に収まる
-        /// （IL 事実文書 §D-1）。その全域を含む帯にしておかないと、
-        /// 山の上だけオーバーレイが途切れて「そこは分布の外」に見える。
+        /// <c>DrawCircle</c> / <c>DrawQuad</c> draw nothing outside <c>minY</c> /
+        /// <c>maxY</c> (<c>ID_LimitsY</c>, IL_0069 / IL_00D2). CS1's terrain keeps
+        /// <c>RawHeights</c> as <c>ushort/64</c>, so it fits in **0-1024 m** (IL facts
+        /// doc §D-1). Without a slab that spans all of it, the overlay cuts off on top of
+        /// mountains and they look as though they are outside the distribution.
         /// </summary>
         private const float SlabMinY = -64f;
 
         private const float SlabMaxY = 1088f;
 
         /// <summary>
-        /// 1 フレームに出してよい描画コールの総数。
+        /// The total number of draw calls allowed in one frame.
         ///
-        /// 内訳は 1 地震あたり最大 22 コール
-        /// （ランプ 10 ＋ 震央 1 ＋ 断層帯 <see cref="FaultBandOutline.Segments"/>=10 ＋ 走向線 1）で、
-        /// **4 地震ぶん**。地震は同時に 256 個まで存在しうるので（§E-1）、
-        /// 上限が無いと 5632 コールまで伸びうる。予算は**地震単位で**消費する
-        /// （途中まで描いた地震を残さない）。足りなくなったら描くのをやめ、
-        /// パネルがその旨を名乗る（<see cref="BudgetExhausted"/>）。
+        /// That breaks down as at most 22 calls per earthquake (10 for the ramp, 1 for
+        /// the epicentre, <see cref="FaultBandOutline.Segments"/>=10 for the fault band
+        /// and 1 for the strike line), times **4 earthquakes**. Up to 256 earthquakes can
+        /// exist at once (§E-1), so without a ceiling this could stretch to 5,632 calls.
+        /// The budget is spent **one whole earthquake at a time** (never leave a
+        /// half-drawn earthquake behind). When it runs out we stop drawing and the panel
+        /// says so (<see cref="BudgetExhausted"/>).
         ///
-        /// 地震が進行しているフレームはゲーム中で最も重い。Task 6〜7 が
-        /// カーソルのレイを 521 → 131 サンプル/フレームまで削ったのと同じ規律で、
-        /// ここも最初から上限を持たせておく。
+        /// The frames during an earthquake are the heaviest in the game. Following the
+        /// same discipline with which Tasks 6-7 cut the cursor ray from 521 to 131
+        /// samples per frame, this has a ceiling from the start.
         /// </summary>
         public const int MaxDrawCallsPerFrame = 4 * DrawCallsPerQuake;
 
-        /// <summary>1 地震あたりの最大コール数（<see cref="MaxDrawCallsPerFrame"/> の内訳）。</summary>
+        /// <summary>Maximum calls per earthquake (the breakdown of <see cref="MaxDrawCallsPerFrame"/>).</summary>
         public const int DrawCallsPerQuake =
             IntensityRamp.Steps + 1 + FaultBandOutline.Segments + 1;
 
-        /// <summary>断層の折れ線のキャッシュ。<see cref="MaxDrawCallsPerFrame"/> と同じ 4 地震ぶん。</summary>
+        /// <summary>The cache of fault polylines. The same 4 earthquakes as <see cref="MaxDrawCallsPerFrame"/>.</summary>
         private static readonly FaultBandOutline[] _outlines = CreateOutlines();
 
         private static bool _enabled;
@@ -106,36 +110,37 @@ namespace DisasterPlus.Game
         private static bool _faultGeometryMissing;
 
         /// <summary>
-        /// 表示中か。**セッション状態**で、セーブにも設定にも残さない
-        /// （情報ビューと同じ扱い。都市をロードするたびに OFF から始まる）。
+        /// Whether it is on screen. **Session state**: it is kept neither in the save nor
+        /// in the settings (treated like an info view; it starts off every time a city is
+        /// loaded).
         /// </summary>
         public static bool Enabled { get { return _enabled; } }
 
-        /// <summary>直近のフレームで実際に出した描画コール数。診断ダンプ用。</summary>
+        /// <summary>How many draw calls were actually issued on the most recent frame. For the diagnostic dump.</summary>
         public static int LastDrawCalls { get { return _lastDrawCalls; } }
 
-        /// <summary>直近のフレームで実際に描いた地震の数。</summary>
+        /// <summary>How many earthquakes were actually drawn on the most recent frame.</summary>
         public static int DrawnQuakes { get { return _drawnQuakes; } }
 
-        /// <summary>描くべき地震が予算に収まらなかったか（パネルがその旨を出す）。</summary>
+        /// <summary>Whether the earthquakes to draw did not fit in the budget (the panel says so).</summary>
         public static bool BudgetExhausted { get { return _budgetExhausted; } }
 
         /// <summary>
-        /// 描いた地震のうち、断層帯の幾何が読めなかったものがあるか。
-        /// **読めないときは帯を 1 本も描かない**（推測の大きさで描かない）ので、
-        /// 「帯が出ていない」の理由をパネルが名乗るために要る。
+        /// Whether any of the earthquakes drawn had fault-band geometry that could not be
+        /// read. **When it cannot be read, not a single band is drawn** (never draw at a
+        /// guessed size), so this is what lets the panel state why no band is showing.
         /// </summary>
         public static bool FaultGeometryMissing { get { return _faultGeometryMissing; } }
 
-        /// <summary><c>RenderManager</c> への登録に成功したか。</summary>
+        /// <summary>Whether registration with <c>RenderManager</c> succeeded.</summary>
         /// <summary>
-        /// 描画ループに刺さっているか（診断）。
+        /// Whether we are hooked into the render loop (diagnostic).
         ///
-        /// ★★ **自前の旗を持たない。** 以前はここで <c>_registered = true</c> と
-        ///   していたが、登録は <see cref="OverlayRenderable"/> が行い、失敗しても
-        ///   例外を飲んで false のまま返る —— 自前の旗だと
-        ///   <b>登録に失敗しているのに「登録済み」と名乗る</b>。
-        ///   診断で嘘をつくのは、この基盤がいちばん避けたい壊れ方である。
+        /// ★★ **Keep no flag of our own.** This used to set <c>_registered = true</c>
+        ///   here, but registration is done by <see cref="OverlayRenderable"/>, which
+        ///   swallows an exception on failure and returns still false — so a flag of our
+        ///   own would <b>report "registered" when registration had failed</b>. Lying in
+        ///   a diagnostic is the breakage this foundation most wants to avoid.
         /// </summary>
         public static bool Registered { get { return OverlayRenderable.Registered; } }
 
@@ -146,12 +151,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 表示を止める。**パネルを閉じたら必ず呼ぶこと。**
+        /// Stops the display. **Always call this when the panel is closed.**
         ///
-        /// 凡例はパネルの中にしか無い。パネルを閉じたままオーバーレイだけが
-        /// 地図に残ると、**何の量を見ているのかを名乗るものが画面から消える** ——
-        /// しかもバニラのハザードビューと取り違えやすい状態そのものになる。
-        /// 「絵と凡例は必ず同時に出る」を構造で保証する。
+        /// The legend only exists inside the panel. If the panel is closed and the
+        /// overlay stays on the map, **the only thing saying what quantity you are
+        /// looking at disappears from the screen** — and that is precisely the state in
+        /// which it is easiest to mistake it for vanilla's hazard view. This guarantees
+        /// structurally that the picture and the legend always appear together.
         /// </summary>
         public static void Disable()
         {
@@ -161,32 +167,35 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルロード時（メインスレッド）。**ここで初めて登録する。**
+        /// On level load (main thread). **This is where we register, for the first time.**
         ///
-        /// <c>RenderManager.m_renderables</c> は静的で、外す API が無い
-        /// （<see cref="OverlayRenderable"/> のクラス doc）。したがって登録は
-        /// プロセスにつき 1 回に絞り、以後は <see cref="_sessionActive"/> で
-        /// 描くかどうかを切り替える。
+        /// <c>RenderManager.m_renderables</c> is static and has no API to remove one (see
+        /// <see cref="OverlayRenderable"/>'s class doc). So registration is limited to
+        /// once per process, and from then on <see cref="_sessionActive"/> switches
+        /// whether we draw.
         /// </summary>
         public static void EnsureRegistered()
         {
             _sessionActive = true;
-            // 都市をロードするたびに OFF から始まる。Reset() が呼ばれずに
-            // 次の都市へ来る経路（クラッシュからの復帰など）でも、前の都市の
-            // トグルを引き継がない。
+            // It starts off every time a city is loaded. Even on a path that reaches the
+            // next city without Reset() being called (recovering from a crash, say), the
+            // previous city's toggle is not inherited.
             _enabled = false;
             ClearStats();
 
-            // ★ 登録は①と共有する 1 個だけ（OverlayRenderable.EnsureRegistered）。
-            //   ここで別の 1 個を作らないこと —— 外す API が無いので増える一方になる。
+            // ★ There is only one registration, shared with ①
+            //   (OverlayRenderable.EnsureRegistered). Never create a second one here —
+            //   with no API to remove them, the count only ever grows.
             OverlayRenderable.EnsureRegistered();
         }
 
         /// <summary>
-        /// レベルアンロード時。**地震が終わった後・都市を出た後に描き続けない。**
+        /// On level unload. **Never carry on drawing after the earthquake has ended or
+        /// after leaving the city.**
         ///
-        /// 登録そのものは外せないので、ここで <see cref="_sessionActive"/> を倒して
-        /// <see cref="Render"/> を即 return させるのが唯一の止め方になる。
+        /// The registration itself cannot be removed, so dropping
+        /// <see cref="_sessionActive"/> here to make <see cref="Render"/> return
+        /// immediately is the only way to stop it.
         /// </summary>
         public static void Reset()
         {
@@ -212,8 +221,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **描画スレッド（<c>OverlayEffect.OnPostRender</c> の中）から毎フレーム。**
-        /// 呼び出し経路の IL は <see cref="OverlayRenderable"/> のクラス doc。
+        /// **Every frame, from the render thread (inside <c>OverlayEffect.OnPostRender</c>).**
+        /// The IL for the call path is in <see cref="OverlayRenderable"/>'s class doc.
         /// </summary>
         public static void Render(RenderManager.CameraInfo cameraInfo)
         {
@@ -239,7 +248,7 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 毎フレームの経路。1 回だけ大きく鳴らし、以後はキー単位スロットルへ。
+                // A per-frame path. Shout once, then drop to the per-key throttle.
                 if (!_errorLogged)
                 {
                     _errorLogged = true;
@@ -253,18 +262,20 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 描く地震を選び、予算の範囲で描く。**確保しない。**
+        /// Picks which earthquakes to draw and draws them within the budget.
+        /// **Allocates nothing.**
         ///
-        /// 対象は <c>QuakeSelection.RunsDamage</c> が true の地震だけ ——
-        /// つまり <c>Active</c> と <c>Emerging</c>。<c>Clearing</c> を除くのは、
-        /// <c>DestroyBuildings</c> の呼び出しが <c>SimulationStep</c> の
-        /// <c>Active</c> 分岐に**しか無い**（§A-3）ためで、パネルのカーソル行が
-        /// 同じ理由で自分から降りるのと同じ判定を使う（全体レビュー I2）。
+        /// It considers only earthquakes for which <c>QuakeSelection.RunsDamage</c> is
+        /// true — i.e. <c>Active</c> and <c>Emerging</c>. <c>Clearing</c> is excluded
+        /// because the call to <c>DestroyBuildings</c> exists **only** in
+        /// <c>SimulationStep</c>'s <c>Active</c> branch (§A-3), and this uses the same
+        /// decision that makes the panel's cursor row bow out for the same reason
+        /// (whole-feature review I2).
         ///
-        /// <c>Emerging</c> を含めるのは、そのときにはもう震央・強度・断層の向きが
-        /// 確定していて（§A-1 の <c>StartDisaster</c>）、これから壊れる範囲が
-        /// **既に決まっている**からである。バニラのハザードマップも同じく
-        /// <c>Emerging|Active</c> で塗る（§A-6）。
+        /// <c>Emerging</c> is included because by then the epicentre, the intensity and
+        /// the fault's orientation are already fixed (<c>StartDisaster</c> in §A-1), so
+        /// the area that is going to be damaged **has already been decided**. Vanilla's
+        /// hazard map likewise paints for <c>Emerging|Active</c> (§A-6).
         /// </summary>
         private static void DrawAll(OverlayEffect overlay, RenderManager.CameraInfo cameraInfo,
                                     IList<EarthquakeReading> quakes)
@@ -280,9 +291,10 @@ namespace DisasterPlus.Game
 
                 if (budget < DrawCallsPerQuake)
                 {
-                    // ★ 地震単位で切る。予算の残りで途中まで描くと、
-                    //    「内側の濃い段だけが無い」ランプ——つまり実際の分布と
-                    //    違う減衰——が画面に出る。
+                    // ★ Cut off a whole earthquake at a time. Draw part of one with the
+                    //    budget that is left and you put a ramp on screen that is missing
+                    //    its dark inner steps — i.e. a falloff that is not the real
+                    //    distribution.
                     _budgetExhausted = true;
                     break;
                 }
@@ -297,7 +309,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>地震 1 個ぶん。戻り値は出した描画コール数。</summary>
+        /// <summary>One earthquake. Returns the number of draw calls issued.</summary>
         private static int DrawQuake(OverlayEffect overlay, RenderManager.CameraInfo cameraInfo,
                                      EarthquakeReading q, FaultBandOutline outline)
         {
@@ -309,22 +321,25 @@ namespace DisasterPlus.Game
 
             if (!band.Known)
             {
-                // 帯の大きさが分からない。**推測して描かない**（プレハブ 4 値は
-                // DLL に無く、実機でしか読めない。§A-0）。理由はパネルが出す。
+                // We do not know the band's size. **Never draw a guess** (the four prefab
+                // values are not in the DLL and can only be read in the running game,
+                // §A-0). The panel gives the reason.
                 _faultGeometryMissing = true;
             }
             else if (outline != null)
             {
-                // 折れ線は L と W だけの関数なので、地震ごとに 1 回測れば足りる
-                // （FaultBandOutline のクラス doc）。**Matches を見てから呼ぶ**のが
-                // その 1 回に絞る仕掛けで、ここが描画経路から Rebuild を呼んでよい
-                // 唯一の理由である（第 2 層レビュー M1。209 回の Contains ＝
-                // 約 3 万回の Gap 評価を、地震が現れた最初の 1 フレームだけ払う）。
+                // The polyline is a function of L and W alone, so measuring it once per
+                // earthquake is enough (see FaultBandOutline's class doc). **Checking
+                // Matches before calling** is the mechanism that holds it to that one
+                // time, and it is the only reason it is acceptable to call Rebuild from
+                // the render path (layer-2 review M1: the 209 Contains calls, roughly
+                // 30,000 Gap evaluations, are paid on the single first frame an
+                // earthquake appears).
                 if (!outline.Matches(band.Length, band.Width)) outline.Rebuild(band);
                 if (outline.Known) calls += DrawFaultBand(overlay, cameraInfo, band, outline, epicentre.y);
             }
 
-            // 震央は最後に。ランプと帯の上に出す。
+            // The epicentre goes last, on top of the ramp and the band.
             overlay.DrawCircle(cameraInfo, MarkerColour, epicentre, EpicentreMarkerSize,
                                SlabMinY, SlabMaxY, false, true);
             calls++;
@@ -333,8 +348,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 全体円盤のランプ。**大きい順**に <see cref="IntensityRamp.Steps"/> 枚。
-        /// アルファは <see cref="IntensityRamp.DrawAlpha"/> が決める（濃さが s に比例する）。
+        /// The whole-quake disc's ramp: <see cref="IntensityRamp.Steps"/> circles,
+        /// **largest first**. The alpha is decided by
+        /// <see cref="IntensityRamp.DrawAlpha"/> (so the density is proportional to s).
         /// </summary>
         private static int DrawRamp(OverlayEffect overlay, RenderManager.CameraInfo cameraInfo,
                                     Vector3 epicentre, float radius)
@@ -346,7 +362,8 @@ namespace DisasterPlus.Game
                 if (r <= 0f) continue;
 
                 var colour = new Color(RampR, RampG, RampB, IntensityRamp.DrawAlpha(k));
-                // size は直径（IL_007E: 境界は center ± size*0.5、ID_CenterPos.w = size*0.5）。
+                // size is the diameter (IL_007E: the bounds are center ± size*0.5, and
+                // ID_CenterPos.w = size*0.5).
                 overlay.DrawCircle(cameraInfo, colour, epicentre, r * 2f,
                                    SlabMinY, SlabMaxY, false, true);
                 calls++;
@@ -355,8 +372,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 断層帯を台形の帯として描く。**濃さは一様**（<c>probability = 1</c> のモデルに
-        /// ランプは無い）。加えて走向線（長さ <c>L</c>）を 1 本。
+        /// Draws the fault band as a strip of trapezia. **The density is uniform** (a
+        /// <c>probability = 1</c> model has no ramp). Plus one strike line, of length
+        /// <c>L</c>.
         /// </summary>
         private static int DrawFaultBand(OverlayEffect overlay, RenderManager.CameraInfo cameraInfo,
                                          FaultBand band, FaultBandOutline outline, float y)
@@ -382,8 +400,9 @@ namespace DisasterPlus.Game
                 calls++;
             }
 
-            // 走向（m_angle）。長さは L ちょうど —— バニラがハザードマップの
-            // 線分に使うのと同じ量（§A-6 の seg.a/seg.b = c ∓ dir*(L*0.5)）。
+            // The strike (m_angle). The length is exactly L — the same quantity vanilla
+            // uses for the hazard map's line segment (§A-6's
+            // seg.a/seg.b = c ∓ dir*(L*0.5)).
             float half = band.Length * 0.5f;
             var strike = new Quad3(
                 LocalToWorld(band, -half, StrikeLineHalfWidth, y),
@@ -397,10 +416,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 断層の局所座標（沿走 / 直交）をワールドへ。
-        /// 直交の基底は <c>(Direction.Z, -Direction.X)</c> で、
-        /// <c>FaultBand.Contains</c> の <c>across</c> と符号まで一致させてある
-        /// （<see cref="FaultBandOutline"/> が測ったのと同じ向き）。
+        /// Converts the fault's local coordinates (along strike / across) into world
+        /// space. The across basis is <c>(Direction.Z, -Direction.X)</c>, matching
+        /// <c>FaultBand.Contains</c>'s <c>across</c> right down to the sign (the same
+        /// orientation <see cref="FaultBandOutline"/> measured in).
         /// </summary>
         private static Vector3 LocalToWorld(FaultBand band, float along, float across, float y)
         {
@@ -409,27 +428,30 @@ namespace DisasterPlus.Game
             return new Vector3(x, y, z);
         }
 
-        // ── 色 ────────────────────────────────────────────
+        // ── Colours ───────────────────────────────────────────
         //
-        // **実在の震度階級を思わせる色相の並びを使わない**（設計書 §3.1 / §7-4）。
-        // 緑→黄→橙→赤のような並びは、それだけで「気象庁震度階級のような、
-        // 実在の意味を持つ尺度」を名乗ってしまう。ここは**単一の色相の濃淡だけ**で
-        // 表す —— 段が意味するのは「s がこれだけ大きい」の 1 次元だけである。
+        // **Never use a sequence of hues that evokes a real intensity scale**
+        // (design doc §3.1 / §7-4). A green→yellow→orange→red sequence, all by itself,
+        // claims to be "a scale with real-world meaning, like the JMA seismic intensity
+        // scale". Here it is expressed **purely as shades of a single hue** — a step
+        // means one thing only: "s is this large".
         //
-        // 色相はバニラの災害ハザード情報ビュー（黄〜赤系）と重ならない側に取る。
-        // 2 つを同時に出したときに、同じ絵の続きに見えないようにするため。
+        // The hue is chosen on the far side from vanilla's disaster hazard info view
+        // (yellows and reds), so that with both on screen at once one does not look like
+        // a continuation of the other.
 
         private const float RampR = 0.16f;
         private const float RampG = 0.85f;
         private const float RampB = 1.00f;
 
-        // 断層帯。ランプと**別の色相**にする。同じ色の濃い版にすると
-        // 「s が高い場所」に見え、probability = 1 の別モデルであることが消える。
+        // The fault band. It uses **a different hue** from the ramp. Make it a darker
+        // version of the same colour and it looks like "where s is high", erasing the
+        // fact that it is a separate model at probability = 1.
         private const float BandR = 1.00f;
         private const float BandG = 0.30f;
         private const float BandB = 0.80f;
 
-        /// <summary>帯は一様。<c>probability = 1</c> のモデルに減衰は無い（§A-3）。</summary>
+        /// <summary>The band is uniform. A <c>probability = 1</c> model has no falloff (§A-3).</summary>
         private const float BandAlpha = 0.40f;
 
         private static readonly Color MarkerColour = new Color(1f, 1f, 1f, 0.85f);

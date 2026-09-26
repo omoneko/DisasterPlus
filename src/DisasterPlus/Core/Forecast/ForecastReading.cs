@@ -1,6 +1,6 @@
 namespace DisasterPlus.Core.Forecast
 {
-    /// <summary>1 つの気象値の現在・目標・傾向。不変。</summary>
+    /// <summary>Current value, target and trend for one weather reading. Immutable.</summary>
     public struct ForecastReading
     {
         public readonly float Current;

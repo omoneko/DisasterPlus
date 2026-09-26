@@ -4,8 +4,10 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 所有者の依頼「噴火の規模によって流れ出るマグマの量も変えてください」。
-    /// **設定 0 は 0 のまま**（切っている）と、**小さい火山でも 1 本は出る**の 2 つが要。
+    /// The owner's request: "please also vary the amount of magma that flows out with the
+    /// scale of the eruption".
+    /// The two essentials are that **a setting of 0 stays 0** (it is switched off) and that
+    /// **even a small volcano produces one flow**.
     /// </summary>
     public class LavaVolumeTests
     {
@@ -15,7 +17,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheReferenceRadiusChangesNothing()
         {
-            // 既定の設定・既定のスライダー位置では今までどおりでなければならない。
+            // With the default settings and the default slider position, the behaviour must
+            // be exactly as it has been.
             Assert.Equal(1f, LavaVolume.Unit(LavaVolume.ReferenceRadiusMetres), 3);
             Assert.Equal(1f, LavaVolume.LengthFactor(LavaVolume.ReferenceRadiusMetres), 3);
             Assert.Equal(4, LavaVolume.FlowCount(4, MaxFlows, LavaVolume.ReferenceRadiusMetres));
@@ -40,7 +43,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TurningLavaOffStaysOff()
         {
-            // 0 は「切っている」であって「いちばん小さい噴火」ではない。
+            // 0 means "switched off", not "the smallest eruption".
             foreach (float r in new[] { 250f, 1200f, 3000f })
             {
                 Assert.Equal(0, LavaVolume.FlowCount(0, MaxFlows, r));
@@ -50,7 +53,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSmallestVolcanoStillPoursOneFlow()
         {
-            // 0 本にすると「溶岩の機能が壊れている」にしか見えない。
+            // Dropping to zero flows can only look like "the lava feature is broken".
             Assert.True(LavaVolume.FlowCount(1, MaxFlows, 250f) >= 1);
             Assert.True(LavaVolume.FlowCount(2, MaxFlows, 250f) >= 1);
         }

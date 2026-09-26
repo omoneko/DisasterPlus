@@ -13,9 +13,9 @@
     <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
     <LangVersion>7.3</LangVersion>
     <FileAlignment>512</FileAlignment>
-    <!-- CitiesHarmony.API は PackageReference（NuGet 復元）で入れる。
-         Workshop フォルダに CitiesHarmony.API.dll は存在せず各 MOD が再配布する形なので、
-         HintPath 方式では参照先が安定しない（Task 11）。 -->
+    <!-- CitiesHarmony.API comes in through a PackageReference (NuGet restore).
+         There is no CitiesHarmony.API.dll in the Workshop folder - each mod redistributes
+         its own copy - so with a HintPath the reference target is never stable (Task 11). -->
     <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
   </PropertyGroup>
 
@@ -24,12 +24,13 @@
     <Optimize>true</Optimize>
     <OutputPath>bin\Release\</OutputPath>
     <WarningLevel>4</WarningLevel>
-    <!-- CS0184 (常に false になる is 判定) を警告で見逃すと、
-         継承チェーンの取り違えが黙って機能を殺す。エラーに昇格させる。 -->
+    <!-- Let CS0184 (an "is" test that is always false) slip by as a warning and a mistaken
+         inheritance chain silently kills the feature. Promote it to an error. -->
     <WarningsAsErrors>0184</WarningsAsErrors>
   </PropertyGroup>
 
-  <!-- マシン固有パスを焼き込まない。環境変数が無ければ既定の Steam パスを使う。 -->
+  <!-- Do not bake in machine-specific paths. When the environment variable is not set,
+       use the default Steam path. -->
   <PropertyGroup>
     <ManagedDir Condition=" '$(CITIES_SKYLINES_MANAGED)' != '' ">$(CITIES_SKYLINES_MANAGED)</ManagedDir>
     <ManagedDir Condition=" '$(ManagedDir)' == '' ">C:\Program Files (x86)\Steam\steamapps\common\Cities_Skylines\Cities_Data\Managed</ManagedDir>
@@ -55,14 +56,16 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Harmony はこの MOD で 1 箇所（VortexPinPatch）のためだけに使う。
-       CitiesHarmony.API が HarmonyLib（CitiesHarmony.Harmony）を推移的に持ち込むので参照は 1 行で済む。
-       HarmonyLib 本体は実行時に CitiesHarmony MOD が供給するため同梱しない（nuspec の exclude 済み）。 -->
+  <!-- Harmony is used in this mod for one thing only (VortexPinPatch).
+       CitiesHarmony.API pulls in HarmonyLib (CitiesHarmony.Harmony) transitively, so a single
+       reference line is enough.
+       HarmonyLib itself is supplied at run time by the CitiesHarmony mod, so it is not shipped
+       with this mod (already excluded in the nuspec). -->
   <ItemGroup>
     <PackageReference Include="CitiesHarmony.API" Version="2.2.0" />
   </ItemGroup>
 
-  <!-- glob。新規ファイルを足しても csproj を触らなくてよい。 -->
+  <!-- Globs. Adding a new file does not mean having to touch the csproj. -->
   <ItemGroup>
     <Compile Include="Core\**\*.cs" />
     <Compile Include="Game\**\*.cs" />

@@ -3,26 +3,29 @@ using DisasterPlus.Core.Common;
 
 namespace DisasterPlus.Core.Typhoon
 {
-    /// <summary>雲の塊 1 個ぶん（描画用）。位置は**台風の目からの相対**（m）。</summary>
+    /// <summary>One blob of cloud (for drawing). Its position is **relative to the typhoon's
+    /// eye** (m).</summary>
     public struct TyphoonParcel
     {
         public readonly float X;
 
-        /// <summary>雲底からの高さ（m）。</summary>
+        /// <summary>Height above the cloud base (m).</summary>
         public readonly float Y;
 
         public readonly float Z;
 
-        /// <summary>塊の半径（m）。描画側は直径に直すこと。</summary>
+        /// <summary>The blob's radius (m). The drawing side must convert it to a
+        /// diameter.</summary>
         public readonly float RadiusMetres;
 
-        /// <summary>不透明度 <c>[0,1]</c>。生まれと終わりで 0 になる。</summary>
+        /// <summary>Opacity <c>[0,1]</c>. It is 0 at birth and at the end.</summary>
         public readonly float Alpha;
 
-        /// <summary>明るさ <c>[0,1]</c>。0 が雲底の影、1 が雲頂の日向。</summary>
+        /// <summary>Brightness <c>[0,1]</c>. 0 is the shadow at the cloud base, 1 the sunlit
+        /// cloud top.</summary>
         public readonly float Brightness;
 
-        /// <summary>回転角（度）。</summary>
+        /// <summary>Rotation angle (degrees).</summary>
         public readonly float RotationDegrees;
 
         public TyphoonParcel(float x, float y, float z, float radiusMetres,
@@ -39,137 +42,148 @@ namespace DisasterPlus.Core.Typhoon
     }
 
     /// <summary>
-    /// 台風の雲を<b>塊（parcel）の群れ</b>として動かす。**エンジン非依存の純関数だけ。**
+    /// Moves the typhoon's cloud as <b>a crowd of parcels</b>. **Pure engine-free functions only.**
     ///
-    /// ── 所有者の指示（2026-08-22）─────────────────────────────────
+    /// ── The owner's instruction (2026-08-22) ─────────────────────────────────
     ///
-    /// &gt; 台風の雲のエフェクトは一瞬だけ現れて消えてしまいます。火山の噴火の雲が
-    /// &gt; 質感としてはふさわしいので、噴火雲エフェクトを応用して台風の雲を
-    /// &gt; 作ってください。
+    /// &gt; The typhoon's cloud effect only appears for a moment and then vanishes. The
+    /// &gt; volcano's eruption cloud has the right texture, so please build the typhoon's
+    /// &gt; cloud by applying the eruption-cloud effect.
     ///
-    /// ── ★★ <see cref="Volcano.PlumeParcels"/> と同じ作り ───────────────────
+    /// ── ★★ Built the same way as <see cref="Volcano.PlumeParcels"/> ───────────────────
     ///
-    /// 噴煙で通った道をそのまま使う:
+    /// It takes the same road the ash plume went down:
     ///
     /// <list type="bullet">
-    /// <item>塊が<b>1 個ずつ一生を持つ</b>（生まれ → 動き → 薄くなって消える）。
-    ///   位相がずれた何百個の一生が重なると、群れは勝手にカオスになる</item>
-    /// <item>周期の違う渦を <see cref="TurbulenceOctaves"/> 個重ねる。
-    ///   1 つだときれいな波になり、繰り返しが目で追える</item>
-    /// <item>描くのは<b>放出を止めた <c>ParticleSystem</c></b>で、
-    ///   粒は毎フレーム <c>SetParticles</c> でこちらが置く</item>
+    /// <item>Each parcel <b>has a life of its own</b> (born → moves → thins out and
+    ///   disappears). Overlap hundreds of lives with staggered phases and the crowd becomes
+    ///   chaotic by itself</item>
+    /// <item>Stack <see cref="TurbulenceOctaves"/> eddies of differing period. With one you
+    ///   get a tidy wave and the eye follows the repetition</item>
+    /// <item>What it draws is <b>a <c>ParticleSystem</c> with emission stopped</b>; we place
+    ///   the particles ourselves every frame with <c>SetParticles</c></item>
     /// </list>
     ///
-    /// ★★ <b>「一瞬だけ現れて消える」がこれで直る理由。</b>
-    ///   前の <c>VortexPuffCrowd</c> は<b>添字だけで決まる静止した並び</b>で、
-    ///   動くのは呼び出し側が足す回転だけだった。そのため
-    ///   <b>雲そのものは 1 度置いたら二度と更新されない</b>のと同じで、
-    ///   借り物のバニラ粒子（寿命で自然に死ぬ）が消えたあとは
-    ///   何も残らなかった。ここは<b>毎フレーム位置が変わる</b>ので、
-    ///   置き直しが止まらないかぎり雲は消えない。
+    /// ★★ <b>Why this fixes "only appears for a moment and then vanishes".</b>
+    ///   The previous <c>VortexPuffCrowd</c> was <b>a static arrangement decided by the
+    ///   indices alone</b>, and the only movement was the rotation the caller added. So it
+    ///   amounted to <b>the cloud itself never being updated once placed</b>, and once the
+    ///   borrowed vanilla particles (which die naturally at the end of their lifetime) were
+    ///   gone, nothing remained. Here <b>the positions change every frame</b>, so the cloud
+    ///   does not disappear as long as the re-placing does not stop.
     ///
-    /// ── 形は台風のものであって、噴煙ではない ────────────────────────
+    /// ── The shape is the typhoon's, not the ash plume's ────────────────────────
     ///
-    /// 借りるのは<b>作り方</b>で、形は別である:
+    /// What is borrowed is <b>the method</b>; the shape is a separate matter:
     ///
     /// <code>
-    /// 噴煙: 火口で生まれ、上がり、傘で横へ広がる（鉛直の柱）
-    /// 台風: 外側で生まれ、**らせんを描いて目へ吸い込まれ**、
-    ///       壁雲で上がり、雲頂から外へ吐き出される（水平の渦）
+    /// ash plume: born at the crater, rises, spreads sideways at the umbrella (a vertical column)
+    /// typhoon:   born on the outside, **spirals inwards and is drawn into the eye**,
+    ///            rises at the eyewall, and is spat outwards from the cloud top (a horizontal vortex)
     /// </code>
     ///
-    /// <see cref="EyeFraction"/> の内側は<b>雲を置かない</b> ——
-    /// 台風の目は本当に晴れている。ここを埋めると、ただの円盤に見える。
+    /// Inside <see cref="EyeFraction"/>, <b>no cloud is placed</b> —
+    /// the eye of a typhoon really is clear. Fill it in and it looks like a plain disc.
     /// </summary>
     public static class TyphoonCloudParcels
     {
-        /// <summary>塊の総数。**増やす前に実機の描画負荷を測ること。**</summary>
+        /// <summary>The total number of parcels. **Measure the in-game draw cost before
+        /// raising it.**</summary>
         public const int Count = 900;
 
-        /// <summary>1 個の塊が生まれてから消えるまで（秒）。**台風は噴煙よりゆっくり。**</summary>
+        /// <summary>How long one parcel lasts from birth to disappearance (seconds). **A
+        /// typhoon is slower than an ash plume.**</summary>
         public const float LifeSeconds = 64f;
 
         /// <summary>
-        /// 台風の目の半径（外周半径に対する比）。**ここには雲を置かない。**
+        /// The eye's radius (as a fraction of the outer radius). **No cloud is placed here.**
         ///
-        /// ★★ 0.10 では埋まった（2026-08-22、tools/TyphoonParcelPreview で気づいた。
-        ///   「目の被覆 100%」）。塊 1 個の半径が目の半径と同じくらいあったので、
-        ///   壁雲に置いた塊が<b>そのまま目の中まではみ出していた</b>。
-        ///   <b>塊の内側の縁</b>で判定すること（<see cref="At"/>）。
+        /// ★★ At 0.10 it filled in (2026-08-22, spotted in tools/TyphoonParcelPreview:
+        ///   "eye coverage 100%"). One parcel's radius was about the same as the eye's
+        ///   radius, so a parcel placed on the eyewall <b>spilled straight into the eye</b>.
+        ///   Test against <b>the parcel's inner edge</b> (see <see cref="At"/>).
         /// </summary>
         public const float EyeFraction = 0.20f;
 
-        /// <summary>壁雲（いちばん濃く、いちばん高い環）の半径（同上）。</summary>
+        /// <summary>The eyewall's radius (the densest and tallest ring) (as above).</summary>
         public const float EyewallFraction = 0.28f;
 
-        /// <summary>一生のあいだに内側へ寄る量（外周半径に対する比）。</summary>
+        /// <summary>How far it moves inwards over its lifetime (as a fraction of the outer
+        /// radius).</summary>
         public const float InflowFraction = 0.34f;
 
-        /// <summary>一生のあいだに回る角度（ラジアン）。**らせんの巻き数を決める。**</summary>
+        /// <summary>The angle swept over its lifetime (radians). **This sets how many turns
+        /// the spiral makes.**</summary>
         public const float SwirlRadians = 2.6f;
 
-        /// <summary>内側ほど速く回る度合い（0 なら剛体回転＝板が回って見える）。</summary>
+        /// <summary>How much faster the inside turns (at 0 it is rigid rotation, i.e. it looks
+        /// like a turning plate).</summary>
         public const float DifferentialSpin = 1.7f;
 
         /// <summary>
-        /// らせん状の雨雲帯（rainband）の本数。
+        /// The number of spiral rainbands.
         ///
-        /// ★★ <b>これが無いと台風に見えない。</b>（2026-08-22、オフラインで描いて
-        ///   気づいた）塊を角度について一様に置くと、質感がどれだけ良くても
-        ///   <b>ただの丸い塊</b>にしかならない。実際の台風は、目のまわりの壁雲と、
-        ///   そこから外へ巻き出す数本の腕でできている。
+        /// ★★ <b>Without these it does not look like a typhoon.</b> (2026-08-22, spotted by
+        ///   drawing it offline.) Place the parcels uniformly in angle and, however good the
+        ///   texture is, all you get is <b>a plain round blob</b>. A real typhoon is made of
+        ///   the eyewall around the eye and several arms winding outwards from it.
         /// </summary>
         public const int ArmCount = 4;
 
         /// <summary>
-        /// 腕の巻きの強さ。対数らせん <c>θ = θ0 + Tightness × ln(r)</c> の係数で、
-        /// 大きいほどきつく巻く。
+        /// How tightly the arms wind. It is the coefficient in the logarithmic spiral
+        /// <c>θ = θ0 + Tightness × ln(r)</c>; the larger it is, the tighter the winding.
         /// </summary>
         public const float SpiralTightness = 2.6f;
 
-        /// <summary>腕からの散らばり（ラジアン）。**0 にすると細い線になる。**</summary>
+        /// <summary>The scatter away from an arm (radians). **At 0 you get a thin line.**</summary>
         public const float ArmScatterRadians = 0.22f;
 
-        /// <summary>腕に属さず、腕の隙間を埋める塊の割合。</summary>
+        /// <summary>The fraction of parcels that belong to no arm and fill the gaps between
+        /// them.</summary>
         public const float StrayShare = 0.08f;
 
-        /// <summary>雲の厚み（外周半径に対する比）。</summary>
+        /// <summary>The cloud's thickness (as a fraction of the outer radius).</summary>
         public const float ThicknessFraction = 0.16f;
 
-        /// <summary>壁雲がほかより高く盛り上がる量（厚みに対する比）。</summary>
+        /// <summary>How much higher the eyewall rises than the rest (as a fraction of the
+        /// thickness).</summary>
         public const float EyewallLiftFraction = 0.85f;
 
-        /// <summary>塊 1 個の半径（外周半径に対する比）。</summary>
+        /// <summary>One parcel's radius (as a fraction of the outer radius).</summary>
         public const float ParcelRadiusFraction = 0.075f;
 
-        /// <summary>塊ごとの大きさのばらつき（上の比に対する割合）。</summary>
+        /// <summary>The spread of sizes between parcels (as a proportion of the fraction
+        /// above).</summary>
         public const float ParcelRadiusSpread = 0.6f;
 
-        /// <summary>乱れを重ねる回数。</summary>
+        /// <summary>How many octaves of turbulence are stacked.</summary>
         public const int TurbulenceOctaves = 3;
 
-        /// <summary>乱れの大きさ（塊の半径に対する比）。</summary>
+        /// <summary>The size of the turbulence (as a fraction of a parcel's radius).</summary>
         public const float TurbulenceRatio = 0.8f;
 
-        /// <summary>いちばんゆっくりした渦の周期（秒）。</summary>
+        /// <summary>The period of the slowest eddy (seconds).</summary>
         public const float TurbulenceBaseSeconds = 23f;
 
-        /// <summary>生まれてから濃くなりきるまでの一生に対する割合。</summary>
+        /// <summary>The fraction of the lifetime spent thickening up after birth.</summary>
         public const float FadeInFraction = 0.08f;
 
-        /// <summary>薄くなりはじめる一生に対する割合。</summary>
+        /// <summary>The fraction of the lifetime at which it starts thinning out.</summary>
         public const float FadeOutFraction = 0.72f;
 
-        /// <summary>いちばん濃いときの不透明度。</summary>
+        /// <summary>The opacity at its densest.</summary>
         public const float PeakAlpha = 0.9f;
 
         /// <summary>
-        /// 塊 1 個ぶんの状態。<paramref name="index"/> は <c>[0, <see cref="Count"/>)</c>。
+        /// The state of one parcel. <paramref name="index"/> is in
+        /// <c>[0, <see cref="Count"/>)</c>.
         /// </summary>
-        /// <param name="timeSeconds">連続で増える秒数。</param>
-        /// <param name="radiusMetres">渦の外周半径（m）。</param>
-        /// <param name="spinRadians">渦全体の回転角（呼び出し側が積む）。</param>
-        /// <param name="seed">この台風の種。</param>
+        /// <param name="timeSeconds">Seconds, increasing continuously.</param>
+        /// <param name="radiusMetres">The vortex's outer radius (m).</param>
+        /// <param name="spinRadians">The whole vortex's rotation angle (accumulated by the
+        /// caller).</param>
+        /// <param name="seed">This typhoon's seed.</param>
         public static TyphoonParcel At(int index, float timeSeconds, float radiusMetres,
                                        float spinRadians, uint seed)
         {
@@ -182,43 +196,46 @@ namespace DisasterPlus.Core.Typhoon
 
             uint draw = (uint)index * 13u + 5u;
 
-            // ★★ 位相をずらす（噴煙と同じ。これがカオスの入口である）。
+            // ★★ Stagger the phase (same as the ash plume. This is the doorway to chaos).
             float phase = DeterministicRandom.Unit(seed, draw);
             float age = Frac(t / LifeSeconds + phase) * LifeSeconds;
             float w = age / LifeSeconds;
 
-            // ── 生まれた半径。外側ほど多くの塊が要る（面積が広い）ので sqrt ──
+            // ── The radius it is born at. The outside needs more parcels (more area), so sqrt ──
             float birth = EyewallFraction
                           + (1f - EyewallFraction)
                             * (float)Math.Sqrt(DeterministicRandom.Unit(seed, draw + 1u));
 
-            // ── らせん: 一生かけて内へ寄る。**目までは入らない。** ──────────
+            // ── The spiral: it moves inwards over its lifetime. **It never enters the eye.** ───
             float fraction = birth - InflowFraction * w;
             if (fraction < EyeFraction) fraction = EyeFraction;
 
-            // ── 塊そのものの大きさ（腕の配置より先に要る）──────────────
+            // ── The parcel's own size (needed before the arm placement) ──────────────
             float sizePick = DeterministicRandom.Unit(seed, draw + 4u);
             float parcel = radius * ParcelRadiusFraction
                            * (1f - ParcelRadiusSpread * 0.5f + ParcelRadiusSpread * sizePick);
 
-            // ★★ **塊の内側の縁で目を守る。** 中心までの距離で判定すると、
-            //    壁雲に置いた塊が目の中まではみ出す（それが「目が埋まる」の正体）。
+            // ★★ **Protect the eye using the parcel's inner edge.** Test against the
+            //    distance to its centre and a parcel placed on the eyewall spills into the
+            //    eye (which is what "the eye fills in" actually was).
             float minDistance = EyeFraction * radius + parcel;
             float distance = fraction * radius;
             if (distance < minDistance) distance = minDistance;
             fraction = radius > 0f ? distance / radius : fraction;
 
-            // ── ★★ らせん状の雨雲帯 ────────────────────────────────
+            // ── ★★ The spiral rainbands ────────────────────────────────
             //
-            //    対数らせん θ = θ0 + Tightness × ln(r)。腕の何本かに割り当てて、
-            //    そこから少しだけ散らす。**一様に置くとただの丸い塊になる。**
+            //    The logarithmic spiral θ = θ0 + Tightness × ln(r). Assign parcels to one of
+            //    the arms and scatter them slightly from it. **Placed uniformly you get a
+            //    plain round blob.**
             float armPick = DeterministicRandom.Unit(seed, draw + 9u);
             float scatter = DeterministicRandom.Unit(seed, draw + 10u) * 2f - 1f;
 
             float baseAngle;
             if (armPick < StrayShare)
             {
-                // 腕の隙間を埋める分。**全部を腕に載せると輪郭が硬くなる。**
+                // The share that fills the gaps between the arms. **Put them all on arms and
+                // the outline goes hard.**
                 baseAngle = DeterministicRandom.Unit(seed, draw + 2u) * 6.2831853f;
             }
             else
@@ -232,27 +249,27 @@ namespace DisasterPlus.Core.Typhoon
                             + scatter * ArmScatterRadians;
             }
 
-            // ★★ **渦の回転を年齢から足さないこと。**（2026-08-22、オフラインで
-            //    描いて気づいた）ここに <c>SwirlRadians × w × 内側ほど速い係数</c> を
-            //    足していたとき、1 個ごとに最大 8 ラジアンも余分に回るので、
-            //    <b>腕がきれいに塗り潰されてただの環になった</b>。
+            // ★★ **Do not add the vortex's rotation from the age.** (2026-08-22, spotted by
+            //    drawing it offline.) While <c>SwirlRadians × w × the faster-inside
+            //    factor</c> was being added here, each parcel turned by up to 8 extra
+            //    radians, and <b>the arms got neatly painted over into a plain ring</b>.
             //
-            //    対数らせんでは<b>回転は内へ寄ること自体から出る</b> ——
-            //    <c>θ = θ0 + Tightness × ln(r)</c> なので、r が小さくなれば
-            //    θ も動く。塊は腕という「模様」の上を流れていくのであって、
-            //    模様ごと勝手に回るのではない。
+            //    In a logarithmic spiral <b>the rotation comes out of moving inwards
+            //    itself</b> — since <c>θ = θ0 + Tightness × ln(r)</c>, θ moves as r gets
+            //    smaller. A parcel flows across the "pattern" that the arms are; the pattern
+            //    does not turn wholesale of its own accord.
             float angle = baseAngle + spin;
             float x = (float)Math.Cos(angle) * distance;
             float z = (float)Math.Sin(angle) * distance;
 
-            // ── 高さ。壁雲がいちばん高く、外周へ向かって薄く低くなる ────────
+            // ── Height. The eyewall is the tallest, thinning and dropping towards the rim ───
             float thickness = ThicknessFraction * radius;
             float wallness = Bell(fraction, EyewallFraction, EyewallFraction * 1.6f);
             float band = DeterministicRandom.Unit(seed, draw + 3u);
             float y = band * thickness * (0.35f + 0.65f * (1f - fraction))
                       + wallness * EyewallLiftFraction * thickness;
 
-            // ── ★★ 乱れ。**ここが「一枚の板」と「雲」を分ける。** ────────
+            // ── ★★ Turbulence. **This is what separates "a flat sheet" from "cloud".** ──────
             float scale = parcel * TurbulenceRatio;
             for (int o = 0; o < TurbulenceOctaves; o++)
             {
@@ -270,10 +287,10 @@ namespace DisasterPlus.Core.Typhoon
                 z += (float)Math.Sin(k * age + pz) * amp;
             }
 
-            // ★★ **目を守るのは乱れの「あと」である。**（2026-08-22、テストが拾った）
-            //    先に守っても、そのあとの乱れが塊を目の中へ押し戻す
-            //    （半径 840 m の目に 683 m まで入っていた）。
-            //    ここで外向きに押し出す ——**中心へ寄せるのではなく外へ**。
+            // ★★ **Protecting the eye happens "after" the turbulence.** (2026-08-22, caught
+            //    by a test.) Protect it first and the turbulence that follows pushes parcels
+            //    back into the eye (they were getting 683 m into an eye of radius 840 m).
+            //    Push them outwards here — **outwards, not in towards the centre**.
             float finalDistance = (float)Math.Sqrt(x * x + z * z);
             float keepOut = EyeFraction * radius + parcel;
             if (finalDistance < keepOut)
@@ -286,23 +303,24 @@ namespace DisasterPlus.Core.Typhoon
                 }
                 else
                 {
-                    // ちょうど中心。向きが無いので生まれた角度へ出す。
+                    // Exactly at the centre. There is no direction, so send it out along the
+                    // angle it was born at.
                     x = (float)Math.Cos(angle) * keepOut;
                     z = (float)Math.Sin(angle) * keepOut;
                 }
             }
 
-            // ── 濃さ ─────────────────────────────────────────
+            // ── Density ─────────────────────────────────────────
             float alpha;
             if (w < FadeInFraction) alpha = w / FadeInFraction;
             else if (w > FadeOutFraction) alpha = (1f - w) / (1f - FadeOutFraction);
             else alpha = 1f;
 
-            // ★ 壁雲はいちばん濃く、外周の腕は薄い。
+            // ★ The eyewall is the densest and the outer arms are thin.
             alpha *= PeakAlpha * (0.55f + 0.45f * (1f - fraction) + 0.3f * wallness);
             if (alpha > 1f) alpha = 1f;
 
-            // ── 明るさ。上ほど日を受けて白い ─────────────────────────
+            // ── Brightness. The higher it is, the more sun it catches and the whiter it is ───
             float brightness = Clamp01(y / (thickness * 1.4f));
 
             float rotation = DeterministicRandom.Unit(seed, draw + 8u) * 360f
@@ -312,8 +330,8 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// <paramref name="at"/> が <paramref name="centre"/> にどれだけ近いか
-        /// <c>[0,1]</c>。<paramref name="width"/> で 0 になる釣鐘。
+        /// How close <paramref name="at"/> is to <paramref name="centre"/>, <c>[0,1]</c>.
+        /// A bell that reaches 0 at <paramref name="width"/>.
         /// </summary>
         private static float Bell(float at, float centre, float width)
         {

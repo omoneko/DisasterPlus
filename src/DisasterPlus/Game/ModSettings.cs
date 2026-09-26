@@ -5,21 +5,25 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 永続設定。
+    /// Persistent settings.
     ///
-    /// ファイル名を MOD 名・アセンブリ名と同じ "DisasterPlus" にしてはいけない。
-    /// 毎起動で "An element with the same key already exists ... Deleting" が出て
-    /// 設定が消え、MOD がエラー扱いになり Workshop 公開まで壊れる。
+    /// The file name must not be "DisasterPlus", the same as the mod and assembly name.
+    /// Every launch would produce "An element with the same key already exists ... Deleting",
+    /// the settings would be wiped, the mod would be treated as an error, and even publishing
+    /// to the Workshop would break.
     ///
-    /// 保存されるキーと値は公開契約として扱う。列挙由来の整数値は意味を固定し、
-    /// 項目を廃止するときも番号を詰めない（既存プレイヤーの .cgs の値が別物になるため）。
+    /// The saved keys and values are treated as a public contract. Integer values derived from
+    /// enums have fixed meanings, and numbers are never closed up when an entry is retired
+    /// (an existing player's .cgs value would come to mean something else).
     /// </summary>
     public static class ModSettings
     {
         public const string FileName = "DisasterPlusSettings";
 
-        /// <summary>地震の被害計算の担当。0 = 競合MODに任せる、1 = Disaster + が担当。
-        /// この数値は .cgs に書かれる公開契約。値の意味を変えたり詰めたりしないこと。</summary>
+        /// <summary>Who owns the earthquake damage calculation. 0 = leave it to the conflicting
+        /// mod, 1 = Disaster + owns it.
+        /// This number is written to the .cgs and is a public contract. Do not change the
+        /// meaning of a value or close the numbering up.</summary>
         public const int EarthquakeOwnerOther = 0;
         public const int EarthquakeOwnerSelf = 1;
 
@@ -30,15 +34,16 @@ namespace DisasterPlus.Game
         public static SavedInt DetectCount;
 
         /// <summary>
-        /// 海溝型地震のタイルを出すか。**既定 ON。**
-        /// これを切ると、津波を連れてくる地震を起こす手段が無くなる
-        /// （バニラの地震には津波が付かない —— <c>TsunamiChain</c>）。
+        /// Whether to show the trench earthquake tile. **ON by default.**
+        /// Switch it off and there is no way left to raise an earthquake that brings a tsunami
+        /// with it (vanilla's earthquakes come with no tsunami — <c>TsunamiChain</c>).
         /// </summary>
         public static SavedBool TrenchQuakeEnabled;
 
         /// <summary>
-        /// バニラ（ND DLC）の竜巻をランダム発生から外すか。**既定 ON。**
-        /// 火災旋風の渦には影響しない（<c>VanillaTornadoSuppressor</c>）。
+        /// Whether to take vanilla's (the ND DLC's) tornado out of random spawning.
+        /// **ON by default.**
+        /// Has no effect on the fire whirl's vortex (<c>VanillaTornadoSuppressor</c>).
         /// </summary>
         public static SavedBool NoVanillaTornado;
         public static SavedInt MaxLifetimeMinutes;
@@ -52,20 +57,23 @@ namespace DisasterPlus.Game
         public static SavedBool ForecastEnabled;
 
         /// <summary>
-        /// ★★ **退役した保存キー（forecastButtonX/Y・earthquakeButtonX/Y・
-        ///     typhoonButtonX/Y・volcanoButtonX/Y の 8 本）。**
+        /// ★★ **Retired saved keys (the eight: forecastButtonX/Y, earthquakeButtonX/Y,
+        ///     typhoonButtonX/Y and volcanoButtonX/Y).**
         ///
-        /// ①②④⑤のボタンはバニラの災害パネルの中に置かれるようになり、位置は
-        /// パネル自身の autolayout が決める（<c>DisasterPanelBar</c>）。したがって
-        /// この 8 本を読む場所はもう 1 つも無い。
+        /// The ①②④⑤ buttons are now placed inside vanilla's disaster panel, and the panel's
+        /// own autolayout decides their positions (<c>DisasterPanelBar</c>). So there is not
+        /// one place left that reads these eight.
         ///
-        /// **それでも宣言は残す。** .cgs のキーと値は公開契約であり、
-        /// - 宣言を消すとキーだけが .cgs に取り残され、後日この名前が
-        ///   *別の意味で* 復活したときに、古い座標が新しい設定として読まれる
-        /// - 番号や名前を詰め直さない、という本 MOD の規律と同じ理由
+        /// **The declarations stay all the same.** The .cgs keys and values are a public
+        /// contract, and
+        /// - deleting the declarations would leave the keys stranded in the .cgs, so that if
+        ///   one of these names came back one day *meaning something else*, the old
+        ///   coordinates would be read as the new setting
+        /// - it is the same reason as this mod's discipline of never closing up numbers or
+        ///   names
         ///
-        /// **この 8 本を別の意味で再利用してはいけない。** 新しい設定には
-        /// 新しいキー名を付けること。
+        /// **These eight must not be reused for another meaning.** Give a new setting a new
+        /// key name.
         /// </summary>
         public static SavedInt ForecastButtonX;
         public static SavedInt ForecastButtonY;
@@ -79,32 +87,36 @@ namespace DisasterPlus.Game
         public static SavedInt EarthquakeLongPeriodStrength;
 
         /// <summary>
-        /// **海溝型地震の遠地被害の強さ（0〜10）。0 で完全に無効。**
+        /// **The strength of the trench earthquake's distant damage (0-10). 0 disables it
+        /// completely.**
         ///
-        /// ★★ 上の長周期（既定 OFF）と違い、**これは既定 ON（6）である。**
-        ///   長周期は「バニラなら倒れなかった建物を倒す」新しい被害だが、
-        ///   こちらは<b>本 MOD 自身が作った災害（海溝型）が、本来あるべき被害を
-        ///   出していなかったのを直すもの</b>である（2026-09-02、所有者
-        ///   「海溝型地震の、地震による被害が少ないです」）。
-        ///   既定 OFF にすると、直した不足が既定では直らない。
+        /// ★★ Unlike the long-period setting above (OFF by default), **this is ON (6) by
+        ///   default.** Long-period is new damage that "collapses buildings vanilla would have
+        ///   left standing", whereas this <b>fixes a disaster this mod itself created (the
+        ///   trench quake) failing to produce the damage it ought to have</b> (2026-09-02, the
+        ///   owner: "the trench earthquake does too little earthquake damage").
+        ///   Make it OFF by default and the shortfall we fixed stays unfixed by default.
         ///
-        /// ★ 断層型とバニラの地震には<b>一切効かない</b>
-        ///   （<c>TrenchQuakeDistantDamage</c> のクラス doc）。
+        /// ★ It has <b>no effect whatsoever</b> on fault earthquakes or vanilla's
+        ///   (see the <c>TrenchQuakeDistantDamage</c> class doc).
         /// </summary>
         public static SavedInt EarthquakeTrenchDamageStrength;
 
         /// <summary>
-        /// **第 2 層。合成記象（P 波・S 波・コーダ）**。既定 OFF。
+        /// **Second layer. The synthetic seismogram (P wave, S wave, coda)**. OFF by default.
         ///
-        /// ON にすると 2 つのことが同時に起きる:
-        ///   1. 波形グラフに <c>[Disaster + model]</c> の線が 1 本増える（バニラの線は残る）
-        ///   2. カメラの揺れが、バニラの 2 本の正弦波の代わりに合成記象の形になる
+        /// Switching it ON does two things at once:
+        ///   1. one more line, <c>[Disaster + model]</c>, appears on the waveform graph
+        ///      (vanilla's line stays)
+        ///   2. the camera shake takes the shape of the synthetic seismogram instead of
+        ///      vanilla's two sine waves
         ///
-        /// ★ **既定 OFF を外さないこと。** <c>EarthquakeShakeBoost</c> が既定 ON に
-        ///   できるのは、強度 55（バニラ既定）で追加分が**厳密に 0** ＝ 挙動が
-        ///   バニラとビット単位で同一になるからで（<c>ShakeWaveform.IntensityFactor</c>）、
-        ///   こちらにはその逃げ道が無い —— 合成記象はどの強度でもバニラと違う形である。
-        ///   これは<c>EarthquakeLongPeriod</c> と同じ扱いになる。
+        /// ★ **Do not take it off OFF-by-default.** <c>EarthquakeShakeBoost</c> can be ON by
+        ///   default because at intensity 55 (vanilla's default) its addition is **exactly 0**,
+        ///   i.e. the behaviour is bit-for-bit identical to vanilla
+        ///   (<c>ShakeWaveform.IntensityFactor</c>); this one has no such escape — the
+        ///   synthetic seismogram has a different shape from vanilla at every intensity.
+        ///   It gets the same treatment as <c>EarthquakeLongPeriod</c>.
         /// </summary>
         public static SavedBool EarthquakeSeismogram;
         public static SavedBool TyphoonEnabled;
@@ -114,11 +126,11 @@ namespace DisasterPlus.Game
         public static SavedBool TyphoonWindDamage;
 
         /// <summary>
-        /// 台風の雲の中で稲妻を光らせるか。**既定 ON。**
+        /// Whether lightning flashes inside the typhoon's cloud. **ON by default.**
         ///
-        /// ★ これは<b>自前の描画</b>である（<c>TyphoonBoltFx</c>）。
-        ///   バニラの空からの落雷は、雨を 0.8 で止めることで<b>そもそも起きない</b>
-        ///   （<c>TyphoonWeather.MaxRainWithoutLightning</c>）。
+        /// ★ This is <b>our own rendering</b> (<c>TyphoonBoltFx</c>).
+        ///   Vanilla's lightning from the sky <b>never happens at all</b>, because the rain is
+        ///   held at 0.8 (<c>TyphoonWeather.MaxRainWithoutLightning</c>).
         /// </summary>
         public static SavedBool TyphoonLightning;
         public static SavedInt TyphoonWindStrength;
@@ -126,43 +138,48 @@ namespace DisasterPlus.Game
         public static SavedInt TyphoonFloodStrength;
         public static SavedBool TyphoonSouthernHemisphere;
         /// <summary>
-        /// **退役キー（随伴竜巻）。読む場所はもう 1 つも無い。**
+        /// **Retired keys (the accompanying tornado). There is not one place left that reads
+        /// them.**
         ///
-        /// バニラの竜巻災害を台風に随伴させる機能は撤去された。持ち主の指示
-        /// 「竜巻を発生させずに竜巻の被害だけを複数発生させてください」に対して、
-        /// ④は竜巻の実体を作らず <c>TyphoonGust</c> の局所被害域だけを出す。
+        /// The feature that attached vanilla's tornado disaster to the typhoon was removed.
+        /// In response to the owner's instruction — "produce several instances of tornado
+        /// damage without producing a tornado" — ④ creates no actual tornado and only puts out
+        /// <c>TyphoonGust</c>'s local damage areas.
         ///
-        /// **それでも宣言は残す。**<c>ForecastButtonX</c> の doc と同じ理由で、
-        /// .cgs のキーと値は公開契約だからである。
-        /// **この 2 本を別の意味で再利用してはいけない** —— 新しい設定
-        /// （<see cref="TyphoonGustEnabled"/> / <see cref="TyphoonGustStrength"/>）には
-        /// 新しいキー名を付けてある。
+        /// **The declarations stay all the same**, for the same reason as the
+        /// <c>ForecastButtonX</c> doc: the .cgs keys and values are a public contract.
+        /// **These two must not be reused for another meaning** — the new settings
+        /// (<see cref="TyphoonGustEnabled"/> / <see cref="TyphoonGustStrength"/>) have been
+        /// given new key names.
         /// </summary>
         public static SavedBool TyphoonTornadoes;
         public static SavedInt TyphoonTornadoCount;
 
-        /// <summary>竜巻並みの局所被害を出すか（**竜巻の実体は作らない**）。</summary>
+        /// <summary>Whether to produce tornado-strength local damage (**no actual tornado is created**).</summary>
         public static SavedBool TyphoonGustEnabled;
 
-        /// <summary>その強さ 0〜10。0 で完全に無効。</summary>
+        /// <summary>Its strength, 0-10. 0 disables it completely.</summary>
         public static SavedInt TyphoonGustStrength;
         public static SavedBool TyphoonCloudEnabled;
         public static SavedBool TyphoonVanillaCloudBoost;
 
         /// <summary>
-        /// 暴風雨の演出（横殴りの飛沫と、市民・車の吹き飛ばし）。
+        /// The storm visuals (driving spray, and citizens and cars being blown about).
         ///
-        /// ★ **建物にも道路にも樹木にも触れない。** 飛沫は main スレッドの描画だけ、
-        ///   吹き飛ばしは <c>DisasterHelpers.AddWind</c>（市民と車だけ）である。
-        ///   だから風害（<see cref="TyphoonWindDamage"/>）とは別のつまみにしてある ——
-        ///   「被害は要らないが嵐は見たい」も、その逆も選べる。
+        /// ★ **It touches neither buildings, nor roads, nor trees.** The spray is main-thread
+        ///   rendering only, and the blowing about is <c>DisasterHelpers.AddWind</c> (citizens
+        ///   and vehicles only).
+        ///   That is why it is a separate knob from wind damage
+        ///   (<see cref="TyphoonWindDamage"/>) — "I don't want the damage but I do want to see
+        ///   the storm" can be chosen, and so can the opposite.
         /// </summary>
         public static SavedBool TyphoonStormFx;
 
         /// <summary>
-        /// 台風の風の音。**⑤の噴火音と同じ経路**（<c>AudioManager.EffectGroup</c>）なので、
-        /// プレイヤーの効果音スライダーとミュートはゲームが掛ける。
-        /// ④が鳴らすのは**1 本だけ**である（<c>EffectGroup</c> の席を奪わない）。
+        /// The sound of the typhoon's wind. **The same path as ⑤'s eruption sound**
+        /// (<c>AudioManager.EffectGroup</c>), so the player's effects volume slider and mute
+        /// are applied by the game.
+        /// ④ plays **just one** (it does not hog a seat in the <c>EffectGroup</c>).
         /// </summary>
         public static SavedBool TyphoonStormSound;
         public static SavedBool VolcanoEnabled;
@@ -170,119 +187,133 @@ namespace DisasterPlus.Game
         public static SavedInt VolcanoButtonY;
 
         /// <summary>
-        /// 火山の形態。**.cgs に書かれる公開契約なので番号を詰め直さない**
-        /// （<c>DisasterPlus.Core.Volcano.VolcanoForm</c> と同じ値）。
+        /// The volcano's form. **It is written to the .cgs and is a public contract, so the
+        /// numbering is never closed up** (the same values as
+        /// <c>DisasterPlus.Core.Volcano.VolcanoForm</c>).
         ///
-        /// ★ フィールド名が <c>VolcanoShapeSetting</c> なのは、Core の型名
-        ///   <c>VolcanoShape</c>（3 形態のプロファイルという内容そのもの）と
-        ///   衝突するからである。**保存キーの文字列 "volcanoShape" は変えない。**
+        /// ★ The field is called <c>VolcanoShapeSetting</c> because it would otherwise clash
+        ///   with Core's type name <c>VolcanoShape</c> (which is the profiles of the three
+        ///   forms themselves). **Do not change the saved key string "volcanoShape".**
         /// </summary>
         public static SavedInt VolcanoShapeSetting;
 
-        // ── ★★ 退役したキーの覚書（2026-08-22）───────────────────
+        // ── ★★ Notes on retired keys (2026-08-22) ───────────────────
         //
-        //   volcanoRadius / volcanoHeight … 火山の半径と最終高（m）。
+        //   volcanoRadius / volcanoHeight … the volcano's radius and final height (m).
         //
-        // 所有者の指摘「これだとスケール調整が意味なくなるので、
-        // 推奨設定でここは固定してほしい」により、**同じ量を 2 つのつまみで
-        // 決めさせるのをやめた**。大きさは災害パネルの強度スライダー 1 本だけが決め、
-        // 基準は形態ごとの推奨値（<c>VolcanoShape.DefaultRadiusOf</c> /
-        // <c>DefaultHeightOf</c>）である（<c>VolcanoSizeScale</c> のクラス doc）。
+        // Following the owner's remark — "this makes the scale adjustment meaningless, so
+        // please fix these at the recommended settings" — **we stopped making the same
+        // quantity be decided by two knobs**. The size is decided by the disaster panel's
+        // intensity slider alone, with the recommended value per form as the baseline
+        // (<c>VolcanoShape.DefaultRadiusOf</c> / <c>DefaultHeightOf</c>; see the
+        // <c>VolcanoSizeScale</c> class doc).
         //
-        // ★★ <b>この 2 つのキーを別の意味で使い回さないこと。</b>
-        //   .cgs には既にプレイヤーが選んだメートル値が入っており、
-        //   同じ名前を別の量に割り当てると**古い値が新しい意味で読まれる**
-        //   （設定の保存値は公開契約である。この MOD が一度踏んだ形）。
-        //   読まなくなっただけなので、.cgs から消す必要も無い。
+        // ★★ <b>Do not recycle these two keys for another meaning.</b>
+        //   The .cgs already holds the metre values the player chose, and assigning the same
+        //   name to a different quantity means **the old value is read with the new meaning**
+        //   (a setting's saved value is a public contract. This mod has walked into that once
+        //   already).
+        //   They are merely no longer read, so there is no need to delete them from the .cgs.
 
         /// <summary>
-        /// 準備（破壊）の前線が隆起の前線より何メートル先を走るか（m）。
-        /// 0 にすると「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
+        /// How many metres ahead of the uplift front the clearing (destruction) front runs (m).
+        /// At 0 it would mean "raise a cell in the same tick it was cleared", leaving no slack.
         /// </summary>
         public static SavedInt VolcanoClearingLeadMetres;
 
         /// <summary>
-        /// 山肌の凹凸の強さ（%）。**0 で今日どおりの滑らかな円錐**、100 が形態ごとの既定、
-        /// 上限は <c>VolcanoRelief.MaxStrengthUnit</c>（150）である。
+        /// The strength of the relief on the mountainside (%). **At 0, today's smooth cone**;
+        /// 100 is the per-form default; the ceiling is
+        /// <c>VolcanoRelief.MaxStrengthUnit</c> (150).
         ///
-        /// これ 1 本だけを出しているのは、起伏の性格（谷の本数・波長・粗さ）が
-        /// 形態ごとに <c>Core/Volcano/VolcanoRelief</c> の表で決まっていて、
-        /// プレイヤーが決めるのは「どのくらい効かせるか」だけだからである。
-        /// **つまみを増やさない。**
+        /// Only this one knob is exposed because the character of the relief (the number of
+        /// gullies, the wavelength, the roughness) is decided per form by the table in
+        /// <c>Core/Volcano/VolcanoRelief</c>, and all the player decides is "how strongly to
+        /// apply it".
+        /// **Do not add more knobs.**
         /// </summary>
         public static SavedInt VolcanoReliefStrength;
 
         /// <summary>
-        /// 隆起にかけるゲーム内分。<c>UpliftSchedule.TotalTicksFor</c> が
-        /// 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰めるので、長すぎる値を
-        /// 入れても無言で止まることは無い。
+        /// The in-game minutes spent on the uplift. <c>UpliftSchedule.TotalTicksFor</c> trims
+        /// it at the ceiling of "the summit moves at least 1/64 m per tick", so an excessive
+        /// value can never make it stop silently.
         /// </summary>
         public static SavedInt VolcanoUpliftMinutes;
 
         /// <summary>
-        /// 噴煙を描くか（T7）。**切っても隆起も溶岩もそのまま動く** ——
-        /// 噴火の描画は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
+        /// Whether to draw the eruption plume (T7). **Switch it off and the uplift and the
+        /// lava carry on unchanged** — drawing the eruption is a main-thread-only feature and
+        /// changes not one piece of game state.
         /// </summary>
         public static SavedBool VolcanoEruptionFx;
 
         /// <summary>
-        /// 噴煙の中の雷（火山雷）を描くか。**噴煙の描画とは別に切れる** ——
-        /// 閃光が苦手な人が居るので、噴煙ごと切らせるのは乱暴である。
-        /// <c>VolcanoEruptionFx</c> が切ってあれば、こちらが true でも何も描かない
-        /// （雷は噴煙の中にしか無い。<c>VolcanoCraterFx</c>）。
+        /// Whether to draw the lightning inside the plume (volcanic lightning). **It can be
+        /// switched off separately from drawing the plume** — some people dislike the flashes,
+        /// and making them switch off the plume as well would be heavy-handed.
+        /// If <c>VolcanoEruptionFx</c> is off, nothing is drawn even when this is true
+        /// (the lightning exists only inside the plume. <c>VolcanoCraterFx</c>).
         /// </summary>
         public static SavedBool VolcanoLightningFx;
 
         /// <summary>
-        /// 噴火の音を鳴らすか。**切っても隆起も溶岩も噴煙もそのまま動く** ——
-        /// 音は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
+        /// Whether to play the sound of the eruption. **Switch it off and the uplift, the lava
+        /// and the plume all carry on unchanged** — sound is a main-thread-only feature and
+        /// changes not one piece of game state.
         ///
-        /// ★ 音量そのものはここでは持たない。**プレイヤーの効果音スライダーと
-        ///   ミュートがそのまま効く**（<c>VolcanoEruptionAudio</c> のクラス doc）ので、
-        ///   2 本目の音量つまみを作ると、どちらが効いているのか分からなくなる。
+        /// ★ The volume itself does not live here. **The player's effects volume slider and
+        ///   mute apply directly** (see the <c>VolcanoEruptionAudio</c> class doc), so a
+        ///   second volume knob would leave nobody able to tell which one is in effect.
         /// </summary>
         public static SavedBool VolcanoEruptionSound;
 
         /// <summary>
-        /// 火口から出す溶岩の本数（T8）。**0 で完全に無効**（溶岩も着火も出ない）。
-        /// 上限は <c>VolcanoLava.MaxFlows</c> が使う側でクランプする。
+        /// The number of lava flows issuing from the crater (T8). **0 disables it completely**
+        /// (no lava and no ignition). The ceiling is clamped on the consuming side by
+        /// <c>VolcanoLava.MaxFlows</c>.
         /// </summary>
         public static SavedInt VolcanoLavaFlows;
 
         /// <summary>
-        /// 溶岩の通り道に火を付けるか（T8）。**切っても溶岩は流れる**（見た目だけになる）。
+        /// Whether to set fire along the lava's path (T8). **Switch it off and the lava still
+        /// flows** (it becomes purely visual).
         /// </summary>
         public static SavedBool VolcanoLavaFire;
 
         /// <summary>
-        /// 溶岩の面を描くか（T9）。**切っても溶岩は流れ、地面を焦がし、建物に火を付ける**
-        /// —— 描画は main スレッドだけの機能で、ゲームの状態を 1 つも変えない。
+        /// Whether to draw the lava surface (T9). **Switch it off and the lava still flows,
+        /// still scorches the ground and still sets buildings on fire** — drawing is a
+        /// main-thread-only feature and changes not one piece of game state.
         /// </summary>
         public static SavedBool VolcanoLavaRender;
 
         /// <summary>
-        /// 斜面を下る土煙の帯（「火砕流」の代用）を出すか。
-        /// **これは火砕流の再現ではない** —— ゲームに火砕流のエフェクトは 1 つも無く、
-        /// 出しているのは建物崩壊の粉塵を溶岩の経路へ流したものである
-        /// （<c>VolcanoPyroclasticFx</c> のクラス doc）。
-        /// **切っても噴火も溶岩も何も変わらない**（この帯は何も壊さない）。
+        /// Whether to produce the band of dust running down the slope (the stand-in for a
+        /// "pyroclastic flow").
+        /// **This is not a reproduction of a pyroclastic flow** — the game has no pyroclastic
+        /// flow effect at all, and what is produced is the dust from a building collapse sent
+        /// down the lava's path (see the <c>VolcanoPyroclasticFx</c> class doc).
+        /// **Switching it off changes nothing about the eruption or the lava** (the band
+        /// destroys nothing).
         /// </summary>
         public static SavedBool VolcanoPyroclasticFx;
 
         /// <summary>
-        /// 火山性地震（群発 ＋ 微動）でカメラを揺らすか。**既定 ON。**
+        /// Whether volcanic earthquakes (swarms plus tremor) shake the camera. **ON by default.**
         ///
-        /// ★ 既定 ON にできる理由は②の <c>EarthquakeShakeBoost</c> と違う。
-        ///   あちらは<b>バニラの地震のカメラ揺れを差し替える</b>ので、既定を変えると
-        ///   MOD を入れた人のバニラ体験が変わる。⑤の火山は
-        ///   **プレイヤーが自分で起こした⑤自身の現象**で、揺れないほうが不自然である。
+        /// ★ The reason it can be ON by default differs from ②'s <c>EarthquakeShakeBoost</c>.
+        ///   That one <b>replaces the camera shake of vanilla's earthquakes</b>, so changing
+        ///   its default would change the vanilla experience of anyone who installs the mod.
+        ///   ⑤'s volcano is **⑤'s own phenomenon, which the player raised themselves**, and
+        ///   it would be stranger for it not to shake.
         ///
-        /// ★ 切ると揺れが止まるだけ。**建物は元から 1 棟も壊していない**
-        ///   （<c>VolcanoTremorShake</c> のクラス doc）。
+        /// ★ Switching it off merely stops the shaking. **It never destroyed a single building
+        ///   to begin with** (see the <c>VolcanoTremorShake</c> class doc).
         /// </summary>
         public static SavedBool VolcanoQuake;
 
-        /// <summary>形態の保存値（公開契約）。<c>VolcanoForm</c> と同じ番号。</summary>
+        /// <summary>The saved values for the form (a public contract). The same numbers as <c>VolcanoForm</c>.</summary>
         public const int VolcanoShapeShield = 0;
         public const int VolcanoShapeStrato = 1;
         public const int VolcanoShapeDome = 2;
@@ -297,219 +328,253 @@ namespace DisasterPlus.Game
             }
 
             FireWhirlEnabled      = new SavedBool("fireWhirlEnabled", FileName, true, true);
-            // ★★ **キーを打ち直した（2026-08-22）。** 実機報告「火災旋風の発生が
-            //    多すぎます。発生トリガーになる範囲を 3*3 倍にして」。
+            // ★★ **The keys were renamed (2026-08-22).** Report from the game: "fire whirls
+            //    happen far too often. Make the range that triggers them 3*3 times bigger."
             //
-            //    既定値を書き換えるだけでは<b>既に遊んでいる人には何も起きない</b> ——
-            //    SavedInt の既定値はキーが .cgs に無いときしか効かないので、
-            //    150/12 が保存済みのプレイヤーは古い（出すぎる）ままになる。
-            //    だからキーごと新しくする。旧キーは下で退役として宣言だけ残す。
+            //    Simply rewriting the default <b>does nothing for anyone already playing</b> —
+            //    a SavedInt's default only applies when the key is absent from the .cgs, so a
+            //    player with 150/12 saved would stay on the old (too frequent) values.
+            //    So the keys themselves are new. The old keys are declared below, retired.
             //
-            //    半径 3 倍・棟数 9 倍 ＝ **面積あたりの密度は同じまま、必要な
-            //    火事の規模だけが 9 倍**になる。実際の火災旋風も、都市規模の
-            //    大火災でしか立たない。
+            //    3× the radius and 9× the building count = **the density per unit area stays
+            //    the same, and only the scale of fire required goes up 9×**. Real fire whirls
+            //    likewise only stand up in a city-scale conflagration.
             DetectRadius          = new SavedInt("fwDetectRadius2", FileName, 450, true);
             DetectCount           = new SavedInt("fwDetectCount2", FileName, 108, true);
 
-            // ★★ バニラ（DLC）の竜巻を止める。実機報告
-            //    「DLC の竜巻が発生して消えないバグが発生しています。
-            //      バニラの竜巻は発生しないようにしてください」。
-            //    火災旋風そのものは CreateDisaster を直に呼ぶので影響を受けない
-            //    （VanillaTornadoSuppressor のクラス doc）。
+            // ★★ Stops vanilla's (the DLC's) tornado. Report from the game:
+            //    "there's a bug where the DLC tornado spawns and never goes away.
+            //      Please stop vanilla tornadoes from spawning."
+            //    The fire whirl itself calls CreateDisaster directly and is unaffected
+            //    (see the VanillaTornadoSuppressor class doc).
             NoVanillaTornado      = new SavedBool("fwNoVanillaTornado", FileName, true, true);
 
-            // ★★ 海溝型地震（2026-08-22、所有者の依頼）。**津波を連れてくるのは
-            //    この地震だけ**で、バニラの断層型地震には付かない。
+            // ★★ The trench earthquake (2026-08-22, the owner's request). **This is the only
+            //    earthquake that brings a tsunami**; vanilla's fault earthquakes do not.
             TrenchQuakeEnabled    = new SavedBool("eqTrenchQuake", FileName, true, true);
             MaxLifetimeMinutes    = new SavedInt("fwMaxLifetime", FileName, 10, true);
             SpreadStrength        = new SavedInt("fwSpreadStrength", FileName, 3, true);
             MinSeparation         = new SavedInt("fwMinSeparation", FileName, 300, true);
-            // 競合MOD（NDR）が居るときは既定 OFF。あちらが同じ解放をするので二重にやらない
-            // （仕様 3.2 / 3.3(a)）。手動で ON にはできる。
+            // OFF by default when the conflicting mod (NDR) is present. It performs the same
+            // unlock, so we do not do it twice (spec 3.2 / 3.3(a)). It can still be switched
+            // ON by hand.
             //
-            // SavedBool の既定値はキーがまだ .cgs に無いときだけ効く。よって既に選択した
-            // プレイヤーの値は保たれ、移行処理も要らない。新設キーを .exists で判定する
-            // 方式（全員 false になる）の罠にも掛からない。
+            // A SavedBool's default only applies while the key is absent from the .cgs, so a
+            // player who has already chosen keeps their value and no migration is needed. It
+            // also avoids the trap of deciding on a new key's .exists (which is false for
+            // everyone).
             IntensityUnlock       = new SavedBool("intensityUnlock", FileName, !ModCompat.NdrPresent, true);
             EarthquakeDamageOwner = new SavedInt("eqDamageOwner", FileName, EarthquakeOwnerOther, true);
-            // 診断オーバーレイ。既定は OFF（開発者向け機能なので一般プレイヤーには出さない）。
+            // The diagnostic overlay. OFF by default (a developer feature, not shown to
+            // ordinary players).
             OverlayEnabled        = new SavedBool("diagOverlayEnabled", FileName, false, true);
             OverlayHotkey         = new SavedInt("diagOverlayHotkey", FileName, (int)KeyCode.F11, true);
             LogChannelMask        = new SavedInt("diagLogChannels", FileName,
                                                   DisasterPlus.Core.Diagnostics.LogChannel.DefaultMask, true);
 
             ForecastEnabled  = new SavedBool("forecastEnabled", FileName, true, true);
-            // ★ 退役キー。読む場所はもう無いが、キーは公開契約なので宣言を残す
-            //   （ForecastButtonX の doc。別の意味で再利用しないこと）。
+            // ★ Retired keys. Nothing reads them any more, but a key is a public contract, so
+            //   the declarations stay (see the ForecastButtonX doc. Do not reuse them for
+            //   another meaning).
             ForecastButtonX  = new SavedInt("forecastButtonX", FileName, -1, true);
             ForecastButtonY  = new SavedInt("forecastButtonY", FileName, -1, true);
 
             EarthquakeEnabled = new SavedBool("earthquakeEnabled", FileName, true, true);
-            // ★★ **退役キー 2 本（2026-08-22）。** 火災旋風の発生条件は
-            //    fwDetectRadius2 / fwDetectCount2 へ移した（上の doc）。
-            //    **同じキーを別の意味で使い回さないこと。**
+            // ★★ **Two retired keys (2026-08-22).** The fire whirl's spawn conditions moved to
+            //    fwDetectRadius2 / fwDetectCount2 (see the doc above).
+            //    **Do not recycle these keys for another meaning.**
             new SavedInt("fwDetectRadius", FileName, 150, true);
             new SavedInt("fwDetectCount", FileName, 12, true);
 
-            // ★ 退役キー。ForecastButtonX/Y と全く同じ扱い（同 doc）。
+            // ★ Retired keys. Treated exactly like ForecastButtonX/Y (see that doc).
             EarthquakeButtonX = new SavedInt("earthquakeButtonX", FileName, -1, true);
             EarthquakeButtonY = new SavedInt("earthquakeButtonY", FileName, -1, true);
-            // 既定 ON にできるのは、強度 55（バニラ既定）で追加分が厳密に 0 になり、
-            // そのとき CameraShakeBooster が m_cameraShake に一切書き込まないから
-            // ——つまり既定の地震では挙動がバニラとビット単位で同一になる
-            // （ShakeWaveform.IntensityFactor とそのユニットテストが固定している）。
+            // It can be ON by default because at intensity 55 (vanilla's default) the addition
+            // is exactly 0, and CameraShakeBooster then writes nothing at all to m_cameraShake
+            // — that is, on a default earthquake the behaviour is bit-for-bit identical to
+            // vanilla (pinned by ShakeWaveform.IntensityFactor and its unit tests).
             EarthquakeShakeBoost = new SavedBool("eqShakeBoost", FileName, true, true);
 
-            // ★ 第 2 層は必ず既定 OFF にする（計画「第 2 層 — 足す」の共通規則）。
-            //    バニラに存在しない挙動を既定で入れると、プレイヤーは
-            //    「地震のあと勝手に津波が来る」原因が MOD だと気付く手段を持たない。
-            //    上の EarthquakeShakeBoost が既定 ON にできるのは、既定の強度で
-            //    追加分が厳密に 0 ＝ バニラとビット単位で同一になるからで、
-            //    こちらにはその逃げ道が無い。
+            // ★ The second layer is always OFF by default (the common rule of the plan's
+            //    "second layer — adding"). Enable behaviour that does not exist in vanilla by
+            //    default and the player has no way of realising that "a tsunami arrives by
+            //    itself after an earthquake" comes from a mod.
+            //    EarthquakeShakeBoost above can be ON by default because at the default
+            //    intensity its addition is exactly 0, i.e. bit-for-bit identical to vanilla;
+            //    this one has no such escape.
             EarthquakeTsunamiChain = new SavedBool("eqTsunamiChain", FileName, false, true);
-            // ゲーム内分。範囲 5〜120 はスライダー側で縛る（.cgs の値は公開契約なので
-            // 範囲外の値が入っていても読み捨てず、そのまま使う——遅延が長いだけで
-            // 壊れる値ではない）。
+            // In-game minutes. The range 5-120 is enforced by the slider (a .cgs value is a
+            // public contract, so an out-of-range value is not discarded but used as-is — the
+            // delay is merely long, not a broken value).
             EarthquakeTsunamiDelayMinutes = new SavedInt("eqTsunamiDelay", FileName, 30, true);
 
-            // ★ 第 2 層。こちらも必ず既定 OFF（上の EarthquakeTsunamiChain と同じ理由）。
-            //    しかも津波より重い —— これは**バニラなら倒れなかった建物を倒す**。
-            //    既定で入れると、プレイヤーは高層ビルが崩れた原因が MOD だと
-            //    気付く手段を持たない（LongPeriodDamage のクラス doc）。
+            // ★ Second layer. This one is likewise always OFF by default (the same reason as
+            //    EarthquakeTsunamiChain above). It is heavier than the tsunami, moreover —
+            //    it **collapses buildings vanilla would have left standing**.
+            //    Enable it by default and the player has no way of realising that a tower
+            //    block came down because of a mod (see the LongPeriodDamage class doc).
             EarthquakeLongPeriod = new SavedBool("eqLongPeriod", FileName, false, true);
-            // 0〜10。0 で完全に無効（LongPeriodResponse.ExtraCollapseChance が
-            // 厳密に 0 を返す）。範囲はスライダー側で縛るが、.cgs の値は公開契約なので
-            // 範囲外が入っていても読み捨てず、使う側でクランプする。
+            // 0-10. 0 disables it completely (LongPeriodResponse.ExtraCollapseChance returns
+            // exactly 0). The range is enforced by the slider, but a .cgs value is a public
+            // contract, so an out-of-range value is not discarded; the consuming side clamps it.
             EarthquakeLongPeriodStrength = new SavedInt("eqLongPeriodStrength", FileName, 3, true);
-            // 0〜10。0 で完全に無効（DistantDamage が厳密に 0 を返す）。
-            // ★ 既定 6（このフィールドの doc）。.cgs の値は公開契約なので、
-            //   範囲外が入っていても読み捨てず、使う側でクランプする。
+            // 0-10. 0 disables it completely (DistantDamage returns exactly 0).
+            // ★ Default 6 (see this field's doc). A .cgs value is a public contract, so an
+            //   out-of-range value is not discarded; the consuming side clamps it.
             EarthquakeTrenchDamageStrength =
                 new SavedInt("eqTrenchDamageStrength", FileName, 6, true);
 
-            // ★ 第 2 層その 3。既定 OFF（ModSettings.EarthquakeSeismogram の doc）。
-            //    OFF のあいだ、記録も描画もカメラの揺れも**今日と 1 ビットも違わない**。
+            // ★ The third second-layer item. OFF by default (see the
+            //    ModSettings.EarthquakeSeismogram doc).
+            //    While it is OFF, the recording, the drawing and the camera shake are
+            //    **not one bit different from today**.
             EarthquakeSeismogram = new SavedBool("eqSeismogram", FileName, false, true);
 
-            // ④台風。パネルの表示そのものは④が発生させない限り何も起きないので、
-            // 有効化は既定 ON でよい（②の EarthquakeEnabled と同じ扱い）。
-            // 台風を実際に起こすのはプレイヤーの明示的な操作だけである（T3）。
+            // ④ typhoon. Simply displaying the panel does nothing unless ④ raises something,
+            // so enabling it can be ON by default (the same treatment as ②'s
+            // EarthquakeEnabled). A typhoon is only ever raised by an explicit player action
+            // (T3).
             TyphoonEnabled = new SavedBool("typhoonEnabled", FileName, true, true);
-            // ★ 退役キー。ForecastButtonX/Y と全く同じ扱い（同 doc）。
+            // ★ Retired keys. Treated exactly like ForecastButtonX/Y (see that doc).
             TyphoonButtonX = new SavedInt("typhoonButtonX", FileName, -1, true);
             TyphoonButtonY = new SavedInt("typhoonButtonY", FileName, -1, true);
-            // 台風の強度。①が 255 まで解放済み（IntensityUnlock）。範囲 10〜255 は
-            // スライダー側で縛るが、.cgs の値は公開契約なので範囲外が入っていても
-            // 読み捨てず、使う側（TyphoonController.ClampIntensity）でクランプする。
-            // ゲーム自身の嵐は 55。既定 120 はそれよりはっきり強いが、
-            // 上限 255 ほど極端でもない値として選んだ。
+            // The typhoon's intensity. ① has already unlocked it to 255 (IntensityUnlock). The
+            // range 10-255 is enforced by the slider, but a .cgs value is a public contract, so
+            // an out-of-range value is not discarded; the consuming side
+            // (TyphoonController.ClampIntensity) clamps it.
+            // The game's own storm is 55. The default of 120 was chosen as clearly stronger
+            // than that without being as extreme as the ceiling of 255.
             TyphoonIntensity = new SavedInt("typhoonIntensity", FileName, 120, true);
 
-            // ★ 風害は既定 ON。②の第 2 層（津波連鎖・長周期）と判断が違う理由は
-            //    TyphoonWind のクラス doc —— 台風はプレイヤーが明示的に起こすので、
-            //    起きたことの原因が取り違えられない。設計書 §4.3 も既定 ON を指定。
+            // ★ Wind damage is ON by default. The reason this call differs from ②'s second
+            //    layer (the tsunami chain, long-period) is in the TyphoonWind class doc —
+            //    a typhoon is raised explicitly by the player, so what happened cannot be
+            //    misattributed. Design doc §4.3 also specifies ON by default.
             TyphoonWindDamage = new SavedBool("typhoonWind", FileName, true, true);
-            // 0〜10。0 で完全に無効（WindDamageModel.CollapseChance が厳密に 0 を返す）。
-            // 範囲はスライダーが縛るが、.cgs の値は公開契約なので使う側でクランプする。
+            // 0-10. 0 disables it completely (WindDamageModel.CollapseChance returns exactly 0).
+            // The range is enforced by the slider, but a .cgs value is a public contract, so
+            // the consuming side clamps it.
             TyphoonWindStrength = new SavedInt("typhoonWindStrength", FileName, 3, true);
 
-            // ★ 危険半円（進行方向のどちら側を強くするか）。**既定は北半球＝右**。
-            //    実在の台風では渦の回転と移動が足し算になる側が強く、北半球では
-            //    進行方向の右、南半球では左になる（TrackBias のクラス doc）。
-            //    既定を false（＝北半球）にするのは、CS のマップの大半が
-            //    北半球の街を想定して作られているからで、物理的な根拠ではない。
+            // ★ The dangerous semicircle (which side of the direction of travel is stronger).
+            //    **The default is the northern hemisphere = the right.**
+            //    In a real typhoon the stronger side is the one where the rotation of the
+            //    vortex and the movement add together, which in the northern hemisphere is to
+            //    the right of travel and in the southern hemisphere to the left (see the
+            //    TrackBias class doc).
+            //    The default of false (i.e. the northern hemisphere) is because most CS maps
+            //    are built assuming a northern-hemisphere city, not for any physical reason.
             TyphoonSouthernHemisphere =
                 new SavedBool("typhoonSouthernHemisphere", FileName, false, true);
 
-            // ★ 既定 ON（風害と同じ理由）。ただしこれは**セーブに焼き付く状態を触る
-            //    唯一の機能**なので、復元経路は 3 箇所（終了時・アンロード時・保存時）
-            //    から呼ばれる（TyphoonFlood のクラス doc）。
-            // ★★ 雲の中の稲妻（2026-08-25、所有者の指示「時々台風の雲の中から
-            //    稲妻を発生させる」）。**バニラの落雷は雨の上限で封じてある。**
+            // ★ ON by default (the same reason as wind damage). But this is **the only feature
+            //    that touches state which gets burnt into the save**, so the restore path is
+            //    called from three places (on end, on unload and on save) (see the
+            //    TyphoonFlood class doc).
+            // ★★ Lightning inside the cloud (2026-08-25, the owner's instruction: "have
+            //    lightning come out of the typhoon's cloud from time to time").
+            //    **Vanilla's lightning is sealed off by the rain ceiling.**
             TyphoonLightning    = new SavedBool("typhoonLightning", FileName, true, true);
 
             TyphoonFloodEnabled = new SavedBool("typhoonFlood", FileName, true, true);
             TyphoonFloodStrength = new SavedInt("typhoonFloodStrength", FileName, 3, true);
 
-            // ★★ **退役キー 2 本。** 随伴竜巻は撤去された（上の doc）。
-            //    宣言だけ残し、読む場所は 1 つも無い。**別の意味で再利用しないこと。**
+            // ★★ **Two retired keys.** The accompanying tornado was removed (see the doc
+            //    above). Only the declarations remain; nothing reads them.
+            //    **Do not reuse them for another meaning.**
             TyphoonTornadoes = new SavedBool("typhoonTornado", FileName, false, true);
             TyphoonTornadoCount = new SavedInt("typhoonTornadoCount", FileName, 1, true);
 
-            // ★ 竜巻並みの局所被害。**新しいキーである**（退役キーを詰め直していない）。
-            //    既定 ON —— 風害と同じ理由で、台風はプレイヤーが明示的に起こすので
-            //    起きたことの原因が取り違えられない。強さ 0 で完全に無効になる。
+            // ★ Tornado-strength local damage. **These are new keys** (the retired keys were
+            //    not recycled). ON by default — the same reason as wind damage: a typhoon is
+            //    raised explicitly by the player, so what happened cannot be misattributed.
+            //    A strength of 0 disables it completely.
             TyphoonGustEnabled = new SavedBool("typhoonGust", FileName, true, true);
             TyphoonGustStrength = new SavedInt("typhoonGustStrength", FileName, 3, true);
 
-            // ★ 雲は既定 ON。**見た目だけの機能で、ゲームの状態を 1 バイトも変えない**
-            //    （main スレッドで Graphics.DrawMesh を出すだけ）。切っても他の 5 要素は
-            //    そのまま動く（TyphoonCloud のクラス doc の独立性）。
+            // ★ The cloud is ON by default. **A purely visual feature that changes not one
+            //    byte of game state** (it merely issues Graphics.DrawMesh on the main thread).
+            //    Switching it off leaves the other five elements running unchanged (see the
+            //    independence described in the TyphoonCloud class doc).
             TyphoonCloudEnabled = new SavedBool("typhoonCloud", FileName, true, true);
-            // バニラのスカイドームの雲を濃く・速くする。**存在しない環境がありうる**
-            // （DLC・グラフィック設定。IL 事実文書 §C-2、PARTIAL）。無ければ黙って諦める。
+            // Makes vanilla's sky-dome clouds thicker and faster. **It may not exist in some
+            // environments** (DLC, graphics settings. IL findings document §C-2, PARTIAL).
+            // If it is absent, give up quietly.
             TyphoonVanillaCloudBoost = new SavedBool("typhoonCloudBoost", FileName, true, true);
 
-            // ★ 暴風雨の演出は既定 ON。**ゲームの状態を壊す方向には 1 バイトも動かさない**
-            //    （飛沫は描画だけ、吹き飛ばしは市民と車だけ）。
-            //    ★★ 保存値のキーは公開契約。既存のキーを詰め直さず、末尾に足す。
+            // ★ The storm visuals are ON by default. **They move not one byte in the direction
+            //    of damaging game state** (the spray is drawing only, and the blowing about
+            //    affects only citizens and vehicles).
+            //    ★★ A saved key is a public contract. Do not close up existing keys; append at
+            //    the end.
             TyphoonStormFx = new SavedBool("typhoonStormFx", FileName, true, true);
 
-            // ★ 風の音は既定 ON。**それまで④は音を 1 つも鳴らしていなかった。**
-            //    ★★ 保存値のキーは公開契約。既存のキーを詰め直さず、末尾に足す。
+            // ★ The wind sound is ON by default. **Until then ④ played no sound at all.**
+            //    ★★ A saved key is a public contract. Do not close up existing keys; append at
+            //    the end.
             TyphoonStormSound = new SavedBool("typhoonStormSound", FileName, true, true);
 
-            // ★ ⑤火山は既定 ON。**DLC 非所持を理由に止めない** —— ⑤は Natural
-            //    Disasters を要らない（設計書 §1.4）。しかも⑤は自動では 1 度も
-            //    発火しない（プレイヤーが地点を指し、不可逆であることを確認して
-            //    初めて始まる）ので、既定 ON でも黙って地形が変わることはない。
+            // ★ The ⑤ volcano is ON by default. **Do not disable it on the grounds that the
+            //    DLC is absent** — ⑤ does not need Natural Disasters (design doc §1.4).
+            //    And ⑤ never fires by itself (it only begins once the player has pointed at a
+            //    spot and acknowledged that it is irreversible), so being ON by default never
+            //    silently changes the terrain.
             VolcanoEnabled = new SavedBool("volcanoEnabled", FileName, true, true);
-            // ★ 退役キー。ForecastButtonX/Y と全く同じ扱い（同 doc）。
+            // ★ Retired keys. Treated exactly like ForecastButtonX/Y (see that doc).
             VolcanoButtonX = new SavedInt("volcanoButtonX", FileName, -1, true);
             VolcanoButtonY = new SavedInt("volcanoButtonY", FileName, -1, true);
 
-            // ★ 保存値は公開契約。0=盾状 / 1=成層 / 2=溶岩ドーム の番号を詰め直さない。
-            //    範囲外の値は VolcanoShape.FormOf が既定（成層）へ落とす。
+            // ★ The saved value is a public contract. Do not close up the numbering
+            //    0=shield / 1=strato / 2=lava dome.
+            //    An out-of-range value is dropped to the default (strato) by
+            //    VolcanoShape.FormOf.
             VolcanoShapeSetting = new SavedInt("volcanoShape", FileName, VolcanoShapeStrato, true);
-            // 準備の前線が隆起の前線より何メートル先を走るか。0 にすると
-            // 「壊した直後のセルを同じ tick で上げる」ことになり、余裕が無くなる。
+            // How many metres ahead of the uplift front the clearing front runs. At 0 it would
+            // mean "raise a cell in the same tick it was cleared", leaving no slack.
             VolcanoClearingLeadMetres = new SavedInt("volcanoClearLead", FileName, 96, true);
 
-            // 山肌の凹凸の強さ（%）。0 で今日どおりの滑らかな円錐。
-            // ★ 新しいキーである。既存のキーの名前も既定値も変えていない
-            //   （.cgs は公開契約で、番号も文字列も詰め直さない）。
+            // The strength of the relief on the mountainside (%). At 0, today's smooth cone.
+            // ★ This is a new key. Neither the name nor the default of any existing key was
+            //   changed (the .cgs is a public contract, and neither numbers nor strings are
+            //   closed up).
             VolcanoReliefStrength = new SavedInt("volcanoRelief", FileName, 100, true);
 
-            // 隆起にかけるゲーム内分。UpliftSchedule.TotalTicksFor が
-            // 「山頂が毎 tick 1/64 m 以上動く」上限で切り詰める。
+            // The in-game minutes spent on the uplift. UpliftSchedule.TotalTicksFor trims it
+            // at the ceiling of "the summit moves at least 1/64 m per tick".
             VolcanoUpliftMinutes = new SavedInt("volcanoUpliftMinutes", FileName, 30, true);
 
-            // 噴煙を描くか。切っても隆起は止まらない（描画は main スレッドだけの機能）。
+            // Whether to draw the eruption plume. Switching it off does not stop the uplift
+            // (drawing is a main-thread-only feature).
             VolcanoEruptionFx = new SavedBool("volcanoEruptionFx", FileName, true, true);
-            // 火山雷。既定 ON（噴煙の中で光るのは噴火の見どころである）。
+            // Volcanic lightning. ON by default (flashes inside the plume are one of the
+            // highlights of an eruption).
             VolcanoLightningFx = new SavedBool("volcanoLightningFx", FileName, true, true);
 
-            // 斜面を下る土煙の帯を出すか。既定 ON。
-            // ★ **新しいキーである。既存のキーの名前も既定値も 1 つも変えていない**
-            //   （.cgs は公開契約で、番号も文字列も詰め直さない）。
+            // Whether to produce the band of dust running down the slope. ON by default.
+            // ★ **This is a new key. Not one name or default of an existing key was changed**
+            //   (the .cgs is a public contract, and neither numbers nor strings are closed up).
             VolcanoPyroclasticFx = new SavedBool("volcanoPyroclasticFx", FileName, true, true);
 
-            // 噴火の音を鳴らすか。既定 ON。
-            // ★ **新しいキーである。既存のキーの名前も既定値も 1 つも変えていない**
-            //   （.cgs は公開契約で、番号も文字列も詰め直さない）。同梱 wav が
-            //   無い環境では ON のままでも黙って無音になるだけなので、既定 ON でよい。
+            // Whether to play the sound of the eruption. ON by default.
+            // ★ **This is a new key. Not one name or default of an existing key was changed**
+            //   (the .cgs is a public contract, and neither numbers nor strings are closed up).
+            //   In an environment without the bundled wav, leaving it ON simply results in
+            //   silence, so ON by default is fine.
             VolcanoEruptionSound = new SavedBool("volcanoEruptionSound", FileName, true, true);
 
-            // 火口から出す流れの本数。0 で完全に無効（溶岩も着火も出ない）。
+            // The number of flows issuing from the crater. 0 disables it completely (no lava
+            // and no ignition).
             VolcanoLavaFlows = new SavedInt("volcanoLavaFlows", FileName, 4, true);
-            // 溶岩の通り道に火を付けるか。切っても溶岩は流れる（見た目だけになる）。
+            // Whether to set fire along the lava's path. Switching it off still leaves the
+            // lava flowing (it becomes purely visual).
             VolcanoLavaFire = new SavedBool("volcanoLavaFire", FileName, true, true);
-            // 溶岩の面を描くか。切っても溶岩は流れる（描画は main スレッドだけの機能）。
+            // Whether to draw the lava surface. Switching it off still leaves the lava flowing
+            // (drawing is a main-thread-only feature).
             VolcanoLavaRender = new SavedBool("volcanoLavaRender", FileName, true, true);
 
-            // 火山性地震（群発＋微動）でカメラを揺らすか。既定 ON。
-            // ★ **新しいキーである。既存のキーの名前も既定値も 1 つも変えていない**
-            //   （.cgs は公開契約で、番号も文字列も詰め直さない）。
+            // Whether volcanic earthquakes (swarms plus tremor) shake the camera. ON by default.
+            // ★ **This is a new key. Not one name or default of an existing key was changed**
+            //   (the .cgs is a public contract, and neither numbers nor strings are closed up).
             VolcanoQuake = new SavedBool("volcanoQuake", FileName, true, true);
 
             MigrateEnableFlagsIntoStrength();
@@ -518,40 +583,43 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <b>「有効」チェックと「強さ 0」の二重操作を畳む。</b>
+        /// <b>Folds the "enabled" checkbox and "strength 0" into one operation.</b>
         ///
-        /// ── 所有者の指摘（2026-09-02）────────────────────────────
+        /// ── The owner's remark (2026-09-02) ────────────────────────────
         ///
-        /// &gt; Option パネルの UI で一部重複して操作がしづらいところがあります
+        /// &gt; Parts of the Options panel UI overlap, which makes them awkward to use
         ///
-        /// 風害・局所被害・氾濫・長周期の 4 つは、**同じ機能に対して
-        /// チェックボックスと「0 で無効」のスライダーが両方付いていた**。
-        /// 切り方が 2 通りあると、片方だけ戻したときに
-        /// <b>入っているのに効かない</b>状態になり、画面からは理由が読めない。
+        /// Wind damage, local damage, flooding and long-period all had **both a checkbox and
+        /// a "0 disables it" slider for the same feature**.
+        /// With two ways to switch something off, putting only one of them back leaves it
+        /// <b>on but having no effect</b>, and the screen gives no reason why.
         ///
-        /// つまみはスライダー 1 本に寄せる。チェックは設定画面から降ろした。
+        /// The knob is consolidated into a single slider. The checkbox came off the settings
+        /// screen.
         ///
-        /// ── ★★ 既存の設定を 1 つも変えずに移行する ─────────────────
+        /// ── ★★ Migrate without changing a single existing setting ─────────────────
         ///
-        /// <c>.cgs</c> の値は公開契約なので、<b>キーは消さないし詰め直さない</b>。
-        /// 代わりに<b>意味を 1 度だけ移す</b>:
+        /// A <c>.cgs</c> value is a public contract, so <b>keys are neither deleted nor closed
+        /// up</b>. Instead <b>the meaning is moved exactly once</b>:
         ///
         /// <code>
-        /// チェックが外れていた -> 強さを 0 にする（切っていた事実を保つ）
-        /// そのあとチェックを true に固定 -> 2 度目以降は何もしない
+        /// the checkbox was off -> set the strength to 0 (preserving the fact that it was off)
+        /// then pin the checkbox to true -> nothing happens on any later run
         /// </code>
         ///
-        /// これで**どの組み合わせも今日と同じ挙動になる**:
+        /// That makes **every combination behave the same as today**:
         ///
         /// <list type="bullet">
-        /// <item>チェック ON・強さ 3 → そのまま（効く）</item>
-        /// <item>チェック OFF・強さ 3 → 強さ 0（切れたまま。<b>勝手に有効化しない</b>）</item>
-        /// <item>チェック ON・強さ 0 → そのまま（切れたまま）</item>
+        /// <item>checkbox ON, strength 3 → unchanged (in effect)</item>
+        /// <item>checkbox OFF, strength 3 → strength 0 (stays off. <b>It is never enabled
+        ///   behind the player's back</b>)</item>
+        /// <item>checkbox ON, strength 0 → unchanged (stays off)</item>
         /// </list>
         ///
-        /// ★★ 長周期は<b>既定 OFF</b> だった（バニラなら倒れない建物を倒すため）。
-        ///   真新しい環境でも <c>eqLongPeriod</c> の既定が false なので、
-        ///   ここを通ると強さが 0 に落ちる —— <b>既定 OFF はそのまま保たれる</b>。
+        /// ★★ Long-period was <b>OFF by default</b> (because it collapses buildings vanilla
+        ///   would leave standing). Even in a brand-new environment <c>eqLongPeriod</c>
+        ///   defaults to false, so passing through here drops the strength to 0 —
+        ///   <b>OFF by default is preserved exactly</b>.
         /// </summary>
         private static void MigrateEnableFlagsIntoStrength()
         {
@@ -562,7 +630,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 組ぶんの移行。**冪等** —— 2 度目以降は旗が立っているので何もしない。
+        /// The migration for one pair. **Idempotent** — on any later run the flag is set, so
+        /// it does nothing.
         /// </summary>
         private static void Fold(SavedBool enabled, SavedInt strength)
         {
@@ -572,7 +641,7 @@ namespace DisasterPlus.Game
             enabled.value = true;
         }
 
-        /// <summary>設定値を Core の設定オブジェクトへ詰め替える。Core は SavedInt を知らない。</summary>
+        /// <summary>Transfers the settings into Core's config object. Core knows nothing of SavedInt.</summary>
         public static FireWhirlConfig ToFireWhirlConfig()
         {
             Ensure();

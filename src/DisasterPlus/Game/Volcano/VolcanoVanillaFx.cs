@@ -5,32 +5,33 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ⑤が借りるバニラの粒子エフェクトが、この環境で実際に引けたか。
+    /// Whether the vanilla particle effects ⑤ borrows could actually be looked up in this
+    /// environment.
     ///
-    /// ★ <b>「引けた」＝ 描ける。</b> <see cref="VolcanoVanillaFx"/> はクローンに
-    /// 失敗しても<b>元のプレハブをそのまま描く</b>ので、
-    /// 各項目の <c>bool</c> が**そのまま描画側の門**になっている
-    /// （クローンは色と寿命の改善であって、必要条件ではない）。
-    /// <c>Assumptions</c> の述語もこの同じ値を見る。
+    /// ★ <b>"Looked up" = drawable.</b> <see cref="VolcanoVanillaFx"/> <b>draws the original
+    /// prefab as is</b> even when cloning fails, so each item's <c>bool</c> **is the drawing
+    /// side's gate directly** (the clone is an improvement to the colour and the lifetime, not a
+    /// precondition).
+    /// <c>Assumptions</c>' predicate looks at these same values.
     /// </summary>
     public struct VolcanoVanillaFacts
     {
-        /// <summary>噴煙に使う灰色の煙が引けたか。</summary>
+        /// <summary>Whether the grey smoke used for the plume was looked up.</summary>
         public readonly bool AshResolved;
 
-        /// <summary>火口の炎（<c>Fire Particles</c>）が引けたか。</summary>
+        /// <summary>Whether the crater flames (<c>Fire Particles</c>) were looked up.</summary>
         public readonly bool FlameResolved;
 
-        /// <summary>噴石（<c>Medium Explosion Particles</c>）が引けたか。</summary>
+        /// <summary>Whether the ejecta (<c>Medium Explosion Particles</c>) were looked up.</summary>
         public readonly bool EjectaResolved;
 
-        /// <summary>火砕流もどきの土煙（<c>Collapse Particles</c>）が引けたか。</summary>
+        /// <summary>Whether the pyroclastic lookalike's dust (<c>Collapse Particles</c>) was looked up.</summary>
         public readonly bool DustResolved;
 
         /// <summary>
-        /// <c>RenderManager.instance.CurrentCameraInfo</c> が今 null でないか。
-        /// <c>ParticleEffect.RenderEffect</c> は先頭で <c>CheckRenderDistance</c> /
-        /// <c>Intersect</c> を呼ぶので、**null を渡すと NRE になる**（IL 実測）。
+        /// Whether <c>RenderManager.instance.CurrentCameraInfo</c> is currently non-null.
+        /// <c>ParticleEffect.RenderEffect</c> calls <c>CheckRenderDistance</c> /
+        /// <c>Intersect</c> right at the top, so **passing null gives an NRE** (measured in IL).
         /// </summary>
         public readonly bool CameraInfoResolved;
 
@@ -45,8 +46,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴火の 3 つ（噴煙・炎・噴石）が全部出せるか。
-        /// **<see cref="VolcanoEruptionFx"/> が門にしている式そのもの**である。
+        /// Whether all three parts of the eruption (plume, flames, ejecta) can be emitted.
+        /// **It is the very expression <see cref="VolcanoEruptionFx"/> gates on.**
         /// </summary>
         public bool EruptionUsable
         {
@@ -54,8 +55,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 火砕流もどきを出せるか。**<see cref="VolcanoPyroclasticFx"/> の門そのもの。**
-        /// 噴火の 3 つとは独立に成否が決まるので、検査も別にする。
+        /// Whether the pyroclastic lookalike can be emitted. **The very gate of
+        /// <see cref="VolcanoPyroclasticFx"/>.**
+        /// Its success is decided independently of the three eruption parts, so the check is
+        /// separate too.
         /// </summary>
         public bool PyroclasticUsable
         {
@@ -64,95 +67,101 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// バニラの粒子エフェクトを名前で引き、必要なら複製して抱える置き場。
-    /// **main スレッド専用**（<c>Object.Instantiate</c> と <c>ParticleSystem</c> を触る）。
+    /// The place that looks vanilla particle effects up by name, clones them where needed, and
+    /// holds them. **Main thread only** (it touches <c>Object.Instantiate</c> and
+    /// <c>ParticleSystem</c>).
     ///
-    /// ── なぜ自前メッシュをやめたのか ──────────────────────────────
+    /// ── why the home-made mesh was abandoned ───────────────────────────────────────────────
     ///
-    /// 実機テストで <c>Shader.Find</c> が**組み込みの <c>"Standard"</c> を含めて
-    /// 全ての名前に null を返した**。自前マテリアルの噴煙は 1 粒も描かれていなかった。
-    /// 一方バニラの粒子エフェクトは<b>既に読み込まれ、既に動くマテリアルを持っている</b>。
-    /// 借りるべきものが最初から在った、というのが結論である。
+    /// In live testing, <c>Shader.Find</c> **returned null for every name, including the built-in
+    /// <c>"Standard"</c>**. Not one particle of the home-made-material plume was ever drawn.
+    /// The vanilla particle effects, meanwhile, <b>are already loaded and already have a working
+    /// material</b>. The conclusion is that what we should have borrowed was there all along.
     ///
-    /// ★ 「CS のマテリアルを借りると見えない」（③が確定させた罠）は
-    ///   <b>自前 <c>MeshRenderer</c> / <c>Graphics.DrawMesh</c> の話</b>である。
-    ///   粒子のマテリアルは <c>ParticleSystemRenderer</c> に付いていて per-instance の
-    ///   <c>MaterialPropertyBlock</c> を要求しない（バニラ自身が
-    ///   <c>EffectsWrapper.CreateParticleEffect</c> で借りたマテリアルを差している）。
-    ///   **したがってここには当たらない。** 溶岩の面（<see cref="VolcanoLavaFx"/>）は
-    ///   粒子ではないので、あちらは <see cref="ShaderPool"/> のままで正しい。
+    /// ★ "Borrow a Cities material and it goes invisible" (the trap ③ settled) is
+    ///   <b>about a home-made <c>MeshRenderer</c> / <c>Graphics.DrawMesh</c></b>.
+    ///   A particle's material hangs off the <c>ParticleSystemRenderer</c> and does not demand a
+    ///   per-instance <c>MaterialPropertyBlock</c> (vanilla itself plugs a borrowed material in
+    ///   at <c>EffectsWrapper.CreateParticleEffect</c>).
+    ///   **So it does not apply here.** The lava surface (<see cref="VolcanoLavaFx"/>) is not
+    ///   particles, so that one is right to stay on <see cref="ShaderPool"/>.
     ///
-    /// ── 引き方（2 通りある。どちらも public）─────────────────────────
+    /// ── how to look them up (there are two ways; both are public) ──────────────────────────
     ///
     /// <code>
-    /// EffectManager.instance.m_EffectsWrapper.GetBuiltinEffect(name)  読み込み済み全部
-    /// EffectCollection.FindEffect(name)                               登録済み 186 個だけ
+    /// EffectManager.instance.m_EffectsWrapper.GetBuiltinEffect(name)  everything loaded
+    /// EffectCollection.FindEffect(name)                               only the 186 registered
     /// </code>
     ///
-    /// ⑤が使う 4 つのうち <c>Factory Smoke</c> は <c>EffectCollection</c> に**登録されて
-    /// いない**（`FindEffect` は null を返す）。だから 1 本目が <c>GetBuiltinEffect</c> で、
-    /// <c>FindEffect</c> は保険である。
-    /// <c>GetBuiltinEffect</c> の戻り値は <c>System.Object</c> なので <c>as</c> で受ける
-    /// （IL 実測。型を間違えても例外にならず null になる）。
+    /// Of the four ⑤ uses, <c>Factory Smoke</c> is **not registered** in
+    /// <c>EffectCollection</c> (`FindEffect` returns null). So the first port of call is
+    /// <c>GetBuiltinEffect</c>, and <c>FindEffect</c> is the fallback.
+    /// <c>GetBuiltinEffect</c> returns <c>System.Object</c>, so take it with <c>as</c>
+    /// (measured in IL; getting the type wrong gives null rather than an exception).
     ///
-    /// ── ★ 引けなかったときに何が起きるか ────────────────────────────
+    /// ── ★ what happens when something cannot be looked up ─────────────────────────────────
     ///
-    /// **1 行ログを出して、その 1 つを出さないだけ。** 例外は投げないし、噴火は続く。
-    /// 探索は <see cref="RetryFrames"/> フレームに 1 回までへ間引く
-    /// （<c>FindEffect</c> は見つからないとゲーム側が警告を吐くので、
-    /// 毎フレーム呼ぶと output_log が埋まる）。
+    /// **One line of log, and that one thing is simply not emitted.** No exception is thrown and
+    /// the eruption carries on.
+    /// The search is throttled to at most once every <see cref="RetryFrames"/> frames
+    /// (<c>FindEffect</c> makes the game print a warning when it does not find something, so
+    /// calling it every frame fills up output_log).
     ///
-    /// ── ★ クローンは「改善」であって必要条件ではない ─────────────────────
+    /// ── ★ the clone is an improvement, not a precondition ─────────────────────────────────
     ///
-    /// 複製に失敗したら**元のプレハブをそのまま描く**。色も寿命も可視距離もバニラのまま
-    /// になるが、何も描かれないよりはるかに良い。この設計のおかげで、
-    /// <see cref="ScanFacts"/> の <c>bool</c> が**そのまま描画側の門**になる
-    /// （「検査は通ったのに機能が動かない」という、このプロジェクトで 2 度出た形を作らない）。
+    /// If cloning fails, **the original prefab is drawn as is**. The colour, the lifetime and the
+    /// visibility distance all stay at vanilla's values, which is far better than drawing nothing.
+    /// Thanks to this design, <see cref="ScanFacts"/>'s <c>bool</c> **is the drawing side's gate
+    /// directly** (so we never create the shape, seen twice in this project, of "the check passed
+    /// but the feature does not work").
     ///
-    /// ── ★ 元のプレハブを書き換えないこと（§D-5）───────────────────────
+    /// ── ★ do not rewrite the original prefab (§D-5) ───────────────────────────────────────
     ///
-    /// <c>ParticleSystem.main.startColor</c> / <c>startSize</c> や
-    /// <c>ParticleEffect.m_minLifeTime</c> は**そのプレハブの共有状態**である。
-    /// <c>Fire Particles</c> を直に書き換えると**街じゅうの建物火災の色が変わり**、
-    /// しかもセーブではなくメモリ上に残る。値を変えたいときは必ず複製する。
-    /// 炎（<see cref="Flames"/>）は複製しない ——**そのままの見た目が欲しい**からで、
-    /// だから 1 バイトも書き換えない。
+    /// <c>ParticleSystem.main.startColor</c> / <c>startSize</c> and
+    /// <c>ParticleEffect.m_minLifeTime</c> are **shared state on that prefab**.
+    /// Rewrite <c>Fire Particles</c> directly and **the colour of every building fire in the city
+    /// changes**, and it lingers in memory (though not in the save). Always clone before changing
+    /// a value.
+    /// The flames (<see cref="Flames"/>) are not cloned — **because we want exactly that look** —
+    /// and so not one byte of them is rewritten.
     ///
-    /// ── ★ 静的キャッシュを配列にしない（③が出荷した不具合）─────────────────
+    /// ── ★ do not make the static cache an array (a bug ③ shipped) ─────────────────────────
     ///
-    /// <c>UnityEngine.Object</c> の <c>==</c> は破棄済みを null と等価にするが、
-    /// <c>static GameObject[]</c> に入れるとその自己修復が効かず、
-    /// **2 つ目の都市で無言のまま見えなくなる**。ここは参照 1 個ずつで持ち、
-    /// 毎回その参照そのものを <c>== null</c> で見る。
+    /// <c>UnityEngine.Object</c>'s <c>==</c> makes a destroyed object compare equal to null, but
+    /// put it into a <c>static GameObject[]</c> and that self-repair stops working, so
+    /// **it goes invisible in the second city with no message**. Here they are held as one
+    /// reference each, and every time we test those references themselves with <c>== null</c>.
     /// </summary>
     internal static partial class VolcanoVanillaFx
     {
-        /// <summary>噴煙の元。細い上昇ジェットで、柱そのもの。**基本ゲーム。**</summary>
+        /// <summary>The source of the plume. A narrow rising jet; the column itself. **Base game.**</summary>
         internal const string AshName = "Factory Smoke";
 
-        /// <summary><see cref="AshName"/> が引けないときの代え（より白く太い）。</summary>
+        /// <summary>The substitute for when <see cref="AshName"/> cannot be looked up (whiter and fatter).</summary>
         internal const string AshAltName = "Factory Steam";
 
-        /// <summary>炎。建物火災とまったく同じもの。**基本ゲーム。**</summary>
+        /// <summary>The flames. Exactly the same thing as a building fire. **Base game.**</summary>
         internal const string FlameName = "Fire Particles";
 
-        /// <summary>噴石。初速 100–150 m/s、放出角 0–80°。**基本ゲーム。**</summary>
+        /// <summary>The ejecta. Initial speed 100–150 m/s, emission angle 0–80°. **Base game.**</summary>
         internal const string EjectaName = "Medium Explosion Particles";
 
-        /// <summary>火砕流もどきの土煙。建物崩壊の粉塵。**基本ゲーム。**</summary>
+        /// <summary>The pyroclastic lookalike's dust. The dust of a building collapse. **Base game.**</summary>
         internal const string DustName = "Collapse Particles";
 
-        /// <summary>探し直すまでに空けるフレーム数（<see cref="ShaderPool"/> と同じ間引き）。</summary>
+        /// <summary>Frames to leave before searching again (the same throttling as <see cref="ShaderPool"/>).</summary>
         private const int RetryFrames = 300;
 
-        // ── ★ 配列にしない。参照 1 個ずつ ─────────────────────────
+        // ── ★ not an array. One reference each ──────────────────────────────────────────────
 
         private static GameObject _ashObject;
         private static ParticleEffect _ashClone;
 
         /// <summary>
-        /// 噴煙柱の**傘**に使う 2 個目の複製（淡い灰・粒が大きい・寿命が長い）。
-        /// 引けなくても柱の複製で代用できるので、こちらは<b>門にしない</b>。
+        /// The second clone, used for the plume column's **umbrella** (pale grey, large
+        /// particles, long life).
+        /// If it cannot be looked up, the column's clone stands in for it, so this one is
+        /// <b>not a gate</b>.
         /// </summary>
         private static GameObject _umbrellaObject;
         private static ParticleEffect _umbrellaClone;
@@ -162,29 +171,30 @@ namespace DisasterPlus.Game
         private static ParticleEffect _dustClone;
 
         /// <summary>
-        /// 炎（<c>Fire Particles</c>）。**複製ではなくゲーム自身のプレハブそのもの。**
-        /// ★ 配列にしない。参照 1 個で持ち、毎回 <c>== null</c> で見る。
+        /// The flames (<c>Fire Particles</c>). **The game's own prefab itself, not a clone.**
+        /// ★ Not an array. Held as one reference and tested with <c>== null</c> every time.
         /// </summary>
         private static ParticleEffect _flame;
 
         private static int _ashMiss;
         private static int _ashAltMiss;
 
-        // ★ 傘は**自分の**間引きカウンタを持つ。噴煙柱と共有すると、同じフレームで
-        //   2 回減るので RetryFrames が実質半分になる（引けない環境で探索が倍になる）。
+        // ★ The umbrella has **its own** throttle counter. Share it with the plume column and it
+        //   is decremented twice in the same frame, effectively halving RetryFrames (which
+        //   doubles the searching in an environment where it cannot be looked up).
         private static int _umbrellaMiss;
         private static int _umbrellaAltMiss;
         private static int _flameMiss;
         private static int _ejectaMiss;
         private static int _dustMiss;
 
-        /// <summary>複製に失敗したので、以後は元のプレハブをそのまま使う。</summary>
+        /// <summary>Cloning failed, so from now on use the original prefab as is.</summary>
         private static bool _ashCloneRefused;
         private static bool _umbrellaCloneRefused;
         private static bool _ejectaCloneRefused;
         private static bool _dustCloneRefused;
 
-        /// <summary>「引けなかった」を名前ごとに 1 度だけ名乗るための旗。</summary>
+        /// <summary>Flags for saying "could not be looked up" exactly once per name.</summary>
         private static bool _ashMissLogged;
         private static bool _umbrellaRefusedLogged;
         private static bool _flameMissLogged;
@@ -193,13 +203,14 @@ namespace DisasterPlus.Game
 
         private static bool _inventoryLogged;
 
-        // ── 診断が読むキャッシュ（**bool と int と string だけ**）─────────────
+        // ── the cache the diagnostics read (**bools, ints and strings only**) ───────────────
         //
-        // ★★ IDisasterFeature.WriteDiagnostics は **sim スレッド専用**である。
-        //    そこから Unity のオブジェクトに触ってはいけない —— 参照の == null さえ、
-        //    ネイティブへ降りる比較なので main スレッドの契約の外にある。
-        //    だから診断へ出すのは、main スレッドが解決したときに書いておいた
-        //    この平の値だけにする（Detail / *ResolvedCached が読むのはここ）。
+        // ★★ IDisasterFeature.WriteDiagnostics is **sim thread only**.
+        //    Unity objects must not be touched from there — even a reference's == null is a
+        //    comparison that drops into native code, and so is outside the main thread's
+        //    contract.
+        //    So what goes into the diagnostics is only these plain values, written by the main
+        //    thread when it resolved something (this is what Detail / *ResolvedCached read).
 
         private static bool _ashOk;
         private static bool _flameOk;
@@ -210,25 +221,26 @@ namespace DisasterPlus.Game
         private static bool _ejectaCloned;
         private static bool _dustCloned;
 
-        /// <summary>直近に測った在庫（診断の 1 行に出す）。</summary>
+        /// <summary>The inventory measured most recently (reported on one diagnostic line).</summary>
         private static int _effectCount;
         private static int _particleMaterialCount;
 
         /// <summary>
-        /// <c>ParticleEffect.m_particleSystem</c>（private, <c>[NonSerialized]</c>）。
-        /// <c>InitializeEffect()</c> が実体を作れたかを**複製のときに 1 度だけ**確かめる。
-        /// <c>EmitParticles</c> はこのフィールドを null 検査なしで参照するので、
-        /// 作れていない複製を描画へ渡すと**バニラの中で NRE になる**。
+        /// <c>ParticleEffect.m_particleSystem</c> (private, <c>[NonSerialized]</c>).
+        /// Used to confirm **once, at clone time** that <c>InitializeEffect()</c> managed to build
+        /// the real thing.
+        /// <c>EmitParticles</c> dereferences this field without a null check, so handing a clone
+        /// that was never built to the drawing path gives **an NRE inside vanilla**.
         /// </summary>
         private static readonly System.Reflection.FieldInfo ParticleSystemField =
             typeof(ParticleEffect).GetField("m_particleSystem",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-        /// <summary>噴煙に使うエフェクト。引けなければ null（**呼び出し側が黙って飛ばす**）。</summary>
+        /// <summary>The effect used for the plume. null if it cannot be looked up (**the caller quietly skips it**).</summary>
         internal static ParticleEffect AshPlume()
         {
-            // ★ 解決の結果をここで控える。診断（sim スレッド）は
-            //   Unity のオブジェクトに触れないので、この平の bool を読む。
+            // ★ Note the resolution result here. The diagnostics (sim thread) cannot touch Unity
+            //   objects, so they read this plain bool.
             ParticleEffect resolved = ResolveAsh();
             _ashOk = resolved != null;
             _ashCloned = _ashClone != null;
@@ -239,16 +251,17 @@ namespace DisasterPlus.Game
         {
             if (_ashClone != null) return _ashClone;
 
-            // ★ 間引きカウンタは名前ごとに別にする。1 本にすると、1 つ目が外れた
-            //   フレームで 2 つ目が必ず「まだ探さない」になり、代えが永久に試されない。
+            // ★ Keep the throttle counters separate per name. Make it one and on the frame the
+            //   first one misses the second is always "do not search yet", so the substitute is
+            //   never tried.
             ParticleEffect source = Source(AshName, ref _ashMiss, ref _ashMissLogged);
             if (source == null) source = Source(AshAltName, ref _ashAltMiss, ref _ashMissLogged);
             if (source == null) return null;
 
             if (_ashCloneRefused) return Ready(source) ? source : null;
 
-            // ここへ来たのは複製の参照が死んでいるとき（別の都市・破棄済み）。
-            // 抜け殻を残したまま作り直さない。
+            // We got here because the clone's reference is dead (a different city, or destroyed).
+            // Do not rebuild while leaving the husk behind.
             ReleaseAndDestroy(ref _ashObject, ref _ashClone);
 
             _ashObject = CloneAsh(source);
@@ -257,7 +270,7 @@ namespace DisasterPlus.Game
             {
                 ReleaseAndDestroy(ref _ashObject, ref _ashClone);
                 _ashCloneRefused = true;
-                // ★ 初期化されていないプレハブを描画へ渡さない（Ready の doc）。
+                // ★ Do not hand an uninitialised prefab to the drawing path (the doc of Ready).
                 return Ready(source) ? source : null;
             }
 
@@ -265,10 +278,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴煙柱の**傘**に使う複製。引けない・複製できないときは <c>null</c> を返す ——
-        /// **元のプレハブへは落とさない**。呼び出し側（<see cref="VolcanoEruptionFx"/>）は
-        /// そのとき柱の複製で傘を描くので、素の <c>Factory Smoke</c>（可視 1 km・粒 7）で
-        /// 代用するより見た目が良い。
+        /// The clone used for the plume column's **umbrella**. Returns <c>null</c> when it cannot
+        /// be looked up or cloned — **it does not fall back to the original prefab**. The caller
+        /// (<see cref="VolcanoEruptionFx"/>) then draws the umbrella with the column's clone,
+        /// which looks better than standing in with a raw <c>Factory Smoke</c> (1 km visibility,
+        /// 7 particles).
         /// </summary>
         internal static ParticleEffect AshUmbrella()
         {
@@ -282,9 +296,11 @@ namespace DisasterPlus.Game
             if (_umbrellaClone != null) return _umbrellaClone;
             if (_umbrellaCloneRefused) return null;
 
-            // ★ 元プレハブは噴煙柱と同じものだが、**間引きカウンタは別**にする
-            //   （共有すると同じフレームで 2 回減って RetryFrames が半分になる）。
-            //   「引けなかった」の 1 行だけは名前ごとなので共有でよい。
+            // ★ The source prefab is the same as the plume column's, but **the throttle counters
+            //   are separate** (share them and they are decremented twice in the same frame,
+            //   halving RetryFrames).
+            //   Only the single "could not be looked up" line is per name, so sharing that is
+            //   fine.
             ParticleEffect source = Source(AshName, ref _umbrellaMiss, ref _ashMissLogged);
             if (source == null)
             {
@@ -302,8 +318,9 @@ namespace DisasterPlus.Game
                 ReleaseAndDestroy(ref _umbrellaObject, ref _umbrellaClone);
                 _umbrellaCloneRefused = true;
 
-                // ★ **黙って諦めない。** 1 行だけ名乗る（毎フレームの経路なので
-                //   Warn は使わない。噴火はそのまま続き、傘は柱の複製で描かれる）。
+                // ★ **Do not give up silently.** Say it in one line (this is on the per-frame
+                //   path, so do not use Warn. The eruption carries on as it is and the umbrella
+                //   is drawn with the column's clone).
                 if (!_umbrellaRefusedLogged)
                 {
                     _umbrellaRefusedLogged = true;
@@ -318,19 +335,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 火口の炎。**複製しない** —— バニラの建物火災とまったく同じ見た目が欲しく、
-        /// 1 バイトも書き換えないから共有して安全である（クラス doc の §D-5）。
+        /// The crater flames. **Not cloned** — we want exactly the same look as a vanilla building
+        /// fire, and since not one byte is rewritten, sharing is safe (§D-5 in the class doc).
         ///
-        /// ★★ **1 本目は <c>BuildingProperties.m_fireEffect.m_particleEffect</c> から取る。**
-        ///   <c>BuildingManager.InitializeProperties</c> が
-        ///   <c>m_fireEffect.InitializeEffect()</c> を呼び、<c>FireEffect.CreateEffect</c> が
-        ///   その中で <c>m_particleEffect.InitializeEffect()</c> を呼ぶ（IL 実測）ので、
-        ///   **この経路で届く 1 個は必ず初期化済み**である。名前引きは同じ物に当たる
-        ///   はずだが、当たる保証はどこにも無い。
+        /// ★★ **The first port of call is <c>BuildingProperties.m_fireEffect.m_particleEffect</c>.**
+        ///   <c>BuildingManager.InitializeProperties</c> calls
+        ///   <c>m_fireEffect.InitializeEffect()</c>, and <c>FireEffect.CreateEffect</c> calls
+        ///   <c>m_particleEffect.InitializeEffect()</c> inside it (measured in IL), so
+        ///   **the one that arrives by this path is guaranteed to be initialised**. A name lookup
+        ///   ought to hit the same object, but nothing guarantees it.
         ///
-        /// ★ 初期化されていないプレハブを描画へ渡さないこと。<c>EmitParticles</c> は
-        ///   <c>m_particleSystem</c> を null 検査なしで参照するので（IL 実測）、
-        ///   **バニラの中で NRE になる**。
+        /// ★ Do not hand an uninitialised prefab to the drawing path. <c>EmitParticles</c>
+        ///   dereferences <c>m_particleSystem</c> without a null check (measured in IL), so you
+        ///   get **an NRE inside vanilla**.
         /// </summary>
         internal static ParticleEffect Flames()
         {
@@ -370,8 +387,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>BuildingProperties.m_fireEffect</c>（<c>FireEffect</c>）の粒子。
-        /// **初期化済みが保証されている唯一の経路**（<see cref="Flames"/> の doc）。
+        /// The particles of <c>BuildingProperties.m_fireEffect</c> (a <c>FireEffect</c>).
+        /// **The only path where initialisation is guaranteed** (the doc of <see cref="Flames"/>).
         /// </summary>
         private static ParticleEffect BuildingFireParticles()
         {
@@ -382,7 +399,7 @@ namespace DisasterPlus.Game
                 var properties = Singleton<BuildingManager>.instance.m_properties;
                 if (properties == null) return null;
 
-                // m_fireEffect の宣言型は EffectInfo なので as で降ろす（IL 実測）。
+                // m_fireEffect's declared type is EffectInfo, so cast down with as (measured in IL).
                 var fire = properties.m_fireEffect as FireEffect;
                 return fire == null ? null : fire.m_particleEffect;
             }
@@ -392,11 +409,11 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>噴石。**重力を下向きに直した複製**を返す（元は上向き＝爆炎用）。</summary>
+        /// <summary>The ejecta. Returns **a clone with the gravity turned downwards** (the original points up, for a fireball).</summary>
         internal static ParticleEffect Ejecta()
         {
-            // ★ 解決の結果をここで控える。診断（sim スレッド）は
-            //   Unity のオブジェクトに触れないので、この平の bool を読む。
+            // ★ Note the resolution result here. The diagnostics (sim thread) cannot touch Unity
+            //   objects, so they read this plain bool.
             ParticleEffect resolved = ResolveEjecta();
             _ejectaOk = resolved != null;
             _ejectaCloned = _ejectaClone != null;
@@ -421,18 +438,18 @@ namespace DisasterPlus.Game
             {
                 ReleaseAndDestroy(ref _ejectaObject, ref _ejectaClone);
                 _ejectaCloneRefused = true;
-                // ★ 初期化されていないプレハブを描画へ渡さない（Ready の doc）。
+                // ★ Do not hand an uninitialised prefab to the drawing path (the doc of Ready).
                 return Ready(source) ? source : null;
             }
 
             return _ejectaClone;
         }
 
-        /// <summary>火砕流もどきの土煙。**ほぼ水平に広がる複製**を返す。</summary>
+        /// <summary>The pyroclastic lookalike's dust. Returns **a clone that spreads almost horizontally**.</summary>
         internal static ParticleEffect PyroclasticDust()
         {
-            // ★ 解決の結果をここで控える。診断（sim スレッド）は
-            //   Unity のオブジェクトに触れないので、この平の bool を読む。
+            // ★ Note the resolution result here. The diagnostics (sim thread) cannot touch Unity
+            //   objects, so they read this plain bool.
             ParticleEffect resolved = ResolveDust();
             _dustOk = resolved != null;
             _dustCloned = _dustClone != null;
@@ -456,7 +473,7 @@ namespace DisasterPlus.Game
             {
                 ReleaseAndDestroy(ref _dustObject, ref _dustClone);
                 _dustCloneRefused = true;
-                // ★ 初期化されていないプレハブを描画へ渡さない（Ready の doc）。
+                // ★ Do not hand an uninitialised prefab to the drawing path (the doc of Ready).
                 return Ready(source) ? source : null;
             }
 
@@ -464,7 +481,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 今この環境で描けるカメラ情報。**null を <c>RenderEffect</c> へ渡さないこと。**
+        /// The camera info that can be drawn with in this environment right now.
+        /// **Never pass null to <c>RenderEffect</c>.**
         /// </summary>
         internal static RenderManager.CameraInfo CameraInfo()
         {
@@ -480,12 +498,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// バニラが今フレームぶんとして使っている時間差。
-        /// <b><c>Time.deltaTime</c> ではない。</b> <c>EffectManager.EndRenderingImpl</c> は
-        /// <c>SimulationManager.m_simulationTimeDelta</c> を渡していて（IL 実測）、
-        /// こちらを使うと**一時停止と速度変更にそのまま追随する**。
-        /// 読めなければ 0 を返す ——**0 は「今フレームは 1 粒も出さない」であって、
-        /// 例外でも作り話でもない。**
+        /// The time delta vanilla is using for this frame.
+        /// <b>It is not <c>Time.deltaTime</c>.</b> <c>EffectManager.EndRenderingImpl</c> passes
+        /// <c>SimulationManager.m_simulationTimeDelta</c> (measured in IL), and using that one
+        /// **follows pausing and speed changes directly**.
+        /// Returns 0 if it cannot be read — **0 means "emit not one particle this frame"; it is
+        /// neither an exception nor a fabrication.**
         /// </summary>
         internal static float EffectTimeDelta()
         {
@@ -503,9 +521,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッド専用。** 何が引けるかを調べる。
-        /// <c>Assumptions</c> と描画側の両方がこれを使い、
-        /// **描画側が門にしているのはこの struct の <c>bool</c> そのもの**である。
+        /// **Main thread only.** Probe what can be looked up.
+        /// Both <c>Assumptions</c> and the drawing side use this, and
+        /// **what the drawing side gates on is this struct's <c>bool</c> itself**.
         /// </summary>
         internal static VolcanoVanillaFacts ScanFacts()
         {
@@ -520,13 +538,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 診断に出す 1 行（**英語**）。将来のゲーム更新で黙って何も出なくなったときの
-        /// 唯一の手がかりなので、**何が引けて何が複製できたか**を必ず名乗る。
+        /// The one line reported in the diagnostics (**English**). It is the only clue if a future
+        /// game update makes everything silently stop appearing, so always state
+        /// **what was looked up and what could be cloned**.
         ///
-        /// ★★ **ここから解決を走らせないこと。** 診断は sim スレッドから組み立てられる
-        ///   （<c>FeatureHost.BuildReport</c>）ので、<c>Object.Instantiate</c> はもちろん
-        ///   Unity の参照比較すら踏んではいけない。読むのは main スレッドが
-        ///   書いておいた平の値だけである。
+        /// ★★ **Do not run a resolution from here.** The diagnostics are assembled from the sim
+        ///   thread (<c>FeatureHost.BuildReport</c>), so not only <c>Object.Instantiate</c> but
+        ///   even a Unity reference comparison must not be stepped on. All that is read is the
+        ///   plain values the main thread wrote.
         /// </summary>
         internal static string Detail
         {
@@ -546,16 +565,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 土煙を直近に引けていたか。**診断専用の平の読み取り**で、
-        /// 解決は 1 度も走らせない（<see cref="Detail"/> と同じ理由）。
+        /// Whether the dust was looked up most recently. **A plain read for diagnostics only**; it
+        /// never runs a resolution (the same reason as <see cref="Detail"/>).
         /// </summary>
         internal static bool DustResolvedCached { get { return _dustOk; } }
 
         /// <summary>
-        /// **実機で 1 度だけ在庫を数える**（事実文書の在庫が PARTIAL のままなので）。
-        /// <c>GetEffectList()</c> は <c>Keys.ToArray()</c> で**配列を確保する**ので、
-        /// ここでしか呼ばない。数えられるまでは <see cref="_inventoryLogged"/> を立てない
-        /// （読み込みの途中では辞書がまだ空でありうる）。
+        /// **Count the inventory exactly once in the live game** (the inventory in the facts doc
+        /// is still PARTIAL).
+        /// <c>GetEffectList()</c> **allocates an array** via <c>Keys.ToArray()</c>, so it is only
+        /// called here. <see cref="_inventoryLogged"/> is not set until the count succeeds
+        /// (partway through loading, the dictionary may still be empty).
         /// </summary>
         internal static void LogInventoryOnce()
         {
@@ -577,9 +597,10 @@ namespace DisasterPlus.Game
 
                 Log.Info("volcano effects: " + count + " builtin effect(s), "
                          + _particleMaterialCount + " particle material(s); "
-                         // ★ この 1 行が MISSING なら、⑤は借り物を 1 つも使わない。
-                         //   引けているかどうかを確かめる手段が無くなるためで、
-                         //   確かめずに RenderEffect へ渡すとバニラの中で NRE になる。
+                         // ★ If this one line says MISSING, ⑤ uses not a single borrowed effect.
+                         //   That is because there would be no way of confirming whether one was
+                         //   looked up, and handing one to RenderEffect unconfirmed gives an NRE
+                         //   inside vanilla.
                          + "ParticleEffect.m_particleSystem="
                          + (ParticleSystemField != null ? "ok" : "MISSING") + "; "
                          + AshName + "=" + Probe(wrapper, AshName)
@@ -589,7 +610,8 @@ namespace DisasterPlus.Game
             }
             catch (Exception e)
             {
-                // 数えられなくても噴火は出る。**1 度だけ名乗って以後は黙る。**
+                // The eruption still appears even if the count fails. **Say it once and then keep
+                // quiet.**
                 _inventoryLogged = true;
                 Log.Info("volcano effects: the builtin effect inventory could not be read ("
                          + e.GetType().Name + ")");
@@ -597,12 +619,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッド。レベルアンロードで呼ぶ。** 冪等。
+        /// **Main thread. Call on level unload.** Idempotent.
         ///
-        /// ★ <c>ReleaseEffect()</c> を先に呼ぶこと。<c>ParticleEffect.CreateEffect</c> が
-        ///   作る内側の複製は <b>"Particle Effects" ルート（<c>DontDestroyOnLoad</c>）</b>
-        ///   の下にぶら下がっていて、こちらの <c>GameObject</c> を消しても道連れにならない。
-        ///   飛ばすと**都市を出入りするたびに粒子系が 1 組ずつ残る。**
+        /// ★ Call <c>ReleaseEffect()</c> first. The inner clones that
+        ///   <c>ParticleEffect.CreateEffect</c> builds hang under the
+        ///   <b>"Particle Effects" root (<c>DontDestroyOnLoad</c>)</b> and do not go down with our
+        ///   <c>GameObject</c>.
+        ///   Skip it and **one more set of particle systems is left behind every time the player
+        ///   enters and leaves a city.**
         /// </summary>
         internal static void Destroy()
         {
@@ -611,12 +635,13 @@ namespace DisasterPlus.Game
             ReleaseAndDestroy(ref _ejectaObject, ref _ejectaClone);
             ReleaseAndDestroy(ref _dustObject, ref _dustClone);
 
-            // ★ 爆発と噴石（VolcanoVanillaFx.Blast.cs）の後始末。
+            // ★ Clean up after the blast and the ejecta (VolcanoVanillaFx.Blast.cs).
             DestroyBlast();
 
-            // ★ 炎は**借りているだけ**なので Release も Destroy もしない
-            //   （こちらが初期化していないものを解放すると、ゲームの建物火災を止める）。
-            //   参照を手放すだけ。
+            // ★ The flames are **only borrowed**, so neither Release nor Destroy is called on
+            //   them (release something we did not initialise and you stop the game's building
+            //   fires).
+            //   Just drop the reference.
             _flame = null;
 
             _ashCloneRefused = false;
@@ -641,8 +666,8 @@ namespace DisasterPlus.Game
             _umbrellaCloned = false;
             _ejectaCloned = false;
             _dustCloned = false;
-            // ★ _ashMissLogged などは戻さない（ゲームのビルドに対する事実であって
-            //   都市ごとの状態ではない。④⑤の他の型と同じ判断）。
+            // ★ _ashMissLogged and friends are not reset (they are facts about the build of the
+            //   game, not per-city state. The same call as the other types in ④ and ⑤).
         }
 
         private static void ReleaseAndDestroy(ref GameObject go, ref ParticleEffect clone)
@@ -653,7 +678,8 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // 解放できなくても続ける。GameObject は下で必ず消す。
+                // Carry on even if it cannot be released. The GameObject is destroyed below
+                // regardless.
             }
 
             if (go != null) UnityEngine.Object.Destroy(go);
@@ -662,8 +688,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 名前でバニラのプレハブを引く。**引けなければ null**（例外は出さない）。
-        /// 見つからないあいだは <see cref="RetryFrames"/> フレームに 1 回まで。
+        /// Look a vanilla prefab up by name. **null if it cannot be looked up** (no exception is
+        /// thrown).
+        /// While it is not found, at most once every <see cref="RetryFrames"/> frames.
         /// </summary>
         private static ParticleEffect Source(string name, ref int missCount, ref bool logged)
         {
@@ -681,8 +708,8 @@ namespace DisasterPlus.Game
                 if (!logged)
                 {
                     logged = true;
-                    // ★ Log.Warn はスロットルされない。ここは毎フレームの経路なので
-                    //   Info を 1 回だけ。**欠けても噴火は続く。**
+                    // ★ Log.Warn is not throttled. This is on the per-frame path, so Info once
+                    //   only. **The eruption carries on even with a piece missing.**
                     Log.Info("volcano effects: the game's particle effect \"" + name
                              + "\" could not be looked up in this environment; Disaster + "
                              + "leaves that piece of the eruption out and carries on");
@@ -693,7 +720,7 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 名前でバニラのプレハブを引くだけ。**間引きもログも持たない純粋な走査。**
+        /// Just looks a vanilla prefab up by name. **A pure probe with no throttling and no log.**
         /// </summary>
         private static ParticleEffect Lookup(string name)
         {
@@ -704,14 +731,15 @@ namespace DisasterPlus.Game
                     var wrapper = Singleton<EffectManager>.instance.m_EffectsWrapper;
                     if (wrapper != null)
                     {
-                        // ★ 戻り値は System.Object（IL 実測）。as で受けて型違いも null にする。
+                        // ★ The return type is System.Object (measured in IL). Take it with as, so
+                        //   a type mismatch comes out as null too.
                         var byName = wrapper.GetBuiltinEffect(name) as ParticleEffect;
                         if (byName != null) return byName;
                     }
                 }
 
-                // ★ 保険。Factory Smoke は EffectCollection に**登録されていない**ので
-                //   こちらでは引けないが、Fire Particles などは引ける。
+                // ★ The fallback. Factory Smoke is **not registered** in EffectCollection so it
+                //   cannot be looked up this way, but Fire Particles and the like can.
                 return EffectCollection.FindEffect(name) as ParticleEffect;
             }
             catch

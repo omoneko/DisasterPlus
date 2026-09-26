@@ -3,29 +3,32 @@ using System.Collections.Generic;
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// 「どの地震の話をしているのか」を 1 箇所で決める。
+    /// Decides, in one place, "which earthquake are we talking about".
     ///
-    /// 地震は同時に複数進行しうる（IL 事実文書 §E-1、上限 256）。順位付けが
-    /// 複数箇所に散ると、**同じパネルの別の行が別の地震を指す**という壊れ方をする。
-    /// 実際、この選定ロジックは以前 3 箇所に写しで存在し、そのうち 2 つ
-    /// （<c>EarthquakeReader.SelectDamagingQuake</c> /
-    ///  <c>SeismographRecorder.SelectRecordingQuake</c>）は 1 バイトも違わない複製、
-    /// 残る 1 つ（<c>EarthquakePanel.SelectPrimary</c>）だけが <c>Clearing</c> を
-    /// 含んでいて、収束中の地震について「カーソルの倒壊係数」と「断層帯: 内側」を
-    /// 出していた —— <c>DestroyBuildings</c> の呼び出しは <c>Active</c> 分岐に
-    /// **しか無い**（§A-3）のに、である。
+    /// Several earthquakes can run at once (IL findings doc §E-1, up to 256). Let the
+    /// ranking spread across several places and it breaks in a particular way: **two rows
+    /// of the same panel end up pointing at different earthquakes.** And indeed this
+    /// selection logic used to exist as three copies, two of which
+    /// (<c>EarthquakeReader.SelectDamagingQuake</c> /
+    ///  <c>SeismographRecorder.SelectRecordingQuake</c>) were byte-identical duplicates,
+    /// while the remaining one (<c>EarthquakePanel.SelectPrimary</c>) also included
+    /// <c>Clearing</c> and so reported "collapse factor under the cursor" and "fault band:
+    /// inside" for an earthquake that was winding down — even though the
+    /// <c>DestroyBuildings</c> call exists **only** in the <c>Active</c> branch (§A-3).
     ///
-    /// **順位付けは 1 つだけ、違いは「どの位相を対象に含めるか」だけにする。**
+    /// **One ranking only; the sole difference is which phases are in scope.**
     /// </summary>
     public static class QuakeSelection
     {
         /// <summary>
-        /// 破壊・揺れの計算が**これから走る、あるいは今走っている**地震を 1 個選ぶ。
-        /// 対象は <c>Active</c> と <c>Emerging</c> のみ（<c>Clearing</c> は含まない）。
-        /// 同位なら強度が大きい方、それも同じなら添字が小さい方。無ければ null。
+        /// Picks the one earthquake whose destruction and shaking maths is **about to run,
+        /// or is running now**. Scope is <c>Active</c> and <c>Emerging</c> only
+        /// (<c>Clearing</c> is not included). Ties go to the greater intensity, and then to
+        /// the lower index. Null if there is none.
         ///
-        /// <c>Emerging</c> を含めるのは、揺れの窓（§A-7 の <c>e = frame - activation + 128</c>）が
-        /// <c>Emerging|Active</c> で開くのと、本震前から余裕度を見せたいためである。
+        /// <c>Emerging</c> is in scope because the shaking window (§A-7's
+        /// <c>e = frame - activation + 128</c>) opens on <c>Emerging|Active</c>, and
+        /// because we want to show the margin before the main shock arrives.
         /// </summary>
         public static EarthquakeReading SelectDamaging(IList<EarthquakeReading> quakes)
         {
@@ -56,8 +59,9 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// この位相で破壊判定・揺れの式が動くか。
-        /// **表示側は、これが false の地震について局所係数や断層帯の内外を出してはいけない。**
+        /// Whether the destruction check and the shaking formula run in this phase.
+        /// **The display side must not report local factors or fault-band inside/outside
+        /// for an earthquake where this is false.**
         /// </summary>
         public static bool RunsDamage(EarthquakePhase phase)
         {

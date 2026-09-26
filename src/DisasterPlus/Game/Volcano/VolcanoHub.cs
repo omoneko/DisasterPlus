@@ -3,70 +3,75 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// main スレッドから sim スレッドへ渡す依頼の種類。
+    /// The kinds of request passed from the main thread to the sim thread.
     ///
-    /// **⑤はプレイヤーが地点を指してから始まる。** 自動発生は無い ——
-    /// 地形の変更は不可逆で（§E-13）、セーブに焼き付き、⑤にもアンドゥが無いので、
-    /// 「気づいたら都市の真ん中に山ができていた」は起こしてはいけない（設計書 §7.1）。
+    /// **⑤ only begins once the player picks a spot.** There is no automatic triggering —
+    /// terrain changes are irreversible (§E-13), they are baked into the save, and ⑤ has no undo,
+    /// so "I turned round and there was a mountain in the middle of my city" must never happen
+    /// (design doc §7.1).
     ///
-    /// ★★ <b>確認の窓（<c>Start</c> / <c>Cancel</c>）は 2026-08-21 に撤去した。</b>
-    /// 所有者の指示は「ほかの災害と同じように、タイル → スライダー → 地図をクリックで
-    /// 起きる」である。したがって main が積む依頼は <see cref="Place"/> 1 つだけである
-    /// （[止める] も 2026-08-22 に撤去した。下の注記）。
-    /// **「はい」を待つ依頼を足し直さないこと。**
+    /// ★★ <b>The confirmation window (<c>Start</c> / <c>Cancel</c>) was removed on 2026-08-21.</b>
+    /// The owner's instruction was "like the other disasters: tile → slider → click the map and it
+    /// happens". So the only request main queues is <see cref="Place"/>
+    /// ([Stop] was removed on 2026-08-22 as well. See the note below).
+    /// **Do not add a request that waits for a "yes" back again.**
     /// </summary>
     public enum VolcanoRequest
     {
         None,
 
         /// <summary>
-        /// この地点に火山を作る。**押した時点で決まりである**（確認は無い）。
+        /// Make a volcano at this spot. **It is settled the moment it is pressed** (there is no
+        /// confirmation).
         ///
-        /// sim 側はこの 1 件で「調査 → 準備の着手」まで進む
-        /// （<c>VolcanoState.HandlePlace</c>）。調査そのものは残っている ——
-        /// 建物と道路のグリッドは sim スレッドが所有しているので、
-        /// **影響範囲は main では数えられない**からである。
+        /// On this one item the sim side goes all the way from "survey" to "start the clearing"
+        /// (<c>VolcanoState.HandlePlace</c>). The survey itself remains —
+        /// the building and road grids are owned by the sim thread, so
+        /// **the affected range cannot be counted on main**.
         /// </summary>
         Place,
 
-        // ★ Stop は 2026-08-22 に撤去した。所有者の判断:
-        //   「止めるボタンは不要です。だって実際に噴火を止めることなんて
-        //     現実じゃできないでしょう？」
-        //   ⑤は起こしたら最後まで走る（バニラの災害と同じ）。
-        //   **受け口だけ残さない** —— 誰も積めない依頼は、次に読む人に
-        //   「押す場所が抜けている」と誤読される。
+        // ★ Stop was removed on 2026-08-22. The owner's call:
+        //   "a stop button isn't needed. After all, you can't actually stop an eruption in real
+        //    life, can you?"
+        //   Once triggered, ⑤ runs to the end (the same as the vanilla disasters).
+        //   **Do not leave just the receiving end** — a request nobody can queue gets misread by
+        //   the next person as "the place to press it is missing".
     }
 
     /// <summary>
-    /// 依頼 1 件。④と違い⑤の依頼は**座標を運ぶ**ので、enum ではなくこの値型を渡す。
-    /// <see cref="Kind"/> が <see cref="VolcanoRequest.None"/> のとき
-    /// <see cref="Point"/> は読まれない。
+    /// One request. Unlike ④, ⑤'s requests **carry coordinates**, so this value type is passed
+    /// rather than an enum.
+    /// When <see cref="Kind"/> is <see cref="VolcanoRequest.None"/>, <see cref="Point"/> is not
+    /// read.
     /// </summary>
     public struct VolcanoRequestData
     {
         public readonly VolcanoRequest Kind;
 
-        /// <summary>クリックされたワールド座標（<see cref="VolcanoRequest.Place"/> のときだけ意味を持つ）。</summary>
+        /// <summary>The world coordinates clicked (meaningful only for <see cref="VolcanoRequest.Place"/>).</summary>
         public readonly Vec3 Point;
 
         /// <summary>
-        /// クリックした瞬間に**バニラのスライダーが指していた大きさの倍率**
-        /// （<see cref="VolcanoRequest.Place"/> のときだけ意味を持つ）。1.0 が設定画面
-        /// どおりのサイズで、2.0 なら半径も最終高も 2 倍になる
-        /// （<c>Core.Volcano.VolcanoSizeScale</c>）。
+        /// **The size scale vanilla's slider was pointing at** at the moment of the click
+        /// (meaningful only for <see cref="VolcanoRequest.Place"/>). 1.0 is the size as set on the
+        /// settings screen, and at 2.0 both the radius and the final height double
+        /// (<c>Core.Volcano.VolcanoSizeScale</c>).
         ///
-        /// ★ 実際に何メートルになるかは形態ごとの帯がさらにクランプする。
-        ///   クランプ後の実寸は火山タブの調査の行と診断ダンプが名乗る。
+        /// ★ How many metres it actually becomes is further clamped by each form's band.
+        ///   The real size after clamping is stated by the survey row on the volcano tab and by
+        ///   the diagnostic dump.
         /// </summary>
         public readonly float SizeScale;
 
         /// <summary>
-        /// クリックした瞬間のスライダーの**生値**（0〜255。表示はこの 1/10）。
+        /// The slider's **raw value** at the moment of the click (0–255; the display is a tenth of
+        /// this).
         ///
-        /// ★★ <b><see cref="SizeScale"/> から割り戻さないこと。</b> あちらは
-        ///   <c>VolcanoSizeScale</c> が帯へクランプした後の値なので、上端では
-        ///   複数の生値が同じ倍率に潰れている。**「スライダーがいちばん上か」は
-        ///   生値でしか判定できない**（<c>SuperEruption.IsSuper</c>）。
+        /// ★★ <b>Do not divide it back out of <see cref="SizeScale"/>.</b> That one is the value
+        ///   after <c>VolcanoSizeScale</c> clamped it into a band, so at the top end several raw
+        ///   values collapse onto the same scale. **"Is the slider at the very top" can only be
+        ///   decided from the raw value** (<c>SuperEruption.IsSuper</c>).
         /// </summary>
         public readonly int SizeRaw;
 
@@ -78,7 +83,7 @@ namespace DisasterPlus.Game
             SizeRaw = sizeRaw;
         }
 
-        /// <summary>「依頼なし」。<c>default(VolcanoRequestData)</c> と同じだが、意図を名乗る。</summary>
+        /// <summary>"No request". The same as <c>default(VolcanoRequestData)</c>, but it states the intent.</summary>
         public static VolcanoRequestData None
         {
             get
@@ -91,15 +96,16 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// sim スレッドが Publish し main スレッドが <see cref="Latest"/> を読む。
-    /// ①の <c>ForecastHub</c>・②の <c>EarthquakeHub</c>・④の <see cref="TyphoonHub"/> と同形
-    /// （net35 に <c>System.Collections.Concurrent</c> は無いので素の lock 1 本）。
-    /// <see cref="VolcanoSnapshot"/> は不変なので参照を渡すだけで安全。
+    /// The sim thread publishes and the main thread reads <see cref="Latest"/>.
+    /// The same shape as ①'s <c>ForecastHub</c>, ②'s <c>EarthquakeHub</c> and ④'s
+    /// <see cref="TyphoonHub"/> (net35 has no <c>System.Collections.Concurrent</c>, so it is one
+    /// plain lock).
+    /// <see cref="VolcanoSnapshot"/> is immutable, so passing the reference is safe.
     ///
-    /// 逆向きの経路（配置ツールとパネルの依頼を main → sim へ渡す）も
-    /// **同じ <c>_gate</c> 1 本で守っている。2 本目のロックを足さないこと** ——
-    /// 2 本のロックの取得順という、この MOD がまだ一度も抱えていない種類の問題を
-    /// 作ることになる（<see cref="TyphoonHub"/> のクラス doc が同じ判断を書いている）。
+    /// The reverse path (passing the placement tool's and the panel's requests from main to sim)
+    /// is guarded by **the same single <c>_gate</c>. Do not add a second lock** —
+    /// that would create a lock-acquisition-order problem, a kind of problem this mod has never
+    /// once had (the class doc of <see cref="TyphoonHub"/> records the same call).
     /// </summary>
     public static class VolcanoHub
     {
@@ -112,18 +118,19 @@ namespace DisasterPlus.Game
             lock (_gate) { _latest = snapshot; }
         }
 
-        /// <summary>まだ publish されていなければ null。呼び出し側で判定すること。</summary>
+        /// <summary>null until something has been published. The caller must check.</summary>
         public static VolcanoSnapshot Latest
         {
             get { lock (_gate) { return _latest; } }
         }
 
         /// <summary>
-        /// **main スレッドから。** 依頼を 1 個だけ積む。
+        /// **From the main thread.** Queue exactly one request.
         ///
-        /// 直前の依頼がまだ sim に拾われていなければ**上書きする**（深さ 1 の後勝ち）。
-        /// 押した順ではなく「最後に押したほうが勝つ」で正しい —— 設置と中止を
-        /// 続けて押した人が望んでいるのは後者だけである。
+        /// If the previous request has not yet been picked up by sim, it is **overwritten**
+        /// (depth 1, last wins). "Last pressed wins" rather than "in the order pressed" is
+        /// correct — someone who pressed place and then cancel in quick succession wants only the
+        /// latter.
         /// </summary>
         public static void Request(VolcanoRequestData request)
         {
@@ -131,14 +138,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッドから（表示専用）。** まだ sim に拾われていない依頼。
+        /// **From the main thread (display only).** A request not yet picked up by sim.
         ///
-        /// パネルが「依頼中」を出すためだけに在る。押してから実際に反応するまでは
-        /// **設計上 1 tick かかる**ので、この口が無いと押した直後のパネルは
-        /// 前の状態のままになり、**プレイヤーはもう一度押す**。
+        /// It exists purely so the panel can show "requested". There is **a designed one-tick
+        /// delay** between pressing and anything actually responding, so without this entry point
+        /// the panel right after the press stays in its previous state and
+        /// **the player presses again**.
         ///
-        /// <see cref="TakeRequest"/> と違って**取り出さない**。ここで消費すると
-        /// パネルを開いているかどうかで sim の挙動が変わる。
+        /// Unlike <see cref="TakeRequest"/>, it **does not take it**. Consume it here and sim's
+        /// behaviour would change depending on whether the panel is open.
         /// </summary>
         public static VolcanoRequestData PendingRequest
         {
@@ -146,9 +154,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **sim スレッドから。** 積まれている依頼を取り出し、
-        /// <see cref="VolcanoRequest.None"/> に戻す。**1 tick に 1 回だけ呼ぶこと**
-        /// （2 回呼ぶと 2 回目が必ず None になり、呼び出し順に依存した取りこぼしを作る）。
+        /// **From the sim thread.** Takes the queued request and resets it to
+        /// <see cref="VolcanoRequest.None"/>. **Call it exactly once per tick**
+        /// (call it twice and the second is always None, creating a call-order-dependent dropped
+        /// request).
         /// </summary>
         public static VolcanoRequestData TakeRequest()
         {
@@ -161,15 +170,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルロード／アンロード時。都市をまたいで状態を持ち越さない。
+        /// On level load and unload. Do not carry state across cities.
         /// </summary>
         public static void Clear()
         {
             lock (_gate)
             {
                 _latest = null;
-                // ★ 戻し忘れると、次の都市がロードされた瞬間に
-                //    前の都市で指された地点に山が生え始める。**地形は戻せない。**
+                // ★ Forget to reset it and a mountain starts growing at the spot picked in the
+                //    previous city the instant the next city loads. **Terrain cannot be undone.**
                 _request = VolcanoRequestData.None;
             }
         }

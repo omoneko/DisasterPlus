@@ -8,7 +8,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void SeedMatchesTheVanillaComposition()
         {
-            // IL 事実文書 §A-3: new Randomizer(buildingID | (disasterID << 16))
+            // IL facts document §A-3: new Randomizer(buildingID | (disasterID << 16))
             Assert.Equal(0x0007_0000 | 1234, CollapseThreshold.SeedFor(1234, 7));
             Assert.Equal(1234, CollapseThreshold.SeedFor(1234, 0));
         }
@@ -16,8 +16,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void CollapseIsDrawnBeforeBurn()
         {
-            // 順序が逆だと、倒壊しきい値と出火しきい値が入れ替わったまま
-            // もっともらしい数字が出続ける。
+            // If the order is reversed, the collapse threshold and the burn threshold
+            // stay swapped while plausible-looking numbers keep coming out.
             var rnd = new VanillaRandomizer(CollapseThreshold.SeedFor(4242, 9));
             int expectedCollapse = rnd.Int32(CollapseThreshold.Draws);
             int expectedBurn = rnd.Int32(CollapseThreshold.Draws);
@@ -30,7 +30,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void ThresholdsAreStableForTheSameBuildingAndDisaster()
         {
-            // フレームにもステップにも依存しない、が主張の土台。
+            // "Depends on neither the frame nor the step" is the basis of the claim.
             var a = CollapseThreshold.For(500, 3);
             var b = CollapseThreshold.For(500, 3);
             Assert.Equal(a.Collapse, b.Collapse);
@@ -63,8 +63,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void HitsUsesStrictLessThan()
         {
-            // IL: rnd.Int32(10000) < f * probability * 10000。等号は含まない。
-            // f * p * 10000 == 200 のとき、しきい値 199 は当たり、200 は外れる。
+            // IL: rnd.Int32(10000) < f * probability * 10000. Equality is not included.
+            // When f * p * 10000 == 200, threshold 199 hits and 200 misses.
             Assert.True(CollapseThreshold.Hits(199, 1f, 0.02f));
             Assert.False(CollapseThreshold.Hits(200, 1f, 0.02f));
         }
@@ -78,13 +78,14 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void CollapseDistanceAgreesWithHits()
         {
-            // 「震央から X m 以内なら倒れる」という主張そのものを固定する。
+            // Pins down the claim itself: "it collapses within X m of the epicentre".
             //
-            // Task 5 で署名が変わった。以前の CollapseDistance(threshold, intensity,
-            // probability) は probability を受け取りながらランプの分母を
-            // R = RadiusOf(intensity)（＝全体円盤の幾何）に決め打ちしていたので、
-            // 断層 4 円盤の probability = 1 を渡すと意味の無い数字が返っていた。
-            // 引数を消して、対になる GlobalDiscHits と揃えてある。
+            // The signature changed in Task 5. The old CollapseDistance(threshold,
+            // intensity, probability) took a probability, yet hard-coded the denominator
+            // of the ramp to R = RadiusOf(intensity) (= the geometry of the global disc),
+            // so passing probability = 1 for the four fault discs returned a meaningless
+            // number. The argument has been removed, lining it up with its counterpart
+            // GlobalDiscHits.
             const byte intensity = 100;
             for (int threshold = 0; threshold < 250; threshold += 7)
             {
@@ -92,7 +93,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
 
                 if (limit <= 0f)
                 {
-                    // どの距離でも倒れないこと（震央でも）。
+                    // It must not collapse at any distance (not even at the epicentre).
                     Assert.False(CollapseThreshold.GlobalDiscHits(
                         threshold, SeismicIntensity.At(0f, intensity)));
                     continue;
@@ -118,15 +119,16 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void GlobalDiscHelpersUseTheVanillaProbability()
         {
-            // 2 つの入口が同じ 0.02 を使っていること。片方だけ書き換えると、
-            // 表示された倒壊距離と実際の判定が静かに食い違う。
+            // The two entry points must use the same 0.02. Rewrite only one of them and
+            // the displayed collapse distance and the actual test silently disagree.
             Assert.Equal(
                 CollapseThreshold.Hits(199, 1f, CollapseThreshold.GlobalDiscProbability),
                 CollapseThreshold.GlobalDiscHits(199, 1f));
             Assert.True(CollapseThreshold.GlobalDiscHits(199, 1f));
             Assert.False(CollapseThreshold.GlobalDiscHits(200, 1f));
 
-            // しきい値 0 の建物は震央で必ず倒れ、その境界は R そのものになる。
+            // A building with threshold 0 always collapses at the epicentre, and that
+            // boundary is R itself.
             Assert.Equal(SeismicIntensity.RadiusOf(100),
                          CollapseThreshold.GlobalDiscCollapseDistance(0, 100), 3);
         }

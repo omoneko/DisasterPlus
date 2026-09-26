@@ -7,38 +7,39 @@ using DisasterPlus.Core.Diagnostics;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 状態を 1 ファイルに書き出す。オーバーレイと同じ DiagnosticFormatter を使うので、
-    /// 画面に見えているものとファイルの内容が食い違わない。
+    /// Writes the state out to a single file. It uses the same DiagnosticFormatter as the
+    /// overlay, so what is on screen and what is in the file never disagree.
     ///
-    /// Ctrl+ホットキーは main スレッド（MonoBehaviour.Update）から押される。だが
-    /// IDisasterFeature.WriteDiagnostics（延いては FeatureHost.BuildReport）は
-    /// sim スレッド専用の契約になっている。ここで main スレッドから直接 BuildReport()
-    /// を呼ぶと、その契約を信じて書かれた将来の機能実装（②〜⑤）がロック無しで
-    /// 壊れる可能性があるため、書き出しは「main → 依頼、sim → 組み立て、
-    /// main → ファイル書き出し」の 3 段に分ける。
+    /// The Ctrl+hotkey is pressed on the main thread (MonoBehaviour.Update). But
+    /// IDisasterFeature.WriteDiagnostics (and hence FeatureHost.BuildReport) is contracted as
+    /// sim-thread only. Calling BuildReport() directly from the main thread here could break
+    /// a future feature implementation (② to ⑤) written in good faith on that contract,
+    /// without any lock, so the write is split into three stages: "main → request,
+    /// sim → assemble, main → write the file".
     /// </summary>
     public static class DiagnosticDump
     {
         public const string FileName = "DisasterPlus-diagnostics.txt";
 
-        // main スレッドが立て、sim スレッドが下ろす。1 ビットのフラグなので
-        // lock より Interlocked の方が軽く、デッドロックの心配も無い。
+        // Raised by the main thread and lowered by the sim thread. It is a one-bit flag, so
+        // Interlocked is lighter than a lock and carries no risk of deadlock.
         private static int _requested;
 
-        // sim スレッドが組み立てたレポートを、main スレッドが書き出すまでの受け渡し場所。
-        // DiagnosticReport 自体は不変なので、参照を渡すだけで安全。
+        // The hand-over point for the report the sim thread assembled, until the main thread
+        // writes it out. DiagnosticReport itself is immutable, so passing the reference is all
+        // that is needed.
         private static readonly object _pendingGate = new object();
         private static DiagnosticReport _pendingReport;
 
-        /// <summary>main スレッドから呼ぶ。次の sim tick でダンプ 1 回ぶんが組み立てられる。</summary>
+        /// <summary>Call from the main thread. One dump's worth is assembled on the next sim tick.</summary>
         public static void RequestDump()
         {
             Interlocked.Exchange(ref _requested, 1);
         }
 
         /// <summary>
-        /// sim スレッドから毎 tick 呼ぶ。依頼が立っていれば true を返し、同時にフラグを下ろす
-        /// （1 回の依頼で 2 回組み立てない）。
+        /// Call from the sim thread every tick. Returns true if a request is raised, and
+        /// lowers the flag at the same time (one request never assembles twice).
         /// </summary>
         public static bool ConsumeRequest()
         {
@@ -46,8 +47,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// sim スレッドから呼ぶ。組み立て済みレポートを main スレッドの書き出し待ちに置くだけで、
-        /// ここではファイル I/O を一切行わない（sim tick を止めないため）。
+        /// Call from the sim thread. It only parks the assembled report for the main thread to
+        /// write; no file I/O whatsoever happens here (so as not to stall the sim tick).
         /// </summary>
         public static void SubmitReport(DiagnosticReport report)
         {
@@ -55,8 +56,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// main スレッドから毎フレーム呼ぶ。書き出し待ちのレポートがあれば 1 回だけファイルに書く。
-        /// 何も無ければロックを取るだけで即座に戻るので、毎フレーム呼んでもコストは無視できる。
+        /// Call from the main thread every frame. If a report is waiting, it is written to the
+        /// file exactly once. With nothing waiting it takes the lock and returns immediately,
+        /// so the per-frame cost is negligible.
         /// </summary>
         public static void FlushPendingWrite()
         {
@@ -70,7 +72,7 @@ namespace DisasterPlus.Game
             WriteToFile(report);
         }
 
-        /// <summary>レベルアンロード時。テアダウン中に立った依頼を次の都市へ持ち越さない。</summary>
+        /// <summary>On level unload. Do not carry a request raised during teardown over to the next city.</summary>
         public static void Reset()
         {
             Interlocked.Exchange(ref _requested, 0);

@@ -4,69 +4,80 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 渦に炎をまとわせる。main スレッドからのみ呼ぶこと（Unity オブジェクトを作る）。
+    /// Wraps the vortex in flames. Call only from the main thread (it creates Unity
+    /// objects).
     ///
-    /// CS の<b>マテリアル</b>は借りない。CS のシェーダはエンジンが供給する per-instance
-    /// データを要求するので、素の Renderer に載せると何も描画されないか真っ黒になる。
-    /// <b>借りるのは <c>ShaderPool</c> が取ってくる<u>シェーダだけ</u></b>で、
-    /// <c>Material</c> は必ず自分で作る（2 つの違いは <see cref="ShaderPool"/> のクラス doc）。
+    /// We do not borrow CS's <b>materials</b>. CS's shaders demand per-instance data the
+    /// engine supplies, so putting one on a plain Renderer draws nothing at all or comes
+    /// out pure black. <b>What we borrow is <u>only the shader</u></b>, fetched by
+    /// <c>ShaderPool</c>; we always build the <c>Material</c> ourselves (the difference
+    /// between the two is in the class doc on <see cref="ShaderPool"/>).
     ///
-    /// ★★ <b>シェーダが 1 つも解決しなければ「描かない」。</b>実機テストで
-    ///   <c>Shader.Find</c> が**組み込みの <c>"Standard"</c> を含めて全て null を返した**。
-    ///   ここは以前 <c>?? Shader.Find("Standard")</c> で終わる 3 段の連鎖のあと
-    ///   <c>new Material(s)</c> を無検査で呼んでいたので、
-    ///   <c>Internal_CreateWithShader</c> が <c>NullReferenceException</c> を投げ、
-    ///   それが毎フレームの経路だったため**同じ例外が 6,938 行**出た。
-    ///   ④<c>TyphoonCloud</c> と⑤<c>VolcanoLavaFx</c> は最初から「解決しなければ描かない」
-    ///   経路を持っていて綺麗に FAIL を報告できたので、③も同じ形に揃える。
+    /// ★★ <b>If not one shader resolves, we do not draw.</b> In an in-game test
+    ///   <c>Shader.Find</c> **returned null for everything, including the built-in
+    ///   <c>"Standard"</c>**. This code used to call <c>new Material(s)</c> unchecked
+    ///   after a three-step chain ending in <c>?? Shader.Find("Standard")</c>, so
+    ///   <c>Internal_CreateWithShader</c> threw a <c>NullReferenceException</c> — and
+    ///   since this is a per-frame path, **the same exception appeared on 6,938 lines**.
+    ///   ④'s <c>TyphoonCloud</c> and ⑤'s <c>VolcanoLavaFx</c> had a "if it does not
+    ///   resolve, do not draw" path from the start and could report a clean FAIL, so ③ is
+    ///   brought into the same shape.
     ///
-    /// DispatchEffect を使わないのは、magnitude が粒子密度でしかなく、大きさは
-    /// EffectInfo.SpawnArea 半径でしか変えられないため。旋風は 40〜220m とスケールが
-    /// 大きく変わるので、自前の ParticleSystem の方が素直になる。
+    /// We do not use DispatchEffect because magnitude is nothing but particle density and
+    /// the size can only be changed through the EffectInfo.SpawnArea radius. A whirl
+    /// varies widely in scale, from 40 to 220 m, so a ParticleSystem of our own is the
+    /// more straightforward route.
     ///
-    /// Unity 5.6 の VelocityOverLifetimeModule には orbitalX/Y/Z が無い（2018 以降の追加）。
-    /// 代わりに発生体の Transform 自体を毎フレーム回転させ、Local 空間の速度ベクトルを
-    /// その回転で毎フレーム引き直させることで渦の芯を表現する（回転する発生体 + Local 空間の
-    /// VelocityOverLifetime は 5.x 世代でよく使われた擬似オービタルの手法）。
+    /// Unity 5.6's VelocityOverLifetimeModule has no orbitalX/Y/Z (they were added in
+    /// 2018 and later). Instead we rotate the emitter's own Transform every frame and let
+    /// that rotation redraw the local-space velocity vector every frame, which gives the
+    /// core of the whirl (a rotating emitter plus a local-space VelocityOverLifetime was
+    /// the pseudo-orbital technique commonly used in the 5.x generation).
     /// </summary>
     public static class FireWhirlFlameFx
     {
         private static readonly Dictionary<ushort, GameObject> _objects = new Dictionary<ushort, GameObject>();
 
-        // ★ 配列にしない。参照 1 個で持ち、fake-null の自己修復を効かせる（§4.8）。
+        // ★ Do not make this an array. Hold a single reference so Unity's fake-null
+        //   self-repair still works (§4.8).
         private static Material _flameMaterial;
 
-        // Sync() は毎フレーム呼ばれるので、ここで使う集合は使い回して確保する。
-        // 中身は毎回 Clear() してから使うので、呼び出しをまたいだ値の持ち越しは無い。
+        // Sync() is called every frame, so the collections it uses are allocated once and
+        // reused. Each is Clear()ed before use, so nothing is carried over between calls.
         private static readonly HashSet<ushort> _aliveScratch = new HashSet<ushort>();
         private static readonly List<ushort> _staleScratch = new List<ushort>();
 
-        /// <summary>渦の見た目上の回転速度（度/秒）。旋風の芯を表現するための演出値。</summary>
+        /// <summary>The vortex's apparent rotation speed (degrees per second). A purely
+        /// presentational value, there to give the whirl a core.</summary>
         private const float SpinDegreesPerSecond = 200f;
 
         /// <summary>
-        /// シェーダを探し直すまでに空けるフレーム数（④の <c>TyphoonCloud</c> と同じ間引き）。
-        /// マテリアルが作れない限り <see cref="FlameMaterial"/> は毎フレーム呼ばれるので、
-        /// 素直に書くと探索がセッションのあいだ毎フレーム走る。
+        /// How many frames to leave before looking for a shader again (the same throttle
+        /// as ④'s <c>TyphoonCloud</c>). <see cref="FlameMaterial"/> is called every frame
+        /// for as long as the material cannot be built, so written naively the search
+        /// would run every frame for the whole session.
         /// </summary>
         private const int ShaderRetryFrames = 300;
 
-        /// <summary>解決しなかったときに次に探すまでの残りフレーム数。</summary>
+        /// <summary>How many frames are left before the next search, after one did not
+        /// resolve.</summary>
         private static int _shaderMissCount;
 
-        /// <summary>直近に解決したシェーダの事実（**取れなければ <c>Usable</c> が false**）。</summary>
+        /// <summary>The facts about the most recently resolved shader (**if none was
+        /// obtained, <c>Usable</c> is false**).</summary>
         private static ShaderPick _pick;
 
-        /// <summary>シェーダが解決しないことを <c>Log.Warn</c> で 1 度だけ鳴らしたか。
-        /// **<see cref="Clear"/> で戻さない**（ゲームのビルドに対する事実であって
-        /// 都市ごとの状態ではない。④⑤と同じ判断）。</summary>
+        /// <summary>Whether we have already sounded <c>Log.Warn</c> once about the shader
+        /// not resolving. **Not reset by <see cref="Clear"/>** (it is a fact about the
+        /// build of the game, not per-city state — the same judgement as ④ and ⑤).</summary>
         private static bool _shaderWarned;
 
         /// <summary>
-        /// 診断に出す 1 行（**英語**）。**③の見た目についての唯一の診断出力**である。
-        /// <c>Assumptions</c> は同じ答えを <see cref="ShaderPool"/> から直接引くので、
-        /// ここに「粒子系か」を別の口として生やさない
-        /// （同じ事実の口が 2 つあると、必ず片方が古くなる）。
+        /// The one line we put into the diagnostics (**in English**). It is **the only
+        /// diagnostic output about ③'s appearance**. <c>Assumptions</c> gets the same
+        /// answer straight from <see cref="ShaderPool"/>, so do not grow a second outlet
+        /// here for "is it a particle system?" (with two outlets for the same fact, one of
+        /// them always goes stale).
         /// </summary>
         public static string ShaderDetail
         {
@@ -78,14 +89,16 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>レジストリの内容に合わせてエフェクトを生成・更新・破棄する。</summary>
+        /// <summary>Creates, updates and destroys the effects to match the registry's
+        /// contents.</summary>
         public static void Sync()
         {
             var views = FireWhirlRegistry.Snapshot();
             float dt = Time.deltaTime;
 
-            // ★ 解決は「作る必要が出たとき」に**このフレームで 1 回だけ**行う。
-            //   ループの中で毎回呼ぶと間引きカウンタが渦の数だけ減る。
+            // ★ Resolve when we first need to create something, and **only once in this
+            //   frame**. Calling it on every pass through the loop would decrement the
+            //   throttle counter once per vortex.
             Material flame = null;
             bool flameAsked = false;
 
@@ -98,17 +111,19 @@ namespace DisasterPlus.Game
                 GameObject go;
                 if (!_objects.TryGetValue(v.DisasterId, out go) || go == null)
                 {
-                    // go == null は Unity のフェイク null（都市を跨いで破棄済み）にも当たる。
+                    // go == null also covers Unity's fake null (destroyed across a city
+                    // change).
                     if (!flameAsked)
                     {
                         flameAsked = true;
                         flame = FlameMaterial();
                     }
 
-                    // ★★ ここが「描かない」経路である。**null のまま Create へ進めない。**
-                    //   進めると new Material(null) が NullReferenceException を投げ、
-                    //   毎フレームの経路なのでログが埋まる（クラス doc）。
-                    //   旋風そのもの（固定・延焼・寿命）はこれが無くても動く。
+                    // ★★ This is the "do not draw" path. **Never go on to Create with a
+                    //   null.** Doing so has new Material(null) throw a
+                    //   NullReferenceException, and since this is a per-frame path it
+                    //   buries the log (see the class doc). The whirl itself — the
+                    //   pinning, the spread, the lifetime — works without this.
                     if (flame == null) continue;
 
                     go = Create(v.DisasterId, flame);
@@ -116,13 +131,14 @@ namespace DisasterPlus.Game
                 }
 
                 go.transform.position = new Vector3(v.Center.X, v.Center.Y, v.Center.Z);
-                // 渦を巻いて見せる回転。Configure の VelocityOverLifetime(Local) と組み合わさって
-                // 接線方向の速度ベクトルが毎フレーム引き直され、渦の芯のように見える。
+                // The rotation that makes it look like a swirl. Combined with Configure's
+                // VelocityOverLifetime (Local), the tangential velocity vector is redrawn
+                // every frame, which reads as the core of a whirl.
                 go.transform.Rotate(Vector3.up, SpinDegreesPerSecond * dt, Space.World);
                 Configure(go, v.Radius);
             }
 
-            // 消えた旋風のエフェクトを片付ける。
+            // Tidy away the effects of whirls that have gone.
             _staleScratch.Clear();
             foreach (var kv in _objects)
             {
@@ -136,22 +152,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 炎のマテリアル。**解決できなければ null を返す**（＝描かない）。
-        /// 呼び出し側は必ず null を見ること。
+        /// The flame material. **Returns null if it cannot be resolved** (i.e. do not
+        /// draw). The caller must always check for null.
         /// </summary>
         private static Material FlameMaterial()
         {
             if (_flameMaterial != null) return _flameMaterial;
 
-            // ★ 毎フレーム探しに行かない（④の TyphoonCloud と同じ間引き）。
+            // ★ Do not go looking every frame (the same throttle as ④'s TyphoonCloud).
             if (_shaderMissCount > 0)
             {
                 _shaderMissCount--;
                 return null;
             }
 
-            // ★ Shader.Find が全滅する環境があるので、名前で引けなければ
-            //   読み込み済み Material から**シェーダだけ**を借りる（ShaderPool）。
+            // ★ There are setups where Shader.Find fails across the board, so if we
+            //   cannot look one up by name we borrow **just the shader** off an
+            //   already-loaded Material (ShaderPool).
             _pick = ShaderPool.Resolve(ShaderPreference.Additive);
 
             if (!_pick.Usable)
@@ -159,8 +176,9 @@ namespace DisasterPlus.Game
                 if (!_shaderWarned)
                 {
                     _shaderWarned = true;
-                    // ★ Log.Warn はスロットルされない。ここは毎フレームの経路なので
-                    //   1 回だけ鳴らして以後は黙る（6,938 行を出した経路そのもの）。
+                    // ★ Log.Warn is not throttled. This is a per-frame path, so we sound
+                    //   it once and stay quiet afterwards (this is the very path that
+                    //   produced 6,938 lines).
                     Log.Warn("fire whirl: no usable shader resolved; the flames are not drawn "
                              + "(Disaster + does not borrow a Cities material - that renders "
                              + "invisible or black on a hand-rolled renderer). The fire whirl "
@@ -170,16 +188,18 @@ namespace DisasterPlus.Game
                 return null;
             }
 
-            // Material.color は書かない。色は main.startColor（Create）が決めている。
-            // Material.color が触るのは _Color だが Particles/Additive のティントは _TintColor なので、
-            // ここで色を入れても何も起きない。「効いているように読める死んだ行」を残すと、
-            // 後から誰かが _TintColor に直してしまい、理由なく見た目が変わる。
+            // Do not write Material.color. The colour is decided by main.startColor (in
+            // Create). Material.color touches _Color, whereas Particles/Additive tints
+            // through _TintColor, so putting a colour in here would do nothing at all.
+            // Leave a dead line that reads as though it works and sooner or later
+            // somebody "fixes" it to _TintColor and the look changes for no reason.
             var m = new Material(_pick.Shader);
             m.name = "DisasterPlus_FireWhirlFlame";
 
-            // ★ Standard まで落ちたときの受け皿。透過にしないと炎が
-            //   **不透明な四角い板の群れ**になる。借りてきた別のシェーダには
-            //   掛けない（_Mode / _SrcBlend は Standard の契約である）。
+            // ★ The catch-all for when we have fallen all the way to Standard. Without
+            //   making it transparent the flames come out as **a swarm of opaque square
+            //   slabs**. Do not apply it to a shader borrowed from elsewhere (_Mode and
+            //   _SrcBlend are Standard's contract).
             if (_pick.StandardFallback) ShaderPool.MakeStandardTransparent(m);
 
             _flameMaterial = m;
@@ -198,7 +218,8 @@ namespace DisasterPlus.Game
                 new Color(1f, 0.75f, 0.2f, 1f), new Color(1f, 0.25f, 0.05f, 1f));
             main.simulationSpace = ParticleSystemSimulationSpace.World;
 
-            // 渦を巻きながら上昇させる。速度そのものは半径に応じて Configure が入れる。
+            // Rise while swirling. The speeds themselves are put in by Configure,
+            // according to the radius.
             var vel = ps.velocityOverLifetime;
             vel.enabled = true;
             vel.space = ParticleSystemSimulationSpace.Local;
@@ -210,7 +231,8 @@ namespace DisasterPlus.Game
             return go;
         }
 
-        /// <summary>半径に合わせて形と量を変える。旋風は 40〜220m まで大きさが変わる。</summary>
+        /// <summary>Varies the shape and the amount with the radius. A whirl's size ranges
+        /// from 40 to 220 m.</summary>
         private static void Configure(GameObject go, float radius)
         {
             var ps = go.GetComponent<ParticleSystem>();
@@ -230,18 +252,18 @@ namespace DisasterPlus.Game
             emission.enabled = true;
             emission.rateOverTime = 40f + radius * 1.5f;
 
-            // Local 空間の接線方向(x)＋上昇(y)速度。発生体自体は Sync() 側で毎フレーム
-            // SpinDegreesPerSecond で回転しているので、この Local ベクトルは World 側では
-            // 円を描くように向きを変え続け、渦に見える。
+            // A local-space tangential (x) plus rising (y) velocity. The emitter itself is
+            // rotated every frame by Sync() at SpinDegreesPerSecond, so in world space
+            // this local vector keeps turning around a circle, which reads as a whirl.
             var vel = ps.velocityOverLifetime;
             vel.x = new ParticleSystem.MinMaxCurve(radius * 0.05f);
             vel.y = new ParticleSystem.MinMaxCurve(radius * 0.30f);
         }
 
         /// <summary>
-        /// レベルアンロード時に必ず呼ぶ。
-        /// 静的なコレクションに破棄済みの Unity オブジェクトを抱えたままにすると、
-        /// 2 つ目の都市で無言のまま炎が出なくなる。
+        /// Always call this on level unload.
+        /// Leave destroyed Unity objects sitting in a static collection and the flames
+        /// silently stop appearing in the second city.
         /// </summary>
         public static void Clear()
         {
@@ -255,9 +277,9 @@ namespace DisasterPlus.Game
             _flameMaterial = null;
 
             _shaderMissCount = 0;
-            // ★ _pick / _shaderWarned は戻さない。ゲームのビルドに対する事実であって
-            //   都市ごとの状態ではない（④⑤と同じ）。_pick が抱えるのは Shader 参照
-            //   だけで、Material は上で破棄している。
+            // ★ _pick and _shaderWarned are not reset. They are facts about the build of
+            //   the game, not per-city state (the same as ④ and ⑤). All _pick holds is a
+            //   Shader reference; the Material is destroyed above.
         }
     }
 }

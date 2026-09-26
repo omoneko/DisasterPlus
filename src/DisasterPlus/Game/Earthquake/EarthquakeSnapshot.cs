@@ -4,22 +4,24 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <c>EarthquakeAI</c> プレハブに焼き込まれている 4 つの調整値。
+    /// The four tuning values baked into the <c>EarthquakeAI</c> prefab.
     ///
-    /// **この 4 個の実数値は DLL に存在しない**（IL 事実文書 §A-0）。プレハブの
-    /// シリアライズ値なので IL 逆アセンブルでは見えず、UnityPy による
-    /// <c>sharedassets</c> の読み出しも型ツリーが読めずに失敗している。したがって
-    /// **実行時に <c>DisasterManager.FindDisasterInfo&lt;EarthquakeAI&gt;()</c> から読んで
-    /// 診断ダンプに出すのが唯一の入手経路**であり、それが Task 3 の主目的である。
-    /// ②の以後の持続時間の設計は全てこの 4 個の上に乗る。
+    /// **The actual numbers do not exist anywhere in the DLL** (IL facts doc §A-0). They
+    /// are serialised prefab values, so IL disassembly cannot see them, and reading
+    /// <c>sharedassets</c> with UnityPy also fails because the type tree cannot be read.
+    /// So **the only way to get them is to read them at runtime from
+    /// <c>DisasterManager.FindDisasterInfo&lt;EarthquakeAI&gt;()</c> and print them in the
+    /// diagnostic dump**, which is Task 3's main purpose. Every later duration design in
+    /// ② rests on these four.
     ///
-    /// struct にしているのは、キャッシュしても Unity の fake-null 自己修復問題を
-    /// 持ち込まないため（float / uint しか持たないので <c>DisasterInfo</c> の参照を
-    /// 抱え込まずに済む）。既定値は <see cref="Resolved"/> == false ＝「まだ／もう読めていない」。
+    /// It is a struct so that caching it does not drag in Unity's fake-null
+    /// self-repair problem (it holds only floats and uints, so no <c>DisasterInfo</c>
+    /// reference is kept). The default value has <see cref="Resolved"/> == false, i.e.
+    /// "not read yet / no longer readable".
     /// </summary>
     public struct EarthquakePrefabFacts
     {
-        /// <summary>4 値を実際に読めたか。false のとき他のフィールドは全て 0 で、意味を持たない。</summary>
+        /// <summary>Whether the four values were actually read. When false every other field is 0 and means nothing.</summary>
         public readonly bool Resolved;
 
         public readonly float CrackLength;
@@ -39,194 +41,217 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// sim スレッドで作り main スレッドで読む不変スナップショット。
-    /// ①の <see cref="WeatherSnapshot"/> と同じ規律で、**一度作ったら書き換えない**。
+    /// An immutable snapshot built on the sim thread and read on the main thread.
+    /// Same discipline as ①'s <see cref="WeatherSnapshot"/>: **once built, never modified**.
     ///
     /// </summary>
     public class EarthquakeSnapshot
     {
         /// <summary>
-        /// 地震が 1 個も無いときに全スナップショットで共有する空リスト。
-        /// sim tick ごとの空リスト確保を避けるためだけにある。
+        /// The empty list shared by every snapshot when there are no earthquakes at all.
+        /// It exists solely to avoid allocating an empty list on every sim tick.
         ///
-        /// <c>ReadOnlyCollection</c> で包んでいるのは意図的。素の <c>List</c> のまま
-        /// <c>IList</c> として配ると <c>snapshot.Quakes.Add(...)</c> がコンパイルも実行も
-        /// 通ってしまい、**共有された空リストを 1 箇所が汚すと以後の全スナップショットが
-        /// 壊れる**。ここで包んでおけば、その誤用は最初の 1 回で即座に例外になる。
+        /// Wrapping it in a <c>ReadOnlyCollection</c> is deliberate. Hand out a plain
+        /// <c>List</c> as an <c>IList</c> and <c>snapshot.Quakes.Add(...)</c> both
+        /// compiles and runs, so **one place dirtying the shared empty list breaks every
+        /// snapshot from then on**. Wrapped as it is here, that misuse throws immediately,
+        /// the very first time.
         /// </summary>
         private static readonly IList<EarthquakeReading> NoQuakes =
             new List<EarthquakeReading>(0).AsReadOnly();
 
         /// <summary>
-        /// 今この瞬間、生きている（Created かつ Deleted でない）地震。
-        /// **構築後に変更しないこと**（<see cref="EarthquakeReader"/> は読み取り専用に
-        /// 包んでから渡している）。破られると main スレッドが列挙している最中に
-        /// sim スレッドが書き換えることになり、スタックトレースの出ない例外に化ける。
+        /// The earthquakes alive at this instant (Created and not Deleted).
+        /// **Do not modify it after construction** (<see cref="EarthquakeReader"/> wraps
+        /// it read-only before handing it over). Break that and the sim thread ends up
+        /// writing to it while the main thread is enumerating it, which turns into an
+        /// exception with no stack trace.
         /// </summary>
         public readonly IList<EarthquakeReading> Quakes;
 
         public readonly EarthquakePrefabFacts Prefab;
 
-        /// <summary><c>SimulationManager.m_currentFrameIndex</c>。表示側が残り時間を出す基準。</summary>
+        /// <summary><c>SimulationManager.m_currentFrameIndex</c>. The reference the display uses for time remaining.</summary>
         public readonly uint CurrentFrame;
 
         /// <summary>
-        /// sim スレッドの時刻（0 〜 23.99963）。
-        /// <c>m_dayTimeFrame * DAYTIME_FRAME_TO_HOUR</c> であって
-        /// <c>m_currentDayTimeHour</c> ではない（§F-1。詳細は <see cref="EarthquakeReader"/>）。
+        /// The sim thread's time of day (0 to 23.99963).
+        /// It is <c>m_dayTimeFrame * DAYTIME_FRAME_TO_HOUR</c>, not
+        /// <c>m_currentDayTimeHour</c> (§F-1; the details are in
+        /// <see cref="EarthquakeReader"/>).
         /// </summary>
         public readonly float HourOfDay;
 
         /// <summary>
-        /// <c>SimulationManager.m_enableDayNight</c>。
+        /// <c>SimulationManager.m_enableDayNight</c>.
         ///
-        /// **false のとき <see cref="HourOfDay"/> は永久に 12.0 に固定される**
-        /// （sim スレッドが毎フレーム <c>m_dayTimeOffsetFrames</c> を再設定するため、§F-1）。
-        /// これはバグでもゲームの不整合でもなく、プレイヤーが選べる正当な設定なので
-        /// 前提検証の FAIL にはしない。ただし**表示側はこの事実を隠さないこと**
-        /// （12.0 という数字だけを出すと「正午に固定された時計」が読めた値に見える）。
+        /// **When it is false, <see cref="HourOfDay"/> is pinned at 12.0 forever**
+        /// (the sim thread resets <c>m_dayTimeOffsetFrames</c> every frame, §F-1).
+        /// That is neither a bug nor an inconsistency in the game but a legitimate player
+        /// setting, so it is not a FAIL in the assumption checks. But **the display must
+        /// not hide the fact** (show the bare number 12.0 and a clock stuck at noon looks
+        /// like a value that was successfully read).
         /// </summary>
         public readonly bool DayNightEnabled;
 
-        /// <summary>読み取りに成功したか。false なら表示側は「読み取れません」と出す。</summary>
+        /// <summary>Whether the read succeeded. When false the display shows "cannot be read".</summary>
         public readonly bool Valid;
 
         /// <summary>
-        /// main スレッドが publish したカーソル座標の直下にあった建物 1 個の余裕度
-        /// （<see cref="BuildingProbe"/> が sim スレッドで作る）。
+        /// The headroom of the one building that was under the cursor position the main
+        /// thread published (built on the sim thread by <see cref="BuildingProbe"/>).
         ///
-        /// 建物が見つからなかった／カーソルが無効だったときは
-        /// <c>HasBuilding == false</c> の <see cref="BuildingMargin.None"/>。
-        /// **main スレッドはこれを描くだけで、建物バッファには一切触らない。**
+        /// When no building was found, or the cursor was invalid, this is
+        /// <see cref="BuildingMargin.None"/> with <c>HasBuilding == false</c>.
+        /// **The main thread only draws it; it never touches the building buffers.**
         /// </summary>
         public readonly BuildingMargin CursorBuilding;
 
         /// <summary>
-        /// <see cref="CursorBuilding"/> がどの地震についての判定か（災害バッファ上の添字）。
+        /// Which earthquake <see cref="CursorBuilding"/> was judged against (an index into
+        /// the disaster buffer).
         ///
-        /// **0 は「建物が無かった」ではなく「そもそも調べていない」**——カーソルが
-        /// 無効（パネルが閉じている／マウスが UI の上／地形を外している）か、
-        /// 破壊判定が走る地震（Active / Emerging）が 1 つも無かったか。
-        /// 「調べたが建物が無かった」は <c>CursorQuakeId != 0</c> かつ
-        /// <c>CursorBuilding.HasBuilding == false</c> で表す。この 2 つを混ぜると、
-        /// 建物の上にカーソルを置いているのに「建物がありません」と出る。
+        /// **0 means "we never looked", not "there was no building"** — either the cursor
+        /// was invalid (panel closed, mouse over the UI, or off the terrain), or there was
+        /// no earthquake running a destruction pass (Active / Emerging). "We looked and
+        /// there was no building" is expressed by <c>CursorQuakeId != 0</c> together with
+        /// <c>CursorBuilding.HasBuilding == false</c>. Conflate the two and the panel says
+        /// "there is no building" while the cursor is sitting on one.
         ///
-        /// **表示側はこれを必ず出すこと。** 地震は同時に複数進行しうる（§E-1）。
-        /// 1 個ぶんの判定だけを出して黙っていると、他の地震について何も言っていない
-        /// ことが読み手に伝わらず、また「確信を持って誤った数値」になる。
+        /// **The display must always state this.** Several earthquakes can run at once
+        /// (§E-1). Show the judgement for one of them and say nothing else, and the
+        /// reader never learns that nothing has been said about the others — which makes
+        /// it a confidently wrong number.
         /// </summary>
         public readonly ushort CursorQuakeId;
 
         /// <summary>
-        /// カーソル直下の建物走査が**どう終わったか**（<see cref="BuildingProbeOutcome"/>）。
+        /// **How** the sweep for the building under the cursor ended
+        /// (<see cref="BuildingProbeOutcome"/>).
         ///
-        /// <see cref="CursorQuakeId"/> だけでは「調べたが建物が無かった」と
-        /// 「調べようとして失敗した」を区別できない。前者は実測値、後者は読み取り失敗で、
-        /// 同じ文言にすると読み取り失敗が実測値の顔で出てくる。
+        /// <see cref="CursorQuakeId"/> alone cannot distinguish "we looked and there was
+        /// no building" from "we tried to look and failed". The first is a measurement,
+        /// the second a failed read, and giving them the same wording makes the failed
+        /// read come out wearing the face of a measurement.
         /// </summary>
         public readonly BuildingProbeOutcome CursorProbe;
 
         /// <summary>
-        /// <see cref="CursorBuilding"/> の高さ（m）。**第 2 層（長周期地震動）専用。**
+        /// The height of <see cref="CursorBuilding"/> (m). **For layer 2 (long-period
+        /// ground motion) only.**
         ///
-        /// **0 は「低い」ではなく「読めなかった」**（<see cref="BuildingHeight.MetresOf"/>）。
-        /// 表示側はこの 2 つを混ぜてはいけない —— 混ぜると、高さが読めない環境で
-        /// 「この建物は低いので長周期の影響を受けません」という、**根拠の無い断定**が出る。
+        /// **0 means "could not be read", not "short"**
+        /// (<see cref="BuildingHeight.MetresOf"/>). The display must not conflate the two
+        /// — conflate them and, in an environment where the height cannot be read, you
+        /// get the **entirely unfounded** assertion "this building is short, so it is not
+        /// affected by long-period motion".
         ///
-        /// バニラはこの量を揺れにも被害にも一切使っていない（§A-7 / §A-3）。
-        /// したがってこれを使う行は必ず第 2 層である。
+        /// Vanilla does not use this quantity for the shaking or the damage at all
+        /// (§A-7 / §A-3). So any row that uses it is necessarily layer 2.
         /// </summary>
         public readonly float CursorBuildingHeight;
 
         /// <summary>
-        /// カーソル地点の <c>ImmaterialResourceManager.Resource.EarthquakeCoverage</c> の生値。
-        /// <see cref="CursorCoverageValid"/> が false のときこの値は無意味。
+        /// The raw <c>ImmaterialResourceManager.Resource.EarthquakeCoverage</c> at the
+        /// cursor position. Meaningless when <see cref="CursorCoverageValid"/> is false.
         ///
-        /// **これはリードタイムの根拠ではない。** バニラがリードタイムに使うのは
-        /// **震央**のカバレッジ 1 点だけで（<see cref="EarthquakeReading.CoverageAtEpicentre"/>、
-        /// §A-2）、カーソル地点の値は「今この場所に地震計が届いているか」を
-        /// プレイヤーが確かめるためだけにある。この 2 つを取り違えて
-        /// カーソル地点からリードタイムを出すと、地震計を建てる場所の判断が丸ごと狂う。
+        /// **This is not what the lead time is based on.** Vanilla's lead time uses the
+        /// single coverage value **at the epicentre**
+        /// (<see cref="EarthquakeReading.CoverageAtEpicentre"/>, §A-2); the value at the
+        /// cursor exists purely so the player can check whether a seismograph reaches
+        /// this spot. Mix the two up and derive the lead time from the cursor position,
+        /// and every decision about where to build seismographs goes wrong.
         /// </summary>
         public readonly int CursorCoverage;
 
         /// <summary>
-        /// カーソル地点のカバレッジを実際に読めたか。
+        /// Whether the coverage at the cursor was actually read.
         ///
-        /// <see cref="EarthquakeReading.CoverageKnown"/> と同じ理由で分けてある。
-        /// **カバレッジ 0 は「地震計が届いていない」という意味のある実測値**であり、
-        /// 本機能の看板の説明そのものなので、読み取り失敗と同じ 0 に潰してはいけない。
+        /// Kept separate for the same reason as
+        /// <see cref="EarthquakeReading.CoverageKnown"/>. **A coverage of 0 is a
+        /// meaningful measurement — "no seismograph reaches here"** — and it is the
+        /// headline explanation of this whole feature, so it must never be collapsed into
+        /// the same 0 as a failed read.
         ///
-        /// false になるのは 2 通り —— main スレッドがまだ有効なカーソル座標を
-        /// publish していない（パネルが閉じている／マウスが UI の上／地形を外している）か、
-        /// <c>ImmaterialResourceManager</c> が読めなかったか。表示側は自分が持っている
-        /// 「今カーソルが地形の上にあるか」と突き合わせて、この 2 つを言い分ける。
+        /// There are two ways it becomes false: the main thread has not yet published a
+        /// valid cursor position (panel closed, mouse over the UI, or off the terrain),
+        /// or <c>ImmaterialResourceManager</c> could not be read. The display tells the
+        /// two apart by cross-checking against its own knowledge of whether the cursor is
+        /// currently over terrain.
         /// </summary>
         public readonly bool CursorCoverageValid;
 
         /// <summary>
-        /// 地震計の位置で観測した地動の波形。**震央に近い順**に並ぶ（先頭が最も近い）。
+        /// Ground-motion waveforms observed at the seismograph positions. **Ordered by
+        /// distance from the epicentre** (nearest first).
         ///
-        /// これは<b>ゲーム内のセンサーが計測した値ではない</b> ——
-        /// <c>EarthquakeSensorAI</c> は時系列データを一切持たない（§C-1）。
-        /// この MOD が**バニラ自身の揺れの式**（§A-7）を地震計の位置で評価して
-        /// 貯めたものである（<see cref="SeismographRecorder"/> のクラス doc）。
+        /// These are <b>not values measured by an in-game sensor</b> —
+        /// <c>EarthquakeSensorAI</c> holds no time-series data whatsoever (§C-1). They are
+        /// what this mod accumulated by evaluating **vanilla's own shaking formula**
+        /// (§A-7) at each seismograph's position (see <see cref="SeismographRecorder"/>'s
+        /// class doc).
         ///
-        /// 空になるのは 2 通りで、**表示側はこれを言い分けること**:
-        ///   - <see cref="WaveformQuakeId"/> == 0 … そもそも記録していない（地震が無い）
-        ///   - <see cref="WaveformQuakeId"/> != 0 … 記録対象の地震はあるが地震計が 0 個
+        /// There are two ways this comes out empty, and **the display must tell them
+        /// apart**:
+        ///   - <see cref="WaveformQuakeId"/> == 0 … nothing is being recorded at all (no earthquake)
+        ///   - <see cref="WaveformQuakeId"/> != 0 … there is an earthquake to record, but zero seismographs
         ///
-        /// さらに「観測点はあるがサンプルが 0 件」（本震前で揺れの窓がまだ開いていない）は
-        /// <c>SeismographTrace.Count == 0</c> で表す。**空のグラフと平らなグラフは
-        /// 別の意味**なので、0 件を「変位 0」として描いてはいけない。
+        /// On top of that, "there are stations but zero samples" (before the main shock,
+        /// while the shaking window has not opened yet) is expressed by
+        /// <c>SeismographTrace.Count == 0</c>. **An empty graph and a flat graph mean
+        /// different things**, so zero samples must never be drawn as "displacement 0".
         /// </summary>
         public readonly IList<SeismographTrace> Traces;
 
         /// <summary>
-        /// <see cref="Traces"/> がどの地震についての記録か（災害バッファ上の添字）。
-        /// **0 は「記録していない」** —— 進行中（Emerging|Active）の地震が 1 つも無い。
+        /// Which earthquake <see cref="Traces"/> records (an index into the disaster
+        /// buffer). **0 means "nothing is being recorded"** — there is no earthquake in
+        /// progress (Emerging|Active).
         /// </summary>
         public readonly ushort WaveformQuakeId;
 
         /// <summary>
-        /// **第 2 層。** 海中震源からの津波連鎖が今どうなっているか
-        /// （<see cref="TsunamiChain"/>）。これはバニラが計算している量ではなく、
-        /// **本 MOD が発明した挙動の状態**なので、表示側は必ず第 2 層の行として出す。
+        /// **Layer 2.** Where the tsunami chain from an undersea epicentre currently
+        /// stands (<see cref="TsunamiChain"/>). This is not a quantity vanilla computes
+        /// but **the state of behaviour this mod invented**, so the display must always
+        /// show it as a layer-2 row.
         ///
-        /// <see cref="TsunamiChain"/> の静的状態を main スレッドから直接読まないための
-        /// 経路である。<c>EarthquakeReader.Read()</c> は <c>TsunamiChain.Tick()</c> より
-        /// **前**に走るので、ここに載るのは最大 1 tick 前の状態になる
-        /// （<see cref="CursorBuilding"/> が既に 1 tick 遅れているのと同じ性質の遅延）。
+        /// It exists so the main thread never reads <see cref="TsunamiChain"/>'s static
+        /// state directly. <c>EarthquakeReader.Read()</c> runs **before**
+        /// <c>TsunamiChain.Tick()</c>, so what lands here is up to one tick old (the same
+        /// kind of lag as <see cref="CursorBuilding"/> already has).
         /// </summary>
         public readonly TsunamiChainState TsunamiState;
 
         /// <summary>
-        /// 津波の予約が満了するフレーム。<see cref="TsunamiState"/> が
-        /// <see cref="TsunamiChainState.Scheduled"/> のときだけ意味を持つ。
+        /// The frame at which the scheduled tsunami comes due. Only meaningful when
+        /// <see cref="TsunamiState"/> is <see cref="TsunamiChainState.Scheduled"/>.
         /// </summary>
         public readonly uint TsunamiDueFrame;
 
         /// <summary>
-        /// 津波連鎖が監視している地震（災害バッファ上の添字）。0 なら監視していない。
-        /// **表示側はこれを名乗る** —— 地震は同時に複数進行しうるので（§E-1）、
-        /// どの地震から連鎖したのかを黙っていると、他の地震について何も
-        /// 言っていないことが読み手に伝わらない。
+        /// The earthquake the tsunami chain is watching (an index into the disaster
+        /// buffer). 0 means it is watching nothing.
+        /// **The display must state this** — several earthquakes can run at once (§E-1),
+        /// so saying nothing about which one the chain came from leaves the reader
+        /// unaware that nothing has been said about the others.
         /// </summary>
         public readonly ushort TsunamiQuakeId;
 
         /// <summary>
-        /// **第 2 層。** 長周期の直近の走査が 1 回ぶんの上限で打ち切られたか
-        /// （<c>LongPeriodDamage.LastCapped</c>）。
+        /// **Layer 2.** Whether the most recent long-period sweep was cut off at its
+        /// per-sweep cap (<c>LongPeriodDamage.LastCapped</c>).
         ///
-        /// 走査は震央から外へ向かうので（<c>OutwardCellOrder</c>）、打ち切りが起きても
-        /// 震央の周りは必ず評価済みである。しかし**外側はまだ評価されていない**ので、
-        /// 遠くの建物について「追加倒壊リスク N.N%」とだけ出すと、この走査では
-        /// まだ抽選されていない確率を確定値の顔で出すことになる（第 2 層レビュー I1）。
-        /// 表示側はこれを注記として必ず名乗ること。
+        /// The sweep works outwards from the epicentre (<c>OutwardCellOrder</c>), so even
+        /// when it is cut off the area around the epicentre has certainly been evaluated.
+        /// But **the outer area has not**, so printing nothing but "extra collapse risk
+        /// N.N%" for a distant building means showing a probability that has not yet been
+        /// drawn in this sweep, wearing the face of a settled figure (layer-2 review I1).
+        /// The display must always state this as a caveat.
         ///
-        /// <see cref="TsunamiState"/> と同じく、<c>EarthquakeReader.Read()</c> は
-        /// <c>LongPeriodDamage.Apply()</c> より**前**に走るので、載るのは最大 1 tick
-        /// 前の状態である。
+        /// As with <see cref="TsunamiState"/>, <c>EarthquakeReader.Read()</c> runs
+        /// **before** <c>LongPeriodDamage.Apply()</c>, so what lands here is up to one
+        /// tick old.
         /// </summary>
         public readonly bool LongPeriodCapped;
 
@@ -269,7 +294,7 @@ namespace DisasterPlus.Game
                                           TsunamiChainState.Idle, 0u, 0, false, false);
         }
 
-        /// <summary>地震が 1 個も無いときに使う共有の空リスト。読み取り側専用。</summary>
+        /// <summary>The shared empty list used when there are no earthquakes. Readers only.</summary>
         public static IList<EarthquakeReading> EmptyQuakeList
         {
             get { return NoQuakes; }

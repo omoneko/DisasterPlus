@@ -4,75 +4,79 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 進行中の火山の各段の状態行。**main スレッド専用。**
-    /// T5 が準備の段を入れ、**T6〜T9 がこの型に段を足していく。**
+    /// The status rows for each stage of a volcano in progress. **Main thread only.**
+    /// T5 put in the clearing stage, and **T6–T9 add their stages to this type.**
     ///
-    /// 行を作るのも文字を入れるのも <see cref="VolcanoRows"/> を通す。
-    /// **このファイルに <c>UILabel</c> の生成も <c>.text</c> への代入も 1 つも無い。**
+    /// Both creating a row and putting text into it go through <see cref="VolcanoRows"/>.
+    /// **There is not one <c>UILabel</c> construction or <c>.text</c> assignment in this file.**
     ///
-    /// ── 出所の印が付く行は 1 つだけ ─────────────────────────────
+    /// ── only one row carries the provenance marker ─────────────────────────────────────────
     ///
-    /// 走査した半径も、壊した建物と道路の数も、**⑤が自分で数えた実績**である。
-    /// ゲームが計算した値ではないので <c>VolcanoRows.SetMeasured</c> は呼ばない。
+    /// The radius swept and the numbers of buildings and roads destroyed are **⑤'s own tally**.
+    /// They are not values the game computed, so <c>VolcanoRows.SetMeasured</c> is not called.
     ///
-    /// ★★ <b>唯一の例外が「影響範囲」の行</b>（<see cref="RefreshFootprint"/>）である。
-    /// あれは調査がゲームの配列（<c>m_buildingGrid</c> / <c>m_segmentGrid</c>）から
-    /// 数えただけの値で、⑤は 1 つも計算していない。**2026-08-21 に撤去した
-    /// 確認の窓が持っていた行がここへ来た** —— 窓は消えたが、
-    /// 「何が巻き込まれたか」を読む場所は残す（<see cref="VolcanoRows"/> の grep 5）。
+    /// ★★ <b>The one exception is the "affected range" row</b> (<see cref="RefreshFootprint"/>).
+    /// That is a value the survey merely counted out of the game's arrays
+    /// (<c>m_buildingGrid</c> / <c>m_segmentGrid</c>); ⑤ computed none of it.
+    /// **It is the row that belonged to the confirmation window removed on 2026-08-21** —
+    /// the window is gone, but the place to read "what got caught up in it" stays
+    /// (grep 5 in <see cref="VolcanoRows"/>).
     ///
-    /// ── パネルのいちばん下に置く ──────────────────────────────
+    /// ── it goes at the very bottom of the panel ────────────────────────────────────────────
     ///
-    /// この一式がパネルのいちばん下であり、出していないときはパネルの高さを
-    /// <see cref="BlockTop"/> まで縮める —— <c>relativePosition</c> は絶対値なので、
-    /// 隠すだけでは空白が残る。
+    /// This set is the bottom of the panel, and when it is not shown the panel's height is shrunk
+    /// to <see cref="BlockTop"/> — <c>relativePosition</c> is absolute, so merely hiding them
+    /// leaves the blank space behind.
     ///
-    /// ── 条件つきの注記は、当てはまらないときに場所も取らない ───────────────
+    /// ── a conditional note takes up no space when it does not apply ────────────────────────
     ///
-    /// 空文字を入れるだけでは「何か出るはずの場所が空いている」ように見えるので、
-    /// <c>Reflow</c> で毎回積み直す。
+    /// Just putting an empty string in makes it look like "somewhere that should show something
+    /// is empty", so everything is re-stacked each time with <c>Reflow</c>.
     ///
-    /// ── ★★ [止める] ボタンは撤去した（2026-08-22）─────────────────
+    /// ── ★★ the [Stop] button was removed (2026-08-22) ─────────────────────────────────────
     ///
-    /// 所有者の判断:
+    /// The owner's call:
     ///
-    /// &gt; 止めるボタンは不要です。だって実際に噴火を止めることなんて
-    /// &gt; 現実じゃできないでしょう？
+    /// &gt; A stop button isn't needed. After all, you can't actually stop an eruption in real
+    /// &gt; life, can you?
     ///
-    /// そのとおりで、**⑤は起こしたら最後まで走る災害である**（バニラの災害と同じ）。
-    /// 途中で畳める災害はゲームに 1 つも無い。
+    /// Quite so, and **⑤ is a disaster that, once triggered, runs to the end** (the same as the
+    /// vanilla disasters). There is not one disaster in the game that can be folded away midway.
     ///
-    /// ★ 以前ここには「自分の都市が壊されているのを見ている人には止める手段が要る」
-    ///   と書いてあった（全体レビュー I5）。**その前提が否定された**ので、
-    ///   受け口（<c>VolcanoRequest.Stop</c> / <c>VolcanoState.HandleStop</c>）も
-    ///   まとめて消した —— 誰も積めない依頼を受け口だけ残さない。
-    ///   どうしても止めたいときは設定の「火山を有効にする」を切る
-    ///   （半分削れた山が残るが、それは「取り消し」ではない）。
+    /// ★ This used to say "someone watching their own city being destroyed needs a way to stop
+    ///   it" (whole-project review I5). **That premise was rejected**, so the receiving end
+    ///   (<c>VolcanoRequest.Stop</c> / <c>VolcanoState.HandleStop</c>) was deleted with it —
+    ///   do not leave a receiving end for a request nobody can queue.
+    ///   If you really must stop it, turn off the "enable volcanoes" setting
+    ///   (a half-carved mountain stays, but that is not an "undo").
     ///
-    /// ★★ **ここに置くのは「今何が起きているか」だけである**（2026-08-22）。
+    /// ★★ **All that goes here is "what is happening right now"** (2026-08-22).
     ///
-    /// 所有者の依頼: 「D＋タブ内の火山の細かい説明やデバッグは
-    /// ゲーム内では表示不要かと思われます」。
+    /// The owner's request: "I don't think the detailed volcano explanations and debug info need
+    /// showing in-game inside the D+ tab".
     ///
-    /// 以前は 24 行あった。その大半は**普通に動いているときの振る舞いの説明**
-    /// （木に火が付かない理由、道路が燃えない理由、建てられる地面の遅れ、
-    /// 火砕流の代用の断り……）と**進行中のカウンタ**（壊した数、有効半径、
-    /// タイル数、描いた点の数……）で、どちらも遊んでいる最中に読むものではない。
+    /// There used to be 24 rows. Most of them were **explanations of the behaviour when things
+    /// are working normally** (why the trees do not catch fire, why the roads do not burn, the
+    /// lag of the buildable ground, the disclaimer about the pyroclastic stand-in…) and
+    /// **in-progress counters** (numbers destroyed, the active radius, the tile count, the number
+    /// of points drawn…), and neither is something to read while playing.
     ///
-    /// ★ <b>捨ててはいない。</b> 全部 <c>VolcanoFeature.WriteDiagnostics</c> の
-    ///   診断ダンプに入っており、診断タブのボタン 1 つで書き出せる。
-    ///   この MOD が禁じているのは「黙って何もしない」であって、
-    ///   「遊んでいる画面に全部出す」ではない。
+    /// ★ <b>Nothing has been thrown away.</b> It is all in the diagnostic dump in
+    ///   <c>VolcanoFeature.WriteDiagnostics</c> and can be written out with one button on the
+    ///   diagnostics tab.
+    ///   What this mod forbids is "failing silently", not "showing everything on the screen you
+    ///   are playing on".
     ///
-    /// ★ <b>残したのは 2 種類だけ</b>: 今の段の状態と、**失敗を名乗る行**である。
-    ///   後者は実際に壊れているときしか出ないので、普段は 1 行も場所を取らない。
+    /// ★ <b>Only two kinds were kept</b>: the state of the current stage, and **the rows that
+    ///   name a failure**. The latter only appear when something is actually broken, so normally
+    ///   they take up no space at all.
     /// </summary>
     internal static class VolcanoEffectRows
     {
-        /// <summary>説明文の行の高さ（3 行ぶん折り返す想定）。</summary>
+        /// <summary>The height of an explanatory row (assuming it wraps to three lines).</summary>
         private const float NoteHeight = 52f;
 
-        /// <summary>長い注記の行の高さ（道路の断りと噴火の注記。4〜5 行ぶん）。</summary>
+        /// <summary>The height of a long note (the roads disclaimer and the eruption note. Four or five lines).</summary>
         private const float LongNoteHeight = 72f;
 
         private static UILabel _footprintLabel;
@@ -82,7 +86,7 @@ namespace DisasterPlus.Game
         private static UILabel _eruptionLabel;
         private static UILabel _lavaLabel;
 
-        // 失敗を名乗る 3 行。**実際に壊れているときしか出ない。**
+        // The three rows that name a failure. **They only appear when something is actually broken.**
         private static UILabel _eruptionMissingLabel;
         private static UILabel _lavaNoMaterialLabel;
         private static UILabel _clearingPathLabel;
@@ -91,39 +95,41 @@ namespace DisasterPlus.Game
         private static float _blockBottom;
         private static bool _showing;
 
-        /// <summary>この一式が始まる y（＝出していないときのパネルの下端）。</summary>
+        /// <summary>The y this set starts at (= the bottom of the panel when it is not shown).</summary>
         internal static float BlockTop { get { return _blockTop; } }
 
-        /// <summary>この一式の下端（＝出しているときのパネルの下端）。</summary>
+        /// <summary>The bottom of this set (= the bottom of the panel when it is shown).</summary>
         internal static float BlockBottom { get { return _blockBottom; } }
 
-        /// <summary>直近の <see cref="Refresh"/> で 1 行でも出したか。</summary>
+        /// <summary>Whether the last <see cref="Refresh"/> showed even one row.</summary>
         internal static bool IsShowing { get { return _showing; } }
 
-        /// <summary>パネル構築時に 1 回。行は常に作り、中身の有無で出し分ける。</summary>
+        /// <summary>Once, when the panel is built. The rows are always created and shown or hidden by their content.</summary>
         internal static void Build(UIPanel p, ref float y)
         {
             _blockTop = y;
 
-            // ★★ **今何が起きているかだけ**（クラス doc）。
-            //    説明とカウンタは診断ダンプにある。
+            // ★★ **What is happening right now, and nothing else** (class doc).
+            //    The explanations and the counters are in the diagnostic dump.
 
-            // 影響範囲。調査がゲームの配列から数えた実数なので、
-            // ⑤で唯一 [実測] が付く行である（<c>VolcanoRows</c> の grep 5）。
+            // The affected range. It is a real count the survey took out of the game's arrays, so
+            // it is the only row in ⑤ that carries [measured] (grep 5 in <c>VolcanoRows</c>).
             _footprintLabel = VolcanoRows.AddMeasuredRow(p, "EffectFootprint", ref y);
 
             _clearingLabel = VolcanoRows.AddRow(p, "EffectClearing", ref y);
             _upliftLabel = VolcanoRows.AddRow(p, "EffectUplift", ref y);
 
-            // ★ 火山性地震は**噴火の前（隆起）から後（冷却）まで**続くので、
-            //   噴火の行より上に置く（時間の順に並べる）。
+            // ★ The volcanic earthquakes run **from before the eruption (the uplift) through to
+            //   after it (the cooling)**, so this goes above the eruption row (they are ordered
+            //   in time).
             _quakeLabel = VolcanoRows.AddRow(p, "EffectQuake", ref y);
             _eruptionLabel = VolcanoRows.AddRow(p, "EffectEruption", ref y);
             _lavaLabel = VolcanoRows.AddRow(p, "EffectLava", ref y);
 
-            // ── 失敗を名乗る 3 行。**壊れているときしか場所を取らない** ─────
-            //    この 3 つを消すと、この MOD がいちばん避けている
-            //    「黙って何もしない」になる。説明を減らすのとは別の話である。
+            // ── The three rows that name a failure. **They only take up space when something is
+            //    broken.** Delete these three and you get the thing this mod avoids above all,
+            //    "failing silently". That is a different matter from cutting down the
+            //    explanations.
             _eruptionMissingLabel =
                 VolcanoRows.AddRow(p, "EffectEruptionMissing", ref y, NoteHeight);
             _lavaNoMaterialLabel = VolcanoRows.AddRow(p, "EffectLavaNoMaterial", ref y,
@@ -133,12 +139,12 @@ namespace DisasterPlus.Game
 
             _blockBottom = _blockTop;
 
-            // 構築直後は何も進んでいない。**作った瞬間に隠す。**
+            // Nothing is in progress right after building. **Hide it the moment it is created.**
             SetVisible(false);
         }
 
         /// <summary>
-        /// パネル表示中に毎フレーム。<paramref name="s"/> は null でありうる。
+        /// Every frame while the panel is shown. <paramref name="s"/> may be null.
         /// </summary>
         internal static void Refresh(VolcanoSnapshot s)
         {
@@ -149,13 +155,14 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 道路の経路が無い環境の断りは、位相に関係なく出す。
+            // The disclaimer for an environment with no road path is shown regardless of phase.
             bool clearingPathBroken = !s.ClearingPathAvailable;
 
-            // ★ 隆起が終わった火山の実績は**終わってからも出したままにする**。
-            //   位相が Done に落ちた瞬間に全部消えると、「山ができた」の結果
-            //   （山頂の高さ・火口・壊した数）を読む機会が 1 度も無い。
-            //   新しい火山を始めるか都市を出ると Reset で 0 に戻る。
+            // ★ The tally of a volcano whose uplift has finished **stays on screen after it
+            //   finishes**. If everything vanished the instant the phase dropped to Done, there
+            //   would never be a chance to read the outcome of "the mountain was made" (the
+            //   summit height, the crater, the numbers destroyed).
+            //   Start a new volcano or leave the city and Reset puts it back to 0.
             bool clearing = InProgress(s.Phase) || s.UpliftComplete;
 
             _showing = clearingPathBroken || clearing;
@@ -204,19 +211,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **影響範囲の 2 行。撤去した確認の窓が持っていた中身そのものである。**
+        /// **The two affected-range rows. Exactly the content the removed confirmation window
+        /// held.**
         ///
-        /// ★ 1 行目は調査がゲームの配列から数えた建物数と道路セグメント数で、
-        ///   ⑤で唯一 <c>SetMeasured</c> を呼んでよい行である
-        ///   （<see cref="VolcanoRows"/> のクラス doc の grep 5）。
-        ///   数は**調べた瞬間のもの**なので、地面をならしている間に街が動けば
-        ///   実際に消えた数とは前後する（診断ダンプの <c>note: counts</c>）。
+        /// ★ The first row holds the building count and road segment count the survey took out of
+        ///   the game's arrays, and it is the only row in ⑤ where <c>SetMeasured</c> may be called
+        ///   (grep 5 in the class doc of <see cref="VolcanoRows"/>).
+        ///   The numbers are **those of the moment it was surveyed**, so if the city moves while
+        ///   the ground is being levelled they will differ from the number actually removed
+        ///   (<c>note: counts</c> in the diagnostic dump).
         ///
-        /// ★ 道路は**「0 本」と「数えられなかった」を混ぜない。** 数えられなかった
-        ///   ときは印を付けない（読めなかった値をゲームの実測値として名乗らない）。
+        /// ★ For roads, **do not mix "0 of them" with "could not be counted".** When it could not
+        ///   be counted, no marker is applied (do not present a value we could not read as a
+        ///   measurement from the game).
         ///
-        /// ★ 2 行目は「結果が変わる」条件つきの注記だけ —— 走査の打ち切りと、
-        ///   1024 m の天井による切り下げである。当てはまらなければ場所も取らない。
+        /// ★ The second row holds only the conditional notes that "change the outcome" — the
+        ///   sweep being cut short, and being cut down by the 1024 m ceiling. If they do not
+        ///   apply, they take up no space.
         /// </summary>
         private static float RefreshFootprint(float y, VolcanoSnapshot s)
         {
@@ -233,17 +244,19 @@ namespace DisasterPlus.Game
                           + " / " + Strings.VolcanoSegmentsRow + " "
                           + (f.SegmentCount < 0 ? "?" : f.SegmentCount.ToString());
 
-            // ★★ **ゲームの高さの天井（1024 m）で山頂が削られたときだけ、行に足す。**
-            //    これは「普通の振る舞いの説明」ではなく、**設定した高さが
-            //    そのままは届かない**という結果の違いである（クラス doc の「失敗を名乗る行」側）。
-            //    天井を MOD から上げられない理由は <c>UpliftSchedule.CeilingClipped</c> の doc。
-            //    行を増やさず末尾に付ける。
+            // ★★ **Append to the row only when the summit was clipped by the game's height
+            //    ceiling (1024 m).** This is not an "explanation of normal behaviour" but a
+            //    difference in the outcome: **the height you set does not arrive as set**
+            //    (the "rows that name a failure" side of the class doc).
+            //    The reason a mod cannot raise the ceiling is in the doc of
+            //    <c>UpliftSchedule.CeilingClipped</c>.
+            //    Append it to the end rather than adding a row.
             if (f.HeightLimitedByCeiling) body += "   " + Strings.VolcanoHeightLimited;
 
             if (f.SegmentCount < 0)
             {
-                // 数えられなかったので印を付けない。**読めなかった値をゲームの
-                // 実測値として名乗らない。**
+                // It could not be counted, so no marker is applied. **Do not present a value we
+                // could not read as a measurement from the game.**
                 y = ReflowRow(y, _footprintLabel, body + "   " + Strings.VolcanoSegmentsUnknown);
             }
             else
@@ -255,9 +268,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 形態の表示名。**メソッドであることに意味がある** ——
-        /// <c>static readonly string[]</c> にすると起動時の言語で凍る
-        /// （<c>Strings</c> のクラス doc）。
+        /// The display name of the form. **It matters that this is a method** —
+        /// make it a <c>static readonly string[]</c> and it freezes in the language the game
+        /// started in (the class doc of <c>Strings</c>).
         /// </summary>
         private static string FormLabel(DisasterPlus.Core.Volcano.VolcanoForm form)
         {
@@ -270,13 +283,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 隆起の 4 行（T6）。**準備の段のうちは出さない** —— 進捗 0 % の行は
-        /// 「進んでいない」ではなく「まだその段に入っていない」だからである。
+        /// The four uplift rows (T6). **They are not shown during the clearing stage** — a row
+        /// reading 0 % progress does not mean "not advancing" but "that stage has not been
+        /// entered yet".
         ///
-        /// ★★ <b>有効半径には必ず「準備が届いた範囲」と添える</b>
-        /// （<c>Strings.VolcanoActiveRadiusRow</c> がその文言を持っている）。
-        /// これが罠 1 の可視化であり、実機で「準備が止まると隆起も止まる」ことを
-        /// 目で確かめられる唯一の行である。
+        /// ★★ <b>The active radius must always carry "as far as the clearing has reached"</b>
+        /// (<c>Strings.VolcanoActiveRadiusRow</c> holds that wording).
+        /// This is the visualisation of trap 1, and the only row that lets you verify with your
+        /// own eyes in the live game that "if the clearing stops, the uplift stops too".
         /// </summary>
         private static float RefreshUplift(float y, VolcanoSnapshot s)
         {
@@ -286,8 +300,8 @@ namespace DisasterPlus.Game
             y = ReflowRow(y, _upliftLabel,
                 Strings.VolcanoUpliftRow + ": " + Strings.VolcanoUpliftProgress + " "
                 + (s.ProgressUnit * 100f).ToString("F0") + "%"
-                // ★ 符号は数のほうに任せる。決め打ちで "+" を書いていた頃は、
-                //   カルデラの陥没が「+-900 m」と表示された。
+                // ★ Leave the sign to the number. Back when a "+" was hard-coded, a caldera
+                //   foundering was displayed as "+-900 m".
                 + "    " + Strings.VolcanoSummitRow + ": "
                 + (s.SummitMetres >= 0f ? "+" : "")
                 + s.SummitMetres.ToString("F0") + " " + Strings.VolcanoMetres
@@ -298,25 +312,28 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴火の 2 行（T7）。**噴火の段に入るまでは出さない**（隆起の 4 行と同じ扱い）。
+        /// The two eruption rows (T7). **Not shown until the eruption stage is entered** (handled
+        /// the same way as the four uplift rows).
         ///
-        /// ★ 強さは <b>0〜10 の段階</b>で出す。⑤は温度も噴出量も持っておらず、
-        ///   実在の物理単位を名乗ってはいけない（設計書 §7.4 /
-        ///   計画「出してよい断定の範囲」の 5）。印（<c>[measured]</c>）も付かない ——
-        ///   これは⑤が決めた量であって、ゲームが計算した値ではない。
+        /// ★ The strength is reported as <b>a stage from 0 to 10</b>. ⑤ holds neither a
+        ///   temperature nor an ejecta volume, and must not quote a real physical unit
+        ///   (design doc §7.4 / item 5 of the plan's "the range of assertions we may make").
+        ///   No marker (<c>[measured]</c>) is applied either — this is a quantity ⑤ chose, not a
+        ///   value the game computed.
         ///
-        /// ★ 注記は**噴火の段のあいだだけ**出す。常に出すと、山を作っている間ずっと
-        ///   「ゲームに溶岩は無い」と言い続けることになる。
+        /// ★ The note is shown **only during the eruption stage**. Show it always and you would
+        ///   be saying "the game has no lava" for the whole time the mountain is being built.
         /// </summary>
         /// <summary>
-        /// 火山性地震の 1 行。**揺れの強さ 0〜10** で、実在の震度でもマグニチュードでもない
-        /// （⑤が決めた量である。設計書 §7.4 の規律）。
+        /// The single volcanic-earthquake row. **A shaking strength of 0 to 10**, which is neither
+        /// a real seismic intensity nor a magnitude (it is a quantity ⑤ chose. The discipline of
+        /// design doc §7.4).
         ///
-        /// ★ 読むのは <c>VolcanoTremorShake</c> が main スレッドで書いた値で、
-        ///   このパネルも main スレッドである（<c>VolcanoPanel.Tick</c>）。
+        /// ★ What it reads is the value <c>VolcanoTremorShake</c> wrote on the main thread, and
+        ///   this panel is on the main thread too (<c>VolcanoPanel.Tick</c>).
         ///
-        /// ★ 設定で切っているあいだは**行ごと出さない** ——
-        ///   「0 / 10」は「揺れていない」であって「切ってある」ではない。
+        /// ★ While it is turned off in the settings, **the row is not shown at all** —
+        ///   "0 / 10" means "not shaking", not "turned off".
         /// </summary>
         private static float RefreshQuake(float y, VolcanoSnapshot s)
         {
@@ -337,8 +354,8 @@ namespace DisasterPlus.Game
 
         private static float RefreshEruption(float y, VolcanoSnapshot s)
         {
-            // ★ T8 で位相を絞った。噴火の段のあいだだけ出す —— 溶岩が流れている間は
-            //   その下の 4 行（<see cref="RefreshLava"/>）がその場所を使う。
+            // ★ T8 narrowed the phases. Shown only during the eruption stage — while the lava is
+            //   flowing, the four rows below (<see cref="RefreshLava"/>) use that space.
             bool erupting = s.Phase == VolcanoPhase.Erupting;
 
             if (!erupting)
@@ -347,15 +364,16 @@ namespace DisasterPlus.Game
                 return ReflowNote(y, _eruptionMissingLabel, "");
             }
 
-            // 0〜10 の段階。0.0 でも「1 段」と言わないよう、素直に四捨五入する。
+            // A stage from 0 to 10. Round plainly, so that 0.0 is not called "stage 1".
             float stage = s.EruptionIntensityUnit * 10f;
 
             y = ReflowRow(y, _eruptionLabel,
                 Strings.VolcanoEruptionRow + ": " + stage.ToString("F1") + " / 10");
 
-            // ★ 引けなかったときだけ断る。**引けている環境で毎回読ませない。**
-            //   設定で切っているだけのときも出さない（「切ってある」と
-            //   「この環境では出せない」を混ぜない）。
+            // ★ Only disclaim when it could not be looked up. **Do not make people read it every
+            //   time in an environment where it resolves.**
+            //   Do not show it when it is merely turned off in the settings either (do not mix
+            //   "turned off" with "cannot be shown in this environment").
             bool fxOn = ModSettings.VolcanoEruptionFx.value;
             y = ReflowNote(y, _eruptionMissingLabel,
                 fxOn && !VolcanoEruptionFx.Facts.EruptionUsable
@@ -365,12 +383,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 溶岩の 4 行（T8）。**溶岩の段に入るまでは出さない。**
+        /// The four lava rows (T8). **Not shown until the lava stage is entered.**
         ///
-        /// ★ 木の説明は <b>ND DLC を持っていないときだけ</b>出す（§B-7c）。
-        ///   持っている環境で常に出すと、起きてもいない制約を毎回読ませることになる。
-        /// ★ 道路の説明は溶岩の段のあいだ常に出す —— 「溶岩の下の道路が燃えない」は
-        ///   必ず目に入る事実で、ゲームに API が無いことを説明できるのはここだけである。
+        /// ★ The note about trees is shown <b>only when the ND DLC is not owned</b> (§B-7c).
+        ///   Show it always in an environment that owns it and you make people read about a
+        ///   constraint that is not even in play.
+        /// ★ The note about roads is shown throughout the lava stage — "the roads under the lava
+        ///   do not burn" is a fact that will certainly be noticed, and this is the only place we
+        ///   can explain that the game has no API for it.
         /// </summary>
         private static float RefreshLava(float y, VolcanoSnapshot s)
         {
@@ -387,10 +407,11 @@ namespace DisasterPlus.Game
                 + "    " + Strings.VolcanoLavaLongest + ": "
                 + s.LavaLongestMetres.ToString("F0") + " " + Strings.VolcanoMetres);
 
-            // マテリアルを作れなかったときだけ説明する。**流れも焦げも着火も
-            //   変わらない**ことを同時に言う（Strings.VolcanoLavaNoMaterial）。
-            //   設定で描画を切っているときは出さない ——
-            //   「切ってある」と「この環境では出せない」を混ぜない。
+            // Explain only when the material could not be built. **Say at the same time that the
+            //   flow, the scorching and the ignition are unchanged**
+            //   (Strings.VolcanoLavaNoMaterial).
+            //   Do not show it when the rendering is turned off in the settings —
+            //   do not mix "turned off" with "cannot be shown in this environment".
             y = ReflowNote(y, _lavaNoMaterialLabel,
                 ModSettings.VolcanoLavaRender.value && !VolcanoLavaFx.MaterialResolved
                     ? Strings.VolcanoLavaNoMaterial : "");
@@ -399,9 +420,10 @@ namespace DisasterPlus.Game
 
 
         /// <summary>
-        /// 「進行中」の位相か。**壊し始めてからの 7 つ**である。
-        /// <c>VolcanoState.InProgress</c> と同じ集合にしておくこと ——
-        /// ずれると、進行中の火山を画面が「終わっている」と名乗る。
+        /// Whether the phase counts as "in progress". **The seven that follow the start of
+        /// destruction.**
+        /// Keep it the same set as <c>VolcanoState.InProgress</c> — let them drift and the screen
+        /// will call a volcano in progress "finished".
         /// </summary>
         private static bool InProgress(VolcanoPhase phase)
         {
@@ -420,8 +442,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// [実測] の印が付く行。**接頭辞は <c>VolcanoRows.SetMeasured</c> が付ける**ので、
-        /// ここでは空文字のときだけ素通しする（空の行に印だけが残らないこと）。
+        /// A row that carries the [measured] marker. **The prefix is applied by
+        /// <c>VolcanoRows.SetMeasured</c>**, so here we only pass through when the text is empty
+        /// (so an empty row is never left with nothing but the marker).
         /// </summary>
         private static float ReflowMeasured(float y, UILabel label, string body)
         {
@@ -455,20 +478,20 @@ namespace DisasterPlus.Game
 
             label.isVisible = true;
             label.relativePosition = new Vector3(VolcanoRows.RowLeft, y);
-            // ★ 高さは構築時に与えたのと同じ値を渡すこと —— wordWrap は構築時の高さで
-            //   決まっている（VolcanoRows.AddLabel）。
+            // ★ Pass the same height that was given at build time — wordWrap is decided by the
+            //   height at build time (VolcanoRows.AddLabel).
             label.height = height;
             return y + step;
         }
 
         /// <summary>
-        /// 一式まとめて出し入れする。
+        /// Show or hide the whole set at once.
         ///
-        /// ★ <b>この一式の行を 1 つも取りこぼさないこと。</b> T6 まで隆起の 4 行が
-        ///   この列に入っておらず、位相が畳まれたフレームで**古い隆起の行が
-        ///   そのまま残る**形になっていた（<see cref="Refresh"/> は <c>false</c> の枝で
-        ///   すぐ return するので、空文字を入れる経路を通らない）。T7 で
-        ///   噴火の 2 行を足すにあたって、隆起の 4 行もここへ入れてある。
+        /// ★ <b>Do not miss a single row of this set.</b> Up to T6 the four uplift rows were not
+        ///   in this list, so on the frame the phase folded away **the stale uplift rows were
+        ///   left behind** (<see cref="Refresh"/> returns immediately in the <c>false</c> branch,
+        ///   so it never goes through the path that puts empty strings in). When the two eruption
+        ///   rows were added in T7, the four uplift rows were put in here as well.
         /// </summary>
         private static void SetVisible(bool visible)
         {
@@ -491,8 +514,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルアンロード時。**参照を捨てるだけ**（実体はパネルの GameObject と
-        /// 一緒に消える）。持ち越すと、次の都市で破棄済みのラベルに書き込む。
+        /// On level unload. **Just drop the references** (the objects themselves go with the
+        /// panel's GameObject). Carry them over and you write into destroyed labels in the next
+        /// city.
         /// </summary>
         internal static void Destroy()
         {

@@ -3,40 +3,41 @@ using DisasterPlus.Core.Common;
 
 namespace DisasterPlus.Core.Volcano
 {
-    /// <summary>1 発ぶんの爆発。<c>DispatchEffect</c> 1 回に写す。</summary>
+    /// <summary>One burst's worth of explosion. Maps onto a single <c>DispatchEffect</c>
+    /// call.</summary>
     public struct BlastBurst
     {
-        /// <summary>噴出口からの水平オフセット（m）。</summary>
+        /// <summary>Horizontal offset from the vent (m).</summary>
         public readonly float OffsetX;
 
-        /// <summary>噴出口からの高さ（m）。</summary>
+        /// <summary>Height above the vent (m).</summary>
         public readonly float OffsetY;
 
-        /// <summary>噴出口からの水平オフセット（m）。</summary>
+        /// <summary>Horizontal offset from the vent (m).</summary>
         public readonly float OffsetZ;
 
-        /// <summary><c>SpawnArea</c> の半径（m）。</summary>
+        /// <summary>The <c>SpawnArea</c>'s radius (m).</summary>
         public readonly float RadiusMetres;
 
         /// <summary>
-        /// <c>SpawnArea</c> の<b>縦の伸び</b>（m）。
+        /// The <c>SpawnArea</c>'s <b>vertical extent</b> (m).
         ///
-        /// ★★ <b>0 にしてはいけない。</b>（2026-08-22、所有者の指摘
-        ///   「エフェクトが平面的」）3 引数の
-        ///   <c>SpawnArea(position, direction, radius)</c> は
-        ///   <c>m_halfHeight = 0</c> を書き込む（IL_006F-0075 で確認）。
-        ///   粒は「円盤 ＋ 上×[0, halfHeight)」に湧くので、0 だと
-        ///   <b>厚みゼロの円盤</b>にしか湧かない —— それが「平面的」の正体である。
-        ///   4 引数のほうを使って、ここを渡すこと。
+        /// ★★ <b>It must not be 0.</b> (2026-08-22, the owner's report that "the effect
+        ///   looks flat".) The three-argument
+        ///   <c>SpawnArea(position, direction, radius)</c> writes
+        ///   <c>m_halfHeight = 0</c> (confirmed at IL_006F-0075).
+        ///   Particles spawn in "the disc + up × [0, halfHeight)", so at 0 they only spawn
+        ///   in <b>a disc of zero thickness</b> — which is what "flat" actually was.
+        ///   Use the four-argument version and pass this in.
         /// </summary>
         public readonly float HalfHeightMetres;
 
-        /// <summary><c>DispatchEffect</c> の <c>magnitude</c>（＝粒子密度）。</summary>
+        /// <summary><c>DispatchEffect</c>'s <c>magnitude</c> (i.e. the particle density).</summary>
         public readonly float Magnitude;
 
         /// <summary>
-        /// 何フレーム遅らせて積むか。**同時に全部出さない** ——
-        /// 同時に出すと 1 個の大きい爆発ではなく「1 個の平たい円盤」に見える。
+        /// How many frames to delay before queueing it. **Do not fire them all at once** —
+        /// fired at once it looks like "one flat disc" rather than one large explosion.
         /// </summary>
         public readonly int DelayFrames;
 
@@ -55,111 +56,125 @@ namespace DisasterPlus.Core.Volcano
     }
 
     /// <summary>
-    /// 1 回の爆発を<b>何発の <c>DispatchEffect</c> に割るか</b>を決める。
-    /// **エンジン非依存の純関数だけ。**
+    /// Decides <b>how many <c>DispatchEffect</c> bursts one explosion is split into</b>.
+    /// **Pure engine-free functions only.**
     ///
-    /// ── なぜ「1 発」ではだめなのか（2026-08-22、所有者の指摘）──────────────
+    /// ── Why one burst will not do (2026-08-22, the owner's report) ──────────────
     ///
-    /// &gt; 爆発のエフェクトがスケール通りではない、特に破局噴火の時の爆発が
-    /// &gt; しょぼすぎます
+    /// &gt; The explosion effect is not to scale — the explosion during a caldera-forming
+    /// &gt; eruption in particular is far too feeble.
     ///
-    /// 以前は <c>DispatchEffect</c> を<b>1 回</b>呼び、半径だけを
-    /// <c>火口半径 ×(0.35 + 0.45·強さ)</c> で広げていた。ところが
-    /// <b><c>SpawnArea</c> の半径を広げても粒子は大きくならない</b> ——
-    /// 1 フレームの粒子数は <c>max(100, π r²) × magnitude × 0.01 × rateOverTime</c> で
-    /// 面積に比例するが、<c>Medium Explosion Particles</c> の粒 1 個の大きさは
-    /// プレハブ側で固定である（<c>ShaderPool</c> 由来の実測メモと同じ話）。
-    /// つまり半径を 2 倍にすると<b>同じ大きさの粒が薄く散る</b>だけで、
-    /// 「大きい爆発」ではなく「まばらな爆発」になる。**指摘のとおりである。**
+    /// It used to call <c>DispatchEffect</c> <b>once</b> and widen the radius alone, as
+    /// <c>crater radius × (0.35 + 0.45·strength)</c>. But <b>widening the
+    /// <c>SpawnArea</c>'s radius does not make the particles bigger</b> —
+    /// the particle count for one frame is
+    /// <c>max(100, π r²) × magnitude × 0.01 × rateOverTime</c>, proportional to area, but
+    /// the size of one <c>Medium Explosion Particles</c> particle is fixed on the prefab
+    /// side (the same story as the measured note about <c>ShaderPool</c>).
+    /// So doubling the radius merely <b>scatters the same-sized particles more thinly</b>,
+    /// giving "a sparse explosion" rather than "a large explosion". **The report was
+    /// right.**
     ///
-    /// 大きく見せる方法は 1 つしかない —— <b>数を増やして、ずらして重ねる</b>。
-    /// 実際の火山の爆発も単一の球ではなく、火道から次々に噴き出す塊の集合である。
+    /// There is only one way to make it look big — <b>increase the number and stagger them
+    /// so they overlap</b>. A real volcanic explosion is not a single sphere either, but a
+    /// collection of blobs bursting out of the conduit one after another.
     ///
-    /// ── ★★ 破局噴火は「環状火口列」から噴く ──────────────────────────
+    /// ── ★★ A caldera-forming eruption erupts from a "ring fissure" ──────────────────────
     ///
-    /// カルデラ形成期の噴火は<b>中央火口からではなく、陥没した屋根のふちの
-    /// 環状断層に沿って</b>噴き上がる（ring-fissure eruption）。これが
-    /// 「破局噴火の爆発がしょぼい」の本質でもある —— 中央の 1 点だけを
-    /// 光らせていたら、半径 5 km のカルデラのどこにも爆発は見えない。
-    /// <see cref="For"/> に <c>ringRadiusMetres</c> を渡すと、発の一部を
-    /// その環に沿って配る。
+    /// The eruption of a caldera-forming episode blows up <b>along the ring fault at the
+    /// edge of the collapsing roof, not from a central crater</b> (a ring-fissure
+    /// eruption). This is also the essence of "the caldera-forming explosion is feeble" —
+    /// light up only the single central point and no explosion is visible anywhere in a
+    /// 5 km radius caldera.
+    /// Pass <c>ringRadiusMetres</c> to <see cref="For"/> and some of the bursts are
+    /// distributed along that ring.
     ///
-    /// ── 大きさは 2 つの軸で決まる ─────────────────────────────────
+    /// ── The size is decided on two axes ─────────────────────────────────
     ///
     /// <list type="number">
-    /// <item><b>強さ</b>（<c>unit</c>）… 噴火の包絡線。今までどおり</item>
-    /// <item><b>山の大きさ</b>（<c>sizeUnit</c>）… <b>ここが抜けていた。</b>
-    ///   スライダーを 25.5 にしても、火口半径が変わるだけで発の数は同じだった</item>
+    /// <item><b>Strength</b> (<c>unit</c>) … the eruption's envelope. As before</item>
+    /// <item><b>The mountain's size</b> (<c>sizeUnit</c>) … <b>this was the missing one.</b>
+    ///   Put the slider at 25.5 and only the crater radius changed; the number of bursts
+    ///   stayed the same</item>
     /// </list>
     /// </summary>
     public static class BlastCluster
     {
-        /// <summary>1 回の爆発で積む発の数の下限（いちばん小さい火山・弱いとき）。</summary>
+        /// <summary>The floor on how many bursts one explosion queues (smallest volcano,
+        /// weakest moment).</summary>
         public const int MinBursts = 3;
 
-        /// <summary>同上の上限。**ここを超えて増やさない** ——
-        /// <c>DispatchEffect</c> は 1 回ごとにゲームの効果キューを消費する。</summary>
+        /// <summary>The ceiling on the same. **Do not raise it past this** —
+        /// every <c>DispatchEffect</c> call consumes the game's effect queue.</summary>
         public const int MaxBursts = 40;
 
-        /// <summary>山の大きさで発の数がどこまで増えるか（倍）。</summary>
+        /// <summary>How far the mountain's size raises the burst count (as a multiple).</summary>
         public const float SizeCountGain = 3.4f;
 
-        /// <summary>大爆発（カルデラ形成期）で発の数がさらに何倍になるか。</summary>
+        /// <summary>How much further the burst count is multiplied in a great explosion (a
+        /// caldera-forming episode).</summary>
         public const float ClimaxCountGain = 2.6f;
 
-        /// <summary>大爆発で 1 発ぶんの密度が何倍になるか。</summary>
+        /// <summary>How much the density of one burst is multiplied in a great explosion.</summary>
         public const float ClimaxMagnitudeGain = 1.8f;
 
         /// <summary>
-        /// 塊が散らばる範囲（火口半径に対する比）。
+        /// How far the blobs scatter (as a fraction of the crater radius).
         ///
-        /// ★★ <b>1.15 は広すぎた</b>（2026-08-22、所有者の指摘「場所が少しずれて
-        ///   見えます」）。火口半径 351 m の火山で最大 404 m —— つまり
-        ///   <b>火口の外側まで爆発が散っていた</b>。1 つの大きい爆発ではなく、
-        ///   火口のまわりでばらばらに弾けているように見える。
-        ///   火口の中に収める。
+        /// ★★ <b>1.15 was too wide</b> (2026-08-22, the owner's report that "the position
+        ///   looks slightly off"). On a volcano with a crater radius of 351 m that is up to
+        ///   404 m — i.e. <b>the explosions were scattering outside the crater</b>. Instead
+        ///   of one large explosion it looks like scattered bursts going off around the
+        ///   crater. Keep it inside the crater.
         /// </summary>
         public const float SpreadRatio = 0.55f;
 
         /// <summary>
-        /// 塊が積み上がる高さ（火口半径に対する比）。**横だけに散らさない。**
+        /// How high the blobs stack (as a fraction of the crater radius). **Do not scatter
+        /// sideways only.**
         ///
-        /// ★★ 同上。1.9 では火口半径 351 m のとき<b>噴出口の 667 m 上</b>にまで
-        ///   爆発が浮いていた。噴煙柱ならその高さでよいが、爆発は火口で起きる。
+        /// ★★ As above. At 1.9, with a crater radius of 351 m, explosions were floating
+        ///   <b>667 m above the vent</b>. That height would be fine for an eruption column,
+        ///   but an explosion happens at the crater.
         /// </summary>
         public const float RiseRatio = 0.7f;
 
         /// <summary>
-        /// 1 発ぶんの縦の伸び（その発の半径に対する比）。
-        /// **1 に近いほど球に見える。** 0 は円盤である（<c>BlastBurst.HalfHeightMetres</c>）。
+        /// The vertical extent of one burst (as a fraction of that burst's radius).
+        /// **The closer to 1, the more it reads as a sphere.** 0 is a disc (see
+        /// <c>BlastBurst.HalfHeightMetres</c>).
         /// </summary>
         public const float HalfHeightRatio = 1.25f;
 
-        /// <summary>1 発ぶんの <c>SpawnArea</c> 半径（火口半径に対する比）の下限。</summary>
+        /// <summary>The floor on one burst's <c>SpawnArea</c> radius (as a fraction of the
+        /// crater radius).</summary>
         public const float BurstRadiusMinRatio = 0.22f;
 
-        /// <summary>同上の上限。</summary>
+        /// <summary>The ceiling on the same.</summary>
         public const float BurstRadiusMaxRatio = 0.62f;
 
-        /// <summary>全部の発が出そろうまでのフレーム数。</summary>
+        /// <summary>How many frames until all the bursts are out.</summary>
         public const int SpreadFrames = 26;
 
         /// <summary>
-        /// 環（＝カルデラのふち）へ配る発の割合。大爆発のときだけ意味を持つ。
-        /// 1 にしない —— 中央の火道も同時に噴いている。
+        /// The fraction of bursts distributed to the ring (i.e. the caldera's edge). It only
+        /// means anything for a great explosion.
+        /// Not 1 — the central conduit is erupting at the same time.
         /// </summary>
         public const float RingShare = 0.55f;
 
-        /// <summary>環に沿った発が環からどれだけばらつくか（環の半径に対する比）。</summary>
+        /// <summary>How far the bursts along the ring scatter from it (as a fraction of the
+        /// ring's radius).</summary>
         public const float RingJitterRatio = 0.10f;
 
         /// <summary>
-        /// この 1 回の爆発を何発に割るか。
+        /// How many bursts this one explosion is split into.
         /// </summary>
         /// <param name="sizeUnit">
-        /// 山の大きさ <c>[0,1]</c>。推奨サイズで 0、スライダー上端で 1。
+        /// The mountain's size <c>[0,1]</c>. 0 at the recommended size, 1 at the top of the slider.
         /// </param>
-        /// <param name="climax">カルデラ形成期の大爆発か。</param>
+        /// <param name="climax">Whether this is the great explosion of a caldera-forming
+        /// episode.</param>
         public static int CountFor(float unit, float sizeUnit, bool climax)
         {
             float u = Clamp01(unit);
@@ -175,14 +190,15 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// <paramref name="index"/> 番目の発。<paramref name="index"/> は
-        /// <c>[0, <see cref="CountFor"/>)</c>。
+        /// Burst number <paramref name="index"/>. <paramref name="index"/> is in
+        /// <c>[0, <see cref="CountFor"/>)</c>.
         /// </summary>
-        /// <param name="craterRadiusMetres">火口半径（m）。塊の散らばりの基準。</param>
+        /// <param name="craterRadiusMetres">The crater radius (m). The baseline for how far
+        /// the blobs scatter.</param>
         /// <param name="ringRadiusMetres">
-        /// 環状火口列の半径（m）。**0 なら環を使わない**（ふつうの噴火）。
+        /// The ring fissure's radius (m). **0 means do not use a ring** (an ordinary eruption).
         /// </param>
-        /// <param name="seed">この爆発の種。</param>
+        /// <param name="seed">This explosion's seed.</param>
         public static BlastBurst For(int index, int count, float unit, float sizeUnit,
                                      bool climax, float craterRadiusMetres,
                                      float ringRadiusMetres, uint seed)
@@ -203,7 +219,8 @@ namespace DisasterPlus.Core.Volcano
             float sizePick = DeterministicRandom.Unit(seed, draw + 3u);
             float delayPick = DeterministicRandom.Unit(seed, draw + 4u);
 
-            // ★★ 環状火口列（破局噴火だけ）。**発の何割かを環に沿って配る。**
+            // ★★ The ring fissure (caldera-forming eruptions only). **Some fraction of the
+            //    bursts is distributed along the ring.**
             bool onRing = climax
                           && !IsBad(ringRadiusMetres)
                           && ringRadiusMetres > crater
@@ -217,14 +234,15 @@ namespace DisasterPlus.Core.Volcano
             }
             else
             {
-                // 円盤上に一様（sqrt）。中心にだけ固まらせない。
+                // Uniform over the disc (hence the sqrt). Do not let them bunch up at the centre.
                 distance = (float)Math.Sqrt(rr) * SpreadRatio * crater;
             }
 
             float offsetX = (float)Math.Cos(a) * distance;
             float offsetZ = (float)Math.Sin(a) * distance;
 
-            // 積み上がる高さ。**環の発は低い**（ふちから横へ噴き出す）。
+            // How high they stack. **The ring's bursts are low** (they blow out sideways
+            // from the edge).
             float offsetY = rise * RiseRatio * crater * (onRing ? 0.35f : 1f);
 
             float radius = crater * (BurstRadiusMinRatio
@@ -232,9 +250,10 @@ namespace DisasterPlus.Core.Volcano
             if (radius < MinRadius) radius = MinRadius;
 
             float magnitude = EruptionEffectPlan.BlastMagnitude(u);
-            // ★ 発を増やしたぶん 1 発を薄くしない —— 薄くすると、増やした意味が
-            //   ちょうど打ち消される（面積で正規化する噴煙とはここが違う。
-            //   あちらは連続、こちらは一発ものである）。
+            // ★ Do not thin out each burst to compensate for having more of them — thinning
+            //   cancels out exactly the point of adding them (this is where it differs from
+            //   the ash plume, which normalises by area. That one is continuous; this is a
+            //   one-shot).
             if (climax) magnitude *= ClimaxMagnitudeGain;
 
             int delay = (int)(delayPick * SpreadFrames);
@@ -246,9 +265,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 山の大きさ <c>[0,1]</c>。推奨サイズ（<c>VolcanoShape.DefaultRadiusOf</c>）で 0、
-        /// 形態の帯の上限で 1。**スライダーそのものではなく実寸で測る** ——
-        /// 形態ごとに帯が違うので、スライダーの位置だけでは大きさが決まらない。
+        /// The mountain's size <c>[0,1]</c>. 0 at the recommended size
+        /// (<c>VolcanoShape.DefaultRadiusOf</c>), 1 at the top of that form's band.
+        /// **Measured from the real dimensions, not from the slider itself** — each form
+        /// has a different band, so the slider position alone does not determine the size.
         /// </summary>
         public static float SizeUnitOf(float radiusMetres, float defaultRadiusMetres,
                                        float maxRadiusMetres)

@@ -2,7 +2,8 @@ using DisasterPlus.Core.Common;
 
 namespace DisasterPlus.Core.FireWhirl
 {
-    /// <summary>発生候補地点。Center は近傍燃焼建物の重心。</summary>
+    /// <summary>A candidate spot for one to form. Center is the centroid of the burning
+    /// buildings nearby.</summary>
     public struct FireWhirlCandidate
     {
         public readonly Vec2 Center;

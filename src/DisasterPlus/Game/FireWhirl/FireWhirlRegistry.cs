@@ -4,7 +4,8 @@ using DisasterPlus.Core.FireWhirl;
 
 namespace DisasterPlus.Game
 {
-    /// <summary>生存中の火災旋風 1 基。レジストリの内部表現なので外に漏らさない。</summary>
+    /// <summary>One live fire whirl. This is the registry's internal representation, so it
+    /// never leaks outside.</summary>
     internal class ActiveFireWhirl
     {
         public ushort DisasterId;
@@ -14,41 +15,45 @@ namespace DisasterPlus.Game
         public int BurningCount;
         public FireWhirlLifecycle Life;
 
-        /// <summary>終了処理に入った。移動目標を現在地に置いてバニラの解体を待っている状態。</summary>
+        /// <summary>It has entered its ending sequence: the movement target has been put
+        /// at its current position and it is waiting for vanilla to tear it down.</summary>
         public bool Ending;
 
         /// <summary>
-        /// 終了処理に入ってからのゲーム内経過（分）。
+        /// How much in-game time (in minutes) has passed since the ending sequence began.
         ///
-        /// Life.ElapsedMinutes では代用できない。FireWhirlFeature.UpdateExisting は
-        /// Ending の旋風を飛ばすので、Ending が立った瞬間に Life の時計は止まる。
-        /// 「終了処理に入ったのに終わらない」（＝m_targetPos0 取り違えの再発シグネチャ）
-        /// を測るには、Ending 専用の別の時計が要る。
+        /// Life.ElapsedMinutes cannot stand in for this. FireWhirlFeature.UpdateExisting
+        /// skips whirls that are Ending, so Life's clock stops the moment Ending is set.
+        /// Measuring "it entered the ending sequence but never ends" — the signature of
+        /// the m_targetPos0 mix-up coming back — needs a separate clock of its own.
         /// </summary>
         public float EndingMinutes;
 
         /// <summary>
-        /// ★★ **退役したフラグ。新しく true になることはもう無い。**
+        /// ★★ **A retired flag. Nothing sets it true any more.**
         ///
-        /// かつてプレイヤーが災害パネルから手動で置けた旋風の印で、発生条件
-        /// （R 内に N 棟）の割り込み判定を免除するために使っていた。手動発生の
-        /// 経路そのものを撤去した（<see cref="FireWhirlFeature"/> のクラス doc）ので、
-        /// これを true にする書き手は <see cref="FireWhirlRegistry.RestoreFromSave"/>
-        /// ——つまり**手動発生が在った頃のセーブ**——しか残っていない。
+        /// It used to mark a whirl the player had placed by hand from the disaster panel,
+        /// and it exempted that whirl from the interrupt check on the spawn condition (N
+        /// buildings within R). The manual spawn route itself has been removed (see the
+        /// class doc on <see cref="FireWhirlFeature"/>), so the only writer left that can
+        /// set it true is <see cref="FireWhirlRegistry.RestoreFromSave"/> — that is,
+        /// **a save from the days when manual spawning existed**.
         ///
-        /// **消さないこと。** セーブ形式 version 2 はこの 1 バイトを持っており、
-        /// 保存形式は公開契約である。読み書きをやめると旧セーブの旋風が
-        /// 免除を失い、ロードした瞬間に猶予だけで消える。
+        /// **Do not delete it.** Save format version 2 carries this one byte, and the save
+        /// format is a public contract. Stop reading and writing it and whirls from old
+        /// saves lose their exemption, so they vanish on load with only the grace period
+        /// to run out.
         /// </summary>
         public bool Manual;
     }
 
     /// <summary>
-    /// レジストリの外へ渡す不変のコピー。
+    /// The immutable copy handed outside the registry.
     ///
-    /// 可変オブジェクトの参照を返すと、リストを複製しても中身は共有されたままで、
-    /// main スレッドがロックの外で Center や Ending を読んでいる最中に
-    /// sim スレッドが書き換えられてしまう。値でコピーして初めて境界が成立する。
+    /// Return a reference to a mutable object and duplicating the list still leaves the
+    /// contents shared, so the sim thread can rewrite Center or Ending while the main
+    /// thread is reading them outside the lock. Only copying by value establishes the
+    /// boundary.
     /// </summary>
     public struct FireWhirlView
     {
@@ -60,7 +65,8 @@ namespace DisasterPlus.Game
         public readonly float ElapsedMinutes;
         public readonly bool Ending;
 
-        /// <summary>終了処理に入ってからのゲーム内経過（分）。Ending でなければ 0。</summary>
+        /// <summary>How much in-game time (in minutes) has passed since the ending
+        /// sequence began. 0 unless Ending.</summary>
         public readonly float EndingMinutes;
 
         public readonly bool Manual;
@@ -80,15 +86,18 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// この MOD で唯一の共有可変状態。
-    /// sim スレッド（判定・生成・被害）と main スレッド（描画）と
-    /// Harmony パッチ（位置固定）の 3 者から触られる。
+    /// The only shared mutable state in this mod.
+    /// It is touched by three parties: the sim thread (the checks, the spawning, the
+    /// damage), the main thread (the drawing) and the Harmony patch (pinning the
+    /// position).
     ///
-    /// net35 に System.Collections.Concurrent は無いので、素の lock で snapshot-then-render する。
+    /// net35 has no System.Collections.Concurrent, so we snapshot-then-render behind a
+    /// plain lock.
     /// </summary>
     public static class FireWhirlRegistry
     {
-        /// <summary>旋風が消えた地点。この間は同じ場所に再発生させない。</summary>
+        /// <summary>A spot where a whirl died. For this long, nothing respawns in the same
+        /// place.</summary>
         private struct CoolingSpot
         {
             public Vec2 Center;
@@ -100,13 +109,14 @@ namespace DisasterPlus.Game
         private static readonly List<CoolingSpot> _cooling = new List<CoolingSpot>();
 
         /// <summary>
-        /// 自然発生した旋風を 1 基登録する。
+        /// Registers one naturally spawned whirl.
         ///
-        /// ★ <c>manual</c> の引数はもう無い。**プレイヤーが火災旋風を置く経路が
-        ///   存在しない**ので（<see cref="FireWhirlFeature"/> のクラス doc）、
-        ///   ここから作られる旋風は必ず自然発生である。
-        ///   <see cref="ActiveFireWhirl.Manual"/> が残っているのは**旧セーブのため**で、
-        ///   復元経路（<see cref="RestoreFromSave"/>）だけが true を入れうる。
+        /// ★ There is no <c>manual</c> argument any more. **No route exists for a player
+        ///   to place a fire whirl** (see the class doc on
+        ///   <see cref="FireWhirlFeature"/>), so anything created from here is by
+        ///   definition a natural spawn. <see cref="ActiveFireWhirl.Manual"/> survives
+        ///   **for the sake of old saves**, and only the restore route
+        ///   (<see cref="RestoreFromSave"/>) can put true in it.
         /// </summary>
         public static void Add(ushort disasterId, ushort vehicleId, Vec3 center, float radius,
                                int burningCount)
@@ -123,16 +133,17 @@ namespace DisasterPlus.Game
                     Life = FireWhirlLifecycle.Start(),
                     Ending = false,
                     EndingMinutes = 0f,
-                    // ★ 自然発生しか経路が無いので必ず false。旧セーブから読み直した
-                    //   旋風だけが true を持ちうる（RestoreFromSave）。
+                    // ★ Natural spawning is the only route, so this is always false. Only
+                    //   whirls read back from an old save can carry true
+                    //   (RestoreFromSave).
                     Manual = false,
                 });
             }
         }
 
         /// <param name="cooldownMinutes">
-        /// この地点を抑制し続ける時間。仕様では最大持続時間と同値
-        /// （呼び出し側が ModSettings.MaxLifetimeMinutes を渡す）。
+        /// How long this spot stays suppressed. By design it equals the maximum lifetime
+        /// (the caller passes ModSettings.MaxLifetimeMinutes).
         /// </param>
         public static void Remove(ushort disasterId, float cooldownMinutes)
         {
@@ -161,11 +172,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// クールダウン中（＝再発生が抑制されている）の地点数。
+        /// How many spots are in cooldown (i.e. where respawning is suppressed).
         ///
-        /// 設計書 7.1 のオーバーレイ例は末尾に cooldown を出しており、
-        /// 「大火災が燃えているのに旋風が出ない」の最有力の原因がこれなので、
-        /// 外から読めないままにしない。
+        /// The overlay example in §7.1 of the design document prints cooldown at the end,
+        /// and this is the most likely cause of "a huge fire is burning but no whirl
+        /// appears", so we do not leave it unreadable from outside.
         /// </summary>
         public static int CoolingCount
         {
@@ -173,8 +184,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 値でコピーした不変ビューを返す。呼び出し側はロックの外で自由に走査してよい。
-        /// ActiveFireWhirl の参照は決して外に出さない。
+        /// Returns immutable views copied by value. The caller may walk them freely
+        /// outside the lock. A reference to an ActiveFireWhirl never leaves this class.
         /// </summary>
         public static List<FireWhirlView> Snapshot()
         {
@@ -186,7 +197,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>寿命を進める。sim スレッドから呼ぶ。</summary>
+        /// <summary>Advances the lifetime. Call from the sim thread.</summary>
         public static void AdvanceLife(ushort disasterId, float deltaMinutes, bool conditionMet)
         {
             lock (_gate)
@@ -200,7 +211,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>燃焼規模の変化を反映する。sim スレッドから呼ぶ。</summary>
+        /// <summary>Applies a change in the fire's scale. Call from the sim thread.</summary>
         public static void UpdateStrength(ushort disasterId, float radius, int burningCount)
         {
             lock (_gate)
@@ -215,7 +226,8 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>寿命判定。Life を外に漏らさないため、評価もレジストリ内で行う。</summary>
+        /// <summary>The lifetime verdict. So that Life never leaks outside, the evaluation
+        /// is done inside the registry too.</summary>
         public static FireWhirlVerdict EvaluateVerdict(ushort disasterId, FireWhirlConfig config)
         {
             lock (_gate)
@@ -226,12 +238,13 @@ namespace DisasterPlus.Game
                     return _active[i].Life.Evaluate(config);
                 }
             }
-            return FireWhirlVerdict.Dissipate;   // 見つからない = 既に消えている
+            return FireWhirlVerdict.Dissipate;   // not found = it has already gone
         }
 
         /// <summary>
-        /// 渦車両を紐づける。車両は ActivateDisaster が作るので、CreateDisaster 直後には
-        /// まだ存在せず、Add した時点では vehicleId = 0 のまま登録されている。
+        /// Associates the vortex vehicle. The vehicle is created by ActivateDisaster, so
+        /// it does not exist yet immediately after CreateDisaster; at the moment of Add
+        /// the entry is registered with vehicleId = 0.
         /// </summary>
         public static void SetVehicle(ushort disasterId, ushort vehicleId)
         {
@@ -246,7 +259,8 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>終了処理に入ったことを記録する。以降は位置固定をやめる。</summary>
+        /// <summary>Records that the ending sequence has begun. From here on we stop
+        /// pinning the position.</summary>
         public static void MarkEnding(ushort disasterId)
         {
             lock (_gate)
@@ -255,15 +269,16 @@ namespace DisasterPlus.Game
                 {
                     if (_active[i].DisasterId != disasterId) continue;
                     _active[i].Ending = true;
-                    _active[i].EndingMinutes = 0f;   // 終了処理の時計をここで始める
+                    _active[i].EndingMinutes = 0f;   // start the ending clock here
                     return;
                 }
             }
         }
 
         /// <summary>
-        /// 終了処理中の旋風の「終了してからの経過」を進める。sim スレッドから毎 tick 呼ぶ。
-        /// 機能設定が OFF でも呼ぶこと（OFF にした瞬間に全基が Ending に入るため）。
+        /// Advances the "time since ending began" for whirls in the ending sequence. Call
+        /// every tick from the sim thread. Call it even when the feature's setting is off
+        /// (turning it off puts every whirl into Ending at that moment).
         /// </summary>
         public static void AdvanceEnding(float deltaMinutes)
         {
@@ -279,11 +294,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 発生を抑制すべき地点の一覧。生存中の旋風の中心と、
-        /// 最近まで旋風があった地点（クールダウン中）の両方を返す。
+        /// The list of spots where spawning should be suppressed. Returns both the centres
+        /// of live whirls and the spots where a whirl was until recently (in cooldown).
         ///
-        /// クールダウンが無いと、消えた直後に同じ大火災が同じ場所で再発生させ続けて
-        /// 実質的に永久の旋風になる（絶対上限の意味が無くなる）。
+        /// Without the cooldown, the same huge fire keeps respawning in the same place the
+        /// instant one dies, giving an effectively permanent whirl (and making the
+        /// absolute cap meaningless).
         /// </summary>
         public static List<Vec2> Centers()
         {
@@ -297,7 +313,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// クールダウンを進め、明けた地点を捨てる。sim スレッドから毎 tick 呼ぶ。
+        /// Advances the cooldowns and drops the spots that have cleared. Call every tick
+        /// from the sim thread.
         /// </summary>
         public static void AdvanceCooldowns(float deltaMinutes)
         {
@@ -315,15 +332,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// Harmony パッチ（VortexAI.SimulationStep の Postfix）から毎ステップ呼ばれる。
-        /// 自分が作った渦かどうかを車両 ID で判定し、固定先の座標を返す。
+        /// Called every step from the Harmony patch (the Postfix on
+        /// VortexAI.SimulationStep). Decides from the vehicle ID whether this is a vortex
+        /// we created, and returns the coordinates to pin it to.
         ///
-        /// 終了処理中（Ending）でも固定を続ける。ここで固定を解くと、目標に到達するまでの
-        /// スピンダウン（角速度 1.0 から -0.05/step で 0.05 未満まで約 20 ステップ、その後
-        /// ArriveAtDestination が m_waitCounter > 4 になるまで 5 ステップ）の間、渦が
-        /// 自由に動き回ってしまい、炎エフェクトだけが発生地点に取り残される。
-        /// 固定したままなら目標との距離が 0 のままなので、スピンダウンが確実に進む。
-        /// エントリは Unspawn 後に CollectFinished が外す。
+        /// Pinning continues even during the ending sequence (Ending). Release it here and
+        /// the vortex wanders freely throughout the spin-down to the target — the angular
+        /// velocity falls from 1.0 at -0.05/step until it is under 0.05, about 20 steps,
+        /// and then ArriveAtDestination takes 5 more until m_waitCounter > 4 — leaving the
+        /// flame effect behind on its own at the spawn point. Keep it pinned and the
+        /// distance to the target stays 0, so the spin-down reliably makes progress.
+        /// The entry is removed by CollectFinished after the Unspawn.
         /// </summary>
         public static bool TryGetPinnedCenter(ushort vehicleId, out Vec3 center)
         {
@@ -340,7 +359,7 @@ namespace DisasterPlus.Game
             return false;
         }
 
-        /// <summary>レベルアンロード時。都市をまたいで状態を持ち越さない。</summary>
+        /// <summary>On level unload. State is never carried across cities.</summary>
         public static void Clear()
         {
             lock (_gate)
@@ -351,15 +370,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// セーブから復元する。現在の _active を置き換える（呼び出し前の内容は消える）。
-        /// 車両 ID は 0 のままにして、FireWhirlPinner.AttachVehicles がロード後に付け直す。
-        /// 経過時間は保存値から積み直すので、ロードしても寿命が延びない。
+        /// Restores from a save. Replaces the current _active (whatever was there before
+        /// the call is lost). Vehicle IDs are left at 0, and
+        /// FireWhirlPinner.AttachVehicles reattaches them after the load. Elapsed time is
+        /// accumulated again from the saved value, so loading does not extend a lifetime.
         ///
-        /// 呼び出し順の注意: DisasterPlusSerialization.OnLoadData は
-        /// DisasterPlusLoading.OnLevelLoaded（内部で FireWhirlRegistry.Clear() を呼ぶ）より前に
-        /// 完了する。そのため OnLoadData から直接ここを呼ぶと Clear() で消される。
-        /// 呼び出しは OnLevelLoaded 側で Clear() の後に行うこと
-        /// （DisasterPlusSerialization.TakePendingRestore() 経由）。
+        /// A note on ordering: DisasterPlusSerialization.OnLoadData finishes before
+        /// DisasterPlusLoading.OnLevelLoaded (which calls FireWhirlRegistry.Clear()
+        /// internally). So calling this directly from OnLoadData means Clear() wipes it.
+        /// Make the call on the OnLevelLoaded side, after Clear() (by way of
+        /// DisasterPlusSerialization.TakePendingRestore()).
         /// </summary>
         public static void RestoreFromSave(List<SavedFireWhirl> saved)
         {

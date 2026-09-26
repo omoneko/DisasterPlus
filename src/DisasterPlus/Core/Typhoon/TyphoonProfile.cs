@@ -1,45 +1,52 @@
 namespace DisasterPlus.Core.Typhoon
 {
     /// <summary>
-    /// 台風の中心からの距離 → 風速相当（[0, 1] の係数）と、その表示用の段階・バー。
+    /// Distance from the typhoon's centre → wind-speed equivalent (a factor in [0, 1]), and
+    /// the display step and bar for it.
     ///
-    /// **この型は m/s を返さない。** ④の「風速相当」はゲームの倒壊確率に掛ける係数で
-    /// あって、実在の風速ではない（設計書 §7.3）。②が気象庁震度階級を名乗らなかったのと
-    /// 同じ理由で、単位を名乗ると実在の意味があると誤解させる。返すのは [0,1] の係数と
-    /// 0〜<see cref="Steps"/> の段階だけである。**m/s を返すメソッドを足さないこと。**
+    /// **This type does not return m/s.** ④'s "wind-speed equivalent" is a factor that
+    /// multiplies the game's collapse probability; it is not a real wind speed (design doc
+    /// §7.3). For the same reason ② declined to claim the JMA seismic intensity scale,
+    /// claiming a unit makes people think it carries a real meaning. All that comes back is
+    /// a factor in [0,1] and a step from 0 to <see cref="Steps"/>. **Do not add a method
+    /// that returns m/s.**
     ///
-    /// 半径だけはバニラ由来の式に合わせてある。<see cref="StormRadiusOf"/> は
-    /// ThunderStormAI の落雷散布半径・ハザード円盤と**同じ**
-    /// R = m_radius × (0.25 + intensity × 0.0075)（IL 事実文書 §A-1 / §A-2）で、
-    /// これによりバニラが塗る円盤と④が表示する暴風域の大きさが一致する。
-    /// 風の形（眼・壁雲・外側の減衰）は④が発明したものである。
+    /// The radius alone is lined up with vanilla's formula. <see cref="StormRadiusOf"/> is
+    /// **the same** R = m_radius × (0.25 + intensity × 0.0075) as ThunderStormAI's lightning
+    /// scatter radius and hazard disc (IL findings doc §A-1 / §A-2), which makes the disc
+    /// vanilla paints and the gale radius ④ displays the same size.
+    /// The shape of the wind (the eye, the eyewall, the outer falloff) is ④'s invention.
     ///
-    /// <c>m_radius</c> はプレハブ値で **DLL に実数値が無い**（§A-0、PARTIAL）。
-    /// 読めなければ全部 0 を返し、呼び出し側は何もしない（設計書 §6）。
-    /// **0 を「風が無い」の意味にも使うが、半径 0 は「読めなかった」である** ——
-    /// 表示側はその 2 つを混ぜないこと（半径が読めたかどうかは
-    /// <c>TyphoonPrefabFacts</c> 側で名乗る）。
+    /// <c>m_radius</c> is a prefab value and **the DLL contains no actual number for it**
+    /// (§A-0, PARTIAL). If it cannot be read, everything returns 0 and the caller does
+    /// nothing (design doc §6).
+    /// **0 is also used to mean "no wind", but a radius of 0 means "could not be read"** —
+    /// the display side must not conflate the two (whether the radius was readable is owned
+    /// up to on the <c>TyphoonPrefabFacts</c> side).
     /// </summary>
     public static class TyphoonProfile
     {
-        /// <summary>眼の半径が暴風域半径に占める割合。</summary>
+        /// <summary>The eye's radius as a fraction of the gale radius.</summary>
         public const float EyeFraction = 0.12f;
 
-        /// <summary>壁雲（最も強い環）の半径が暴風域半径に占める割合。</summary>
+        /// <summary>The eyewall's (the strongest ring's) radius as a fraction of the gale
+        /// radius.</summary>
         public const float WallFraction = 0.34f;
 
-        /// <summary>強風域半径 ÷ 暴風域半径。</summary>
+        /// <summary>Strong-wind radius ÷ gale radius.</summary>
         public const float GaleFactor = 2.2f;
 
         /// <summary>
-        /// 眼の**縁**での風速相当。中心はちょうど 0（実在の台風でも眼の中心は静穏）で、
-        /// そこから縁までこの値へ線形に立ち上がり、縁から壁雲までで 1 に達する。
+        /// The wind-speed equivalent at the **rim** of the eye. The centre is exactly 0
+        /// (the middle of a real typhoon's eye is calm too), it rises linearly from there
+        /// to this value at the rim, and reaches 1 between the rim and the eyewall.
         ///
-        /// 計画 §1.2 の擬似コードは眼の枝を <c>EyeWind + (1-EyeWind)·(d/eye)</c> と
-        /// 書いているが、それは眼の縁でちょうど 1 に達してしまい、続く壁雲の枝
-        /// （同じく「wall で 1f」）と両立しない —— 縁の内側で 1.0、外側で 0.15 という
-        /// 不連続になる。壁雲が最強の環であるという構造（テストが固定している）を
-        /// 保つために、眼の枝は 0 → EyeWind の立ち上がりにしてある。
+        /// The pseudocode in plan §1.2 writes the eye's branch as
+        /// <c>EyeWind + (1-EyeWind)·(d/eye)</c>, but that reaches exactly 1 at the rim of
+        /// the eye, which cannot coexist with the eyewall branch that follows (which also
+        /// says "1f at wall") — you would get a discontinuity of 1.0 just inside the rim
+        /// and 0.15 just outside it. To preserve the structure where the eyewall is the
+        /// strongest ring (which the tests pin), the eye's branch rises from 0 to EyeWind.
         /// </summary>
         public const float EyeWind = 0.15f;
 
@@ -48,31 +55,34 @@ namespace DisasterPlus.Core.Typhoon
         public const char EmptyChar = '-';
 
         /// <summary>
-        /// 暴風域半径（m）。**バニラの散布半径・ハザード円盤と同じ式**
-        /// R = prefabRadius × (0.25 + intensity × 0.0075)（§A-1 IL_0177–0191 / §A-2）。
+        /// The gale radius (m). **The same formula as vanilla's scatter radius and hazard
+        /// disc**: R = prefabRadius × (0.25 + intensity × 0.0075) (§A-1 IL_0177–0191 / §A-2).
         ///
-        /// <paramref name="prefabRadius"/> が 0 以下か NaN なら **0**（＝プレハブが
-        /// 読めていない）。推測した半径を返さない。
+        /// If <paramref name="prefabRadius"/> is 0 or less, or NaN, the result is **0**
+        /// (i.e. the prefab could not be read). It never returns a guessed radius.
         /// </summary>
         public static float StormRadiusOf(byte intensity, float prefabRadius)
         {
-            // NaN も一緒に弾く（NaN > 0 は false）。
+            // This rejects NaN along with the rest (NaN > 0 is false).
             if (!(prefabRadius > 0f)) return 0f;
             return prefabRadius * (0.25f + intensity * 0.0075f);
         }
 
-        /// <summary>強風域半径（m）。暴風域の <see cref="GaleFactor"/> 倍。</summary>
+        /// <summary>The strong-wind radius (m). <see cref="GaleFactor"/> times the gale
+        /// radius.</summary>
         public static float GaleRadiusOf(byte intensity, float prefabRadius)
         {
             return StormRadiusOf(intensity, prefabRadius) * GaleFactor;
         }
 
         /// <summary>
-        /// 中心から <paramref name="distance"/> m の地点の風速相当（[0, 1]）。
+        /// The wind-speed equivalent ([0, 1]) at a point <paramref name="distance"/> m from
+        /// the centre.
         ///
-        /// 眼の中心 0 → 眼の縁 <see cref="EyeWind"/> → 壁雲でちょうど 1 →
-        /// 強風域の縁でちょうど 0。境界の 2 点はテストが固定している。
-        /// 強風域の外・負の距離・NaN は 0。
+        /// 0 at the centre of the eye → <see cref="EyeWind"/> at the rim of the eye →
+        /// exactly 1 at the eyewall → exactly 0 at the edge of the strong-wind radius.
+        /// Those two boundary points are pinned by the tests.
+        /// Outside the strong-wind radius, a negative distance, or NaN, all give 0.
         /// </summary>
         public static float WindAt(float distance, byte intensity, float prefabRadius)
         {
@@ -81,7 +91,7 @@ namespace DisasterPlus.Core.Typhoon
 
             float gale = storm * GaleFactor;
 
-            // NaN は !(d >= 0) 側で落ちる。
+            // NaN falls out on the !(d >= 0) side.
             if (!(distance >= 0f) || distance >= gale) return 0f;
 
             float eye = storm * EyeFraction;
@@ -89,7 +99,7 @@ namespace DisasterPlus.Core.Typhoon
 
             if (distance <= eye)
             {
-                // eye は storm > 0 かつ EyeFraction > 0 なので必ず正。
+                // eye is certain to be positive, since storm > 0 and EyeFraction > 0.
                 return EyeWind * (distance / eye);
             }
 
@@ -102,8 +112,9 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 風速相当を 0〜<see cref="Steps"/> の段階へ。単調増加。1 でちょうど Steps。
-        /// ②の <c>SeismicScale.StepOf</c> と同じ形（NaN は 0、範囲外はクランプ）。
+        /// Turns the wind-speed equivalent into a step from 0 to <see cref="Steps"/>.
+        /// Monotonically increasing; 1 lands exactly on Steps.
+        /// Same shape as ②'s <c>SeismicScale.StepOf</c> (NaN gives 0, out-of-range clamps).
         /// </summary>
         public static int StepOf(float wind)
         {
@@ -117,9 +128,11 @@ namespace DisasterPlus.Core.Typhoon
         }
 
         /// <summary>
-        /// 長さ <see cref="Steps"/> の ASCII バー。埋まった数は <see cref="StepOf"/> と一致する。
-        /// ASCII 固定なのは①の <c>HazardLevel</c>・②の <c>SeismicScale</c> と同じ理由で、
-        /// CS の UI フォントに罫線素片がある保証が無いため（無ければ豆腐になる）。
+        /// An ASCII bar of length <see cref="Steps"/>. The number filled matches
+        /// <see cref="StepOf"/>.
+        /// It is fixed ASCII for the same reason as ①'s <c>HazardLevel</c> and ②'s
+        /// <c>SeismicScale</c>: there is no guarantee the CS UI font has the block-drawing
+        /// characters (and without them you get tofu).
         /// </summary>
         public static string BarOf(float wind)
         {

@@ -5,15 +5,17 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 地震計の節と波形グラフの節。**main スレッド専用。**
+    /// The seismograph section and the waveform graph section. **Main thread only.**
     ///
-    /// <see cref="EarthquakePanel"/> から切り出したのは、あのファイルがプロジェクト規約の
-    /// 800 行を大きく超えていたためで、**内容は 1 文字も変えていない**。
-    /// 行の生成も <c>.text</c> の代入もこのファイルには無く、
-    /// <see cref="EarthquakeRows"/> を通してしか行えない（あちらのクラス doc の担保）。
+    /// It was split out of <see cref="EarthquakePanel"/> because that file had grown far
+    /// past the project's 800-line rule, and **not one character of the content was
+    /// changed**. Neither row creation nor assignment to <c>.text</c> appears in this
+    /// file; both can only go through <see cref="EarthquakeRows"/> (the guarantee set out
+    /// in its class doc).
     ///
-    /// 2 つの節を 1 つの型にまとめてあるのは、片方がもう片方の説明になっているため。
-    /// 「地震計を建てると何が変わるか」の直後に、建てた地震計が実際に何を見ているかが来る。
+    /// The two sections are in one type because each explains the other: straight after
+    /// "what building a seismograph changes" comes what the seismograph you built is
+    /// actually seeing.
     /// </summary>
     internal static class EarthquakeSensorRows
     {
@@ -27,75 +29,81 @@ namespace DisasterPlus.Game
 
         internal static void Build(UIPanel p, ref float y)
         {
-            // ── 地震計（Task 7）──────────────────────────────────
-            // ここも第 1 層である。リードタイムの式も上限 100 もバニラのリテラルで
-            // （§A-2）、この MOD は 1 つも係数を足していない。
+            // ── Seismographs (Task 7) ───────────────────────────────
+            // This is layer 1 too. Both the lead-time formula and the cap of 100 are
+            // vanilla's own literals (§A-2); this mod has not added a single coefficient.
             EarthquakeRows.AddSectionHeader(p, "SensorSection", ref y,
                 Strings.EarthquakeSensorSection);
             _sensorEpicentreLabel = EarthquakeRows.AddLayer1Row(p, "SensorEpicentre", ref y);
             _sensorLeadLabel = EarthquakeRows.AddLayer1Row(p, "SensorLead", ref y);
             _sensorCursorLabel = EarthquakeRows.AddLayer1Row(p, "SensorCursor", ref y);
 
-            // ★ この 1 行は**建てたら何が変わるか**の説明であって観測値ではないので、
-            //    地震が起きていなくても、スナップショットが読めていなくても出す。
-            //    したがってここで一度書いたら以後どこからも書き換えない
-            //    （Refresh 側に「消す」経路を作らないことがその保証になっている）。
+            // ★ This one row explains **what building one changes**, not a reading, so it
+            //    is shown with no earthquake happening and with the snapshot unreadable.
+            //    Accordingly, once written here it is never rewritten from anywhere
+            //    (having no "clear" path on the Refresh side is what guarantees that).
             EarthquakeRows.AddPlainRow(p, "SensorEffect", ref y,
                 Strings.EarthquakeSensorEffect, 42f);
 
-            // ── 波形（Task 8）───────────────────────────────────
-            // ここも第 1 層である。プロットしているのは**バニラ自身の揺れの式**
-            // （§A-7、カメラを動かしているのと同じ式・同じ定数・同じ窓）を、
-            // カメラの代わりに地震計の位置で評価した値で、この MOD は物理を
-            // 1 つも足していない。**ただしゲームの地震計が測った値ではない** ——
-            // EarthquakeSensorAI は時系列データを一切持たない（§C-1）。
-            // その区別は EarthquakeWaveformNote が毎回グラフの真下で名乗る。
+            // ── Waveforms (Task 8) ──────────────────────────────────
+            // This is layer 1 too. What is plotted is **vanilla's own shaking formula**
+            // (§A-7: the same formula, the same constants and the same window that move
+            // the camera), evaluated at the seismograph's position instead of the
+            // camera's; this mod has not added a single piece of physics.
+            // **But it is not a value the game's seismograph measured** —
+            // EarthquakeSensorAI holds no time-series data whatsoever (§C-1).
+            // EarthquakeWaveformNote states that distinction directly under the graph,
+            // every time.
             //
-            // 地震計の節の直下に置いている。「地震計を建てると何が変わるか」の
-            // 説明のすぐ次に、建てた地震計が実際に何を見ているかが来る。
-            // 3 行ぶんの高さを取る。この行は最も長いとき
-            // Strings.EarthquakeWaveformNeedsSensor（約 150 文字）を丸ごと入れる。
+            // It goes directly below the seismograph section. Straight after the
+            // explanation of what building a seismograph changes comes what the one you
+            // built is actually seeing.
+            // It takes three rows' worth of height. At its longest this row holds the
+            // whole of Strings.EarthquakeWaveformNeedsSensor (about 150 characters).
             _waveformLabel = EarthquakeRows.AddLayer1Row(p, "Waveform", ref y, 42f);
 
             WaveformView.Build(p, "WaveformPlot", 12f, y);
             if (WaveformView.Available) y += WaveformView.PlotHeight + 6f;
 
-            // ★★ **第 2 層の行がこの節に 1 本だけ入る**（合成記象、既定 OFF）。
-            //    グラフから離れた第 2 層の節へ追い出すと、目の前の橙の線が
-            //    何なのか、その場では分からなくなる。離さない代わりに
-            //    <c>AddLayer2Row</c> を使い、接頭辞（[Disaster + model]）と色の
-            //    両方でこの 1 行だけが層の違う行であることを名乗らせる。
-            //    **接頭辞は EarthquakeRows しか付けられない**ので、この行を
-            //    うっかり実測として出すことはできない（あちらのクラス doc の担保）。
+            // ★★ **Exactly one layer-2 row lives in this section** (the synthetic
+            //    seismogram, off by default). Banish it to the layer-2 section away from
+            //    the graph and there is no way to tell, on the spot, what the orange line
+            //    in front of you is. Instead of moving it away we use
+            //    <c>AddLayer2Row</c>, so that both the prefix ([Disaster + model]) and the
+            //    colour declare that this one row belongs to a different layer.
+            //    **Only EarthquakeRows can attach the prefix**, so this row cannot
+            //    accidentally be presented as measured (the guarantee in its class doc).
             _waveformModelLabel = EarthquakeRows.AddLayer2Row(p, "WaveformModel", ref y, 40f);
 
-            // ★★ **第 3 層＝火山性微動の行**（2026-08-22、所有者の依頼
-            //    「火山性地震は震度計に記録されていないのも修正して」）。
-            //    第 2 層とまったく同じ扱いにする —— これも<b>この MOD のモデル</b>で
-            //    あって、ゲームが計算している値ではない
-            //    （<c>Game/Volcano/VolcanoTremorTrace</c> のクラス doc）。
-            //    <c>AddLayer2Row</c> を使うのはそのためで、接頭辞と色が
-            //    「実測ではない」を毎回名乗る。
+            // ★★ **Layer 3: the volcanic tremor row** (2026-08-22, at the owner's
+            //    request: "also fix volcanic earthquakes not being recorded on the
+            //    seismograph"). Treated exactly like layer 2 — this too is <b>this mod's
+            //    model</b>, not a value the game computes (see
+            //    <c>Game/Volcano/VolcanoTremorTrace</c>'s class doc). That is why it uses
+            //    <c>AddLayer2Row</c>: the prefix and the colour declare "not measured"
+            //    every time.
             _waveformTremorLabel = EarthquakeRows.AddLayer2Row(p, "WaveformTremor", ref y, 40f);
 
-            // ★ 黙って空欄にしない。最大振幅の行（_waveformLabel）は出したうえで、
-            //    グラフが出ない理由を名乗る。劣化であって嘘ではない。
+            // ★ Never go silently blank. Show the peak-amplitude row (_waveformLabel)
+            //    and then state why the graph is not there. Degradation, not a lie.
             //
-            //    **この行は構築の成否に関わらず作る**（全体レビュー I6）。以前は
-            //    構築時に失敗したときしか作っておらず、**実行時**に描画が落ちて
-            //    WaveformView.Destroy() がスプライトを隠したときには、
-            //    理由を書く場所が存在しなかった —— プレイヤーには何の説明も無い
-            //    空白だけが残り、それは WaveformView のクラス doc が
-            //    「黙って空欄にならず…劣化であって嘘ではない」と約束している
-            //    ことの正反対である。中身は Refresh 側が状態を見て入れる。
+            //    **This row is created regardless of whether the build succeeded**
+            //    (whole-feature review I6). It used to be created only when the build
+            //    failed, so when drawing fell over **at runtime** and
+            //    WaveformView.Destroy() hid the sprite, there was nowhere to write the
+            //    reason — the player was left with a blank and no explanation at all,
+            //    the exact opposite of what WaveformView's class doc promises ("does not
+            //    silently go blank… degradation, not a lie"). The content is filled in
+            //    by the Refresh side according to the state.
             _waveformUnavailableLabel = EarthquakeRows.AddPlainRow(p, "WaveformUnavailable",
                 ref y, "", 28f);
 
-            // グラフが何の絵なのかを、グラフのすぐ下で毎回言う。
-            // 内容はグラフを出しているときだけ入れる（Refresh 側で設定する）。
+            // Say what the graph is a picture of, directly under the graph, every time.
+            // The content is only filled in while the graph is showing (set on the
+            // Refresh side).
         }
 
-        /// <summary>レベルアンロード時。参照を捨てるだけ（実体はパネルごと消える）。</summary>
+        /// <summary>On level unload. Just drop the references (the objects go with the panel).</summary>
         internal static void Destroy()
         {
             _sensorEpicentreLabel = null;
@@ -108,24 +116,27 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **地震計を建てると何が変わるか。** ゲーム内のどこにも書かれていない 2 つの効果を
-        /// 名指しする（§A-2 / §C-2）:
+        /// **What building a seismograph changes.** It names the two effects that are
+        /// written down nowhere in the game (§A-2 / §C-2):
         ///
-        ///   1. 警報リードタイムが 1755 → 最大 8192 フレーム（38.6 分 → ちょうど 3.0 時間）
-        ///   2. <c>located</c> が立ち、**そもそも地震がハザードマップに描かれるようになる**
+        ///   1. the warning lead time goes from 1755 to at most 8192 frames
+        ///      (38.6 minutes to exactly 3.0 hours)
+        ///   2. <c>located</c> gets set, and **the earthquake starts being painted on the
+        ///      hazard map at all**
         ///
-        /// **因果の向きを間違えないこと。** 地震計は <c>DetectDisaster</c> を呼ばない。
-        /// 呼ぶのは <c>EarthquakeAI.SimulationStep</c> で、判断材料は
-        /// **震央 1 点のカバレッジ**である。したがってここでリードタイムを出してよいのは
-        /// <see cref="EarthquakeReading.CoverageAtEpicentre"/> からだけで、
-        /// カーソル地点の値から出してはいけない（効果範囲が震央に届いていない地震計は、
-        /// その地震について何も寄与しない）。
+        /// **Do not get the causation backwards.** The seismograph does not call
+        /// <c>DetectDisaster</c>. <c>EarthquakeAI.SimulationStep</c> does, and what it
+        /// decides on is **the coverage at the single point of the epicentre**. So the
+        /// only thing the lead time may be derived from here is
+        /// <see cref="EarthquakeReading.CoverageAtEpicentre"/>, never the value at the
+        /// cursor (a seismograph whose range does not reach the epicentre contributes
+        /// nothing at all for that earthquake).
         ///
-        /// **カバレッジ 0 と「読めなかった」を同じ顔にしない。** 0 は
-        /// 「震央に届いている地震計が 1 つも無い」という本機能の看板の実測値であり、
-        /// そのときは数値も出す。読めなかったときだけ数値を伏せる
-        /// （<see cref="EarthquakeReading.CoverageKnown"/> /
-        /// <see cref="EarthquakeSnapshot.CursorCoverageValid"/>）。
+        /// **Do not give a coverage of 0 and "could not be read" the same face.** 0 is
+        /// this feature's headline measurement — "not one seismograph reaches the
+        /// epicentre" — and in that case the number is shown. The number is withheld only
+        /// when the read failed (<see cref="EarthquakeReading.CoverageKnown"/> /
+        /// <see cref="EarthquakeSnapshot.CursorCoverageValid"/>).
         /// </summary>
         internal static void RefreshSensor(EarthquakeSnapshot snapshot,
                                            EarthquakeReading primary, bool haveCursor)
@@ -135,9 +146,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 地震計の行の値だけを消す。**説明文（<c>SensorEffect</c>）は消さない** ——
-        /// あれは「建てたら何が変わるか」であって観測値ではないので、
-        /// 何も読めていないときこそ読む価値がある。
+        /// Clears only the values in the seismograph rows. **The explanation
+        /// (<c>SensorEffect</c>) is not cleared** — it is "what building one changes",
+        /// not a reading, so it is at its most worth reading precisely when nothing can
+        /// be read.
         /// </summary>
         internal static void ClearSensor()
         {
@@ -148,7 +160,8 @@ namespace DisasterPlus.Game
 
         private static void RefreshEpicentreCoverageRows(EarthquakeReading primary)
         {
-            // 地震が無ければ震央も無い。ここで 0 を出すと「地震計が無い」に見える。
+            // No earthquake means no epicentre. Print 0 here and it looks like "there is
+            // no seismograph".
             if (primary == null)
             {
                 EarthquakeRows.SetPlain(_sensorEpicentreLabel, "");
@@ -158,8 +171,9 @@ namespace DisasterPlus.Game
 
             if (!primary.CoverageKnown)
             {
-                // ★ 捏造ゼロを作らない。読めなかったことを言い、リードタイムは伏せる
-                //    （カバレッジ不明のまま 38.6 分と出すと、それは 0 の断定になる）。
+                // ★ Never manufacture a zero. Say that the read failed and withhold the
+                //    lead time (printing 38.6 minutes with the coverage unknown would be
+                //    asserting that it is 0).
                 EarthquakeRows.SetPlain(_sensorEpicentreLabel,
                     Strings.EarthquakeCoverageAtEpicentre + ": " + Strings.EarthquakeUnavailable);
                 EarthquakeRows.SetPlain(_sensorLeadLabel, "");
@@ -170,14 +184,15 @@ namespace DisasterPlus.Game
             int used = WarningLeadTime.ClampCoverage(raw);
 
             string text = Strings.EarthquakeCoverageAtEpicentre + ": " + raw;
-            // バニラが Min(cov, 100) で頭打ちにしている事実を、実際に頭打ちに
-            // なっているときだけ見せる（§A-2）。
+            // Show the fact that vanilla caps this with Min(cov, 100) only when it is
+            // actually being capped (§A-2).
             if (raw != used) text += " -> " + used;
             if (used == 0) text += "   (" + Strings.EarthquakeNoSensor + ")";
             EarthquakeRows.SetLayer1(_sensorEpicentreLabel, text);
 
-            // 換算は必ず FeatureHost.FramesPerMinute から出す（定数を直書きして
-            // 4 倍ずれた前科がある）。換算できないときは 0 が返るので行ごと伏せる。
+            // Always derive the conversion from FeatureHost.FramesPerMinute (we once
+            // hard-coded the constant and came out a factor of 4 wrong). When the
+            // conversion is unavailable it returns 0, so the whole row is withheld.
             float minutes = WarningLeadTime.MinutesFor(raw, FeatureHost.FramesPerMinute);
             if (minutes <= 0f)
             {
@@ -185,16 +200,18 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // これは「あと何分で警報が出る」ではなく、**本震の何分前に警報が出るか**
-            // という長さである。ポーズしていても縮まない（ゲーム内分の尺度）。
+            // This is not "how many minutes until the warning"; it is a duration —
+            // **how many minutes before the main shock the warning is issued**. It does
+            // not shrink while paused (it is measured in game minutes).
             EarthquakeRows.SetLayer1(_sensorLeadLabel, Strings.EarthquakeWarningLead + ": "
                 + minutes.ToString("F1") + " " + Strings.EarthquakeMinutes);
         }
 
         private static void RefreshCursorCoverageRow(EarthquakeSnapshot snapshot, bool haveCursor)
         {
-            // 「カーソルが地形の上に無い」と「読めなかった」を言い分ける。
-            // 前者はパネルを読んでいる間ほぼ常に起きる（マウスがパネルの上にある）。
+            // Tell "the cursor is not over terrain" apart from "it could not be read".
+            // The first happens almost constantly while the panel is being read (the
+            // mouse is over the panel).
             if (!haveCursor)
             {
                 EarthquakeRows.SetPlain(_sensorCursorLabel, Strings.EarthquakeCursorUnknown);
@@ -207,16 +224,17 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 上限 100 の注記は付けない。ここは「この場所に地震計が届いているか」を
-            // 見る行であって、リードタイムの式に入る値ではない。
+            // No note about the cap of 100 here. This row is for seeing whether a
+            // seismograph reaches this spot; it is not a value that goes into the
+            // lead-time formula.
             EarthquakeRows.SetLayer1(_sensorCursorLabel,
                 Strings.EarthquakeCoverageAtCursor + ": " + snapshot.CursorCoverage);
         }
 
         /// <summary>
-        /// 波形の行を全部消し、プロットを隠す。**注記も消す** —— あれは
-        /// 「今出ているこのグラフが何なのか」の説明であって、グラフが無いときに
-        /// 残しておくと、存在しない絵の出所を説明していることになる。
+        /// Clears every waveform row and hides the plot. **The note is cleared too** —
+        /// it explains what the graph currently on screen is, so leaving it up with no
+        /// graph means explaining the provenance of a picture that does not exist.
         /// </summary>
         internal static void ClearWaveform()
         {
@@ -228,15 +246,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 「グラフが出ない理由」の 1 行（全体レビュー I6）。
+        /// The one row giving the reason the graph is not showing (whole-feature review I6).
         ///
-        /// **毎回状態を見に行く。** 描画は実行時にも落ちうる（<see cref="WaveformView.Render"/>
-        /// の catch が <c>Destroy()</c> を呼んで以後描かない）。構築時にしか判定して
-        /// いなかった頃は、そこから先が**説明の無い空白**になっていた。
+        /// **Check the state every time.** Drawing can fall over at runtime too (the
+        /// catch in <see cref="WaveformView.Render"/> calls <c>Destroy()</c> and never
+        /// draws again). Back when this was only decided at construction, everything from
+        /// that point on was **a blank with no explanation**.
         ///
-        /// 「まだ作っていない」には何も書かない —— パネルが開いていればここは
-        /// 構築済みなので通らないが、状態を 4 つに分けている以上、
-        /// 未構築を「使えません」と言い換えないことを構造で示しておく。
+        /// Nothing is written for "not built yet" — with the panel open we are already
+        /// built, so that case is never reached, but since the state is split four ways
+        /// this makes it structurally explicit that "not built" is never restated as
+        /// "unavailable".
         /// </summary>
         private static void RefreshWaveformAvailability()
         {
@@ -257,36 +277,43 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **依頼の「地震計があるのに波形グラフが見られない」への回答そのもの。**
+        /// **The answer, in itself, to the request "I have a seismograph but I cannot see
+        /// a waveform graph".**
         ///
-        /// ここに出る線は<b>ゲーム内の地震計が計測した値ではない</b>。
-        /// <c>EarthquakeSensorAI</c> は時系列データを一切持たない（§C-1、ABSENT）——
-        /// フィールドは <c>m_detectionRange</c> だけで、毎 tick 免疫的リソースを
-        /// 撒くだけの装置である。**プロットしているのはバニラ自身の揺れの式**
-        /// （§A-7、<c>EarthquakeAI.RenderInstance</c> がカメラを動かすのに使っている
-        /// のと同じ式・定数・窓）を、カメラの代わりに地震計の位置で評価した値である。
-        /// これは同じ式の別評価であって近似ではない。
+        /// The lines shown here are <b>not values measured by an in-game seismograph</b>.
+        /// <c>EarthquakeSensorAI</c> holds no time-series data whatsoever (§C-1, ABSENT)
+        /// — its only field is <c>m_detectionRange</c>, and it is a device that does
+        /// nothing but scatter an immaterial resource each tick. **What is plotted is
+        /// vanilla's own shaking formula** (§A-7: the same formula, constants and window
+        /// that <c>EarthquakeAI.RenderInstance</c> uses to move the camera), evaluated at
+        /// the seismograph's position instead of the camera's. That is a different
+        /// evaluation of the same formula, not an approximation.
         ///
-        /// **その区別は必ずグラフの真下に書く**（<c>EarthquakeWaveformNote</c>、
-        /// 設計書 §3.5 が設計書と UI の両方に書けと要求している）。書かないと、
-        /// この機能は「ゲームが計測しているように見えるが実際は誰も測っていない絵」になる。
+        /// **Always write that distinction directly under the graph**
+        /// (<c>EarthquakeWaveformNote</c>; design doc §3.5 requires it in both the design
+        /// doc and the UI). Without it, this feature becomes "a picture that looks as
+        /// though the game is measuring something when in fact nobody is".
         ///
-        /// **3 つの「空」を言い分ける**（①から続く、捏造ゼロを作らない規律）:
-        ///   - 記録対象の地震が無い … 行ごと出さない
-        ///   - 地震はあるが地震計が 0 個 … 「地震計を建ててください」
-        ///   - 地震計はあるがサンプル 0 件 … 本震前で揺れの窓がまだ開いていない
-        /// 最後の 1 つを平らな線で描くと「揺れていない」に化ける。
+        /// **Tell the three kinds of "empty" apart** (the no-manufactured-zeros
+        /// discipline carried over from ①):
+        ///   - no earthquake to record … the whole row is omitted
+        ///   - an earthquake but zero seismographs … "please build a seismograph"
+        ///   - seismographs but zero samples … before the main shock, the shaking window
+        ///     has not opened yet
+        /// Draw that last one as a flat line and it turns into "it is not shaking".
         /// </summary>
         internal static void RefreshWaveform(EarthquakeSnapshot snapshot)
         {
-            // 進行中（Emerging|Active）の地震が 1 つも無く、**火山も揺れていない**。
-            // 揺れの式自体が動かない区間なので、波形について言えることは何も無い。
+            // There is no earthquake in progress (Emerging|Active) and **no volcano
+            // shaking either**. The shaking formula itself is not running over this
+            // stretch, so there is nothing that can be said about a waveform.
             //
-            // ★★ <b>「地震が無い」だけで畳まないこと</b>（2026-08-22）。
-            //    以前はここが <c>WaveformQuakeId == 0</c> だけを見ていたので、
-            //    **火山だけが揺れているあいだグラフごと消えていた** ——
-            //    「火山性地震が震度計に記録されない」の、表示側の半分である。
-            //    記録の側が生きていれば <c>Traces</c> に観測点が入っている。
+            // ★★ <b>Do not fold this away on "there is no earthquake" alone</b>
+            //    (2026-08-22). This used to look only at <c>WaveformQuakeId == 0</c>, so
+            //    **the whole graph vanished while only a volcano was shaking** — that was
+            //    the display half of "volcanic earthquakes are not recorded on the
+            //    seismograph". If the recording side is alive, <c>Traces</c> has stations
+            //    in it.
             if (snapshot.WaveformQuakeId == 0 && snapshot.Traces.Count == 0)
             {
                 ClearWaveform();
@@ -298,8 +325,9 @@ namespace DisasterPlus.Game
             var traces = snapshot.Traces;
             if (traces.Count == 0)
             {
-                // ★ カメラ位置や市の中心で代用しない。「地震計があるのに波形が
-                //    見られない」への回答なので、地震計に紐づかない波形は意味が違う。
+                // ★ Do not substitute the camera position or the city centre. This is the
+                //    answer to "I have a seismograph but I cannot see a waveform", so a
+                //    waveform not tied to a seismograph means something else entirely.
                 EarthquakeRows.SetPlain(_waveformLabel, Strings.EarthquakeWaveformNeedsSensor);
                 EarthquakeRows.SetPlain(_waveformModelLabel, "");
                 EarthquakeRows.SetPlain(_waveformTremorLabel, "");
@@ -307,20 +335,22 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 震央に最も近い 1 個だけを描く（SeismographRecorder が近い順に並べている）。
-            // グラフを 4 枚並べても読めないので、残りは件数として添えるだけ。
+            // Draw only the one nearest the epicentre (SeismographRecorder has ordered
+            // them nearest first). Four graphs side by side would be unreadable, so the
+            // rest appear only as a count.
             var trace = traces[0];
 
-            // ★ どの地震の波形なのかを必ず名乗る（全体レビュー I1）。
-            //    EarthquakeSnapshot.CursorQuakeId の doc が「表示側はこれを必ず出す」と
-            //    要求しているのと同じ理由で、波形の地震にも同じ規律が要る。
-            //    地震が 2 個同時に進んでいると、上の 6 行が指す地震
-            //    （SelectPrimary）と、この絵の地震（QuakeSelection.SelectDamaging）は
-            //    一致しないことがある。
-            // ★★ **出所を取り違えない。** バニラの地震が無いのに震央からの距離と
-            //    地震の番号を出すと、**起きていない地震の記録**という顔になる
-            //    （<c>SeismographTrace.HasQuake</c> がその区別を持っている）。
-            //    火山だけが揺れているときは、⑤の中心からの距離を、そう名乗って出す。
+            // ★ Always state which earthquake the waveform belongs to (whole-feature
+            //    review I1). For the same reason EarthquakeSnapshot.CursorQuakeId's doc
+            //    requires "the display must always state this", the waveform's earthquake
+            //    needs the same discipline. With two earthquakes running at once, the one
+            //    the six rows above refer to (SelectPrimary) and the one in this picture
+            //    (QuakeSelection.SelectDamaging) can differ.
+            // ★★ **Do not misattribute the source.** Printing a distance from the
+            //    epicentre and an earthquake number with no vanilla earthquake present
+            //    makes it look like **a recording of an earthquake that is not happening**
+            //    (<c>SeismographTrace.HasQuake</c> holds that distinction). When only a
+            //    volcano is shaking, show the distance from ⑤'s centre, labelled as such.
             string header = Strings.EarthquakeWaveform + ": #" + trace.BuildingId;
             if (trace.HasQuake)
             {
@@ -337,19 +367,22 @@ namespace DisasterPlus.Game
                 header += "   (" + Strings.EarthquakeSensorSection + ": " + traces.Count + ")";
             }
 
-            // ★★ 火山だけが揺らしているときは、ここに**第 1 層の最大振幅 0.00 を
-            //    出さない** —— 0 が「揺れていない地震が起きている」に化ける。
-            //    揺れの大きさは下の第 3 層の行が名乗る。
+            // ★★ When only a volcano is shaking, **do not print a layer-1 peak amplitude
+            //    of 0.00 here** — that 0 turns into "an earthquake is happening and it is
+            //    not shaking". The size of the shaking is declared by the layer-3 row
+            //    below.
             if (trace.Count > 0 && trace.HasQuake)
             {
-                // 縦軸は最大振幅で正規化して描くので、その最大振幅を数値でも名乗る。
-                // これが無いと、グラフの高さだけを見て地震の強さを比べてしまう。
+                // The vertical axis is normalised by the peak amplitude, so state that
+                // peak as a number too. Without it, people compare earthquake strength
+                // from the graph's height alone.
                 //
-                // ★ バーの満目盛りは s（0-1）ではなく変位の理論最大 0.60 である
-                //    （全体レビュー I4）。s の目盛りを流用していた頃は、最大でも
-                //    0.6 にしかならない量を 0-1 の尺度で描いていたため、常に
-                //    1〜2 マスしか埋まらず、しかもすぐ上の s のバーと見分けが
-                //    付かなかった。満目盛りを数値でも併記する。
+                // ★ The bar's full scale is the theoretical maximum displacement of 0.60,
+                //    not s (0-1) (whole-feature review I4). Back when it reused s's scale,
+                //    a quantity that never exceeds 0.6 was drawn on a 0-1 scale, so only
+                //    one or two cells were ever filled — and it was indistinguishable
+                //    from the s bar directly above it. The full scale is printed as a
+                //    number alongside.
                 float peak = trace.PeakAbsolute;
                 header += "\n" + peak.ToString("F2")
                           + " / " + ShakeWaveform.MaxDisplacement.ToString("F2")
@@ -358,9 +391,9 @@ namespace DisasterPlus.Game
             }
             else if (trace.Count <= 0)
             {
-                // 観測点はある。まだ揺れの窓（§A-7 の e > 0）が開いていないだけ。
-                // 「サンプルが無い」と「サンプルが全部 0」は別のことなので、
-                // ここで 0.00 と出してはいけない。
+                // There are stations. The shaking window (§A-7's e > 0) simply has not
+                // opened yet. "There are no samples" and "all the samples are 0" are
+                // different things, so never print 0.00 here.
                 header += "   " + WaitingReason(snapshot);
             }
 
@@ -368,23 +401,26 @@ namespace DisasterPlus.Game
             RefreshWaveformModelRow(snapshot, trace);
             RefreshWaveformTremorRow(trace);
 
-            // 注記はグラフ（あるいは最大振幅の行）が出ているときだけ添える。
+            // The note is only attached while the graph (or the peak-amplitude row) is
+            // showing.
             WaveformView.Render(trace);
         }
 
         /// <summary>
-        /// **合成記象の 1 行**（第 2 層）。記録が無ければ空にする。
+        /// **The synthetic seismogram row** (layer 2). Blanked when there is no recording.
         ///
-        /// ★ <b>この行を <c>SetLayer1</c> で書かないこと。</b> ここに出る値は
-        ///   バニラが計算しているものではなく、<c>SeismogramModel</c> が
-        ///   その地震の種から作った波形である。すぐ上の行（同じグラフの
-        ///   もう 1 本の線）が <c>[measured]</c> を名乗っているぶん、
-        ///   取り違えたときの嘘が大きい。
+        /// ★ <b>Never write this row with <c>SetLayer1</c>.</b> The value shown here is
+        ///   not something vanilla computes but a waveform <c>SeismogramModel</c> built
+        ///   from that earthquake's seed. Because the row directly above (the other line
+        ///   on the same graph) declares itself <c>[measured]</c>, getting this wrong
+        ///   makes for a much bigger lie.
         ///
-        /// 出すのは 3 つ:
-        ///   - 最大振幅（満目盛りはバニラの線と共通の <c>MaxDisplacement</c>）
-        ///   - 初期微動継続時間 S-P（**震源距離とともに開く**、このモデルの看板）
-        ///   - どちらの色がどちらの層かの凡例
+        /// Three things are shown:
+        ///   - the peak amplitude (full scale is the same <c>MaxDisplacement</c> as
+        ///     vanilla's line)
+        ///   - the S-P interval, the duration of the preliminary tremor (**it widens with
+        ///     hypocentral distance**, which is this model's headline feature)
+        ///   - a legend saying which colour is which layer
         /// </summary>
         private static void RefreshWaveformModelRow(EarthquakeSnapshot snapshot,
                                                     SeismographTrace trace)
@@ -402,8 +438,9 @@ namespace DisasterPlus.Game
                           + "  [" + SeismicScale.BarOf(
                               ShakeWaveform.NormalisedDisplacement(peak)) + "]";
 
-            // ★ 窓（m_activeDuration）が読めていないときは S-P を出さない。
-            //   モデルの到達時刻は窓の長さから決まるので、窓が無ければ数字も無い。
+            // ★ Do not show S-P when the window (m_activeDuration) could not be read. The
+            //   model's arrival times are derived from the window's length, so with no
+            //   window there is no number.
             if (snapshot.Prefab.Resolved && snapshot.Prefab.ActiveDuration != 0u)
             {
                 var model = SeismogramModel.For(
@@ -423,15 +460,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **第 3 層＝火山性微動の行**（2026-08-22、所有者の依頼）。
+        /// **Layer 3: the volcanic tremor row** (2026-08-22, at the owner's request).
         ///
-        /// ★★ ここに出る線は<b>ゲームが計算している値ではないし、カメラが実際に
-        /// 足した変位でもない</b>。<c>Core/Volcano/VolcanicTremor</c> という
-        /// この MOD のモデルを、地震計の位置と**記象の時間軸（sim フレーム）**で
-        /// 評価したものである（カメラは実時間で評価する。
-        /// <c>Game/Volcano/VolcanoTremorTrace</c> のクラス doc に両者の違いがある）。
-        /// 第 2 層とまったく同じ扱いにしてあるのはそのためで、
-        /// <c>SetLayer2</c> の接頭辞と色が毎回それを名乗る。
+        /// ★★ The line here is <b>neither a value the game computes nor the displacement
+        /// the camera actually applied</b>. It is this mod's own model,
+        /// <c>Core/Volcano/VolcanicTremor</c>, evaluated at the seismograph's position on
+        /// **the seismogram's time axis (sim frames)** — the camera evaluates it in real
+        /// time; the difference between the two is set out in
+        /// <c>Game/Volcano/VolcanoTremorTrace</c>'s class doc. That is why it is treated
+        /// exactly like layer 2, with <c>SetLayer2</c>'s prefix and colour declaring it
+        /// every time.
         /// </summary>
         private static void RefreshWaveformTremorRow(SeismographTrace trace)
         {
@@ -453,11 +491,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 波形を記録している地震の発動フレーム。**種を作るのに要る**
-        /// （<c>SeismographRecorder.SeismogramSeed</c> と同じ組み合わせでなければ、
-        /// 表示している S-P が描いてある線のものと食い違う）。
-        /// 見つからなければ 0 —— そのとき <c>SeismogramModel.For</c> は
-        /// 別の形を返すが、S-P の桁は距離で決まるので表示は壊れない。
+        /// The activation frame of the earthquake whose waveform is being recorded.
+        /// **It is needed to build the seed** (unless it is the same combination as
+        /// <c>SeismographRecorder.SeismogramSeed</c>, the S-P shown disagrees with the
+        /// line that is drawn). 0 if it cannot be found — <c>SeismogramModel.For</c> then
+        /// returns a different shape, but the order of magnitude of S-P is set by the
+        /// distance, so the display does not break.
         /// </summary>
         private static uint ActivationFrameOf(EarthquakeSnapshot snapshot)
         {
@@ -470,18 +509,20 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// サンプルがまだ 1 件も無い理由。**「揺れていない」とは言わない。**
+        /// Why there is not a single sample yet. **Never say "it is not shaking".**
         ///
-        /// 記録できない理由は 3 通りあり、どれも観測値ではないので出所の接頭辞を
-        /// 付けない語を選んでいる。<c>m_activeDuration</c> はプレハブ値で
-        /// **誰もまだ実測していない**（§A-0）ので、読めていない可能性が現実にある。
+        /// There are three reasons recording cannot happen, and since none of them is a
+        /// reading, the wording chosen carries no source prefix.
+        /// <c>m_activeDuration</c> is a prefab value that **nobody has yet measured**
+        /// (§A-0), so it genuinely may not have been read.
         /// </summary>
         private static string WaitingReason(EarthquakeSnapshot snapshot)
         {
             if (!snapshot.Prefab.Resolved || snapshot.Prefab.ActiveDuration == 0u)
             {
-                // 揺れの窓が分からない。窓を決め打ちで補うと、地震が終わった後も
-                // 伸び続ける波形になる（CameraShakeBooster と同じ判断）。
+                // We do not know the shaking window. Fill it in with a hard-coded guess
+                // and you get a waveform that keeps extending after the earthquake has
+                // ended (the same judgement as CameraShakeBooster).
                 return Strings.EarthquakeUnavailable;
             }
 
@@ -489,8 +530,8 @@ namespace DisasterPlus.Game
             {
                 if (snapshot.Quakes[i].DisasterId != snapshot.WaveformQuakeId) continue;
                 return snapshot.Quakes[i].ActivationScheduled
-                    ? Strings.EarthquakePhaseEmerging     // 本震前。揺れの窓がまだ開いていない。
-                    : Strings.EarthquakeTimeUnknown;      // SelfTrigger が立っていない（§A-1）。
+                    ? Strings.EarthquakePhaseEmerging     // Before the main shock; the shaking window has not opened.
+                    : Strings.EarthquakeTimeUnknown;      // SelfTrigger is not set (§A-1).
             }
 
             return Strings.EarthquakePhaseEmerging;

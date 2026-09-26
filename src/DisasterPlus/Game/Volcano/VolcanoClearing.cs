@@ -7,198 +7,212 @@ using DisasterPlus.Core.Volcano;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 準備 —— 道路と建物の段階的破壊。**sim スレッド専用。**
+    /// Clearing — the staged destruction of roads and buildings. **Sim thread only.**
     ///
-    /// ★★ <b>このタスクが⑤の要である。</b> 設計書 §1.2 は「地面を上げれば山ができる」が
-    /// 市街地では成立しないことを発見し、⑤の設計そのものを書き換えた。
-    /// 準備を隆起より先に置くのがその結論であり、それを実装するのがこの型である。
+    /// ★★ <b>This task is the heart of ⑤.</b> Design doc §1.2 discovered that "raise the ground
+    /// and you get a mountain" does not hold in a built-up area, and rewrote ⑤'s design itself.
+    /// Putting the clearing ahead of the uplift is that conclusion, and this type is what
+    /// implements it.
     ///
-    /// ── なぜ隆起より先なのか（設計書 §1.2 ／ IL 事実文書 §A-2 / §A-3）───────────
+    /// ── why it comes before the uplift (design doc §1.2 / IL facts doc §A-2 / §A-3) ─────────
     ///
-    /// <c>TerrainModify.UpdateAreaImplementation</c> は毎回 7 つのマネージャに
-    /// <c>ApplyQuad</c> させる。そのうち 2 つが⑤を殺す —— <c>NetSegment.TerrainUpdated</c> は
-    /// <c>m_flattenTerrain</c> の道路の下で <c>Heights.PrimaryLevel</c> を掛けて
-    /// <c>primaryMin = primaryMax = 道路の y</c> にし、<c>Building.TerrainUpdated</c> は
-    /// <c>SecondaryLevel</c> で建物の y に固定する（1:4 の裾つき）。
-    /// 反映段は <c>Clamp(Clamp(target, secondaryMin, secondaryMax), primaryMin, primaryMax)</c>
-    /// なので、<b>下限と上限が同じ値なら target に何を入れていても打ち消される。</b>
-    /// しかも**毎フラッシュゼロからやり直される**ので、書き続けても勝てない。
-    /// そして<b>ゲームは何も壊さない</b>（<c>NetAI.AfterTerrainUpdate</c> は <c>ret</c> 1 命令、§A-3）。
+    /// <c>TerrainModify.UpdateAreaImplementation</c> makes seven managers <c>ApplyQuad</c> every
+    /// time. Two of them kill ⑤ — <c>NetSegment.TerrainUpdated</c> applies
+    /// <c>Heights.PrimaryLevel</c> under roads with <c>m_flattenTerrain</c> and sets
+    /// <c>primaryMin = primaryMax = the road's y</c>, and <c>Building.TerrainUpdated</c> pins it
+    /// to the building's y through <c>SecondaryLevel</c> (with a 1:4 skirt).
+    /// The apply step is <c>Clamp(Clamp(target, secondaryMin, secondaryMax), primaryMin, primaryMax)</c>,
+    /// so <b>if the lower and upper bounds are the same value, whatever you put in target is
+    /// cancelled out.</b> And it is **redone from scratch on every flush**, so writing harder
+    /// does not win. On top of that <b>the game destroys nothing</b>
+    /// (<c>NetAI.AfterTerrainUpdate</c> is a single <c>ret</c> instruction, §A-3).
     ///
-    /// > したがって、⑤が自分で壊さない限り、山の中に道路の平らな溝と建物のすり鉢が
-    /// > 必ず残る。**これは実装の良し悪しではなく順序の問題である。**
+    /// > Therefore, unless ⑤ destroys them itself, flat trenches for roads and funnels for
+    /// > buildings are guaranteed to remain inside the mountain.
+    /// > **This is not a matter of implementation quality but of ordering.**
     ///
-    /// ── <see cref="ClearedRadiusMetres"/> は T6 の唯一許される入力である ──────────
+    /// ── <see cref="ClearedRadiusMetres"/> is the only input T6 is allowed ───────────────────
     ///
-    /// <c>VolcanoUplift</c>（T6）が書いてよいセルは
-    /// <c>UpliftSchedule.ActiveRadiusMetres(shapeRadius, VolcanoClearing.ClearedRadiusMetres)</c>
-    /// の内側だけである。**第 2 引数にこれ以外を渡してはいけない**（計画の罠 1）。
-    /// まだ 1 本も壊していなければ 0 で、Core 側のテストが「0 なら 0 を返す」を固定している。
+    /// The only cells <c>VolcanoUplift</c> (T6) may write are those inside
+    /// <c>UpliftSchedule.ActiveRadiusMetres(shapeRadius, VolcanoClearing.ClearedRadiusMetres)</c>.
+    /// **Never pass anything else as the second argument** (plan trap 1).
+    /// It is 0 until the first thing has been destroyed, and the Core-side tests pin
+    /// "0 in, 0 out".
     ///
-    /// ★ <b><see cref="ClearedRadiusMetres"/> は「壊し終えた」ではなく「走査し終えた」である。</b>
-    /// 断られた建物（下記）が残っていても走査は終わっている。**そこは⑤が壊せないと
-    /// 分かっている場所**なので、T6 は上げてよい —— 上げても押し戻されるが、それは
-    /// 「⑤が壊せない建物が 1 つある」という事実の可視化であって⑤の欠陥ではない。
+    /// ★ <b><see cref="ClearedRadiusMetres"/> means "finished sweeping", not "finished destroying".</b>
+    /// The sweep is finished even if refused buildings (below) remain. **Those are places ⑤ is
+    /// known to be unable to clear**, so T6 may raise them — it will be pushed back, but that is
+    /// the visualisation of the fact "there is one building ⑤ cannot destroy", not a defect in ⑤.
     ///
-    /// ── 準備は隆起の前を走る（ring lockstep）───────────────────────
+    /// ── the clearing runs ahead of the uplift (ring lockstep) ──────────────────────────────
     ///
     /// <code>
     /// front   = UpliftSchedule.ClearingFrontMetres(R, frontUnit, VolcanoClearingLeadMetres)
-    /// cleared = 実際に走査を終えた半径（front 以下。届かなければ届いた分だけ）
+    /// cleared = the radius actually swept (at most front; if it falls short, only as far as it got)
     /// </code>
     ///
-    /// 1 回の走査で <c>front</c> まで届かなかったら <see cref="ClearedRadiusMetres"/> は
-    /// **届いた分しか進めない**。上限に当たった状態で「全部終わった」と報告すると、
-    /// T6 が壊れていない場所を上げる。<b>火山の中心は動かない</b>ので、④の風害と違って
-    /// 走査位置（<see cref="_buildingCursor"/> / <see cref="_segmentCursor"/>）を捨てる条件は
-    /// 「別の火山になったとき」だけである。
+    /// If a single sweep does not reach <c>front</c>, <see cref="ClearedRadiusMetres"/>
+    /// **advances only as far as it got**. Reporting "all done" while capped would have T6 raise
+    /// ground that has not been cleared. <b>A volcano's centre does not move</b>, so unlike ④'s
+    /// wind damage, the only condition for discarding the sweep position
+    /// (<see cref="_buildingCursor"/> / <see cref="_segmentCursor"/>) is "it became a different
+    /// volcano".
     ///
-    /// ── 建物は <c>demolish: true</c>（④の風害と判断が逆になる）──────────────
+    /// ── buildings use <c>demolish: true</c> (the opposite call to ④'s wind damage) ──────────
     ///
-    /// ④の風害は「台風で**壊れた**ように見せる」ので跡地が残ってよく <c>false</c> だった。
-    /// ⑤の準備は「その場所を**空ける**」ので跡地が残ってはいけない —— 残ると
-    /// <c>Building.TerrainUpdated</c> が地形固定を続ける（§A-2、§G-16 (c)）。
-    /// <c>burnAmount</c> は <b>0</b> —— 準備は焼損ではない（火を付けるのは T8）。
+    /// ④'s wind damage is meant to "look as if the typhoon **broke** it", so leaving the ruin
+    /// behind was fine and it used <c>false</c>.
+    /// ⑤'s clearing is meant to **free up the site**, so no ruin may remain — a ruin keeps
+    /// <c>Building.TerrainUpdated</c> pinning the terrain (§A-2, §G-16 (c)).
+    /// <c>burnAmount</c> is <b>0</b> — the clearing is not scorching (setting fires is T8's job).
     ///
-    /// > **罠 5。<c>Building.m_fireIntensity</c> を直接書かない。** 消費するのは
-    /// > <c>CommonBuildingAI</c> の系だけで、それ以外の AI に書くと誰も消さない永久の
-    /// > 幽霊火災になり、**バニラの建物配列に入るのでセーブに焼き付き、MOD を外しても残る**。
-    /// > 本プロジェクトは一度これを出荷している。
-    /// > レビューの grep（★ 実際に走らせて件数を合わせてある。全体レビュー M12 ——
-    /// > 素で走らせると**この規則の文そのもの**が引っかかり、
-    /// > 「0 件」という手順が最初から成立していなかった）:
+    /// > **Trap 5. Do not write <c>Building.m_fireIntensity</c> directly.** Only the
+    /// > <c>CommonBuildingAI</c> family consumes it; write it on any other AI and nobody ever
+    /// > clears it, giving a permanent ghost fire — and **because it goes into the vanilla
+    /// > building array it is baked into the save and survives removing the mod**.
+    /// > This project has shipped that once already.
+    /// > Review grep (★ actually run, with the counts made to match. Whole-project review M12 —
+    /// > run plainly, **the sentences of this very rule** got caught, so the "0 hits" procedure
+    /// > never held in the first place):
     /// > <code>
     /// > grep -rn --include=*.cs "m_fireIntensity" src/DisasterPlus/Game/Volcano/ \
     /// >   | grep -vE ':[0-9]+: *//' | wc -l        # -> 0
     /// > </code>
-    /// > <c>grep -v '///'</c> では足りない（<c>//</c> 1 本のコメントも落とす）。
+    /// > <c>grep -v '///'</c> is not enough (single <c>//</c> comments must be dropped too).
     ///
-    /// > **<c>DisasterHelpers</c> の破壊ヘルパを絶対に呼ばない**（§E-14）。Natural Disasters
-    /// > Renewal はそれらを Prefix で完全置換する。<c>BuildingAI.CollapseBuilding</c> と
-    /// > <c>NetAI.CollapseSegment</c> を直接呼べばパッチ面を**完全に迂回できる**。
+    /// > **Never call <c>DisasterHelpers</c>' destruction helpers** (§E-14). Natural Disasters
+    /// > Renewal replaces them wholesale with a Prefix. Call <c>BuildingAI.CollapseBuilding</c>
+    /// > and <c>NetAI.CollapseSegment</c> directly and you **bypass the patch surface entirely**.
     ///
-    /// ── ★ T5 Step 1: IL で確定させた破壊経路（典拠は IL 事実文書 §G-16。再導出しない）──
+    /// ── ★ T5 Step 1: the destruction path settled in IL (the source is IL facts doc §G-16; do not re-derive) ──
     ///
-    /// 設計書 付録と計画 T5 Step 1 が「未確定」と名指ししていた 2 項目の答えである。
-    /// **全文と IL のオフセットは §G-16 にある。** ここには、このファイルのコードが
-    /// どの結論に乗っているかだけを書く:
+    /// These are the answers to the two items the design doc appendix and plan T5 Step 1 named as
+    /// "unsettled". **The full text and the IL offsets are in §G-16.** All that is written here
+    /// is which conclusions the code in this file rests on:
     ///
-    ///   1. **道路は本当に解放される**（§G-16 (a)）。<c>demolish: true</c> は
-    ///      <c>PlayerNetAI.CollapseSegment</c> に集約され、
-    ///      <c>NetManager.ReleaseSegment(id, keepNodes: false)</c> を呼ぶ。
-    ///      19 個の override のうち断るのは <c>SupportCableAI</c> だけである
-    ///      （ケーブルカーの支線。地形を平らにしない種別なので、残っても溝にはならない）。
-    ///      <c>Untouchable</c> のセグメントは所有建物の倒壊が断られるとセグメントごと断られる
-    ///   2. **最後のセグメントが消えたノードはその場で解放される**（§G-16 (b)）。
-    ///      孤児ノードは残らない。ただし<b>道路の解放が建物を巻き込むことがある</b>
-    ///      （<c>ReleaseNodeImplementation</c> → <c>ReleaseBuilding</c>）ので、
-    ///      建物側の走査は「次の ID を行動前に控える」規律を必ず守ること
-    ///   3. **<c>Collapsed</c> を立てただけでは地形固定が止まらない**（§G-16 (c)）。
-    ///      <c>NetSegment.TerrainUpdated</c> は <c>m_flags &amp; 3</c> しか見ず、
-    ///      <c>Building.TerrainUpdated</c> は <c>m_flags &amp; 524291</c>
-    ///      （<c>Created|Deleted|Demolishing</c>）しか見ない。**これが④の
-    ///      <c>demolish: false</c> と判断が逆になる、IL 上の理由である**
-    ///   4. **断る 5 つの AI は <c>demolish: true</c> を通す**（§G-16 (d)）。
-    ///      ShelterAI / DoomsdayVaultAI / DamPowerHouseAI / TsunamiBuoyAI は
-    ///      <c>CommonBuildingAI</c> へ委譲し、DecorationBuildingAI は <c>Demolishing</c> を
-    ///      立てる。**「防災施設の足元だけ地形が残る」は起きない。**
-    ///      それでも <see cref="LastBuildingsRefused"/> を残してあるのは、断りうる経路が
-    ///      他にもあるからで、**1 棟でも断られたらそのセルは永久に固定されたまま隆起に
-    ///      取り残される**ので診断とパネルで見えるようにしておく。
-    ///      <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> / <c>MonorailPylonAI</c> は
-    ///      dry-run で嘘をつく（④ §F-2）が、⑤は dry-run を**フィルタに使わない**ので
-    ///      取りこぼさない
-    ///   5. **<c>InstanceManager.Group</c> は <c>null</c> を渡す**（§G-16 (e)）。
-    ///      ⑤は災害スロットに載らないので束ねる先が無く、null 検査は 3 箇所とも在る。
-    ///      空の <c>Group</c> を new して渡すより、null のほうが実測どおりである
+    ///   1. **Roads really are released** (§G-16 (a)). <c>demolish: true</c> funnels into
+    ///      <c>PlayerNetAI.CollapseSegment</c>, which calls
+    ///      <c>NetManager.ReleaseSegment(id, keepNodes: false)</c>.
+    ///      Of the 19 overrides, the only one that refuses is <c>SupportCableAI</c>
+    ///      (cable-car spans; a type that does not flatten terrain, so leaving it does not make a
+    ///      trench). An <c>Untouchable</c> segment is refused together with its owning building
+    ///      when that building's collapse is refused
+    ///   2. **A node whose last segment is gone is released on the spot** (§G-16 (b)).
+    ///      No orphan nodes are left. But <b>releasing a road can take buildings with it</b>
+    ///      (<c>ReleaseNodeImplementation</c> → <c>ReleaseBuilding</c>), so the building-side
+    ///      sweep must always keep to the discipline of "note the next ID before acting"
+    ///   3. **Setting <c>Collapsed</c> alone does not stop the terrain pinning** (§G-16 (c)).
+    ///      <c>NetSegment.TerrainUpdated</c> only looks at <c>m_flags &amp; 3</c>, and
+    ///      <c>Building.TerrainUpdated</c> only at <c>m_flags &amp; 524291</c>
+    ///      (<c>Created|Deleted|Demolishing</c>). **This is the IL-level reason the call goes the
+    ///      opposite way to ④'s <c>demolish: false</c>**
+    ///   4. **The five refusing AIs let <c>demolish: true</c> through** (§G-16 (d)).
+    ///      ShelterAI / DoomsdayVaultAI / DamPowerHouseAI / TsunamiBuoyAI delegate to
+    ///      <c>CommonBuildingAI</c>, and DecorationBuildingAI sets <c>Demolishing</c>.
+    ///      **"Terrain left standing only under the disaster facilities" does not happen.**
+    ///      <see cref="LastBuildingsRefused"/> is kept anyway because there may be other paths
+    ///      that refuse, and **if even one building is refused, that cell stays pinned for good
+    ///      and is left behind by the uplift**, so it is made visible in the diagnostics and on
+    ///      the panel.
+    ///      <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> / <c>MonorailPylonAI</c> lie in a dry run
+    ///      (④ §F-2), but ⑤ **does not use the dry run as a filter**, so it does not miss them
+    ///   5. **Pass <c>null</c> for <c>InstanceManager.Group</c>** (§G-16 (e)).
+    ///      ⑤ does not occupy a disaster slot, so there is nothing to group into, and all three
+    ///      call sites do check for null. Passing null matches the measurements better than
+    ///      newing an empty <c>Group</c>
     ///
-    /// > **1 と 2 が成立しなかった場合、⑤は隆起を始めない**（計画 T5 Step 1）。
-    /// > <see cref="ClearingPathAvailable"/> が false になり、<c>VolcanoState.HandleStart</c> は
-    /// > 1 本も壊さずに <c>Refused</c> へ落ちて、パネルが
-    /// > <c>Strings.VolcanoRoadPathUnavailable</c> を出す。
-    /// > **「道路だけ諦めて隆起する」を選んではいけない** —— それは設計書 §1.2 が
-    /// > 発見した失敗（山の中の平らな溝）を、分かったうえで出荷することになる。
+    /// > **If 1 and 2 do not hold, ⑤ does not start the uplift** (plan T5 Step 1).
+    /// > <see cref="ClearingPathAvailable"/> goes false, <c>VolcanoState.HandleStart</c> falls
+    /// > through to <c>Refused</c> without destroying a single thing, and the panel shows
+    /// > <c>Strings.VolcanoRoadPathUnavailable</c>.
+    /// > **Do not choose "give up on the roads and uplift anyway"** — that would mean shipping,
+    /// > knowingly, the very failure design doc §1.2 discovered (flat trenches inside the
+    /// > mountain).
     ///
-    /// ── 1 tick あたりの仕事量の上限（明示する）──────────────────────
+    /// ── the per-sweep work budget (stated explicitly) ──────────────────────────────────────
     ///
-    /// 走査の間隔は <see cref="IntervalFrames"/> フレームぶんの**経過ゲーム内時間**である。
-    /// <c>frameIndex % N</c> にしない —— <c>m_currentFrameIndex</c> は 1 tick で
-    /// <c>FinalSimulationSpeed</c>（1/3/9）進むので、剰余だとゲーム速度で判定がまばらになる
-    /// （火災旋風 付録 A-4）。
+    /// The sweep interval is the **elapsed in-game time** worth of <see cref="IntervalFrames"/>
+    /// frames. Never <c>frameIndex % N</c> — <c>m_currentFrameIndex</c> advances by
+    /// <c>FinalSimulationSpeed</c> (1/3/9) per tick, so a modulo makes the test fire erratically
+    /// depending on game speed (firestorm appendix A-4).
     ///
-    /// 1 回の走査の上限は<b>建物側・道路側それぞれ グリッドセル
-    /// <see cref="MaxCellsPerPass"/> 個</b>と<b>建物 <see cref="MaxBuildingsPerPass"/> 棟 /
-    /// 道路 <see cref="MaxSegmentsPerPass"/> 本</b>。半径 3000 m（形態の最大）でも矩形は
-    /// 95×95 ＝ 9025 セルなので、セル上限に当たるのは中心がマップの端にある場合だけで、
-    /// 実際に効くのは件数の上限である。打ち切ったら次回はカーソルから再開し、
-    /// <see cref="ClearedRadiusMetres"/> は**届いた分しか進めない**。
+    /// One sweep is limited to <b><see cref="MaxCellsPerPass"/> grid cells on each of the
+    /// building and road sides</b> and <b><see cref="MaxBuildingsPerPass"/> buildings /
+    /// <see cref="MaxSegmentsPerPass"/> road segments</b>. Even at radius 3000 m (the largest
+    /// form) the rectangle is 95×95 = 9025 cells, so the cell limit only bites when the centre is
+    /// at the edge of the map; what actually bites is the count limit. If it is cut short, the
+    /// next sweep resumes from the cursor, and <see cref="ClearedRadiusMetres"/> **advances only
+    /// as far as it got**.
     ///
-    /// ── 候補マスクが②④と違う（ここが⑤に固有）──────────────────────
+    /// ── the candidate mask differs from ② and ④ (this part is specific to ⑤) ───────────────
     ///
-    /// ②④は <c>Collapsed</c> を候補から弾いていた（<c>CollapseBuilding</c> が必ず
-    /// false を返すので、跡地の瓦礫が毎回 refused に積まれて診断が読めなくなるため）。
-    /// **⑤は弾かない。** 上の 3 のとおり、<c>Collapsed</c> を立てただけの瓦礫は
-    /// <b>地形を固定し続ける</b>ので、⑤にとってはまさに取り除かなければならない相手である。
-    /// 代わりに <c>Demolishing</c> を弾く（そちらは既に地形固定が止まっている）。
+    /// ② and ④ excluded <c>Collapsed</c> from the candidates (<c>CollapseBuilding</c> always
+    /// returns false for it, so the leftover rubble piles up in "refused" every time and makes
+    /// the diagnostics unreadable).
+    /// **⑤ does not exclude it.** As per point 3 above, rubble with only <c>Collapsed</c> set
+    /// <b>keeps pinning the terrain</b>, so for ⑤ it is precisely what has to be removed.
+    /// Instead it excludes <c>Demolishing</c> (there the terrain pinning has already stopped).
     /// </summary>
     public static partial class VolcanoClearing
     {
-        /// <summary>走査の間隔（フレーム相当のゲーム内時間）。</summary>
+        /// <summary>The sweep interval (in-game time equivalent to this many frames).</summary>
         private const int IntervalFrames = 64;
 
         /// <summary>
-        /// 1 回の走査で見るグリッドセルの上限（建物側・道路側それぞれ）。
+        /// Maximum grid cells examined in one sweep (on each of the building and road sides).
         ///
-        /// ★ **32768 は死んだ定数だった**（全体レビュー M16）。走査するリングの
-        /// 通し番号は形態の最大（R=3000 m）でも 99² = 9801 が上限なので、
-        /// 32768 には**構造上 1 度も届かない**。実際に効く値へ下げてある ——
-        /// 最大の火山でも 3 回に分けて走ることになり、1 tick でグリッドを
-        /// 歩く量そのものに上限が付く。届かなかった分は次回のカーソルから続き、
-        /// <see cref="ClearedRadiusMetres"/> は届いた分しか進まない。
+        /// ★ **32768 was a dead constant** (whole-project review M16). The running index of the
+        /// rings being swept tops out at 99² = 9801 even for the largest form (R=3000 m), so
+        /// 32768 is **structurally unreachable**. It has been lowered to a value that actually
+        /// bites — even the largest volcano now has to be swept in three passes, which puts a
+        /// limit on how much of the grid is walked in a single tick. Whatever did not get done
+        /// continues from the cursor next time, and <see cref="ClearedRadiusMetres"/> advances
+        /// only as far as it got.
         /// </summary>
         private const int MaxCellsPerPass = 4096;
 
         /// <summary>
-        /// 1 回の走査で壊しにいく建物の上限。
+        /// Maximum buildings attacked in one sweep.
         ///
-        /// ★ **2048 から下げた**（全体レビュー M16）。<c>demolish: true</c> の 1 回は
-        /// フラグを立てるだけではない —— 建物の解放、下請け建物への再帰、
-        /// 道路側ではノードの解放と経路の無効化と <c>UpdateArea</c> を引き連れる。
-        /// 建物 2048 ＋ 道路 2048 ＝ **1 sim tick に 4096 回**は、
-        /// 「1 tick あたりの仕事量に上限を置く」と名乗れる数ではない。
-        /// 走査は 64 フレームおきなので、128 でも 1 ゲーム内分あたり
-        /// およそ 90 棟が消える速さである。
+        /// ★ **Lowered from 2048** (whole-project review M16). One <c>demolish: true</c> does not
+        /// merely set a flag — it drags along releasing the building, recursing into its
+        /// sub-buildings, and, on the road side, releasing nodes, invalidating paths and issuing
+        /// an <c>UpdateArea</c>. 2048 buildings + 2048 roads = **4096 calls in a single sim tick**
+        /// is not a number you can call "putting a limit on the per-tick work".
+        /// The sweep runs every 64 frames, so even 128 clears about 90 buildings per in-game
+        /// minute.
         /// </summary>
         private const int MaxBuildingsPerPass = 128;
 
-        /// <summary>1 回の走査で壊しにいく道路セグメントの上限（建物側と同じ理由）。</summary>
+        /// <summary>Maximum road segments attacked in one sweep (same reasoning as the building side).</summary>
         private const int MaxSegmentsPerPass = 128;
 
-        /// <summary>建物・道路グリッドの 1 辺のセル数（1 セル 64 m）。</summary>
+        /// <summary>Cells along one side of the building/road grid (one cell is 64 m).</summary>
         private const int GridSide = 270;
 
-        /// <summary>グリッドのセル寸法（m）。</summary>
+        /// <summary>Grid cell size (m).</summary>
         private const float GridCellSize = 64f;
 
-        /// <summary>ワールド座標 → セル添字のオフセット。</summary>
+        /// <summary>Offset from world coordinates to cell index.</summary>
         private const float GridCellOffset = 135f;
 
-        /// <summary>建物の連結リストを辿る回数の上限（建物バッファの大きさ）。</summary>
+        /// <summary>Guard on how many times the building linked list is walked (the size of the building buffer).</summary>
         private const int BuildingChainGuard = 49152;
 
-        /// <summary>道路の連結リストを辿る回数の上限（<c>Array16&lt;NetSegment&gt;(36864)</c>）。</summary>
+        /// <summary>Guard on how many times the road linked list is walked (<c>Array16&lt;NetSegment&gt;(36864)</c>).</summary>
         private const int SegmentChainGuard = 36864;
 
-        // ★★ **マスクも余白も当たり判定もここには置かない**（全体レビュー I2 / I4）。
-        //    <see cref="VolcanoScan"/> の 1 組を調査（VolcanoSurvey）と共有する。
-        //    以前は同じ規則を 2 つのファイルに写し、「同じ値でなければずれる」と
-        //    **注意書きで**担保していた。注意書きは、実際にマスクがずれたことを
-        //    防げなかった —— 調査だけが Untouchable と Collapsed を弾いており、
-        //    不可逆の操作の直前に壊れる数を実際より少なく見せていた。
+        // ★★ **Neither the masks nor the margins nor the hit test belong here**
+        //    (whole-project review I2 / I4). The single set in <see cref="VolcanoScan"/> is shared
+        //    with the survey (VolcanoSurvey). The same rules used to be copied into two files,
+        //    with a **note** promising "these must stay the same value or they drift". The note
+        //    did not prevent the masks actually drifting — the survey alone was excluding
+        //    Untouchable and Collapsed, and so it was showing fewer things about to be destroyed
+        //    than there really were, immediately before an irreversible operation.
 
         /// <summary>
-        /// 先行距離の下限（m）。raw セル 1 つ分。**0 を許すと ring lockstep が
-        /// 自分自身を待って永久に止まる**（<see cref="LeadMetres"/>）。
+        /// Minimum lead distance (m). One raw cell. **Allow 0 and the ring lockstep waits on
+        /// itself and stalls for good** (<see cref="LeadMetres"/>).
         /// </summary>
         private const float MinLeadMetres = 16f;
 
@@ -216,36 +230,38 @@ namespace DisasterPlus.Game
         private static int _buildingCursor;
         private static int _segmentCursor;
 
-        // ★ カーソルが途中のまま持ち越された走査が、「一周した」と言ってよい半径の
-        //   上限（全体レビュー M8。<c>VolcanoClearing.Sweep.cs</c> の <c>PassFront</c>）。
-        //   0 は「控えていない」。
+        // ★ The upper bound on the radius a sweep carried over mid-cursor may claim to have
+        //   "gone all the way round" (whole-project review M8; <c>PassFront</c> in
+        //   <c>VolcanoClearing.Sweep.cs</c>). 0 means "not recorded".
         private static float _buildingPassFront;
         private static float _segmentPassFront;
 
-        // ★★ **走査の 2 本は別々に一周する。だから届いた半径も別々に憶える。**
-        //    （2026-08-22、実機で楯状 r=3000 m が永久に終わらなかった原因。）
+        // ★★ **The two sweeps complete their laps separately, so the radii they reach are
+        //    remembered separately too.**
+        //    (2026-08-22; the cause of a shield volcano at r=3000 m never finishing in the live
+        //    game.)
         //
-        //    以前はこの 2 つを持たず、<c>Sweep</c> が**そのパスの**建物側と道路側の
-        //    小さいほうを取って <see cref="_clearedRadius"/> へ入れていた。
-        //    ところが 1 周に要するパス数は 2 本で違う（道路側の矩形は
-        //    <c>VolcanoScan.SegmentGridMargin</c> ぶん広い）ので、
-        //    **前線が伸びていく途中で 2 本の周回位相がずれる。** ずれたあとは
-        //    「片方が一周し終えたパス」と「もう片方が一周し終えたパス」が
-        //    永久に別のパスになり、**同じパスで両方が前線に届くことが二度と無い。**
-        //    実機の log はその状態をそのまま記録している ——
-        //    <c>cleared=2816/3000</c> が 660 パス以上動かず、隆起は
-        //    <c>progress=1.000</c> のまま <c>Uplifting</c> で止まり、
-        //    火山性微動が鳴りやまなかった。
+        //    These two did not exist before; <c>Sweep</c> took the smaller of the building and
+        //    road sides **for that pass** and put it into <see cref="_clearedRadius"/>.
+        //    But the number of passes needed for one lap differs between them (the road side's
+        //    rectangle is wider by <c>VolcanoScan.SegmentGridMargin</c>), so
+        //    **the lap phases of the two drift apart while the front is still advancing.**
+        //    Once drifted, "the pass on which one finished its lap" and "the pass on which the
+        //    other finished its lap" are forever different passes, and
+        //    **the two never again reach the front on the same pass.**
+        //    The live log records exactly that state — <c>cleared=2816/3000</c> did not move for
+        //    over 660 passes, the uplift sat in <c>Uplifting</c> at <c>progress=1.000</c>, and
+        //    the volcanic tremor would not stop.
         //
-        //    それぞれの側で単調に憶えて、**最後に小さいほうを取る**。
-        //    意味は変わらない（「両方が走査し終えた半径」）が、
-        //    2 本が同じパスで揃う必要が無くなる。
+        //    Remember each side monotonically and **take the smaller at the end**.
+        //    The meaning is unchanged ("the radius both have finished sweeping"), but the two no
+        //    longer have to line up on the same pass.
         private static float _buildingReachedRadius;
         private static float _segmentReachedRadius;
 
         private static bool _errorLogged;
 
-        // ── 診断カウンタ 9 個（全て sim スレッドからのみ読み書きする）────────────
+        // ── nine diagnostic counters (all read and written from the sim thread only) ─────────
         private static int _passes;
         private static int _lastScanned;
         private static int _lastBuildingsDestroyed;
@@ -259,91 +275,95 @@ namespace DisasterPlus.Game
         private static string _lastFailure;
 
         /// <summary>
-        /// ★★ <b>T6 の唯一許される入力。</b> 走査を終えた半径（m）。
-        /// **まだ 1 本も壊していなければ 0** で、そのとき
-        /// <c>UpliftSchedule.ActiveRadiusMetres</c> は 0 を返す（＝隆起は 1 セルも動かない）。
+        /// ★★ <b>The only input T6 is allowed.</b> The radius (m) that has been swept.
+        /// **It is 0 until the first thing has been destroyed**, and at that point
+        /// <c>UpliftSchedule.ActiveRadiusMetres</c> returns 0 (i.e. the uplift moves not one cell).
         ///
-        /// 「壊し終えた」ではなく「**走査し終えた**」である（クラス doc）。
+        /// It means "**finished sweeping**", not "finished destroying" (class doc).
         /// </summary>
         public static float ClearedRadiusMetres { get { return _clearedRadius; } }
 
         /// <summary>
-        /// 今この瞬間に追いかけている前線（m）。<see cref="ClearedRadiusMetres"/> が
-        /// ここまで届いたら、その進捗ぶんの準備は済んでいる。診断と位相の遷移に使う。
+        /// The front being chased right now (m). Once <see cref="ClearedRadiusMetres"/> reaches
+        /// it, the clearing for that much progress is done. Used for diagnostics and the phase
+        /// transitions.
         /// </summary>
         public static float FrontMetres { get { return _frontRadius; } }
 
-        /// <summary>今の前線まで走査が届いているか（＝この進捗ぶんの準備が済んだか）。</summary>
+        /// <summary>Whether the sweep has reached the current front (i.e. the clearing for this much progress is done).</summary>
         public static bool FrontReached
         {
             get { return _passes > 0 && _clearedRadius >= _frontRadius; }
         }
 
-        /// <summary>山の半径まで走査を終えたか（＝準備が全部終わったか）。</summary>
+        /// <summary>Whether the sweep has reached the mountain's radius (i.e. the clearing is finished entirely).</summary>
         public static bool Complete
         {
             get { return _shapeRadius > 0f && _clearedRadius >= _shapeRadius; }
         }
 
         /// <summary>
-        /// 準備の破壊経路がこの環境で成立するか。**false なら⑤は火山を 1 つも作らない**
-        /// （クラス doc の Step 1）。<see cref="Tick"/> を 1 度も呼んでいなくても答えられる。
+        /// Whether the clearing's destruction path holds in this environment. **If false, ⑤
+        /// creates no volcano at all** (Step 1 in the class doc). It can answer even if
+        /// <see cref="Tick"/> has never been called.
         ///
-        /// ★★ <b>述語は <see cref="Sweep"/> が実際に門にしている式と同じでなければならない</b>
-        /// （全体レビュー M9）。ここが <c>RoadPathUsable</c>（道路だけ）だった頃、
-        /// <c>CollapseBuilding</c> が解決できず道路側だけ解決できた環境では
-        /// **火山が確定して <c>Clearing</c> に入り、そこで永久に止まった** ——
-        /// <c>Sweep</c> は <c>Facts().Usable</c> で毎回引き返すので走査回数が 1 回も
-        /// 増えず、<c>FrontReached</c> が真にならず、位相は <c>Refused</c> にすらならない。
+        /// ★★ <b>The predicate must be the same expression <see cref="Sweep"/> actually gates on</b>
+        /// (whole-project review M9). Back when this was <c>RoadPathUsable</c> (roads only), in an
+        /// environment where <c>CollapseBuilding</c> could not be resolved but the road side
+        /// could, **the volcano was confirmed, entered <c>Clearing</c>, and stalled there for
+        /// good** — <c>Sweep</c> turns back on <c>Facts().Usable</c> every time, so the pass count
+        /// never went up, <c>FrontReached</c> never became true, and the phase did not even reach
+        /// <c>Refused</c>.
         /// </summary>
         public static bool ClearingPathAvailable
         {
             get { return Facts().Usable && SegmentGridUsable(); }
         }
 
-        /// <summary>これまでに走った走査の回数（この火山での累計）。</summary>
+        /// <summary>Sweeps run so far (cumulative for this volcano).</summary>
         public static int Passes { get { return _passes; } }
 
-        /// <summary>直近 1 回で候補として見た建物と道路の合計。</summary>
+        /// <summary>Buildings plus roads examined as candidates in the last sweep.</summary>
         public static int LastScanned { get { return _lastScanned; } }
 
-        /// <summary>直近 1 回で実際に取り除いた建物数。</summary>
+        /// <summary>Buildings actually removed in the last sweep.</summary>
         public static int LastBuildingsDestroyed { get { return _lastBuildingsDestroyed; } }
 
         /// <summary>
-        /// 直近 1 回で**バニラが断った**建物数。0 でないなら、その足元のセルは
-        /// 元の高さに固定されたまま隆起に取り残される（クラス doc の 4）。
+        /// Buildings **vanilla refused** in the last sweep. If it is not 0, the cells under them
+        /// stay pinned at their original height and are left behind by the uplift (point 4 in the
+        /// class doc).
         /// </summary>
         public static int LastBuildingsRefused { get { return _lastBuildingsRefused; } }
 
-        /// <summary>直近 1 回で実際に取り除いた道路セグメント数。</summary>
+        /// <summary>Road segments actually removed in the last sweep.</summary>
         public static int LastSegmentsDestroyed { get { return _lastSegmentsDestroyed; } }
 
         /// <summary>
-        /// 直近 1 回で**バニラが断った**道路セグメント数。<c>SupportCableAI</c> と、
-        /// 所有建物が倒壊を断った <c>Untouchable</c> のセグメントがここに入る。
+        /// Road segments **vanilla refused** in the last sweep. <c>SupportCableAI</c> and
+        /// <c>Untouchable</c> segments whose owning building refused to collapse land here.
         /// </summary>
         public static int LastSegmentsRefused { get { return _lastSegmentsRefused; } }
 
-        /// <summary>この火山でこれまでに取り除いた建物数。</summary>
+        /// <summary>Buildings removed so far for this volcano.</summary>
         public static int TotalBuildingsDestroyed { get { return _totalBuildingsDestroyed; } }
 
-        /// <summary>この火山でこれまでに取り除いた道路セグメント数。</summary>
+        /// <summary>Road segments removed so far for this volcano.</summary>
         public static int TotalSegmentsDestroyed { get { return _totalSegmentsDestroyed; } }
 
-        /// <summary>直近 1 回が上限で打ち切られたか（続きは次回。前線には届いていない）。</summary>
+        /// <summary>Whether the last sweep was cut short by a limit (it continues next time; the front was not reached).</summary>
         public static bool LastCapped { get { return _lastCapped; } }
 
         /// <summary>
-        /// 直近に走れなかった理由（**英語・診断用**）。走れていれば null。
-        /// **黙って何もしないをやらない**ための口である。
+        /// The most recent reason it could not run (**English, for diagnostics**). null if it ran.
+        /// This is the mouth that stops us **failing silently**.
         /// </summary>
         public static string LastFailure { get { return _lastFailure; } }
 
         /// <summary>
-        /// 火山を手放すときとレベルアンロードで呼ぶ。冪等である。
-        /// **進行中の火山は保存しない**ので、都市を出入りすると準備は 0 からになる
-        /// （地形はそのときの形のまま残る。設計書 §1.3）。
+        /// Call when letting go of the volcano and on level unload. Idempotent.
+        /// **A volcano in progress is not saved**, so leaving and re-entering the city restarts
+        /// the clearing from 0 (the terrain stays in whatever shape it was in. Design doc §1.3).
         /// </summary>
         public static void Reset()
         {
@@ -370,19 +390,19 @@ namespace DisasterPlus.Game
             _lastCapped = false;
             _lastFailure = null;
 
-            // ★ _errorLogged と破壊経路の実測は戻さない。どちらも「この DLL が参照して
-            //    いるゲームのビルドに対する事実」であって都市ごとの状態ではない
-            //    （TyphoonWind / VolcanoReader と同じ判断）。
+            // ★ _errorLogged and the measured destruction path are not reset. Both are "facts
+            //    about the build of the game this DLL references", not per-city state
+            //    (the same call as in TyphoonWind / VolcanoReader).
         }
 
         /// <summary>
-        /// 破壊経路を走査するだけの純粋関数。キャッシュを一切触らないので、
-        /// **どのスレッドから呼んでもこの型の状態を壊さない**。
-        /// <see cref="Assumptions"/>（main スレッド）はこちらを使うこと。
+        /// A pure function that only probes the destruction path. It touches no cache, so
+        /// **calling it from any thread cannot corrupt this type's state**.
+        /// <see cref="Assumptions"/> (main thread) should use this one.
         ///
-        /// メソッドは <c>GetMethod</c> で**引数の型まで指定**して見る（②が確立した形）。
-        /// 名前だけの <c>GetMethod</c> はオーバーロードで例外を投げるうえ、
-        /// シグネチャ変更を見逃す。
+        /// Methods are looked up with <c>GetMethod</c> **specifying the parameter types too**
+        /// (the form ② established). A name-only <c>GetMethod</c> throws on overloads and also
+        /// misses signature changes.
         /// </summary>
         public static VolcanoDestructionFacts ScanFacts()
         {
@@ -407,19 +427,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から呼ぶこと**（ポーズ中に建物が消える）。
+        /// Sim thread. **Always call it from below the pause guard in
+        /// <c>VolcanoFeature.OnSimulationTick</c>** (otherwise buildings vanish while paused).
         ///
-        /// <paramref name="frontUnit"/> は<b>隆起の前線 [0,1]</b>である。準備が始まった
-        /// ばかり（隆起がまだ動いていない）なら 0 で、前線は
-        /// <c>ModSettings.VolcanoClearingLeadMetres</c> だけになる。
+        /// <paramref name="frontUnit"/> is <b>the uplift front [0,1]</b>. If the clearing has only
+        /// just begun (the uplift has not moved yet) it is 0, and the front is just
+        /// <c>ModSettings.VolcanoClearingLeadMetres</c>.
         ///
-        /// ★★ **進捗そのものを渡さないこと**（<c>VolcanoUplift.GrowthFrontUnit</c> を渡す）。
-        ///   火口のぶん円錐を立て直しているので、隆起の前線は進捗より先に出る
-        ///   （<c>UpliftSchedule.GrowthFrontUnit</c>）。進捗を渡すと、準備が届く前に
-        ///   隆起が届いてしまい、山の外周が切り立った円で止まって見える
-        ///   ——**危険側ではない**（<c>ActiveRadiusMetres</c> が書き込みを止める）が、
-        ///   毎回そこで待たされる。
+        /// ★★ **Do not pass the progress itself** (pass <c>VolcanoUplift.GrowthFrontUnit</c>).
+        ///   The cone is rebuilt to allow for the crater, so the uplift front runs ahead of the
+        ///   progress (<c>UpliftSchedule.GrowthFrontUnit</c>). Pass the progress and the uplift
+        ///   arrives before the clearing does, and the outer rim of the mountain appears to stop
+        ///   at a sheer circle — **not the dangerous direction** (<c>ActiveRadiusMetres</c> stops
+        ///   the writes), but it waits there every time.
         /// </summary>
         public static void Tick(VolcanoFootprint footprint, float frontUnit, float deltaMinutes)
         {
@@ -447,8 +467,9 @@ namespace DisasterPlus.Game
         {
             if (!footprint.Valid) return;
 
-            // ★ 火山が入れ替わったら走査位置と実績を捨てる。**中心は動かない**ので、
-            //    ここが唯一カーソルを捨てる条件である（クラス doc）。
+            // ★ If the volcano has been swapped, discard the sweep position and the tally.
+            //    **The centre does not move**, so this is the only condition under which the
+            //    cursors are discarded (class doc).
             if (!_centreValid || !SamePoint(_centre, footprint.Centre))
             {
                 float keptMinutes = _minutesSincePass;
@@ -460,8 +481,8 @@ namespace DisasterPlus.Game
 
             _shapeRadius = footprint.RadiusMetres;
 
-            // ★ 間隔の累積は対象より先に進める（④の TyphoonWind と同じ形。
-            //    巻き戻すと走査が 1 度も走らない）。
+            // ★ Advance the interval accumulator before the subject (the same shape as ④'s
+            //    TyphoonWind; rewind it and the sweep never runs at all).
             float framesPerMinute = FeatureHost.FramesPerMinute;
             float interval = framesPerMinute > 0f ? IntervalFrames / framesPerMinute : 0f;
 
@@ -473,29 +494,32 @@ namespace DisasterPlus.Game
             _frontRadius = UpliftSchedule.ClearingFrontMetres(
                 footprint.RadiusMetres, frontUnit, LeadMetres());
 
-            // 前線に既に届いているなら走らない。**累積を消費しない**ので、
-            // 前線が伸びた次の tick で即座に走る。
+            // If it already reaches the front, do not run. **The accumulator is not consumed**,
+            // so it runs immediately on the next tick after the front advances.
             if (_clearedRadius >= _frontRadius) return;
 
             if (_minutesSincePass < interval) return;
 
-            // 余りを繰り越さない（ロード直後の大きな deltaMinutes で連続発火させない）。
+            // Do not carry the remainder over (no repeated firing after a load hands us a large
+            // deltaMinutes).
             _minutesSincePass = 0f;
 
             Sweep(footprint);
         }
 
         /// <summary>
-        /// 1 回ぶんの走査。建物と道路をそれぞれ中心から外へ辿り、前線の内側を取り除く。
+        /// One sweep. Walks the buildings and the roads outwards from the centre and removes what
+        /// is inside the front.
         ///
-        /// **届いた半径は 2 つの小さいほう**である。片方だけ前線まで届いても、
-        /// もう片方が届いていなければそこはまだ「準備できた場所」ではない。
+        /// **The radius reached is the smaller of the two.** Even if one side reaches the front,
+        /// if the other has not, the place is not yet "cleared".
         ///
-        /// ★★ <b>ただし「このパスの 2 つの小さいほう」ではない。</b>
-        /// 建物と道路は別々に一周しており、**1 周に要するパス数が違う**。
-        /// 直接比べると周回位相がずれたとたん永久に前線へ届かなくなるので、
-        /// それぞれを単調に憶えて（<c>_buildingReachedRadius</c> /
-        /// <c>_segmentReachedRadius</c>）から小さいほうを取る。
+        /// ★★ <b>But it is not "the smaller of the two for this pass".</b>
+        /// Buildings and roads complete their laps separately, and **they need a different number
+        /// of passes per lap**. Compare them directly and the moment their lap phases drift apart
+        /// the front is never reached again, so each is remembered monotonically
+        /// (<c>_buildingReachedRadius</c> / <c>_segmentReachedRadius</c>) and the smaller is
+        /// taken from those.
         /// </summary>
         private static void Sweep(VolcanoFootprint footprint)
         {
@@ -518,11 +542,12 @@ namespace DisasterPlus.Game
             int segmentsScanned = ClearSegments(footprint, out segmentsCapped,
                                                 out segmentsReached);
 
-            // ★★ **それぞれの側で単調に憶えてから、小さいほうを取る。**
-            //    このパスの 2 つを直接比べてはいけない —— 1 周に要するパス数が
-            //    2 本で違うので周回位相がずれ、**同じパスで両方が前線に届くことが
-            //    二度と無くなる**（<see cref="_buildingReachedRadius"/> の由来）。
-            //    意味は変わらない: 小さいほうは今も「両方が走査し終えた半径」である。
+            // ★★ **Remember each side monotonically, then take the smaller.**
+            //    Do not compare this pass's two values directly — the number of passes per lap
+            //    differs between the two, so their lap phases drift and **the two never again
+            //    reach the front on the same pass** (the origin of <see cref="_buildingReachedRadius"/>).
+            //    The meaning is unchanged: the smaller is still "the radius both have finished
+            //    sweeping".
             if (buildingsReached > _buildingReachedRadius)
             {
                 _buildingReachedRadius = buildingsReached;
@@ -545,18 +570,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 準備の前線が隆起の前線より何メートル先を走るか。
+        /// How many metres ahead of the uplift front the clearing front runs.
         ///
-        /// **負にしない** —— 負にすると「まだ壊していない場所を上げる」ことになり、
-        /// 罠 1 そのものになる。
+        /// **Never negative** — negative means "raise ground that has not been cleared yet",
+        /// which is trap 1 itself.
         ///
-        /// ★★ **0 にもしない。** 準備と隆起は ring lockstep で噛み合っている ——
-        /// 隆起してよい半径は準備が届いた半径で、準備の前線は隆起の進捗で決まる。
-        /// 先行距離が 0 だと進捗 0 のとき前線も 0 になり、
-        /// <b>何も壊さない → 何も上がらない → 進捗が動かない</b>の輪から永久に出られない。
-        /// 例外は 1 つも出ず、位相が <c>Clearing</c> のまま黙って止まる。
-        /// 下限は raw セル 1 つ分（16 m）—— それより細かい先行に意味は無い
-        /// （地形の格子がそれ以上細かくならないため）。
+        /// ★★ **Not 0 either.** The clearing and the uplift mesh as a ring lockstep — the radius
+        /// that may be uplifted is the radius the clearing reached, and the clearing front is
+        /// decided by the uplift progress. With a lead of 0, at progress 0 the front is 0 too,
+        /// and you can never escape the loop of <b>nothing destroyed → nothing raised → progress
+        /// does not move</b>. Not a single exception is thrown; the phase just sits silently at
+        /// <c>Clearing</c>.
+        /// The floor is one raw cell (16 m) — a finer lead than that is meaningless (the terrain
+        /// grid does not get any finer).
         /// </summary>
         private static float LeadMetres()
         {
@@ -565,13 +591,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 道路グリッドが実測どおり <see cref="GridSide"/>² か（§F-15）。
-        /// **推測で走らない**（設計書 §6）—— 合わないまま <c>z*270+x</c> で引くと、
-        /// まったく別の場所の道路を壊す。
+        /// Whether the road grid is <see cref="GridSide"/>² as measured (§F-15).
+        /// **Do not run on a guess** (design doc §6) — index with <c>z*270+x</c> when it does not
+        /// match and you destroy roads somewhere else entirely.
         ///
-        /// <c>NetManager</c> がまだ居ないとき（メインメニュー・前提検証）は
-        /// <b>true</b> を返す。「まだ読めていない」を「使えない」と名乗らないためで、
-        /// 実際に壊す直前には必ず居る。
+        /// Returns <b>true</b> when <c>NetManager</c> is not around yet (main menu, assumption
+        /// checks). That is so "cannot read it yet" is not reported as "unusable"; it is always
+        /// around immediately before anything is actually destroyed.
         /// </summary>
         private static bool SegmentGridUsable()
         {
@@ -591,7 +617,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>破壊経路の実測をキャッシュ越しに返す。**sim スレッド専用**（キャッシュを書く）。</summary>
+        /// <summary>Returns the measured destruction path through the cache. **Sim thread only** (it writes the cache).</summary>
         private static VolcanoDestructionFacts Facts()
         {
             if (_factsScanned) return _facts;
@@ -614,7 +640,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>1/64 m（raw 1 単位）より細かい差は「同じ地点」とみなす。</summary>
+        /// <summary>Differences finer than 1/64 m (one raw unit) count as "the same point".</summary>
         private static bool SamePoint(Vec3 a, Vec3 b)
         {
             return Same(a.X, b.X) && Same(a.Z, b.Z);
@@ -628,12 +654,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **破壊 0 のときも毎回出す。** 「機能が死んでいる」と「範囲内に何も無い」が
-        /// ログ上で区別できなくなる（③で実際に起きた形）。
+        /// **Emit it every time, including when nothing was destroyed.** Otherwise "the feature is
+        /// dead" and "there is nothing in range" become indistinguishable in the log (which is
+        /// what actually happened in ③).
         ///
-        /// <c>Log.Diag</c> は同一キーで 512 sim フレームに 1 回に間引かれるが、
-        /// **引数の文字列連結は毎回走ってしまう**ので <c>DiagEnabled</c> で先に落とす
-        /// （C# は引数を呼び出し前に評価し切る）。
+        /// <c>Log.Diag</c> is throttled to once per 512 sim frames for a given key, but
+        /// **the string concatenation of the arguments runs every time**, so drop it early with
+        /// <c>DiagEnabled</c> (C# evaluates the arguments fully before the call).
         /// </summary>
         private static void WriteDiag()
         {
@@ -644,8 +671,8 @@ namespace DisasterPlus.Game
                 + " front=" + _frontRadius.ToString("F0")
                 + " cleared=" + _clearedRadius.ToString("F0")
                 + "/" + _shapeRadius.ToString("F0")
-                // ★ 2 本を別々に出す。片方だけが止まっているのが、揃えた 1 つの数からは
-                //   読めなかった（上の _buildingReachedRadius の由来）。
+                // ★ Report the two separately. One of them being stuck could not be read from the
+                //   single merged number (the origin of _buildingReachedRadius above).
                 + " reach b=" + _buildingReachedRadius.ToString("F0")
                 + " r=" + _segmentReachedRadius.ToString("F0")
                 + " scanned=" + _lastScanned

@@ -4,11 +4,12 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// 地図に描くランプが、**カーソル行が出している s と同じ量・同じ量子化**であること。
+    /// The ramp drawn on the map must be **the same quantity and the same quantisation as
+    /// the s reported by the cursor row**.
     ///
-    /// この機能でいちばん出してはいけない壊れ方は「示していると称する量とは
-    /// 違う減衰を描く」ことなので、ここのテストは見た目ではなく
-    /// <c>SeismicIntensity</c> との一致を固定する。
+    /// The one way this feature must never break is by "drawing an attenuation different
+    /// from the quantity it claims to show", so these tests pin down agreement with
+    /// <c>SeismicIntensity</c> rather than the look of it.
     /// </summary>
     public class IntensityRampTests
     {
@@ -17,8 +18,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void StepsAreTheSameQuantisationAsTheCursorBar()
         {
-            // 段数が食い違うと、同じ s に対して 2 つの違う「段」が
-            // 画面に同時に出ることになる（バーは 10 段、地図は別の段数）。
+            // If the step counts disagree, two different "steps" for the same s appear on
+            // screen at once (the bar with 10 steps, the map with some other number).
             Assert.Equal(SeismicScale.Steps, IntensityRamp.Steps);
         }
 
@@ -31,8 +32,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
             {
                 float radius = IntensityRamp.RadiusOf(k, r);
 
-                // 円盤 k の縁で s は k/Steps ちょうど。つまりこの円盤は
-                // 「s > k/Steps の範囲」を覆っている。
+                // At the edge of disc k, s is exactly k/Steps. In other words this disc
+                // covers "the region where s > k/Steps".
                 Assert.Equal((float)k / IntensityRamp.Steps,
                              SeismicIntensity.At(radius, Intensity), 4);
             }
@@ -57,11 +58,12 @@ namespace DisasterPlus.Core.Tests.Earthquake
         }
 
         /// <summary>
-        /// **このファイルの中心。** 大きい順にアルファ合成した結果の濃さが、
-        /// その輪帯の s に**比例**すること。
+        /// **The heart of this file.** The opacity resulting from alpha-compositing the
+        /// discs from largest to smallest must be **proportional** to that annulus's s.
         ///
-        /// 同じアルファを重ねると <c>1-(1-a)^(k+1)</c> の飽和曲線になり、
-        /// 弱い側を強く・強い側を弱く見せる。それは減衰の描き違いである。
+        /// Stacking the same alpha gives the saturating curve <c>1-(1-a)^(k+1)</c>, which
+        /// makes the weak side look strong and the strong side look weak. That is drawing
+        /// the attenuation wrongly.
         /// </summary>
         [Fact]
         public void AccumulatedOpacityIsProportionalToS()
@@ -79,20 +81,22 @@ namespace DisasterPlus.Core.Tests.Earthquake
         {
             float innermost = IntensityRamp.AccumulatedOpacity(IntensityRamp.Steps - 1);
 
-            // 震央側の代表 s は (Steps-0.5)/Steps なので、上限そのものには届かない。
-            // ただし上限の 9 割は超えていて、地形を完全には隠さない。
+            // The representative s on the epicentre side is (Steps-0.5)/Steps, so it never
+            // reaches the cap itself. It does exceed 90 per cent of the cap, yet it never
+            // hides the terrain completely.
             Assert.True(innermost > IntensityRamp.MaxOpacity * 0.9f);
             Assert.True(innermost < IntensityRamp.MaxOpacity);
             Assert.True(IntensityRamp.MaxOpacity < 1f);
         }
 
         /// <summary>
-        /// 単体アルファが 0..1 に収まり、**内側ほど大きい**こと。
+        /// The individual alpha must lie in 0..1 and **grow towards the inside**.
         ///
-        /// 単調性はこの機能の保険でもある。仮に <c>alphaBlend: true</c> が
-        /// アルファ合成ではなく上書きだったとしても（シェーダのブレンド式だけは
-        /// DLL から読めない）、単調である限り**濃さが震央へ向かって増える向きは
-        /// 反転しない** —— 曲線が凸に歪むだけで済む。
+        /// Monotonicity is also this feature's insurance. Even if <c>alphaBlend: true</c>
+        /// turned out to overwrite rather than alpha-composite (the shader's blend equation
+        /// is the one thing we cannot read from the DLL), as long as it is monotone
+        /// **the direction in which the opacity increases towards the epicentre does not
+        /// reverse** —— the curve merely warps into a convex one.
         /// </summary>
         [Fact]
         public void DrawAlphaIsMonotoneInwardAndWithinRange()

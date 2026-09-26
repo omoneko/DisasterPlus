@@ -5,8 +5,8 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 全体レビュー I4（中点が範囲の外にある放射状の幹線道路が取り除かれず、
-    /// 完成した山の中に平らな溝が残る）を固定するテスト。
+    /// Tests pinning down overall review I4 (a radial trunk road whose midpoint lies outside
+    /// the area was not removed, leaving a flat trench inside the finished mountain).
     /// </summary>
     public class FootprintReachTests
     {
@@ -15,7 +15,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void AMidpointInsideTheCircleTouches()
         {
-            // 中点だけで判定していた頃も通っていた形。回帰で落とさないこと。
+            // A shape that already passed back when only the midpoint was tested.
+            // Do not lose it to a regression.
             Assert.True(FootprintReach.CircleTouchesPolyline(
                 Centre, 100f,
                 new Vec2(-500f, 0f), new Vec2(50f, 0f), new Vec2(600f, 0f)));
@@ -24,8 +25,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ARadialRoadWhoseMidpointIsOutsideStillTouches()
         {
-            // ★ これが I4 そのもの。中点も両端も円の外だが、道路は円を貫いている。
-            //   中点 1 点の判定では false になり、その道路は永久に残る。
+            // ★ This is I4 itself. The midpoint and both ends are outside the circle, yet
+            //   the road runs straight through it. A midpoint-only test returns false and
+            //   that road stays for ever.
             Assert.True(FootprintReach.CircleTouchesPolyline(
                 Centre, 100f,
                 new Vec2(-800f, 0f), new Vec2(400f, 0f), new Vec2(1600f, 0f)));
@@ -34,7 +36,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void AnEndNodeInsideTheCircleTouchesEvenWhenTheMidpointIsFarAway()
         {
-            // 曲がった道路（ベジェの中点がノードの中点から離れる場合）の形。
+            // The shape of a curved road (where the Bezier midpoint is far from the midpoint
+            // of the nodes).
             Assert.True(FootprintReach.CircleTouchesPolyline(
                 Centre, 100f,
                 new Vec2(20f, 20f), new Vec2(900f, 900f), new Vec2(1800f, 1800f)));
@@ -51,8 +54,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheBoundaryIsInclusive()
         {
-            // ちょうど半径の上に乗っている道路は「掛かっている」。
-            // 走査側と数える側で同じ述語を使うので、境界の向きも 1 つに決めておく。
+            // A road lying exactly on the radius counts as "touching".
+            // The scanning side and the counting side use the same predicate, so the
+            // direction of the boundary is settled once and for all.
             Assert.True(FootprintReach.CircleTouchesPolyline(
                 Centre, 100f,
                 new Vec2(-500f, 100f), new Vec2(0f, 100f), new Vec2(500f, 100f)));
@@ -77,15 +81,15 @@ namespace DisasterPlus.Core.Tests.Volcano
         {
             var nan = new Vec2(float.NaN, float.NaN);
 
-            // 中点が読めなくても両端で判定する。
+            // Even when the midpoint cannot be read, the two ends are still tested.
             Assert.True(FootprintReach.CircleTouchesPolyline(
                 Centre, 100f, new Vec2(-500f, 0f), nan, new Vec2(500f, 0f)));
 
-            // 1 点しか読めなければその点で判定する。
+            // If only one point can be read, the test is made on that point.
             Assert.True(FootprintReach.CircleTouchesPolyline(
                 Centre, 100f, nan, new Vec2(10f, 10f), nan));
 
-            // 1 点も読めなければ false（推測で壊さない）。
+            // If no point at all can be read, false (never demolish on a guess).
             Assert.False(FootprintReach.CircleTouchesPolyline(Centre, 100f, nan, nan, nan));
         }
 
@@ -95,9 +99,9 @@ namespace DisasterPlus.Core.Tests.Volcano
             var a = new Vec2(0f, 0f);
             var b = new Vec2(10f, 0f);
 
-            // 線分の内側に落ちる点は垂線の足まで。
+            // A point that falls within the segment measures to the foot of the perpendicular.
             Assert.Equal(9f, FootprintReach.DistanceSquaredToSegment(new Vec2(5f, 3f), a, b), 3);
-            // 線分の外側の点は端点まで（無限直線ではない）。
+            // A point beyond the segment measures to the end point (not to an infinite line).
             Assert.Equal(25f, FootprintReach.DistanceSquaredToSegment(new Vec2(-5f, 0f), a, b), 3);
             Assert.Equal(25f, FootprintReach.DistanceSquaredToSegment(new Vec2(15f, 0f), a, b), 3);
         }

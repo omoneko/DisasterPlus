@@ -2,7 +2,7 @@ using System;
 
 namespace DisasterPlus.Core.Common
 {
-    /// <summary>アイコンの 1 画素。<c>[0,255]</c> の 4 成分。</summary>
+    /// <summary>One pixel of an icon. Four components in <c>[0,255]</c>.</summary>
     public struct IconPixel
     {
         public readonly byte R;
@@ -18,105 +18,115 @@ namespace DisasterPlus.Core.Common
             A = a;
         }
 
-        /// <summary>透明。</summary>
+        /// <summary>Transparent.</summary>
         public static IconPixel None { get { return new IconPixel(0, 0, 0, 0); } }
     }
 
     /// <summary>
-    /// **災害パネルのタイルに載せる絵を、画素の式として持つ。**
-    /// <b>Core なのでエンジンには一切触らない</b>（<c>Texture2D</c> はここには出てこない）。
+    /// **Holds the artwork for the disaster panel's tiles as pixel formulas.**
+    /// <b>This is Core, so it never touches the engine</b> (no <c>Texture2D</c> appears
+    /// here).
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── The request (2026-08-22) ─────────────────────────────────
     ///
-    /// &gt; タブアイコンの火山と台風をイラストにしてほしいです。
+    /// &gt; I'd like the volcano and typhoon tab icons turned into illustrations.
     ///
-    /// 災害パネルに並ぶ⑤と④のタイルは、これまで**文字だけ**だった。
-    /// バニラのタイルはどれも絵なので、その列に文字が 2 枚混ざっている。
+    /// The ⑤ and ④ tiles sitting in the disaster panel used to be **text only**.
+    /// Every vanilla tile is a picture, so that row had two lots of text mixed into it.
     ///
-    /// ── ★★ なぜ描くのか（バニラのスプライトを使わないのか）────────────────
+    /// ── ★★ Why we draw them (rather than using vanilla sprites) ───────────────
     ///
-    /// <c>DisasterPanelBar</c> のクラス doc が禁じている ——
-    /// **前景スプライトの名前を 1 つも指定しない**。スプライト名はアトラスのデータで
-    /// あってアセンブリからは読めないので、名前を当てにいくと
-    /// 「見えないタイル」になり得る。しかも⑤（火山）と④（台風）は
-    /// <b>バニラに存在しない災害</b>で、当てにいく絵がそもそも無い。
+    /// <c>DisasterPanelBar</c>'s class doc forbids it —
+    /// **never name a foreground sprite**. Sprite names are atlas data and cannot be read
+    /// from the assembly, so guessing at a name risks "an invisible tile". On top of that
+    /// ⑤ (volcano) and ④ (typhoon) are <b>disasters that do not exist in vanilla</b>, so
+    /// there is no picture to guess at in the first place.
     ///
-    /// だから<b>自分で描く</b>。サイレン MOD の <c>WarningIcon</c> が同じことを
-    /// していて、<c>UITextureSprite</c> に自前の <c>Texture2D</c> を挿すだけで済む。
+    /// So <b>we draw them ourselves</b>. The siren mod's <c>WarningIcon</c> does the same
+    /// thing, and it takes nothing more than pushing our own <c>Texture2D</c> into a
+    /// <c>UITextureSprite</c>.
     ///
-    /// ── ★★ 小さくても読めること ────────────────────────────
+    /// ── ★★ They must read at a small size ────────────────────────────
     ///
-    /// タイルは 109×100 で、絵はその 7 割ほど。<b>70 px 前後で意味が分かる</b>
-    /// 必要がある。だから:
+    /// A tile is 109×100 and the picture is about 70% of that. It <b>has to make sense at
+    /// around 70 px</b>. So:
     ///
-    ///   - 形は<b>影絵</b>で決める（細い線は 70 px で消える）
-    ///   - 色は<b>2〜3 色</b>だけ。階調は輪郭の内側でしか使わない
-    ///   - 縁に 1 px 以上の暗い縁取りを置く —— タイルの背景は明るくも暗くもなりうる
+    ///   - The form is decided by <b>silhouette</b> (thin lines vanish at 70 px)
+    ///   - Only <b>two or three colours</b>. Gradation is only used inside the outline
+    ///   - Put a dark outline at least 1 px wide around the edge — a tile's background can
+    ///     be either light or dark
     ///
-    /// 実際に 70 px で描いて確かめてある（<c>tools/IconPreview</c>）。
+    /// We actually rendered them at 70 px and checked (<c>tools/IconPreview</c>).
     /// </summary>
     public static class DisasterIconArt
     {
-        // ── 色 ────────────────────────────────────────────
+        // ── Colours ────────────────────────────────────────────
 
-        /// <summary>火山の山体。暗い玄武岩。</summary>
+        /// <summary>The volcano's cone. Dark basalt.</summary>
         private static readonly IconPixel Rock = new IconPixel(58, 52, 58, 255);
 
-        /// <summary>火山の山体の日向側。</summary>
+        /// <summary>The sunlit side of the volcano's cone.</summary>
         private static readonly IconPixel RockLit = new IconPixel(92, 84, 90, 255);
 
-        /// <summary>溶岩。<c>VolcanoLavaFx</c> のティントと同じ向きの橙。</summary>
+        /// <summary>Lava. An orange in the same direction as <c>VolcanoLavaFx</c>'s
+        /// tint.</summary>
         private static readonly IconPixel Lava = new IconPixel(255, 122, 32, 255);
 
-        /// <summary>火口の芯。</summary>
+        /// <summary>The heart of the crater.</summary>
         private static readonly IconPixel LavaHot = new IconPixel(255, 214, 130, 255);
 
-        /// <summary>噴煙。</summary>
+        /// <summary>The plume.</summary>
         private static readonly IconPixel Ash = new IconPixel(146, 142, 148, 255);
 
-        /// <summary>台風の雲。<c>TyphoonVortexPuffFx</c> と同じ日向の白。</summary>
+        /// <summary>The typhoon's cloud. The same sunlit white as
+        /// <c>TyphoonVortexPuffFx</c>.</summary>
         private static readonly IconPixel Cloud = new IconPixel(242, 244, 248, 255);
 
-        /// <summary>台風の雲の影側。</summary>
+        /// <summary>The shaded side of the typhoon's cloud.</summary>
         private static readonly IconPixel CloudShade = new IconPixel(176, 186, 204, 255);
 
-        /// <summary>台風の背景（海）。</summary>
+        /// <summary>The typhoon's background (the sea).</summary>
         private static readonly IconPixel Sea = new IconPixel(28, 58, 96, 255);
 
-        /// <summary>縁取り。**背景が明るくても暗くても輪郭が立つ。**</summary>
+        /// <summary>The outline. **The silhouette stands out whether the background is light
+        /// or dark.**</summary>
         private static readonly IconPixel Outline = new IconPixel(16, 16, 20, 255);
 
-        // ── 火山 ───────────────────────────────────────────
+        // ── The volcano ───────────────────────────────────────────
 
-        /// <summary>山体の頂の高さ（<c>v</c>）。</summary>
+        /// <summary>The height of the cone's summit (<c>v</c>).</summary>
         private const float SummitV = 0.50f;
 
-        /// <summary>裾の広がり（<c>x</c> の片側）。</summary>
+        /// <summary>The spread of the foot (one side, in <c>x</c>).</summary>
         private const float BaseHalf = 0.94f;
 
-        /// <summary>頂の平らな部分（<c>x</c> の片側）。</summary>
+        /// <summary>The flat part of the summit (one side, in <c>x</c>).</summary>
         private const float SummitHalf = 0.17f;
 
         /// <summary>
-        /// 火山のアイコン。<paramref name="u"/> / <paramref name="v"/> は <c>[0,1]</c> で、
-        /// <b><paramref name="v"/> は 0 が下（地面）、1 が上（空）</b>である。
+        /// The volcano icon. <paramref name="u"/> and <paramref name="v"/> are in
+        /// <c>[0,1]</c>, and <b><paramref name="v"/> is 0 at the bottom (the ground) and 1 at
+        /// the top (the sky)</b>.
         ///
-        /// ── ★★ 噴煙は「台形」ではなく「もくもく」である ────────────────────
+        /// ── ★★ The plume is "billowing", not "a trapezoid" ────────────────────
         ///
-        /// 最初の版は噴煙を<b>上へ広がる台形</b>で描いた。70 px で見ると
-        /// **漏斗（じょうご）にしか見えない** —— 直線の縁は煙の縁ではない
-        /// （<c>tools/IconPreview</c> の 1 版目）。いまは<b>丸を 4 つ重ねる</b>。
+        /// The first version drew the plume as <b>a trapezoid widening upwards</b>. At 70 px
+        /// **it looks like nothing but a funnel** — a straight edge is not a smoke edge
+        /// (the first version in <c>tools/IconPreview</c>). Now it is <b>four overlapping
+        /// circles</b>.
         ///
-        /// 山体も同じ理由で直線をやめ、<b>内側へ反った稜線</b>にしてある
-        /// （成層火山の形。直線の台形は「山」ではなく「台」に見える）。
+        /// For the same reason the cone dropped its straight lines too, in favour of
+        /// <b>a concave ridge line</b> (the shape of a stratovolcano; a straight trapezoid
+        /// reads as a plinth, not a mountain).
         /// </summary>
         public static IconPixel Volcano(float u, float v)
         {
             if (IsBad(u) || IsBad(v)) return IconPixel.None;
 
-            float x = u * 2f - 1f;              // -1 .. 1（中心が 0）
+            float x = u * 2f - 1f;              // -1 .. 1 (0 at the centre)
 
-            // 噴煙が先。**山体より奥**なので、山体に負ける（下で上書きされる）。
+            // The plume first. It is **behind the cone**, so the cone beats it (overwritten
+            // below).
             IconPixel plume = Plume(x, v);
 
             IconPixel cone = Cone(x, v);
@@ -126,21 +136,23 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// 山体。稜線は内側へ反る（<c>(1-t)^0.72</c>）ので、裾が広く肩が締まる。
-        /// 火口は頂の中央を丸く抉り、そこだけ溶岩の色にする。
+        /// The cone. The ridge line is concave (<c>(1-t)^0.72</c>), so the foot is wide and
+        /// the shoulders are tight.
+        /// The crater scoops a round hollow out of the centre of the summit, and only there
+        /// do we use the lava colour.
         /// </summary>
         private static IconPixel Cone(float x, float v)
         {
             if (v > SummitV) return IconPixel.None;
 
             float ax = x < 0f ? -x : x;
-            float t = v / SummitV;                                   // 0 = 裾、1 = 頂
+            float t = v / SummitV;                                   // 0 = foot, 1 = summit
 
-            // 内側へ反った稜線。
+            // The concave ridge line.
             float half = SummitHalf + (BaseHalf - SummitHalf) * (float)Math.Pow(1f - t, 0.88);
             if (ax > half) return IconPixel.None;
 
-            // ── 火口。頂の中央を丸く抉る。
+            // ── The crater. Scoop a round hollow out of the centre of the summit.
             float craterLip = SummitV - 0.045f;
             if (v > craterLip)
             {
@@ -152,25 +164,26 @@ namespace DisasterPlus.Core.Common
                 }
             }
 
-            // 縁取り。稜線に沿って一定の太さで入れる。
+            // The outline. Laid along the ridge line at a constant thickness.
             if (half - ax < 0.05f) return Outline;
 
-            // 溶岩の筋 2 本。**火口から下へ**、少し蛇行する。
+            // Two streaks of lava. **From the crater downwards**, meandering slightly.
             if (LavaStreak(x, v, 0.34f) || LavaStreak(x, v, -0.48f)) return Lava;
 
-            // 右から光が当たっている。
+            // The light comes from the right.
             return x > 0.05f ? RockLit : Rock;
         }
 
         /// <summary>
-        /// 噴煙。**丸を 4 つ**、上へ行くほど大きく・少し風下へ寄せて重ねる。
-        /// 直線の縁を 1 本も作らないのが要点である（クラス doc）。
+        /// The plume. **Four circles**, overlapping, getting larger the higher they go and
+        /// leaning slightly downwind.
+        /// The point is not to create a single straight edge (see the class doc).
         /// </summary>
         private static IconPixel Plume(float x, float v)
         {
             if (v < SummitV - 0.06f) return IconPixel.None;
 
-            // (中心 x, 中心 v, 半径)
+            // (centre x, centre v, radius)
             float[] cx = { 0.00f, 0.13f, -0.10f, 0.20f, -0.02f };
             float[] cv = { 0.59f, 0.70f, 0.79f, 0.86f, 0.88f };
             float[] cr = { 0.14f, 0.22f, 0.25f, 0.24f, 0.28f };
@@ -190,14 +203,14 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// 溶岩の筋 1 本。火口から裾へ、少し蛇行しながら下りる。
-        /// <paramref name="lean"/> が正なら右へ流れる。
+        /// One streak of lava. It runs from the crater to the foot, meandering slightly.
+        /// A positive <paramref name="lean"/> makes it flow to the right.
         /// </summary>
         private static bool LavaStreak(float x, float v, float lean)
         {
             if (v > SummitV - 0.05f) return false;
 
-            float t = 1f - v / SummitV;                              // 0 = 頂、1 = 裾
+            float t = 1f - v / SummitV;                              // 0 = summit, 1 = foot
             float centre = lean * t * t + 0.05f * (float)Math.Sin(7.0 * t);
             float width = 0.030f + 0.040f * t;
 
@@ -206,11 +219,11 @@ namespace DisasterPlus.Core.Common
             return d <= width;
         }
 
-        // ── 台風 ───────────────────────────────────────────
+        // ── The typhoon ───────────────────────────────────────────
 
         /// <summary>
-        /// 台風のアイコン。丸い海の上に、**眼を空けた 3 本の腕**。
-        /// 腕は対数螺旋で、内側ほど詰まっている。
+        /// The typhoon icon. **Three arms with an eye left open**, over a circle of sea.
+        /// The arms are logarithmic spirals, packed more tightly towards the centre.
         /// </summary>
         public static IconPixel Typhoon(float u, float v)
         {
@@ -223,67 +236,72 @@ namespace DisasterPlus.Core.Common
             if (r > 0.97f) return IconPixel.None;
             if (r > 0.90f) return Outline;
 
-            // ── 眼。**中は海のまま**（ここが空いているから台風に見える）。
+            // ── The eye. **Left as sea inside** (this gap is what makes it read as a
+            //    typhoon).
             const float Eye = 0.17f;
             if (r < Eye) return Sea;
-            if (r < Eye + 0.035f) return CloudShade;   // 眼の壁の内側
+            if (r < Eye + 0.035f) return CloudShade;   // the inside of the eyewall
 
             float angle = (float)Math.Atan2(y, x);
 
-            // ── 腕。対数螺旋 θ = k ln r を 3 本、120 度ずつずらして置く。
+            // ── The arms. Three logarithmic spirals θ = k ln r, 120 degrees apart.
             const int Arms = 3;
             const float Twist = 2.6f;
 
             float spiral = Twist * (float)Math.Log(r / Eye);
             float phase = angle - spiral;
 
-            // phase を 1 本ぶんの間隔で折り返す。
+            // Fold phase by one arm's spacing.
             float step = 6.2831853f / Arms;
             float local = phase - step * (float)Math.Floor(phase / step + 0.5);
 
-            // 腕の太さ。外へ行くほど細くなって尾を引く。
+            // The arms' thickness. They thin out towards the edge and trail off.
             float width = 0.62f - 0.30f * r;
 
             float d = local < 0f ? -local : local;
             if (d <= width)
             {
-                // 腕の縁は影、芯は白。
+                // The arms' edges are shaded and their hearts are white.
                 return d > width - 0.16f ? CloudShade : Cloud;
             }
 
             return Sea;
         }
 
-        // ── 海溝型地震 ──────────────────────────────────────
+        // ── The trench earthquake ──────────────────────────────────────
 
-        /// <summary>海底。</summary>
+        /// <summary>The seabed.</summary>
         private static readonly IconPixel SeaBed = new IconPixel(64, 58, 52, 255);
 
-        /// <summary>断層の破断面。**ここだけが光る。**</summary>
+        /// <summary>The fault's rupture surface. **This alone glows.**</summary>
         private static readonly IconPixel Rupture = new IconPixel(255, 196, 72, 255);
 
-        /// <summary>波の芯。</summary>
+        /// <summary>The heart of the wave.</summary>
         private static readonly IconPixel Foam = new IconPixel(238, 244, 250, 255);
 
-        /// <summary>海面より上の空。</summary>
+        /// <summary>The sky above the sea surface.</summary>
         private static readonly IconPixel Sky = new IconPixel(96, 124, 156, 255);
 
         /// <summary>
-        /// 海溝型地震のアイコン（2026-08-22、所有者の依頼「アイコンも新規で」）。
-        /// <paramref name="v"/> は<b>0 が下（海底）、1 が上（空）</b>。
+        /// The trench earthquake icon (2026-08-22, at the owner's request: "a new icon for
+        /// this one too").
+        /// <paramref name="v"/> is <b>0 at the bottom (the seabed) and 1 at the top (the
+        /// sky)</b>.
         ///
-        /// ── 70 px で何が読めるか ────────────────────────────────
+        /// ── What reads at 70 px ────────────────────────────────
         ///
-        /// タイルは 109×100 px なので、絵は 70 px 角ほどにしか見えない。
-        /// **3 つより多い要素は読めない。** 入れるのは
+        /// A tile is 109×100 px, so the picture only ever appears at about 70 px square.
+        /// **More than three elements will not read.** What goes in is:
         ///
-        ///   1. <b>海</b>（この災害が海のものだと一目で分かる）
-        ///   2. <b>津波の波</b>（これが目的である）
-        ///   3. <b>海底の V 字の海溝と、そこで光る破断</b>（原因である）
+        ///   1. <b>The sea</b> (so you can see at a glance that this disaster belongs to the
+        ///      sea)
+        ///   2. <b>The tsunami wave</b> (this is the point)
+        ///   3. <b>The V-shaped trench on the seabed, with the rupture glowing in it</b>
+        ///      (the cause)
         ///
-        /// ★ 火山アイコンで学んだこと（あちらの doc）と同じで、
-        ///   <b>直線は自然物に見えない</b>。波の背は正弦、海溝は
-        ///   丸めた V 字にしてある。
+        /// ★ Just as we learnt with the volcano icon (see its doc),
+        ///   <b>straight lines do not read as natural objects</b>. The wave's crest is a sine
+        ///   and the trench is a rounded V.
         /// </summary>
         public static IconPixel TrenchQuake(float u, float v)
         {
@@ -291,24 +309,26 @@ namespace DisasterPlus.Core.Common
 
             float x = u * 2f - 1f;
 
-            // ── 丸い枠（ほかの 2 つと同じ作り）──────────────────────
+            // ── The round frame (built the same way as the other two) ──────────────
             float y = v * 2f - 1f;
             float r = (float)Math.Sqrt(x * x + y * y);
             if (r > 0.97f) return IconPixel.None;
             if (r > 0.90f) return Outline;
 
-            // ── 海底（下から 0〜0.36）。中央に V 字の海溝 ─────────────
-            //   谷は釣鐘状に丸める（尖った V は「割れ目」に見えて海溝に見えない）。
+            // ── The seabed (0-0.36 from the bottom), with a V-shaped trench in the middle ──
+            //   The valley is rounded into a bell shape (a sharp V reads as a crack, not a
+            //   trench).
             float trench = 0.36f - 0.21f / (1f + 22f * x * x);
             if (v < trench)
             {
-                // ★★ **破断は谷の底から下へ伸びる 1 本の裂け目である。**
+                // ★★ **The rupture is a single fissure running down from the valley floor.**
                 //
-                //   はじめ「谷の面から一定の深さの帯」で描いていたが、
-                //   それは<b>谷の形をなぞる</b>ので、70 px では
-                //   **黄色い角が 2 本生えているようにしか見えなかった**
-                //   （tools/IconPreview の 1 版目）。
-                //   谷底の 1 点から真下へ、下ほど広がる楔にする。
+                //   We originally drew it as "a band of constant depth below the valley
+                //   surface", but that <b>traces the valley's shape</b>, and at 70 px
+                //   **it looked like nothing but two yellow horns sprouting**
+                //   (the first version in tools/IconPreview).
+                //   Now it is a wedge running straight down from one point on the valley
+                //   floor, widening as it goes.
                 float depth = trench - v;
                 float halfWidth = 0.055f + 0.55f * depth;
                 if (x > -halfWidth && x < halfWidth) return Rupture;
@@ -316,19 +336,20 @@ namespace DisasterPlus.Core.Common
                 return SeaBed;
             }
 
-            // ── 海面。津波の背が右上がりに崩れる ────────────────────
-            //   正弦 1 本ではなく 2 本重ねて、峰の左右を非対称にする
-            //   （対称な波は「波」ではなく「山」に見える）。
+            // ── The sea surface. The tsunami's crest breaks, rising to the right ─────────
+            //   Two sines stacked rather than one, to make the crest asymmetric left to right
+            //   (a symmetric wave reads as a hill, not a wave).
             float crest = 0.62f
                           + 0.17f * (float)Math.Sin(2.1f * x + 0.6f)
                           + 0.05f * (float)Math.Sin(5.3f * x + 1.9f);
 
             if (v > crest + 0.05f) return Sky;
 
-            // 峰の縁を白く。**厚みを持たせないと「線」に見える。**
+            // White along the crest's edge. **Without some thickness it reads as a line.**
             if (v > crest - 0.10f) return Foam;
 
-            // 水中。峰の直下だけ明るくして、波が立ち上がって見えるようにする。
+            // Underwater. Only directly below the crest is lightened, so the wave looks like
+            // it is rearing up.
             float lift = crest - 0.10f - v;
             if (lift < 0.16f) return CloudShade;
             return Sea;

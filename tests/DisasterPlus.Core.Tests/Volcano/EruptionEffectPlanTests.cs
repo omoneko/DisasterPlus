@@ -19,7 +19,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ThePlumeStaysInsideItsBandForSillyIntensities()
         {
-            // NaN も範囲外も帯の外へ出さない。**外へ出ると粒子数が跳ねる。**
+            // Neither NaN nor out-of-range values may leave the band.
+            // **Leave it and the particle count shoots up.**
             Assert.Equal(EruptionEffectPlan.PlumeMagnitudeMin,
                          EruptionEffectPlan.PlumeMagnitude(float.NaN), 3);
             Assert.Equal(EruptionEffectPlan.PlumeMagnitudeMin,
@@ -31,8 +32,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheFlamesAreFarLessDenseThanThePlume()
         {
-            // Fire Particles の rateOverTime は 200、Factory Smoke は 15。
-            // 同じ magnitude を渡すと炎だけが 13 倍濃くなる。
+            // The rateOverTime of Fire Particles is 200, that of Factory Smoke is 15.
+            // Pass the same magnitude and the flames alone become 13 times denser.
             Assert.True(EruptionEffectPlan.FlameMagnitudeMax
                         < EruptionEffectPlan.PlumeMagnitudeMin);
         }
@@ -40,8 +41,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ARadiusIsNeverZeroEvenWhenTheCraterCouldNotBeRead()
         {
-            // 半径 0 でも粒子は湧く（面積の下限が 100）。0 のまま素通りさせると
-            // 1 点から噴くことになるので、必ず下限へ持ち上げる。
+            // Particles still appear at radius 0 (the area has a floor of 100). Letting the
+            // 0 pass through would make it erupt from a single point, so it is always raised
+            // to the floor.
             Assert.Equal(EruptionEffectPlan.MinRadiusMetres,
                          EruptionEffectPlan.PlumeRadiusMetres(0f, 1f), 3);
             Assert.Equal(EruptionEffectPlan.MinRadiusMetres,
@@ -76,7 +78,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         {
             Assert.Equal(0.5f, EruptionEffectPlan.BurstPhaseSeconds(4.5f, 2f), 3);
             Assert.Equal(0f, EruptionEffectPlan.BurstPhaseSeconds(4f, 2f), 3);
-            // 壊れた入力でも窓の外へ出ない。
+            // Even broken input never leaves the window.
             Assert.Equal(0f, EruptionEffectPlan.BurstPhaseSeconds(float.NaN, 2f), 3);
             Assert.Equal(0f, EruptionEffectPlan.BurstPhaseSeconds(3f, 0f), 3);
             Assert.Equal(0f, EruptionEffectPlan.BurstPhaseSeconds(-3f, 2f), 3);
@@ -96,7 +98,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheEjectaWindowRisesAndFallsInsteadOfSwitchingOn()
         {
-            // 矩形にすると 1 フレームだけ濃い粒子が出て点滅して見える。
+            // Make it rectangular and a dense burst of particles appears for a single frame,
+            // which reads as a flicker.
             float peak = EruptionEffectPlan.EjectaMagnitude(
                 1f, EruptionEffectPlan.EjectaBurstSeconds * 0.5f);
             float edge = EruptionEffectPlan.EjectaMagnitude(

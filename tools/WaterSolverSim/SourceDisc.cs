@@ -3,83 +3,89 @@ using System;
 namespace DisasterPlus.Tools.WaterSolverSim
 {
     /// <summary>
-    /// <b><c>WaterSource</c> の <c>TYPE_NATURAL</c>（マップの川の湧き出し）の再現。</b>
+    /// <b>Reproduction of <c>WaterSource</c>'s <c>TYPE_NATURAL</c> (the river springs on a map).</b>
     ///
-    /// ── なぜこれなのか（2026-08-31、所有者の指示）────────────────────
+    /// ── Why this one (2026-08-31, the owner's instruction) ────────────────────
     ///
-    /// &gt; DLC そのまま使っちゃったら わざわざ MOD で出す意味ないじゃないですか。
-    /// &gt; 仕組みを解析して応用、震源付近から津波が同心円状に発生するのを作ってほしい
+    /// &gt; If we just use the DLC as it is, there is no point in shipping a mod at all.
+    /// &gt; Analyse the mechanism and apply it: make a tsunami radiate in concentric circles
+    /// &gt; from near the epicentre.
     ///
-    /// DLC の津波が強いのは<b>振幅ではなく仕掛け</b>である —— 外周セルの海面を
-    /// 書き換え、Dirichlet 境界が<b>水を湧かせる</b>。<c>TYPE_IMPACT</c> の丘は
-    /// 水を押しのけるだけで作らないので、どれだけ大きくしても真似できない
-    /// （<see cref="EdgeWave"/> のクラス doc、およびオフライン比較 2026-08-31:
-    ///  同じ棚で汀線 84.8 m 対 19.3 m）。
+    /// What makes the DLC tsunami strong is <b>not the amplitude but the trick</b> —— it
+    /// rewrites the sea surface in the outermost cells, and the Dirichlet boundary
+    /// <b>creates water</b>. A <c>TYPE_IMPACT</c> mound only displaces water, it never creates
+    /// any, so no matter how big it is made it cannot imitate this (see the class doc of
+    /// <see cref="EdgeWave"/>, and the offline comparison of 2026-08-31: on the same shelf,
+    /// 84.8 m of shoreline run-up against 19.3 m).
     ///
-    /// ★★ **ところがゲームは、同じことをマップの真ん中でやる道具を持っている。**
-    ///   <c>WaterSource</c> の <c>TYPE_NATURAL</c> は
-    ///   「指定した円を指定した水位まで満たす／抜く」装置で、置き場所は自由である。
-    ///   <b>境界条件を震源へ持ってくる</b> —— これが「解析して応用」の中身。
+    /// ★★ **But the game does have a tool that does the same thing in the middle of the map.**
+    ///   <c>WaterSource</c>'s <c>TYPE_NATURAL</c> is a device that
+    ///   "fills / drains a given circle to a given water level", and it can be placed anywhere.
+    ///   <b>Bring the boundary condition to the epicentre</b> —— that is what "analyse and
+    ///   apply" amounts to.
     ///
-    /// ── IL（<c>WaterSimulation.SimulateWater</c> IL_184A-20B3）────────────
+    /// ── The IL (<c>WaterSimulation.SimulateWater</c> IL_184A-20B3) ────────────
     ///
-    /// 取り込み（<c>m_inputRate</c>、<c>m_inputPosition</c> のまわり）:
+    /// Intake (around <c>m_inputRate</c> and <c>m_inputPosition</c>):
     /// <code>
-    /// r     = sqrt(inputRate)*0.4 + 10          // m。type 2/3 だけ min(50, r)
-    /// total = SUM min(terrain + h - max(target, terrain), h)   // 目標より上の水
-    /// take  = min(inputRate, total &gt;&gt; 1)        // natural は毎ステップ超過の半分
-    /// // 2 周目: share = (share*take + total - 1)/total  を各セルから引く
+    /// r     = sqrt(inputRate)*0.4 + 10          // m. only type 2/3 apply min(50, r)
+    /// total = SUM min(terrain + h - max(target, terrain), h)   // water above the target
+    /// take  = min(inputRate, total &gt;&gt; 1)        // natural takes half the excess per step
+    /// // second pass: subtract share = (share*take + total - 1)/total from each cell
     /// </code>
     ///
-    /// 吐き出し（<c>m_outputRate</c>、<c>m_outputPosition</c> のまわり）:
+    /// Output (around <c>m_outputRate</c> and <c>m_outputPosition</c>):
     /// <code>
-    /// out  = outputRate                          // ★ natural は m_water と無関係に湧く
-    /// r    = sqrt(out)*0.4 + 10                  // ★ natural は上限なし
-    /// room = SUM min(terrain + h - max(target, terrain), h)   // 目標までの不足（負）
-    ///        ただし natural は terrain &gt;= target のセルを飛ばす（＝陸には出さない）
-    /// out  = min(out, -(room &gt;&gt; 1))              // 毎ステップ不足の半分
-    /// // 2 周目: share = (out + count/2)/count を各セルへ均等に足す
+    /// out  = outputRate                          // ★ natural springs regardless of m_water
+    /// r    = sqrt(out)*0.4 + 10                  // ★ natural has no upper limit
+    /// room = SUM min(terrain + h - max(target, terrain), h)   // shortfall to the target (negative)
+    ///        but natural skips cells where terrain &gt;= target (i.e. never outputs onto land)
+    /// out  = min(out, -(room &gt;&gt; 1))              // half the shortfall per step
+    /// // second pass: add share = (out + count/2)/count evenly to each cell
     /// </code>
     ///
-    /// ★ <b>半径は流量で決まる</b>（<c>r = sqrt(rate)*0.4 + 10</c>）。半径 1280 m が
-    ///   欲しければ rate はおよそ 1.0e7 になる。流量は「速さ」、<c>m_target</c> が
-    ///   「高さ」を決めるので、両方を別々に効かせられる。
+    /// ★ <b>The radius is set by the flow rate</b> (<c>r = sqrt(rate)*0.4 + 10</c>). For a
+    ///   radius of 1280 m the rate comes out around 1.0e7. The rate is the "speed" and
+    ///   <c>m_target</c> sets the "height", so the two can be dialled in independently.
     /// </summary>
     internal sealed class SourceDisc
     {
-        /// <summary>円の中心（セル）。</summary>
+        /// <summary>Centre of the circle (cell).</summary>
         public int CellX;
         public int CellZ;
 
-        /// <summary>目標水面（1/64 m の絶対標高）。実機の <c>m_target</c> は ushort。</summary>
+        /// <summary>Target water surface (absolute elevation in 1/64 m). In the game
+        /// <c>m_target</c> is a ushort.</summary>
         public int Target;
 
-        /// <summary>取り込み流量。0 なら取り込まない。</summary>
+        /// <summary>Intake flow rate. 0 means nothing is taken in.</summary>
         public long InputRate;
 
-        /// <summary>吐き出し流量。0 なら吐き出さない。</summary>
+        /// <summary>Output flow rate. 0 means nothing is put out.</summary>
         public long OutputRate;
 
-        /// <summary>いままでに湧かせた量（診断）。</summary>
+        /// <summary>Amount created so far (diagnostic).</summary>
         public long Made;
 
-        /// <summary>いままでに抜いた量（診断）。</summary>
+        /// <summary>Amount drained so far (diagnostic).</summary>
         public long Taken;
 
         /// <summary>
-        /// <b>ゲームの int32 なら溢れていた回数。</b>（ゲームには対応物が無い診断）
+        /// <b>How many times the game's int32 would have overflowed.</b> (A diagnostic with no
+        /// counterpart in the game.)
         ///
-        /// ★★ ここが 0 でない設定は<b>実機で使ってはいけない</b>。
-        ///   このクラスの冒頭 doc と、IL_1B4C-1B58 を参照。
+        /// ★★ A setting where this is not 0 <b>must not be used in the real game</b>.
+        ///   See the doc at the top of this class, and IL_1B4C-1B58.
         /// </summary>
         public long Int32Overflows;
 
-        /// <summary>溢れた最大の積（診断）。int.MaxValue = 2,147,483,647。</summary>
+        /// <summary>Largest product that overflowed (diagnostic). int.MaxValue =
+        /// 2,147,483,647.</summary>
         public long WorstProduct;
 
         /// <summary>
-        /// 円の中でいちばん高い水面（1/64 m の絶対標高）。
-        /// **目標を実測から縛るために要る**（Program の --ringgap）。
+        /// The highest water surface inside the circle (absolute elevation in 1/64 m).
+        /// **Needed to pin the target down from measurement** (Program's --ringgap).
         /// </summary>
         public int MaxSurface(WaterField field, float radiusMetres)
         {
@@ -110,13 +116,13 @@ namespace DisasterPlus.Tools.WaterSolverSim
             return best == int.MinValue ? 0 : best;
         }
 
-        /// <summary>実機と同じ半径（m）。natural に上限は無い。</summary>
+        /// <summary>The same radius as the game (m). natural has no upper limit.</summary>
         public static float RadiusMetres(long rate)
         {
             return (float)Math.Sqrt(rate) * 0.4f + 10f;
         }
 
-        /// <summary>1 水ステップぶん。**取り込みが先、吐き出しが後**（IL の順）。</summary>
+        /// <summary>One water step. **Intake first, output second** (the order in the IL).</summary>
         public void Apply(WaterField field)
         {
             Take(field);
@@ -155,9 +161,9 @@ namespace DisasterPlus.Tools.WaterSolverSim
                 }
             }
 
-            // ★★ ゲームは `total` も int32（loc154）。**early return より前に見る** ——
-            //    後ろに置くと、負に溢れた total（円の中に陸があるとき）を
-            //    数え損ねる（2026-08-31、第 2 回検証）。
+            // ★★ In the game `total` is an int32 too (loc154). **Check it before the early
+            //    return** —— put it after and a total that overflowed negative (when there is
+            //    land inside the circle) goes uncounted (2026-08-31, second round of checks).
             if (total > int.MaxValue || total < int.MinValue)
             {
                 Int32Overflows++;
@@ -182,10 +188,10 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     int lvl = Math.Max(Target, g);
                     long share = Math.Min(g + h - lvl, h);
 
-                    // ★★ **ゲームが int32 で持つのは商の手前まで全部である**
-                    //    （IL_1B4C-1B58: mul, add, sub がすべて int32）。
-                    //    `share * take` だけを見ていたのは<b>式を取り違えていた</b>
-                    //    （2026-08-31、第 2 回検証）。
+                    // ★★ **The game holds everything up to just before the division in int32**
+                    //    (IL_1B4C-1B58: the mul, add and sub are all int32).
+                    //    Looking only at `share * take` was <b>getting the expression wrong</b>
+                    //    (2026-08-31, second round of checks).
                     long product = share * take + total - 1;
                     if (product > int.MaxValue || product < int.MinValue)
                     {
@@ -196,11 +202,11 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     share = (share * take + total - 1) / total;
                     if (share <= 0) continue;
 
-                    // ★★ **ゲームには h での頭打ちが無い**（IL_1B59-1BDA には
-                    //    `share <= 0` の判定しか無く、そのまま
-                    //    `m_height = (ushort)(h - share)` へ行く）。
-                    //    ここで丸めていたせいで、<b>再現側だけが壊れずに済んでいた</b>。
-                    //    実機と同じく ushort へ落として、壊れるなら壊れさせる。
+                    // ★★ **The game has no clamp at h** (IL_1B59-1BDA only has the
+                    //    `share <= 0` test and then goes straight to
+                    //    `m_height = (ushort)(h - share)`).
+                    //    Clamping here was <b>the only reason the reproduction stayed intact</b>.
+                    //    Truncate to ushort exactly as the game does, and let it break if it breaks.
                     cells[i].Height = (ushort)(h - share);
                     Taken += share;
                 }
@@ -236,7 +242,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
                     int i = z * n + x;
                     int g = terrain[i];
 
-                    // ★ natural は陸へは出さない（IL_1E51-1E61）。
+                    // ★ natural never outputs onto land (IL_1E51-1E61).
                     if (g >= Target) continue;
 
                     int h = cells[i].Height;
@@ -248,7 +254,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
             if (count <= 0) return;
 
-            // ★ 吐き出し側の room も int32（loc181）。
+            // ★ On the output side, room is an int32 as well (loc181).
             if (room > int.MaxValue || room < int.MinValue)
             {
                 Int32Overflows++;

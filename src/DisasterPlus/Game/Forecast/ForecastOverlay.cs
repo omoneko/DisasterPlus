@@ -7,73 +7,82 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>台風の進路・暴風域・風の分布を、都市の地図の上に描く。</b>
-    /// **main スレッド専用**（カメラの <c>OnPostRender</c> の中）。
+    /// <b>Draws the typhoon's track, its gale area and its wind distribution over the city
+    /// map.</b> **Main thread only** (inside the camera's <c>OnPostRender</c>).
     ///
-    /// ── 所有者の依頼（2026-09-02）────────────────────────────────
+    /// ── What the owner asked for (2026-09-02) ──────────────────────────────
     ///
-    /// &gt; 気象予報パネルには、今後の天気予報タブ（気象レーダーを置くことで解禁）、
-    /// &gt; 台風の進路、暴風域、風の分布を都市マップ上に示すボタンを配置して、
-    /// &gt; 機能するようにしてください
+    /// &gt; On the weather forecast panel, please place buttons for a tab for the weather
+    /// &gt; to come (unlocked by placing a weather radar) and for showing the typhoon's
+    /// &gt; track, its gale area and its wind distribution on the city map, and make them
+    /// &gt; work
     ///
-    /// 3 つは<b>別々に切れる</b>。同時に全部出すと地図が読めなくなるし、
-    /// 「進路だけ見たい」が一番多い使い方になるはずだからである。
+    /// The three <b>switch independently</b>. Turning them all on at once makes the map
+    /// unreadable, and "I only want to see the track" is likely to be the commonest way
+    /// to use this.
     ///
-    /// ── 描画経路は②で確立済みのものをそのまま使う ────────────────────
+    /// ── The drawing route is the one ② already established, used as it is ──
     ///
-    /// <c>OverlayEffect.DrawCircle</c> / <c>DrawQuad</c> は
-    /// <c>Graphics.DrawMeshNow</c> を呼ぶ<b>即時描画</b>なので、
-    /// <c>IRenderableManager.EndOverlay</c> の中からしか出ない
-    /// （<see cref="OverlayRenderable"/> のクラス doc に IL）。
-    /// 登録も②と<b>同じ 1 個</b>を共有する —— <c>RenderManager.m_renderables</c> は
-    /// 外す API を持たないので、登録は増やさないほうがよい。
+    /// <c>OverlayEffect.DrawCircle</c> and <c>DrawQuad</c> are <b>immediate-mode
+    /// drawing</b> that calls <c>Graphics.DrawMeshNow</c>, so they can only be issued from
+    /// inside <c>IRenderableManager.EndOverlay</c> (the IL is in the class doc on
+    /// <see cref="OverlayRenderable"/>). We also share <b>the same single</b> registration
+    /// with ② — <c>RenderManager.m_renderables</c> has no API for removing one, so it is
+    /// better not to add more.
     ///
-    /// ── ★★ 予測して描いてよいのは経路だけである ─────────────────────
+    /// ── ★★ The path is the only thing we may draw ahead of time ───────────
     ///
-    /// 進路は <see cref="TyphoonTrackPlan"/> から<b>厳密に引ける</b> ——
-    /// 経路は (原点, 種, 速度, 接近フレーム) だけで決まっていて、乱数も天候も
-    /// 入っていないからである。だから「これから通る道」は推測ではない。
+    /// The track <b>can be drawn exactly</b> from <see cref="TyphoonTrackPlan"/>, because
+    /// the path is determined by (origin, seed, speed, approach frame) alone, with no
+    /// random numbers and no weather in it. So "the road it is going to travel" is not a
+    /// guess.
     ///
-    /// **強度の先読みはしない。** 強度には上陸減衰が入っていて、それは
-    /// 「これから陸の上を通るか」に依存する。だから暴風域の円は
-    /// <b>今の中心に、今の強度で</b>描くものだけにしてある。
-    /// 先の半径を描くと、それは<b>確信を持った誤り</b>を地図に置くことになる。
+    /// **We do not look ahead at the intensity.** The intensity includes landfall decay,
+    /// and that depends on whether it is going to pass over land. So the gale circles are
+    /// drawn only <b>at the present centre, at the present intensity</b>. Drawing a future
+    /// radius would put <b>a confident error</b> on the map.
     ///
-    /// ── 1 フレームあたりの費用 ────────────────────────────────
+    /// ── Cost per frame ─────────────────────────────────────────────────────
     ///
-    /// 進路 <see cref="TrackSamples"/> 本 ＋ 円 2 個 ＋ 風の格子
-    /// <see cref="WindGridSide"/>² 個が上限で、**どれも定数**である。
-    /// 都市の大きさにも建物の数にも比例しない。
-    /// 経路の点は <see cref="_trackBuffer"/> を使い回すので<b>毎フレームの確保は無い</b>。
+    /// At most <see cref="TrackSamples"/> track segments, 2 circles and
+    /// <see cref="WindGridSide"/>² wind grid points — **all of them constants**. Nothing
+    /// scales with the size of the city or the number of buildings.
+    /// The path's points reuse <see cref="_trackBuffer"/>, so <b>there is no per-frame
+    /// allocation</b>.
     /// </summary>
     public static class ForecastOverlay
     {
-        /// <summary>進路を何点で引くか。線分はこれ - 1 本になる。</summary>
+        /// <summary>How many points the track is drawn from. That gives this minus one
+        /// segments.</summary>
         private const int TrackSamples = 64;
 
-        /// <summary>進路の線の太さ（m、片側）。</summary>
+        /// <summary>The thickness of the track line (m, to one side).</summary>
         private const float TrackHalfWidth = 24f;
 
-        /// <summary>これから通る道に沿って置く印の間隔（点の数）。</summary>
+        /// <summary>The spacing of the markers placed along the road still to come (in
+        /// points).</summary>
         private const int TrackMarkerEvery = 8;
 
-        /// <summary>印の大きさ（m）。</summary>
+        /// <summary>The size of a marker (m).</summary>
         private const float TrackMarkerSize = 220f;
 
-        /// <summary>風の分布を測る格子の 1 辺。**費用の上限そのもの。**</summary>
+        /// <summary>One side of the grid the wind distribution is measured on. **This is
+        /// the cost ceiling itself.**</summary>
         private const int WindGridSide = 21;
 
-        /// <summary>風の格子 1 マスの円の大きさ（強風域の直径に対する比）。</summary>
+        /// <summary>The size of the circle for one wind grid cell (as a fraction of the
+        /// diameter of the strong-wind area).</summary>
         private const float WindDotFraction = 0.055f;
 
         /// <summary>
-        /// <c>DrawQuad</c> の上下端。②の値と同じ。地形の起伏より広く取らないと、
-        /// 丘の上や谷底で線が地面に飲まれる。
+        /// The top and bottom of <c>DrawQuad</c>. The same values as ②'s. Unless they span
+        /// more than the relief of the terrain, the lines get swallowed by the ground on
+        /// top of a hill or at the bottom of a valley.
         /// </summary>
         private const float SlabMinY = -64f;
         private const float SlabMaxY = 1088f;
 
-        // ── 色 ────────────────────────────────────────────────
+        // ── Colours ────────────────────────────────────────────────────────
         private static readonly Color TrackColour = new Color(1f, 0.85f, 0.25f, 0.75f);
         private static readonly Color TrackPastColour = new Color(1f, 1f, 1f, 0.28f);
         private static readonly Color MarkerColour = new Color(1f, 0.72f, 0.15f, 0.55f);
@@ -87,21 +96,23 @@ namespace DisasterPlus.Game
         private static bool _errorLogged;
 
         /// <summary>
-        /// 経路の点を書き出す先。**毎フレーム使い回す**（描画経路で確保しない）。
+        /// Where the path's points are written. **Reused every frame** (nothing is
+        /// allocated on the drawing path).
         /// </summary>
         private static readonly Vec2[] _trackBuffer = new Vec2[TrackSamples];
 
-        // ── 診断 ──────────────────────────────────────────────
+        // ── Diagnostics ────────────────────────────────────────────────────
         private static int _lastDrawCalls;
 
-        /// <summary>直近のフレームで出した描画コール数（診断用）。</summary>
+        /// <summary>How many draw calls were issued in the most recent frame (for the
+        /// diagnostics).</summary>
         public static int LastDrawCalls { get { return _lastDrawCalls; } }
 
         public static bool ShowTrack { get { return _showTrack; } }
         public static bool ShowGale { get { return _showGale; } }
         public static bool ShowWind { get { return _showWind; } }
 
-        /// <summary>どれか 1 つでも出ているか（パネルの見た目に使う）。</summary>
+        /// <summary>Whether any one of them is showing (used for the panel's look).</summary>
         public static bool AnyVisible
         {
             get { return _sessionActive && (_showTrack || _showGale || _showWind); }
@@ -112,14 +123,16 @@ namespace DisasterPlus.Game
         public static void ToggleWind() { _showWind = !_showWind; }
 
         /// <summary>
-        /// レベルロード時（main スレッド）。②と<b>同じ登録</b>に相乗りする ——
-        /// <c>RenderManager.m_renderables</c> は外せないので増やさない。
+        /// On level load (main thread). Rides on <b>the same registration</b> as ② —
+        /// <c>RenderManager.m_renderables</c> cannot be unregistered, so we do not add
+        /// more.
         /// </summary>
         public static void EnsureRegistered()
         {
             _sessionActive = true;
 
-            // 都市をロードするたびに全部 OFF から始める（②の EnsureRegistered と同じ）。
+            // Every city load starts with all of them off (the same as ②'s
+            // EnsureRegistered).
             _showTrack = false;
             _showGale = false;
             _showWind = false;
@@ -129,7 +142,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルアンロード時。**登録は外せないので、描かないことをここで保証する。**
+        /// On level unload. **The registration cannot be removed, so this is where we
+        /// guarantee nothing is drawn.**
         /// </summary>
         public static void Reset()
         {
@@ -142,8 +156,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **毎フレーム、カメラの <c>OnPostRender</c> の中から。**
-        /// 台風が居ないときは即座に戻る。
+        /// **Every frame, from inside the camera's <c>OnPostRender</c>.**
+        /// Returns immediately when there is no typhoon about.
         /// </summary>
         public static void Render(RenderManager.CameraInfo cameraInfo)
         {
@@ -169,7 +183,8 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 毎フレームの経路。1 回だけ大きく鳴らし、以後はキー単位スロットルへ。
+                // A per-frame path. Sound it loudly once, then fall back to the per-key
+                // throttle.
                 if (!_errorLogged)
                 {
                     _errorLogged = true;
@@ -183,10 +198,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 進路。**通ってきた道は薄く、これから通る道は濃く。**
+        /// The track. **The road already travelled is faint, the road still to come is
+        /// strong.**
         ///
-        /// ★ 経路は乱数も天候も含まないので、ここに描く線は推測ではない
-        ///   （クラス doc の ★★）。
+        /// ★ The path contains no random numbers and no weather, so the line drawn here
+        ///   is not a guess (the ★★ in the class doc).
         /// </summary>
         private static void DrawTrack(OverlayEffect overlay,
                                       RenderManager.CameraInfo cameraInfo,
@@ -202,15 +218,17 @@ namespace DisasterPlus.Game
 
             for (int i = 1; i < n; i++)
             {
-                // この線分がもう通り過ぎたところか。端の点の時刻で決める。
+                // Has this segment already been passed? Decided by the time at its end
+                // point.
                 uint at = (uint)((long)plan.TotalFrames * i / (n - 1));
                 Color colour = at <= now ? TrackPastColour : TrackColour;
 
                 DrawSegment(overlay, cameraInfo, _trackBuffer[i - 1], _trackBuffer[i], colour,
                             TrackHalfWidth);
 
-                // ★ これから通るところにだけ印を置く。過ぎた道に置いても
-                //   「いつ来るか」を語らないので、地図を汚すだけである。
+                // ★ Only put markers on the road still to come. On the road already
+                //   travelled they say nothing about when it arrives, so they would just
+                //   clutter the map.
                 if (at > now && i % TrackMarkerEvery == 0)
                 {
                     overlay.DrawCircle(cameraInfo, MarkerColour,
@@ -222,7 +240,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 暴風域と強風域。**今の中心に、今の半径で**（クラス doc の ★★）。
+        /// The storm area and the gale area. **At the present centre, at the present
+        /// radius** (the ★★ in the class doc).
         /// </summary>
         private static void DrawGale(OverlayEffect overlay,
                                      RenderManager.CameraInfo cameraInfo,
@@ -246,15 +265,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 風の分布。強風域を覆う格子の各点で
-        /// <c>TyphoonProfile.WindAt</c> を測り、強さで色を変えた点を置く。
+        /// The wind distribution. Measures <c>TyphoonProfile.WindAt</c> at each point of a
+        /// grid covering the gale area and places a dot whose colour varies with the
+        /// strength.
         ///
-        /// ★ **これは④が持っている風の場そのもの**であって、別に発明した絵ではない ——
-        ///   同じ関数が倒木と建物被害の判定にも使われている。
-        ///   だから地図の濃いところが、実際に壊れやすいところである。
+        /// ★ **This is ④'s actual wind field**, not a picture invented separately — the
+        ///   same function is what decides felled trees and building damage. So the strong
+        ///   parts of the map really are the parts most likely to break.
         ///
-        /// ★ 眼の中は静かなので中心付近は薄くなる。それは不具合ではなく、
-        ///   <c>TyphoonProfile.WindAt</c> が眼を持っているからである。
+        /// ★ The eye is calm, so it thins out near the centre. That is not a fault; it is
+        ///   because <c>TyphoonProfile.WindAt</c> has an eye in it.
         /// </summary>
         private static void DrawWind(OverlayEffect overlay,
                                      RenderManager.CameraInfo cameraInfo,
@@ -294,14 +314,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 風速相当（[0, 1]）を色へ。弱い＝青、強い＝赤。
-        /// **透明度も強さで上げる** —— 弱いところが地図を覆い隠さないように。
+        /// Turns the wind-speed equivalent ([0, 1]) into a colour. Weak = blue, strong =
+        /// red. **The opacity rises with the strength too** — so that the weak parts do
+        /// not cover up the map.
         /// </summary>
         private static Color WindColourOf(float wind)
         {
             if (wind > 1f) wind = 1f;
 
-            // 青 (0.25, 0.55, 1) → 黄 (1, 0.85, 0.2) → 赤 (1, 0.25, 0.15)
+            // blue (0.25, 0.55, 1) → yellow (1, 0.85, 0.2) → red (1, 0.25, 0.15)
             float r, g, b;
             if (wind < 0.5f)
             {
@@ -322,7 +343,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 2 点を結ぶ帯を 1 枚の <c>DrawQuad</c> で。②の断層帯と同じ手口。
+        /// A band joining two points, as a single <c>DrawQuad</c>. The same trick as ②'s
+        /// fault zone.
         /// </summary>
         private static void DrawSegment(OverlayEffect overlay,
                                         RenderManager.CameraInfo cameraInfo,
@@ -333,7 +355,7 @@ namespace DisasterPlus.Game
             float length = Mathf.Sqrt(dx * dx + dz * dz);
             if (length < 0.01f) return;
 
-            // 進行方向に直交する単位ベクトル。
+            // A unit vector at right angles to the direction of travel.
             float nx = -dz / length * halfWidth;
             float nz = dx / length * halfWidth;
 
@@ -348,9 +370,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// XZ をワールド座標へ。**高さは 0 でよい** —— <c>DrawCircle</c> /
-        /// <c>DrawQuad</c> は <c>minY</c> / <c>maxY</c> で地形に沿って塗るので、
-        /// ここで地面の高さを引く必要は無い（②が確立した使い方）。
+        /// XZ to world coordinates. **A height of 0 is fine** — <c>DrawCircle</c> and
+        /// <c>DrawQuad</c> paint along the terrain between <c>minY</c> and <c>maxY</c>, so
+        /// there is no need to look up the ground height here (the usage ② established).
         /// </summary>
         private static Vector3 Ground(Vec2 p)
         {

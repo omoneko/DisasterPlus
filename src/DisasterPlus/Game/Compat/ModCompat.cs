@@ -3,17 +3,17 @@ using ColossalFramework.Plugins;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 競合MOD の検出。起動時に 1 回だけ判定してキャッシュする。
+    /// Detection of conflicting mods. Evaluated once at startup and cached.
     ///
-    /// PluginManager はメインメニューが立ち上がる時点で既に埋まっているので、
-    /// OnSettingsUI から参照してよい（SteamHelper.IsDLCOwned と同じ扱い）。
+    /// PluginManager is already populated by the time the main menu comes up, so it is fine to
+    /// consult from OnSettingsUI (the same treatment as SteamHelper.IsDLCOwned).
     /// </summary>
     public static class ModCompat
     {
-        /// <summary>Natural Disasters Renewal の Workshop ID。</summary>
+        /// <summary>Natural Disasters Renewal's Workshop ID.</summary>
         private const ulong NdrWorkshopId = 2957578256UL;
 
-        /// <summary>同 MOD のアセンブリ名。ローカル配置・開発コピーには Workshop ID が無いので併用する。</summary>
+        /// <summary>That mod's assembly name. A local or development copy has no Workshop ID, so use both.</summary>
         private const string NdrAssemblyName = "NaturalDisastersRenewal";
 
         private static bool _evaluated;
@@ -33,15 +33,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// Natural Disasters DLC を持っているか。
+        /// Whether the Natural Disasters DLC is owned.
         ///
-        /// SteamHelper.IsDLCOwned は起動時から使えるので、OnSettingsUI
-        /// （メインメニューで 1 回だけ実行）から参照してよい。
-        /// レベルロード後にしか分からない情報でオプションを組み立ててはいけない。
+        /// SteamHelper.IsDLCOwned works from startup, so it is fine to consult from
+        /// OnSettingsUI (which runs once, on the main menu).
+        /// Never build the options out of information that is only known after a level load.
         ///
-        /// NdrPresent と同じく 1 回だけ判定してキャッシュする。DLC の所持状態は
-        /// プロセス内で変わらないうえ、ここは sim tick の先頭から毎 tick 呼ばれるため、
-        /// キャッシュしないと失敗時の Log.Error が tick 頻度で output_log.txt を埋める。
+        /// Like NdrPresent, evaluated once and cached. DLC ownership does not change within
+        /// the process, and this is called every tick from the top of the sim tick, so without
+        /// the cache a Log.Error on failure would fill output_log.txt at tick frequency.
         /// </summary>
         public static bool NaturalDisastersOwned
         {
@@ -53,16 +53,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 上の値が**実際に測った答え**か（false なら判定に失敗して「持っている」に
-        /// 倒しただけ）。
+        /// Whether the value above is **an answer we actually measured** (false means the
+        /// check failed and it was simply assumed to be "owned").
         ///
-        /// ★★ 全体レビュー M11。判定が例外で倒れた環境では
-        /// <see cref="NaturalDisastersOwned"/> は true を返すが、それは推定であって
-        /// 事実ではない。**診断がそれを「所持」と名乗ると、木が燃えない理由を
-        /// 探す人に嘘の手がかりを渡す**（<c>TreeManager.BurnTree</c> は DLC が無ければ
-        /// 黙って false を返す）。値そのものは倒したままにする ——
-        /// false に倒すと、判定に失敗しただけの環境で①②③④の機能が丸ごと隠れる。
-        /// **分岐は今までどおり、名乗りだけを正直にする。**
+        /// ★★ Overall review M11. In an environment where the check fell over with an
+        /// exception, <see cref="NaturalDisastersOwned"/> returns true, but that is an
+        /// assumption, not a fact. **If the diagnostics called that "owned", it would hand a
+        /// false lead to someone hunting for why the trees will not burn**
+        /// (<c>TreeManager.BurnTree</c> quietly returns false without the DLC). The value
+        /// itself stays as assumed — assume false and features ①②③④ vanish wholesale in an
+        /// environment where the check merely failed.
+        /// **Branch as before; be honest only about what we claim.**
         /// </summary>
         public static bool NaturalDisastersOwnedKnown
         {
@@ -84,10 +85,11 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 判定できないときは「持っている」に倒す。
-                // 機能を永久に隠す偽陰性より、実行時に諦める偽陽性の方が害が小さい
-                // （DisasterInfo が見つからなければ Task 10 が警告を出して黙って止まる）。
-                // ★ ただし**倒したことは覚えておく**（NaturalDisastersOwnedKnown）。
+                // When it cannot be determined, assume "owned".
+                // A false positive that gives up at runtime does less harm than a false
+                // negative that hides the feature forever (if no DisasterInfo is found,
+                // Task 10 warns and stops quietly).
+                // ★ But **remember that it was assumed** (NaturalDisastersOwnedKnown).
                 Log.Error("DLC check failed; assuming owned", e);
                 _naturalDisastersOwned = true;
                 _naturalDisastersOwnedKnown = false;
@@ -118,15 +120,16 @@ namespace DisasterPlus.Game
                             if (asm != null && asm.GetName().Name == NdrAssemblyName) { matched = true; break; }
                         }
                     }
-                    catch { /* 壊れた MOD のアセンブリ列挙で落ちない */ }
+                    catch { /* do not fall over enumerating a broken mod's assemblies */ }
 
                     if (matched) { _ndrPresent = true; break; }
                 }
             }
             catch (System.Exception e)
             {
-                // 判定に失敗したら「居ない」に倒す。
-                // 偽陽性で機能を隠すより、偽陰性で余分な設定が出る方が害が小さい。
+                // If the check fails, assume "not present".
+                // A false negative that shows a redundant setting does less harm than a false
+                // positive that hides a feature.
                 Log.Error("plugin scan failed; assuming NDR absent", e);
                 _ndrPresent = false;
             }

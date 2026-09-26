@@ -4,25 +4,25 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **自前の白い雲の素材**（テクスチャ 1 枚とマテリアル 1 個）。main スレッド専用。
+    /// **Our own white cloud assets** (one texture and one material). Main thread only.
     ///
-    /// ── なぜ借り物では駄目だったのか（2026-08-22、所有者の指摘）────────────
+    /// ── Why borrowed assets would not do (2026-08-22, the owner's remark) ────────────
     ///
-    /// &gt; 台風の雲のエフェクトについて、まだ煙のようなものが見えるんですが、
-    /// &gt; MissileDisaster のキノコ雲のエフェクトに使っている白い雲を
-    /// &gt; 上空の方で渦上に表示させられますか？
+    /// &gt; About the typhoon's cloud effect — I can still see something like smoke.
+    /// &gt; Could you show the white cloud that MissileDisaster uses for its mushroom cloud,
+    /// &gt; swirling up high instead?
     ///
-    /// ④はバニラの粒子マテリアルを<b>実際に列挙して採点し</b>、いちばん雲らしいものを
-    /// 借りていた。実機のログはそれが期待どおり働いたことを示している ——
-    /// <c>resolved: Large Pool Steam</c>。**素材の選択は成功していた。**
-    /// それでも煙に見えるのは、<b>湯気の絵が薄いから</b>である。
+    /// ④ <b>actually enumerated and scored</b> vanilla's particle materials and borrowed the
+    /// most cloud-like one. The log from the game shows that worked as intended —
+    /// <c>resolved: Large Pool Steam</c>. **Picking the asset was a success.**
+    /// It still looks like smoke because <b>the steam image is thin</b>.
     ///
-    /// ミサイル MOD が同じ壁を先に殴っており、その計測が残っている:
+    /// The missile mod hit the same wall first, and its measurements survive:
     ///
     /// <code>
-    /// テクスチャ            雲の本体で測った不透明度
-    /// soft-glow（湯気・煙）      0.34 - 0.41   ← 雲の向こうに空が見える
-    /// 芯が不透明な雲             0.997         ← 雲に見える
+    /// texture                    opacity measured over the body of the cloud
+    /// soft-glow (steam, smoke)        0.34 - 0.41   ← the sky shows through the cloud
+    /// cloud with an opaque core       0.997         ← looks like a cloud
     /// </code>
     ///
     /// > "The soft-glow texture is almost transparent everywhere but its centre -
@@ -30,43 +30,44 @@ namespace DisasterPlus.Game
     /// >  show through."
     /// >   —— <c>MissileDisaster/Game/Effects/ParticleAssets.cs</c>
     ///
-    /// **だから借りるのをやめ、雲の絵を自分で作る。** 借りるのは<b>シェーダだけ</b>で
-    /// （<see cref="ShaderPool"/>）、<c>Material</c> インスタンスは借りない ——
-    /// 借りると自前の描画では不可視・無着色になる（⑤の <c>VolcanoLavaFx</c> の罠 1）。
+    /// **So stop borrowing and draw the cloud ourselves.** Borrow <b>the shader only</b>
+    /// (<see cref="ShaderPool"/>), never the <c>Material</c> instance — borrow that and our
+    /// own rendering comes out invisible and uncoloured (trap 1 of ⑤'s <c>VolcanoLavaFx</c>).
     ///
-    /// ── ★★ アルファブレンドでなければならない ────────────────────────
+    /// ── ★★ It must be alpha-blended ────────────────────────
     ///
-    /// 雲は<b>背景を隠す</b>ものである。加算合成のシェーダを掴むと、
-    /// 明るいほど背景が透けるので、どんなテクスチャを入れても雲にならない。
-    /// <see cref="ShaderPreference.AlphaBlended"/> を指定すること。
-    /// 実機のログでは <c>Custom/Particles/Alpha Blended</c> が
-    /// **読み込み済みマテリアルからの借用で**引けている（<c>Shader.Find</c> では引けない）。
+    /// A cloud is something that <b>hides the background</b>. Grab an additive shader and the
+    /// brighter it is the more the background shows through, so no texture will ever make it
+    /// a cloud. Specify <see cref="ShaderPreference.AlphaBlended"/>.
+    /// In the game's log, <c>Custom/Particles/Alpha Blended</c> is found
+    /// **by borrowing from an already-loaded material** (<c>Shader.Find</c> will not find it).
     ///
-    /// ── 都市をまたいで抱えない ───────────────────────────────
+    /// ── Do not hold on across cities ───────────────────────────────
     ///
-    /// <c>Material</c> も <c>Texture2D</c> も <c>Component</c> ではないので、
-    /// <c>GameObject</c> を消しても道連れにならない。<see cref="Destroy"/> を
-    /// レベルアンロードで必ず呼ぶこと。**参照 1 個ずつで持つ**（配列にすると
-    /// 破棄済みを抱えたまま非 null になる）。
+    /// Neither <c>Material</c> nor <c>Texture2D</c> is a <c>Component</c>, so destroying the
+    /// <c>GameObject</c> does not take them with it. Always call <see cref="Destroy"/> on
+    /// level unload. **Hold them as individual references** (put them in an array and you end
+    /// up holding a destroyed object that still tests non-null).
     /// </summary>
     public static class CloudParticleAssets
     {
-        /// <summary>ここまでは**完全に不透明**（テクスチャの中心からの比）。</summary>
+        /// <summary>**Fully opaque** up to here (as a fraction from the texture centre).</summary>
         public const float CoreEnd = 0.42f;
 
-        /// <summary>ここで透明になりきる。</summary>
+        /// <summary>Fully transparent by here.</summary>
         public const float EdgeEnd = 0.95f;
 
         /// <summary>
-        /// 縁を 3 回ぶん揺らす量。**真円の粒が並ぶと「泡の集まり」に見える** ——
-        /// 縁を崩すと、重なった粒がひと続きの塊として読める。
+        /// How much the rim wobbles, three times around. **A row of perfectly round
+        /// particles reads as "a cluster of bubbles"** — break the rim up and the overlapping
+        /// particles read as one continuous mass.
         /// </summary>
         public const float RimWobble = 0.10f;
 
-        /// <summary>テクスチャの一辺（px）。</summary>
+        /// <summary>Texture edge length (px).</summary>
         private const int TextureSize = 128;
 
-        /// <summary>シェーダが引けなかったときに、次に試すまで待つ呼び出し回数。</summary>
+        /// <summary>How many calls to wait before trying again when the shader could not be found.</summary>
         private const int RetryCalls = 300;
 
         private static Material _material;
@@ -76,8 +77,8 @@ namespace DisasterPlus.Game
         private static string _detail;
 
         /// <summary>
-        /// 白い雲のマテリアル。**引けなければ null**（呼び出し側は描かないこと）。
-        /// 1 度作ったら都市を出るまで使い回す。
+        /// The white cloud material. **null if it could not be resolved** (callers must not
+        /// draw). Once built, it is reused until the city is left.
         /// </summary>
         public static Material Cloud
         {
@@ -96,10 +97,10 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>診断用の 1 行。**まだ試していないときは null。**</summary>
+        /// <summary>One line for diagnostics. **null when nothing has been tried yet.**</summary>
         public static string Detail { get { return _detail; } }
 
-        /// <summary>**レベルアンロードで必ず呼ぶ。** 冪等。</summary>
+        /// <summary>**Always call on level unload.** Idempotent.</summary>
         public static void Destroy()
         {
             if (_material != null) UnityEngine.Object.Destroy(_material);
@@ -109,7 +110,7 @@ namespace DisasterPlus.Game
             _texture = null;
             _missCount = 0;
             _detail = null;
-            // _warned は戻さない（ゲームのビルドに対する事実である）。
+            // _warned is not reset (it is a fact about the game build).
         }
 
         private static Material Build()
@@ -140,9 +141,10 @@ namespace DisasterPlus.Game
                     if (m.HasProperty("_MainTex")) m.SetTexture("_MainTex", _texture);
                 }
 
-                // ★ <c>Custom/Particles/Alpha Blended</c> は <c>_TintColor</c> を**そのまま**
-                //   掛ける（Unity 純正の粒子シェーダの「半灰色 0.5」の慣習ではない。
-                //   ミサイル MOD が実機で確定させた区別）。白＝粒子自身の色をそのまま出す。
+                // ★ <c>Custom/Particles/Alpha Blended</c> multiplies <c>_TintColor</c> in
+                //   **as-is** (not Unity's stock particle-shader convention of "half grey,
+                //   0.5" — a distinction the missile mod pinned down in the game itself).
+                //   White = show the particle's own colour unchanged.
                 if (m.HasProperty("_TintColor")) m.SetColor("_TintColor", Color.white);
                 if (m.HasProperty("_Color")) m.SetColor("_Color", Color.white);
                 m.color = Color.white;
@@ -167,9 +169,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 雲の粒 1 個の絵。**芯は完全に不透明**で、縁へ滑らかに消える。
-        /// 縁は 3 回ぶん揺らしてあるので、重なった粒がひと続きの塊に見える
-        /// （クラス doc の計測）。
+        /// The image of a single cloud particle. **The core is fully opaque** and fades
+        /// smoothly to the rim. The rim wobbles three times around, so overlapping particles
+        /// read as one continuous mass (see the measurements in the class doc).
         /// </summary>
         private static Texture2D BuildTexture()
         {
@@ -196,7 +198,7 @@ namespace DisasterPlus.Game
                     if (t < 0f) t = 0f;
                     if (t > 1f) t = 1f;
 
-                    // smoothstep。芯の中は 1、縁で 0。
+                    // smoothstep. 1 inside the core, 0 at the rim.
                     float a = 1f - t * t * (3f - 2f * t);
                     pixels[y * TextureSize + x] =
                         new Color32(255, 255, 255, (byte)(255f * a));

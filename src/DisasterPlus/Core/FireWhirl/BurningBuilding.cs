@@ -2,7 +2,8 @@ using DisasterPlus.Core.Common;
 
 namespace DisasterPlus.Core.FireWhirl
 {
-    /// <summary>燃焼中の建物 1 棟。Game 層が m_fireIntensity &gt; 0 の建物から作る。</summary>
+    /// <summary>One burning building. The Game layer builds these from buildings with
+    /// m_fireIntensity &gt; 0.</summary>
     public struct BurningBuilding
     {
         public readonly ushort Id;

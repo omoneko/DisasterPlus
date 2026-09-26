@@ -4,70 +4,81 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ④が握っているバニラの**災害スロット 1 個**そのもの。<b>sim スレッド専用。</b>
+    /// The **single vanilla disaster slot** ④ holds. <b>Sim thread only.</b>
     ///
-    /// ── なぜ <see cref="TyphoonController"/> から切り出したか ─────────────
+    /// ── Why this was split out of <see cref="TyphoonController"/> ─────────
     ///
-    /// ④には性質のまったく違う 2 つの仕事がある。ひとつは**④自身のモデル**
-    /// （経路・強度の包絡線・上陸減衰・位相・上陸予測）で、これは
-    /// <c>Core/Typhoon</c> の純関数の上に乗った算術であり、間違えても
-    /// 「台風が変な動きをする」で済む。もうひとつが**バニラの災害バッファへの
-    /// 書き込み**で、こちらは間違えると<b>他人の災害スロットを書き潰す</b>・
-    /// <b>スロットを 1 個永久に食い潰す</b>・<b>無関係な災害を引きずり回す</b>という、
-    /// 例外の出ない壊れ方をする（罠 1 と罠 2、そして ID 再利用）。
+    /// ④ has two jobs of entirely different character. One is **④'s own model** (the
+    /// track, the intensity envelope, the landfall decay, the phase, the landfall
+    /// forecast), which is arithmetic riding on the pure functions in
+    /// <c>Core/Typhoon</c>, and getting it wrong only ever means "the typhoon moves
+    /// oddly". The other is **writing into vanilla's disaster buffer**, where getting it
+    /// wrong means <b>scribbling over somebody else's disaster slot</b>,
+    /// <b>eating one slot for ever</b> or <b>dragging an unrelated disaster around</b> —
+    /// all breakages with no exception (traps 1 and 2, and ID reuse).
     ///
-    /// この型は後者だけを持つ。**<c>DisasterManager</c> / <c>DisasterData</c> /
-    /// <c>DisasterAI</c> / <c>DisasterInfo</c> に触るコードは、④ではここにしか無い。**
-    /// T7〜T10 が④に新しい要素を足しても、この境界は動かないこと。
+    /// This type holds only the latter. **In ④, the code that touches
+    /// <c>DisasterManager</c> / <c>DisasterData</c> / <c>DisasterAI</c> /
+    /// <c>DisasterInfo</c> is here and nowhere else.** However many new elements T7 to T10
+    /// add to ④, this boundary must not move.
     ///
-    /// ── 罠 1: <c>SelfTrigger</c>（③が実際に出荷した） ───────────────────
+    /// ── Trap 1: <c>SelfTrigger</c> (③ actually shipped this) ──────────────
     ///
-    /// <c>ThunderStormAI.StartDisaster</c> は <c>IL_000E</c> で <c>m_flags &amp; 64</c> を見て、
-    /// 立っていなければ**即 return する**（IL 事実文書 §A-1）。そのとき
-    /// <c>m_activationFrame</c> は 0 のまま・<c>Significant(256)</c> も付かないので、
-    /// <c>IsStillEmerging</c> が永久 true になり、周囲の建物は <c>DetectDisaster</c> を
-    /// 呼ばず、**ハザードマップにも通知にも一切出ない**。例外は 1 つも出ない。
-    /// ③がこれを出荷し、②のレビューで初めて見つかった。
+    /// <c>ThunderStormAI.StartDisaster</c> looks at <c>m_flags &amp; 64</c> at
+    /// <c>IL_000E</c> and **returns immediately** if it is not set (IL facts document
+    /// §A-1). In that case <c>m_activationFrame</c> stays 0 and <c>Significant(256)</c> is
+    /// never set, so <c>IsStillEmerging</c> is true for ever, the surrounding buildings
+    /// never call <c>DetectDisaster</c>, and **nothing shows in the hazard map or in the
+    /// notifications at all**. Not one exception is raised. ③ shipped this, and it was
+    /// only found during ②'s review.
     ///
-    /// **だからフラグを立てるだけでは足りない。** <see cref="Begin"/> は
-    /// <c>StartNow</c> の直後に <c>m_activationFrame != 0</c> を観測する。将来
-    /// <c>m_flags</c> の代入がリファクタで消えても、実行時に必ず気付く。
+    /// **So setting the flag is not enough on its own.** <see cref="Begin"/> observes
+    /// <c>m_activationFrame != 0</c> immediately after <c>StartNow</c>. If a future
+    /// refactor deletes the assignment to <c>m_flags</c>, we will notice at runtime
+    /// without fail.
     ///
-    /// ── 罠 2: <c>CreateDisaster</c> の戻り値 ─────────────────────────
+    /// ── Trap 2: <c>CreateDisaster</c>'s return value ──────────────────────
     ///
-    /// 災害は上限 256。<c>CreateDisaster</c> は失敗時に **false を返し
-    /// <c>disasterIndex = 0</c> を出す**（例外は出ない。地震 §E-1）。見ないで書くと
-    /// **他人の災害スロットを書き潰す**。<see cref="Create"/> は必ず戻り値を見る。
+    /// Disasters are capped at 256. On failure <c>CreateDisaster</c> **returns false and
+    /// gives out <c>disasterIndex = 0</c>** (no exception. Earthquake §E-1). Write without
+    /// looking at it and you **scribble over somebody else's disaster slot**.
+    /// <see cref="Create"/> always looks at the return value.
     ///
-    /// ── 罠 3: <c>m_activationFrame</c> の既定値（実機で 0 除算した） ───────────
+    /// ── Trap 3: <c>m_activationFrame</c>'s default (we divided by zero in the game) ──
     ///
-    /// <c>StartDisaster</c> が書く既定値は <c>m_startFrame + m_emergingDuration</c> で、
-    /// Thunderstorm プレハブの <c>m_emergingDuration</c> は <b>8192</b>（実測）。
-    /// そのままにすると <c>ThunderStormAI.GetFireSpreadProbability</c> の
-    /// <c>1500 / (8 + (num &gt;&gt; 10))</c> が <b>0 で割る</b>
-    /// （<see cref="DisasterPlus.Core.Typhoon.VanillaFireSpread"/> に事実と算術がある）。
-    /// しかも活性化は寿命が尽きた後になるので、台風は一生 Emerging のままになる。
-    /// <see cref="Begin"/> は活性化フレームを開始フレームまで引き寄せる。
+    /// The default <c>StartDisaster</c> writes is
+    /// <c>m_startFrame + m_emergingDuration</c>, and the Thunderstorm prefab's
+    /// <c>m_emergingDuration</c> is <b>8192</b> (measured). Leave it as it is and
+    /// <c>ThunderStormAI.GetFireSpreadProbability</c>'s
+    /// <c>1500 / (8 + (num &gt;&gt; 10))</c> <b>divides by zero</b>
+    /// (the facts and the arithmetic are in
+    /// <see cref="DisasterPlus.Core.Typhoon.VanillaFireSpread"/>).
+    /// On top of that, activation would come after the lifetime has run out, so the
+    /// typhoon stays Emerging all its life.
+    /// <see cref="Begin"/> pulls the activation frame back to the start frame.
     ///
-    /// ── ID は再利用される ───────────────────────────────────
+    /// ── IDs get reused ───────────────────────────────────────
     ///
-    /// 災害 ID は解放後に再利用される。別の災害に化けたまま <c>m_targetPosition</c> を
-    /// 書き続けると**無関係な災害を④が引きずり回す**（③の <c>FireWhirlPinner</c> が
-    /// 距離で偽陽性を弾いているのと同じ事故）。<see cref="TryGetBuffer"/> が
-    /// 毎 tick 4 つの条件で持ち主かどうかを確かめる。
+    /// Disaster IDs are reused after release. Keep writing <c>m_targetPosition</c> after
+    /// the slot has turned into some other disaster and **④ drags an unrelated disaster
+    /// around** (the same accident ③'s <c>FireWhirlPinner</c> guards against by rejecting
+    /// false positives on distance). <see cref="TryGetBuffer"/> checks ownership against
+    /// four conditions every tick.
     ///
-    /// ── <c>Singleton&lt;T&gt;.exists</c> を先に見る ─────────────────────
+    /// ── Look at <c>Singleton&lt;T&gt;.exists</c> first ──────────────────────
     ///
-    /// <c>Singleton&lt;T&gt;.instance</c> は <c>sInstance</c> が null のとき
-    /// <c>FindObjectOfType</c> と <c>new GameObject</c> を走らせる **main スレッド専用
-    /// API** で、sim スレッドから踏むと落ちる（<see cref="TsunamiChain"/> の同じ注記）。
+    /// <c>Singleton&lt;T&gt;.instance</c> runs <c>FindObjectOfType</c> and
+    /// <c>new GameObject</c> when <c>sInstance</c> is null, which makes it a **main thread
+    /// only API**; step on it from the sim thread and you crash (the same note is on
+    /// <see cref="TsunamiChain"/>).
     /// </summary>
     internal static class TyphoonSlot
     {
         /// <summary>
-        /// 残りがこれを切ったら活性化フレームを進め直す（フレーム）。
-        /// **0 にしない** —— 0 だと「切れた次の tick で書き直す」ことになり、
-        /// その 1 tick のあいだ宿主が死ぬ。
+        /// Once the remaining time falls below this, re-advance the activation frame
+        /// (frames).
+        /// **Never make it 0** — at 0 we would be rewriting "on the tick after it ran
+        /// out", and the host would be dead for that one tick.
         /// </summary>
         private const uint KeepAliveMarginFrames = 512u;
 
@@ -75,38 +86,43 @@ namespace DisasterPlus.Game
         private static uint _activationFrame;
 
         /// <summary>
-        /// 掴んだ災害の <c>m_randomSeed</c>。**スロットの所有を見分ける鍵である**
-        /// （<see cref="TryGetBuffer"/> の doc）。<c>DisasterManager.CreateDisaster</c> が
-        /// 入れた値で、**AI は 1 つも書き換えない。**
+        /// The <c>m_randomSeed</c> of the disaster we grabbed. **This is the key that
+        /// identifies ownership of the slot** (the doc on <see cref="TryGetBuffer"/>).
+        /// It is the value <c>DisasterManager.CreateDisaster</c> put in, and **no AI ever
+        /// rewrites it.**
         /// </summary>
         private static ulong _randomSeed;
 
-        /// <summary>同上の <c>m_infoIndex</c>。種と合わせて 2 つで見る。</summary>
+        /// <summary>The same disaster's <c>m_infoIndex</c>. We look at it together with the
+        /// seed, as a pair.</summary>
         private static ushort _infoIndex;
 
-        /// <summary>例外を 1 回だけ <c>Log.Error</c> で出したか。<see cref="Forget"/> で戻さない
-        /// （ゲームのビルドに対する事実であって都市ごとの状態ではない）。</summary>
+        /// <summary>Whether an exception has been reported once through <c>Log.Error</c>.
+        /// Not reset by <see cref="Forget"/> (it is a fact about the game build, not
+        /// per-city state).</summary>
         private static bool _errorLogged;
 
-        /// <summary>掴んでいる災害スロットの添字。0 は「持っていない」。</summary>
+        /// <summary>The index of the disaster slot we hold. 0 means "we have none".</summary>
         internal static ushort Id { get { return _id; } }
 
         /// <summary>
-        /// 災害の <c>m_activationFrame</c>。<b><see cref="Begin"/> が開始フレームまで
-        /// 引き寄せた値</b>であって、<c>StartDisaster</c> の既定値
-        /// （<c>m_startFrame + m_emergingDuration</c>）ではない（罠 3）。
-        /// スロットが再利用されたことを見分ける最も安いキーであり、
-        /// **落雷の予算がバニラの取り分を見積もるための起点**でもある
-        /// （<c>LightningBudget.VanillaRampCount</c>）。
+        /// The disaster's <c>m_activationFrame</c>. It is <b>the value
+        /// <see cref="Begin"/> pulled back to the start frame</b>, not
+        /// <c>StartDisaster</c>'s default (<c>m_startFrame + m_emergingDuration</c>)
+        /// (trap 3).
+        /// It is the cheapest key for spotting that the slot has been reused, and it is
+        /// also **the origin from which the lightning budget estimates vanilla's share**
+        /// (<c>LightningBudget.VanillaRampCount</c>).
         /// </summary>
         internal static uint ActivationFrame { get { return _activationFrame; } }
 
         /// <summary>
-        /// 災害スロットを 1 個取る。**まだ開始しない。**
+        /// Take one disaster slot. **It does not start yet.**
         ///
-        /// 2 段に分かれているのは、④の経路の種が<b>災害 ID そのもの</b>だからである
-        /// （設計書 §4.1「同じセーブで再現できること」）。ID が決まらないと中心が
-        /// 決まらず、中心が決まらないと <see cref="Begin"/> に渡す座標が作れない。
+        /// It is in two stages because the seed for ④'s track is <b>the disaster ID
+        /// itself</b> (design doc §4.1, "it must be reproducible from the same save").
+        /// Until the ID is fixed the centre is not fixed, and until the centre is fixed we
+        /// cannot build the coordinates to pass to <see cref="Begin"/>.
         /// </summary>
         internal static bool Create(out string refusal)
         {
@@ -126,8 +142,8 @@ namespace DisasterPlus.Game
             }
 
             ushort id;
-            // ★ 罠 2: 戻り値を必ず見る。false のとき id = 0 になり、そのまま書き込むと
-            //    **他人の災害スロットを書き潰す**（上限 256）。
+            // ★ Trap 2: always look at the return value. On false, id = 0, and writing
+            //    there anyway **scribbles over somebody else's disaster slot** (cap 256).
             if (!Singleton<DisasterManager>.instance.CreateDisaster(out id, info))
             {
                 refusal = "CreateDisaster returned false (disaster buffer full?)";
@@ -138,10 +154,11 @@ namespace DisasterPlus.Game
             _id = id;
             _activationFrame = 0u;
 
-            // ★★ **所有の鍵をここで控える**（<see cref="TryGetBuffer"/> の doc）。
-            //    <c>CreateDisaster</c> が入れた直後の値でなければならない ——
-            //    あとから読むと、既にスロットが誰かに取られていた場合に
-            //    「取った相手の鍵」を自分のものとして覚えてしまう。
+            // ★★ **Take down the ownership key here** (the doc on
+            //    <see cref="TryGetBuffer"/>). It must be the value straight after
+            //    <c>CreateDisaster</c> put it in — read it later and, if the slot had
+            //    already been taken by somebody, we would memorise "the taker's key" as
+            //    our own.
             DisasterData[] created = Singleton<DisasterManager>.instance.m_disasters.m_buffer;
             _randomSeed = created[id].m_randomSeed;
             _infoIndex = created[id].m_infoIndex;
@@ -150,23 +167,25 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 取ったスロットに初期状態を書き、<c>StartNow</c> で開始し、
-        /// **<c>SelfTrigger</c> が本当に効いたかをその場で確かめる**（罠 1）。
+        /// Write the initial state into the slot we took, start it with <c>StartNow</c>,
+        /// and **check on the spot that <c>SelfTrigger</c> really took effect** (trap 1).
         ///
-        /// <paramref name="pos"/> は入力がクランプ前の中心（y は無視）で、
-        /// 返るときには <c>ClampDisasterTarget</c> と地形高を通した実際の書き込み値に
-        /// なっている。呼び出し側はその y を「中心の高さ」として使う。
+        /// <paramref name="pos"/> goes in as the centre before clamping (y is ignored) and
+        /// comes back as the value actually written, after
+        /// <c>ClampDisasterTarget</c> and the terrain height. The caller uses that y as
+        /// "the height of the centre".
         ///
-        /// 失敗したらスロットを解放して <see cref="Forget"/> するので、
-        /// 呼び出し側は後始末を書かなくてよい。
+        /// On failure it releases the slot and calls <see cref="Forget"/>, so the caller
+        /// does not have to write any cleanup.
         /// </summary>
         internal static bool Begin(ref Vector3 pos, float angle, byte intensity, out string refusal)
         {
             refusal = null;
 
-            // ★ 2 つの別々の失敗を 1 つのメッセージにまとめない（全体レビュー I3）。
-            //   「まだスロットを取っていない」を "DisasterManager is not available" と
-            //   名乗ると、診断を読む人は存在しない Singleton の不在を追いかけることになる。
+            // ★ Do not roll two different failures into one message (whole-project review
+            //   I3). Call "we have not taken a slot yet" "DisasterManager is not
+            //   available" and whoever reads the diagnostics goes chasing the absence of a
+            //   Singleton that is not absent at all.
             if (_id == 0)
             {
                 refusal = "Begin was called without a disaster slot (Create did not run "
@@ -187,12 +206,14 @@ namespace DisasterPlus.Game
             if (buffer == null || _id >= buffer.Length)
             {
                 refusal = "the disaster index is out of range";
-                // ★★ **取ったスロットを返してから降りる**（全体レビュー I3）。
-                //    ここへ来るのは Create が成功した後なので、④は災害スロットを
-                //    1 個確保済みである。返さずに Forget すると、そのスロットは
-                //    誰にも解放されないまま都市の寿命ぶん残り、災害一覧にも出続ける
-                //    （下の SelfTrigger の見張りが Abandon するのと同じ理由）。
-                //    ReleaseDisaster 自身が範囲外を弾く（例外は Abandon が握る）。
+                // ★★ **Give the slot we took back before bowing out** (whole-project
+                //    review I3). We only get here after Create succeeded, so ④ has one
+                //    disaster slot reserved. Forget without giving it back and that slot
+                //    is never released by anybody for the lifetime of the city, and stays
+                //    in the disaster list too (the same reason the SelfTrigger watchdog
+                //    below calls Abandon).
+                //    ReleaseDisaster itself rejects out-of-range indices (Abandon holds
+                //    the exception).
                 Abandon(manager, _id);
                 Forget();
                 return false;
@@ -209,21 +230,21 @@ namespace DisasterPlus.Game
 
             var ai = info.m_disasterAI;
             ai.ClampDisasterTarget(ref pos);                        // public
-            pos.y = SampleHeight(pos);                              // StartDisaster と同じ扱い（§A-1）
+            pos.y = SampleHeight(pos);                              // treated as StartDisaster does (§A-1)
 
             buffer[_id].m_targetPosition = pos;
             buffer[_id].m_angle = angle;
             buffer[_id].m_intensity = intensity;
-            // ★ 罠 1: これが無いと StartDisaster は IL_000E で即 return する（クラス doc）。
+            // ★ Trap 1: without this, StartDisaster returns immediately at IL_000E (class doc).
             buffer[_id].m_flags |= DisasterData.Flags.SelfTrigger;
 
-            // StartDisaster は protected。CreateDisaster 直後の m_flags は Created(1) だけ
-            // なので StartNow の「& 60 が 0 なら」の門は必ず通る（§E-3）。
+            // StartDisaster is protected. Straight after CreateDisaster, m_flags is only
+            // Created(1), so StartNow's "if & 60 is 0" gate always lets us through (§E-3).
             ai.StartNow(_id, ref buffer[_id]);
 
-            // ★ SelfTrigger が本当に効いたかを、その場で確かめる。StartDisaster が
-            //    通っていれば m_activationFrame = m_startFrame + m_emergingDuration が
-            //    入っている（§A-1 IL_003F）。**この検査は書き換える前に行う。**
+            // ★ Check on the spot that SelfTrigger really took effect. If StartDisaster
+            //    got through, m_activationFrame = m_startFrame + m_emergingDuration is in
+            //    there (§A-1 IL_003F). **Do this check before we overwrite it.**
             if (buffer[_id].m_activationFrame == 0u)
             {
                 refusal = "StartDisaster did not schedule an activation frame; "
@@ -234,24 +255,29 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★★ 活性化フレームを**開始フレームまで引き寄せる**。理由は 2 つあり、
-            //    どちらも「④の台風は押した瞬間にそこで始まる」という設計から出る。
+            // ★★ **Pull the activation frame back to the start frame.** There are two
+            //    reasons, and both follow from the design that "④'s typhoon begins right
+            //    there the moment you press it".
             //
-            //    1. 0 除算を消すため（DisasterPlus.Core.Typhoon.VanillaFireSpread）。
-            //       StartDisaster が書く既定値は m_startFrame + m_emergingDuration で、
-            //       Thunderstorm プレハブの m_emergingDuration は 8192。そのとき
-            //       ThunderStormAI.GetFireSpreadProbability の
-            //       1500 / (8 + (num >> 10)) は num = -8192 でちょうど 0 で割る。
-            //       ④は Emerging のうちから落雷を撒くので、その火が付いた時点で
-            //       バニラの中で DivideByZeroException が出る（実機で発生）。
+            //    1. To remove the division by zero
+            //       (DisasterPlus.Core.Typhoon.VanillaFireSpread).
+            //       The default StartDisaster writes is m_startFrame + m_emergingDuration,
+            //       and the Thunderstorm prefab's m_emergingDuration is 8192. Then
+            //       ThunderStormAI.GetFireSpreadProbability's
+            //       1500 / (8 + (num >> 10)) divides by exactly 0 at num = -8192.
+            //       ④ scatters lightning while still Emerging, so the moment one of those
+            //       starts a fire, a DivideByZeroException comes out inside vanilla
+            //       (seen in the game).
             //
-            //    2. 引き寄せないと**台風が一生 Emerging のまま終わる**。
-            //       m_emergingDuration も m_activeDuration も 8192 で、④の寿命は
-            //       m_activeDuration ぶんしかない。活性化する頃には④はもう
-            //       手放しており、Deactivate は Active 旗が無いので空振りする。
+            //    2. Without pulling it back **the typhoon lives and dies as Emerging**.
+            //       Both m_emergingDuration and m_activeDuration are 8192, and ④'s
+            //       lifetime is only m_activeDuration long. By the time it activates, ④
+            //       has already let go, and Deactivate does nothing because the Active
+            //       flag is not set.
             //
-            //    m_activationFrame == 0 は「予定が無い」の意味なので（IsStillEmerging の
-            //    IL_0015 が 0 を恒久 true として扱う）、フレーム 0 でも 0 を書かない。
+            //    m_activationFrame == 0 means "nothing is scheduled" (IsStillEmerging's
+            //    IL_0015 treats 0 as permanently true), so we never write 0, not even on
+            //    frame 0.
             uint activation = DisasterPlus.Core.Typhoon.VanillaFireSpread
                                   .SafeActivationFrame(buffer[_id].m_startFrame);
             buffer[_id].m_activationFrame = activation;
@@ -261,28 +287,32 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 宿主の嵐を**生かし続ける**。**sim スレッド。**
+        /// **Keep the host storm alive.** **Sim thread.**
         ///
-        /// ── なぜ要るのか（2026-08-22、実機報告「エフェクトがすぐに消えてしまいます」）──
+        /// ── Why it is needed (2026-08-22, in-game report "the effects disappear almost immediately") ──
         ///
-        /// <c>ThunderStormAI.IsStillActive</c> は
-        /// <c>(currentFrame - m_activationFrame) &lt; m_activeDuration</c> である（IL 実測）。
-        /// 死ぬのは<b>活性化フレームからの経過</b>が上限に届いたときなので、
-        /// <c>m_activationFrame</c> を<b>「今」へ進め直せば残り時間は満タンに戻る</b>。
+        /// <c>ThunderStormAI.IsStillActive</c> is
+        /// <c>(currentFrame - m_activationFrame) &lt; m_activeDuration</c> (measured from
+        /// the IL). It dies when <b>the time elapsed since the activation frame</b>
+        /// reaches the limit, so <b>re-advancing <c>m_activationFrame</c> to "now" refills
+        /// the remaining time</b>.
         ///
-        /// ★★ <b>「今」ちょうどに置くこと。</b>
-        ///   - <c>IsStillActive</c> … <c>0 &lt; m_activeDuration</c> で true
-        ///   - <c>IsStillEmerging</c> … <c>now &lt; now</c> は false（**Emerging に戻らない**）
-        ///   - <c>ThunderStormAI.GetFireSpreadProbability</c> の
-        ///     <c>1500 / (8 + (num &gt;&gt; 10))</c> … <c>num = 0</c> で割る数は 8。
-        ///     **0 除算にならない**（負へ引き戻すと 0 になる。実機で 1 度出した）
+        /// ★★ <b>Put it exactly at "now".</b>
+        ///   - <c>IsStillActive</c> … true, since <c>0 &lt; m_activeDuration</c>
+        ///   - <c>IsStillEmerging</c> … <c>now &lt; now</c> is false (**it does not go back
+        ///     to Emerging**)
+        ///   - <c>ThunderStormAI.GetFireSpreadProbability</c>'s
+        ///     <c>1500 / (8 + (num &gt;&gt; 10))</c> … at <c>num = 0</c> the divisor is 8.
+        ///     **No division by zero** (pull it back into the negatives and it becomes 0;
+        ///     we produced that once in the game)
         ///
-        /// ★ <see cref="_activationFrame"/> も同じ値へ更新する。あれは
-        ///   「スロットが誰かに再利用されていないか」を見分ける鍵なので
-        ///   （<see cref="TryGetBuffer"/>）、片方だけ書くと**次の tick で自分の台風を
-        ///   「他人に取られた」と誤判定して手放す**。
+        /// ★ Update <see cref="_activationFrame"/> to the same value. That is the key for
+        ///   telling "has the slot been reused by somebody" (<see cref="TryGetBuffer"/>),
+        ///   so writing only one of the two makes us **misjudge our own typhoon as "taken
+        ///   by somebody else" on the next tick and let go of it**.
         ///
-        /// ★ 毎 tick は書かない。残りが <see cref="KeepAliveMarginFrames"/> を切ったときだけ。
+        /// ★ Do not write every tick. Only when the remaining time drops below
+        ///   <see cref="KeepAliveMarginFrames"/>.
         /// </summary>
         internal static void KeepAlive(uint currentFrame, uint activeDuration)
         {
@@ -294,7 +324,7 @@ namespace DisasterPlus.Game
 
             uint elapsed = currentFrame - _activationFrame;
 
-            // まだ余裕がある。**書かない。**
+            // There is still room. **Do not write.**
             if (elapsed + KeepAliveMarginFrames < activeDuration) return;
 
             buffer[_id].m_activationFrame = currentFrame;
@@ -302,10 +332,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 掴んでいるスロットがまだ④のものか。**災害 ID は解放後に再利用される**
-        /// （クラス doc）。1 つでも外れたら false を返し、理由を
-        /// <paramref name="lostReason"/> に入れる —— 呼び出し側は<b>書き込みをやめて
-        /// 手放す</b>こと。バニラの終了経路を呼んではいけない（もう④のものではない）。
+        /// Whether the slot we hold is still ④'s. **Disaster IDs are reused after
+        /// release** (class doc). If even one condition fails it returns false and puts
+        /// the reason in <paramref name="lostReason"/> — the caller must <b>stop writing
+        /// and let go</b>. Do not call vanilla's ending routes (it is not ④'s any more).
         /// </summary>
         internal static bool TryGetBuffer(out DisasterData[] buffer, out string lostReason)
         {
@@ -331,31 +361,34 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // ★★ **所有の鍵は m_randomSeed である。**（2026-08-25、実機ログで判明）
+            // ★★ **The ownership key is m_randomSeed.** (2026-08-25, found from an
+            //    in-game log.)
             //
-            //    ここは長らく <c>m_activationFrame</c> を鍵にしていた。
-            //    **あれはゲーム自身が書き換える。** 全メソッドの IL を走査した結果
-            //    （<c>docs/tools/findwriters.ps1</c>）:
+            //    This used <c>m_activationFrame</c> as the key for a long time.
+            //    **The game itself rewrites that.** From an IL scan of every method
+            //    (<c>docs/tools/findwriters.ps1</c>):
             //
-            //        WRITE  DisasterAI::ActivateDisaster          <- ★ これ
+            //        WRITE  DisasterAI::ActivateDisaster          <- ★ this one
             //        WRITE  ThunderStormAI::StartDisaster
             //        WRITE  EarthquakeAI / SinkholeAI / TornadoAI::StartDisaster
             //        WRITE  Data::Deserialize
             //
-            //    つまり<b>嵐が Emerging から Active になった瞬間に値が変わり</b>、
-            //    ④は自分の災害を「他人に取られた」と誤判定して手放していた。
-            //    実機ログの
+            //    In other words <b>the value changes the instant the storm goes from
+            //    Emerging to Active</b>, and ④ would misjudge its own disaster as "taken
+            //    by somebody else" and let go of it. The in-game log's
             //        DIAG TyLost: the disaster slot was reused by something else
-            //    がそれで、**雲が一瞬出て雷雨だけが残る**という一連の報告は
-            //    ぜんぶこの 1 行から出ていた（雲の作りも種もカリングも無関係だった）。
+            //    was exactly that, and the whole series of reports about **the cloud
+            //    appearing for an instant and only the thunderstorm remaining** all came
+            //    out of this one line (the cloud's construction, its seed and the culling
+            //    were all irrelevant).
             //
-            //    <c>m_randomSeed</c> を書くのは <c>DisasterManager.CreateDisaster</c> と
-            //    セーブの読み込みだけで、**AI は 1 つも触らない**（同じ走査）。
-            //    64 bit あり、スロットが再利用されれば必ず変わる ——
-            //    これが「同じ災害か」の正しい鍵である。
+            //    The only things that write <c>m_randomSeed</c> are
+            //    <c>DisasterManager.CreateDisaster</c> and loading a save; **no AI touches
+            //    it** (same scan). It is 64 bits wide and necessarily changes if the slot
+            //    is reused — that is the correct key for "is this the same disaster".
             //
-            //    ★ <c>m_infoIndex</c> も一緒に見る。種が偶然一致しても、
-            //      別の災害種別になっていたら他人のものである。
+            //    ★ Look at <c>m_infoIndex</c> as well. Even if the seed matches by chance,
+            //      if it has become a different kind of disaster it is somebody else's.
             if (candidate[_id].m_randomSeed != _randomSeed
                 || candidate[_id].m_infoIndex != _infoIndex)
             {
@@ -363,7 +396,8 @@ namespace DisasterPlus.Game
                 return false;
             }
 
-            // get_Info は境界検査をしない 4 命令なので、要素ごとに try/catch する。
+            // get_Info is four instructions with no bounds check, so wrap each element
+            // access in try/catch.
             try
             {
                 var info = candidate[_id].Info;
@@ -384,14 +418,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 毎 tick の書き込み（IL 事実文書 §E-1）。<paramref name="pos"/> は入力が
-        /// クランプ前の中心で、返るときには実際に書いた座標（クランプ＋地形高）になる。
+        /// The per-tick write (IL facts document §E-1). <paramref name="pos"/> goes in as
+        /// the centre before clamping and comes back as the coordinate actually written
+        /// (clamped, plus the terrain height).
         ///
-        /// <c>ClampDisasterTarget</c> は本タスクで IL を読んだところ**マップ矩形ではなく
-        /// 「解放済みタイル」の内側**へ丸める（<c>GameAreaManager.IsUnlocked</c> /
-        /// <c>GetAreaBounds</c> を 8 方向ぶん見る）。だから④は「本当の中心」を自分で持ち、
-        /// ここにはその**クランプした写し**を書く。終了判定をクランプ後の値で行うと、
-        /// 台風は購入済みエリアの縁に貼り付いたまま永久に終わらなくなる。
+        /// Reading the IL for this task showed that <c>ClampDisasterTarget</c> rounds to
+        /// **the inside of the unlocked tiles, not the map rectangle** (it looks at
+        /// <c>GameAreaManager.IsUnlocked</c> / <c>GetAreaBounds</c> in eight directions).
+        /// That is why ④ keeps "the true centre" itself and writes only **a clamped copy**
+        /// here. Decide the ending condition from the clamped value and the typhoon sticks
+        /// to the edge of the purchased area and never ends.
         /// </summary>
         internal static void WriteTarget(DisasterData[] buffer, ref Vector3 pos,
                                          float angle, byte intensity)
@@ -406,22 +442,24 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// バニラの終了経路に乗せる。<c>DeactivateNow</c> は public で、本タスクで IL を
-        /// 読んだところ **<c>m_flags</c> に <c>Active(8)</c> が立っていなければ何もしない**。
-        /// 立っていれば <c>ThunderStormAI.DeactivateDisaster</c> が走り、
-        /// <c>SelfTrigger</c> 付きなので <c>m_targetRain = 0</c> / <c>m_targetCloud = 0</c> が
-        /// 書かれる（§A-1）。
+        /// Put it on vanilla's ending route. <c>DeactivateNow</c> is public, and reading
+        /// the IL for this task showed that **it does nothing unless <c>Active(8)</c> is
+        /// set in <c>m_flags</c>**. If it is set, <c>ThunderStormAI.DeactivateDisaster</c>
+        /// runs, and since <c>SelfTrigger</c> is on, <c>m_targetRain = 0</c> /
+        /// <c>m_targetCloud = 0</c> are written (§A-1).
         ///
-        /// ★ **Emerging 中に止めた場合はここが空振りする。** だから④が触った天候は
-        ///   ④自身が戻さなければならない（<c>TyphoonWeather.Release</c>）。
+        /// ★ **If we stop it while Emerging, this does nothing.** That is why ④ must put
+        ///   back the weather it touched itself (<c>TyphoonWeather.Release</c>).
         ///
-        /// **災害スロットは解放しない。** <c>DisasterAI.IsStillClearing</c>（base）は
-        /// 災害グループの <c>m_refCount &gt; 1</c>、すなわち④の落雷で燃えた建物が残っている
-        /// 間 Clearing を続ける（§A-1）。**嵐は火が消えるまで終わらない**のが正しい挙動で、
-        /// その後 <c>DisasterManager.SimulationStepImpl</c> が <c>ReleaseDisaster</c> を呼ぶ。
-        /// ②の <see cref="TsunamiChain"/> が <c>ReleaseDisaster</c> を「使えるが使わない」と
-        /// 判断したのと同じ理由（<c>OnDisasterStarted</c> を受け取った他 MOD から見て、
-        /// 終了通知の無い災害を作らない）。
+        /// **We do not release the disaster slot.** <c>DisasterAI.IsStillClearing</c> (the
+        /// base) keeps Clearing while the disaster group's <c>m_refCount &gt; 1</c>, i.e.
+        /// while buildings set alight by ④'s lightning remain (§A-1). **The storm not
+        /// ending until the fires are out** is the correct behaviour, and afterwards
+        /// <c>DisasterManager.SimulationStepImpl</c> calls <c>ReleaseDisaster</c>.
+        /// The same reason ②'s <see cref="TsunamiChain"/> judged <c>ReleaseDisaster</c> to
+        /// be "available but not to be used" (do not create a disaster with no ending
+        /// notification, as seen by another mod that received
+        /// <c>OnDisasterStarted</c>).
         /// </summary>
         internal static void Deactivate()
         {
@@ -450,7 +488,8 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>参照を捨てるだけ。**災害スロットには触らない。**</summary>
+        /// <summary>Only drops the references. **It does not touch the disaster
+        /// slot.**</summary>
         internal static void Forget()
         {
             _id = 0;
@@ -460,21 +499,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>SelfTrigger</c> の見張りが鳴ったときだけ通る後始末。**通常は到達しない。**
+        /// The cleanup we only reach when the <c>SelfTrigger</c> watchdog fires.
+        /// **Normally unreachable.**
         ///
-        /// <c>DeactivateNow</c> では畳めない。<c>DisasterAI.DeactivateNow</c> は
-        /// <c>m_flags &amp; Active(8)</c> が無ければ何もせず、この時点の旗は
-        /// <c>Created|Emerging</c> だからである。しかも
-        /// <c>ThunderStormAI.IsStillEmerging</c> は <c>m_activationFrame == 0</c> のとき
-        /// **恒久的に true を返す**（IL_0015 の <c>brfalse</c>）ので、この災害は
-        /// Emerging のまま**永久に Finished にならず、スロットも解放されない**。
+        /// <c>DeactivateNow</c> cannot pack it away. <c>DisasterAI.DeactivateNow</c> does
+        /// nothing without <c>m_flags &amp; Active(8)</c>, and the flags at this point are
+        /// <c>Created|Emerging</c>. On top of that
+        /// <c>ThunderStormAI.IsStillEmerging</c> **returns true permanently** when
+        /// <c>m_activationFrame == 0</c> (the <c>brfalse</c> at IL_0015), so this disaster
+        /// stays Emerging and **never becomes Finished, and the slot is never released**.
         ///
-        /// ②の <see cref="TsunamiChain"/> は <c>ReleaseDisaster</c> を「使えるが使わない」と
-        /// 判断した。あちらは位相が <c>m_startFrame</c> 基準で自然に進み、最悪でも
-        /// 39 ゲーム内時間で自己解放されると IL で確認できていたからである。
-        /// **ここはその条件が成り立たない**（進まないことが IL で確定している）ので、
-        /// 判断を分ける。放置すると災害スロット 256 を 1 個、都市の寿命ぶん食い潰し、
-        /// 災害一覧にも永久に残る。
+        /// ②'s <see cref="TsunamiChain"/> judged <c>ReleaseDisaster</c> to be "available
+        /// but not to be used". There, the phase advances naturally from <c>m_startFrame</c>
+        /// and the IL confirmed it would self-release within 39 in-game hours at worst.
+        /// **That condition does not hold here** (the IL establishes that it will not
+        /// advance), so we decide differently. Leave it and one of the 256 disaster slots
+        /// is eaten for the lifetime of the city, and it stays in the disaster list for
+        /// ever.
         /// </summary>
         private static void Abandon(DisasterManager manager, ushort id)
         {
@@ -499,9 +540,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>ThunderStormAI</c> を持つ災害プレハブ。**キャッシュしない**
-        /// （<c>TsunamiChain.FindTsunamiInfo</c> と同じ判断。走査は
-        /// 台風を起こす瞬間にしか走らない）。
+        /// The disaster prefab carrying <c>ThunderStormAI</c>. **Not cached**
+        /// (the same decision as <c>TsunamiChain.FindTsunamiInfo</c>; the scan only runs
+        /// at the moment a typhoon is raised).
         /// </summary>
         private static DisasterInfo FindStormInfo()
         {

@@ -8,30 +8,35 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.VolcanoPreview
 {
     /// <summary>
-    /// 溶岩の帯を**そのまま描く**（実機の指摘④の確認）。ゲームは起動しない。
+    /// Draws the lava band **exactly as it is** (checking point 4 from the in-game report).
+    /// The game is not launched.
     ///
-    /// 描いているのは <c>Core/Volcano/LavaGlow</c> が返す色と不透明度そのもので、
-    /// <c>Game/Volcano/VolcanoLavaFx.BuildTexture</c> が焼くテクスチャと
-    /// **同じ式・同じ大きさ・同じ並び**である（<c>u</c> が帯を横切る向き、
-    /// <c>v</c> が帯に沿う向きで <c>v=0</c> が火口、<c>v=1</c> が前進端）。
+    /// What is drawn is the colour and opacity returned by <c>Core/Volcano/LavaGlow</c>
+    /// itself, with **the same formula, the same size and the same layout** as the texture
+    /// baked by <c>Game/Volcano/VolcanoLavaFx.BuildTexture</c> (<c>u</c> runs across the band
+    /// and <c>v</c> along it, with <c>v=0</c> at the crater and <c>v=1</c> at the advancing
+    /// front).
     ///
-    /// 2 枚出す:
+    /// Two images are produced:
     /// <list type="number">
-    /// <item><c>lava-band.png</c> —— 帯 1 本を上から見た図。**時間の引数は無い**ので、
-    ///   これがそのまま「動かない絵」である（点滅しない）</item>
-    /// <item><c>lava-cooling.png</c> —— 冷え具合 1.0 / 0.6 / 0.3 / 0.1 / 0.0 の 5 枚。
-    ///   **いちばん右がまっさらな地面**であることが指摘④の後半の確認である</item>
+    /// <item><c>lava-band.png</c> —— one band seen from above. **There is no time argument**,
+    ///   so this is literally "the picture that does not move" (it does not flicker)</item>
+    /// <item><c>lava-cooling.png</c> —— five images at cooling 1.0 / 0.6 / 0.3 / 0.1 / 0.0.
+    ///   **That the rightmost is bare ground** is the check for the second half of point
+    ///   4</item>
     /// </list>
     /// </summary>
     internal static class Lava
     {
-        /// <summary>帯の解像度（**実機のテクスチャと同じ値を Core から取る**）。</summary>
+        /// <summary>Resolution of the band (**taken from Core, the same value as the game's
+        /// texture**).</summary>
         private const int Texture = LavaGlow.TextureSize;
 
-        /// <summary>1 セルを何ピクセルで描くか。</summary>
+        /// <summary>How many pixels one cell is drawn as.</summary>
         private const int Zoom = 3;
 
-        /// <summary>焦げた地面の色（<c>BurnGround</c> の跡）。</summary>
+        /// <summary>Colour of the scorched ground (what <c>BurnGround</c> leaves
+        /// behind).</summary>
         private static readonly float[] Ground = { 0.16f, 0.14f, 0.12f };
 
         internal static void Report(string dir, StringBuilder log)
@@ -76,8 +81,9 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// 帯 1 本。**上が火口、下が前進端**（<c>v</c> を縦に取る）。
-        /// 焦げた地面の上に、色 × 不透明度で重ねる。
+        /// One band. **The crater is at the top and the advancing front at the bottom**
+        /// (<c>v</c> runs vertically). It is composited over the scorched ground as
+        /// colour × opacity.
         /// </summary>
         private static byte[] Draw(float coolUnit, out float mean, out float max)
         {

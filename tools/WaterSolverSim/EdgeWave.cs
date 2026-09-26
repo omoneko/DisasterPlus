@@ -3,50 +3,54 @@ using System;
 namespace DisasterPlus.Tools.WaterSolverSim
 {
     /// <summary>
-    /// <b>DLC の津波そのもの。</b><c>WaterWave.GetSeaLevel</c>（<c>m_type == 1</c>）の再現。
+    /// <b>The DLC tsunami itself.</b> A reproduction of <c>WaterWave.GetSeaLevel</c>
+    /// (<c>m_type == 1</c>).
     ///
-    /// ── なぜ移植するのか（2026-08-31）────────────────────────────
+    /// ── Why port it (2026-08-31) ────────────────────────────
     ///
-    /// こちらの波は <c>TYPE_IMPACT</c>、つまり<b>海の中に置く仮想の丘</b>である。
-    /// 丘は水を押しのけるだけで<b>水を作らない</b> —— 押した分は必ずどこかから
-    /// 引いてくる。だから正味ゼロの外力しか出せず、出せるのは「双極子」であって
-    /// 「水の壁」ではない。
+    /// Our wave is <c>TYPE_IMPACT</c>, i.e. <b>a virtual hill placed in the sea</b>.
+    /// A hill only displaces water, it <b>does not create any</b> —— whatever it pushes must
+    /// come from somewhere else. So it can only apply a net-zero external force; what it
+    /// produces is a "dipole", not a "wall of water".
     ///
-    /// DLC の津波は<b>まったく別の仕掛け</b>である。<c>SimulateWater</c> の
-    /// 最外周ループの中でしか評価されず、そこで<b>外周セルの海面そのものを
-    /// 書き換える</b>。外周は Dirichlet 境界 —— 足りなければ<b>水を湧かせる</b>。
+    /// The DLC tsunami is <b>an entirely different trick</b>. It is only evaluated inside the
+    /// outermost-ring loop of <c>SimulateWater</c>, and there it <b>rewrites the sea surface
+    /// of the outermost cells themselves</b>. That ring is a Dirichlet boundary —— if there
+    /// is not enough water it <b>creates some</b>.
     ///
-    /// ★★ **つまり DLC の津波は無限の水源であり、こちらの波は水の使い回しである。**
-    ///   同じ土俵で比べない限り「power が足りない」の正体は分からない。
-    ///   このクラスはその土俵を作るためだけに在る。
+    /// ★★ **So the DLC tsunami is an infinite water source, whereas our wave recycles the
+    ///   water it already has.** Until the two are compared on the same footing, there is no
+    ///   telling what "not enough power" really means. This class exists solely to create
+    ///   that footing.
     ///
-    /// ── IL（docs/superpowers/specs/2026-08-29-tsunami-il-facts.md §3）────
+    /// ── The IL (docs/superpowers/specs/2026-08-29-tsunami-il-facts.md §3) ────
     ///
     /// <code>
-    /// phase = ((x - origX)*dirX + (z - origZ)*dirZ) &gt;&gt; 8   // dir 長 32768 -&gt; 1 セル = 128
+    /// phase = ((x - origX)*dirX + (z - origZ)*dirZ) &gt;&gt; 8   // dir length 32768 -&gt; 1 cell = 128
     /// t     = currentTime - phase
     /// if (t &lt;= 0 || t &gt;= duration) return original
     /// amp   = delta * (65536 - currentTime) / 65536
-    /// arg   = amp - amp*cos(2*pi * t / duration)             // (1-cos) の包絡
-    /// off   = arg * sin(2*pi * 1.5 * t / duration) / 2       // 1.5 周期
+    /// arg   = amp - amp*cos(2*pi * t / duration)             // the (1-cos) envelope
+    /// off   = arg * sin(2*pi * 1.5 * t / duration) / 2       // 1.5 cycles
     /// return original - off
     /// </code>
     ///
-    /// 押し波の頂点は <c>t = duration/2</c> で <c>original + amp</c>。
-    /// <c>currentTime</c> は 1 水ステップにつき +64、<c>duration = 16384</c>
-    /// ＝ **256 水ステップで終わる。**
+    /// The crest of the leading wave is at <c>t = duration/2</c> and reaches
+    /// <c>original + amp</c>. <c>currentTime</c> advances by +64 per water step and
+    /// <c>duration = 16384</c>, i.e. **it is over after 256 water steps.**
     /// </summary>
     public sealed class EdgeWave
     {
-        /// <summary><c>m_duration</c>。バニラは <c>256 &lt;&lt; 6 = 16384</c>。</summary>
+        /// <summary><c>m_duration</c>. Vanilla uses <c>256 &lt;&lt; 6 = 16384</c>.</summary>
         public const int VanillaDuration = 16384;
 
-        /// <summary>1 水ステップぶんの <c>m_currentTime</c> の進み（IL_03B3-03C6）。</summary>
+        /// <summary>How far <c>m_currentTime</c> advances per water step
+        /// (IL_03B3-03C6).</summary>
         public const int TimePerStep = 64;
 
         /// <summary>
-        /// <c>m_delta</c>（1/64 m）。<c>round(64 * 64 * intensity / 55)</c>。
-        /// intensity 100 で 7447（116.4 m）、255 で 18991（296.7 m）。
+        /// <c>m_delta</c> (1/64 m). <c>round(64 * 64 * intensity / 55)</c>.
+        /// At intensity 100 that is 7447 (116.4 m), at 255 it is 18991 (296.7 m).
         /// </summary>
         public static int DeltaFor(int intensity)
         {
@@ -55,7 +59,7 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
         public int OrigX;
         public int OrigZ;
-        public int DirX = 32768;   // 内向き、長さ 32768
+        public int DirX = 32768;   // pointing inwards, length 32768
         public int DirZ;
         public int MinX;
         public int MinZ;
@@ -65,14 +69,15 @@ namespace DisasterPlus.Tools.WaterSolverSim
         public int Duration = VanillaDuration;
         public int CurrentTime;
 
-        /// <summary>まだ海面を動かしているか。</summary>
+        /// <summary>Whether it is still moving the sea surface.</summary>
         public bool Active { get { return CurrentTime < Duration; } }
 
-        /// <summary>1 水ステップ進める。</summary>
+        /// <summary>Advance by one water step.</summary>
         public void Step() { CurrentTime += TimePerStep; }
 
         /// <summary>
-        /// この外周セルの海面（1/64 m）。bbox の外と時間外は <paramref name="original"/> のまま。
+        /// The sea surface at this outermost cell (1/64 m). Outside the bbox and outside the
+        /// time window, <paramref name="original"/> is returned unchanged.
         /// </summary>
         public int LevelAt(int x, int z, int original)
         {

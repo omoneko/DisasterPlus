@@ -7,37 +7,43 @@ using ICities;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 生存中の火災旋風を保存する。
+    /// Saves the fire whirls that are alive.
     ///
-    /// 論理状態のみを保存し、パーティクル・エフェクト・車両参照は再構築する。
-    /// 見た目や実行時の参照まで保存すると、ロード順に依存するバグを作るだけになる。
+    /// Only the logical state is saved; particles, effects and vehicle references are rebuilt.
+    /// Save the appearance and the runtime references too and all you create are bugs that
+    /// depend on load order.
     ///
-    /// 先頭にバージョンを書き、読み込み側は追加ブロックごとに if (version >= N) で分岐する。
-    /// 旧セーブは既定値で読める。
+    /// The version is written first, and the reading side branches on if (version >= N) for
+    /// each added block. Old saves can be read with defaults.
     ///
-    /// ロード順の注意: OnLoadData は LoadingManager.LoadSimulationData の中で呼ばれ、
-    /// LoadingExtensionBase.OnLevelLoaded（DisasterPlusLoading.OnLevelLoaded、
-    /// FireWhirlRegistry.Clear() を呼ぶ）より前に完了する。
-    /// そのためここで直接 FireWhirlRegistry.RestoreFromSave を呼ぶと、
-    /// 直後の Clear() で消される。復元先のリストは一旦ここに保留し、
-    /// DisasterPlusLoading.OnLevelLoaded が Clear() の後に TakePendingRestore() で取り出して適用する。
+    /// A note on load order: OnLoadData is called inside LoadingManager.LoadSimulationData and
+    /// finishes before LoadingExtensionBase.OnLevelLoaded (DisasterPlusLoading.OnLevelLoaded,
+    /// which calls FireWhirlRegistry.Clear()).
+    /// So calling FireWhirlRegistry.RestoreFromSave directly here would have it wiped out by
+    /// the Clear() that follows. The list to restore is parked here for the time being, and
+    /// DisasterPlusLoading.OnLevelLoaded pulls it out with TakePendingRestore() after Clear()
+    /// and applies it.
     /// </summary>
     public class DisasterPlusSerialization : ISerializableDataExtension
     {
         private const string DataId = "DisasterPlus.FireWhirl";
 
         /// <summary>
-        /// 2: Manual（手動発生）フラグを追加。
+        /// 2: added the Manual (raised by hand) flag.
         ///
-        /// 保存しないと、ロード後に手動発生の旋風が自動発生扱いに変わり、
-        /// 周囲に火が無いので条件割り込みの猶予だけで消える。
-        /// 「セーブ・ロードを挟むと勝手に消える」は原因の見えない不具合になるので保存する。
+        /// Without saving it, a hand-raised whirl turns into an automatic one after loading,
+        /// and since there is no fire around it, it dies as soon as the grace period for the
+        /// condition break runs out.
+        /// "It vanishes by itself if you save and load" would be a fault with no visible
+        /// cause, so it is saved.
         /// </summary>
         private const int CurrentVersion = 2;
 
         /// <summary>
-        /// OnLoadData で読み取った復元待ちの一覧。OnLevelLoaded が Clear() の後に取り出すまでの一時置き場。
-        /// メインスレッドのロード処理内でのみ書き / 読みされる（ロード中は sim tick が回っていない）。
+        /// The list awaiting restore, read in OnLoadData. A holding place until OnLevelLoaded
+        /// pulls it out after Clear().
+        /// Only written and read inside the main thread's load processing (no sim tick is
+        /// running during a load).
         /// </summary>
         private static List<SavedFireWhirl> _pendingRestore;
 
@@ -48,22 +54,24 @@ namespace DisasterPlus.Game
 
         public void OnSaveData()
         {
-            // ★ 水源の m_target は WaterSimulation.Data.Serialize でセーブに焼き付く
-            //   （④の IL 事実文書 §D-4）。MOD を外したセーブで川が溢れたままに
-            //   ならないよう、**保存の前に必ず戻す**。火災旋風の保存処理より前に置く
-            //   ——「早期 return しても戻し損ねない」を構造で保証するため
-            //   （下の if (_data == null) より上にある理由）。
+            // ★ A water source's m_target is burnt into the save by
+            //   WaterSimulation.Data.Serialize (④'s IL findings document §D-4). So that a
+            //   save with the mod removed is not left with an overflowing river,
+            //   **always put it back before saving**. It goes before the fire whirl saving —
+            //   so that the structure itself guarantees "an early return cannot skip the
+            //   restore" (which is why it sits above the if (_data == null) below).
             RestoreFloodedRiversForSave();
 
-            // ★★ ②の津波も同じ理由で外す。あちらは MOD が<b>自分で作った</b>
-            //   水源なので、残ると MOD を外しても消えない
-            //   （<c>TsunamiRing</c> のクラス doc §3）。
+            // ★★ ②'s tsunami comes off for the same reason. That one is a water source the
+            //   mod <b>made itself</b>, so if it is left behind it does not go away even when
+            //   the mod is removed (see the <c>TsunamiRing</c> class doc §3).
             LiftTsunamiSourceForSave();
 
-            // ★ 天候の上書きも同じ理由でセーブに焼き付く（WeatherManager+Data.Serialize は
-            //   m_targetRain / m_targetCloud / m_forceWeatherOn を書く。全体レビュー I2 で
-            //   IL 実測）。水源と同じく**保存の前に降ろし、AddAction で戻す**。
-            //   早期 return より上に置くのも同じ理由である。
+            // ★ The weather override is burnt into the save for the same reason
+            //   (WeatherManager+Data.Serialize writes m_targetRain / m_targetCloud /
+            //   m_forceWeatherOn. Measured from the IL in overall review I2). As with the
+            //   water source, **lower it before saving and put it back with AddAction**.
+            //   It sits above the early return for the same reason.
             LowerTyphoonWeatherForSave();
 
             if (_data == null) return;
@@ -86,7 +94,7 @@ namespace DisasterPlus.Game
                     w.Write(v.Radius);
                     w.Write(v.BurningCount);
                     w.Write(v.ElapsedMinutes);
-                    w.Write(v.Manual);          // version 2 以降
+                    w.Write(v.Manual);          // version 2 onwards
                 }
 
                 _data.SaveData(DataId, ms.ToArray());
@@ -96,20 +104,22 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ④が持ち上げている河川の水位を、**バニラが水源配列を書く前に**元へ戻す。
+        /// Puts the river water levels ④ has raised back, **before vanilla writes the water
+        /// source array**.
         ///
-        /// **再適用は <c>SimulationManager.AddAction</c> で遅らせる。** ここで
-        /// （あるいは <c>finally</c> で）すぐ戻し直すと、バニラが配列を書く前に
-        /// 持ち上げ直すことになり漏れが再発する ——
-        /// **MOD の <c>OnSaveData</c> はバニラの配列書き込みより先に走る**というのは、
-        /// 本プロジェクトが一時フラグの漏れで一度出荷して確定させた事実である。
+        /// **Delay the re-application with <c>SimulationManager.AddAction</c>.** Put it
+        /// straight back here (or in a <c>finally</c>) and you would raise it again before
+        /// vanilla writes the array, and the leak returns —
+        /// **a mod's <c>OnSaveData</c> runs before vanilla's array write** is a fact this
+        /// project settled the hard way, having once shipped a temporary-flag leak.
         ///
-        /// <c>SimulationManager.AddAction(System.Action)</c> は public instance で
-        /// <c>AsyncAction</c> を返す（④ Task 8 で IL 実測）。渡したデリゲートは
-        /// **sim スレッド**で走るので、<c>TyphoonFlood</c> のスレッド契約を破らない。
+        /// <c>SimulationManager.AddAction(System.Action)</c> is a public instance method
+        /// returning an <c>AsyncAction</c> (measured from the IL in ④ Task 8). The delegate
+        /// passed runs on **the sim thread**, so it does not break <c>TyphoonFlood</c>'s
+        /// threading contract.
         ///
-        /// ここで例外を出して**セーブそのものを失敗させない**。水位が戻ったままに
-        /// なるだけで、セーブは正しく（溢れていない状態で）書かれる。
+        /// **Do not fail the save itself** by throwing here. At worst the water level stays
+        /// lowered, and the save is written correctly (in the un-flooded state).
         /// </summary>
         private static void RestoreFloodedRiversForSave()
         {
@@ -118,8 +128,8 @@ namespace DisasterPlus.Game
                 var raised = TyphoonFlood.SnapshotAndRestoreForSave();
                 if (raised == null || raised.Count == 0) return;
 
-                // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-                // new GameObject を走らせるので、exists で先に確認する。
+                // When sInstance is null, Singleton<T>.instance runs FindObjectOfType and
+                // new GameObject, so check exists first.
                 if (!Singleton<SimulationManager>.exists) return;
 
                 Singleton<SimulationManager>.instance.AddAction(delegate
@@ -135,16 +145,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ④が握っている天候の上書きを、**バニラが <c>WeatherManager+Data</c> を書く前に**
-        /// 降ろし、セーブが終わってから <c>AddAction</c> で戻す。
+        /// Lowers the weather override ④ is holding **before vanilla writes
+        /// <c>WeatherManager+Data</c>**, and puts it back with <c>AddAction</c> once the save
+        /// is done.
         ///
-        /// 形は <see cref="RestoreFloodedRiversForSave"/> と同じで、理由も同じである
-        /// （MOD の <c>OnSaveData</c> はバニラの書き込みより先に走る。すぐ戻し直すと
-        /// 漏れが再発する）。**戻しを次の sim tick の <c>TyphoonWeather.Drive</c> に
-        /// 任せない** —— ポーズ中に保存されるとポーズガードがそれを止めるので、
-        /// ポーズを解くまで雨だけが消えたままになる。
+        /// The shape is the same as <see cref="RestoreFloodedRiversForSave"/>, and so is the
+        /// reason (a mod's <c>OnSaveData</c> runs before vanilla's write. Put it straight back
+        /// and the leak returns). **Do not leave the restore to the next sim tick's
+        /// <c>TyphoonWeather.Drive</c>** — if the save happens while paused, the pause guard
+        /// stops that, so the rain alone stays gone until the pause is lifted.
         ///
-        /// ここで例外を出して**セーブそのものを失敗させない**。
+        /// **Do not fail the save itself** by throwing here.
         /// </summary>
         private static void LowerTyphoonWeatherForSave()
         {
@@ -153,8 +164,8 @@ namespace DisasterPlus.Game
                 bool wasDriving = TyphoonWeather.SuspendForSave();
                 if (!wasDriving) return;
 
-                // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-                // new GameObject を走らせるので、exists で先に確認する。
+                // When sInstance is null, Singleton<T>.instance runs FindObjectOfType and
+                // new GameObject, so check exists first.
                 if (!Singleton<SimulationManager>.exists) return;
 
                 Singleton<SimulationManager>.instance.AddAction(delegate
@@ -170,14 +181,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ②が置いている津波の水源を、**バニラが水源配列を書く前に**外し、
-        /// 保存が終わってから <c>AddAction</c> で戻す。
+        /// Removes the tsunami water source ② has placed **before vanilla writes the water
+        /// source array**, and puts it back with <c>AddAction</c> once the save is done.
         ///
-        /// 形は <see cref="RestoreFloodedRiversForSave"/> と同じで、理由も同じである。
-        /// ただし④が触るのは<b>マップに元から在る</b>水源の <c>m_target</c> なのに対し、
-        /// ②の水源は<b>MOD が作ったもの</b>なので、残ると MOD を外しても消えない。
+        /// The shape is the same as <see cref="RestoreFloodedRiversForSave"/>, and so is the
+        /// reason. The difference is that what ④ touches is the <c>m_target</c> of a water
+        /// source <b>that was already on the map</b>, whereas ②'s water source is <b>one the
+        /// mod made</b>, so if it is left behind it does not go away even when the mod is
+        /// removed.
         ///
-        /// ここで例外を出して**セーブそのものを失敗させない**。
+        /// **Do not fail the save itself** by throwing here.
         /// </summary>
         private static void LiftTsunamiSourceForSave()
         {
@@ -185,8 +198,8 @@ namespace DisasterPlus.Game
             {
                 if (!TsunamiRing.SuspendForSave()) return;
 
-                // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-                // new GameObject を走らせるので、exists で先に確認する。
+                // When sInstance is null, Singleton<T>.instance runs FindObjectOfType and
+                // new GameObject, so check exists first.
                 if (!Singleton<SimulationManager>.exists) return;
 
                 Singleton<SimulationManager>.instance.AddAction(delegate
@@ -203,10 +216,11 @@ namespace DisasterPlus.Game
 
         public void OnLoadData()
         {
-            // 前回ロード分の残骸を必ず捨てる。ここより下のどの早期 return でも
-            // （_data == null、blob 無し、version < 1、例外）古い保留が残ったままだと、
-            // 次に読む都市が今回データを持っていない場合に TakePendingRestore() が
-            // 前回都市の一覧を渡してしまい、無関係な都市に火災旋風が湧く。
+            // Always throw away the leftovers from the previous load. If a stale pending list
+            // survived any of the early returns below (_data == null, no blob, version < 1,
+            // an exception), then when the next city read has no data of its own
+            // TakePendingRestore() would hand over the previous city's list, and fire whirls
+            // would spring up in an unrelated city.
             _pendingRestore = null;
 
             if (_data == null) return;
@@ -238,8 +252,9 @@ namespace DisasterPlus.Game
                         s.BurningCount = r.ReadInt32();
                         s.ElapsedMinutes = r.ReadSingle();
 
-                        // version 1 のセーブには Manual のバイトが無い。読まずに既定の false のままにする
-                        // （ここで読むとストリームがずれて以降の全エントリが壊れる）。
+                        // A version 1 save has no byte for Manual. Do not read it and leave it
+                        // at the default of false (read it here and the stream goes out of
+                        // step, corrupting every entry after it).
                         if (version >= 2) s.Manual = r.ReadBoolean();
 
                         if (!IsValid(s))
@@ -260,23 +275,25 @@ namespace DisasterPlus.Game
 
             if (rejected > 0)
             {
-                // 壊れた blob の一部が NaN/Infinity を持っていた場合の保険。
-                // FireWhirlLifecycle.Advance/Evaluate は NaN <= / >= 比較が常に false になるため、
-                // 弾かずに通すと絶対寿命の上限が効かなくなる（延焼フィードバックの唯一の安全弁が消える）。
-                // 頻発するものではない（ロード時に一度だけ）ので Diag ではなく Warn でよい。
+                // Insurance for the case where part of a corrupted blob held NaN/Infinity.
+                // In FireWhirlLifecycle.Advance/Evaluate a NaN <= / >= comparison is always
+                // false, so letting one through unrejected would disable the absolute
+                // lifetime cap (the only safety valve on the spread feedback).
+                // This does not happen often (once at load time), so Warn rather than Diag.
                 Log.Warn("fire whirl load: rejected " + rejected + " entr" +
                     (rejected == 1 ? "y" : "ies") + " with invalid data (NaN/Infinity/negative radius)");
             }
 
-            // ここでは適用しない（Clear() が後から来る）。OnLevelLoaded 側で取り出させる。
+            // Do not apply it here (Clear() comes later). Let the OnLevelLoaded side pull it out.
             _pendingRestore = restored;
             Log.Info("loaded " + restored.Count + " fire whirls; pending apply");
         }
 
         /// <summary>
-        /// 壊れたセーブデータへの保険。NaN/Infinity は FireWhirlLifecycle の比較
-        /// （NaN &lt;= / &gt;= は常に false）をすり抜けて絶対寿命の上限を無効化してしまうため、
-        /// ここで弾く。Core 側の契約は変えない（デシリアライズ側の責務）。
+        /// Insurance against corrupted save data. NaN/Infinity slips past FireWhirlLifecycle's
+        /// comparisons (NaN &lt;= / &gt;= is always false) and disables the absolute lifetime
+        /// cap, so it is rejected here. Core's contract is left unchanged (this is the
+        /// deserialiser's responsibility).
         /// </summary>
         private static bool IsValid(SavedFireWhirl s)
         {
@@ -290,9 +307,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// DisasterPlusLoading.OnLevelLoaded から、FireWhirlRegistry.Clear() の後に呼ぶ。
-        /// 保留分を取り出し、内部の保留状態は消費済みにする（次のロードに前回分を持ち越さない）。
-        /// 復元対象が無ければ null を返す。
+        /// Called from DisasterPlusLoading.OnLevelLoaded, after FireWhirlRegistry.Clear().
+        /// Takes the pending list out and marks the internal pending state consumed (so the
+        /// previous one is not carried over to the next load).
+        /// Returns null if there is nothing to restore.
         /// </summary>
         public static List<SavedFireWhirl> TakePendingRestore()
         {
@@ -303,9 +321,10 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// セーブから読み戻した 1 基。車両 ID は保存しない（ロード後に付け直す）。
-    /// Ending（終了処理中）フラグは保存しない — 仕様上の既知の制約。
-    /// 終了処理の途中でセーブすると、ロード後は完全に生きた状態から復帰する。
+    /// One whirl read back from a save. The vehicle IDs are not saved (they are reattached
+    /// after loading).
+    /// The Ending (finishing up) flag is not saved — a known limitation by design.
+    /// Save part-way through the finishing sequence and it comes back fully alive after loading.
     /// </summary>
     public class SavedFireWhirl
     {
@@ -315,7 +334,7 @@ namespace DisasterPlus.Game
         public int BurningCount;
         public float ElapsedMinutes;
 
-        /// <summary>手動発生か（version 2 以降）。旧セーブからは false で読む。</summary>
+        /// <summary>Whether it was raised by hand (version 2 onwards). Read as false from old saves.</summary>
         public bool Manual;
     }
 }

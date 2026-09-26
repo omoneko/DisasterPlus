@@ -4,47 +4,48 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 震度分布オーバーレイの操作と凡例。<see cref="EarthquakePanel"/> の一部だが、
-    /// **あのファイルをこれ以上伸ばさない**ために別ファイルにしてある
-    /// （プロジェクト規約は 800 行）。
+    /// The controls and legend for the seismic-intensity overlay. Part of
+    /// <see cref="EarthquakePanel"/>, but in its own file **so that file does not grow
+    /// any further** (the project's rule is 800 lines).
     ///
-    /// ── 層の分離の担保はそのまま ─────────────────────────────
+    /// ── The layer separation still holds ─────────────────────────────
     ///
-    /// このファイルは <c>AddUIComponent(typeof(UILabel))</c> も
-    /// <c>UILabel.text</c> への代入も**書かない**。行は
+    /// This file **never writes** <c>AddUIComponent(typeof(UILabel))</c> or an assignment
+    /// to <c>UILabel.text</c>. Rows can only be made through
     /// <see cref="EarthquakeRows.AddPlainRow"/> /
-    /// <see cref="EarthquakeRows.AddLayer1Row(UIPanel,string,ref float,float)"/> を
-    /// 通してしか作れず、中身は <see cref="EarthquakeRows.SetPlain"/> /
-    /// <see cref="EarthquakeRows.SetLayer1"/> を通してしか書けない
-    /// （<c>Strings.SourceVanilla</c> はあちらのセッターの中にしか現れない）。
-    /// つまり「grep 1 回で確認できる」という担保は壊れていない。
+    /// <see cref="EarthquakeRows.AddLayer1Row(UIPanel,string,ref float,float)"/>, and
+    /// their contents can only be written through <see cref="EarthquakeRows.SetPlain"/> /
+    /// <see cref="EarthquakeRows.SetLayer1"/> (<c>Strings.SourceVanilla</c> appears
+    /// nowhere but inside those setters). So the guarantee that "one grep confirms it"
+    /// is intact.
     ///
-    /// ── 既定 OFF、ただし隠さない ─────────────────────────────
+    /// ── Off by default, but not hidden ───────────────────────────────
     ///
-    /// オーバーレイは常時表示にしない（地震のフレームはゲーム中で最も重く、
-    /// 常に地図を塗り潰していると都市そのものが見えない）。かといって
-    /// 設定画面の奥のチェックボックスにもしない ——「分布が見たい」という
-    /// 依頼そのものに対する答えが、見つけられない場所にあっては意味が無い。
-    /// **パネルの中に、バニラのハザードビューのボタンと並べて置く。**
+    /// The overlay is not on permanently (an earthquake's frames are the heaviest in the
+    /// game, and with the map painted over the whole time you cannot see the city at
+    /// all). Nor is it a checkbox buried in the options screen — an answer to the very
+    /// request "I want to see the distribution" is worthless somewhere nobody will find
+    /// it. **It goes in the panel, next to the button for vanilla's hazard view.**
     ///
-    /// ── 隣のボタンと混同させない ─────────────────────────────
+    /// ── Don't let it be confused with the button beside it ───────────
     ///
-    /// すぐ上の「マップに表示」はバニラの情報ビュー
-    /// （<c>SubInfoMode.EarthquakeHazard</c>）で、塗る形が**違う**:
-    /// 亀裂**線分**までの距離・2 次減衰・<c>Rmax = R + 400</c>、しかも
-    /// <c>Located</c>（＝地震計）が無いと 1 セルも塗られない（§A-6）。
-    /// 一方このオーバーレイは震央からの線形ランプで、地震計が無くても出る。
-    /// 誤解を防ぐ手当てを 3 段重ねてある:
-    ///   1. 凡例（常設）が両者の違いを名指しする
-    ///   2. 2 つが同時に出ているときは、状態行がそれを名指しする
-    ///   3. 色相を分ける（バニラのハザードは黄〜赤系、こちらは青緑）
+    /// "Show on map" just above it is vanilla's info view
+    /// (<c>SubInfoMode.EarthquakeHazard</c>), and it paints a **different** shape:
+    /// distance to the crack **line segment**, quadratic falloff, <c>Rmax = R + 400</c> —
+    /// and without <c>Located</c> (i.e. a seismograph) not a single cell is painted
+    /// (§A-6). This overlay, by contrast, is a linear ramp from the epicentre and shows
+    /// up with no seismograph at all. There are three layers of defence against the
+    /// confusion:
+    ///   1. the legend (always present) names the difference between the two
+    ///   2. when both are up at once, the status row says so
+    ///   3. they use different hues (vanilla's hazard is yellow-to-red, this one is teal)
     /// </summary>
     internal static class EarthquakeOverlayRows
     {
         private static UIButton _button;
         private static UILabel _statusLabel;
 
-        /// <summary>パネル構築時に 1 回。<paramref name="y"/> を進める。</summary>
+        /// <summary>Once, when the panel is built. Advances <paramref name="y"/>.</summary>
         internal static void Build(UIPanel panel, ref float y)
         {
             _button = (UIButton)panel.AddUIComponent(typeof(UIButton));
@@ -60,21 +61,23 @@ namespace DisasterPlus.Game
             _button.eventClick += (c, e) => EarthquakeOverlay.Toggle();
             y += 30f;
 
-            // 状態は第 1 層で名乗る。出している量がバニラの実測値そのものだからである。
+            // The status declares itself as layer 1, because the quantity it shows is a
+            // value measured straight out of vanilla.
             _statusLabel = EarthquakeRows.AddLayer1Row(panel, "OverlayStatus", ref y, 42f);
 
-            // 凡例は**常設**。地震が無くても、読み取りに失敗していても出す
-            // （これは「今の観測値」ではなく「この絵の読み方」である。
-            //  Strings.EarthquakeSensorEffect と同じ扱いで、一度書いたら
-            //  以後どこからも書き換えない＝参照を保持する必要が無い）。
+            // The legend is **always there**. It shows with no earthquake, and it shows
+            // when the read failed (it is not "the current reading" but "how to read
+            // this picture". Treated like Strings.EarthquakeSensorEffect: written once
+            // and never rewritten from anywhere afterwards, so no reference need be
+            // kept).
             EarthquakeRows.AddPlainRow(panel, "OverlayLegend", ref y,
                 Strings.EarthquakeOverlayLegend, 72f);
         }
 
         /// <summary>
-        /// 毎フレーム。<paramref name="hazardViewOn"/> はバニラのハザード情報ビューが
-        /// 表示中かどうかで、呼び出し側が既に 1 回だけ求めている値を受け取る
-        /// （同じフレームで <c>InfoManager</c> を 2 回引かない）。
+        /// Every frame. <paramref name="hazardViewOn"/> says whether vanilla's hazard info
+        /// view is up; it is passed in because the caller has already worked it out once
+        /// (so <c>InfoManager</c> is not queried twice in the same frame).
         /// </summary>
         internal static void Refresh(bool hazardViewOn)
         {
@@ -86,7 +89,8 @@ namespace DisasterPlus.Game
 
             if (!EarthquakeOverlay.Registered)
             {
-                // 描画経路そのものが取れていない。黙って何も出ないのを避ける。
+                // We never got hold of the render path at all. Avoid silently showing
+                // nothing.
                 EarthquakeRows.SetLayer1(_statusLabel,
                     Strings.EarthquakeOverlayRow + ": " + Strings.EarthquakeOverlayUnavailable);
                 return;
@@ -102,8 +106,8 @@ namespace DisasterPlus.Game
             string text;
             if (EarthquakeOverlay.DrawnQuakes == 0)
             {
-                // ★ 0 を「安全」と読ませない。描くものが無い理由を書く
-                //    （①の ForecastNoStormDetected と同じ扱い）。
+                // ★ Never let 0 be read as "safe". Say why there is nothing to draw
+                //    (treated the same way as ①'s ForecastNoStormDetected).
                 text = Strings.EarthquakeOverlayRow + ": " + Strings.EarthquakeOverlayNothingToDraw;
             }
             else
@@ -123,7 +127,7 @@ namespace DisasterPlus.Game
             }
             if (hazardViewOn)
             {
-                // いちばん誤解が起きる状態。2 枚の絵が同時に出ている。
+                // The state that causes the most confusion: two pictures up at once.
                 text += "  " + Strings.EarthquakeOverlayBothOn;
             }
 
@@ -131,8 +135,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// スナップショットが読めていないとき。**凡例は消さない**
-        /// （絵の読み方は観測値ではない）。ボタンの表示だけは実状に合わせる。
+        /// For when the snapshot could not be read. **The legend is not cleared** (how to
+        /// read the picture is not a reading). Only the button's caption is brought into
+        /// line with reality.
         /// </summary>
         internal static void Clear()
         {
@@ -146,8 +151,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルアンロード時。パネルの <c>GameObject</c> ごと破棄されるので
-        /// 参照を捨てるだけでよい（<see cref="EarthquakePanel.Destroy"/> から）。
+        /// On level unload. The panel's <c>GameObject</c> is destroyed along with
+        /// everything on it, so dropping the references is all that is needed (called
+        /// from <see cref="EarthquakePanel.Destroy"/>).
         /// </summary>
         internal static void Destroy()
         {

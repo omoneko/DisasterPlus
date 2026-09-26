@@ -1,125 +1,141 @@
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// <b>震源から遠くても、規模に応じた確率で火災と倒壊が起きる。</b>
-    /// 海溝型地震のためのモデル。**エンジン非依存。**
+    /// <b>Far from the epicentre, fires and collapses still happen — at a rate that
+    /// scales with the magnitude.</b> The model behind the trench earthquake.
+    /// **Engine-free.**
     ///
-    /// ── 所有者の指示（2026-09-02）────────────────────────────────
+    /// ── What the owner asked for (2026-09-02) ─────────────────────────────
     ///
-    /// &gt; 海溝型地震の、地震による被害が少ないです。震源から離れていても
-    /// &gt; 一定確率で火災や倒壊が起きるようにしてください（地震の規模に合わせて）
+    /// &gt; The trench earthquake does too little damage. Make fires and collapses
+    /// &gt; happen at some rate even far from the epicentre (scaled to the magnitude).
     ///
-    /// ── ★★ なぜ海溝型<b>だけ</b>被害が少ないのか（原因は分かっている）───────
+    /// ── ★★ Why the trench quake <b>alone</b> was so harmless (the cause is known) ──
     ///
-    /// バニラの地震被害は <c>EarthquakeAI.SimulationStep</c> が
+    /// Vanilla earthquake damage comes out of <c>EarthquakeAI.SimulationStep</c> as
     ///
     /// <code>
-    /// R = 2000 + m_intensity * 20                     （§A-3、SeismicIntensity）
+    /// R = 2000 + m_intensity * 20                     (§A-3, SeismicIntensity)
     /// DestroyBuildings(preRadius: R, min: 0, max: R, probability: 0.02f)
-    ///   建物ごとに fD = 1 - dist/R  を掛ける
+    ///   each building is multiplied by fD = 1 - dist/R
     /// </code>
     ///
-    /// と<b>震央を中心にした円盤</b>で配る。断層型は<b>プレイヤーが指した場所</b>が
-    /// 震央なので、この円盤は街の上に落ちる。
+    /// — a <b>disc centred on the epicentre</b>. For a fault quake the epicentre is
+    /// <b>wherever the player clicked</b>, so that disc lands on the city.
     ///
-    /// ★★ **海溝型の震央は沖の海の上である**（<c>TrenchQuakeSlot</c> の定義）。
-    ///   だから円盤の中心は海に落ち、街に届くのは<b>外周のいちばん薄いところ</b>
-    ///   だけになる。強度 100 で R = 4,000 m、3 km 沖なら fD = 0.25、
-    ///   実効確率は <c>0.02 × 0.25 = 0.5%</c> —— <b>これが「被害が少ない」の正体で、
-    ///   バニラの不具合ではなく、円盤モデルを海の上に置いた当然の帰結である。</b>
+    /// ★★ **A trench quake's epicentre is out at sea** (that is the definition, see
+    ///   <c>TrenchQuakeSlot</c>). So the centre of the disc falls on water and all the
+    ///   city ever gets is <b>the thinnest part of the rim</b>. At intensity 100,
+    ///   R = 4,000 m; 3 km offshore gives fD = 0.25, so the effective chance is
+    ///   <c>0.02 × 0.25 = 0.5%</c> — <b>that is what "too little damage" really was.
+    ///   Not a bug in the game, just the inevitable result of putting a disc model
+    ///   out at sea.</b>
     ///
-    /// ── 現実の海溝型地震はそうではない ────────────────────────────
+    /// ── Real megathrust earthquakes do not behave that way ─────────────────
     ///
-    /// プレート境界の破壊は<b>数百 km の長さ</b>に及ぶので、震央からの距離で
-    /// きれいに減らない。遠方でも長く揺れ、<b>火災は転倒した火器と電気系から
-    /// 散発的に出る</b> —— 震央からの距離ではなく、そこに建物があるかで決まる。
+    /// A plate-boundary rupture runs for <b>hundreds of kilometres</b>, so it does not
+    /// fall off neatly with distance from the epicentre. Far away the shaking still
+    /// lasts a long time, and <b>fires break out here and there from toppled heaters
+    /// and electrical faults</b> — which depends on whether there are buildings there,
+    /// not on the distance to the epicentre.
     ///
-    /// そこでこのモデルは<b>床（<see cref="FloorFraction"/>）を持つ</b>。
-    /// 遠方でも近傍の <see cref="FloorFraction"/> 倍は残る。それが所有者の言う
-    /// 「離れていても一定確率で」である。
+    /// So this model <b>has a floor (<see cref="FloorFraction"/>)</b>. Even far out,
+    /// <see cref="FloorFraction"/> of the near-field rate survives. That is what the
+    /// owner meant by "at some rate even far away".
     ///
-    /// ── 規模との対応（「地震の規模に合わせて」）──────────────────────
+    /// ── Tying it to the magnitude ("scaled to the magnitude") ──────────────
     ///
-    /// 強度 <c>i</c> の効き方は <c>(i/255)²</c> にしてある。**線形にしない。**
-    /// 線形だと既定のスライダー（55）でも最大（255）の 1/5 の被害が出てしまい、
-    /// 「大地震だけが街を壊す」という区別が消える。二乗なら 1/21 になる。
+    /// Intensity <c>i</c> acts as <c>(i/255)²</c>. **Not linear.** Linear would make
+    /// the default slider (55) do a fifth of the damage of the maximum (255), which
+    /// erases the distinction that only a great earthquake wrecks the city. Squared,
+    /// it is a twenty-first.
     ///
-    /// 目安。**オフラインで数えた実測値**である（強さスライダー既定 6、
-    /// 4 km 四方に 8,000 棟の街、震央はその 3 km 沖）:
+    /// Rough figures. **These were counted offline, not estimated** (strength slider
+    /// at its default of 6, a city of 8,000 buildings in a 4 km square, epicentre
+    /// 3 km off its coast):
     ///
-    /// | 強度 | 到達 | 倒壊 | 出火 |
+    /// | Intensity | Reach | Collapsed | Set alight |
     /// |------|------|------|------|
-    /// | 55   |  9,300 m |   9 棟 |  14 棟 |
-    /// | 100  | 12,000 m |  32 棟 |  53 棟 |
-    /// | 150  | 15,000 m |  77 棟 | 129 棟 |
-    /// | 255  | 21,300 m | 243 棟 | 405 棟 |
+    /// | 55   |  9,300 m |   9 |  14 |
+    /// | 100  | 12,000 m |  32 |  53 |
+    /// | 150  | 15,000 m |  77 | 129 |
+    /// | 255  | 21,300 m | 243 | 405 |
     ///
-    /// 同じ条件でバニラの円盤が配るのは、強度 100 で <b>0.50%</b> ——
-    /// このモデルは <b>1.24%</b>（倒壊と出火の合計）で、約 2.5 倍である。
+    /// Under the same conditions vanilla's disc hands out <b>0.50%</b> at intensity
+    /// 100; this model gives <b>1.24%</b> (collapses and fires together), about 2.5×.
     ///
-    /// ── 抽選は (地震, 建物) だけで決まる ──────────────────────────
+    /// ── The draw depends on (quake, building) and nothing else ─────────────
     ///
-    /// ★★ **フレームも走査回数も混ぜない**（<c>LongPeriodDamage</c> と同じ規律）。
-    ///   混ぜると同じ建物が走査のたびに抽選し直され、<b>地震が長引くほど
-    ///   際限なく壊れる</b>。混ぜなければ、上の表は<b>走査が何回走っても変わらない</b>。
+    /// ★★ **Never mix in the frame or the sweep count** (the same discipline as
+    ///   <c>LongPeriodDamage</c>). Mix them in and the same building is re-drawn on
+    ///   every sweep, so <b>the longer the quake runs the more it destroys, without
+    ///   limit</b>. Leave them out and the table above <b>holds no matter how many
+    ///   sweeps run</b>.
     /// </summary>
     public static class DistantDamage
     {
         /// <summary>
-        /// 到達距離 ÷ バニラの全体円盤 R。
+        /// Reach ÷ vanilla's whole-quake disc R.
         ///
-        /// ★ 3 倍にしてあるのは、**強度 255 で 21,300 m ＝ マップ全域**を確実に
-        ///   覆うためである（25 タイル全域でも対角の半分は約 12,200 m）。
-        ///   既定のスライダー（55）でも 9,300 m あり、9 タイルの街はほぼ入る。
-        ///   海溝型の震央は沖にあるので、ここが短いと<b>街に一切届かない</b>。
+        /// ★ It is 3× so that **intensity 255 reaches 21,300 m — the whole map** (even
+        ///   across all 25 tiles, half the diagonal is only about 12,200 m). At the
+        ///   default slider (55) it is still 9,300 m, which covers most of a 9-tile
+        ///   city. A trench epicentre sits offshore, so if this were short the damage
+        ///   <b>would never reach the city at all</b>.
         /// </summary>
         public const float ReachFactor = 3f;
 
         /// <summary>
-        /// 到達端に残る割合。**これが「離れていても一定確率で」の中身である。**
-        /// 0 にすると距離に比例して消え、依頼の前と同じ「遠方は無傷」に戻る。
+        /// The fraction left at the far edge. **This is what "at some rate even far
+        /// away" actually means.** Set it to 0 and the damage fades with distance
+        /// again, back to the untouched-far-away behaviour the owner complained about.
         /// </summary>
         public const float FloorFraction = 0.35f;
 
         /// <summary>
-        /// 床を落とし始める位置（到達距離に対する割合）。
+        /// Where the floor starts being taken away, as a fraction of the reach.
         ///
-        /// ★ これが無いと、到達端で確率が <see cref="FloorFraction"/> から 0 へ
-        ///   <b>段差で落ちる</b>。マップの端で被害がぷつりと切れるのは目に見えるので、
-        ///   外側の 1/4 で滑らかに 0 へ落とす。
+        /// ★ Without this the chance drops <b>in a step</b> from
+        ///   <see cref="FloorFraction"/> to 0 at the edge of the reach. Damage
+        ///   stopping dead along a line on the map is visible, so the outer quarter
+        ///   eases it down to 0 instead.
         /// </summary>
         public const float TaperStart = 0.75f;
 
-        /// <summary>強度 255・震央・強さ満目盛りでの倒壊確率。</summary>
+        /// <summary>Collapse chance at intensity 255, at the epicentre, at full strength.</summary>
         public const float PeakCollapseChance = 0.06f;
 
         /// <summary>
-        /// 同・出火確率。**倒壊より高い。** 海溝型で街を焼くのは主に火災で、
-        /// 倒壊は揺れの強い近傍に偏る（1923 も 1995 も 2011 もそうだった）。
+        /// The same for fires. **Higher than the collapse chance.** What burns a city
+        /// down after a megathrust is mostly fire; collapses cluster where the shaking
+        /// is strongest (1923, 1995 and 2011 all went that way).
         /// </summary>
         public const float PeakFireChance = 0.10f;
 
-        /// <summary>1 棟あたりの倒壊確率の上限。</summary>
+        /// <summary>Ceiling on the collapse chance for one building.</summary>
         public const float MaxCollapseChance = 0.25f;
 
-        /// <summary>1 棟あたりの出火確率の上限。</summary>
+        /// <summary>Ceiling on the fire chance for one building.</summary>
         public const float MaxFireChance = 0.35f;
 
-        /// <summary>強さスライダーの満目盛り。<c>strength / 10</c> が倍率になる。</summary>
+        /// <summary>Full scale on the strength slider. <c>strength / 10</c> is the multiplier.</summary>
         public const float MaxStrength = 10f;
 
         /// <summary>
-        /// 火災の抽選に使う塩。倒壊と<b>同じ鍵で引かない</b> ——
-        /// 同じ鍵だと「倒壊しなかった建物ほど燃えにくい」という相関が付き、
-        /// 2 つの災いが独立でなくなる。
+        /// Salt for the fire draw. <b>Do not draw it with the same key as the
+        /// collapse</b> — the same key would correlate the two, making a building that
+        /// survived the collapse draw less likely to catch fire, so the two misfortunes
+        /// would stop being independent.
         /// </summary>
         public const uint FireSalt = 0x5EA1F17Eu;
 
         /// <summary>
-        /// この被害が届く距離（m）。バニラの全体円盤の <see cref="ReachFactor"/> 倍。
+        /// How far this damage reaches (m): <see cref="ReachFactor"/> × vanilla's
+        /// whole-quake disc.
         ///
-        /// ★ これは<b>本 MOD がこの被害を足す範囲</b>であって、揺れの物理的な
-        ///   境界ではない（<c>LongPeriodResponse.RangeOf</c> と同じ断り）。
+        /// ★ This is <b>the range over which this mod adds damage</b>, not a physical
+        ///   boundary of the shaking (the same caveat as
+        ///   <c>LongPeriodResponse.RangeOf</c>).
         /// </summary>
         public static float ReachMetres(byte intensity)
         {
@@ -127,12 +143,12 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 距離による減り方（[0, 1]）。震央で 1、到達端で 0。
+        /// Falloff with distance ([0, 1]): 1 at the epicentre, 0 at the far edge.
         ///
         /// <code>
         /// u = d / reach
-        /// f = Floor + (1 - Floor) * (1 - u)          床のぶんは遠方でも残る
-        /// if (u &gt; TaperStart) f *= (1 - u) / (1 - TaperStart)    端で 0 へ
+        /// f = Floor + (1 - Floor) * (1 - u)          the floor survives far out
+        /// if (u &gt; TaperStart) f *= (1 - u) / (1 - TaperStart)    eased to 0 at the edge
         /// </code>
         /// </summary>
         public static float Falloff(float distance, byte intensity)
@@ -140,7 +156,7 @@ namespace DisasterPlus.Core.Earthquake
             float reach = ReachMetres(intensity);
             if (!(reach > 0f)) return 0f;
 
-            // NaN は !(d >= 0) 側で落ちる。
+            // NaN falls out on the !(d >= 0) side.
             if (!(distance >= 0f)) return 0f;
             if (distance >= reach) return 0f;
 
@@ -157,7 +173,7 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 規模の効き方（[0, 1]）。<c>(i/255)²</c>（クラス doc）。
+        /// How the magnitude acts ([0, 1]): <c>(i/255)²</c> (see the class doc).
         /// </summary>
         public static float MagnitudeFactor(byte intensity)
         {
@@ -166,18 +182,22 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// この建物が倒壊する確率。**0 を返す条件は全て「壊さない」側に倒れている。**
+        /// The chance this building collapses. **Every condition that returns 0 errs
+        /// on the side of destroying nothing.**
         /// </summary>
-        /// <param name="distance">震央からの水平距離（m）。</param>
-        /// <param name="intensity"><c>DisasterData.m_intensity</c> の生値。</param>
-        /// <param name="strength">設定の強さ（0〜10）。0 で完全に無効。</param>
+        /// <param name="distance">Horizontal distance from the epicentre (m).</param>
+        /// <param name="intensity">The raw <c>DisasterData.m_intensity</c>.</param>
+        /// <param name="strength">The strength setting (0-10). 0 disables it completely.</param>
         public static float CollapseChance(float distance, byte intensity, float strength)
         {
             return ChanceOf(distance, intensity, strength,
                             PeakCollapseChance, MaxCollapseChance);
         }
 
-        /// <summary>この建物が出火する確率。条件は <see cref="CollapseChance"/> と同じ。</summary>
+        /// <summary>
+        /// The chance this building catches fire. Same conditions as
+        /// <see cref="CollapseChance"/>.
+        /// </summary>
         public static float FireChance(float distance, byte intensity, float strength)
         {
             return ChanceOf(distance, intensity, strength, PeakFireChance, MaxFireChance);

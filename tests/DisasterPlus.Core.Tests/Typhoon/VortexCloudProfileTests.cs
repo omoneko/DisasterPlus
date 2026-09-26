@@ -8,9 +8,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheProfileAndTheLayoutAgreeOnParticleSize()
         {
-            // ★★ ここがずれると**眼が埋まる。** VortexPuffLayout は
-            //   SizeFractionOf で眼の余白を計算し、Game 側は VortexCloudProfile の
-            //   SizeFraction で startSize を決める。**同じ数でなければならない。**
+            // ★★ If these drift apart **the eye fills in.** VortexPuffLayout computes the
+            //   eye's clearance from SizeFractionOf, while the Game side decides startSize
+            //   from VortexCloudProfile's SizeFraction. **They must be the same number.**
             for (int i = 0; i < 3; i++)
             {
                 var layer = (VortexCloudLayer)i;
@@ -22,23 +22,24 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheCloudIsBrightOnTopAndDarkUnderneath()
         {
-            // 入道雲そのもの。ここが逆だと、どんな形に置いても煙の塊に見える
-            // （旧実装は 1 つの複製に均一な灰色を入れていた）。
+            // A thunderhead exactly. Reverse this and it looks like a lump of smoke however
+            // it is arranged (the old implementation put a uniform grey into a single copy).
             float deck = Luma(VortexCloudProfile.Deck);
             float tower = Luma(VortexCloudProfile.Tower);
             float canopy = Luma(VortexCloudProfile.Canopy);
 
             Assert.True(deck < tower, "the cloud base must be darker than the towers");
             Assert.True(tower < canopy, "the canopy must be the brightest layer");
-            // 差が小さいと「明るさの違う灰色」にしかならない。
+            // Too small a difference and it is only ever "greys of different brightness".
             Assert.True(canopy - deck > 0.35f);
         }
 
         [Fact]
         public void NoLayerEmitsZeroParticles()
         {
-            // ★★ rateOverTime を 0 にすると 1 粒も出ない（emission.enabled が false でも
-            //   EmitParticles は乗数として読み続ける）。いちばん踏みやすい罠である。
+            // ★★ Set rateOverTime to 0 and not one particle appears (EmitParticles keeps
+            //   reading it as a multiplier even when emission.enabled is false).
+            //   It is the easiest trap of all to fall into.
             for (int i = 0; i < 3; i++)
             {
                 VortexCloudProfile p = VortexCloudProfile.Of((VortexCloudLayer)i);
@@ -53,13 +54,15 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheCanopySpreadsSidewaysAndTheTowersRise()
         {
-            // かなとこは中立浮力高度で横へ広がる（放出角がほぼ水平）。
+            // The canopy spreads sideways at the neutral buoyancy height
+            // (its emission angle is nearly horizontal).
             Assert.True(VortexCloudProfile.Canopy.SpawnAngleMinDegrees >= 60f);
-            // 塔は上へ立ち上がる（放出角が狭い）。
+            // The towers rise (a narrow emission angle).
             Assert.True(VortexCloudProfile.Tower.SpawnAngleMaxDegrees <= 45f);
-            // 塔だけがわずかに浮く（負の重力）。雲底とかなとこは滞留する。
+            // Only the towers float slightly (negative gravity).
+            // The cloud base and the canopy linger.
             Assert.True(VortexCloudProfile.Tower.GravityModifier < 0f);
-            // かなとこはいちばん長生き（滞留して平たい天蓋になる）。
+            // The canopy lives the longest (it lingers and becomes a flat ceiling).
             Assert.True(VortexCloudProfile.Canopy.LifeMaxSeconds
                         > VortexCloudProfile.Tower.LifeMaxSeconds);
         }

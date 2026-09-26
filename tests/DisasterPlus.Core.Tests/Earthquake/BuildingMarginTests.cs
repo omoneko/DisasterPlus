@@ -8,7 +8,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
     {
         private static FaultBand NoBand()
         {
-            // 幾何が確定した、しかしどの試験点も含まない小さな帯。
+            // A small band with settled geometry that contains none of the test points.
             return new FaultBand(new Vec2(0f, 0f), 0f, length: 10f, width: 1f);
         }
 
@@ -41,7 +41,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void OutsideTheRadius_IsOutOfRangeNotSurvives()
         {
-            // 「圏外」と「耐える」を同じ結論にしない。前者はバニラが判定すらしていない。
+            // Do not give "out of range" and "survives" the same conclusion. In the former
+            // case vanilla has not even made a judgement.
             var m = Eval(10, 99999f, 55, NoBand(), false);
             Assert.Equal(CollapseVerdict.OutOfRange, m.Verdict);
         }
@@ -56,9 +57,10 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void InsideTheFaultZone_NeverClaimsSurvival()
         {
-            // 帯の内側では、全体円盤で耐える建物でも「倒れません」と言ってはいけない。
-            // 4 個の破壊円盤は probability = 1 で壊すので、全体円盤のしきい値は
-            // その判定について何も語っていない。
+            // Inside the band, we must not say "will not collapse" even for a building that
+            // survives under the overall disc. The 4 destruction discs destroy with
+            // probability = 1, so the overall disc's threshold says nothing about that
+            // judgement.
             var wideBand = new FaultBand(new Vec2(0f, 0f), 0f, length: 4000f, width: 500f);
             for (ushort id = 1; id < 200; id++)
             {
@@ -74,15 +76,16 @@ namespace DisasterPlus.Core.Tests.Earthquake
             var unknown = new FaultBand(new Vec2(0f, 0f), 0f, 0f, 0f);
             var m = Eval(10, 100f, 100, unknown, false);
             Assert.Equal(CollapseVerdict.Unknown, m.Verdict);
-            // 数値そのものは出せる（しきい値は幾何と無関係）。
+            // The numbers themselves can still be shown (the thresholds have nothing to do
+            // with the geometry).
             Assert.True(m.CollapseThresholdValue >= 0);
         }
 
         [Fact]
         public void VerdictAgreesWithTheCollapseDistance()
         {
-            // 「X m 以内で倒れる」という表示と、実際の判定が食い違わないこと。
-            // これが食い違うと、いちばんもっともらしい形で嘘をつくことになる。
+            // The displayed "collapses within X m" must not disagree with the actual verdict.
+            // If those two disagree, we end up lying in the most plausible-looking way there is.
             var band = NoBand();
             for (ushort id = 1; id < 300; id++)
             {
@@ -95,12 +98,12 @@ namespace DisasterPlus.Core.Tests.Earthquake
             }
         }
 
-        // ── 出火（全体レビュー M1）──────────────────────────────────
+        // ── Fires (full review M1) ──────────────────────────────────
 
         [Fact]
         public void BurnVerdictAgreesWithTheBurnDistance()
         {
-            // 倒壊とまったく同じ関係が、2 回目の引きについても成り立つこと。
+            // Exactly the same relation must hold for the second draw.
             var band = NoBand();
             for (ushort id = 1; id < 300; id++)
             {
@@ -116,9 +119,10 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void BurnDistanceComesFromTheSecondDraw()
         {
-            // 全体円盤では fB も fD も 1 - d/R（burnRadiusMin = 0, burnRadiusMax = R）なので、
-            // 2 つの距離が違うのは**しきい値が別の引きだから**でしかない。
-            // 1 回目と 2 回目を取り違えていたら（同じ値を 2 回使っていたら）ここで落ちる。
+            // On the overall disc both fB and fD are 1 - d/R (burnRadiusMin = 0,
+            // burnRadiusMax = R), so the only reason the two distances differ is **that the
+            // thresholds come from different draws**. Mix up the first and the second draw
+            // (i.e. use the same value twice) and this one fails.
             bool sawDifferentDraws = false;
             for (ushort id = 1; id < 300; id++)
             {
@@ -147,14 +151,14 @@ namespace DisasterPlus.Core.Tests.Earthquake
                              .BurnVerdict);
         }
 
-        // ── 破壊コードが他 MOD に置き換えられている場合（全体レビュー C2）─────
+        // ── When the destruction code is replaced by another mod (full review C2) ─────
 
         [Fact]
         public void ReplacedDamageModel_WithholdsBothVerdicts()
         {
-            // NDR は DisasterHelpers.DestroyBuildings を完全置換し probability を
-            // 0.02 → 0.04 にする（§E-2）。0.02 から導いた結論は、その環境では
-            // バニラの答えでも NDR の答えでもない。
+            // NDR replaces DisasterHelpers.DestroyBuildings wholesale and changes the
+            // probability from 0.02 to 0.04 (§E-2). A conclusion derived from 0.02 is, in
+            // that environment, neither vanilla's answer nor NDR's.
             var m = Eval(10, 100f, 55, NoBand(), false, damageModelReplaced: true);
             Assert.Equal(CollapseVerdict.DamageModelReplaced, m.Verdict);
             Assert.Equal(CollapseVerdict.DamageModelReplaced, m.BurnVerdict);
@@ -163,19 +167,21 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void ReplacedDamageModel_WithholdsTheDistancesToo()
         {
-            // 判定だけ伏せて距離を出すと、伏せた意味が無くなる。
+            // Withholding the verdict but still showing the distance defeats the point of
+            // withholding it.
             var m = Eval(10, 100f, 55, NoBand(), false, damageModelReplaced: true);
             Assert.Equal(0f, m.CollapseWithin, 4);
             Assert.Equal(0f, m.BurnWithin, 4);
-            // 距離としきい値そのもの（バニラの乱数）は読めているので残す。
+            // The distance and the thresholds themselves (vanilla's random numbers) can
+            // still be read, so they stay.
             Assert.True(m.Distance > 0f);
         }
 
         [Fact]
         public void ReplacedDamageModel_NeverHidesThatABuildingIsAlreadyDown()
         {
-            // 「もう倒れている」は建物の現在の状態であって、これから何が起きるかの
-            // 予測ではない。どの MOD が破壊を計算していても正しい。
+            // "Already down" is the building's current state, not a prediction of what is
+            // about to happen. It is correct whichever mod is computing the destruction.
             var m = Eval(10, 100f, 55, NoBand(), true, damageModelReplaced: true);
             Assert.Equal(CollapseVerdict.AlreadyDown, m.Verdict);
         }
@@ -183,8 +189,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void ReplacedDamageModel_NeverClaimsSurvival()
         {
-            // 全体レビュー C2 の失敗例そのもの: 強度 55、遠い建物。
-            // NDR 下では倒れうるので、「どの距離でも倒壊しません」と言ってはいけない。
+            // The very failing case from full review C2: intensity 55, a distant building.
+            // Under NDR it can collapse, so we must not say "will not collapse at any
+            // distance".
             var band = NoBand();
             for (ushort id = 1; id < 200; id++)
             {

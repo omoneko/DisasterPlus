@@ -5,39 +5,41 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 災害パネルのタイルに載せる**自前の絵**（<c>Texture2D</c> 2 枚）。main スレッド専用。
+    /// **Our own artwork** for the tiles on the disaster panel (two <c>Texture2D</c>s).
+    /// Main thread only.
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── The request (2026-08-22) ─────────────────────────────────
     ///
-    /// &gt; タブアイコンの火山と台風をイラストにしてほしいです。
+    /// &gt; I'd like the volcano and typhoon tab icons to be illustrations.
     ///
-    /// ── ★★ バニラのスプライト名は 1 つも書かない ────────────────────
+    /// ── ★★ Do not write a single vanilla sprite name ────────────────────
     ///
-    /// <see cref="DisasterPanelBar"/> のクラス doc の約束である。スプライト名は
-    /// アトラスのデータであってアセンブリからは読めないので、名前を当てにいくと
-    /// **見えないタイル**になり得る。しかも④と⑤は<b>バニラに存在しない災害</b>で、
-    /// 当てにいく絵がそもそも無い。
+    /// That is the promise in the <see cref="DisasterPanelBar"/> class doc. Sprite names are
+    /// atlas data and cannot be read from the assembly, so guessing at a name can give you
+    /// **an invisible tile**. And on top of that, ④ and ⑤ are <b>disasters that do not exist
+    /// in vanilla</b>, so there is no artwork to guess at in the first place.
     ///
-    /// 絵は <see cref="DisasterIconArt"/>（Core、画素の式）が持っており、ここは
-    /// それを <c>Texture2D</c> に焼くだけである。**形の議論は Core 側にある。**
-    /// サイレン MOD の <c>WarningIcon</c> と同じ組み立てで、
-    /// <c>UITextureSprite</c> に挿せばそのまま出る。
+    /// The artwork lives in <see cref="DisasterIconArt"/> (Core, the per-pixel formulae), and
+    /// this only bakes it into a <c>Texture2D</c>. **The discussion of the shapes is on the
+    /// Core side.** It is assembled the same way as the siren mod's <c>WarningIcon</c>, and
+    /// plugging it into a <c>UITextureSprite</c> shows it as-is.
     ///
-    /// ── 焼くのは 1 都市に 1 回 ───────────────────────────────
+    /// ── Baked once per city ───────────────────────────────
     ///
-    /// 128×128 が 2 枚（128 KB）。<see cref="Destroy"/> をレベルアンロードで必ず
-    /// 呼ぶこと —— <c>Texture2D</c> は <c>Component</c> ではないので、
-    /// <c>GameObject</c> を消しても道連れにならない。
+    /// Two 128×128 textures (128 KB). Always call <see cref="Destroy"/> on level unload —
+    /// a <c>Texture2D</c> is not a <c>Component</c>, so destroying the <c>GameObject</c> does
+    /// not take it along.
     ///
-    /// ★ **参照 1 個ずつで持つ。** 配列に入れると、破棄済み（fake-null）を抱えたまま
-    ///   非 null になり、2 つ目の都市で無言で絵が出なくなる（⑤で実際に踏んだ形）。
+    /// ★ **Hold them as individual references.** Put them in an array and you end up holding
+    ///   a destroyed one (fake-null) that still tests non-null, and the artwork silently
+    ///   stops appearing in the second city (the shape ⑤ actually hit).
     /// </summary>
     public static class DisasterTileIcons
     {
-        /// <summary>一辺（px）。タイルは 109×100 なので、これで足りる。</summary>
+        /// <summary>Edge length (px). The tile is 109×100, so this is enough.</summary>
         private const int Size = 128;
 
-        /// <summary>どの絵を焼くか。**bool 2 値では 3 つ目が足せない。**</summary>
+        /// <summary>Which artwork to bake. **A two-valued bool leaves no room for a third.**</summary>
         private enum IconKind { Volcano, Typhoon, TrenchQuake }
 
         private static Texture2D _volcano;
@@ -45,7 +47,7 @@ namespace DisasterPlus.Game
         private static Texture2D _trenchQuake;
         private static bool _failed;
 
-        /// <summary>火山の絵。**引けなければ null**（呼び出し側は文字のままにする）。</summary>
+        /// <summary>The volcano artwork. **null if it cannot be built** (the caller keeps the text label).</summary>
         public static Texture2D Volcano
         {
             get
@@ -58,7 +60,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>台風の絵。同上。</summary>
+        /// <summary>The typhoon artwork. As above.</summary>
         public static Texture2D Typhoon
         {
             get
@@ -71,7 +73,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>海溝型地震の絵。同上。</summary>
+        /// <summary>The trench earthquake artwork. As above.</summary>
         public static Texture2D TrenchQuake
         {
             get
@@ -84,7 +86,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>**レベルアンロードで必ず呼ぶ。** 冪等。</summary>
+        /// <summary>**Always call on level unload.** Idempotent.</summary>
         public static void Destroy()
         {
             if (_volcano != null) UnityEngine.Object.Destroy(_volcano);
@@ -94,7 +96,7 @@ namespace DisasterPlus.Game
             _volcano = null;
             _typhoon = null;
             _trenchQuake = null;
-            // _failed は戻さない（ゲームのビルドに対する事実である）。
+            // _failed is not reset (it is a fact about the game build).
         }
 
         private static Texture2D Build(IconKind kind, string name)
@@ -109,8 +111,9 @@ namespace DisasterPlus.Game
 
                 for (int y = 0; y < Size; y++)
                 {
-                    // ★ v は **0 が下**（<see cref="DisasterIconArt"/> の約束）。
-                    //   Unity のテクスチャも 0 行目が下なので、そのまま入れてよい。
+                    // ★ For v, **0 is the bottom** (the promise in
+                    //   <see cref="DisasterIconArt"/>). Unity textures also have row 0 at the
+                    //   bottom, so it can go straight in.
                     float v = (y + 0.5f) / Size;
 
                     for (int x = 0; x < Size; x++)

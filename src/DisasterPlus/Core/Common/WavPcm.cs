@@ -3,73 +3,80 @@ using System;
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// RIFF/WAVE の <c>byte[]</c> を、そのまま <c>AudioClip.SetData</c> へ渡せる
-    /// インターリーブ済みの <c>float[]</c> へ変換する**純粋な**パーサ。
+    /// A **pure** parser turning a RIFF/WAVE <c>byte[]</c> into an interleaved
+    /// <c>float[]</c> that can be handed straight to <c>AudioClip.SetData</c>.
     ///
-    /// ── なぜ Core に置くのか ──────────────────────────────────
+    /// ── Why it lives in Core ──────────────────────────────────
     ///
-    /// 実行時に wav を読む定番は <c>WWW</c> ＋ <c>file://</c> ＋ <c>GetAudioClip</c> だが、
-    /// あれは**非同期**で、コルーチンを回す <c>MonoBehaviour</c> と「まだ読めていない」
-    /// 状態を MOD のライフサイクルへ持ち込む。<c>AudioClip.Create</c> ＋ <c>SetData</c> は
-    /// **完全に同期**なので、その 2 つがどちらも要らない。
+    /// The standard way to read a wav at runtime is <c>WWW</c> + <c>file://</c> +
+    /// <c>GetAudioClip</c>, but that is **asynchronous** and brings both a
+    /// <c>MonoBehaviour</c> to run the coroutine and a "not loaded yet" state into the mod's
+    /// lifecycle. <c>AudioClip.Create</c> + <c>SetData</c> is **completely synchronous**, so
+    /// neither of those is needed.
     ///
-    /// そして同期にすると、**バイト列 → サンプルの変換にエンジンが 1 つも要らなくなる**。
-    /// だからここは Core（<c>UnityEngine</c> も Cities API も <c>System.Random</c> も
-    /// LINQ も無し、net35 と net8.0 の両対応）に置き、単体テストで固定できる。
-    /// <c>AudioClip</c> を作る部分だけが Game 側にある。
+    /// And once it is synchronous, **not one bit of the engine is needed to turn bytes into
+    /// samples**. So this lives in Core (no <c>UnityEngine</c>, no Cities API, no
+    /// <c>System.Random</c>, no LINQ; works on both net35 and net8.0) and can be pinned by
+    /// unit tests. Only the part that creates the <c>AudioClip</c> is on the Game side.
     ///
-    /// ── 契約 ─────────────────────────────────────────
+    /// ── The contract ─────────────────────────────────────────
     ///
-    /// <see cref="Parse"/> は**決して投げない**。読めなければ <see cref="Valid"/> が
-    /// false の 1 個を返し、<see cref="Error"/> に英語の理由が入る。
-    /// 呼び出し側（<c>VolcanoEruptionAudio</c>）は「音が出ない」以外の影響を受けない ——
-    /// **ファイルが消されていても火山は今日どおりに動く**というのがこの設計の要件である。
+    /// <see cref="Parse"/> **never throws**. If it cannot read the file it returns an
+    /// instance whose <see cref="Valid"/> is false, with the reason in <see cref="Error"/>
+    /// in English.
+    /// The caller (<c>VolcanoEruptionAudio</c>) suffers no consequence other than "no
+    /// sound" — **the volcano works exactly as it does today even if the file has been
+    /// deleted**, and that is a requirement of this design.
     ///
-    /// ★ <b>「それらしい既定値」を作らない。</b> 壊れたヘッダを 44.1 kHz 16 bit ステレオと
-    ///   みなして読み進めると、雑音を全開で鳴らすという最悪の失敗になる。
-    ///   分からなければ何も返さない。
+    /// ★ <b>Do not invent "plausible defaults".</b> Treating a corrupt header as 44.1 kHz
+    ///   16 bit stereo and reading on gives the worst possible failure: noise at full
+    ///   volume. If it is not clear, return nothing.
     /// </summary>
     public sealed class WavPcm
     {
         /// <summary>
-        /// 受け付ける総サンプル数（＝ <c>FrameCount × Channels</c>）の上限。
+        /// The cap on the total sample count accepted (i.e. <c>FrameCount × Channels</c>).
         ///
-        /// 超えた入力は**読まずに断る**。<c>float[]</c> 1 本ぶんで 4 バイト／サンプルなので、
-        /// 3200 万で 128 MB になる。ヘッダの数字だけを信じて確保すると、
-        /// 壊れた（あるいは悪意のある）ファイル 1 個でゲームごと落ちる。
+        /// Input past it is **refused without being read**. One <c>float[]</c> is 4 bytes a
+        /// sample, so 32 million comes to 128 MB. Allocate on the header's numbers alone and
+        /// a single corrupt (or malicious) file takes the whole game down.
         /// </summary>
         public const int MaxTotalSamples = 32000000;
 
-        /// <summary>WAVE_FORMAT_PCM。</summary>
+        /// <summary>WAVE_FORMAT_PCM.</summary>
         private const int FormatPcm = 1;
 
-        /// <summary>WAVE_FORMAT_IEEE_FLOAT。</summary>
+        /// <summary>WAVE_FORMAT_IEEE_FLOAT.</summary>
         private const int FormatFloat = 3;
 
-        /// <summary>WAVE_FORMAT_EXTENSIBLE（実体は SubFormat GUID の先頭 2 バイト）。</summary>
+        /// <summary>WAVE_FORMAT_EXTENSIBLE (the real format is in the first two bytes of the
+        /// SubFormat GUID).</summary>
         private const int FormatExtensible = 0xFFFE;
 
-        /// <summary>読めたか。false のとき <see cref="Samples"/> は長さ 0 である。</summary>
+        /// <summary>Whether it was read. When false, <see cref="Samples"/> has length 0.</summary>
         public readonly bool Valid;
 
-        /// <summary>読めなかった理由（**英語・診断用**）。読めていれば null。</summary>
+        /// <summary>Why it could not be read (**English, for diagnostics**). Null if it was
+        /// read.</summary>
         public readonly string Error;
 
-        /// <summary>サンプリング周波数（Hz）。読めていなければ 0。</summary>
+        /// <summary>Sample rate (Hz). 0 if it could not be read.</summary>
         public readonly int SampleRate;
 
-        /// <summary>チャンネル数。読めていなければ 0。</summary>
+        /// <summary>Channel count. 0 if it could not be read.</summary>
         public readonly int Channels;
 
-        /// <summary>元ファイルの量子化ビット数（**変換後の <see cref="Samples"/> は常に float**）。</summary>
+        /// <summary>The source file's bit depth (**the converted <see cref="Samples"/> is
+        /// always float**).</summary>
         public readonly int BitsPerSample;
 
-        /// <summary>1 チャンネルあたりのサンプル数（＝ <c>AudioClip.Create</c> の lengthSamples）。</summary>
+        /// <summary>Samples per channel (i.e. <c>AudioClip.Create</c>'s lengthSamples).</summary>
         public readonly int FrameCount;
 
         /// <summary>
-        /// インターリーブ済みのサンプル <c>[-1,1]</c>。長さは <c>FrameCount × Channels</c>。
-        /// <see cref="Valid"/> が false でも null にはしない（呼び出し側の null 判定を増やさない）。
+        /// The interleaved samples, <c>[-1,1]</c>. Its length is <c>FrameCount × Channels</c>.
+        /// It is never null even when <see cref="Valid"/> is false (so as not to add another
+        /// null check on the caller).
         /// </summary>
         public readonly float[] Samples;
 
@@ -92,7 +99,7 @@ namespace DisasterPlus.Core.Common
             Samples = samples;
         }
 
-        /// <summary>再生時間（秒）。読めていなければ 0。</summary>
+        /// <summary>Playing time (seconds). 0 if it could not be read.</summary>
         public float LengthSeconds
         {
             get
@@ -103,7 +110,8 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// 読めなかった 1 個を作る。**テストと呼び出し側が同じ形を共有するため**に公開する。
+        /// Builds a "could not be read" instance. Public **so the tests and the callers
+        /// share the same shape**.
         /// </summary>
         public static WavPcm Failed(string error)
         {
@@ -111,11 +119,12 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// RIFF/WAVE を解釈する。**投げない。**
+        /// Interprets a RIFF/WAVE. **It never throws.**
         ///
-        /// チャンクは頭から順に歩く（<c>fmt </c> と <c>data</c> の間に <c>LIST</c> /
-        /// <c>fact</c> / <c>bext</c> などが挟まるファイルは珍しくない。決め打ちのオフセットで
-        /// 読むと、そういうファイルで**無音ではなく雑音**になる）。
+        /// The chunks are walked in order from the top (files with <c>LIST</c> /
+        /// <c>fact</c> / <c>bext</c> and the like between <c>fmt </c> and <c>data</c> are
+        /// not unusual. Read at a hard-coded offset and such a file gives you **noise, not
+        /// silence**).
         /// </summary>
         public static WavPcm Parse(byte[] bytes)
         {
@@ -124,7 +133,7 @@ namespace DisasterPlus.Core.Common
 
             if (!Matches(bytes, 0, 'R', 'I', 'F', 'F'))
             {
-                // RIFX はビッグエンディアンの WAVE。**推測で読み替えない。**
+                // RIFX is big-endian WAVE. **Do not guess and reinterpret it.**
                 if (Matches(bytes, 0, 'R', 'I', 'F', 'X'))
                 {
                     return Failed("this is a big-endian RIFX file, which is not supported");
@@ -153,9 +162,10 @@ namespace DisasterPlus.Core.Common
                 int chunkSize = ReadInt32(bytes, position + 4);
                 int bodyStart = position + 8;
 
-                // 負（＝ 2 GB 超が int で折り返した）と、ファイル末尾をはみ出す長さの両方を
-                // ここで刈る。はみ出す data はよくある（録音が途中で切れた形）ので、
-                // 断らずに**実際に在るぶんだけ**読む。
+                // Prune both the negative case (over 2 GB wrapped round in an int) and a
+                // length that runs past the end of the file. A data chunk that runs over is
+                // common (a recording that was cut off), so rather than refusing it we read
+                // **only as much as is actually there**.
                 if (chunkSize < 0) return Failed("a RIFF chunk declares a negative length");
 
                 int available = bytes.Length - bodyStart;
@@ -172,8 +182,9 @@ namespace DisasterPlus.Core.Common
                     blockAlign = ReadUInt16(bytes, bodyStart + 12);
                     bits = ReadUInt16(bytes, bodyStart + 14);
 
-                    // WAVE_FORMAT_EXTENSIBLE の実体は SubFormat GUID の先頭 2 バイトにある。
-                    // ここを見ないと、ふつうの 24 bit PCM を「未知の形式」と断ってしまう。
+                    // For WAVE_FORMAT_EXTENSIBLE the real format is in the first two bytes
+                    // of the SubFormat GUID. Without looking here, ordinary 24 bit PCM gets
+                    // refused as "an unknown format".
                     if (format == FormatExtensible && bodyLength >= 40)
                     {
                         format = ReadUInt16(bytes, bodyStart + 24);
@@ -187,11 +198,13 @@ namespace DisasterPlus.Core.Common
                     dataLength = bodyLength;
                 }
 
-                // チャンクの本体は偶数境界へパディングされる（長さが奇数なら 1 バイト詰まる）。
+                // A chunk's body is padded to an even boundary (an odd length gets one
+                // byte of padding).
                 //
-                // ★ 長さ 0 のチャンクでも position は必ず 8 バイト進むので、ここは止まらない。
-                //   止まるとしたら int の折り返しで advance が負になったときだけなので、
-                //   **そこだけ**を見て抜ける（無限ループにしない）。
+                // ★ position always advances by 8 bytes even for a zero-length chunk, so
+                //   this cannot stall. The only way it could is if advance went negative
+                //   through an int wrap-around, so we check **that alone** and break out
+                //   (no infinite loop).
                 int advance = chunkSize + (chunkSize & 1);
                 if (advance < 0) break;
                 position = bodyStart + advance;
@@ -216,15 +229,15 @@ namespace DisasterPlus.Core.Common
                               + bits + " bit); only PCM 8/16/24/32 and 32-bit float are read");
             }
 
-            // blockAlign を信じない（0 や嘘を書くエンコーダが実在する）。
-            // チャンネル数とビット数から自分で出す。
+            // Do not trust blockAlign (encoders that write 0, or a lie, really exist).
+            // Derive it ourselves from the channel count and the bit depth.
             int frameBytes = bytesPerSample * channels;
             if (frameBytes <= 0) return Failed("the fmt chunk describes a zero-length frame");
             if (blockAlign > 0 && blockAlign != frameBytes)
             {
-                // 一致しないのは異常だが、ここで断ると読める音まで捨てることになる。
-                // 自分の計算を採用して読み進める（値は診断に出ない ——
-                // 出すべき情報はサンプル数のほうである）。
+                // A mismatch is abnormal, but refusing here would throw away audio we can
+                // read. Take our own calculation and read on (the value does not go into
+                // the diagnostics — the information worth reporting is the sample count).
                 blockAlign = frameBytes;
             }
 
@@ -246,8 +259,8 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// 1 サンプルのバイト数。**対応していない組み合わせは 0** を返す
-        /// （「たぶん 2 バイト」で進めない）。
+        /// The bytes in one sample. **Unsupported combinations return 0**
+        /// (we do not carry on with "probably 2 bytes").
         /// </summary>
         private static int BytesPerSampleOf(int format, int bits)
         {
@@ -278,8 +291,8 @@ namespace DisasterPlus.Core.Common
                 for (int i = 0; i < count; i++)
                 {
                     float v = ToSingle(bytes, at);
-                    // 32 bit float の wav は 1.0 を超える値を持ちうる。
-                    // クランプしないと SetData の先で歪む。
+                    // A 32 bit float wav can hold values above 1.0.
+                    // Without clamping it distorts downstream of SetData.
                     if (float.IsNaN(v)) v = 0f;
                     else if (v > 1f) v = 1f;
                     else if (v < -1f) v = -1f;
@@ -292,7 +305,7 @@ namespace DisasterPlus.Core.Common
             switch (bytesPerSample)
             {
                 case 1:
-                    // 8 bit PCM だけは**符号なし**（0..255、無音が 128）。
+                    // 8 bit PCM is the one that is **unsigned** (0..255, with silence at 128).
                     for (int i = 0; i < count; i++)
                     {
                         samples[i] = (bytes[at] - 128) / 128f;
@@ -313,7 +326,8 @@ namespace DisasterPlus.Core.Common
                     for (int i = 0; i < count; i++)
                     {
                         int v = bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16);
-                        // 24 bit の符号拡張。忘れると波形の下半分が上へ跳ね返る。
+                        // Sign extension for 24 bit. Forget it and the bottom half of the
+                        // waveform is reflected upwards.
                         if ((v & 0x800000) != 0) v |= unchecked((int)0xFF000000);
                         samples[i] = v / 8388608f;
                         at += 3;
@@ -334,9 +348,10 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// リトルエンディアンの 4 バイトを float として読む。
-        /// <c>BitConverter</c> は環境のエンディアンに従うので、**そこを見てから**渡す
-        /// （Core はエンジンに依らないので、実行環境を決め打ちにしない）。
+        /// Reads four little-endian bytes as a float.
+        /// <c>BitConverter</c> follows the environment's endianness, so **check that
+        /// first** before handing bytes to it (Core does not depend on the engine, so it
+        /// does not hard-code the runtime environment).
         /// </summary>
         private static float ToSingle(byte[] bytes, int at)
         {

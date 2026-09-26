@@ -4,134 +4,155 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// **火山性地震。** 火口の下でマグマが動くあいだ地面が揺れ続ける、あの揺れの合成である。
-    /// エンジン非依存の純関数だけで、Unity の型もゲームの型も
-    /// <c>System.Random</c> も出てこない。
+    /// **Volcanic earthquakes.** The synthesis of that shaking which goes on while the magma
+    /// moves beneath the crater.
+    /// Pure engine-free functions only; no Unity types, no game types and no
+    /// <c>System.Random</c> appear here.
     ///
-    /// ── なぜ②の地震をそのまま起こさないのか（2026-08-22、所有者の依頼）──────────
+    /// ── Why we do not simply trigger ②'s earthquake (2026-08-22, the owner's request) ──────
     ///
-    /// > 噴火と同時に火山性の地震の発生もお願いします。
+    /// > Please also make volcanic earthquakes occur at the same time as the eruption.
     ///
-    /// **バニラの <c>EarthquakeAI</c> を起こすのは間違いである。** あれは地図に
-    /// 断層の亀裂を刻む —— ⑤が同じ地形セルへ山を書いているところへ、別の書き手が
-    /// 割り込むことになる（設計書 §1.2 の平らな溝と同じ壊れ方をする）。
-    /// 火山の地震はそもそも断層地震ではない。
+    /// **Triggering vanilla's <c>EarthquakeAI</c> would be wrong.** That carves fault cracks
+    /// into the map — which means another writer barging in on the very terrain cells ⑤ is
+    /// writing a mountain into (it breaks the same way as the flat trench in design doc
+    /// §1.2). And volcanic earthquakes are not fault earthquakes to begin with.
     ///
-    /// **②の合成記象（<c>SeismogramModel</c>）もそのままは使わない。** あれは
-    /// **1 回の断層破壊**のモデルで、P 波が着き、S 波が着き、コーダが減衰して終わる。
-    /// 火山性地震はそうではない:
+    /// **Nor do we use ②'s synthetic seismogram (<c>SeismogramModel</c>) as it stands.**
+    /// That is a model of **a single fault rupture**: the P wave arrives, the S wave
+    /// arrives, the coda decays and it is over. Volcanic earthquakes are not like that:
     ///
-    ///   1. **群発** —— 小さい地震が数十〜数百回。1 回 1 回は短く、大きいものは稀
-    ///   2. **火山性微動（harmonic tremor）** —— マグマが動いているあいだ
-    ///      <b>切れ目なく</b>続く、周期のそろった低い揺れ
-    ///   3. **噴火の前から始まり、噴火中に最大になり、あとを引いて収まる**
+    ///   1. **Swarms** — tens to hundreds of small earthquakes. Each one is short, and the
+    ///      big ones are rare
+    ///   2. **Harmonic tremor** — a low shaking of uniform period that continues
+    ///      <b>without a break</b> while the magma is moving
+    ///   3. **It starts before the eruption, peaks during it, and trails off afterwards**
     ///
-    /// この 3 つだけを作る。**②の設定（<c>eqSeismogram</c> / <c>eqShakeBoost</c>）は
-    /// 1 つも見ない** —— あちらが既定 OFF なのはバニラの地震のカメラ揺れを
-    /// 差し替えるからで、⑤の火山は<b>プレイヤーが自分で起こした、⑤自身の現象</b>である。
-    /// ②を全部切っていても火山は揺れる（<c>Game/Volcano/VolcanoTremorShake</c>）。
+    /// Those three, and nothing else, are what this builds. **It looks at not one of ②'s
+    /// settings (<c>eqSeismogram</c> / <c>eqShakeBoost</c>)** — those are off by default
+    /// because they replace the camera shake of vanilla's earthquakes, whereas ⑤'s volcano
+    /// is <b>⑤'s own phenomenon, which the player triggered themselves</b>.
+    /// Turn every part of ② off and the volcano still shakes
+    /// (<c>Game/Volcano/VolcanoTremorShake</c>).
     ///
-    /// ── 群発の作り方（★ 状態を持たない）───────────────────────────
+    /// ── How the swarm is built (★ it holds no state) ───────────────────────────
     ///
-    /// 時間を <see cref="SlotSeconds"/> の枠に切り、**枠ごとに必ず 1 回**地震を置く。
-    /// 「起きるか起きないか」を活動度で決めない ——
-    /// 決めると<b>活動度が変わった瞬間に、もう鳴っている過去の地震が消える</b>
-    /// （<see cref="DisplacementAt"/> は t の閉じた式で、過去の枠も毎回引き直すため）。
-    /// 代わりに<b>大きさ</b>を活動度に比例させる。静かなときは「ほとんど感じない
-    /// 地震が絶え間なく起きている」で、それは火山性群発の姿そのものである。
+    /// Time is cut into slots of <see cref="SlotSeconds"/>, with **exactly one earthquake
+    /// placed per slot**.
+    /// "Does it happen or not" is not decided by the activity level —
+    /// decide it that way and <b>an earthquake already sounding in the past disappears the
+    /// instant the activity changes</b> (<see cref="DisplacementAt"/> is a closed-form
+    /// expression in t, so it re-derives the past slots every time).
+    /// Instead the activity scales <b>the size</b>. When things are quiet you get "barely
+    /// perceptible earthquakes happening incessantly", which is exactly what a volcanic
+    /// swarm looks like.
     ///
-    /// 大きさの分布は <c>u⁴</c>（<see cref="MagnitudeCurve"/>）—— **小さいものが圧倒的に
-    /// 多く、大きいものが稀**。実際の地震の規模別頻度（Gutenberg–Richter）と同じ向きで、
-    /// **ここで作っているのは分布の形だけである**（マグニチュードではない）。
-    /// 実測（テストが固定）: 6 割が「ほとんど感じない」側、1 割強だけが大きい側。
+    /// The size distribution is <c>u⁴</c> (see <see cref="MagnitudeCurve"/>) — **small ones
+    /// overwhelmingly common, large ones rare**. It goes the same way as the real
+    /// frequency-magnitude relation (Gutenberg–Richter), and **what is built here is the
+    /// shape of the distribution only** (not a magnitude).
+    /// Measured (and pinned by tests): 60% fall on the "barely perceptible" side and only a
+    /// little over 10% on the large side.
     ///
-    /// ── 折り返さないこと ───────────────────────────────────
+    /// ── Do not alias ───────────────────────────────────────
     ///
-    /// カメラの揺れは**描画フレームごと**に評価する（60 fps ⇒ ナイキスト 30 Hz）。
-    /// いちばん速い成分は地震の搬送波 <see cref="EventFastHz"/> = 3.2 Hz で、
-    /// 1 周期あたり 18 点とれる。**これ以上速い成分を足さないこと。**
+    /// The camera shake is evaluated **per rendered frame** (60 fps ⇒ Nyquist 30 Hz).
+    /// The fastest component is the earthquake carrier <see cref="EventFastHz"/> = 3.2 Hz,
+    /// which gets 18 points per cycle. **Do not add any component faster than that.**
     ///
-    /// ── 同じ火山は同じ揺れ ───────────────────────────────
+    /// ── The same volcano shakes the same way ───────────────────────────────
     ///
-    /// <see cref="DeterministicRandom"/> だけを使い、**フレーム番号を種に混ぜない**。
-    /// <see cref="DisplacementAt"/> は t の閉じた式なので、飛んだフレームがあっても
-    /// そのフレームで評価したのと同じ値になる。
+    /// It uses <see cref="DeterministicRandom"/> alone and **never mixes the frame number
+    /// into the seed**. <see cref="DisplacementAt"/> is a closed-form expression in t, so
+    /// even if frames are skipped the value is the same as if it had been evaluated on that
+    /// frame.
     /// </summary>
     public static class VolcanicTremor
     {
-        /// <summary>群発の枠（秒）。**1 枠にちょうど 1 回**地震が入る。</summary>
+        /// <summary>The swarm's slot (seconds). **Exactly one earthquake per slot.**</summary>
         public const float SlotSeconds = 1.6f;
 
-        /// <summary>どこまで前の枠の地震が今の揺れに効くか。</summary>
+        /// <summary>How many slots back an earthquake still contributes to the present
+        /// shaking.</summary>
         public const int TailSlots = 3;
 
-        /// <summary>地震の立ち上がり（秒）。**0 にしない**（不連続は目に出る）。</summary>
+        /// <summary>An earthquake's rise time (seconds). **Not 0** (a discontinuity shows on
+        /// screen).</summary>
         public const float EventRiseSeconds = 0.10f;
 
-        /// <summary>地震の減衰の時定数（秒）。</summary>
+        /// <summary>The time constant of an earthquake's decay (seconds).</summary>
         public const float EventDecaySeconds = 0.55f;
 
-        /// <summary>地震の搬送波（Hz）。**ここがいちばん速い成分である。**</summary>
+        /// <summary>An earthquake's carrier (Hz). **This is the fastest component here.**</summary>
         public const float EventFastHz = 3.2f;
 
-        /// <summary>地震の低いほうの搬送波（Hz）。</summary>
+        /// <summary>An earthquake's lower carrier (Hz).</summary>
         public const float EventSlowHz = 1.1f;
 
-        /// <summary>火山性微動の搬送波（Hz）。切れ目なく続く低い揺れ。</summary>
+        /// <summary>The harmonic tremor's carrier (Hz). The low shaking that continues without
+        /// a break.</summary>
         public const float TremorHz = 1.8f;
 
-        /// <summary>微動の振幅がうねる周期（Hz）。**マグマの流れのゆらぎ。**</summary>
+        /// <summary>The period over which the tremor's amplitude swells (Hz). **The
+        /// unsteadiness of the magma flow.**</summary>
         public const float TremorSwellHz = 0.11f;
 
-        /// <summary>同上、もう 1 本（通約でない値にして反復に聞こえないようにする）。</summary>
+        /// <summary>The same again, a second one (an incommensurate value, so it does not
+        /// sound repetitive).</summary>
         public const float TremorSwell2Hz = 0.037f;
 
         /// <summary>
-        /// 微動の振幅（活動度 1 のとき）。**群発の山より小さくする** ——
-        /// 大きいと記象が正弦波 1 本に埋もれて、地震が起きているように見えない
-        /// （<c>docs/images/volcano/tremor-waveform.png</c> で 0.34 → 0.26 に下げた）。
+        /// The tremor's amplitude (at activity 1). **Keep it below the swarm's peaks** —
+        /// larger and the seismogram is buried under a single sinusoid, so it no longer
+        /// looks as though earthquakes are happening
+        /// (lowered from 0.34 to 0.26 against <c>docs/images/volcano/tremor-waveform.png</c>).
         /// </summary>
         public const float TremorAmplitude = 0.26f;
 
-        /// <summary>微動の振幅の下限比（うねっても完全には途切れない）。</summary>
+        /// <summary>The floor on the tremor's amplitude as a fraction (it swells but never
+        /// cuts out completely).</summary>
         public const float TremorFloor = 0.45f;
 
-        /// <summary>いちばん小さい地震の大きさ（活動度 1 のとき）。</summary>
+        /// <summary>The size of the smallest earthquake (at activity 1).</summary>
         public const float MinEventMagnitude = 0.06f;
 
-        /// <summary>いちばん大きい地震の大きさ（活動度 1 のとき）。</summary>
+        /// <summary>The size of the largest earthquake (at activity 1).</summary>
         public const float MaxEventMagnitude = 1.0f;
 
-        /// <summary>隆起中（マグマ上昇）の活動度の下限。**噴火の前から揺れている。**</summary>
+        /// <summary>The floor on the activity during uplift (rising magma). **It is shaking
+        /// before the eruption.**</summary>
         public const float BuildUpFloor = 0.18f;
 
-        /// <summary>隆起が終わった時点の活動度。</summary>
+        /// <summary>The activity at the point the uplift finishes.</summary>
         public const float BuildUpCeiling = 0.62f;
 
-        /// <summary>噴火中の活動度の下限（噴出の強さ 0 のとき）。</summary>
+        /// <summary>The floor on the activity during the eruption (at eruption strength
+        /// 0).</summary>
         public const float EruptionFloor = 0.55f;
 
-        /// <summary>噴火のあと、冷えきるまでに残る活動度（余韻）。</summary>
+        /// <summary>The activity remaining after the eruption until everything has cooled (the
+        /// afterglow).</summary>
         public const float AfterglowUnit = 0.42f;
 
-        /// <summary>塩（枠の位相をずらす）。</summary>
+        /// <summary>Salt (for offsetting a slot's phase).</summary>
         private const uint OffsetSalt = 0x0F5E7u;
 
-        /// <summary>塩（枠の大きさ）。</summary>
+        /// <summary>Salt (for a slot's size).</summary>
         private const uint MagnitudeSalt = 0x4D41475u;
 
-        /// <summary>塩（微動の位相）。</summary>
+        /// <summary>Salt (for the tremor's phase).</summary>
         private const uint TremorSalt = 0x54524Du;
 
         /// <summary>
-        /// 今の活動度 <c>[0,1]</c>。**⑤が決めた量**であって、実在の観測量ではない。
+        /// The current activity <c>[0,1]</c>. **A quantity ⑤ decided**, not a real observable.
         ///
-        /// <paramref name="upliftProgressUnit"/> は隆起の進捗（マグマの上昇に対応）、
-        /// <paramref name="eruptionUnit"/> は噴出の強さ、
-        /// <paramref name="coolUnit"/> は溶岩の冷え具合（1 で冷えきった）。
+        /// <paramref name="upliftProgressUnit"/> is the uplift's progress (corresponding to
+        /// the magma rising), <paramref name="eruptionUnit"/> is the eruption strength, and
+        /// <paramref name="coolUnit"/> is how far the lava has cooled (1 = cooled right
+        /// through).
         ///
-        /// <paramref name="erupting"/> が false で <paramref name="afterEruption"/> も
-        /// false なら「まだ噴いていない」＝ 隆起の側の式を使う。
+        /// If <paramref name="erupting"/> is false and <paramref name="afterEruption"/> is
+        /// false too, then it "has not erupted yet" and the uplift-side formula is used.
         /// </summary>
         public static float ActivityUnit(float upliftProgressUnit, bool erupting,
                                          float eruptionUnit, bool afterEruption, float coolUnit)
@@ -144,16 +165,18 @@ namespace DisasterPlus.Core.Volcano
 
             if (afterEruption)
             {
-                // 噴火が終わってから冷えきるまで、余韻が引いていく。
+                // From the end of the eruption until everything has cooled, the afterglow
+                // fades away.
                 return Clamp01(AfterglowUnit * (1f - Clamp01(coolUnit)));
             }
 
-            // 隆起（マグマ上昇）。**噴火の前から揺れている**のが火山性群発である。
+            // Uplift (rising magma). **Shaking before the eruption** is what a volcanic swarm is.
             return Clamp01(BuildUpFloor
                            + (BuildUpCeiling - BuildUpFloor) * Clamp01(upliftProgressUnit));
         }
 
-        /// <summary>時刻 <paramref name="clockSeconds"/> が入る枠の番号。</summary>
+        /// <summary>The number of the slot the time <paramref name="clockSeconds"/> falls
+        /// in.</summary>
         public static int SlotAt(float clockSeconds)
         {
             if (IsBad(clockSeconds) || clockSeconds < 0f) return 0;
@@ -161,8 +184,8 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 枠 <paramref name="slot"/> の地震の大きさ <c>[0,1]</c>。
-        /// **活動度に比例する**（枠は必ず 1 回起きる。クラス doc）。
+        /// The size <c>[0,1]</c> of slot <paramref name="slot"/>'s earthquake.
+        /// **Proportional to the activity** (a slot always has exactly one; see the class doc).
         /// </summary>
         public static float MagnitudeUnit(uint seed, int slot, float activityUnit)
         {
@@ -177,8 +200,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 規模別頻度の形（<c>u⁴</c>）。**小さいものが圧倒的に多く、大きいものが稀。**
-        /// マグニチュードそのものではない（クラス doc）。
+        /// The shape of the frequency-magnitude relation (<c>u⁴</c>). **Small ones
+        /// overwhelmingly common, large ones rare.**
+        /// It is not a magnitude as such (see the class doc).
         /// </summary>
         public static float MagnitudeCurve(float u)
         {
@@ -187,7 +211,7 @@ namespace DisasterPlus.Core.Volcano
             return x2 * x2;
         }
 
-        /// <summary>枠の中での発生時刻（秒、<c>[0, SlotSeconds)</c>）。</summary>
+        /// <summary>When within the slot it occurs (seconds, <c>[0, SlotSeconds)</c>).</summary>
         public static float OffsetInSlot(uint seed, int slot)
         {
             if (slot < 0) return 0f;
@@ -196,8 +220,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 火山性微動（連続）の変位 <c>[-1,1]</c>。**切れ目が無い**のがこれの正体で、
-        /// 群発の 1 回 1 回とは別に鳴り続ける。
+        /// The displacement <c>[-1,1]</c> of the (continuous) harmonic tremor. **Having no
+        /// break in it** is what this actually is; it sounds on independently of the
+        /// individual earthquakes in the swarm.
         /// </summary>
         public static float TremorAt(uint seed, float clockSeconds, float activityUnit)
         {
@@ -218,8 +243,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 地震 1 回の波形（<c>[-1,1]</c> に <paramref name="magnitude"/> を掛けたもの）。
-        /// 立ち上がって指数的に減衰する。<paramref name="ageSeconds"/> が負なら 0。
+        /// The waveform of one earthquake (<c>[-1,1]</c> multiplied by
+        /// <paramref name="magnitude"/>).
+        /// It rises and then decays exponentially. 0 if <paramref name="ageSeconds"/> is
+        /// negative.
         /// </summary>
         public static float EventAt(float ageSeconds, float magnitude)
         {
@@ -240,8 +267,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 火口の真下の地動 <c>[-1,1]</c>（微動 ＋ 直近 <see cref="TailSlots"/> 枠の群発）。
-        /// **t の閉じた式で、状態を 1 つも持たない。**
+        /// The ground motion <c>[-1,1]</c> directly beneath the crater (the tremor plus the
+        /// swarm over the last <see cref="TailSlots"/> slots).
+        /// **A closed-form expression in t, holding not one piece of state.**
         /// </summary>
         public static float DisplacementAt(uint seed, float clockSeconds, float activityUnit)
         {
@@ -270,9 +298,11 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 距離による減衰 <c>[0,1]</c>。<paramref name="distanceMetres"/> は火口からの距離、
-        /// <paramref name="reachMetres"/> は「ここまでは感じる」距離である。
-        /// <paramref name="reachMetres"/> の外はきっかり 0 —— **街の反対側は揺れない。**
+        /// The attenuation with distance <c>[0,1]</c>. <paramref name="distanceMetres"/> is
+        /// the distance from the crater and <paramref name="reachMetres"/> is the distance
+        /// out to which it can be felt.
+        /// Outside <paramref name="reachMetres"/> it is exactly 0 — **the far side of the
+        /// city does not shake.**
         /// </summary>
         public static float AttenuationAt(float distanceMetres, float reachMetres)
         {
@@ -280,7 +310,7 @@ namespace DisasterPlus.Core.Volcano
             if (IsBad(reachMetres) || reachMetres <= 0f) return 0f;
             if (distanceMetres >= reachMetres) return 0f;
 
-            // 1 / (1 + (d/ref)^2) を、reach でちょうど 0 になるように窓で切る。
+            // 1 / (1 + (d/ref)^2), cut by a window so that it comes to exactly 0 at reach.
             float x = distanceMetres / reachMetres;
             float near = 1f / (1f + 9f * x * x);
             float window = 1f - x * x;

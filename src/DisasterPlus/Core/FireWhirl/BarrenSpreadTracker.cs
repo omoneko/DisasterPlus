@@ -1,44 +1,52 @@
 namespace DisasterPlus.Core.FireWhirl
 {
     /// <summary>
-    /// 「延焼判定は建物を選んでいるのに、1 棟も着火していない」が続いていることの検出。
+    /// Detects a run of "the spread test keeps picking buildings, yet not one of them
+    /// catches fire".
     ///
-    /// なぜ要るか: ③の実装で誤っていた IL 前提のひとつが
-    /// 「Building.m_fireIntensity を直接書けば着火する」で、実際は
-    /// CommonBuildingAI 派生でないと誰もその値を消費しない。この取り違えは
-    /// 例外もログも出さず、延焼が静かに起きないだけだった。
-    /// 存在検査（BuildingAI.BurnBuilding が解決できるか）は通ってしまうので、
-    /// 「呼んだ結果 1 棟も燃えなかったか」という振る舞いでしか捕まらない。
+    /// Why it is needed: one of the IL assumptions ③'s implementation got wrong was
+    /// "writing Building.m_fireIntensity directly sets a building alight", when in reality
+    /// nothing consumes that value unless the AI derives from CommonBuildingAI. That mix-up
+    /// raised no exception and logged nothing — the spread simply, quietly, did not happen.
+    /// An existence check (can BuildingAI.BurnBuilding be resolved?) passes, so the only way
+    /// to catch it is the behaviour: "after the call, did nothing burn?".
     ///
-    /// エンジン非依存の純粋なカウンタとして Core に置き、ユニットテストで固定する。
+    /// It lives in Core as a pure, engine-free counter, pinned down by unit tests.
     /// </summary>
     public class BarrenSpreadTracker
     {
         /// <summary>
-        /// 何回連続で「着火を試みたのに 0 棟」なら異常とみなすか。
+        /// How many consecutive rounds of "we tried to set buildings alight and got zero"
+        /// count as a fault.
         ///
-        /// 延焼判定は 16 sim フレームぶんのゲーム内時間ごと（既定で約 0.35 ゲーム内分）に
-        /// 走るので、旋風 1 基の寿命（既定 10 分）はおよそ 28 回ぶんに相当する。
+        /// The spread test runs once per 16 sim frames' worth of in-game time (about 0.35
+        /// in-game minutes by default), so one whirl's lifetime (10 minutes by default)
+        /// works out at roughly 28 rounds.
         ///
-        /// 24 回 ≒ 8.4 ゲーム内分。旋風 1 基が生まれてから消えるまでのあいだ
-        /// 「燃やせるはずの建物に一度も火が付かなかった」に相当する。
+        /// 24 rounds ≒ 8.4 in-game minutes. That amounts to "not one building that should
+        /// have been burnable ever caught fire" across the whole life of a single whirl.
         ///
-        /// 8 回では短すぎた。8 回はゲーム内 2.8 分＝速度 1 の実時間で 3 秒足らずで、
-        /// しかも当時は証拠に「バニラが設計上断るもの」（瓦礫・公園・消防署）が
-        /// 混ざっていたため、正常な街で必ず踏んだ。証拠側は
-        /// FireWhirlDamage.CanBurn で掃除したので、いまや attempted に数えた棟は
-        /// バニラが受け付けるはずの棟だけ＝ 1 回の空振りでも十分に異常だが、
-        /// 「他 MOD が BurnBuilding を横取りしている」等こちらの知らない事情も
-        /// ありうるので、証拠を厚く積んでから名指しする。
+        /// 8 rounds was too short. 8 rounds is 2.8 in-game minutes = under 3 seconds of real
+        /// time at speed 1, and at the time the evidence was also polluted with "things
+        /// vanilla refuses by design" (rubble, parks, fire stations), so a perfectly healthy
+        /// city always tripped it. The evidence side has since been cleaned up by
+        /// FireWhirlDamage.CanBurn, so the buildings now counted in attempted are only ones
+        /// vanilla ought to accept — meaning even a single empty round is genuinely
+        /// suspicious — but there may be circumstances we do not know about (another mod
+        /// intercepting BurnBuilding, say), so we pile up plenty of evidence before naming
+        /// it.
         ///
-        /// 閾値を伸ばす代償はほぼ無い。検出したい破れ（m_fireIntensity 直接書込の
-        /// 再発など）は「1 棟も燃えない」が永久に続くので、何回に設定しても必ず捕まる。
-        /// 一方で誤検知は狼少年を作り、この基盤ごと信用されなくなる。
+        /// Stretching the threshold costs almost nothing. The failure we want to detect (a
+        /// regression back to writing m_fireIntensity directly, for instance) means "nothing
+        /// ever burns" forever, so whatever count we pick it will still be caught. A false
+        /// positive, on the other hand, cries wolf and costs this whole facility its
+        /// credibility.
         ///
-        /// なお「選ばれた（selected）」ではなく「実際に BurnBuilding を呼んだ（attempted）」
-        /// を数えること。IgnitionSpread.Select は既燃の建物を除外するが、選定後に
-        /// 燃え出した分は FireWhirlDamage.Ignite 側で弾かれるため、attempted を使わないと
-        /// 「周囲が全部すでに燃えている大火災」を異常と誤判定する。
+        /// Note that we count "we actually called BurnBuilding" (attempted), not "it was
+        /// picked" (selected). IgnitionSpread.Select excludes buildings that are already
+        /// burning, but any that start burning after the selection are rejected on the
+        /// FireWhirlDamage.Ignite side, so without attempted we would wrongly flag "a huge
+        /// fire where everything nearby is already alight" as a fault.
         /// </summary>
         public const int DefaultThreshold = 24;
 
@@ -53,32 +61,36 @@ namespace DisasterPlus.Core.FireWhirl
             _threshold = threshold < 1 ? 1 : threshold;
         }
 
-        /// <summary>連続して空振りしている回数。</summary>
+        /// <summary>How many rounds in a row have come up empty.</summary>
         public int Streak { get { return _streak; } }
 
-        /// <summary>閾値に達した状態か。Record が着火を観測するまで下りない。</summary>
+        /// <summary>Whether the threshold has been reached. It does not come back down
+        /// until Record observes an ignition.</summary>
         public bool Tripped { get { return _tripped; } }
 
         public int Threshold { get { return _threshold; } }
 
         /// <summary>
-        /// 延焼判定 1 回ぶんの結果を記録する。
+        /// Records the result of one round of the spread test.
         /// </summary>
-        /// <param name="attempted">実際に BurnBuilding を呼んだ棟数。</param>
-        /// <param name="ignited">着火に成功した棟数。</param>
-        /// <returns>この記録でちょうど閾値に達したときだけ true（ログを 1 回だけ出すため）。</returns>
+        /// <param name="attempted">The number of buildings BurnBuilding was actually called
+        /// on.</param>
+        /// <param name="ignited">The number of buildings that were successfully set
+        /// alight.</param>
+        /// <returns>True only when this record is the one that reaches the threshold (so
+        /// that the log is emitted exactly once).</returns>
         public bool Record(int attempted, int ignited)
         {
             if (ignited > 0)
             {
-                // 動いている。証拠はすべて捨てる。
+                // It is working. Throw away all the evidence.
                 _streak = 0;
                 _tripped = false;
                 return false;
             }
 
-            // 試行が 0 の回は証拠にならない（燃やす対象がそもそも無かっただけ）。
-            // リセットもしない。静かな時間を挟んでも証拠は積み上がる。
+            // A round with zero attempts is not evidence (there was simply nothing to burn).
+            // Nor do we reset. The evidence keeps accumulating across quiet stretches.
             if (attempted <= 0) return false;
 
             _streak++;
@@ -88,7 +100,7 @@ namespace DisasterPlus.Core.FireWhirl
             return true;
         }
 
-        /// <summary>レベルアンロード時。都市をまたいで証拠を持ち越さない。</summary>
+        /// <summary>For level unload. Evidence is never carried over between cities.</summary>
         public void Reset()
         {
             _streak = 0;

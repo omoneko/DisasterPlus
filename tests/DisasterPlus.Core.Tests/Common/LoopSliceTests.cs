@@ -5,12 +5,13 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Common
 {
     /// <summary>
-    /// <see cref="LoopSlice"/> の固定。
+    /// Pins down <see cref="LoopSlice"/>.
     ///
-    /// 守っているのは 3 つ:
-    /// 1. 指定した窓のフレームがそのまま出る（クロスフェード域を除いて）
-    /// 2. 継ぎ目で**波形が跳ばない**（クリックが出ない）
-    /// 3. 切れない入力では**元の配列をそのまま返す**（無音にしない）
+    /// Three things are protected:
+    /// 1. the frames of the requested window come out verbatim (outside the crossfade region)
+    /// 2. **the waveform does not jump** at the seam (no click)
+    /// 3. for input that cannot be cut, **the original array is returned as it is**
+    ///    (never silence)
     /// </summary>
     public class LoopSliceTests
     {
@@ -51,16 +52,17 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TheSeamDoesNotJump()
         {
-            // ★ これがこのクラスの存在理由。ループ末尾 → 先頭 の段差が、
-            //   窓の中の 1 サンプルぶんの段差と同じ程度に収まっていること。
+            // ★ This is the reason the class exists. The step from the end of the loop back
+            //   to its start must be of about the same size as a one-sample step inside the
+            //   window.
             float[] src = Ramp(200, 1);
             float[] loop = LoopSlice.Build(src, 1, 20, 100, 10);
 
             float insideStep = Math.Abs(loop[60] - loop[59]);
             float seamStep = Math.Abs(loop[0] - loop[loop.Length - 1]);
 
-            // 素材はランプなので、切り出しただけなら段差は 100（窓の長さ）になる。
-            // クロスフェードが効いていれば数サンプルぶんに収まる。
+            // The material is a ramp, so a plain cut would give a step of 100 (the window
+            // length). With the crossfade working it stays within a few samples' worth.
             Assert.True(seamStep < insideStep * 5f,
                         "the loop seam jumps by " + seamStep + " against an in-window step of "
                         + insideStep);
@@ -69,8 +71,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TheCrossfadeStartsFromTheMaterialThatFollowedTheLoopEnd()
         {
-            // 先頭サンプルはほぼ src[start+length]（＝末尾の続き）でなければ、
-            // 戻った瞬間に波形が跳ぶ。
+            // Unless the first sample is roughly src[start+length] (i.e. the continuation
+            // of the end), the waveform jumps the moment the loop wraps round.
             float[] src = Ramp(300, 1);
             float[] loop = LoopSlice.Build(src, 1, 50, 100, 20);
 
@@ -89,7 +91,7 @@ namespace DisasterPlus.Core.Tests.Common
             for (int i = 0; i < 20; i++) Assert.Equal(10f + i, loop[i], 4);
         }
 
-        // ── 切れないときは元のまま（**無音にしない**）──────────────────
+        // ── When it cannot be cut, leave it alone (**never silence**) ──────────────────
 
         [Fact]
         public void AFileTooShortForTheWindowIsReturnedUnchanged()
@@ -102,10 +104,11 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void ThereMustBeMaterialAfterTheLoopEndForTheCrossfade()
         {
-            // ちょうど窓ぶんしか無いファイル。混ぜる素材が無いので切らない。
+            // A file with exactly the window's worth of material. There is nothing to mix
+            // in, so it is not cut.
             float[] src = Ramp(50, 1);
             Assert.Same(src, LoopSlice.Build(src, 1, 0, 50, 5));
-            // 5 フレームだけ余分にあれば切れる。
+            // Just 5 extra frames are enough for it to be cut.
             float[] longer = Ramp(55, 1);
             Assert.Equal(50, LoopSlice.Build(longer, 1, 0, 50, 5).Length);
         }
@@ -150,8 +153,9 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TheCrossfadeKeepsTheLevelRoughlyConstant()
         {
-            // 等電力（√）で混ぜているので、無相関な素材でも継ぎ目で音圧が凹まないこと。
-            // 直流 1.0 の素材どうしなら √t + √(1-t) >= 1 になり、決して 1 を下回らない。
+            // The mix is equal-power (√), so the level must not dip at the seam even for
+            // uncorrelated material. Between two DC 1.0 sources, √t + √(1-t) >= 1, so it
+            // never falls below 1.
             var src = new float[400];
             for (int i = 0; i < src.Length; i++) src[i] = 1f;
 

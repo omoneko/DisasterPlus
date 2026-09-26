@@ -5,22 +5,25 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// <see cref="TsunamiRingShape"/> —— 震源から同心円に立つ津波の「形」。
+    /// <see cref="TsunamiRingShape"/> —— the "shape" of the tsunami that rises in concentric
+    /// circles from the hypocentre.
     ///
-    /// ここで守るのは<b>IL から写した式と数字</b>である。ゲームの挙動そのものは
-    /// オフラインのソルバ（<c>tools/WaterSolverSim</c>）で測るので、この層では
-    /// 「写し間違えていないか」だけを見る。
+    /// What is protected here are <b>the formulas and numbers copied out of the IL</b>. The
+    /// behaviour in the game itself is measured by the offline solver
+    /// (<c>tools/WaterSolverSim</c>), so at this layer we only check that nothing was
+    /// copied down wrongly.
     /// </summary>
     public class TsunamiRingShapeTests
     {
-        /// <summary>バニラの長さ。**ここを既定にするだけで、値としては扱う。**</summary>
+        /// <summary>The vanilla duration. **Only the default here; it is treated as a
+        /// value.**</summary>
         private const int T0 = TsunamiRingShape.DurationTicks;
 
         [Fact]
         public void VanillaDelta_matches_the_IL_formula()
         {
             // m_delta = round(64 * 64 * intensity / 55)
-            // 強度 100 -> 7447 (116.4 m)、255 -> 18991 (296.7 m)。IL 実測値。
+            // Intensity 100 -> 7447 (116.4 m), 255 -> 18991 (296.7 m). Measured from the IL.
             Assert.Equal(7447, TsunamiRingShape.VanillaDeltaUnits(100));
             Assert.Equal(18991, TsunamiRingShape.VanillaDeltaUnits(255));
             Assert.Equal(0, TsunamiRingShape.VanillaDeltaUnits(0));
@@ -37,7 +40,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Radius_and_rate_are_inverses_of_each_other()
         {
-            // r = sqrt(rate)*0.4 + 10、その逆が rate = ((r-10)/0.4)^2。
+            // r = sqrt(rate)*0.4 + 10, whose inverse is rate = ((r-10)/0.4)^2.
             foreach (float r in new[] { 100f, 640f, 1280f, 3840f })
             {
                 long rate = TsunamiRingShape.RateForRadiusMetres(r);
@@ -50,7 +53,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Radius_below_the_floor_asks_for_nothing()
         {
-            // 半径 10 m は流量 0 でも出る（式の定数項）。それ以下は要求できない。
+            // A radius of 10 m comes out even at rate 0 (the constant term of the formula).
+            // Anything below that cannot be asked for.
             Assert.Equal(0L, TsunamiRingShape.RateForRadiusMetres(10f));
             Assert.Equal(0L, TsunamiRingShape.RateForRadiusMetres(0f));
             Assert.Equal(0f, TsunamiRingShape.RadiusMetresForRate(0L));
@@ -68,8 +72,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void The_crest_is_in_the_middle_and_equals_the_decayed_amplitude()
         {
-            // t = T/2 で off = -amp、つまり level = sea + amp。
-            // amp = delta * (65536 - t) / 65536 = 7447 * 0.875 = 6516。
+            // At t = T/2, off = -amp, i.e. level = sea + amp.
+            // amp = delta * (65536 - t) / 65536 = 7447 * 0.875 = 6516.
             int half = TsunamiRingShape.DurationTicks / 2;
             int got = TsunamiRingShape.LevelOffsetUnits(half, 7447, T0);
 
@@ -79,7 +83,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Retreat_comes_before_and_after_the_crest()
         {
-            // 1.5 周期の sin と (1-cos) の包絡なので、引き -> 押し -> 引き になる。
+            // It is 1.5 periods of sin under a (1-cos) envelope, so it goes
+            // retreat -> push -> retreat.
             int T = TsunamiRingShape.DurationTicks;
 
             int early = TsunamiRingShape.LevelOffsetUnits(T / 6, 7447, T);
@@ -90,7 +95,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.True(crest > 0, "the crest should push, got " + crest);
             Assert.True(late < 0, "the sea should draw back again, got " + late);
 
-            // 引き波は押し波よりずっと浅い（0.25*amp 対 1.0*amp）。
+            // The retreat is far shallower than the push (0.25*amp against 1.0*amp).
             Assert.True(-early < crest / 2, "retreat " + early + " vs crest " + crest);
         }
 
@@ -108,11 +113,12 @@ namespace DisasterPlus.Core.Tests.Earthquake
         {
             int depth = 174 * 64;   // 174 m
 
-            // 引き波が水深より深く要求しても、割合までしか通さない。
+            // Even when the retreat asks for more than the water depth, only the given
+            // fraction gets through.
             int got = TsunamiRingShape.ClampDraw(-100000, depth, 0.45f);
             Assert.Equal(-(int)(depth * 0.45f), got);
 
-            // 浅い要求はそのまま通る。
+            // A shallow request passes through untouched.
             Assert.Equal(-64, TsunamiRingShape.ClampDraw(-64, depth, 0.45f));
         }
 
@@ -133,19 +139,19 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void The_duration_really_is_a_parameter()
         {
-            // ★★ **この 3 本が緑でなければ、波形の長さは絵に描いた餅である。**
-            //    実際に一度、呼び出し側が 768 水ステップを指定しているのに
-            //    ここが定数を見ていて 256 歩で終わっていた。
+            // ★★ **Unless these three are green, the waveform's duration is pie in the sky.**
+            //    It did in fact happen once that the caller specified 768 water steps while
+            //    this code was looking at the constant and finishing after 256.
             int longT = 768 * TsunamiRingShape.TicksPerWaterStep;
 
-            // 1. バニラの長さを過ぎても、長い波形なら 0 にならない。
+            // 1. Past the vanilla duration it must not be 0 for a long waveform.
             Assert.NotEqual(0, TsunamiRingShape.LevelOffsetUnits(T0 + 640, 7447, longT));
 
-            // 2. 山は指定した長さの真ん中あたりに来る。
+            // 2. The crest comes around the middle of the duration given.
             //
-            // ★ **ちょうど真ん中ではない。** 振幅 (65536 - t)/65536 が
-            //   時間とともに落ちるので、頂点はわずかに手前へずれる。
-            //   だから「真ん中で最大」ではなく「真ん中付近で最大」を試す。
+            // ★ **Not exactly at the middle.** The amplitude (65536 - t)/65536 falls with
+            //   time, so the peak shifts slightly earlier. So we test for "greatest near
+            //   the middle" rather than "greatest at the middle".
             int crest = TsunamiRingShape.LevelOffsetUnits(longT / 2, 7447, longT);
             Assert.True(crest > 0, "crest should push, got " + crest);
 
@@ -161,16 +167,16 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.True(crest > best * 0.95,
                 "the middle should be within 5% of the peak: " + crest + " vs " + best);
 
-            // 3. 指定した長さで終わる。
+            // 3. It ends at the duration given.
             Assert.Equal(0, TsunamiRingShape.LevelOffsetUnits(longT, 7447, longT));
         }
 
         [Fact]
         public void A_longer_waveform_decays_more_by_its_crest()
         {
-            // ★ 減衰項 (65536 - t)/65536 は**絶対時刻**で効くので、
-            //   長い波形ほど山の時点で振幅が落ちている。
-            //   これが 1024 水ステップで威力が落ちた理由である。
+            // ★ The decay term (65536 - t)/65536 acts on **absolute time**, so the longer
+            //   the waveform the more the amplitude has already fallen by the crest.
+            //   This is why the force dropped off at 1024 water steps.
             int shortT = 256 * TsunamiRingShape.TicksPerWaterStep;
             int longT = 1024 * TsunamiRingShape.TicksPerWaterStep;
 
@@ -191,7 +197,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void The_offset_never_leaves_the_representable_range()
         {
-            // m_target は ushort。強度 255 でも 1/64 m 単位で桁が溢れないこと。
+            // m_target is a ushort. Even at intensity 255 the 1/64 m units must not overflow.
             for (int t = 0; t <= TsunamiRingShape.DurationTicks; t += 64)
             {
                 int off = TsunamiRingShape.LevelOffsetUnits(t, 18991, T0);

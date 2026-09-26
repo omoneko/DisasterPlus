@@ -3,10 +3,12 @@ using DisasterPlus.Core.Diagnostics;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 診断スナップショットの受け渡し。sim スレッドが Publish し、main スレッドが Latest を読む。
-    /// FireWhirlRegistry と同じ snapshot-then-render（net35 に Concurrent は無いので素の lock）。
+    /// Hands diagnostic snapshots over. The sim thread Publishes and the main thread reads
+    /// Latest.
+    /// The same snapshot-then-render as FireWhirlRegistry (net35 has no Concurrent
+    /// collections, so a plain lock).
     ///
-    /// DiagnosticReport は不変なので、参照を渡すだけで安全。
+    /// DiagnosticReport is immutable, so passing the reference is all that is needed.
     /// </summary>
     public static class DiagnosticsHub
     {
@@ -15,8 +17,8 @@ namespace DisasterPlus.Game
         private static bool _collectionEnabled;
 
         /// <summary>
-        /// 収集を走らせるか。オーバーレイが閉じていてダンプ要求も無ければ false で、
-        /// そのとき収集コストはゼロになる。
+        /// Whether to run collection. false when the overlay is closed and no dump has been
+        /// requested, and the collection cost is zero then.
         /// </summary>
         public static bool CollectionEnabled
         {
@@ -29,7 +31,7 @@ namespace DisasterPlus.Game
             lock (_gate) { _latest = report; }
         }
 
-        /// <summary>まだ一度も publish されていなければ null。呼び出し側で判定すること。</summary>
+        /// <summary>null if nothing has been published yet. The caller must check.</summary>
         public static DiagnosticReport Latest
         {
             get { lock (_gate) { return _latest; } }

@@ -4,12 +4,13 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// <b>海溝型地震の遠地被害。</b>（2026-09-02、所有者
-    /// 「震源から離れていても一定確率で火災や倒壊が起きるように（地震の規模に合わせて）」）
+    /// <b>Distant damage from a trench-type earthquake.</b> (2026-09-02, from the owner:
+    /// "make fires and collapses happen with a certain probability even far from the
+    /// epicentre, scaled to the size of the quake")
     ///
-    /// ★ ここが固定しているのは<b>依頼の 2 つの言葉</b>である ——
-    ///   「離れていても一定確率で」（＝床が残る）と
-    ///   「規模に合わせて」（＝強度で大きく変わる）。
+    /// ★ What is pinned here are the <b>two phrases of the request</b> ——
+    ///   "with a certain probability even far away" (= a floor remains) and
+    ///   "scaled to the size" (= it varies greatly with intensity).
     /// </summary>
     public class DistantDamageTests
     {
@@ -18,8 +19,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Far_from_the_epicentre_it_still_happens()
         {
-            // ★★ **これが依頼の中身である。** バニラの円盤（1 - d/R）は
-            //    遠方でほぼ 0 になる。こちらは床で残る。
+            // ★★ **This is the substance of the request.** The vanilla disc (1 - d/R)
+            //    drops to nearly 0 far away. Ours keeps a floor.
             float reach = DistantDamage.ReachMetres(200);
 
             float near = DistantDamage.Falloff(0f, 200);
@@ -27,20 +28,21 @@ namespace DisasterPlus.Core.Tests.Earthquake
 
             Assert.Equal(1f, near, 3);
 
-            // 半分の距離で、近傍の 6 割以上が残っていること
-            // （床が無ければちょうど 0.5 になる）。
+            // At half the distance, more than 60% of the near value must remain
+            // (without the floor it would be exactly 0.5).
             Assert.True(half > near * 0.6f, "falloff at half reach was " + half);
         }
 
         [Fact]
         public void The_reach_covers_the_whole_map_for_a_big_quake()
         {
-            // 25 タイル全域でも対角の半分は約 12,200 m。震央が沖にあるので、
-            // ここが届かないと**街に一切被害が出ない**。
+            // Even across all 25 tiles, half the diagonal is about 12,200 m. The epicentre
+            // is offshore, so if the reach does not get here
+            // **the city takes no damage at all**.
             Assert.True(DistantDamage.ReachMetres(255) > 12200f,
                 "reach at full intensity was " + DistantDamage.ReachMetres(255));
 
-            // 既定のスライダー（55）でも 9 タイル（半対角 約 7,330 m）は覆う。
+            // Even at the default slider (55) it covers 9 tiles (half-diagonal about 7,330 m).
             Assert.True(DistantDamage.ReachMetres(55) > 7330f,
                 "reach at intensity 55 was " + DistantDamage.ReachMetres(55));
         }
@@ -48,13 +50,14 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void It_stops_at_the_edge_without_a_step()
         {
-            // ★ 端で段差にすると、マップ上で被害がぷつりと切れるのが見える。
+            // ★ If there is a step at the edge, you can see the damage cut off abruptly
+            //   on the map.
             float reach = DistantDamage.ReachMetres(150);
 
             Assert.Equal(0f, DistantDamage.Falloff(reach, 150));
             Assert.Equal(0f, DistantDamage.Falloff(reach * 1.5f, 150));
 
-            // 端の直前は既に小さい（テーパーが効いている）。
+            // Just inside the edge it is already small (the taper is working).
             float justInside = DistantDamage.Falloff(reach * 0.98f, 150);
             Assert.True(justInside < 0.1f, "just inside the edge was " + justInside);
         }
@@ -77,7 +80,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void A_big_quake_is_far_worse_than_a_moderate_one()
         {
-            // ★★ 「地震の規模に合わせて」。二乗なので、強度 5 倍で被害は 25 倍近い。
+            // ★★ "Scaled to the size of the quake". It is squared, so 5x the intensity
+            //    gives close to 25x the damage.
             float small = DistantDamage.CollapseChance(0f, 51, Full);
             float big = DistantDamage.CollapseChance(0f, 255, Full);
 
@@ -88,7 +92,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Fire_is_more_likely_than_collapse()
         {
-            // 海溝型で街を焼くのは主に火災（クラス doc）。
+            // For a trench-type quake it is mainly fire that burns the city (class doc).
             Assert.True(DistantDamage.FireChance(1000f, 200, Full)
                         > DistantDamage.CollapseChance(1000f, 200, Full));
         }
@@ -103,7 +107,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
             float full = DistantDamage.CollapseChance(0f, 255, Full);
             Assert.Equal(full / 2f, half, 4);
 
-            // 目盛りを超えても倍率は 1 で頭打ち（負の値も 0 で止まる）。
+            // Beyond the top of the scale the multiplier caps at 1 (and negatives stop at 0).
             Assert.Equal(full, DistantDamage.CollapseChance(0f, 255, Full * 3f), 4);
             Assert.Equal(0f, DistantDamage.CollapseChance(0f, 255, -5f));
         }
@@ -124,27 +128,27 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void Broken_input_damages_nothing()
         {
-            // ★ 0 を返す条件は全て「壊さない」側に倒れていること。
+            // ★ Every condition that returns 0 must fall on the "do not damage" side.
             Assert.Equal(0f, DistantDamage.CollapseChance(float.NaN, 255, Full));
             Assert.Equal(0f, DistantDamage.CollapseChance(0f, 255, float.NaN));
             Assert.Equal(0f, DistantDamage.CollapseChance(-100f, 255, Full));
             Assert.Equal(0f, DistantDamage.FireChance(float.NaN, 255, Full));
 
-            // 強度 0 は「災害が読めていない」。何も起こさない。
+            // Intensity 0 means "the disaster could not be read". Do nothing.
             Assert.Equal(0f, DistantDamage.CollapseChance(0f, 0, Full));
         }
 
         [Fact]
         public void It_beats_the_vanilla_disc_where_vanilla_gives_up()
         {
-            // ★★ これが依頼の定量的な中身である。強度 100、3 km 沖の街:
-            //    バニラは 0.02 x (1 - 3000/4000) = 0.5% しか配らない。
+            // ★★ This is the quantitative substance of the request. Intensity 100, a city
+            //    3 km offshore: vanilla only hands out 0.02 x (1 - 3000/4000) = 0.5%.
             const byte intensity = 100;
             const float distance = 3000f;
 
             float vanilla = 0.02f * SeismicIntensity.At(distance, intensity);
 
-            // 既定の強さ（6）で、倒壊と出火を合わせてバニラを上回ること。
+            // At the default strength (6), collapse and fire together must beat vanilla.
             float ours = DistantDamage.CollapseChance(distance, intensity, 6f)
                          + DistantDamage.FireChance(distance, intensity, 6f);
 

@@ -1,20 +1,20 @@
 namespace DisasterPlus.Core.Diagnostics
 {
     /// <summary>
-    /// ログチャンネルのビットフラグ。
+    /// Bit flags for the log channels.
     ///
-    /// このビット位置は .cgs に保存される公開契約であり、凍結扱いとする。
-    /// 値を詰め直したり並べ替えたりしてはいけない。チャンネルを廃止するときも
-    /// ビットを残し、UI から外すだけにする。
+    /// These bit positions are a public contract saved into the .cgs, and are treated as
+    /// frozen. Never repack or reorder the values. Even when a channel is retired, keep its
+    /// bit and merely drop it from the UI.
     ///
-    /// 注意: Assembly-CSharp（ゲーム本体）にもグローバル名前空間の別物の
-    /// LogChannel 型が存在する。Game/ 側のファイルで
-    /// `using DisasterPlus.Core.Diagnostics;` を足すと、C# の名前解決はまず
-    /// 到達可能な名前空間（グローバル名前空間を含む）の型を using より優先するため、
-    /// 不用意な `using` はこの型ではなくゲーム側の LogChannel に無言で解決され、
-    /// CS0117（このメンバーは無い）で発覚する。Game/ から参照するときは
-    /// `DisasterPlus.Core.Diagnostics.LogChannel` と完全修飾すること
-    /// （実例: src/DisasterPlus/Game/Mod.cs）。
+    /// Note: Assembly-CSharp (the game itself) also has a completely different LogChannel
+    /// type in the global namespace. If you add `using DisasterPlus.Core.Diagnostics;` to a
+    /// file under Game/, C# name resolution prefers types from the enclosing namespaces
+    /// (including the global namespace) over the ones brought in by a using, so a careless
+    /// `using` silently resolves to the game's LogChannel rather than this type, and you
+    /// find out via CS0117 (no such member). When referring to it from Game/, fully qualify
+    /// it as `DisasterPlus.Core.Diagnostics.LogChannel`
+    /// (a worked example: src/DisasterPlus/Game/Mod.cs).
     /// </summary>
     public static class LogChannel
     {
@@ -27,15 +27,16 @@ namespace DisasterPlus.Core.Diagnostics
         public const int Diagnostics = 64;
 
         /// <summary>
-        /// 既定マスク。General だけを有効にする。
+        /// The default mask. Only General is enabled.
         ///
-        /// 0 にしてはいけない。チャンネル指定のない既存の Log.Diag(key, msg) は
-        /// General 扱いになるため、0 にすると現在出ている診断ログが黙って消え、
-        /// docs/playtest-checklist.md が参照している実機確認の手順が壊れる。
+        /// Never make it 0. Existing calls to Log.Diag(key, msg) without a channel are
+        /// treated as General, so setting it to 0 would silently remove the diagnostic
+        /// logging we get today and break the on-hardware verification steps that
+        /// docs/playtest-checklist.md refers to.
         /// </summary>
         public const int DefaultMask = General;
 
-        /// <summary>channel のビットが全て mask に立っていれば true。</summary>
+        /// <summary>True if every bit of channel is set in mask.</summary>
         public static bool IsEnabled(int channel, int mask)
         {
             if (channel == 0) return false;

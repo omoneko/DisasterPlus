@@ -1,55 +1,58 @@
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="Assumptions"/> のうち⑤火山 の前提。
+    /// The part of <see cref="Assumptions"/> covering the ⑤ volcano.
     ///
-    /// **このファイルには検証しか置かない。** <c>Check</c> / <c>SetResult</c> /
-    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> は本体側の private のままで、
-    /// partial なので可視性を 1 つも上げずに使える（分割の要件そのもの）。
+    /// **This file holds nothing but checks.** <c>Check</c> / <c>SetResult</c> /
+    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> stay private on the main side, and
+    /// because this is partial they can be used without raising a single visibility
+    /// (that is exactly the requirement behind the split).
     ///
-    /// 件数は <see cref="VolcanoCheckCount"/> がこのファイルの中で宣言する。
-    /// **検証を足したらここも増やすこと** —— 本体の <c>TotalCheckCount</c> は
-    /// これらの和である。
+    /// The count is declared inside this file by <see cref="VolcanoCheckCount"/>.
+    /// **If you add a check, bump it here too** — the main file's <c>TotalCheckCount</c> is
+    /// the sum of these.
     ///
-    /// ── ★ この 3 件の述語について（④のレビューと②の監査が見つけた欠陥）─────
+    /// ── ★ About the predicates of these three (the flaw ④'s review and ②'s audit found) ─────
     ///
-    /// ④で「未実測のプレハブ値を捕まえるはずの検証が、まさにその場合に PASS した」
-    /// ことがあった。原因は述語が「フィールドが解決したか」を見ていて、
-    /// **機能が実際に門にしている「値が使えるか」を見ていなかった**ことである。
-    /// ②にも同じ形が残っていた。
+    /// In ④ there was a case where "a check that was supposed to catch an unmeasured prefab
+    /// value PASSed in exactly that case". The cause was that the predicate looked at "did the
+    /// field resolve" and **not at "is the value usable", which is what the feature actually
+    /// gates on**. The same shape remained in ② as well.
     ///
-    /// そこで⑤の 3 件は、**機能そのものが門にしている式を、そのまま述語にする**:
+    /// So ⑤'s three checks **take the expression the feature itself gates on and use it
+    /// verbatim as the predicate**:
     ///
     /// <code>
-    /// 検証 1 ← VolcanoTerrainFacts.Usable
-    ///          （= HeightsResolved &amp;&amp; RawArrayLength == 1081^2 &amp;&amp; UpdateAreaResolved）
-    /// 検証 2 ← BurnGroundResolved                     （T8 の焦げの門）
-    /// 検証 3 ← SlopeSampleResolved                    （T8 の溶岩の門）
+    /// check 1 ← VolcanoTerrainFacts.Usable
+    ///           (= HeightsResolved &amp;&amp; RawArrayLength == 1081^2 &amp;&amp; UpdateAreaResolved)
+    /// check 2 ← BurnGroundResolved                    (T8's gate for the scorching)
+    /// check 3 ← SlopeSampleResolved                   (T8's gate for the lava)
     /// </code>
     ///
-    /// 特に検証 1 は<b>配列の長さまで見る</b>。<c>RawHeights</c> が解決しても長さが
-    /// 1081² でなければ <c>z*1081 + x</c> の添字が別のセルを指し、**マップの
-    /// 無関係な場所が隆起する**。「解決した」だけを見る述語は、そこで PASS を出す。
+    /// Check 1 in particular <b>looks at the length of the array as well</b>. Even if
+    /// <c>RawHeights</c> resolves, if the length is not 1081² the index <c>z*1081 + x</c>
+    /// points at a different cell and **an unrelated part of the map rises**. A predicate that
+    /// only looks at "it resolved" emits a PASS there.
     ///
-    /// 走査は <see cref="VolcanoReader.ScanTerrainFacts"/> に委ねる。あちらは
-    /// **副作用なし**で、sim スレッドが回しているキャッシュを巻き戻さない
-    /// （<see cref="Run"/> は main スレッドから呼ばれる）。
+    /// The scan is delegated to <see cref="VolcanoReader.ScanTerrainFacts"/>. That one is
+    /// **side-effect-free** and does not wind back the cache the sim thread is turning
+    /// (<see cref="Run"/> is called from the main thread).
     /// </summary>
     public static partial class Assumptions
     {
-        /// <summary>このファイルが持つ検証の数。</summary>
+        /// <summary>The number of checks this file holds.</summary>
         private const int VolcanoCheckCount = 9;
 
         private static void RunVolcano()
         {
-            // --- ⑤火山（Task 2: 地形 API）ここから ---
+            // --- ⑤ volcano (Task 2: the terrain API) starts here ---
 
-            // ★ 走査は 1 回だけ。3 つの述語はその結果を見る。
-            //   **Check() の外側で呼ぶので、自分で例外を抑える**（Run() は
-            //   DisasterPlusLoading.OnLevelLoaded から素で呼ばれているため、
-            //   ここから投げるとレベルロードが壊れる。④の
-            //   FirstResolvableCloudShader が同じ理由で同じ形をしている）。
-            //   ScanTerrainFacts は項目ごとに try/catch しているが、二重に守る。
+            // ★ Scan only once. The three predicates look at that result.
+            //   **It is called outside Check(), so it suppresses exceptions itself** (Run() is
+            //   called bare from DisasterPlusLoading.OnLevelLoaded, so throwing from here
+            //   would break the level load. ④'s FirstResolvableCloudShader has the same shape
+            //   for the same reason).
+            //   ScanTerrainFacts try/catches per item, but guard it twice.
             VolcanoTerrainFacts facts;
             try
             {
@@ -57,16 +60,16 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // 既定値は全て false ＝「読めていない」。3 件とも FAIL になる。
+                // Every default is false = "could not read". All three then FAIL.
                 facts = new VolcanoTerrainFacts();
             }
 
-            // 1. 地形の書き込み経路。**⑤全体がこの 1 件に乗っている。**
+            // 1. The terrain write path. **The whole of ⑤ rests on this one check.**
             //
-            //   述語は VolcanoTerrainFacts.Usable そのもの ——
-            //   VolcanoUplift（T6）が「山を上げてよいか」を決めるのに使う式と
-            //   1 文字も違わない。名前に実測した長さを出すのは、
-            //   **1081² でなかったときにその数がここにしか出ないから**である。
+            //   The predicate is VolcanoTerrainFacts.Usable itself — not one character
+            //   different from the expression VolcanoUplift (T6) uses to decide "may the
+            //   mountain be raised". The measured length goes into the name because
+            //   **when it is not 1081², this is the only place that number appears.**
             Check("TerrainManager.RawHeights is a ushort[1081^2] and "
                   + "TerrainModify.UpdateArea(int,int,int,int,bool,bool,bool) is resolvable "
                   + "(RawHeights: "
@@ -78,45 +81,48 @@ namespace DisasterPlus.Game
                   + "change are the two calls the whole feature rests on",
                   delegate { return facts.Usable; });
 
-            // 2. 溶岩の焦げ。**山も火口も溶岩の前進もこれが無くても動く**ので、
-            //   impact にそこまで書く（狼少年にしない）。
-            //   述語は T8 の焦げが実際に門にする 1 つである。DLC ゲートは無い（§B-7b）ので
-            //   expectedWithoutDlc は付けない —— 付けると DLC 非所持環境で
-            //   本当の欠落まで「正常な FAIL」に紛れる。
+            // 2. The lava's scorching. **The mountain, the crater and the lava's advance all
+            //   work without it**, so the impact says as much (do not cry wolf).
+            //   The predicate is the one thing T8's scorching actually gates on. There is no
+            //   DLC gate (§B-7b), so expectedWithoutDlc is not set — set it and a genuine
+            //   absence would be lost among the "normal FAILs" in an environment without the
+            //   DLC.
             //
-            //   ★ かつてここは MakeCrater も見ていた。火口は高さプロファイルの一部に
-            //     なったので（Core/Volcano/VolcanoCrater）、あの呼び出しはもう存在しない。
+            //   ★ This used to look at MakeCrater too. The crater became part of the height
+            //     profile (Core/Volcano/VolcanoCrater), so that call no longer exists.
             Check("DisasterHelpers.BurnGround(Vector2,float,float) is resolvable",
                   "the ground is not scorched along the lava; the mountain, the crater and "
                   + "the lava still work",
                   delegate { return facts.BurnGroundResolved; });
 
-            // 3. 勾配サンプリング。**溶岩の門はこれ 1 つだけ**（T8）。
-            //   ★ 1 引数版ではなく 3 引数版（out float slopeX, out float slopeZ）を見る。
-            //     1 引数版は高さしか返さないので、それが解決しても溶岩は
-            //     下り方向を見つけられない（§B-6）。同名 4 本のオーバーロードが
-            //     あるので、引数の型まで指定しないと別物を掴む。
+            // 3. Slope sampling. **This is the lava's only gate** (T8).
+            //   ★ Look at the three-argument version (out float slopeX, out float slopeZ),
+            //     not the one-argument version. The one-argument version only returns the
+            //     height, so even if that resolves the lava cannot find which way is downhill
+            //     (§B-6). There are four overloads of the same name, so without specifying the
+            //     argument types you grab the wrong one.
             Check("TerrainManager.SampleDetailHeight(Vector3, out float, out float) is resolvable",
                   "the lava cannot find its way downhill, so no lava flows at all. The "
                   + "mountain, the clearing and the eruption are unaffected",
                   delegate { return facts.SlopeSampleResolved; });
 
-            // --- ⑤火山（Task 2: 地形 API）ここまで ---
+            // --- ⑤ volcano (Task 2: the terrain API) ends here ---
 
-            // --- ⑤火山（Task 5: 準備の破壊経路）ここから ---
+            // --- ⑤ volcano (Task 5: the clearing/destruction path) starts here ---
 
-            // 4. 破壊経路。**述語は VolcanoClearing が実際に門にしている式そのもの**
-            //   （VolcanoDestructionFacts.Usable）である。「フィールドが解決した」を
-            //   述語にすると、経路が使えない環境で PASS が出る（④のレビューと
-            //   ②の監査が同じ欠陥を見つけている）。
+            // 4. The destruction path. **The predicate is the very expression VolcanoClearing
+            //   actually gates on** (VolcanoDestructionFacts.Usable). Make "the field
+            //   resolved" the predicate and a PASS comes out in an environment where the path
+            //   is unusable (④'s review and ②'s audit found the same flaw).
             //
-            //   ★ この検査が FAIL なら⑤は火山を 1 つも作らない。**degraded ではない** ——
-            //     準備せずに地面を上げるのは劣化した動作ではなく、設計書 §1.2 が
-            //     発見した失敗そのものだからである。
+            //   ★ If this check FAILs, ⑤ builds no volcano at all. **This is not degraded** —
+            //     raising the ground without clearing it first is not a degraded mode but
+            //     precisely the failure design doc §1.2 discovered.
             //
-            //   ScanFacts はキャッシュを触らない純粋な走査なので main スレッドから
-            //   呼んでよい（あちらのクラス doc）。Check の外で例外を抑えるのは
-            //   上の 3 件と同じ理由（Run はレベルロードから素で呼ばれている）。
+            //   ScanFacts is a pure scan that does not touch the cache, so it is fine to call
+            //   from the main thread (see its class doc). Suppressing exceptions outside Check
+            //   is for the same reason as the three above (Run is called bare from the level
+            //   load).
             VolcanoDestructionFacts destruction;
             try
             {
@@ -135,28 +141,29 @@ namespace DisasterPlus.Game
                   + "full of flat trenches and bowls",
                   delegate { return destruction.Usable; });
 
-            // --- ⑤火山（Task 5: 準備の破壊経路）ここまで ---
+            // --- ⑤ volcano (Task 5: the clearing/destruction path) ends here ---
 
-            // --- ⑤火山（Task 7: 噴火の借り物エフェクト）ここから ---
+            // --- ⑤ volcano (Task 7: the borrowed eruption effects) starts here ---
 
-            // 5. 借りるバニラの粒子エフェクト 3 つ（噴煙・炎・噴石）。
-            //   **この検査が FAIL でも山は育ち、溶岩は流れて建物を燃やす** ——
-            //   欠けた 1 つが描かれなくなるだけである。impact 文にそう書くのは
-            //   狼少年にしないためである（④が DestroyTrees で同じ判断をしている）。
+            // 5. The three vanilla particle effects that are borrowed (plume, flame, ejecta).
+            //   **Even if this check FAILs the mountain grows, the lava flows and buildings
+            //   burn** — the missing one simply is not drawn. Saying so in the impact sentence
+            //   is how it avoids crying wolf (④ made the same call for DestroyTrees).
             //
-            //   ★★ 述語は VolcanoEruptionFx が実際に門にしている式そのものである。
-            //     VolcanoVanillaFx は**複製に失敗しても元のプレハブをそのまま描く**ので、
-            //     「引けたか」が「描けるか」と一致する。ここが一致していないと
-            //     「検査は通ったのに機能が動かない」が起きる（本プロジェクトで 2 度出た形）。
+            //   ★★ The predicate is the very expression VolcanoEruptionFx actually gates on.
+            //     VolcanoVanillaFx **draws the original prefab as-is even if the copy fails**,
+            //     so "did it resolve" matches "can it be drawn". Where those two do not match
+            //     you get "the check passed but the feature does not work" (a shape that has
+            //     come up twice in this project).
             //
-            //   ★ この 3 つはどれも DLC 不要である。Natural Disasters の
-            //     爆発・隕石のほうが見た目は良いが、非所持環境には存在しないので
-            //     既定経路には決してしない。
+            //   ★ None of these three needs a DLC. Natural Disasters' explosion and meteor
+            //     look better, but they do not exist where the DLC is not owned, so they are
+            //     never made the default path.
             //
-            //   ScanFacts は main スレッド専用（Run() も main）。副作用として
-            //   複製を 1 度だけ作りうるが、それは描画側が作るものと同一の 1 個で、
-            //   レベルアンロードで VolcanoVanillaFx.Destroy が畳む。
-            //   Check の外で例外を抑えるのは上の 4 件と同じ理由。
+            //   ScanFacts is main thread only (Run() is main too). As a side effect it may
+            //   create a copy once, but that is the same single copy the rendering side would
+            //   create, and VolcanoVanillaFx.Destroy folds it away on level unload.
+            //   Suppressing exceptions outside Check is for the same reason as the four above.
             VolcanoVanillaFacts vanilla;
             try
             {
@@ -179,16 +186,17 @@ namespace DisasterPlus.Game
                   + "these effects needs a DLC",
                   delegate { return vanilla.EruptionUsable; });
 
-            // --- ⑤火山（Task 7: 噴火の借り物エフェクト）ここまで ---
+            // --- ⑤ volcano (Task 7: the borrowed eruption effects) ends here ---
 
-            // --- ⑤火山（火砕流の代用）ここから ---
+            // --- ⑤ volcano (the stand-in for a pyroclastic flow) starts here ---
 
-            // 6. 斜面を下る土煙の帯。**バニラに火砕流のエフェクトは 1 つも無い**ので、
-            //   ⑤は建物崩壊の粉塵を溶岩の経路へ流している。噴火の 3 つとは成否が
-            //   別に決まるので、検査も別にする（片方の欠けでもう片方を巻き込まない）。
+            // 6. The band of dust running down the slope. **Vanilla has no pyroclastic flow
+            //   effect at all**, so ⑤ sends the dust from a building collapse down the lava's
+            //   path. Its success is decided separately from the three eruption effects, so
+            //   the check is separate too (one being absent must not drag the other in).
             //
-            //   ★ 述語は VolcanoPyroclasticFx.Step が実際に門にしている式
-            //     （VolcanoVanillaFacts.PyroclasticUsable）そのものである。
+            //   ★ The predicate is the very expression VolcanoPyroclasticFx.Step actually
+            //     gates on (VolcanoVanillaFacts.PyroclasticUsable).
             Check("the game's own particle effect \"" + VolcanoVanillaFx.DustName
                   + "\" can be looked up and rendered (dust: "
                   + (vanilla.DustResolved ? "ok" : "missing")
@@ -198,50 +206,55 @@ namespace DisasterPlus.Game
                   + "pyroclastic flow effect to fall back to",
                   delegate { return vanilla.PyroclasticUsable; });
 
-            // --- ⑤火山（火砕流の代用）ここまで ---
+            // --- ⑤ volcano (the stand-in for a pyroclastic flow) ends here ---
 
-            // --- ⑤火山（Task 8: 溶岩の着火経路）ここから ---
+            // --- ⑤ volcano (Task 8: the lava's ignition path) starts here ---
 
-            // 7. 着火と水の 3 つ。**溶岩そのものはこれが無くても流れて描かれる**ので、
-            //   impact にそこまで書く。
+            // 7. The three for ignition and water. **The lava itself flows and is drawn
+            //   without them**, so the impact says as much.
             //
-            //   ★ **TreeManager.BurnTree はこの検査に含めない。** ND 非所持で
-            //     常に false になるのは正常であり（§B-7c の SupportsExpansion ゲート）、
-            //     FAIL にすると狼少年になる。所持／非所持は診断の 1 行で名乗る。
+            //   ★ **TreeManager.BurnTree is not part of this check.** It always returning
+            //     false without ND is normal (the SupportsExpansion gate in §B-7c), and
+            //     making it a FAIL would cry wolf. Owned/not owned is stated on one
+            //     diagnostic line.
             //
-            //   ★ 述語は VolcanoLava が実際に呼ぶ 3 つのメソッドの解決である。
-            //     引数の型まで指定するのは、SampleDetailHeight のように
-            //     同名オーバーロードがあるものを取り違えないためである（②が確立した形）。
+            //   ★ The predicate is the resolution of the three methods VolcanoLava actually
+            //     calls. The argument types are specified so as not to grab the wrong thing
+            //     where there are same-named overloads, as with SampleDetailHeight (the shape
+            //     ② established).
             Check("DisasterHelpers.BurnGround, BuildingAI.BurnBuilding and "
                   + "TerrainManager.HasWater are resolvable",
                   "the lava still flows and is still drawn, but it neither scorches the ground "
                   + "nor sets buildings on fire, and it does not stop at water",
                   delegate { return LavaIgnitionResolvable(); });
 
-            // --- ⑤火山（Task 8: 溶岩の着火経路）ここまで ---
+            // --- ⑤ volcano (Task 8: the lava's ignition path) ends here ---
 
-            // --- ⑤火山（Task 9: 溶岩の描画のシェーダ）ここから ---
+            // --- ⑤ volcano (Task 9: the shader the lava is drawn with) starts here ---
 
-            // 8. 溶岩の面のシェーダ。
+            // 8. The shader for the lava surface.
             //
-            //   ★★ **述語に「Standard が取れた」を混ぜない。** Standard は
-            //     Unity の組み込みなので実質必ず非 null だと思われており、
-            //     「… || Shader.Find("Standard") != null」という検査は**構造上 1 度も
-            //     失敗できない**形だった（④のレビューがまさにこれを見つけている。
-            //     実機では Shader.Find がその Standard にすら null を返したが、
-            //     構造上の欠陥は欠陥のままである）。
-            //     ここが見るのは **粒子系（加算 / アルファブレンド）が取れたか**で、
-            //     取れなければ Standard を透過モードにして描く（＝見えるが光らない）。
+            //   ★★ **Do not mix "Standard resolved" into the predicate.** Standard is a Unity
+            //     built-in and was therefore believed to be effectively always non-null, so a
+            //     check of the form "… || Shader.Find("Standard") != null" was **structurally
+            //     incapable of failing even once** (④'s review found exactly this. In the game
+            //     Shader.Find returned null even for that Standard, but a structural flaw is a
+            //     flaw regardless).
+            //     What this looks at is **whether something in the particle family (additive /
+            //     alpha-blended) resolved**; if not, we draw with Standard forced into
+            //     transparent mode (i.e. visible but not glowing).
             //
-            //   ★ 名前に「実際に何で解決したか」を出すのは、失敗したときにその情報が
-            //     ここにしか出ないからである（T2 の RawHeights の件数と同じ扱い）。
-            //     **借りてきたのかどうかも出す** —— Shader.Find で引けた環境と
-            //     読み込み済み Material から借りた環境は、次に何を疑うかが違う。
+            //   ★ What it actually resolved to goes into the name because, on a failure, that
+            //     information appears nowhere else (the same treatment as T2's RawHeights
+            //     count). **It also says whether it was borrowed** — an environment where
+            //     Shader.Find worked and one where it was borrowed off a loaded material
+            //     differ in what you would suspect next.
             //
-            //   ★ 述語は VolcanoLavaFx が実際に門にしている式そのものである
-            //     （ScanShaderFacts は BuildMaterial と同じ ShaderPool を呼ぶ）。
-            //     ShaderPool は main スレッド専用で、Run() も main である。
-            //     Check の外で例外を抑えるのは上の 7 件と同じ理由。
+            //   ★ The predicate is the very expression VolcanoLavaFx actually gates on
+            //     (ScanShaderFacts calls the same ShaderPool as BuildMaterial).
+            //     ShaderPool is main thread only, and Run() is main too.
+            //     Suppressing exceptions outside Check is for the same reason as the seven
+            //     above.
             VolcanoLavaShaderFacts lavaShader;
             try
             {
@@ -262,25 +275,27 @@ namespace DisasterPlus.Game
                   + "buildings on fire either way",
                   delegate { return lavaShader.ParticleShaderResolved; });
 
-            // --- ⑤火山（Task 9: 溶岩の描画のシェーダ）ここまで ---
+            // --- ⑤ volcano (Task 9: the shader the lava is drawn with) ends here ---
 
-            // --- ⑤火山（噴火の音）ここから ---
+            // --- ⑤ volcano (the sound of the eruption) starts here ---
 
-            // 9. 音の経路。**この検査が FAIL でも噴火はそのまま出る**（音だけが消える）ので、
-            //   impact にそう書く（狼少年にしない）。
+            // 9. The audio path. **Even if this check FAILs the eruption appears as usual**
+            //   (only the sound goes), so the impact says so (do not cry wolf).
             //
-            //   ★ 述語は VolcanoEruptionAudio.Update が実際に門にしている式
-            //     （VolcanoAudioFacts.Usable）そのものである。
+            //   ★ The predicate is the very expression VolcanoEruptionAudio.Update actually
+            //     gates on (VolcanoAudioFacts.Usable).
             //
-            //   ★★ **同梱 wav の有無を述語に混ぜない。** ファイルはプレイヤーが
-            //     消せるもので、消えていることは「ゲーム更新で前提が壊れた」ではない。
-            //     混ぜると、自分で消した人に前提違反を名乗ることになる。
-            //     代わりに**名前のほうに実測を出す** —— 音が出ないときに
-            //     「経路が無い」のか「ファイルが無い」のかは、ここでしか区別できない。
+            //   ★★ **Do not mix the presence of the bundled wav into the predicate.** The file
+            //     is something the player can delete, and its absence is not "a game update
+            //     broke an assumption". Mix it in and you would be declaring a broken
+            //     assumption at someone who deleted it themselves.
+            //     Put the measurement **in the name** instead — when there is no sound, "there
+            //     is no path" and "there is no file" can only be told apart here.
             //
-            //   ScanAudioFacts は副作用の無い走査で main スレッド専用（Run() も main）。
-            //   クリップは読まないので、レベルロードに 6 MB の I/O を持ち込まない。
-            //   Check の外で例外を抑えるのは上の 7 件と同じ理由。
+            //   ScanAudioFacts is a side-effect-free scan and main thread only (Run() is main
+            //   too). It does not read the clip, so it brings no 6 MB of I/O into the level
+            //   load. Suppressing exceptions outside Check is for the same reason as the seven
+            //   above.
             VolcanoAudioFacts audio;
             try
             {
@@ -302,14 +317,14 @@ namespace DisasterPlus.Game
                   + "does not fall back to playing it at a raw fixed volume",
                   delegate { return audio.Usable; });
 
-            // --- ⑤火山（噴火の音）ここまで ---
+            // --- ⑤ volcano (the sound of the eruption) ends here ---
         }
 
         /// <summary>
-        /// <see cref="VolcanoLava"/> が呼ぶ 3 つのメソッドが解決できるか。
-        /// **これは⑤の門ではない**（無くても溶岩は流れる）ので、
-        /// <c>VolcanoTerrainFacts.Usable</c> のような 1 本の式にはまとめていない ——
-        /// まとめると「溶岩が焦がさないだけ」の環境で山まで止めることになる。
+        /// Whether the three methods <see cref="VolcanoLava"/> calls can be resolved.
+        /// **This is not one of ⑤'s gates** (the lava flows without them), so it is not rolled
+        /// into a single expression like <c>VolcanoTerrainFacts.Usable</c> — roll it in and an
+        /// environment where "the lava merely does not scorch" would stop the mountain too.
         /// </summary>
         private static bool LavaIgnitionResolvable()
         {

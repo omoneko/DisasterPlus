@@ -4,81 +4,91 @@ using UnityEngine;
 
 namespace DisasterPlus.Game
 {
-    /// <summary>吹き付ける雨が今どうなっているか。</summary>
+    /// <summary>What the driving rain is doing right now.</summary>
     public enum TyphoonSquallState
     {
-        /// <summary>設定で切っている（あるいはまだ都市に入っていない）。</summary>
+        /// <summary>Switched off in the settings (or we are not in a city yet).</summary>
         Off,
 
-        /// <summary>借りられる粒子エフェクトがこの環境に無い。**不具合ではない**（雨は降る）。</summary>
+        /// <summary>This environment has no borrowable particle effect. **Not a fault**
+        /// (the rain still falls).</summary>
         NoEffect,
 
-        /// <summary>台風が居ないので出していない。</summary>
+        /// <summary>Not drawing, because there is no typhoon.</summary>
         Idle,
 
-        /// <summary>カメラが強風域の外に居る。**不具合ではない** —— そこは吹いていない。</summary>
+        /// <summary>The camera is outside the gale radius. **Not a fault** — it is not
+        /// blowing there.</summary>
         OutsideStorm,
 
-        /// <summary>毎フレーム飛沫を出している。</summary>
+        /// <summary>Emitting spray every frame.</summary>
         Emitting,
 
-        /// <summary>例外で落ちた。</summary>
+        /// <summary>It threw and fell over.</summary>
         Failed,
     }
 
     /// <summary>
-    /// <b>暴風雨</b>を地上で見せる。<b>main スレッド専用。</b>
+    /// Shows <b>the storm</b> at ground level. <b>Main thread only.</b>
     ///
-    /// ── 持ち主の指摘（2026-08-22）────────────────────────────────
+    /// ── What the owner pointed out (2026-08-22) ───────────────────────────
     ///
-    /// &gt; 暴風雨を再現してほしいです。
+    /// &gt; I would like the storm itself reproduced.
     ///
-    /// ④が今まで「嵐の強さ」として出せていたのは <c>m_targetRain</c> /
-    /// <c>m_targetCloud</c> の 2 つだけだった。どちらも**空全体の設定**で、
-    /// バニラの雨は真下に降り、風向きにも台風の位置にも従わない。
-    /// 地上のプレイヤーから見ると、最盛期の台風もただの雨と同じ絵になる。
+    /// All ④ had been able to show as "the strength of the storm" so far was the two
+    /// values <c>m_targetRain</c> / <c>m_targetCloud</c>. Both are **settings for the
+    /// whole sky**, and vanilla's rain falls straight down, obeying neither the wind
+    /// direction nor the typhoon's position. To a player on the ground, a typhoon at its
+    /// peak looks exactly like ordinary rain.
     ///
-    /// ★★ <b>雨量はもう上げられない。</b> 最盛期の <c>m_targetRain</c> は既に 1.0 で、
-    ///   しかも <c>m_currentRain &gt; 0.8</c> はゲーム自身に雷雨災害を作らせる境界である
-    ///   （IL 事実文書 §A-3）。④の落雷の予算はその手前で釣り合いを取っている
-    ///   （設計書 §4.2）。**この機能は雨量に 1 バイトも触らない。**
+    /// ★★ <b>The rainfall cannot be raised any further.</b> At the peak
+    ///   <c>m_targetRain</c> is already 1.0, and on top of that
+    ///   <c>m_currentRain &gt; 0.8</c> is the boundary at which the game creates a
+    ///   thunderstorm disaster of its own (IL facts document §A-3). ④'s lightning budget
+    ///   is balanced just short of that (design doc §4.2). **This feature does not touch
+    ///   a single byte of the rainfall.**
     ///
-    /// 代わりに足すのが<b>横殴りの飛沫</b>である。バニラの雨と違って
-    /// <c>velocity</c> 引数で風下へ流れるので、はじめて「吹いている」ように見える。
+    /// What it adds instead is <b>spray driven sideways</b>. Unlike vanilla's rain it
+    /// drifts downwind via the <c>velocity</c> argument, and for the first time it looks
+    /// as though the wind is blowing.
     ///
-    /// ── ★ カメラの周りに置く（台風の中心ではない）────────────────────────
+    /// ── ★ Place it around the camera (not at the typhoon's centre) ───────
     ///
-    /// 渦（<see cref="TyphoonCloudFx"/>）は台風の中心に置く。こちらは違う ——
-    /// <b>「自分が居るところが吹き荒れている」を見せるもの</b>なので、
-    /// <c>RenderManager.CurrentCameraInfo.m_position</c> の下に置く。
-    /// 5 km 先で飛沫が舞っても画面には何も起きない。
+    /// The vortex (<see cref="TyphoonCloudFx"/>) is placed at the typhoon's centre. This
+    /// is different — it is <b>there to show "it is raging where I am"</b>, so it goes
+    /// below <c>RenderManager.CurrentCameraInfo.m_position</c>. Spray whirling 5 km away
+    /// does nothing at all on screen.
     ///
-    /// 強さは <c>TyphoonProfile.WindAt</c>（カメラと台風中心の距離）から
-    /// <c>SquallLayout.StrengthOf</c> が決める。強風域の外では**1 粒も出さない**
-    /// （<see cref="TyphoonSquallState.OutsideStorm"/>。不具合ではない）。
+    /// The strength is decided by <c>SquallLayout.StrengthOf</c> from
+    /// <c>TyphoonProfile.WindAt</c> (the distance between the camera and the typhoon's
+    /// centre). Outside the gale radius **not one particle is emitted**
+    /// (<see cref="TyphoonSquallState.OutsideStorm"/>; not a fault).
     ///
-    /// ── 素材 ─────────────────────────────────────────
+    /// ── The source material ───────────────────────────────────────
     ///
-    /// <see cref="VanillaParticles"/> が在庫を列挙して、粒子マテリアル
-    /// <c>Water</c>（出荷アセットの <c>water</c> テクスチャは平均 RGB (201, 222, 254)
-    /// の白青の飛沫）を最優先で採る。**名前で引かない**理由はあちらの doc。
-    /// 借り元は放出角が 1 度しか無く可視距離も 500〜2000 m なので、
-    /// **複製して**ほぼ水平（66〜104 度）に、可視 3000 m に作り替える。
+    /// <see cref="VanillaParticles"/> enumerates what is available and takes, in
+    /// preference to anything else, the particle material <c>Water</c> (the shipped
+    /// <c>water</c> texture is white-blue spray with an average RGB of (201, 222, 254)).
+    /// Why we **do not look it up by name** is in that doc.
+    /// The source has a spawn angle of only 1 degree and a visibility distance of
+    /// 500-2000 m, so we **clone it** and rebuild it as almost horizontal (66-104 degrees)
+    /// with a visibility of 3000 m.
     ///
-    /// ── 毎フレームの仕事量 ───────────────────────────────────
+    /// ── The work done per frame ───────────────────────────────────
     ///
-    /// <c>RenderEffect</c> は <c>SquallLayout.PatchCount</c>（9）回ちょうど、
-    /// 新しく湧く粒子は <c>SquallLayout.ParticlesPerSecond</c>（900）個／秒、
-    /// 生きている粒子は <c>SquallLayout.MaxParticles</c>（2400）で頭打ち。
-    /// **ヒープ確保は 0 バイト。**
+    /// <c>RenderEffect</c> exactly <c>SquallLayout.PatchCount</c> (9) times, newly spawned
+    /// particles at <c>SquallLayout.ParticlesPerSecond</c> (900) per second, and live
+    /// particles capped at <c>SquallLayout.MaxParticles</c> (2400).
+    /// **Zero bytes of heap allocation.**
     ///
-    /// ── 止まり方 ─────────────────────────────────────
+    /// ── How it stops ─────────────────────────────────────────
     ///
-    /// この型は**sim スレッドから 1 度も呼ばれない**（<see cref="TyphoonCloud"/> と同じ）。
-    /// 台風が終わったフレームに <see cref="TyphoonFeature.OnMainThreadUpdate"/> が
-    /// <c>Active == false</c> のスナップショットを渡し、ここが自分で出すのをやめる。
-    /// 既に湧いた粒は寿命（最大 1.9 秒）で消える。
-    /// <c>TyphoonController.Forget</c> の後始末列にこの型を足さないこと。
+    /// This type is **never once called from the sim thread** (the same as
+    /// <see cref="TyphoonCloud"/>). On the frame the typhoon ends,
+    /// <see cref="TyphoonFeature.OnMainThreadUpdate"/> hands it a snapshot with
+    /// <c>Active == false</c> and it stops drawing itself. Particles that already spawned
+    /// die of old age (1.9 seconds at most).
+    /// Do not add this type to <c>TyphoonController.Forget</c>'s cleanup list.
     /// </summary>
     public static class TyphoonSquallFx
     {
@@ -101,13 +111,15 @@ namespace DisasterPlus.Game
 
         public static TyphoonSquallState State { get { return _state; } }
 
-        /// <summary>直近のフレームで出した <c>RenderEffect</c> の回数。</summary>
+        /// <summary>How many <c>RenderEffect</c> calls were made on the most recent
+        /// frame.</summary>
         public static int LastRenderCalls { get { return _lastRenderCalls; } }
 
-        /// <summary>直近に測った吹き付けの強さ [0, 1]（カメラの居る場所の）。</summary>
+        /// <summary>The most recently measured spray strength [0, 1] (where the camera
+        /// is).</summary>
         public static float LastStrength { get { return _lastStrength; } }
 
-        /// <summary>診断に出す 1 行（**英語**）。</summary>
+        /// <summary>The one line for the diagnostics (**in English**).</summary>
         public static string Detail
         {
             get
@@ -124,7 +136,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>**main スレッド、毎フレーム。**</summary>
+        /// <summary>**Main thread, every frame.**</summary>
         public static void Update(TyphoonSnapshot snapshot)
         {
             try
@@ -143,7 +155,7 @@ namespace DisasterPlus.Game
                     Log.Error("typhoon driving rain failed", e);
                 }
 
-                // 壊れた複製を抱えたまま毎フレーム投げ続けない。
+                // Do not keep hold of a broken clone and go on throwing every frame.
                 DestroyClone();
             }
         }
@@ -161,7 +173,8 @@ namespace DisasterPlus.Game
             var camera = VanillaParticles.CameraInfo();
             if (camera == null)
             {
-                // ★ null を RenderEffect へ渡すと先頭で NRE になる。**描かずに待つ。**
+                // ★ Passing null to RenderEffect gives an NRE on its first line. **Draw
+                //   nothing and wait.**
                 _lastRenderCalls = 0;
                 return;
             }
@@ -179,20 +192,22 @@ namespace DisasterPlus.Game
 
             if (!(strength > 0f))
             {
-                // カメラが強風域の外に居る。**不具合ではない。**
+                // The camera is outside the gale radius. **Not a fault.**
                 _lastRenderCalls = 0;
                 if (_effect != null) _state = TyphoonSquallState.OutsideStorm;
                 return;
             }
 
-            // ★ 参照そのものを毎フレーム見る。破棄済みなら fake-null で null と
-            //   等価になり、ここで作り直される（2 つ目の都市の自己修復）。
+            // ★ Look at the reference itself every frame. If it has been destroyed,
+            //   fake-null makes it compare equal to null and it is rebuilt here (the
+            //   second city's self-repair).
             if (_effect == null && !Acquire()) return;
 
             float timeDelta = VanillaParticles.TimeDelta();
             if (!(timeDelta > 0f))
             {
-                // ポーズ中・速度 0。粒は湧かないが、既に湧いた粒は漂う。
+                // Paused, or speed 0. No new particles spawn, but the ones already spawned
+                // drift on.
                 _lastRenderCalls = 0;
                 _state = TyphoonSquallState.Emitting;
                 return;
@@ -205,7 +220,8 @@ namespace DisasterPlus.Game
                                  float strength, float timeDelta,
                                  RenderManager.CameraInfo camera)
         {
-            // 風は台風の二次循環（接線＋吸い込み）。**渦の回る向きと同じ。**
+            // The wind is the typhoon's secondary circulation (tangential plus inflow).
+            // **The same sense as the vortex turns.**
             float wx, wz;
             SquallLayout.WindDirection(dx, dz, out wx, out wz);
 
@@ -215,20 +231,22 @@ namespace DisasterPlus.Game
             InstanceID id = InstanceID.Empty;
             id.Disaster = snapshot.TyphoonId != 0 ? snapshot.TyphoonId : (ushort)1;
 
-            // ★★ **地面から撒く。** 最初はカメラの高さを基準にしていたが、
-            //   それだと飛沫が空中の板になって地面に届かなかった
-            //   （tools/TyphoonPreview の squall 画像で見つけた）。
-            //   <c>SampleDetailHeight</c> は読み取り専用でどちらのスレッドからも安全
-            //   （TerrainHeightSampler のクラス doc）。1 フレームに 1 回だけ引く。
+            // ★★ **Scatter from the ground.** At first we used the camera height as the
+            //   reference, but then the spray became a sheet up in the air that never
+            //   reached the ground (spotted in tools/TyphoonPreview's squall image).
+            //   <c>SampleDetailHeight</c> is read-only and safe from either thread
+            //   (TerrainHeightSampler's class doc). We sample it once per frame.
             float ground = TerrainHeightSampler.Instance.SampleHeight(eye.x, eye.z);
             if (float.IsNaN(ground))
             {
-                // 地形が読めない。**推測した高さで空中に撒かない。**
+                // The terrain cannot be read. **Do not scatter in mid-air at a guessed
+                // height.**
                 _lastRenderCalls = 0;
                 return;
             }
 
-            // カメラが高いほど広く撒く（でないと画面の真ん中に小さな染みが出るだけ）。
+            // The higher the camera the wider we scatter (otherwise all you get is a small
+            // smudge in the middle of the screen).
             float spread = SquallLayout.SpreadFor(eye.y - ground);
 
             int calls = 0;
@@ -253,7 +271,7 @@ namespace DisasterPlus.Game
 
                 var area = new EffectInfo.SpawnArea(position, Vector3.up, disc, band);
 
-                // timeOffset = -1f ＝ **継続モード**（§B-3）。
+                // timeOffset = -1f means **continuous mode** (§B-3).
                 _effect.RenderEffect(id, area, velocity, 0f,
                                      magnitude * patch.DensityFraction,
                                      -1f, timeDelta, camera);
@@ -264,7 +282,8 @@ namespace DisasterPlus.Game
             _state = calls > 0 ? TyphoonSquallState.Emitting : TyphoonSquallState.NoEffect;
         }
 
-        /// <summary>借りて、複製して、初期化する。取れなければ false（**例外は投げない**）。</summary>
+        /// <summary>Borrow, clone and initialise. false if we could not get one (**it does
+        /// not throw**).</summary>
         private static bool Acquire()
         {
             if (_lookupMissCount > 0)
@@ -285,8 +304,8 @@ namespace DisasterPlus.Game
                 if (!_unavailableLogged)
                 {
                     _unavailableLogged = true;
-                    // ★ **Warn ではなく Info。** 飛沫が出なくても雨は降るし、
-                    //   台風の他の要素は 1 つも止まらない。
+                    // ★ **Info, not Warn.** Even with no spray the rain still falls, and
+                    //   not one of the typhoon's other elements stops.
                     Log.Info("typhoon driving rain: this build exposes no borrowable water "
                              + "particle effect, so the storm has no wind-driven spray. "
                              + "The rain, the wind damage and the vortex are unaffected.");
@@ -323,16 +342,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 望む粒子マテリアル（良い順）。**<c>Water</c> が本命** ——
-        /// 出荷アセットの <c>water</c> テクスチャは平均 RGB (201, 222, 254) の
-        /// 白青の飛沫である。<c>Steam</c> は雲に見えてしまうので次点。
+        /// The particle materials we want, best first. **<c>Water</c> is the one we are
+        /// after** — the shipped <c>water</c> texture is white-blue spray with an average
+        /// RGB of (201, 222, 254). <c>Steam</c> ends up looking like cloud, so it is
+        /// second choice.
         /// </summary>
         private static readonly string[] SprayMaterials =
         {
             "Water", "Snow", "Steam", "Placement Dust",
         };
 
-        /// <summary>同点のときの並べ替えにだけ使う名前の順。**引く順ではない。**</summary>
+        /// <summary>The name order, used only to break ties in the ordering. **Not the
+        /// order we draw in.**</summary>
         private static readonly string[] SprayNames =
         {
             "Fire Copter Water Particles",
@@ -341,9 +362,11 @@ namespace DisasterPlus.Game
         };
 
         /// <summary>
-        /// 複製して横殴りの飛沫に仕立てる。**共有状態は 1 バイトも触らない**（§D-5）——
-        /// 借り元をそのまま書き換えると、街じゅうの消防車の放水が嵐色になる。
-        /// 数値表は <see cref="SquallLayout"/>（Core）に在るので**ここに直書きしない**。
+        /// Clone it and dress it up as sideways spray. **It does not touch a single byte
+        /// of shared state** (§D-5) — rewrite the source in place and every fire engine in
+        /// the city hoses storm-coloured water.
+        /// The table of numbers lives in <see cref="SquallLayout"/> (Core), so **do not
+        /// write them inline here**.
         /// </summary>
         private static GameObject Clone(ParticleEffect source)
         {
@@ -361,7 +384,7 @@ namespace DisasterPlus.Game
             effect.m_maxStartSpeed = SquallLayout.SpeedMax;
             effect.m_minSpawnAngle = SquallLayout.SpawnAngleMinDegrees;
             effect.m_maxSpawnAngle = SquallLayout.SpawnAngleMaxDegrees;
-            effect.m_renderDuration = 0f;      // 継続モードで使う（§B-3）
+            effect.m_renderDuration = 0f;      // used in continuous mode (§B-3)
             effect.m_extraRadius = 0f;
 
             var main = ps.main;
@@ -381,7 +404,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **レベルアンロードと、設定で切ったときに呼ぶ。** main スレッド専用。冪等。
+        /// **Call on level unload and when it is switched off in the settings.** Main
+        /// thread only. Idempotent.
         /// </summary>
         public static void Destroy()
         {
@@ -390,7 +414,8 @@ namespace DisasterPlus.Game
             _lastRenderCalls = 0;
             _lastStrength = 0f;
             _state = TyphoonSquallState.Off;
-            // ★ _unavailableLogged / _errorLogged は戻さない（ゲームのビルドに対する事実）。
+            // ★ _unavailableLogged / _errorLogged are not reset (they are facts about the
+            //   game build).
         }
 
         private static void DestroyClone()

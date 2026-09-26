@@ -6,11 +6,12 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// 「どの地震の話をしているのか」の一本化（全体レビュー I2）。
+    /// Unifying "which earthquake are we talking about" (overall review I2).
     ///
-    /// 以前この順位付けは 3 箇所に写しで存在し、2 つは 1 バイトも違わない複製、
-    /// 残る 1 つだけが <c>Clearing</c> を含んでいた。その 1 つが表示側だったので、
-    /// 収束中の地震について「カーソルの倒壊係数」と「断層帯: 内側」が出ていた。
+    /// This ranking used to exist as copies in three places: two were duplicates identical
+    /// to the byte, and only the remaining one included <c>Clearing</c>. That one was the
+    /// display side, so for an earthquake that was already dying down it still reported
+    /// "cursor collapse factor" and "fault zone: inside".
     /// </summary>
     public class QuakeSelectionTests
     {
@@ -43,15 +44,16 @@ namespace DisasterPlus.Core.Tests.Earthquake
                 Quake(1, EarthquakePhase.Active, 40),
                 Quake(2, EarthquakePhase.Active, 90),
                 Quake(3, EarthquakePhase.Active, 90)));
-            // 同じ強度なら添字の小さい方（先に見た方）を保つ。
+            // At equal intensity, keep the lower index (the one seen first).
             Assert.Equal(2, chosen.DisasterId);
         }
 
         [Fact]
         public void ClearingIsNeverSelected()
         {
-            // 全体円盤の DestroyBuildings は SimulationStep の Active 分岐にしか無い
-            // （§A-3）。収束中の地震を選ぶと「もう起きないこと」を出すことになる。
+            // The overall disc's DestroyBuildings only exists in the Active branch of
+            // SimulationStep (§A-3). Choosing an earthquake that is dying down means
+            // reporting something that will no longer happen.
             Assert.Null(QuakeSelection.SelectDamaging(List(
                 Quake(1, EarthquakePhase.Clearing, 255),
                 Quake(2, EarthquakePhase.Finished, 255),
@@ -61,7 +63,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void RunsDamageMatchesTheSelection()
         {
-            // 表示側はこの述語で自分から降りるので、選定と食い違ってはいけない。
+            // The display side bows out on this predicate, so it must not disagree with the
+            // selection.
             Assert.True(QuakeSelection.RunsDamage(EarthquakePhase.Active));
             Assert.True(QuakeSelection.RunsDamage(EarthquakePhase.Emerging));
             Assert.False(QuakeSelection.RunsDamage(EarthquakePhase.Clearing));

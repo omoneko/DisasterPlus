@@ -4,124 +4,128 @@ using DisasterPlus.Core.Volcano;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ⑤の位相。**バニラの災害スロットに載らない**（設計書 §2）ので、⑤は自前の
-    /// 位相機械で動く。
+    /// ⑤'s phases. **It does not occupy a vanilla disaster slot** (design doc §2), so ⑤ runs on
+    /// its own phase machine.
     ///
-    /// <see cref="Idle"/> / <see cref="Done"/> / <see cref="Refused"/> の 3 つが
-    /// 「今は何も進んでいない」であり、そこからしか新しい火山は始まらない。
+    /// The three of <see cref="Idle"/> / <see cref="Done"/> / <see cref="Refused"/> mean
+    /// "nothing is in progress right now", and a new volcano can only start from those.
     ///
-    /// ★★ <b>1 番（Surveying）と 2 番（AwaitingConfirmation）は 2026-08-21 に退役した。</b>
-    /// 確認の窓を撤去したので、クリック 1 回で
-    /// <c>Idle</c> → <c>Clearing</c>（または <c>Refused</c>）まで**同じ tick の中で**進む。
-    /// 調査そのものは残っているが、**外から観測できる位相ではなくなった**ので
-    /// 位相にもしていない（誰も到達できない状態を残さない）。
-    /// **番号は詰めていない** —— 退役した番号を別の意味で使い回さないためである。
+    /// ★★ <b>Number 1 (Surveying) and number 2 (AwaitingConfirmation) were retired on 2026-08-21.</b>
+    /// The confirmation window is gone, so a single click goes from
+    /// <c>Idle</c> to <c>Clearing</c> (or <c>Refused</c>) **within the same tick**.
+    /// The survey itself is still there, but **it is no longer a phase observable from outside**,
+    /// so it is not a phase either (no state is left that nobody can reach).
+    /// **The numbers have not been closed up** — so that a retired number is never reused with a
+    /// different meaning.
     /// </summary>
     public enum VolcanoPhase
     {
-        /// <summary>何も無い。</summary>
+        /// <summary>Nothing at all.</summary>
         Idle = 0,
 
-        // 1 = Surveying（退役）／2 = AwaitingConfirmation（退役）。再利用しないこと。
+        // 1 = Surveying (retired) / 2 = AwaitingConfirmation (retired). Do not reuse.
 
-        /// <summary>準備（道路と建物の段階的破壊）。T5。</summary>
+        /// <summary>Clearing (the staged destruction of roads and buildings). T5.</summary>
         Clearing = 3,
 
-        /// <summary>隆起。T6。</summary>
+        /// <summary>Uplift. T6.</summary>
         Uplifting = 4,
 
-        /// <summary>噴火。T7。</summary>
+        /// <summary>Eruption. T7.</summary>
         Erupting = 5,
 
-        /// <summary>溶岩の前進。T8。</summary>
+        /// <summary>The lava advancing. T8.</summary>
         Flowing = 6,
 
-        /// <summary>溶岩が冷える。T8。</summary>
+        /// <summary>The lava cooling. T8.</summary>
         Cooling = 7,
 
-        /// <summary>終わった。**地形はそのまま残る（不可逆）。**</summary>
+        /// <summary>Finished. **The terrain stays as it is (irreversible).**</summary>
         Done = 8,
 
-        /// <summary>断った。理由は <see cref="VolcanoState.LastRefusal"/>。</summary>
+        /// <summary>Refused. The reason is in <see cref="VolcanoState.LastRefusal"/>.</summary>
         Refused = 9,
 
         /// <summary>
-        /// **破局噴火だけ。** 巨大なマグマだまりが育って、山より広い地面が
-        /// ドーム状に膨らむ（<c>SuperEruption.InflationAt</c>）。
-        /// スライダーが上端（表示 25.5）のときにだけ通る。
+        /// **Super-eruption only.** A huge magma chamber grows and ground wider than the mountain
+        /// swells into a dome (<c>SuperEruption.InflationAt</c>).
+        /// Only reached when the slider is at its top (display 25.5).
         /// </summary>
         Inflating = 10,
 
         /// <summary>
-        /// **破局噴火だけ。** 空になったマグマだまりの屋根が自重で抜け、
-        /// 平底のカルデラが落ちる（<c>SuperEruption.BowlProfileAt</c>）。
+        /// **Super-eruption only.** The roof of the emptied magma chamber gives way under its own
+        /// weight and a flat-bottomed caldera drops (<c>SuperEruption.BowlProfileAt</c>).
         /// </summary>
         Collapsing = 11,
     }
 
     /// <summary>
-    /// ⑤の位相機械。**sim スレッド専用。**
+    /// ⑤'s phase machine. **Sim thread only.**
     ///
-    /// ── クリック 1 回で着手まで行く（2026-08-21 変更）───────────────
+    /// ── one click goes all the way to starting work (changed 2026-08-21) ──────────────
     ///
-    /// 所有者の指示:
+    /// The owner's instruction:
     ///
-    /// > ほかの災害と同じようにタブから選択してスケール選択して発生個所押したら
-    /// > その災害が起こるようにしてください。
+    /// > make it like the other disasters: pick it from the tab, pick the scale, press the spot
+    /// > where it happens, and the disaster happens.
     ///
-    /// **確認の窓は撤去した。** クリックが「作る」であり、そこから先に人の入る隙は無い。
+    /// **The confirmation window has been removed.** The click *is* "make it", and there is no
+    /// gap for a human beyond that point.
     ///
     /// <code>
-    /// [main] クリック → RayGeometry.IntersectTerrain で地点を取る
-    ///                 → VolcanoHub.Request(Place, point, sizeScale)
-    ///                 → ツールを解除する（パネルは開かない）
+    /// [main] click → take the point with RayGeometry.IntersectTerrain
+    ///              → VolcanoHub.Request(Place, point, sizeScale)
+    ///              → release the tool (the panel is not opened)
     ///         v
-    /// [sim ] VolcanoState.HandleRequest が TakeRequest() で拾う
-    ///                 → VolcanoSurvey.Run(...) が建物と道路を数え、Footprint を作る
-    ///                 → Phase = Clearing（T5 が動き出す）
+    /// [sim ] VolcanoState.HandleRequest picks it up with TakeRequest()
+    ///              → VolcanoSurvey.Run(...) counts the buildings and roads and builds a Footprint
+    ///              → Phase = Clearing (T5 starts running)
     /// </code>
     ///
-    /// ★ **調査は無くなっていない。** <c>BuildingManager.m_buildingGrid</c> と
-    /// <c>NetManager.m_segmentGrid</c> は sim スレッドが所有しているので、
-    /// **main スレッド（ツールのクリックハンドラ）から数えることはできない**。
-    /// 変わったのは「調査の結果を人に見せて待つ」段が消えたことだけで、
-    /// main → sim の 1 往復は今も要る。
+    /// ★ **The survey has not gone away.** <c>BuildingManager.m_buildingGrid</c> and
+    /// <c>NetManager.m_segmentGrid</c> are owned by the sim thread, so
+    /// **they cannot be counted from the main thread (the tool's click handler)**.
+    /// All that changed is that the step of "show the survey result to a human and wait" is gone;
+    /// the one main → sim round trip is still required.
     ///
-    /// ★ 調べた影響範囲の数（建物・道路）と、実際に届いた山頂の高さと、断った理由は
-    ///   **火山タブ（<c>VolcanoEffectRows</c> / <c>VolcanoStatusRows</c>）と
-    ///   診断ダンプ（<c>VolcanoFeature</c>）**にある。消えたのは
-    ///   「先に読ませて止める」段であって、情報そのものではない。
+    /// ★ The counts in the surveyed affected range (buildings, roads), the summit height actually
+    ///   reached, and the reason for a refusal are all in **the volcano tab
+    ///   (<c>VolcanoEffectRows</c> / <c>VolcanoStatusRows</c>) and the diagnostic dump
+    ///   (<c>VolcanoFeature</c>)**. What went away is the step of "make them read it first and
+    ///   stop", not the information itself.
     ///
-    /// ── ポーズ中に指しても捨てない ─────────────────────────
+    /// ── a click while paused is not thrown away ─────────────────────────
     ///
-    /// 依頼の受け取り（<see cref="HandleRequest"/>）は
-    /// <c>VolcanoFeature.OnSimulationTick</c> の**ポーズガードより上**にあり、
-    /// 位相の前進（<see cref="Tick"/>）だけがガードの下にある。したがって
-    /// ポーズ中のクリックは<b>位相を <c>Clearing</c> にするところまで</b>進み、
-    /// **建物も道路も地形も 1 つも変わらないまま**、解除した瞬間から動き出す ——
-    /// バニラの災害をポーズ中に起こしたときと同じ挙動である。
-    /// **黙って捨てない**（このクラス doc がいちばん禁じている形）。
+    /// Taking the request (<see cref="HandleRequest"/>) sits **above the pause guard** in
+    /// <c>VolcanoFeature.OnSimulationTick</c>, and only advancing the phase (<see cref="Tick"/>)
+    /// sits below it. So a click while paused gets <b>as far as setting the phase to
+    /// <c>Clearing</c></b>, and with **not one building, road or terrain cell changed**, it
+    /// starts moving the moment the pause is lifted — the same behaviour as triggering a vanilla
+    /// disaster while paused.
+    /// **Do not throw it away silently** (the thing this class doc forbids most).
     ///
-    /// ── 同時に 1 つだけ ─────────────────────────────────
+    /// ── one at a time ───────────────────────────────────
     ///
-    /// 進行中（<see cref="VolcanoPhase.Clearing"/> 以降）なら <c>Place</c> は無視し、
-    /// 理由を <see cref="LastRefusal"/> に残す。
+    /// While one is in progress (<see cref="VolcanoPhase.Clearing"/> onwards), <c>Place</c> is
+    /// ignored and the reason is left in <see cref="LastRefusal"/>.
     ///
-    /// ★★ <b>途中で止める手段は無い（2026-08-22 に撤去）。</b> 所有者の判断:
-    /// 「止めるボタンは不要です。だって実際に噴火を止めることなんて現実じゃ
-    /// できないでしょう？」——⑤は起こしたら最後まで走る災害である
-    /// （バニラの災害と同じ）。どうしても畳みたいときは設定の
-    /// 「火山を有効にする」を切る。**半分削れた山は残る。取り消しではない。**
+    /// ★★ <b>There is no way to stop it midway (removed on 2026-08-22).</b> The owner's call:
+    /// "a stop button isn't needed. After all, you can't actually stop an eruption in real life,
+    /// can you?" — ⑤ is a disaster that, once triggered, runs to the end (the same as the vanilla
+    /// disasters). If you really must fold it away, turn off the "enable volcanoes" setting.
+    /// **A half-carved mountain stays. This is not an undo.**
     ///
-    /// **黙って何もしないをやらない。** 断ったときは必ず <see cref="LastRefusal"/> に
-    /// 英語 1 文を残す（④の <c>TyphoonSnapshot.Refusal</c> と同じ扱い）。
+    /// **Do not fail silently.** On a refusal, always leave one English sentence in
+    /// <see cref="LastRefusal"/> (handled the same way as ④'s <c>TyphoonSnapshot.Refusal</c>).
     /// </summary>
     public static class VolcanoState
     {
         /// <summary>
-        /// 溶岩が流れはじめる隆起の進捗。**この MOD が決めた演出値である。**
-        /// 0 にすると平らな地面から溶岩を出すことになり、勾配が無いのでその場で溜まる
-        /// （<c>LavaPath.MinSlope</c>）。0.6 なら円錐は最終形の 6 割まで立っている。
+        /// The uplift progress at which the lava starts flowing. **This is a presentation value
+        /// chosen by this mod.** Set it to 0 and you are emitting lava onto flat ground, where it
+        /// simply pools in place because there is no gradient (<c>LavaPath.MinSlope</c>).
+        /// At 0.6 the cone stands at 60 % of its final shape.
         /// </summary>
         private const float LavaDuringUpliftFrom = 0.6f;
 
@@ -130,24 +134,24 @@ namespace DisasterPlus.Game
         private static string _lastRefusal;
 
         /// <summary>
-        /// この火山が破局噴火か（スライダーが上端だったか）。
-        /// **置いた瞬間に 1 度だけ決まる** —— 途中でスライダーを動かされても
-        /// 進行中の火山の筋書きは変わらない。
+        /// Whether this volcano is a super-eruption (whether the slider was at its top).
+        /// **Decided exactly once, at the moment it is placed** — moving the slider midway does
+        /// not change the script of a volcano already in progress.
         /// </summary>
         private static bool _super;
 
-        /// <summary>今の位相。</summary>
+        /// <summary>The current phase.</summary>
         public static VolcanoPhase Phase { get { return _phase; } }
 
         /// <summary>
-        /// 進行中の火山が破局噴火か。表示と診断が「なぜ地面がこんなに動くのか」を
-        /// 名乗るのに使う。
+        /// Whether the volcano in progress is a super-eruption. The display and the diagnostics
+        /// use it to state "why the ground is moving this much".
         /// </summary>
         public static bool IsSupereruption { get { return _super; } }
 
         /// <summary>
-        /// 膨らみの段の影響範囲（山より広い）。破局噴火でなければ
-        /// <see cref="Footprint"/> と同じ。
+        /// The affected range of the inflation stage (wider than the mountain). Same as
+        /// <see cref="Footprint"/> unless this is a super-eruption.
         /// </summary>
         private static VolcanoFootprint InflationFootprint
         {
@@ -160,11 +164,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 環状火口列の半径（m）。**破局噴火の陥没中だけ 0 でない。**
+        /// The radius of the ring of fissures (m). **Non-zero only during a super-eruption's
+        /// collapse.**
         ///
-        /// カルデラ形成期の噴火は中央火口ではなく、陥没する屋根のふちの
-        /// 環状断層に沿って噴き上がる。爆発（<c>Core.Volcano.BlastCluster</c>）が
-        /// これを見て、発の何割かを環へ配る。
+        /// An eruption in the caldera-forming stage does not come up through the central vent but
+        /// along the ring fault at the edge of the foundering roof. The blast
+        /// (<c>Core.Volcano.BlastCluster</c>) looks at this and distributes a share of its bursts
+        /// around the ring.
         /// </summary>
         public static float RingFissureRadiusMetres
         {
@@ -176,7 +182,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>カルデラの段の影響範囲（山より広く、**深さは正の値**で入る）。</summary>
+        /// <summary>The affected range of the caldera stage (wider than the mountain, and **the depth goes in positive**).</summary>
         private static VolcanoFootprint CalderaFootprint
         {
             get
@@ -187,26 +193,28 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>直近の調査結果。<c>Valid == false</c> なら「まだ調べていない」。</summary>
+        /// <summary>The latest survey result. <c>Valid == false</c> means "not surveyed yet".</summary>
         public static VolcanoFootprint Footprint { get { return _footprint; } }
 
         /// <summary>
-        /// 隆起の進捗 [0,1]。T6 以降は <see cref="VolcanoUplift.ProgressUnit"/> そのもの。
-        /// <b>0 のうちは行にしないこと</b> —— 「進捗 0%」は「進んでいない」ではなく
-        /// 「まだ隆起という段に入っていない」だからである。
+        /// Uplift progress [0,1]. From T6 onwards it is <see cref="VolcanoUplift.ProgressUnit"/>
+        /// itself. <b>Do not show a row for it while it is 0</b> — "progress 0%" does not mean
+        /// "not advancing" but "the uplift stage has not been entered yet".
         /// </summary>
         public static float ProgressUnit { get { return VolcanoUplift.ProgressUnit; } }
 
         /// <summary>
-        /// 直近に断った理由（**英語・診断用**）。断っていなければ null。
-        /// 翻訳は無いが、出さないほうが悪い —— これが「起こせなかった」の
-        /// 唯一の手がかりである（④の <c>TyphoonSnapshot.Refusal</c> と同じ判断）。
+        /// The most recent reason for a refusal (**English, for diagnostics**). null if nothing
+        /// was refused. There is no translation, but not reporting it would be worse — this is
+        /// the only clue as to "why it could not be triggered" (the same call as ④'s
+        /// <c>TyphoonSnapshot.Refusal</c>).
         /// </summary>
         public static string LastRefusal { get { return _lastRefusal; } }
 
         /// <summary>
-        /// レベルのロード／アンロードで呼ぶ。**全状態を捨てる。**
-        /// 持ち越すと、次の都市で前の都市の地点の火山が動き続ける。
+        /// Call on level load and unload. **Discards all state.**
+        /// Carry it over and a volcano at the previous city's location keeps running in the next
+        /// one.
         /// </summary>
         public static void Reset()
         {
@@ -214,50 +222,54 @@ namespace DisasterPlus.Game
             _footprint = VolcanoFootprint.None;
             _lastRefusal = null;
             _super = false;
-            // 準備の実績も持ち越さない。**進行中の火山は保存しない**ので、
-            // 都市を出入りすると準備は 0 からになる（地形はそのままの形で残る）。
+            // The clearing's tally is not carried over either. **A volcano in progress is not
+            // saved**, so leaving and re-entering the city restarts the clearing from 0 (the
+            // terrain stays in whatever shape it was in).
             VolcanoClearing.Reset();
-            // ★ 隆起の退避配列も返す（半径 3 km で 279 KB）。**地形は戻らない。**
+            // ★ Give back the uplift's snapshot array too (279 KB at a 3 km radius).
+            //   **The terrain does not come back.**
             VolcanoUplift.Reset();
-            // ★ 噴火の予定も畳む。**描画側（main）の後始末はここではしない** ——
-            //   Unity オブジェクトの破棄は main スレッドの仕事で、
-            //   VolcanoEruptionFx がスナップショットを見て自分で畳む
-            //   （レベルアンロードでは VolcanoFeature が Destroy を呼ぶ）。
+            // ★ Fold away the eruption's plan as well. **The drawing side's (main) cleanup does
+            //   not happen here** — destroying Unity objects is the main thread's job, and
+            //   VolcanoEruptionFx folds itself away by looking at the snapshot
+            //   (on level unload VolcanoFeature calls Destroy).
             VolcanoEruption.Reset();
-            // ★ 溶岩の軌跡も返す（8 本 × 128 点で 8 KB）。**焦げた地面と燃えた建物は
-            //   戻らない** —— 捨てるのは「これからの予定」だけである。
+            // ★ Give back the lava's trails too (8 flows × 128 points = 8 KB). **The scorched
+            //   ground and the burnt buildings do not come back** — all that is discarded is
+            //   "what was going to happen next".
             VolcanoLava.Reset();
-            // ★ 地震計へ記録している火山性地震も畳む。**次の都市／次の火山へ
-            //   前の揺れを持ち越さない。**
+            // ★ Fold away the volcanic earthquakes being recorded on the seismograph as well.
+            //   **Do not carry the previous shaking into the next city or the next volcano.**
             VolcanoTremorTrace.Reset();
         }
 
         /// <summary>
-        /// 積まれている依頼を 1 件だけ拾って答える。**sim スレッド。**
+        /// Pick up exactly one queued request and answer it. **Sim thread.**
         ///
-        /// ★★ <b>これは <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
-        /// <u>上</u>から呼ぶ</b>（全体レビュー I1）。ガードの下に置いていた頃、
-        /// **ポーズ中に地面をクリックしたプレイヤーには何も起きなかった** ——
-        /// 状態の行は止まったまま、ログにも診断にも何も残らなかった。
-        /// **山を作る前にポーズするのは最も自然な操作**であり、そこが
-        /// 「黙って何もしない」になっていた（クラス doc がまさに禁じている形）。
+        /// ★★ <b>Call this from <u>above</u> the pause guard in
+        /// <c>VolcanoFeature.OnSimulationTick</c></b> (whole-project review I1). Back when it sat
+        /// below the guard, **a player who clicked the ground while paused got nothing at all** —
+        /// the status rows stayed still and nothing was left in the log or the diagnostics.
+        /// **Pausing before making a mountain is the most natural thing to do**, and there it was
+        /// "failing silently" (exactly the thing the class doc forbids).
         ///
-        /// ポーズ中でも <c>Place</c> を受けるが、**位相を <c>Clearing</c> にするだけ**で
-        /// 建物も道路も地形も 1 つも変わらない —— 実際に壊し始めるのは
-        /// <see cref="Tick"/> であり、あちらはポーズガードの下に在る。
-        /// バニラの災害をポーズ中に起こしたときと同じ挙動である。
+        /// A <c>Place</c> is accepted while paused, but **all it does is set the phase to
+        /// <c>Clearing</c>** — not one building, road or terrain cell changes. What actually
+        /// starts destroying things is <see cref="Tick"/>, and that sits below the pause guard.
+        /// The same behaviour as triggering a vanilla disaster while paused.
         ///
-        /// <see cref="VolcanoHub.TakeRequest"/> は<b>1 tick にちょうど 1 回</b>
-        /// しか呼ばない（2 回呼ぶと 2 回目が必ず None になり、呼び出し順に依存した
-        /// 取りこぼしを作る。あちらの doc）。**その 1 回はここである。**
+        /// <see cref="VolcanoHub.TakeRequest"/> is called <b>exactly once per tick</b>
+        /// (call it twice and the second is always None, creating a call-order-dependent dropped
+        /// request; see its own doc). **That one call is here.**
         /// </summary>
         public static void HandleRequest(VolcanoSnapshot snapshot)
         {
             VolcanoRequestData request = VolcanoHub.TakeRequest();
             if (request.Kind == VolcanoRequest.None) return;
 
-            // ★ 述語は⑤の門そのもの（VolcanoTerrainFacts.Usable）。
-            //   「フィールドが解決した」で通すと、値が使えない環境で着手できてしまう。
+            // ★ The predicate is ⑤'s gate itself (VolcanoTerrainFacts.Usable).
+            //   Let it through on "the field resolved" and work could start in an environment
+            //   where the value is unusable.
             bool terrainUsable = snapshot != null && snapshot.Valid && snapshot.Terrain.Usable;
             if (!terrainUsable)
             {
@@ -266,10 +278,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 依頼は Place 1 種類だけである（Stop は撤去した。
-            //   <c>VolcanoRequest</c> の注記）。switch にしない ——
-            //   到達しない case を並べておくと、消したはずの経路が
-            //   生きているように読める。
+            // ★ There is only one kind of request, Place (Stop was removed; see the note on
+            //   <c>VolcanoRequest</c>). Do not make it a switch — lining up unreachable cases
+            //   makes a path we supposedly deleted read as if it were still alive.
             if (request.Kind == VolcanoRequest.Place)
             {
                 HandlePlace(request.Point, request.SizeScale, request.SizeRaw);
@@ -277,15 +288,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 位相を前へ進める。**必ず <c>VolcanoFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から呼ぶこと**（ポーズ中に山が育ち、建物が消える）。
+        /// Advance the phase. **Always call it from below the pause guard in
+        /// <c>VolcanoFeature.OnSimulationTick</c>** (otherwise the mountain grows and buildings
+        /// vanish while paused).
         ///
-        /// 依頼の受け取りはここには無い（<see cref="HandleRequest"/> がガードの上で
-        /// 済ませている）。
+        /// Taking the request is not here (<see cref="HandleRequest"/> has done it above the
+        /// guard).
         /// </summary>
         public static void Tick(VolcanoSnapshot snapshot, uint frame, float deltaMinutes)
         {
-            // ★ 述語は⑤の門そのもの（VolcanoTerrainFacts.Usable）。
+            // ★ The predicate is ⑤'s gate itself (VolcanoTerrainFacts.Usable).
             bool terrainUsable = snapshot != null && snapshot.Valid && snapshot.Terrain.Usable;
             if (!terrainUsable) return;
 
@@ -293,15 +305,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 位相ごとの前進。**実処理はこのファイルに書かない** ——
-        /// <see cref="VolcanoClearing"/> / <c>VolcanoUplift</c> / <c>VolcanoLava</c> に置く
-        /// （800 行の規則）。ここに書いてよいのは「どれをどの順で呼ぶか」だけである。
+        /// Per-phase advance. **Do not write the real work in this file** — it belongs in
+        /// <see cref="VolcanoClearing"/> / <c>VolcanoUplift</c> / <c>VolcanoLava</c>
+        /// (the 800-line rule). All that may be written here is "which one to call in which
+        /// order".
         ///
-        /// ★★ <b>準備 → 隆起の順序は、ここでしか壊れない。</b> 順序を入れ替えると
-        /// 道路と建物が毎フラッシュ地形を押し戻して、山の中に平らな溝とすり鉢が残る
-        /// （設計書 §1.2 / §A-2）。型の側の担保は
-        /// <c>UpliftSchedule.ActiveRadiusMetres(R, VolcanoClearing.ClearedRadiusMetres)</c> で、
-        /// 準備が届いていなければ 0 が返る。
+        /// ★★ <b>The clearing → uplift ordering can only be broken here.</b> Swap them and the
+        /// roads and buildings push the terrain back on every flush, leaving flat trenches and
+        /// funnels inside the mountain (design doc §1.2 / §A-2). The type-side guarantee is
+        /// <c>UpliftSchedule.ActiveRadiusMetres(R, VolcanoClearing.ClearedRadiusMetres)</c>,
+        /// which returns 0 while the clearing has not reached.
         /// </summary>
         private static void StepPhase(uint frame, float deltaMinutes)
         {
@@ -309,14 +322,14 @@ namespace DisasterPlus.Game
 
             if (_phase == VolcanoPhase.Clearing)
             {
-                // 隆起はまだ 1 度も動いていないので進捗は 0。前線は
-                // ModSettings.VolcanoClearingLeadMetres のぶんだけ先へ出る。
+                // The uplift has not moved once yet, so the progress is 0. The front runs ahead
+                // by ModSettings.VolcanoClearingLeadMetres only.
                 VolcanoClearing.Tick(_footprint, 0f, deltaMinutes);
 
                 if (!VolcanoClearing.FrontReached) return;
 
-                // 最初の前線まで届いた。ここから先は隆起が進捗を持ち、
-                // 準備はその前を走る（ring lockstep）。
+                // It reached the first front. From here the uplift holds the progress and the
+                // clearing runs ahead of it (ring lockstep).
                 _phase = VolcanoPhase.Uplifting;
                 Log.Info("volcano clearing reached its first front ("
                          + VolcanoClearing.ClearedRadiusMetres.ToString("F0")
@@ -326,9 +339,9 @@ namespace DisasterPlus.Game
 
             if (_phase == VolcanoPhase.Inflating)
             {
-                // ★★ **数万年かけたマグマだまりの成長**（所有者の依頼）。
-                //    山より広い地面が、山よりずっと低くドーム状に膨らむ。
-                //    ここではまだ噴火していない —— 噴煙も溶岩も出さない。
+                // ★★ **The magma chamber growing over tens of thousands of years** (the owner's
+                //    request). Ground wider than the mountain swells into a dome far lower than
+                //    the mountain. Nothing is erupting yet here — no plume and no lava.
                 VolcanoFootprint bulge = InflationFootprint;
                 VolcanoClearing.Tick(bulge, VolcanoUplift.GrowthFrontUnit, deltaMinutes);
                 VolcanoUplift.Tick(bulge, frame, deltaMinutes);
@@ -345,28 +358,30 @@ namespace DisasterPlus.Game
 
             if (_phase == VolcanoPhase.Collapsing)
             {
-                // ★★ **山体が落ち込みながら爆発している**（2026-08-22、所有者の指摘）。
+                // ★★ **The edifice explodes as it founders** (2026-08-22, owner's report).
                 //
-                //    > カルデラ形成時は、山体が大きく落ち込んで大爆発する
-                //    > んじゃないでしょうか…？
+                //    &gt; when the caldera forms, doesn't the cone body drop a long way and
+                //    &gt; explode massively…?
                 //
-                //    そのとおりで、この 3 つは**同時に走らせる**のが正しい。
-                //    以前は「噴火が終わってから静かに沈む」順序で、
-                //    いちばん激しいはずの瞬間に噴煙が消えていた。
-                //    噴火は VolcanoEruption.BeginClimax で持続の天井に固定してあるので、
-                //    **落ち切るまで終わらない**。
+                //    Quite so, and the right thing is to run these three **at the same time**.
+                //    The old ordering was "sink quietly once the eruption has finished", which
+                //    made the plume disappear at what should be the most violent moment.
+                //    The eruption is pinned to the ceiling of its sustain phase by
+                //    VolcanoEruption.BeginClimax, so **it does not end until the ground has
+                //    finished falling**.
                 VolcanoFootprint caldera = CalderaFootprint;
                 VolcanoEruption.Tick(_footprint, frame, deltaMinutes, 1f);
                 VolcanoClearing.Tick(caldera, VolcanoUplift.GrowthFrontUnit, deltaMinutes);
                 VolcanoUplift.Tick(caldera, frame, deltaMinutes);
 
-                // 溶岩は陥没のあいだも流れ続ける（止めるとここだけ絵が凍る）。
+                // The lava keeps flowing through the collapse too (stop it and the picture
+                // freezes here alone).
                 VolcanoLava.Tick(_footprint, frame, deltaMinutes,
                                  VolcanoUplift.RiseMetresPerFrame);
 
                 if (!VolcanoUplift.Complete) return;
 
-                // ★ 落ち切った。ここでようやく噴火が衰退へ向かう。
+                // ★ It has finished falling. Only now does the eruption head into its decline.
                 VolcanoEruption.EndClimax();
                 _phase = VolcanoPhase.Erupting;
                 Log.Info("supereruption: the edifice foundered ("
@@ -380,31 +395,35 @@ namespace DisasterPlus.Game
 
             if (_phase == VolcanoPhase.Erupting)
             {
-                // T7。**噴出の予定を決めるだけ**で、地形も建物も 1 つも変えない。
-                //   山はもうできあがっているので進捗に 1 を渡す（＝包絡線が持続から
-                //   衰退へ進む）。噴火そのものは隆起の最初から続いている。
+                // T7. **It only decides the plan for the ejecta**; it changes not one terrain
+                //   cell or building. The mountain is finished, so 1 is passed as the progress
+                //   (i.e. the envelope moves from sustain into decline). The eruption itself has
+                //   been running since the start of the uplift.
                 VolcanoEruption.Tick(_footprint, frame, deltaMinutes, 1f);
 
-                // ★ 溶岩は隆起の途中から出ているので、ここでも進め続ける ——
-                //   止めると噴火のあいだだけ流れが凍りつく。地形はもう動かないので
-                //   許容差は 0（VolcanoUplift.RiseMetresPerFrame が完了後 0 を返す）。
+                // ★ The lava has been coming out since partway through the uplift, so keep
+                //   advancing it here too — stop it and the flow freezes for the duration of the
+                //   eruption alone. The terrain no longer moves, so the tolerance is 0
+                //   (VolcanoUplift.RiseMetresPerFrame returns 0 once complete).
                 VolcanoLava.Tick(_footprint, frame, deltaMinutes,
                                  VolcanoUplift.RiseMetresPerFrame);
 
-                // ★★ **陥没は噴火の「あと」ではなく「途中」で始まる**
-                //    （2026-08-22、所有者の指摘）。噴き出してマグマだまりが空きはじめた
-                //    ところで屋根が落ち、その落下そのものが大爆発を起こす。
-                //    頃合いは VolcanoEruption.ReadyForCollapse が持っている。
+                // ★★ **The foundering starts "during" the eruption, not "after" it**
+                //    (2026-08-22, owner's report). The roof falls once enough has erupted for the
+                //    magma chamber to start emptying, and that fall is itself what causes the
+                //    huge explosion. The timing is held by VolcanoEruption.ReadyForCollapse.
                 //
-                //    ★ 段が Collapse でないことを見るのが「まだ落ちていない」の判定である
-                //      —— 落ち切ったあとこの位相へ戻ってくるので、見ないと無限に落ち続ける。
+                //    ★ Checking that the stage is not Collapse is how we decide "it has not
+                //      fallen yet" — this phase is returned to once it has finished falling, so
+                //      without that check it would fall for ever.
                 if (_super
                     && VolcanoUplift.Stage != UpliftStage.Collapse
                     && VolcanoEruption.ReadyForCollapse)
                 {
                     VolcanoFootprint caldera = CalderaFootprint;
-                    // ★ 山体の半径も渡す。カルデラの床は**山体の外では
-                    //   そのセルの本物の地面**を基準に落ちる（元の地形を残す）。
+                    // ★ Pass the radius of the cone body too. Outside the cone body the caldera
+                    //   floor drops relative to **that cell's real ground** (keeping the original
+                    //   terrain).
                     if (VolcanoUplift.StartStage(caldera, UpliftStage.Collapse,
                                                  _footprint.RadiusMetres))
                     {
@@ -420,8 +439,8 @@ namespace DisasterPlus.Game
                         return;
                     }
 
-                    // ★ **黙って飛ばさない。** 落とせなかった理由を残して、
-                    //   ふつうの噴火と同じ終わり方へ落とす。
+                    // ★ **Do not skip it silently.** Leave the reason it could not be dropped,
+                    //   and fall through to the ordinary eruption ending.
                     Refuse("the caldera collapse could not start ("
                            + (VolcanoUplift.LastFailure ?? "unknown reason")
                            + "); the volcano finishes without one");
@@ -429,10 +448,11 @@ namespace DisasterPlus.Game
 
                 if (!VolcanoEruption.Finished) return;
 
-                // ★ T8 がここを <c>Done</c> から <c>Flowing</c> に差し替えた。
-                //   位相が進行中のまま止まらないことは、溶岩の側の 2 つの有限性が
-                //   担保する —— 1 本の流れは <c>LavaPath.MaxSteps</c> で必ず止まり、
-                //   全部止まったあとは <c>CoolMinutes</c> で必ず冷え切る。
+                // ★ T8 replaced <c>Done</c> here with <c>Flowing</c>.
+                //   That the phase does not get stuck in progress is guaranteed by two
+                //   finiteness properties on the lava side — one flow always stops at
+                //   <c>LavaPath.MaxSteps</c>, and once they have all stopped everything is
+                //   certain to cool out within <c>CoolMinutes</c>.
                 _phase = VolcanoPhase.Flowing;
                 Log.Info("volcano eruption finished after "
                          + VolcanoEruption.BurstsSoFar + " bursts; the lava starts now");
@@ -441,10 +461,11 @@ namespace DisasterPlus.Game
 
             if (_phase == VolcanoPhase.Flowing)
             {
-                // T8。**地形は変えない**（RawHeights を書くのは T6 だけ）。
+                // T8. **It does not change the terrain** (only T6 writes RawHeights).
                 VolcanoLava.Tick(_footprint, frame, deltaMinutes, 0f);
 
-                // 本数 0（設定で無効）のときは 1 度も流れずにここを抜ける。
+                // With a flow count of 0 (disabled in the settings) it passes through here
+                // without a single flow.
                 if (!VolcanoLava.AllStopped && !VolcanoLava.Finished) return;
 
                 _phase = VolcanoPhase.Cooling;
@@ -457,7 +478,7 @@ namespace DisasterPlus.Game
 
             if (_phase == VolcanoPhase.Cooling)
             {
-                // 冷えるのを待つだけ。**新しい流れは出さない。**
+                // Just waiting for it to cool. **No new flows are emitted.**
                 VolcanoLava.Tick(_footprint, frame, deltaMinutes, 0f);
 
                 if (!VolcanoLava.Finished) return;
@@ -469,26 +490,30 @@ namespace DisasterPlus.Game
 
             if (_phase != VolcanoPhase.Uplifting) return;
 
-            // ★★ **順序がこの 2 行そのものである**（設計書 §1.2 / 罠 1）。
-            //    準備を先に、隆起の進捗を渡して前へ走らせ、そのあとで隆起が
-            //    「準備が届いた半径」の内側だけを上げる。入れ替えてはいけない。
-            //   ★ 渡すのは進捗ではなく**隆起の前線**である（火口のぶん円錐を立て直して
-            //     いるので、前線は進捗より先に出る。VolcanoClearing.Tick の doc）。
+            // ★★ **The ordering is these two lines themselves** (design doc §1.2 / trap 1).
+            //    The clearing first, handed the uplift's progress so it runs ahead, and only then
+            //    does the uplift raise the inside of "the radius the clearing reached".
+            //    They must not be swapped.
+            //   ★ What gets passed is not the progress but **the uplift front** (the cone is
+            //     rebuilt to allow for the crater, so the front runs ahead of the progress; see
+            //     the doc of VolcanoClearing.Tick).
             VolcanoClearing.Tick(_footprint, VolcanoUplift.GrowthFrontUnit, deltaMinutes);
             VolcanoUplift.Tick(_footprint, frame, deltaMinutes);
 
-            // ★★ **SimCity 4 の順序。噴火が先で、山はそれに積み上げられる。**
-            //    以前はここが「隆起が終わってから噴火」で、できあがった山が音もなく
-            //    地面から膨らんだあとに煙が出ていた。噴煙と発光は隆起の 1 tick 目から出す。
-            //    T7 は**予定を決めるだけ**で地形も建物も 1 つも変えないので、
-            //    準備 → 隆起の順序（罠 1）には触れていない。
+            // ★★ **SimCity 4's ordering. The eruption comes first and the mountain is piled up
+            //    by it.** This used to be "erupt once the uplift has finished", so the smoke
+            //    appeared only after the finished mountain had silently inflated out of the
+            //    ground. The plume and the glow are emitted from the uplift's very first tick.
+            //    T7 **only decides the plan** and changes not one terrain cell or building, so it
+            //    does not touch the clearing → uplift ordering (trap 1).
             VolcanoEruption.Tick(_footprint, frame, deltaMinutes, VolcanoUplift.ProgressUnit);
 
-            // ★ 溶岩も山ができきる前から流れはじめる。**円錐がある程度立ってから**に
-            //   してあるのは、平らな地面から出しても勾配が無くてその場で溜まるだけだからで、
-            //   閾値そのものは演出値である（LavaDuringUpliftFrom）。
-            //   地形はまだ上がっているので、その量を許容差として渡す
-            //   （渡さないと「溶岩が登った」と誤って観測して流れが止まる）。
+            // ★ The lava starts flowing before the mountain is finished too. It is held back
+            //   **until the cone is reasonably far up** because emitting it onto flat ground
+            //   just pools in place for want of a gradient; the threshold itself is a
+            //   presentation value (LavaDuringUpliftFrom).
+            //   The terrain is still rising, so that amount is passed as the tolerance
+            //   (without it, the flow stops because it wrongly observes "the lava climbed").
             if (VolcanoUplift.ProgressUnit >= LavaDuringUpliftFrom)
             {
                 VolcanoLava.Tick(_footprint, frame, deltaMinutes,
@@ -497,13 +522,15 @@ namespace DisasterPlus.Game
 
             if (!VolcanoUplift.Complete) return;
 
-            // ★ T7 がここを <c>Done</c> から <c>Erupting</c> に差し替えた。位相が
-            //   進行中のまま止まらないことは <c>VolcanoEruption.Finished</c> が担保する
-            //   （噴火は必ず有限のゲーム内時間で終わり、例外が出た場合も終わる）。
+            // ★ T7 replaced <c>Done</c> here with <c>Erupting</c>. That the phase does not get
+            //   stuck in progress is guaranteed by <c>VolcanoEruption.Finished</c> (the eruption
+            //   always ends within a finite amount of in-game time, and ends even if an exception
+            //   is thrown).
             _lastRefusal = null;
 
-            // ★★ **破局噴火だけ、山ができたあとにマグマだまりが育つ**
-            //    （所有者の依頼の 2 段目）。ふつうの噴火はそのまま Erupting へ。
+            // ★★ **Only in a super-eruption does the magma chamber grow after the mountain is
+            //    built** (the second stage of the owner's request). An ordinary eruption goes
+            //    straight on to Erupting.
             if (_super && VolcanoUplift.Stage == UpliftStage.Cone)
             {
                 VolcanoFootprint bulge = InflationFootprint;
@@ -527,10 +554,10 @@ namespace DisasterPlus.Game
                      + " m, crater " + (VolcanoUplift.CraterFormed ? "at full depth" : "SHALLOW")
                      + "; the eruption starts now");
 
-            // ★★ **山頂がゲームの高さの天井で削られたなら、そう言う。**
-            //    黙って平らな山頂を出すと、プレイヤーからは
-            //    「高さの設定が効いていない」にしか見えない。
-            //    天井は MOD からは上げられない（UpliftSchedule.CeilingClipped の doc）。
+            // ★★ **If the summit was clipped by the game's height ceiling, say so.**
+            //    Present a flat summit silently and all the player can see is
+            //    "the height setting is not working".
+            //    The ceiling cannot be raised by a mod (the doc of UpliftSchedule.CeilingClipped).
             if (VolcanoUplift.CeilingClippedCells > 0)
             {
                 Log.Info("volcano summit was clipped by the game's terrain ceiling ("
@@ -542,15 +569,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **地図をクリックされた。ここが「作る」である。**
+        /// **The map was clicked. This is "make it".**
         ///
-        /// 調査（<c>VolcanoSurvey.Run</c>）と着手を 1 つの呼び出しで済ませる ——
-        /// 確認の窓が無くなったので、この 2 つの間に人の判断は入らない
-        /// （クラス doc）。**この 2 つを別の位相に割らないこと**:
-        /// 間の状態は誰も観測できず、到達不能な位相が 1 つ増えるだけである。
+        /// The survey (<c>VolcanoSurvey.Run</c>) and starting work are done in one call — with
+        /// the confirmation window gone, no human judgement comes between the two (class doc).
+        /// **Do not split these two into separate phases**: nobody can observe the state in
+        /// between, and all it adds is one more unreachable phase.
         ///
-        /// 断る順序は「進行中 → 破壊経路が無い → 調査が失敗」で、
-        /// **どれも 1 つも壊す前に返る**。理由は必ず <see cref="LastRefusal"/> に残す。
+        /// The order of refusals is "already in progress → no destruction path → the survey
+        /// failed", and **all of them return before destroying a single thing**. The reason is
+        /// always left in <see cref="LastRefusal"/>.
         /// </summary>
         private static void HandlePlace(Vec3 point, float sizeScale, int sizeRaw)
         {
@@ -561,14 +589,16 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ **準備の破壊経路が無い環境では、1 つも壊さずにここで断る**
-            //    （設計書 §1.2 / T5 Step 1）。「道路だけ諦めて隆起する」は選ばない ——
-            //    それは §1.2 が発見した失敗（山の中の平らな溝）を、分かったうえで
-            //    出荷することになる。**判定は着手の直前に、破壊より先に置く。**
+            // ★★ **In an environment without the clearing's destruction path, refuse here
+            //    without destroying a single thing** (design doc §1.2 / T5 Step 1). Do not choose
+            //    "give up on the roads and uplift anyway" — that would mean shipping, knowingly,
+            //    the failure §1.2 discovered (flat trenches inside the mountain).
+            //    **Put the test immediately before starting work, ahead of any destruction.**
             //
-            //    ★ 述語は <c>VolcanoClearing.Sweep</c> が実際に門にしている式と同じ
-            //      （全体レビュー M9）。道路側だけを見ていた頃は、建物側が解決できない
-            //      環境で **火山が確定して <c>Clearing</c> のまま永久に止まった。**
+            //    ★ The predicate is the same expression <c>VolcanoClearing.Sweep</c> actually
+            //      gates on (whole-project review M9). Back when it only looked at the road side,
+            //      in an environment where the building side could not be resolved
+            //      **the volcano was confirmed and stalled for good in <c>Clearing</c>.**
             if (!VolcanoClearing.ClearingPathAvailable)
             {
                 RefuseAndForget("no usable destruction path for the roads and buildings in "
@@ -577,40 +607,41 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 倍率は**依頼が運んできたもの**を使う。ここでスライダーを読み直す
-            //   ことはできない（sim スレッドから UI に触らない）し、読み直せたと
-            //   しても「クリックした時の値」ではなくなる。
+            // ★ Use the scale **the request carried in**. The slider cannot be re-read here
+            //   (the sim thread does not touch the UI), and even if it could, it would no longer
+            //   be "the value at the moment of the click".
             VolcanoForm form = CurrentForm();
             VolcanoFootprint footprint;
 
-            // ★★ **スライダーが上端のときだけ破局噴火**（所有者の依頼）。
-            //    生値で判定する —— 倍率は帯でクランプされたあとの値なので、
-            //    上端かどうかがもう分からない。
-            //    **調査より先に決める**（下で半径の読み方が変わる）。
+            // ★★ **A super-eruption only when the slider is at its top** (the owner's request).
+            //    Test it on the raw value — the scale is the value after clamping into a band, so
+            //    it no longer tells you whether it was at the top.
+            //    **Decide it before the survey** (the way the radius is read changes below).
             _super = SuperEruption.IsSuper(sizeRaw);
 
-            // ★★ **破局噴火では、頼まれた大きさは「カルデラ」の大きさである。**
+            // ★★ **In a super-eruption the size requested is the size of the CALDERA.**
             //
-            //    そうしないと絵にならない。カルデラは円錐の 1.9 倍なので、
-            //    円錐を頼まれた半径いっぱい（成層火山なら 5564 m）で立てると
-            //    カルデラは 10.6 km を要求し、実費の上限（6 km）で切られて
-            //    **山とほぼ同じ大きさの穴**になる —— 陥没が見えない。
+            //    Otherwise it does not read as a picture. The caldera is 1.9× the cone, so
+            //    raising a cone at the full requested radius (5564 m for a stratovolcano) would
+            //    demand a 10.6 km caldera, which is cut at the cost ceiling (6 km) and gives
+            //    **a hole roughly the same size as the mountain** — the foundering is invisible.
             //
-            //    実際の超巨大火山（Yellowstone・Toba）にも**大きな円錐は無い**。
-            //    在るのはカルデラである。だから 25.5 では、頼まれた半径を
-            //    カルデラの半径として読み、円錐はそこから割り戻す:
+            //    Real supervolcanoes (Yellowstone, Toba) **have no big cone** either.
+            //    What they have is a caldera. So at 25.5 the requested radius is read as the
+            //    caldera's radius, and the cone is divided back out of it:
             //
-            //      円錐 = R / 1.9 → 膨らみ = 円錐 × 2.4 → カルデラ = 円錐 × 1.9 = R
+            //      cone = R / 1.9 → inflation = cone × 2.4 → caldera = cone × 1.9 = R
             //
-            //    ★ 高さは割り戻さない。低い山が落ちても陥没に見えないので、
-            //      円錐は頼まれた高さのまま立てる。
+            //    ★ The height is not divided back out. A low mountain falling does not look like
+            //      a foundering, so the cone is raised at the requested height.
             float requestedRadius =
                 VolcanoSizeScale.Apply(VolcanoShape.DefaultRadiusOf(form), sizeScale);
             //
-            //    ★ 上限も割り戻す。<c>SuperEruption.MaxRadiusMetres</c> で頭を
-            //      押さえているのは**カルデラ**なので、円錐をそれより大きく立てると
-            //      カルデラだけが天井に当たって、また「山と同じ大きさの穴」に戻る
-            //      （楯状火山は推奨半径が 2 km あるので、ここが無いと必ずそうなる）。
+            //    ★ Divide the ceiling back out as well. What <c>SuperEruption.MaxRadiusMetres</c>
+            //      caps is **the caldera**, so raising a cone larger than that leaves only the
+            //      caldera hitting the ceiling, and we are back to "a hole the same size as the
+            //      mountain" (a shield volcano's recommended radius is 2 km, so without this it
+            //      always happens).
             if (_super)
             {
                 float coneCeiling =
@@ -621,9 +652,10 @@ namespace DisasterPlus.Game
 
             if (!VolcanoSurvey.Run(
                     point, form,
-                    // ★★ 基準は**形態ごとの推奨値**である（2026-08-22）。
-                    //    設定画面の半径・最終高のスライダーは撤去した ——
-                    //    同じ量を 2 つのつまみで決めさせていた（<c>VolcanoSizeScale</c>）。
+                    // ★★ The baseline is **the recommended value for each form** (2026-08-22).
+                    //    The radius and final-height sliders on the settings screen were removed —
+                    //    they were making the same quantity depend on two knobs
+                    //    (<c>VolcanoSizeScale</c>).
                     requestedRadius,
                     VolcanoSizeScale.Apply(VolcanoShape.DefaultHeightOf(form), sizeScale),
                     out footprint))
@@ -635,9 +667,9 @@ namespace DisasterPlus.Game
 
             _footprint = footprint;
             _lastRefusal = null;
-            // ★ ここから先が「壊す」である。T5 の VolcanoClearing がこの位相を動かす。
-            //   ポーズ中なら位相がここまで進むだけで、実際の破壊は解除まで始まらない
-            //   （VolcanoFeature のポーズガード）。
+            // ★ Everything from here on is "destroying". T5's VolcanoClearing drives this phase.
+            //   While paused the phase merely advances this far, and the real destruction does
+            //   not start until the pause is lifted (VolcanoFeature's pause guard).
             _phase = VolcanoPhase.Clearing;
             Log.Info("volcano placed at (" + _footprint.Centre.X.ToString("F0") + ","
                      + _footprint.Centre.Z.ToString("F0") + "): " + _footprint.Form
@@ -660,7 +692,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 「もう新しい火山は始められない」位相か。**壊し始めてからの 5 つ**である。
+        /// Whether the phase is one where "no new volcano can be started". **The five that follow
+        /// the start of destruction.**
         /// </summary>
         private static bool InProgress()
         {
@@ -680,20 +713,21 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 置こうとした地点そのものを断る。**位相を <see cref="VolcanoPhase.Refused"/> へ
-        /// 落として調査結果も捨てる** —— 断ったのに前の火山の影響範囲が残っていると、
-        /// 火山タブが「作られなかった山」の数を名乗り続ける。
+        /// Refuse the attempted location itself. **Drops the phase to
+        /// <see cref="VolcanoPhase.Refused"/> and discards the survey result too** — if the
+        /// previous volcano's affected range survived a refusal, the volcano tab would keep
+        /// quoting the figures for "the mountain that was never made".
         /// </summary>
         private static void RefuseAndForget(string reason)
         {
             _footprint = VolcanoFootprint.None;
-            // ★ 作らなかった火山の筋書きを持ち越さない。
+            // ★ Do not carry over the script of a volcano that was never made.
             _super = false;
             _phase = VolcanoPhase.Refused;
             Refuse(reason);
         }
 
-        /// <summary>設定の形態。範囲外の値は <c>VolcanoShape.FormOf</c> が既定へ落とす。</summary>
+        /// <summary>The form from the settings. Out-of-range values are dropped to the default by <c>VolcanoShape.FormOf</c>.</summary>
         private static VolcanoForm CurrentForm()
         {
             return VolcanoShape.FormOf(ModSettings.VolcanoShapeSetting.value);

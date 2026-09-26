@@ -1,6 +1,7 @@
 namespace DisasterPlus.Core.Common
 {
-    /// <summary>3 次元ベクトル。Core は UnityEngine.Vector3 を参照できないので自前で持つ。</summary>
+    /// <summary>A 3-D vector. Core cannot reference UnityEngine.Vector3, so we carry our
+    /// own.</summary>
     public struct Vec3
     {
         public readonly float X;

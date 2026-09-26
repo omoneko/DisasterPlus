@@ -4,23 +4,24 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// ゲームの高さの天井（1023.98 m）に当たったことを名乗れるか。
-    /// **黙って平らな山頂を出さない**のがここの目的である
-    /// （所有者の質問 2026-08-22「CS の土地の高さ制限を拡張することは可能なのか」）。
+    /// Can it report that it hit the game's height ceiling (1023.98 m)?
+    /// The purpose here is to **never silently produce a flat summit**
+    /// (owner's question, 2026-08-22: "is it possible to extend the CS terrain
+    /// height limit?").
     /// </summary>
     public class CeilingClipTests
     {
         [Fact]
         public void TheCeilingIsTheUshortLimitDividedByTheRawScale()
         {
-            // 65535 / 64。TerrainManager.TERRAIN_HEIGHT = 1024 のすぐ下である。
+            // 65535 / 64. Just below TerrainManager.TERRAIN_HEIGHT = 1024.
             Assert.Equal(1023.98f, UpliftSchedule.CeilingMetres, 2);
         }
 
         [Fact]
         public void GroundLevelPlusASmallHillDoesNotHitTheCeiling()
         {
-            // 標高 60 m（TERRAIN_LEVEL）に 300 m の山。
+            // A 300 m hill on ground at an elevation of 60 m (TERRAIN_LEVEL).
             ushort baseRaw = (ushort)(60f * UpliftSchedule.RawUnitsPerMetre);
             Assert.False(UpliftSchedule.CeilingClipped(baseRaw, 300f, 1f));
         }
@@ -28,11 +29,12 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void HighGroundPlusATallVolcanoDoesHitTheCeiling()
         {
-            // 標高 700 m の尾根に 400 m の山を足すと 1100 m で天井を越える。
+            // Adding a 400 m cone to a ridge at 700 m gives 1100 m, which is over the
+            // ceiling.
             ushort baseRaw = (ushort)(700f * UpliftSchedule.RawUnitsPerMetre);
             Assert.True(UpliftSchedule.CeilingClipped(baseRaw, 400f, 1f));
 
-            // 削られた結果は必ず天井そのものになる（巻き戻らない）。
+            // The clipped result is always the ceiling itself (it never wraps around).
             ushort target = UpliftSchedule.RawTargetAt(baseRaw, 400f, 1f);
             Assert.Equal(UpliftSchedule.MaxRaw, target);
         }
@@ -40,7 +42,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ThePredicateAgreesWithWhatRawTargetAtActuallyDid()
         {
-            // 「削られた」と名乗るのは、実際に削られたときだけ（数を偽らない）。
+            // It reports "clipped" only when it actually was clipped
+            // (it does not lie about the numbers).
             for (int metres = 0; metres <= 1200; metres += 25)
             {
                 for (int baseMetres = 0; baseMetres <= 1000; baseMetres += 100)
@@ -62,7 +65,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void DiggingTheCraterNeverCountsAsCeilingClipping()
         {
-            // 火口は負のプロファイルで彫る。下へ向かう書き込みは天井とは無関係。
+            // The crater is carved with a negative profile. A downward write has
+            // nothing to do with the ceiling.
             ushort baseRaw = (ushort)(900f * UpliftSchedule.RawUnitsPerMetre);
             Assert.False(UpliftSchedule.CeilingClipped(baseRaw, -120f, 1f));
         }

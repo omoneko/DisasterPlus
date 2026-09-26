@@ -4,15 +4,16 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// 実機報告（2026-08-22）「台風についてはエフェクトがすぐに消えてしまいます。
-    /// 台風がゆっくりと移動する様子を再現してください」。
+    /// Live report (2026-08-22): "As for the typhoon, the effect disappears almost at
+    /// once. Please reproduce the way a typhoon moves slowly."
     ///
-    /// ★★ 寿命を延ばすと**速度は自動的に落ちる**（経路長を寿命で割るため）。
-    ///    ここが固定するのはその関係と、宿主の持続時間が読めないときの振る舞いである。
+    /// ★★ Extending the lifetime **automatically lowers the speed** (because the path
+    ///    length is divided by the lifetime). What is pinned here is that relationship,
+    ///    and the behaviour when the host's duration cannot be read.
     /// </summary>
     public class TyphoonLifetimeTests
     {
-        /// <summary>ThunderStormAI の実測値（sharedassets55）。</summary>
+        /// <summary>Measured from ThunderStormAI (sharedassets55).</summary>
         private const uint HostDuration = 8192u;
 
         [Fact]
@@ -32,21 +33,23 @@ namespace DisasterPlus.Core.Tests.Typhoon
 
             Assert.True(after < before, after + " should be slower than " + before);
 
-            // 経路長は変えていないので、速度はちょうど倍率ぶん落ちる
-            // （帯でクランプされない限り）。
+            // The path length has not been changed, so the speed drops by exactly the
+            // multiplier (unless it gets clamped to the band).
             Assert.Equal(before / TyphoonTrack.LifetimeMultiplier, after, 4);
         }
 
         [Fact]
         public void ItCrossesTheWholeMapInOneLifeSoItCanArriveFromOutside()
         {
-            // ★★ **2026-09-02 に意図が反転した。** 以前は「寿命いっぱいでも
-            //   渡り切らない」ことを固定していたが、いまは台風が
-            //   <b>マップ外から入ってきて、クリック地点を通って、去る</b>。
-            //   そのためには一辺ぶんの道のりが要る（NominalPathLength の doc）。
+            // ★★ **The intent was reversed on 2026-09-02.** It used to pin that the
+            //   typhoon "does not make it all the way across even with a full lifetime",
+            //   but now the typhoon <b>comes in from off the map, passes through the
+            //   clicked point, and leaves</b>. That needs one map edge's worth of
+            //   distance (see the doc on NominalPathLength).
             //
-            // ★ 「ゆっくり見える」は速さではなく<b>接近に使う割合</b>で作る。
-            //   速すぎると言われたら下げるのは ApproachFraction のほうである。
+            // ★ "Looks slow" is created not by the speed but by the <b>fraction spent on
+            //   the approach</b>. If it is reported as too fast, the thing to lower is
+            //   ApproachFraction.
             float speed = TyphoonTrack.SpeedFor(TyphoonTrack.LifetimeFramesFor(HostDuration));
             float life = TyphoonTrack.LifetimeFramesFor(HostDuration);
 
@@ -58,7 +61,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void AnUnreadableHostDurationYieldsNothingToStartWith()
         {
-            // 読めなければ 0。呼び出し側は台風を 1 個も起こさない（設計書 §6）。
+            // If it cannot be read, 0. The caller then raises no typhoon at all
+            // (design doc §6).
             Assert.Equal(0u, TyphoonTrack.LifetimeFramesFor(0u));
             Assert.Equal(0f, TyphoonTrack.SpeedFor(0u), 5);
         }
@@ -66,7 +70,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void AnAbsurdHostDurationDoesNotOverflow()
         {
-            // .cgs もプレハブも手で変えられうる。掛け算で巻き戻らないこと。
+            // Both the .cgs and the prefab can be edited by hand. The multiplication
+            // must not wrap around.
             uint life = TyphoonTrack.LifetimeFramesFor(uint.MaxValue);
             Assert.True(life >= uint.MaxValue / TyphoonTrack.LifetimeMultiplier,
                         "the lifetime wrapped around");

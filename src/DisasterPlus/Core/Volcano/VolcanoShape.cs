@@ -1,89 +1,103 @@
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 火山の形態。**値は設定ファイル（.cgs）に保存される公開契約なので詰め直さない。**
-    /// 番号を入れ替えると、既に保存されている設定が黙って別の形態に化ける。
+    /// A volcano's form. **The values are a public contract saved into the settings file
+    /// (.cgs), so do not renumber them.**
+    /// Swap the numbers around and settings already saved silently turn into a different form.
     /// </summary>
     public enum VolcanoForm
     {
-        /// <summary>楯状火山。裾が広く頂が平ら（既定 R=2000 m / H=200 m、平均勾配 1:10）。</summary>
+        /// <summary>A shield volcano. Broad at the foot and flat at the summit (default R=2000
+        /// m / H=200 m, mean gradient 1:10).</summary>
         Shield = 0,
 
-        /// <summary>成層火山。直線の円錐（既定 R=1200 m / H=600 m、平均勾配 1:2）。**⑤の既定。**</summary>
+        /// <summary>A stratovolcano. A straight cone (default R=1200 m / H=600 m, mean
+        /// gradient 1:2). **⑤'s default.**</summary>
         Strato = 1,
 
-        /// <summary>溶岩ドーム。小さく急峻（既定 R=350 m / H=300 m、平均勾配 1:1.17）。</summary>
+        /// <summary>A lava dome. Small and steep (default R=350 m / H=300 m, mean gradient
+        /// 1:1.17).</summary>
         Dome = 2,
     }
 
     /// <summary>
-    /// 3 形態の高さプロファイル。**ここにある数字は全て本 MOD が発明したものである。**
-    /// バニラに「火山」という現象は無く、溶岩・マグマ・溶融物のプレハブもマテリアルも
-    /// シェーダも、DLL の文字列ヒープにすら 1 件も存在しない（IL 事実文書 §B-5）。
+    /// The height profiles of the three forms. **Every number here was invented by this mod.**
+    /// Vanilla has no such phenomenon as a volcano, and there is not one prefab, material or
+    /// shader for lava, magma or melt — not even a single entry in the DLL's string heap
+    /// (IL findings doc §B-5).
     ///
-    /// 唯一の例外が<b>盾状火山のプロファイル</b>で、これは
-    /// DisasterHelpers.MakeCrater(pos, R, -H, raiseEdges:false) が実際に描く形
-    /// （§C-8 の実測式 1 - (d/0.837R)^4 と、0.73R 以遠の 4(u-1.197)^2）を
-    /// **そのまま写したもの**である。
+    /// The one exception is <b>the shield volcano's profile</b>, which is **a straight copy**
+    /// of the shape DisasterHelpers.MakeCrater(pos, R, -H, raiseEdges:false) actually draws
+    /// (§C-8's measured formulas 1 - (d/0.837R)^4, and 4(u-1.197)^2 beyond 0.73R).
     ///
-    /// **ではなぜ MakeCrater を呼ばないのか。** MakeCrater は先頭で
-    /// TerrainModify.RefreshAllModifications() を呼ぶ（§C-8 IL_0006）ため、
-    /// **呼ぶたびに地形の強制フラッシュが 1 回走る**。段階的隆起で毎 tick 呼べば
-    /// バニラのバッチ最適化を毎 tick 無効化することになる（§A-1 の設計上の結論 3）。
-    /// 形は同じで、コストだけが違う。**「MakeCrater 1 発で済む」と言って
-    /// 戻さないこと。**
+    /// **So why not call MakeCrater?** Because MakeCrater calls
+    /// TerrainModify.RefreshAllModifications() at its top (§C-8 IL_0006), so **every call
+    /// forces one full terrain flush**. Called every tick during a staged uplift, that
+    /// disables vanilla's batching optimisation every tick (design conclusion 3 in §A-1).
+    /// The shape is the same; only the cost differs. **Do not revert to it saying "one
+    /// MakeCrater call will do".**
     ///
-    /// ★ 山頂の火口も 2026-08-22 に <c>MakeCrater</c> をやめた（実機の指摘①
-    /// 「噴火口が最初から窪みとして生成される方がいい」）。火口は
-    /// <see cref="VolcanoCrater"/> が**高さプロファイルの一部**として返すので、
-    /// 山と一緒に育つ。⑤は <c>MakeCrater</c> をもうどこからも呼ばない。
+    /// ★ The summit crater dropped <c>MakeCrater</c> too, on 2026-08-22 (in-game report ①,
+    /// "it would be better if the crater were generated as a depression from the start").
+    /// The crater is returned by <see cref="VolcanoCrater"/> as **part of the height
+    /// profile**, so it grows along with the mountain. ⑤ no longer calls
+    /// <c>MakeCrater</c> from anywhere.
     ///
-    /// 勾配クランプも侵食も平滑化パスも存在しない（§C-9）ので、急峻な円錐は潰れない。
-    /// 制約は「16 m 格子」と「1/64 m 量子」の 2 つだけである。だから
-    /// **溶岩ドームの半径を 250 m（片側 8 raw セル）より小さくしない**。
-    /// それ以下は「山」ではなく地面のノイズに見える。
+    /// There is no gradient clamp, no erosion and no smoothing pass (§C-9), so a steep cone
+    /// does not collapse. The only two constraints are "a 16 m grid" and "1/64 m
+    /// quantisation". Which is why **the lava dome's radius is never taken below 250 m
+    /// (8 raw cells each side)**.
+    /// Below that it looks like noise in the ground rather than a mountain.
     ///
-    /// 高さの天井は 65535/64 = 1023.984375 m で、**超えても例外は出ず無言で
-    /// 山頂が平らな台地になる**（§C-10）。<see cref="HeightFor"/> が起点の地形高さを
-    /// 先に引き、<see cref="HeightWasLimitedByCeiling"/> が
-    /// 「切ったかどうか」を別に返す。呼び出し側はそれをプレイヤーに先に見せること。
+    /// The height ceiling is 65535/64 = 1023.984375 m, and **going past it raises no
+    /// exception; the summit silently becomes a flat plateau** (§C-10).
+    /// <see cref="HeightFor"/> subtracts the starting terrain height first, and
+    /// <see cref="HeightWasLimitedByCeiling"/> separately reports "whether it was cut".
+    /// The caller must show that to the player up front.
     /// </summary>
     public static class VolcanoShape
     {
-        /// <summary>1 メートルあたりの raw 単位（<c>RawHeights</c> は <c>raw/64</c> メートル、§C-8）。</summary>
+        /// <summary>Raw units per metre (<c>RawHeights</c> is <c>raw/64</c> metres,
+        /// §C-8).</summary>
         public const float RawUnitsPerMetre = 64f;
 
-        /// <summary>raw 1 単位のメートル値（= 0.015625 m）。**これ未満の変化は丸めで消える。**</summary>
+        /// <summary>The metre value of one raw unit (= 0.015625 m). **Any change smaller than
+        /// this is lost to rounding.**</summary>
         public const float MetresPerRawUnit = 1f / 64f;
 
-        /// <summary>地形高さの表現上限（= 65535/64 m、§C-10）。超えても例外は出ない。</summary>
+        /// <summary>The representable ceiling on terrain height (= 65535/64 m, §C-10). Going
+        /// past it raises no exception.</summary>
         public const float MaxTerrainMetres = 1023.984375f;
 
-        /// <summary>raw セルの一辺（m）。§C-8 の <c>cell = 16</c>。</summary>
+        /// <summary>The side of a raw cell (m). §C-8's <c>cell = 16</c>.</summary>
         public const float RawCellSizeMetres = 16f;
 
-        /// <summary>溶岩ドームの最小半径（m）。片側 8 raw セル。§C-9。</summary>
+        /// <summary>The lava dome's minimum radius (m). 8 raw cells each side. §C-9.</summary>
         public const float MinDomeRadiusMetres = 250f;
 
-        /// <summary>盾状の減衰基準（§C-8 の <c>radius * 0.837</c>）。</summary>
+        /// <summary>The shield's falloff reference (§C-8's <c>radius * 0.837</c>).</summary>
         public const float ShieldFalloff = 0.837f;
 
-        /// <summary>盾状の内側分岐の境目（§C-8 の <c>d &lt; radius * 0.73</c>）。</summary>
+        /// <summary>The boundary of the shield's inner branch (§C-8's
+        /// <c>d &lt; radius * 0.73</c>).</summary>
         public const float ShieldInnerFraction = 0.73f;
 
-        /// <summary>盾状の外側分岐のオフセット（§C-8 の <c>u - 1.197</c>）。</summary>
+        /// <summary>The offset in the shield's outer branch (§C-8's <c>u - 1.197</c>).</summary>
         public const float ShieldOuterOffset = 1.197f;
 
-        /// <summary>火口半径の比（山の半径に対して）。上下限つき。</summary>
+        /// <summary>The crater radius as a fraction (of the mountain's radius). Bounded above
+        /// and below.</summary>
         private const float CraterRadiusFraction = 0.12f;
 
-        /// <summary>火口深さの比（山の高さに対して）。上下限つき。</summary>
+        /// <summary>The crater depth as a fraction (of the mountain's height). Bounded above
+        /// and below.</summary>
         private const float CraterDepthFraction = 0.12f;
 
         /// <summary>
-        /// 火口の深さが山の高さに対して超えてはいけない比。**低い山を貫かないため**で、
-        /// これが無いと <see cref="MinCraterDepthMetres"/>（10 m）が 15 m の山に
-        /// 10 m の穴を空け、火口の底が元の地面まで抜ける。
+        /// The fraction of the mountain's height the crater's depth must never exceed.
+        /// **It is there so a low mountain is not punched through**; without it,
+        /// <see cref="MinCraterDepthMetres"/> (10 m) puts a 10 m hole in a 15 m mountain and
+        /// the crater floor drops all the way to the original ground.
         /// </summary>
         private const float MaxCraterDepthOfHeight = 0.45f;
 
@@ -93,8 +107,9 @@ namespace DisasterPlus.Core.Volcano
         private const float MaxCraterDepthMetres = 60f;
 
         /// <summary>
-        /// 設定値（.cgs に保存される int）から形態へ。**範囲外は既定の
-        /// <see cref="VolcanoForm.Strato"/> に落とす**（設定ファイルは手で編集されうる）。
+        /// From the setting value (the int saved in .cgs) to a form. **Out-of-range values
+        /// fall to the default <see cref="VolcanoForm.Strato"/>** (the settings file can be
+        /// edited by hand).
         /// </summary>
         public static VolcanoForm FormOf(int settingValue)
         {
@@ -106,7 +121,7 @@ namespace DisasterPlus.Core.Volcano
             }
         }
 
-        /// <summary>形態ごとの既定半径（m）。</summary>
+        /// <summary>The default radius (m) for each form.</summary>
         public static float DefaultRadiusOf(VolcanoForm form)
         {
             switch (form)
@@ -117,7 +132,8 @@ namespace DisasterPlus.Core.Volcano
             }
         }
 
-        /// <summary>形態ごとの最小半径（m）。ドームだけ <see cref="MinDomeRadiusMetres"/>（§C-9）。</summary>
+        /// <summary>The minimum radius (m) for each form. Only the dome uses
+        /// <see cref="MinDomeRadiusMetres"/> (§C-9).</summary>
         public static float MinRadiusOf(VolcanoForm form)
         {
             switch (form)
@@ -129,46 +145,48 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 形態ごとの最大半径（m）。
+        /// The maximum radius (m) for each form.
         ///
-        /// ── ★★ スライダーの上端まで効くようにした（2026-08-22）─────────
+        /// ── ★★ Made to work right to the top of the slider (2026-08-22) ─────────
         ///
-        /// 実機報告:
+        /// The in-game report:
         ///
-        /// &gt; 火山の 25.5 スケールが小さすぎるように思います
+        /// &gt; I think the volcano's 25.5 scale is too small.
         ///
-        /// そのとおりで、**帯がスライダーより先に頭打ちになっていた。**
-        /// 倍率の上端は <c>VolcanoSizeScale.MaxScale</c>（255/55 ≒ 4.64）なので、
-        /// 成層火山なら 1200 × 4.64 = 5568 m を要求される。それを 2000 m で
-        /// 切っていたため、<b>表示 9.2 より上はスライダーを動かしても
-        /// 半径が 1 m も変わらなかった</b>。
+        /// Quite right, and **the band was topping out before the slider did.**
+        /// The top of the multiplier is <c>VolcanoSizeScale.MaxScale</c> (255/55 ≈ 4.64), so
+        /// a stratovolcano is asked for 1200 × 4.64 = 5568 m. That was being cut at 2000 m,
+        /// so <b>above a displayed 9.2 the slider moved and the radius did not change by a
+        /// single metre</b>.
         ///
-        /// 今の上限は「推奨値 × 上端の倍率」を丸めた値である。ただし
-        /// <see cref="AbsoluteMaxRadiusMetres"/> で頭を押さえる ——
-        /// 隆起は影響矩形ぶんの <c>ushort[]</c> を 2 枚持つので（面積に比例）、
-        /// マップ半辺（8640 m）まで許すと 1 個の火山で数十 MB になる。
+        /// The current ceilings are "the recommended value × the top multiplier", rounded.
+        /// They are then held down by <see cref="AbsoluteMaxRadiusMetres"/> — the uplift
+        /// holds two <c>ushort[]</c>s covering the affected rectangle (proportional to
+        /// area), so allowing a map half-side (8640 m) would put a single volcano into tens
+        /// of megabytes.
         /// </summary>
         public static float MaxRadiusOf(VolcanoForm form)
         {
             switch (form)
             {
-                // 推奨 2000 × 4.64 = 9280 → 実費の上限で 6000 に押さえる。
+                // Recommended 2000 × 4.64 = 9280 → held down to 6000 by the memory cost ceiling.
                 case VolcanoForm.Shield: return AbsoluteMaxRadiusMetres;
-                // 推奨 350 × 4.64 = 1624。
+                // Recommended 350 × 4.64 = 1624.
                 case VolcanoForm.Dome: return 1650f;
-                // 推奨 1200 × 4.64 = 5568。
+                // Recommended 1200 × 4.64 = 5568.
                 default: return 5600f;
             }
         }
 
         /// <summary>
-        /// どの形態でも越えない半径（m）。**実費の上限であって形の話ではない。**
-        /// 隆起の退避配列は半径 3 km で 279 KB（面積に比例）なので、
-        /// 6 km で約 1.1 MB。ここを上げるならその表も直すこと。
+        /// The radius (m) no form ever exceeds. **It is a cost ceiling, not a statement
+        /// about shape.**
+        /// The uplift's backup array is 279 KB at a 3 km radius (proportional to area), so
+        /// about 1.1 MB at 6 km. If you raise this, fix that table too.
         /// </summary>
         public const float AbsoluteMaxRadiusMetres = 6000f;
 
-        /// <summary>形態ごとの既定高さ（m）。</summary>
+        /// <summary>The default height (m) for each form.</summary>
         public static float DefaultHeightOf(VolcanoForm form)
         {
             switch (form)
@@ -179,7 +197,7 @@ namespace DisasterPlus.Core.Volcano
             }
         }
 
-        /// <summary>形態ごとの最小高さ（m）。</summary>
+        /// <summary>The minimum height (m) for each form.</summary>
         public static float MinHeightOf(VolcanoForm form)
         {
             switch (form)
@@ -190,40 +208,40 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 形態ごとの最大高さ（m）。<see cref="MaxRadiusOf"/> と同じ理由で
-        /// 「推奨値 × 上端の倍率」まで上げた（2026-08-22）。
+        /// The maximum height (m) for each form. Raised to "the recommended value × the top
+        /// multiplier" for the same reason as <see cref="MaxRadiusOf"/> (2026-08-22).
         ///
-        /// ★★ <b>ゲームの地形の天井は 1024 m である</b>
-        ///   （<c>UpliftSchedule.CeilingMetres</c>。<c>ushort</c> × 0.015625 m）。
-        ///   これは<b>海抜</b>の天井なので、標高 400 m の土地に 700 m の山を
-        ///   立てれば山頂は削られる —— そのときは <c>VolcanoState</c> が
-        ///   「天井で削った」と必ず言う。**MOD からは上げられない。**
-        ///   だからここを 1024 より上にしても意味が無い。
+        /// ★★ <b>The game's terrain ceiling is 1024 m</b>
+        ///   (see <c>UpliftSchedule.CeilingMetres</c>: <c>ushort</c> × 0.015625 m).
+        ///   That is a ceiling on <b>height above sea level</b>, so raising a 700 m mountain
+        ///   on land 400 m up gets its summit shaved off — and in that case
+        ///   <c>VolcanoState</c> always says "cut by the ceiling". **A mod cannot raise it.**
+        ///   So there is no point putting this above 1024.
         /// </summary>
         public static float MaxHeightOf(VolcanoForm form)
         {
             switch (form)
             {
-                // 推奨 200 × 4.64 = 928。楯状火山は「広く低い」ままである
-                // （半径のほうが 6 km まで伸びるので、比は崩れない）。
+                // Recommended 200 × 4.64 = 928. A shield volcano stays "broad and low"
+                // (the radius goes out to 6 km, so the proportion is not broken).
                 case VolcanoForm.Shield: return 930f;
-                // 推奨 300 × 4.64 = 1392 → 天井で押さえる。
+                // Recommended 300 × 4.64 = 1392 → held down by the ceiling.
                 case VolcanoForm.Dome: return AbsoluteMaxHeightMetres;
-                // 推奨 600 × 4.64 = 2784 → 天井で押さえる。
+                // Recommended 600 × 4.64 = 2784 → held down by the ceiling.
                 default: return AbsoluteMaxHeightMetres;
             }
         }
 
         /// <summary>
-        /// どの形態でも越えない高さ（m）。ゲームの地形の天井（1024 m）より
-        /// 少し下に置く —— ちょうどに置くと、海抜 0 m の土地でも山頂の
-        /// 1 raw 単位が天井に触れて「削られた」と報告されることになる。
+        /// The height (m) no form ever exceeds. Placed a little below the game's terrain
+        /// ceiling (1024 m) — put it exactly there and, even on land at sea level, one raw
+        /// unit of the summit touches the ceiling and gets reported as "cut".
         /// </summary>
         public const float AbsoluteMaxHeightMetres = 1000f;
 
         /// <summary>
-        /// 要求半径を形態の帯へクランプする。NaN は既定値。
-        /// **読み捨てない** —— .cgs は公開契約で、手で編集されうる。
+        /// Clamps the requested radius into the form's band. NaN gives the default.
+        /// **Do not silently discard it** — .cgs is a public contract and can be edited by hand.
         /// </summary>
         public static float RadiusFor(VolcanoForm form, float requestedRadiusMetres)
         {
@@ -232,7 +250,8 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 起点の地形高さから天井までの余裕（m）。NaN は 0。負にはならない。
+        /// The headroom (m) from the starting terrain height to the ceiling. NaN gives 0.
+        /// It never goes negative.
         /// </summary>
         public static float HeadroomMetres(float baseHeightMetres)
         {
@@ -242,20 +261,24 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 要求高さを形態の帯へクランプしたうえで、**天井（§C-10）の分だけさらに切る**。
+        /// Clamps the requested height into the form's band and then **cuts it further by
+        /// the ceiling (§C-10)**.
         ///
-        /// ★ かつてここは火口の縁の余裕（<c>CraterRimHeadroomOf</c>）も引いていた。
-        ///   <c>MakeCrater(raiseEdges:true)</c> が <b>山頂より上に</b> 環状の縁を盛っていて、
-        ///   その分が天井を突き抜けると縁だけが無言で平らになったからである。
-        ///   火口を高さプロファイルへ畳み込んだ（<see cref="VolcanoCrater"/>）いま、
-        ///   **⑤が書く最大の高さはちょうど <c>base + H</c> である** ——
-        ///   火口の縁が H そのもので、そこから上には 1 mm も書かない。
-        ///   したがって引くものはもう無い。
+        /// ★ This used to subtract the crater rim's headroom too
+        ///   (<c>CraterRimHeadroomOf</c>). <c>MakeCrater(raiseEdges:true)</c> raised an
+        ///   annular rim <b>above the summit</b>, and when that broke through the ceiling
+        ///   the rim alone went silently flat.
+        ///   Now that the crater has been folded into the height profile (see
+        ///   <see cref="VolcanoCrater"/>), **the greatest height ⑤ writes is exactly
+        ///   <c>base + H</c>** — the crater rim is H itself, and nothing is written a single
+        ///   millimetre above it.
+        ///   So there is nothing left to subtract.
         ///
-        /// 標高の高い場所では <c>limit</c> が <see cref="MinHeightOf"/> を割ることがある。
-        /// そのときは最小値へ引き上げず、**そのまま小さい値を返す** ——
-        /// 呼び出し側が <see cref="HeightWasLimitedByCeiling"/> を見て
-        /// 「この場所には作れません」と先に断るためである。
+        /// At high elevations <c>limit</c> can fall below <see cref="MinHeightOf"/>.
+        /// In that case it does not get raised to the minimum; **the small value is
+        /// returned as it is** — so that the caller can look at
+        /// <see cref="HeightWasLimitedByCeiling"/> and refuse up front with "a volcano
+        /// cannot be made here".
         /// </summary>
         public static float HeightFor(VolcanoForm form, float requestedHeightMetres,
                                       float baseHeightMetres)
@@ -270,7 +293,8 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 天井のせいで要求より低い山になるか。**黙って低い山を作らない**ための口。
+        /// Whether the ceiling makes the mountain lower than requested. The way to avoid
+        /// **silently building a lower mountain**.
         /// </summary>
         public static bool HeightWasLimitedByCeiling(VolcanoForm form, float requestedHeightMetres,
                                                      float baseHeightMetres)
@@ -282,10 +306,12 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 中心から <paramref name="distanceMetres"/> の地点での**地形からの盛り上がり**（m）。
+        /// The **rise above the terrain** (m) at a point <paramref name="distanceMetres"/>
+        /// from the centre.
         ///
-        /// **半径の外はきっかり 0 を返す。** 1 mm でも残ると <c>UpdateArea</c> の矩形が
-        /// 際限なく広がる。異常入力（NaN・負の距離・R&lt;=0・H&lt;=0）も 0。
+        /// **Outside the radius it returns exactly 0.** Leave even a millimetre and
+        /// <c>UpdateArea</c>'s rectangle grows without limit. Abnormal input (NaN, a
+        /// negative distance, R&lt;=0, H&lt;=0) also gives 0.
         /// </summary>
         public static float ProfileAt(VolcanoForm form, float distanceMetres,
                                       float radiusMetres, float heightMetres)
@@ -312,8 +338,8 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// §C-8 の <c>MakeCrater(pos, R, -H, raiseEdges:false)</c> の実測式そのもの。
-        /// 内側 <c>H(1 - u^4)</c>、0.73R 以遠 <c>4H(u - 1.197)^2</c>（u = d / 0.837R）。
+        /// §C-8's measured formula for <c>MakeCrater(pos, R, -H, raiseEdges:false)</c>, exactly.
+        /// Inside, <c>H(1 - u^4)</c>; beyond 0.73R, <c>4H(u - 1.197)^2</c> (u = d / 0.837R).
         /// </summary>
         private static float ShieldProfile(float distanceMetres, float radiusMetres,
                                            float heightMetres)
@@ -329,8 +355,8 @@ namespace DisasterPlus.Core.Volcano
             return heightMetres * 4f * w * w;
         }
 
-        /// <summary>山頂の火口の半径（m）。**上限 400 m** ——
-        /// 火口 1 個の矩形が 128 セル（2048 m）を跨がないようにするため。</summary>
+        /// <summary>The summit crater's radius (m). **Capped at 400 m** —
+        /// so that one crater's rectangle does not span 128 cells (2048 m).</summary>
         public static float CraterRadiusOf(float radiusMetres)
         {
             if (float.IsNaN(radiusMetres) || radiusMetres <= 0f) return 0f;
@@ -339,10 +365,11 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 山頂の火口の深さ（m）。**山を貫かないよう 2 段の上限**がある ——
-        /// 絶対値の <see cref="MaxCraterDepthMetres"/> と、山の高さに対する
-        /// <see cref="MaxCraterDepthOfHeight"/> である。後者が無いと、天井ぎりぎりで
-        /// 15 m しか立てられなかった山に 10 m の穴が空く。
+        /// The summit crater's depth (m). **There are two tiers of cap so it does not punch
+        /// through the mountain** — the absolute <see cref="MaxCraterDepthMetres"/>, and
+        /// <see cref="MaxCraterDepthOfHeight"/> relative to the mountain's height. Without
+        /// the latter, a mountain that could only be raised 15 m right under the ceiling
+        /// gets a 10 m hole in it.
         /// </summary>
         public static float CraterDepthOf(float heightMetres)
         {

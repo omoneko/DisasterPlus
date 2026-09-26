@@ -5,45 +5,49 @@ using DisasterPlus.Core.Typhoon;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 河川氾濫の状態。パネルは <see cref="Idle"/> のとき行を出さず、
-    /// <see cref="NoSources"/> のとき**「不具合ではありません」と理由を出す**
-    /// （設計書 §7.4。①の「なぜハザードマップが空か」と同じ扱い）。
+    /// The state of river flooding. The panel shows no row when it is <see cref="Idle"/>,
+    /// and **gives the reason, saying "this is not a fault"** when it is
+    /// <see cref="NoSources"/> (design doc §7.4; treated the same way as ①'s "why is the
+    /// hazard map empty").
     /// </summary>
     public enum TyphoonFloodState
     {
-        /// <summary>まだ何も起きていない（台風が強風域に入っていない）。</summary>
+        /// <summary>Nothing has happened yet (the typhoon's gale radius has not reached
+        /// anything).</summary>
         Idle,
 
         /// <summary>
-        /// 台風の近くに <c>TYPE_NATURAL</c> の水源が 1 個も無い。
-        /// **これは正常な結果である。** 内陸の池だけのマップ、水源をエディタで
-        /// 置いていないマップではこれが正しい。
+        /// There is not one <c>TYPE_NATURAL</c> water source near the typhoon.
+        /// **This is a correct result.** On a map with nothing but inland ponds, or one
+        /// where no water sources were placed in the editor, this is right.
         /// </summary>
         NoSources,
 
-        /// <summary>水位を持ち上げている。</summary>
+        /// <summary>We are raising the water level.</summary>
         Raised,
 
-        /// <summary>持ち上げたぶんを元に戻した。水は吸い込み側が自然に引かせる。</summary>
+        /// <summary>We have put the rise back. The water is drained naturally by the
+        /// intake side.</summary>
         Restored,
 
         /// <summary>
-        /// 到達経路が使えなかった。**パネルには行を出さず**、理由を診断に出す
-        /// （<see cref="TyphoonFlood.LastFailure"/>）。
+        /// The route to it was unusable. **No row is shown on the panel**; the reason goes
+        /// into the diagnostics (<see cref="TyphoonFlood.LastFailure"/>).
         /// </summary>
         Failed
     }
 
     /// <summary>
-    /// ④が持ち上げている水源 1 個ぶんの台帳。
+    /// The ledger entry for one water source ④ is raising.
     ///
-    /// <see cref="Original"/> は**必ず④が触る前の値**である。走査のたびに
-    /// <see cref="Raised"/> は変わるが（台風が近づけば上げ幅が増える）、
-    /// <see cref="Original"/> は最初に掴んだ値のまま持ち続ける ——
-    /// 持ち上げた値を「元の値」として上書きしたら、復元しても水位が戻らない。
+    /// <see cref="Original"/> is **always the value from before ④ touched it**.
+    /// <see cref="Raised"/> changes with every sweep (the rise grows as the typhoon
+    /// approaches), but <see cref="Original"/> keeps the value we first grabbed —
+    /// overwrite "the original value" with the raised one and restoring will not bring the
+    /// water level back.
     ///
-    /// <see cref="Handle"/> は <c>WaterSimulation</c> のハンドルで、**1 基点**である
-    /// （<see cref="TyphoonFlood"/> のクラス doc の IL 実測）。
+    /// <see cref="Handle"/> is a <c>WaterSimulation</c> handle and is **1-based**
+    /// (measured from the IL in <see cref="TyphoonFlood"/>'s class doc).
     /// </summary>
     public struct TyphoonFloodedSource
     {
@@ -60,160 +64,179 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// 台風による河川氾濫。<b>sim スレッド専用。</b>既定 ON。
+    /// River flooding from a typhoon. <b>Sim thread only.</b> On by default.
     ///
-    /// **この機能だけが「ゲームを固める」と「セーブを壊す」を同時に持つ。**
+    /// **This feature alone can both freeze the game and corrupt a save.**
     ///
-    /// ── 先に潰しておく 3 つの不成立ルート（設計書 §1.3）───────────────
+    /// ── Three routes ruled out up front (design doc §1.3) ─────────────────
     ///
-    /// 1. **洪水災害はバニラに無い。** <c>GenericFloodAI</c> はフィールド 0・
-    ///    メソッド 0 の空クラス（§D-1）
-    /// 2. **海面上昇は使えない。** ゲームプレイ中に <c>m_nextSeaLevel</c> を動かす
-    ///    バニラのコードは無く、全マップ一律なので河川の局所氾濫にならない（§D-1）
-    /// 3. **<c>TYPE_TSUNAMI</c> の波を川に置いても何も起きない。**
-    ///    <c>GetSeaLevel</c> は <c>SimulateWater</c> の**マップ外周リングでしか
-    ///    評価されない**（§D-3(a)）。地震ファクト §B-3 が「逃げ道」として明記していた
-    ///    経路は成立しない
+    /// 1. **Vanilla has no flood disaster.** <c>GenericFloodAI</c> is an empty class with
+    ///    0 fields and 0 methods (§D-1)
+    /// 2. **Raising the sea level is no use.** There is no vanilla code that moves
+    ///    <c>m_nextSeaLevel</c> during play, and it is uniform across the whole map, so it
+    ///    cannot produce localised river flooding (§D-1)
+    /// 3. **Putting a <c>TYPE_TSUNAMI</c> wave on a river does nothing.**
+    ///    <c>GetSeaLevel</c> is **only evaluated on the map's outer ring in
+    ///    <c>SimulateWater</c>** (§D-3(a)). The route the earthquake facts §B-3 explicitly
+    ///    noted as "the way out" does not hold
     ///
-    /// ── 成立する唯一のルート（§D-4）──────────────────────────
+    /// ── The one route that does work (§D-4) ───────────────────────────────
     ///
-    /// <c>m_type == TYPE_NATURAL(1)</c> の水源は**目標水位 <c>m_target</c> まで注ぎ、
-    /// 超えたら吸い戻す自己調整の泉**である。しかも吐き出し側のループは
-    /// <c>natural &amp;&amp; terrain[i] &gt;= m_target</c> のセルを**スキップする**
-    /// （IL_1E5E / IL_1EBF）ので、**丘の上には水を載せず、谷筋だけが濡れる**。
-    /// これは河川氾濫そのものである。
+    /// A water source with <c>m_type == TYPE_NATURAL(1)</c> is **a self-regulating spring
+    /// that pours until the target level <c>m_target</c> and sucks back once it is
+    /// exceeded**. What is more, the discharge loop **skips** cells where
+    /// <c>natural &amp;&amp; terrain[i] &gt;= m_target</c> (IL_1E5E / IL_1EBF), so
+    /// **it puts no water on the hilltops and only the valleys get wet**.
+    /// That is river flooding itself.
     ///
-    /// **新しい水源は作らない**（設計書 §2 が (i) を選び (ii) を代案としている）。
-    /// <c>CreateWaterSource</c> を呼ばなければ、「上限 65535 で false」も
-    /// 「注いだ水が引かない」も最初から発生しない。
-    /// **次の担当者へ: 「もっと強い氾濫を」と <c>CreateWaterSource</c> に手を伸ばさないこと。**
-    /// 新しい泉を置くと、止めたあとに残った水を引かせる手段が
-    /// 「吸い込み側の水源を残す」しか無くなり、復元経路が 1 本増える。
+    /// **We create no new water sources** (design doc §2 chooses (i) with (ii) as the
+    /// alternative). Never call <c>CreateWaterSource</c> and neither "false at the 65535
+    /// ceiling" nor "the poured water never drains" can arise in the first place.
+    /// **To whoever comes next: do not reach for <c>CreateWaterSource</c> to get "stronger
+    /// flooding".** Put a new spring down and the only way left to drain the remaining
+    /// water after stopping is "leave the intake-side source in place", which adds one more
+    /// restore route.
     ///
-    /// <c>DisasterHelpers.SplashWater</c>（<c>TYPE_IMPACT</c> の波）を演出として
-    /// 重ねてもよいが、**体積は増えないのでこれ単独では氾濫にならない**（§D-3(b)）。
-    /// **本タスクでは足さない** —— 水面の見た目より <c>m_target</c> の復元を優先する。
+    /// Layering <c>DisasterHelpers.SplashWater</c> (a <c>TYPE_IMPACT</c> wave) on top as
+    /// presentation is fine, but **it adds no volume, so on its own it is not flooding**
+    /// (§D-3(b)). **We do not add it in this task** — restoring <c>m_target</c> matters
+    /// more than how the water surface looks.
     ///
-    /// ── ロックの取り方（罠 3。落とすとゲームが無反応になる）─────────────
+    /// ── How to take the lock (trap 3. Drop it and the game stops responding) ──
     ///
-    /// **本タスクで IL を直接読み直して確定させた**（§D-4 の主張の再確認）:
+    /// **Re-read directly from the IL and settled for this task** (a re-confirmation of
+    /// §D-4's claims):
     ///
     /// ```
     /// WaterSimulation.LockWaterSource(ushort source)     // public, instance
     ///   IL_0000  br IL_0005
-    ///   IL_0005  Monitor.TryEnter(m_waterSources, 0) ; brfalse IL_0005   // ★ スピンロック
-    ///   IL_0016  return m_waterSources.m_buffer[source - 1]              // ★ 1 基点
-    ///   -- Monitor.Exit も try/finally 領域も無い（leave / endfinally が 1 つも無い）--
+    ///   IL_0005  Monitor.TryEnter(m_waterSources, 0) ; brfalse IL_0005   // ★ spin lock
+    ///   IL_0016  return m_waterSources.m_buffer[source - 1]              // ★ 1-based
+    ///   -- no Monitor.Exit and no try/finally region (not one leave / endfinally) --
     ///
     /// WaterSimulation.UnlockWaterSource(ushort source, WaterSource data) // public, instance
-    ///   IL_0000  m_waterSources.m_buffer[source - 1] = data              // ★ 1 基点
-    ///   IL_0019  Monitor.Exit(m_waterSources)                            // ★ 唯一の解放経路
+    ///   IL_0000  m_waterSources.m_buffer[source - 1] = data              // ★ 1-based
+    ///   IL_0019  Monitor.Exit(m_waterSources)                            // ★ the only release path
     /// ```
     ///
-    /// したがって <c>UnlockWaterSource</c> は**必ず <c>finally</c> に置く**。落とすと
-    /// 水シミュ専用スレッドが <c>TryEnter(_, 0)</c> のループで永久に回り、
-    /// **ゲームが無反応になる。**
+    /// So <c>UnlockWaterSource</c> **always goes in a <c>finally</c>**. Drop it and the
+    /// dedicated water simulation thread spins for ever in the <c>TryEnter(_, 0)</c> loop
+    /// and **the game stops responding.**
     ///
-    /// **<c>try</c> の中で例外を投げうる処理を増やさない。** ログも診断カウンタの更新も
-    /// <c>finally</c> の**外**でやる。<c>Log.Diag</c> は内部で <c>lock</c> を取るので、
-    /// 水源のモニタを握ったまま呼ぶと**2 本のロックの取得順**という、この MOD が
-    /// まだ一度も抱えていない種類の問題を作ることになる。
+    /// **Do not add anything that can throw inside the <c>try</c>.** Both logging and
+    /// updating the diagnostic counters happen **outside** the <c>finally</c>.
+    /// <c>Log.Diag</c> takes a <c>lock</c> internally, so calling it while holding the
+    /// water source's monitor would create a **lock-ordering** problem, a kind of problem
+    /// this mod has never once had.
     ///
-    /// ── ★ ハンドルは呼ぶ前に検証する（IL から新たに分かった危険）──────────
+    /// ── ★ Validate the handle before calling (a danger newly found in the IL) ──
     ///
-    /// <c>LockWaterSource</c> は <c>source</c> の範囲を**検査しない**。
-    /// <c>Monitor.TryEnter</c> は IL_000C、配列アクセスは IL_0024 なので、
-    /// **範囲外のハンドルを渡すとモニタを取った直後に <c>IndexOutOfRangeException</c> が
-    /// 出て、`Monitor.Exit` に到達しないまま抜ける** ＝ 恒久デッドロックである。
-    /// ハンドル 0 は <c>m_buffer[-1]</c> になるので特に危ない。
-    /// <see cref="IsValidHandle"/> を通ってからでなければ <c>LockWaterSource</c> を呼ばない。
+    /// <c>LockWaterSource</c> **does not check** <c>source</c>'s range.
+    /// <c>Monitor.TryEnter</c> is at IL_000C and the array access at IL_0024, so
+    /// **passing an out-of-range handle raises an <c>IndexOutOfRangeException</c> right
+    /// after the monitor is taken and leaves without reaching `Monitor.Exit`** — a
+    /// permanent deadlock. Handle 0 is especially dangerous because it becomes
+    /// <c>m_buffer[-1]</c>.
+    /// Never call <c>LockWaterSource</c> without going through
+    /// <see cref="IsValidHandle"/> first.
     ///
-    /// ── 走査はロックの外（§8.3）──────────────────────────────
+    /// ── The sweep happens outside the lock (§8.3) ─────────────────────────
     ///
-    /// <c>m_waterSources</c> は public な <c>FastList</c> なので直接読む。
-    /// ロックを取るのは**書き換える 1 個ずつ**にする。全件をロックの中で回すと、
-    /// 水スレッドが 1 ステップぶん止まる。
+    /// <c>m_waterSources</c> is a public <c>FastList</c>, so we read it directly.
+    /// We take the lock only for **the one entry we are writing**. Loop over all of them
+    /// inside the lock and the water thread stalls for a whole step.
     ///
-    /// <c>m_buffer</c> を先に、<c>m_size</c> を後に読み、**短いほうで打ち切る** ——
-    /// 逆順だと <c>FastList.Add</c> の再確保に挟まれて「新しい長さ ＋ 古い配列」を
-    /// 掴み、範囲外になる。
+    /// Read <c>m_buffer</c> first and <c>m_size</c> second, and **stop at the shorter of
+    /// the two** — in the other order we could be caught between
+    /// <c>FastList.Add</c>'s reallocation and grab "the new length with the old array",
+    /// which goes out of range.
     ///
-    /// ── 復元は 3 箇所から呼ぶ（罠 4）────────────────────────────
+    /// ── Restoration is called from three places (trap 4) ──────────────────
     ///
-    /// 水源は <c>WaterSimulation.Data.Serialize</c> で**セーブに焼き付く**（§D-4）。
-    /// <see cref="RestoreAll"/> は**冪等**で、次の 3 箇所から呼ばれる:
+    /// Water sources **burn into the save** through
+    /// <c>WaterSimulation.Data.Serialize</c> (§D-4). <see cref="RestoreAll"/> is
+    /// **idempotent** and is called from these three places:
     ///
-    /// | 呼び元 | なぜ要るか |
+    /// | Caller | Why it is needed |
     /// |---|---|
-    /// | <c>TyphoonController.Forget</c> | 台風が終わった／スロットを失った（通常の経路） |
-    /// | <c>TyphoonFeature.OnLevelUnloading</c> | 都市を出るとき。忘れると次の都市で前の都市のハンドルを復元しようとする |
-    /// | <c>DisasterPlusSerialization.OnSaveData</c> | 下記。無いと川が溢れたままセーブに焼き付く |
+    /// | <c>TyphoonController.Forget</c> | The typhoon ended or the slot was lost (the normal route) |
+    /// | <c>TyphoonFeature.OnLevelUnloading</c> | When leaving the city. Forget it and the next city tries to restore the previous city's handles |
+    /// | <c>DisasterPlusSerialization.OnSaveData</c> | See below. Without it, the burst rivers burn into the save |
     ///
-    /// ── 保存時は「戻して、遅らせて、戻し直す」（§8.5）───────────────────
+    /// ── On saving it is "put back, delay, put back again" (§8.5) ──────────
     ///
-    /// 台風の最中にプレイヤーがセーブすると、そのセーブには持ち上げた
-    /// <c>m_target</c> が入る。MOD を外してそのセーブを開けば**川は永久に溢れたまま**になる。
+    /// If the player saves in the middle of a typhoon, that save contains the raised
+    /// <c>m_target</c>. Remove the mod and open that save and **the rivers stay burst for
+    /// ever**.
     ///
-    /// 本プロジェクトは**これと同じ形の失敗を一度出荷している**（一時フラグがセーブに
-    /// 漏れた件）。そのとき確定した事実は:
+    /// This project **has shipped a failure of exactly this shape once already** (a
+    /// temporary flag leaking into the save). What was established then was:
     ///
-    /// > **MOD の <c>OnSaveData</c> はバニラの配列書き込みより先に走る。** したがって
-    /// > 「<c>OnSaveData</c> の中で clear → <c>finally</c> で再適用」では**漏れる**。
-    /// > 再適用は <c>SimulationManager.AddAction</c> で**遅延させる**必要がある。
+    /// > **A mod's <c>OnSaveData</c> runs before vanilla writes its arrays.** So
+    /// > "clear inside <c>OnSaveData</c> and re-apply in the <c>finally</c>" **leaks**.
+    /// > The re-apply must be **delayed** with <c>SimulationManager.AddAction</c>.
     ///
-    /// <see cref="SnapshotAndRestoreForSave"/> が「今持ち上げているぶんを元に戻し、
-    /// その内容を返す」、<see cref="ReapplyAfterSave"/> が「台風がまだ Active なら
-    /// 持ち上げ直す」。後者は <c>AddAction</c> の契約により **sim スレッドで走る**。
-    /// <c>SimulationManager.AddAction(System.Action)</c> は **public instance、
-    /// 戻り値 <c>AsyncAction</c>**（本タスクで IL 実測）。
+    /// <see cref="SnapshotAndRestoreForSave"/> does "put back what is currently raised and
+    /// return its contents", and <see cref="ReapplyAfterSave"/> does "raise it again if the
+    /// typhoon is still Active". The latter **runs on the sim thread** by
+    /// <c>AddAction</c>'s contract.
+    /// <c>SimulationManager.AddAction(System.Action)</c> is **a public instance method
+    /// returning <c>AsyncAction</c>** (measured from the IL in this task).
     ///
-    /// ── 起きなかったときに理由を出す（設計書 §7.4）──────────────────
+    /// ── Give the reason when nothing happened (design doc §7.4) ───────────
     ///
-    /// **対象マップに <c>TYPE_NATURAL</c> の水源が 1 個も無ければ、正常に何も起きない。**
-    /// <see cref="TyphoonFloodState.NoSources"/> を立てて理由を表示する。
-    /// **警告としてログに出さない** —— 不具合ではない。
-    /// <see cref="NaturalSourceCount"/> はマップ依存で未知なので診断に必ず出す。
+    /// **If the map in question has not one <c>TYPE_NATURAL</c> water source, nothing
+    /// happening is correct.** We raise <see cref="TyphoonFloodState.NoSources"/> and
+    /// display the reason.
+    /// **Do not log it as a warning** — it is not a fault.
+    /// <see cref="NaturalSourceCount"/> is map-dependent and unknown, so it always goes in
+    /// the diagnostics.
     /// </summary>
     public static class TyphoonFlood
     {
-        /// <summary>走査の間隔（フレーム相当のゲーム内時間）。風害と同じ 256。</summary>
+        /// <summary>The sweep interval (in-game time equivalent to a frame count). 256, the
+        /// same as wind damage.</summary>
         private const int IntervalFrames = 256;
 
         /// <summary>
-        /// 1 回の走査で**新たに掴む**水源の上限。
+        /// The ceiling on how many water sources are **newly grabbed** in one sweep.
         ///
-        /// 1 個ごとに水シミュのモニタを取るので、無制限にすると 1 tick のあいだ
-        /// 水スレッドを断続的に止め続けることになる。上限に達したぶんは次の走査で拾う
-        /// （台帳に載っているぶんの更新はこの上限に数えない —— 数えると、
-        /// 台帳が上限より大きくなった瞬間に更新が回らなくなる）。
+        /// We take the water simulation's monitor for each one, so with no ceiling we would
+        /// keep stalling the water thread intermittently for a whole tick. Whatever is left
+        /// over is picked up on the next sweep (updating entries already in the ledger does
+        /// not count against this ceiling — count them and updates stop running the moment
+        /// the ledger grows past the ceiling).
         /// </summary>
         private const int MaxNewSourcesPerPass = 64;
 
-        /// <summary><c>WaterSource.TYPE_NATURAL</c>（§D-4）。</summary>
+        /// <summary><c>WaterSource.TYPE_NATURAL</c> (§D-4).</summary>
         private const ushort TypeNatural = 1;
 
         /// <summary>
-        /// ④が持ち上げている水源の台帳（ハンドル → 元の値と今の値）。
-        /// **sim スレッドからのみ触る。**
+        /// The ledger of water sources ④ is raising (handle → the original value and the
+        /// current one).
+        /// **Touched only from the sim thread.**
         /// </summary>
         private static readonly Dictionary<ushort, TyphoonFloodedSource> _raised =
             new Dictionary<ushort, TyphoonFloodedSource>();
 
         /// <summary>
-        /// この走査で範囲内だったハンドル（範囲外に出たものを外すのに使う）。
-        /// **毎 tick 作らない**ので使い回す。
+        /// The handles that were in range on this sweep (used to drop the ones that have
+        /// moved out of range).
+        /// **We do not build it every tick**, so it is reused.
         ///
-        /// ★ <c>List</c> ではなく <c>HashSet</c>（全体レビュー）。
-        ///   <see cref="DropOutOfRange"/> は台帳の全要素について「今回の範囲内か」を
-        ///   引くので、List だと <c>Contains</c> が線形走査になり
-        ///   **台帳 × 範囲内の掛け算**になる。台帳は大きな川のあるマップでは
-        ///   水源の数ぶんまで育ちうるので、256 フレームに 1 回とはいえ
-        ///   ここを O(n^2) のまま置かない。.NET 3.5 に HashSet&lt;T&gt; はある
-        ///   （System.Core）。
+        /// ★ A <c>HashSet</c>, not a <c>List</c> (whole-project review).
+        ///   <see cref="DropOutOfRange"/> asks "was this in range this time" for every
+        ///   element of the ledger, and with a List that <c>Contains</c> becomes a linear
+        ///   scan, making it **the ledger times the in-range set**. The ledger can grow to
+        ///   the number of water sources on a map with big rivers, so even at once per 256
+        ///   frames we do not leave this O(n^2). .NET 3.5 does have
+        ///   HashSet&lt;T&gt; (System.Core).
         /// </summary>
         private static readonly HashSet<ushort> _inRange = new HashSet<ushort>();
 
-        /// <summary>台帳から外すハンドルの作業用。毎回 <c>Clear()</c> して使い回す。</summary>
+        /// <summary>Scratch space for the handles to drop from the ledger.
+        /// <c>Clear()</c>ed and reused each time.</summary>
         private static readonly List<ushort> _toDrop = new List<ushort>();
 
         private static float _minutesSincePass;
@@ -223,39 +246,41 @@ namespace DisasterPlus.Game
         private static string _lastFailure;
         private static bool _errorLogged;
 
-        /// <summary>今の状態（設計書 §7.4 の 5 状態）。</summary>
+        /// <summary>The current state (the five states in design doc §7.4).</summary>
         public static TyphoonFloodState State { get { return _state; } }
 
         /// <summary>
-        /// マップ全体の <c>TYPE_NATURAL</c> 水源の数。
-        /// **マップ依存で未知**（§D-4 / 設計書 §6）なので診断に必ず出す。
-        /// 0 は不具合ではない。
+        /// The number of <c>TYPE_NATURAL</c> water sources across the whole map.
+        /// **Map-dependent and unknown** (§D-4 / design doc §6), so it always goes in the
+        /// diagnostics. 0 is not a fault.
         /// </summary>
         public static int NaturalSourceCount { get { return _naturalSourceCount; } }
 
-        /// <summary>今④が持ち上げている水源の数。</summary>
+        /// <summary>How many water sources ④ is currently raising.</summary>
         public static int TouchedCount { get { return _raised.Count; } }
 
-        /// <summary>直近の走査で中心に適用した上げ幅（m）。</summary>
+        /// <summary>The rise applied at the centre in the most recent sweep (m).</summary>
         public static float LastPeakRiseMetres { get { return _lastPeakRiseMetres; } }
 
         /// <summary>
-        /// 到達経路が使えなかった理由（英語、診断用。無ければ null）。
-        /// **「使えなかった」を「何も起きていない」と見分ける手段がここにしか無い。**
+        /// Why the route was unusable (English, for diagnostics; null if there is none).
+        /// **This is the only means of telling "it was unusable" from "nothing is
+        /// happening".**
         /// </summary>
         public static string LastFailure { get { return _lastFailure; } }
 
         /// <summary>
-        /// **レベルアンロードで必ず呼ぶ。** <see cref="RestoreAll"/> を済ませてから
-        /// セッション状態を捨てる。冪等である。
+        /// **Always call on level unload.** It finishes <see cref="RestoreAll"/> and then
+        /// throws the session state away. It is idempotent.
         /// </summary>
         public static void Reset()
         {
             RestoreAll();
 
-            // RestoreAll が（水シミュに到達できず）台帳を空にできなかった場合でも、
-            // 次の都市へハンドルを持ち越さない。前の都市のハンドルで復元しにいくと、
-            // **無関係な川の水位を書き換える。**
+            // Even if RestoreAll could not empty the ledger (because the water simulation
+            // was unreachable), do not carry the handles into the next city. Going to
+            // restore with the previous city's handles **rewrites the level of an unrelated
+            // river.**
             _raised.Clear();
 
             _minutesSincePass = 0f;
@@ -263,19 +288,20 @@ namespace DisasterPlus.Game
             _naturalSourceCount = 0;
             _lastPeakRiseMetres = 0f;
             _lastFailure = null;
-            // ★ _errorLogged は戻さない（ゲームのビルドに対する事実であって
-            //    都市ごとの状態ではない。TyphoonLightning / TyphoonWind と同じ判断）。
+            // ★ _errorLogged is not reset (it is a fact about the game build, not per-city
+            //    state. The same decision as TyphoonLightning / TyphoonWind).
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>TyphoonFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から呼ぶこと**（ポーズ中に川が溢れる）。
-        /// 設定が OFF のときは呼び出し側が呼ばない。
+        /// Sim thread. **Always call it from below the pause guard in
+        /// <c>TyphoonFeature.OnSimulationTick</c>** (otherwise rivers burst while the game
+        /// is paused).
+        /// When the setting is OFF the caller does not call it.
         ///
-        /// <paramref name="snapshot"/> からは**降雨量だけ**を読む
-        /// （<c>WeatherManager.m_currentRain</c>。1 tick 前の値だが、雨量は
-        /// 0.0002/step でしか動かないので差は無い）。位置と強度は
-        /// <c>TyphoonController</c> の static から同じスレッドで直接読む。
+        /// We read **only the rainfall** from <paramref name="snapshot"/>
+        /// (<c>WeatherManager.m_currentRain</c>; it is one tick old, but rainfall only moves
+        /// at 0.0002/step so there is no difference). The position and the intensity are
+        /// read directly from <c>TyphoonController</c>'s statics on the same thread.
         /// </summary>
         public static void Tick(TyphoonSnapshot snapshot, uint frame, float deltaMinutes)
         {
@@ -299,15 +325,17 @@ namespace DisasterPlus.Game
                              "typhoon river flooding failed: " + e.GetType().Name);
                 }
 
-                // ★ 失敗しても持ち上げたままにしない。ここを飛ばすと、
-                //    例外の出た走査で掴んだ水源が誰にも戻されずセーブに焼き付く。
+                // ★ Do not leave things raised after a failure. Skip this and the water
+                //    sources grabbed by the sweep that threw are never put back by anybody
+                //    and burn into the save.
                 RestoreAll();
             }
         }
 
         private static void Step(TyphoonSnapshot snapshot, float deltaMinutes)
         {
-            // ★ 間隔の累積は**対象の台風より先に**進める（風害と同じ。②の I3）。
+            // ★ Advance the interval accumulator **before looking at the typhoon** (the
+            //   same as wind damage; ②'s I3).
             float framesPerMinute = FeatureHost.FramesPerMinute;
             float interval = framesPerMinute > 0f ? IntervalFrames / framesPerMinute : 0f;
 
@@ -316,9 +344,9 @@ namespace DisasterPlus.Game
 
             if (!TyphoonController.Active)
             {
-                // 台風が終わっていれば必ず戻す。**ここが通常の復元経路ではない**
-                // （通常は TyphoonController.Forget → RestoreAll）が、
-                // 取りこぼしがあってもここで拾う。
+                // If the typhoon has ended, always put things back. **This is not the normal
+                // restore route** (normally it is TyphoonController.Forget → RestoreAll),
+                // but it catches anything that slipped through.
                 if (_raised.Count > 0) RestoreAll();
                 return;
             }
@@ -333,7 +361,8 @@ namespace DisasterPlus.Game
 
             if (strength == 0)
             {
-                // スライダーを 0 にした瞬間に川が引くこと。持ち上げたままにしない。
+                // The rivers must recede the moment the slider goes to 0. Do not leave them
+                // raised.
                 if (_raised.Count > 0) RestoreAll();
                 return;
             }
@@ -341,7 +370,7 @@ namespace DisasterPlus.Game
             Sweep(snapshot, strength);
         }
 
-        /// <summary>1 回ぶんの走査。</summary>
+        /// <summary>One sweep.</summary>
         private static void Sweep(TyphoonSnapshot snapshot, int strength)
         {
             var sim = WaterSim();
@@ -360,7 +389,7 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ m_buffer を先に、m_size を後に読み、短いほうで打ち切る（クラス doc）。
+            // ★ Read m_buffer first and m_size second, and stop at the shorter (class doc).
             var buffer = sources.m_buffer;
             if (buffer == null)
             {
@@ -388,7 +417,7 @@ namespace DisasterPlus.Game
                 if (buffer[i].m_type != TypeNatural) continue;
                 natural++;
 
-                // ★ ハンドルは 1 基点（クラス doc の IL 実測）。
+                // ★ Handles are 1-based (measured from the IL in the class doc).
                 ushort handle = (ushort)(i + 1);
 
                 float dx = buffer[i].m_outputPosition.x - centre.X;
@@ -406,16 +435,18 @@ namespace DisasterPlus.Game
                 if (!WriteTarget(sim, handle, size, known, entry.Original, rise,
                                  out original, out actual))
                 {
-                    // 型が変わっていた（解放・再利用された）。台帳から外す。
+                    // The type had changed (it was released and reused). Drop it from the
+                    // ledger.
                     if (known) _raised.Remove(handle);
                     continue;
                 }
 
                 if (!known) newlyTaken++;
 
-                // ★ Original は**最初に掴んだ値のまま**持ち続ける
-                //   （WriteTarget が known のときは引数をそのまま返す）。
-                //   持ち上げた値を「元の値」にすると、復元しても水位が戻らない。
+                // ★ Original keeps **the value we first grabbed** (WriteTarget returns the
+                //   argument unchanged when known is true).
+                //   Make the raised value "the original" and restoring will not bring the
+                //   water level back.
                 _raised[handle] = new TyphoonFloodedSource(handle, original, actual);
                 _inRange.Add(handle);
                 applied++;
@@ -435,8 +466,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 台帳にあるが今回の範囲に入らなかった水源を元に戻して台帳から外す。
-        /// 台風が遠ざかれば川が引く、という当たり前の挙動がここにある。
+        /// Put back and drop from the ledger the water sources that are in it but did not
+        /// fall in range this time.
+        /// The obvious behaviour that the rivers recede once the typhoon moves away lives
+        /// here.
         /// </summary>
         private static void DropOutOfRange(WaterSimulation sim, int size)
         {
@@ -445,7 +478,7 @@ namespace DisasterPlus.Game
             _toDrop.Clear();
             foreach (var entry in _raised)
             {
-                // HashSet なので 1 件あたり定数時間（_inRange の doc）。
+                // It is a HashSet, so this is constant time per entry (_inRange's doc).
                 if (!_inRange.Contains(entry.Key)) _toDrop.Add(entry.Key);
             }
 
@@ -459,19 +492,24 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 水源 1 個の <c>m_target</c> を書く。**ロックはここでしか取らない。**
+        /// Write one water source's <c>m_target</c>. **This is the only place that takes
+        /// the lock.**
         ///
-        /// <c>try</c> の中には**例外を投げうる処理を置かない**（ログも診断も外）。
-        /// <c>finally</c> の <c>UnlockWaterSource</c> が唯一の解放経路である（クラス doc）。
+        /// **Put nothing that can throw inside the <c>try</c>** (logging and diagnostics go
+        /// outside). The <c>UnlockWaterSource</c> in the <c>finally</c> is the only release
+        /// path (class doc).
         /// </summary>
-        /// <param name="known">台帳に載っているか。false なら元の値をここで読む。</param>
-        /// <param name="knownOriginal">台帳に載っている「④が触る前の値」。</param>
+        /// <param name="known">Whether it is in the ledger. If false we read the original
+        /// value here.</param>
+        /// <param name="knownOriginal">The "value from before ④ touched it" held in the
+        /// ledger.</param>
         /// <param name="original">
-        /// 「④が触る前の値」。<paramref name="known"/> が true なら
-        /// <paramref name="knownOriginal"/> がそのまま返る。**持ち上げた値は返らない。**
+        /// The "value from before ④ touched it". If <paramref name="known"/> is true,
+        /// <paramref name="knownOriginal"/> comes straight back. **The raised value is never
+        /// returned.**
         /// </param>
-        /// <param name="actual">実際に書いた値。</param>
-        /// <returns>書けたか（<c>TYPE_NATURAL</c> でなければ false）。</returns>
+        /// <param name="actual">The value actually written.</param>
+        /// <returns>Whether we could write (false if it is not <c>TYPE_NATURAL</c>).</returns>
         private static bool WriteTarget(WaterSimulation sim, ushort handle, int size,
                                         bool known, ushort knownOriginal, float rise,
                                         out ushort original, out ushort actual)
@@ -479,18 +517,18 @@ namespace DisasterPlus.Game
             original = knownOriginal;
             actual = 0;
 
-            // ★ ハンドルを先に検証する。LockWaterSource は範囲を検査せず、
-            //   モニタを取った**後**に m_buffer[handle - 1] を読むので、
-            //   範囲外だと Monitor.Exit に到達しないまま抜ける＝恒久デッドロック。
+            // ★ Validate the handle first. LockWaterSource does not check the range and
+            //   reads m_buffer[handle - 1] **after** taking the monitor, so an out-of-range
+            //   handle leaves without reaching Monitor.Exit = a permanent deadlock.
             if (!IsValidHandle(handle, size)) return false;
 
             ushort seen = knownOriginal;
             bool ok = false;
 
-            // ★ LockWaterSource は Monitor を取ったまま返る（§D-4、IL_0005-002E に
-            //   Monitor.Exit が無い）。UnlockWaterSource が唯一の解放経路。
-            //   **必ず try/finally で対にする。** 落とすと水シミュ専用スレッドが
-            //   スピンロックで固まり、ゲームが無反応になる。
+            // ★ LockWaterSource returns while still holding the Monitor (§D-4; there is no
+            //   Monitor.Exit in IL_0005-002E). UnlockWaterSource is the only release path.
+            //   **Always pair them with try/finally.** Drop it and the dedicated water
+            //   simulation thread seizes up in its spin lock and the game stops responding.
             WaterSource src = sim.LockWaterSource(handle);
             try
             {
@@ -503,7 +541,7 @@ namespace DisasterPlus.Game
             }
             finally
             {
-                // ★ return しても例外が出ても、必ずここを通る。
+                // ★ Whether we return or throw, we always come through here.
                 sim.UnlockWaterSource(handle, src);
             }
 
@@ -515,9 +553,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 水源 1 個を元の値へ戻す。<see cref="WriteTarget"/> と同じロックの形。
-        /// **戻せなくても例外を外へ出さない** —— 復元は 3 箇所から呼ばれるので、
-        /// 1 個の失敗で残りの復元を止めてはいけない。
+        /// Put one water source back to its original value. The same lock shape as
+        /// <see cref="WriteTarget"/>.
+        /// **Do not let an exception escape even if it cannot be restored** — restoration is
+        /// called from three places, and one failure must not stop the rest of it.
         /// </summary>
         private static void RestoreOne(WaterSimulation sim, ushort handle, int size,
                                        ushort original)
@@ -529,8 +568,9 @@ namespace DisasterPlus.Game
                 WaterSource src = sim.LockWaterSource(handle);
                 try
                 {
-                    // 型が変わっていたら（解放・再利用）触らない。
-                    // **他人のものになった水源に④の値を書かない。**
+                    // If the type has changed (released and reused) leave it alone.
+                    // **Do not write ④'s value into a water source that belongs to somebody
+                    // else.**
                     if (src.m_type == TypeNatural) src.m_target = original;
                 }
                 finally
@@ -540,15 +580,17 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // ログはロックの外（ここは finally の外側）。
+                // The logging is outside the lock (this is outside the finally).
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyFloodRestore",
                          "could not restore water source #" + handle + ": " + e.GetType().Name);
             }
         }
 
         /// <summary>
-        /// ハンドルが <c>m_buffer[handle - 1]</c> として有効か。**1 基点**なので 0 は無効。
-        /// <c>LockWaterSource</c> を呼ぶ前に必ず通す（クラス doc の危険）。
+        /// Whether the handle is valid as <c>m_buffer[handle - 1]</c>. It is **1-based**, so
+        /// 0 is invalid.
+        /// Always go through this before calling <c>LockWaterSource</c> (the danger in the
+        /// class doc).
         /// </summary>
         private static bool IsValidHandle(ushort handle, int size)
         {
@@ -556,9 +598,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **持ち上げたぶんを全部元に戻す。冪等**（2 回呼ばれても、既に空なら何もしない）。
+        /// **Put every raise back. Idempotent** (called twice, it does nothing if it is
+        /// already empty).
         ///
-        /// 3 箇所から呼ばれる（クラス doc の表）ので、重なるのが普通である。
+        /// It is called from three places (the table in the class doc), so overlapping is
+        /// normal.
         /// </summary>
         public static void RestoreAll()
         {
@@ -571,12 +615,14 @@ namespace DisasterPlus.Game
             var sim = WaterSim();
             if (sim == null)
             {
-                // 水シミュに到達できない（都市が既に落ちている等）。
-                // **台帳は捨てる** —— 残しても次の都市で無関係な川を書き換えるだけ。
+                // The water simulation is unreachable (the city has already gone, etc.).
+                // **Throw the ledger away** — keeping it only means rewriting an unrelated
+                // river in the next city.
                 //
-                // ★ 状態を先に、ログを後に。逆にすると、ログ側が投げたときに
-                //   台帳が残る ——「前の都市のハンドルを次の都市で復元しに行く」という、
-                //   この機能でいちばん避けたい状態そのものになる。
+                // ★ State first, logging second. The other way round, if the logging throws
+                //   the ledger survives — which is exactly the state this feature most wants
+                //   to avoid, "going to restore the previous city's handles in the next
+                //   city".
                 int lost = _raised.Count;
                 _raised.Clear();
                 _state = TyphoonFloodState.Restored;
@@ -599,20 +645,21 @@ namespace DisasterPlus.Game
             _raised.Clear();
             _state = TyphoonFloodState.Restored;
 
-            // ログはロックを 1 本も握っていない場所で。
+            // The logging goes somewhere we hold not one lock.
             Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyFloodRestore",
                      "restored " + restored + " water source target(s) to their original level");
         }
 
         /// <summary>
-        /// **保存の直前に呼ぶ**（<c>DisasterPlusSerialization.OnSaveData</c> の先頭）。
-        /// 今持ち上げているぶんを元に戻し、その内容を返す。
-        /// 持ち上げていなければ <c>null</c>。
+        /// **Call immediately before saving** (at the top of
+        /// <c>DisasterPlusSerialization.OnSaveData</c>).
+        /// It puts back what is currently raised and returns its contents.
+        /// <c>null</c> if nothing is raised.
         ///
-        /// 呼び出し側は返り値を <c>SimulationManager.AddAction</c> 越しに
-        /// <see cref="ReapplyAfterSave"/> へ渡すこと。**ここで（あるいは
-        /// <c>finally</c> で）すぐ戻し直すと、バニラが配列を書く前に持ち上げ直す
-        /// ことになり漏れが再発する**（クラス doc §8.5）。
+        /// The caller must pass the return value to <see cref="ReapplyAfterSave"/> through
+        /// <c>SimulationManager.AddAction</c>. **Put it back immediately here (or in a
+        /// <c>finally</c>) and we would be raising it again before vanilla writes its
+        /// arrays, and the leak comes back** (class doc §8.5).
         /// </summary>
         public static List<TyphoonFloodedSource> SnapshotAndRestoreForSave()
         {
@@ -629,13 +676,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **保存が終わったあとに sim スレッドで呼ぶ**
-        /// （<c>SimulationManager.AddAction</c> の契約）。台風がまだ動いていれば
-        /// 持ち上げ直す。終わっていれば何もしない。
+        /// **Call on the sim thread after the save has finished**
+        /// (<c>SimulationManager.AddAction</c>'s contract). If the typhoon is still running,
+        /// raise them again. If it has ended, do nothing.
         ///
-        /// 呼ばれるまでの間に走査が同じ水源を掴み直していることがある。その場合は
-        /// **台帳側を正とする** —— あちらは今の台風の位置で計算した値で、
-        /// こちらは保存時点の古い値だからである。
+        /// In the meantime a sweep may have grabbed the same water source again. In that
+        /// case **the ledger wins** — that side has a value computed from the typhoon's
+        /// current position, while this side holds a stale value from the moment of the
+        /// save.
         /// </summary>
         public static void ReapplyAfterSave(List<TyphoonFloodedSource> raised)
         {
@@ -654,7 +702,7 @@ namespace DisasterPlus.Game
                 for (int i = 0; i < raised.Count; i++)
                 {
                     var s = raised[i];
-                    if (_raised.ContainsKey(s.Handle)) continue;   // 台帳が既に掴み直した
+                    if (_raised.ContainsKey(s.Handle)) continue;   // the ledger has already regrabbed it
 
                     if (WriteRaw(sim, s.Handle, s.Raised, size))
                     {
@@ -672,20 +720,22 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 戻し直せなくても**川は元の高さのまま**なので害は無い。
+                // Even if they cannot be raised again, **the rivers stay at their original
+                // level**, so there is no harm.
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Typhoon, "TyFloodReapply",
                          "could not re-raise water sources after the save: " + e.GetType().Name);
             }
         }
 
         /// <summary>
-        /// <c>m_target</c> に値をそのまま書く（再適用専用）。
-        /// <see cref="WriteTarget"/> と同じロックの形。
+        /// Write a value straight into <c>m_target</c> (for re-application only).
+        /// The same lock shape as <see cref="WriteTarget"/>.
         ///
-        /// ハンドルの検証は呼び出し側でも済ませているが、**ここでも通す** ——
-        /// 範囲外のハンドルで <c>LockWaterSource</c> を呼ぶと Monitor を取った直後に
-        /// 例外が出て <c>Monitor.Exit</c> に到達せず、恒久デッドロックになる
-        /// （クラス doc）。この 1 行を二重に置く価値がある種類の失敗である。
+        /// The caller has already validated the handle, but **we validate here too** —
+        /// calling <c>LockWaterSource</c> with an out-of-range handle throws right after the
+        /// Monitor is taken, never reaches <c>Monitor.Exit</c> and becomes a permanent
+        /// deadlock (class doc). This is the kind of failure where that one line is worth
+        /// having twice.
         /// </summary>
         private static bool WriteRaw(WaterSimulation sim, ushort handle, ushort target,
                                      int size)
@@ -712,13 +762,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>WaterSimulation</c> への到達経路。**本タスクで IL 実測した**:
-        /// <c>TerrainManager.WaterSimulation</c> は **public なインスタンスプロパティ**
-        /// （裏は private フィールド <c>m_waterSimulation</c>）。
+        /// The route to <c>WaterSimulation</c>. **Measured from the IL in this task**:
+        /// <c>TerrainManager.WaterSimulation</c> is **a public instance property**
+        /// (backed by the private field <c>m_waterSimulation</c>).
         ///
-        /// <c>Singleton&lt;T&gt;.instance</c> は <c>sInstance</c> が null のとき
-        /// <c>FindObjectOfType</c> と <c>new GameObject</c> を走らせる main スレッド専用
-        /// API なので、<c>exists</c> で先に確認する。
+        /// <c>Singleton&lt;T&gt;.instance</c> runs <c>FindObjectOfType</c> and
+        /// <c>new GameObject</c> when <c>sInstance</c> is null, which makes it a main thread
+        /// only API, so we check <c>exists</c> first.
         /// </summary>
         private static WaterSimulation WaterSim()
         {
@@ -729,8 +779,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 有効なハンドルの上限。<see cref="Sweep"/> と同じ順序で読む
-        /// （<c>m_buffer</c> が先、<c>m_size</c> が後、短いほうを採る）。
+        /// The ceiling on valid handles. Read in the same order as <see cref="Sweep"/>
+        /// (<c>m_buffer</c> first, <c>m_size</c> second, taking the shorter).
         /// </summary>
         private static int SizeOf(WaterSimulation sim)
         {
@@ -745,12 +795,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **持ち上げた数が 0 のときも毎回出す。** 「水源が無い」「範囲に入っていない」
-        /// 「設定で切っている」「到達経路が壊れている」が画面上どれも同じ顔（川が
-        /// 増水しない）になるので、切り分けはここでしかできない。
+        /// **Written every time, even when 0 were raised.** "There are no water sources",
+        /// "nothing fell in range", "it is switched off in the settings" and "the route is
+        /// broken" all look identical on screen (the rivers do not rise), so this is the
+        /// only place they can be told apart.
         ///
-        /// <c>Log.Diag</c> は同一キーで間引かれるが**引数の文字列連結は毎回走る**ので
-        /// <c>DiagEnabled</c> で先に落とす。
+        /// <c>Log.Diag</c> thins the same key out, but **the string concatenation in the
+        /// arguments still runs every time**, so we bail out first with
+        /// <c>DiagEnabled</c>.
         /// </summary>
         private static void WriteDiag(int natural, int applied, float peak, float gale)
         {

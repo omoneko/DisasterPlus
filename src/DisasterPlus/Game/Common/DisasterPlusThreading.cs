@@ -5,34 +5,35 @@ namespace DisasterPlus.Game
     public class DisasterPlusThreading : ThreadingExtensionBase
     {
         /// <summary>
-        /// sim スレッド。建物・車両・災害バッファの生成と変更はここからのみ行う。
-        /// main スレッド（OnUpdate）からこれらを触ると、スタックトレースの無い
-        /// IndexOutOfRangeException が後から出て、自分の try/catch にも掛からない。
+        /// Sim thread. Creating and modifying the building, vehicle and disaster buffers
+        /// happens only from here. Touch those from the main thread (OnUpdate) and an
+        /// IndexOutOfRangeException with no stack trace turns up later, which your own
+        /// try/catch will not catch either.
         /// </summary>
 
         /// <summary>
-        /// **MOD が外されたときに呼ばれる。**
+        /// **Called when the mod is removed.**
         ///
-        /// ★★ ここを実装していないと、<b>津波の最中に MOD を無効化された都市に
-        ///   水源が残る</b>（2026-08-31、相互検証）。拡張が外されると
-        ///   <c>OnAfterSimulationTick</c> も <c>OnSaveData</c> も
-        ///   <c>OnLevelUnloading</c> も二度と来ないので、
-        ///   自力で終わる道が無くなる —— 次のオートセーブで焼き付き、
-        ///   MOD を消しても消えない湧き水になる。
+        /// ★★ Leave this unimplemented and <b>a city where the mod was disabled mid-tsunami
+        ///   is left with a water source</b> (2026-08-31, cross-review). Once the extension
+        ///   is released, neither <c>OnAfterSimulationTick</c>, nor <c>OnSaveData</c>, nor
+        ///   <c>OnLevelUnloading</c> ever comes again, so there is no way for it to end on
+        ///   its own — it is burnt in at the next autosave, a spring that will not go away
+        ///   even if the mod is deleted.
         ///
-        /// ★ 無関係な MOD の切り替えでもここは呼ばれる。そのときの損は
-        ///   「走っていた波が早く終わる」だけなので、迷わず解放してよい。
+        /// ★ This is also called when an unrelated mod is toggled. The only loss in that case
+        ///   is "a wave that was running ends early", so release without hesitation.
         /// </summary>
         public override void OnReleased()
         {
-            // ★★ **予約も消す。**（2026-08-31、第 2 回検証）これを忘れると、
-            //    まだ走っていた sim tick が予約済みの津波を立ててしまい、
-            //    そのあと解放する手立てが無くなる。
+            // ★★ **Clear the reservation too.** (2026-08-31, second review round) Forget this
+            //    and a sim tick that was still running would raise the reserved tsunami, after
+            //    which there is no means left to release it.
             try { TsunamiChain.Reset(); }
             catch (System.Exception e) { Log.Error("TsunamiChain.Reset on release", e); }
 
-            // ★ 片道の錠は置かない（TsunamiRing の ★★: OnReleased は
-            //   メインメニューへ戻るたびにも来る）。予約を消したうえで解放する。
+            // ★ Do not put a one-way latch here (see TsunamiRing's ★★: OnReleased also comes
+            //   every time you go back to the main menu). Clear the reservation, then release.
             try { TsunamiRing.Reset(); }
             catch (System.Exception e) { Log.Error("TsunamiRing.Reset on release", e); }
 
@@ -44,7 +45,7 @@ namespace DisasterPlus.Game
             FeatureHost.SimulationTick();
         }
 
-        /// <summary>main スレッド。Unity オブジェクト・描画・UI 専用。</summary>
+        /// <summary>Main thread. Unity objects, rendering and UI only.</summary>
         public override void OnUpdate(float realTimeDelta, float simulationTimeDelta)
         {
             FeatureHost.MainThreadUpdate();

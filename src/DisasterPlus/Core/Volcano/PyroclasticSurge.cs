@@ -4,144 +4,169 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 「火砕流」に見せる<b>土煙の扇</b>の幾何。**エンジン非依存の純関数だけ。**
+    /// The geometry of the <b>fan of dust</b> that stands in for a "pyroclastic flow".
+    /// **Pure, engine-free functions only.**
     ///
-    /// ── ★★ これは火砕流ではない。名乗り方を間違えないこと ─────────────
+    /// ── ★★ This is not a pyroclastic flow. Do not misdescribe it ─────────────
     ///
-    /// バニラに火砕流は無い。出荷アセットの <c>EffectInfo</c> を全数（277 個）調べても、
-    /// 「地面を這って高速で流れ下る濃密な雲」に当たるものは基本ゲームにも DLC にも
-    /// 存在しない。⑤が出すのは <b>建物が崩れるときの粉塵</b>
-    /// （<c>Collapse Particles</c>）を斜面のベジェ帯へ湧かせ、引数の <c>velocity</c> で
-    /// 下り方向へ押したものである。見た目は「斜面を駆け下りる灰色の土煙」であって、
-    /// 火砕流の再現ではない。**この型は建物にも木にも地面にも触らない**
-    /// （燃やすのは溶岩の仕事である）。パネルと設計書は<b>そう書く</b>。
+    /// Vanilla has no pyroclastic flow. We checked every single <c>EffectInfo</c> in the
+    /// shipped assets (277 of them) and nothing corresponding to "a dense cloud hugging the
+    /// ground and racing downhill" exists in either the base game or the DLC. What ⑤
+    /// produces is <b>the dust raised when a building collapses</b>
+    /// (<c>Collapse Particles</c>), spawned into a Bézier band down the slope and pushed
+    /// downhill by the <c>velocity</c> argument. It looks like "grey dust running down a
+    /// slope"; it is not a reproduction of a pyroclastic flow. **This type touches neither
+    /// buildings, nor trees, nor the ground** (setting things alight is the lava's job). The
+    /// panel and the design document <b>say so</b>.
     ///
-    /// ── ★★ 扇である。溶岩の上のリボンではない（2026-08-22、実機の指摘⑤）───────
+    /// ── ★★ It is a fan, not a ribbon on top of the lava (2026-08-22, on-hardware
+    ///    observation ⑤) ───────
     ///
-    /// > 火砕流については溶岩流の上だけを今は流れ落ちていますが、実際はもっと裾野に
-    /// > 広がっていくはずです。
+    /// > As for the pyroclastic flow, at the moment it only runs down on top of the lava
+    /// > flows, but in reality it ought to spread much further across the foot of the
+    /// > mountain.
     ///
-    /// 以前はスナップショットの<b>溶岩の軌跡そのもの</b>を経路にしていた。溶岩と同じ
-    /// 谷を下るのは正しいが、**火砕流は溶岩の幅では流れない** ——
-    /// 火砕流（正しくは火砕サージ／密度流）は重い雲であって流体の筋ではないので、
-    /// 下るにつれて<b>横へ広がり、裾野いっぱいに扇を作る</b>。地形に完全には従わず、
-    /// **源に近いところでは尾根を越えて乗り越えていく**。
+    /// The path used to be <b>the lava's own track</b> from the snapshot. Running down the
+    /// same valleys as the lava is correct, but **a pyroclastic flow does not run at the
+    /// lava's width** — a pyroclastic flow (properly a pyroclastic surge, a density current)
+    /// is a heavy cloud, not a thread of fluid, so as it descends it <b>spreads sideways and
+    /// makes a fan across the whole foot</b>. It does not follow the terrain entirely, and
+    /// **near the source it rides straight over ridges**.
     ///
-    /// いまはこの型が扇そのものを組む:
+    /// Now this type builds the fan itself:
     ///
     /// <code>
-    /// 舌(lobe) を <see cref="LobeCount"/> 本、火口のまわりに等間隔＋ゆらぎで配る
-    /// 各舌は火口から <see cref="ReachMetres"/> まで放射状に下る
-    /// 舌の幅は下るほど広がる（<see cref="HalfWidthMetres"/>。裾で最大 300 m ＝ 直径 600 m）
-    /// 谷（＝溶岩が下った向き）へは**裾へ行くほど**引かれる（<see cref="ChannelPullAt"/>）
-    ///   → 源の近くでは尾根を越え、裾では谷筋に集まる。これが「部分的に地形に従う」
+    /// Lay out <see cref="LobeCount"/> lobes around the crater, evenly spaced plus jitter
+    /// Each lobe runs radially from the crater out to <see cref="ReachMetres"/>
+    /// A lobe widens as it descends (<see cref="HalfWidthMetres"/>; up to 300 m at the foot = 600 m across)
+    /// It is pulled towards the valleys (the directions the lava ran) **more and more towards the foot** (<see cref="ChannelPullAt"/>)
+    ///   → near the source it rides over ridges, and at the foot it gathers into the valleys. That is "partly following the terrain"
     /// </code>
     ///
-    /// 溶岩の軌跡は<b>「谷がどこにあるか」を知る唯一の手がかり</b>としてだけ使う
-    /// （方位を 1 本ずつ取り出す）。経路そのものには使わない。
+    /// The lava's track is used solely as <b>the one clue to where the valleys are</b> (we
+    /// extract one bearing per flow). It is not used as the path itself.
     ///
-    /// ── 密度は面積で正規化する（**ここを外すと粒子が溢れる**）───────────────
+    /// ── The density is normalised by area (**get this wrong and the particles flood**) ────
     ///
-    /// ベジェ帯の粒子数は <c>2 × halfWidth × 経路長 × pps</c> である（IL 実測 §B-5）。
-    /// 半幅を 90 m から <see cref="HalfWidthMaxMetres"/> へ広げ、
-    /// 本数を 2 から <see cref="LobeCount"/> へ増やすと、
-    /// 素朴には**十数倍**の粒子を撃つことになる。<see cref="Magnitude"/> は帯の面積で
-    /// 割るので、<b>扇ぜんぶで従来の 2 本ぶんと同じ量</b>に収まる
-    /// （<see cref="EruptionColumn"/> の噴煙柱と同じ考え方）。
+    /// A Bézier band's particle count is <c>2 × halfWidth × path length × pps</c> (measured
+    /// from the IL, §B-5). Widen the half-width from 90 m to
+    /// <see cref="HalfWidthMaxMetres"/> and raise the count from 2 to
+    /// <see cref="LobeCount"/>, and naively you would be firing **more than ten times** as
+    /// many particles. <see cref="Magnitude"/> divides by the band's area, so
+    /// <b>the whole fan stays within the same budget as the old two bands</b>
+    /// (the same thinking as <see cref="EruptionColumn"/>'s plume column).
     ///
-    /// ── サージ（突進）の作り方 ───────────────────────────────
+    /// ── How the surge is made ───────────────────────────────
     ///
-    /// 帯の頭が火口から舌の端まで一定の速さで走り、抜け切ったら火口へ戻ってやり直す。
-    /// 1 周の長さは <c>(経路長 + 帯の長さ) / 速さ</c> 秒。帯が経路からはみ出したぶんは
-    /// <see cref="Magnitude"/> が薄くするので、端で唐突に消えない。
-    /// **舌ごとに位相をずらす**（<see cref="LobePhaseSeconds"/>）ので、舌が
-    /// 隊列を組んで同時に走ることはない。
+    /// The band's head runs at a constant speed from the crater to the end of the lobe, and
+    /// once it has passed all the way through it returns to the crater and starts again.
+    /// One cycle lasts <c>(path length + band length) / speed</c> seconds. Whatever part of
+    /// the band overhangs the path is thinned out by <see cref="Magnitude"/>, so it does not
+    /// vanish abruptly at the end.
+    /// **Each lobe's phase is offset** (<see cref="LobePhaseSeconds"/>), so the lobes never
+    /// run in formation together.
     ///
-    /// 時計は呼び出し側が積む。**フレーム番号を混ぜないこと**（この型は時計を持たない）。
+    /// The caller keeps the clock. **Do not mix in the frame number** (this type holds no
+    /// clock).
     /// </summary>
     public static class PyroclasticSurge
     {
-        /// <summary>扇を成す舌の本数。**費用の上限そのもの**（1 本 ＝ <c>RenderEffect</c> 1 回）。</summary>
+        /// <summary>The number of lobes making up the fan. **This is the cost cap itself**
+        /// (one lobe = one <c>RenderEffect</c> call).</summary>
         public const int LobeCount = 6;
 
-        /// <summary>帯の長さ（m）。頭から尾まで。</summary>
+        /// <summary>The band's length (m), from head to tail.</summary>
         public const float BandLengthMetres = 260f;
 
-        /// <summary>帯の頭が進む速さ（m/秒）。**⑤が決めた演出値。**</summary>
+        /// <summary>The speed the band's head travels at (m/s). **A presentation value ⑤
+        /// chose.**</summary>
         public const float HeadSpeedMetresPerSecond = 95f;
 
         /// <summary>
-        /// 粒子そのものを下り方向へ押す速さ（m/秒）。
-        /// <b><see cref="HeadSpeedMetresPerSecond"/> とは別物である。</b>
-        /// あちらは帯（湧かす場所）が経路を下る速さ、こちらは湧いた 1 粒が飛ぶ速さで、
-        /// 同じ値にすると粒子が帯の外へ置き去りになって尾を引く。
+        /// The speed the particles themselves are pushed downhill at (m/s).
+        /// <b>A different thing from <see cref="HeadSpeedMetresPerSecond"/>.</b>
+        /// That is the speed at which the band (the spawn region) travels down the path;
+        /// this is the speed at which one spawned particle flies. Make them the same and the
+        /// particles get left behind outside the band and trail off.
         /// </summary>
         public const float PushMetresPerSecond = 30f;
 
-        /// <summary>舌が届く距離（山の半径に対する比）の下限（＝噴出が弱いとき）。</summary>
+        /// <summary>The floor on a lobe's reach (as a ratio of the mountain's radius), i.e.
+        /// when the eruption is weak.</summary>
         public const float ReachBaseFraction = 0.55f;
 
-        /// <summary>強さで足される到達距離（同上）。1 なら裾まで届く。</summary>
+        /// <summary>The reach added by the strength (same units). At 1 it reaches the
+        /// foot.</summary>
         public const float ReachGainFraction = 0.45f;
 
-        /// <summary>帯の半幅の下限（m）。火口のすぐそば。</summary>
+        /// <summary>The floor on the band's half-width (m). Right beside the crater.</summary>
         public const float HalfWidthBaseMetres = 45f;
 
-        /// <summary>1 km 下るごとに広がる半幅（m）。**指摘⑤で 40 → 230 にした。**</summary>
+        /// <summary>The half-width added per kilometre descended (m). **Raised from 40 to 230
+        /// after observation ⑤.**</summary>
         public const float HalfWidthPerKilometre = 230f;
 
-        /// <summary>帯の半幅の上限（m）。**指摘⑤で 90 → 300 にした。**</summary>
+        /// <summary>The cap on the band's half-width (m). **Raised from 90 to 300 after
+        /// observation ⑤.**</summary>
         public const float HalfWidthMaxMetres = 300f;
 
-        /// <summary>帯の密度の下限（強さ 0 のとき）。</summary>
+        /// <summary>The floor on the band's density (at strength 0).</summary>
         public const float MagnitudeMin = 10f;
 
-        /// <summary>帯の密度の上限（強さ 1 のとき）。</summary>
+        /// <summary>The ceiling on the band's density (at strength 1).</summary>
         public const float MagnitudeMax = 46f;
 
         /// <summary>
-        /// 密度を正規化する基準の面積（m²）。**従来の帯 2 本ぶん**
-        /// （<c>2 × 半幅 90 m</c>（＝全幅）× 帯の長さ 260 m × 2 本）である。
-        /// 先頭の 2 は「表と裏」ではなく、<see cref="Magnitude"/> の
-        /// <c>2f * half</c> と同じ**半幅から全幅への換算**である。
-        /// 扇の帯の面積がこれを超えたぶんだけ密度を薄める ——
-        /// でないと本数と幅を増やした瞬間に粒子が十数倍になる。
+        /// The reference area (m²) the density is normalised against. **The old two bands'
+        /// worth** (<c>2 × a half-width of 90 m</c> (= the full width) × a band length of
+        /// 260 m × 2 bands).
+        /// The leading 2 is not "front and back" but the same **half-width to full-width
+        /// conversion** as the <c>2f * half</c> in <see cref="Magnitude"/>.
+        /// We thin the density by however much the fan's band area exceeds this — otherwise
+        /// the moment we raise the count and the width, the particles go up more than
+        /// tenfold.
         /// </summary>
         public const float ReferenceAreaSquareMetres = 2f * 90f * 260f * 2f;
 
         /// <summary>
-        /// 舌の方位のゆらぎ（等間隔に対する比）。0 だと**風車の羽根**に見える。
-        /// 隣と入れ替わらないよう ±0.5 未満に抑える。
+        /// The jitter on a lobe's bearing (as a ratio of the even spacing). At 0 it looks
+        /// like **the blades of a windmill**.
+        /// Keep it below ±0.5 so a lobe cannot swap places with its neighbour.
         /// </summary>
         public const float AzimuthJitter = 0.34f;
 
         /// <summary>
-        /// 谷（溶岩が下った向き）へ引かれる最大の割合。**裾での値**である。
-        /// 1 にすると「溶岩の上だけを流れる」——それが指摘⑤で直した形そのものなので、
-        /// **半分より上げないこと。**
+        /// The maximum fraction by which it is pulled towards the valleys (the directions the
+        /// lava ran). **This is the value at the foot.**
+        /// At 1 it "only flows on top of the lava" — which is exactly the shape observation ⑤
+        /// made us fix, so **never raise it above a half.**
         /// </summary>
         public const float ChannelPullMax = 0.5f;
 
         /// <summary>
-        /// 谷へ引かれる強さが距離とともに増える指数。大きいほど
-        /// 「源の近くでは尾根を越え、裾で谷に集まる」がはっきりする。
+        /// The exponent by which the pull towards the valleys grows with distance. The larger
+        /// it is, the more pronounced "rides over ridges near the source, gathers into
+        /// valleys at the foot" becomes.
         /// </summary>
         public const float ChannelPullPower = 1.6f;
 
         /// <summary>
-        /// 舌が横へふくらむ量（半幅に対する比）。**まっすぐな放射線は人工物に見える。**
+        /// How far a lobe bows sideways (as a ratio of the half-width). **A dead straight ray
+        /// looks artificial.**
         /// </summary>
         public const float BowFactor = 0.55f;
 
         /// <summary>
-        /// これより短い舌には帯を出さない（m）。
-        /// 火口のすぐそばの点線に帯を巻くと、山頂に灰の球が乗る。
+        /// Lobes shorter than this get no band (m).
+        /// Wrap a band around a stub right beside the crater and you get a ball of ash
+        /// sitting on the summit.
         /// </summary>
         public const float MinPathMetres = 80f;
 
         /// <summary>
-        /// 舌 <paramref name="index"/> 本目の到達距離（m）。
-        /// **舌ごとに少し違う**（全部同じだと扇の縁が真円になる）。
+        /// The reach (m) of lobe number <paramref name="index"/>.
+        /// **Slightly different per lobe** (with all of them the same, the fan's edge is a
+        /// perfect circle).
         /// </summary>
         public static float ReachMetres(float radiusMetres, float intensityUnit,
                                         uint seed, int index)
@@ -151,16 +176,19 @@ namespace DisasterPlus.Core.Volcano
             float unit = Clamp01(intensityUnit);
             float reach = radiusMetres * (ReachBaseFraction + ReachGainFraction * unit);
 
-            // ±15 % のばらつき。種と番号だけで決まる（フレーム番号は混ぜない）。
+            // ±15% of variation, determined by the seed and index alone (we never mix in the
+            // frame number).
             float jitter = 0.85f + 0.3f * DeterministicRandom.Unit(seed, (uint)(0x5A00 + index));
             float value = reach * jitter;
             return IsBad(value) || value < 0f ? 0f : value;
         }
 
         /// <summary>
-        /// 舌 <paramref name="index"/> 本目の**火口を出るときの方位**（ラジアン）。
-        /// 等間隔 ＋ <see cref="DeterministicRandom"/> のゆらぎで、地形は 1 つも見ない ——
-        /// <b>源の近くでは尾根を越える</b>のがこの型の主張だからである。
+        /// **The bearing at which lobe number <paramref name="index"/> leaves the crater**
+        /// (radians).
+        /// Evenly spaced plus <see cref="DeterministicRandom"/> jitter, looking at no terrain
+        /// at all — because <b>riding over ridges near the source</b> is this type's whole
+        /// claim.
         /// </summary>
         public static float LobeAzimuth(uint seed, int index, int count)
         {
@@ -173,8 +201,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 火口からの距離の割合 <paramref name="t"/> において、谷へどれだけ引かれるか <c>[0,1]</c>。
-        /// **源では 0（尾根を越える）、裾で <see cref="ChannelPullMax"/>**。
+        /// How strongly it is pulled towards the valleys at a fraction <paramref name="t"/>
+        /// of the distance from the crater, in <c>[0,1]</c>.
+        /// **0 at the source (it rides over ridges), <see cref="ChannelPullMax"/> at the
+        /// foot.**
         /// </summary>
         public static float ChannelPullAt(float t)
         {
@@ -184,10 +214,12 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// <paramref name="bearings"/> のうち <paramref name="azimuth"/> にいちばん近い向き
-        /// （ラジアン）。1 本も無ければ <paramref name="found"/> が false になり、
-        /// 戻り値は <paramref name="azimuth"/> そのもの ——
-        /// **溶岩が 1 本も流れていない山でも扇は出る**（谷に引かれないだけ）。
+        /// The bearing among <paramref name="bearings"/> closest to
+        /// <paramref name="azimuth"/> (radians). If there are none,
+        /// <paramref name="found"/> comes back false and the result is
+        /// <paramref name="azimuth"/> itself —
+        /// **the fan still appears on a mountain with no lava flows at all** (it just is not
+        /// pulled towards any valley).
         /// </summary>
         public static float NearestChannel(float azimuth, float[] bearings, int count,
                                            out bool found)
@@ -218,11 +250,12 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 舌 1 本ぶんの帯を 4 点（ベジェの制御点）で返す。
-        /// <paramref name="a"/> が尾、<paramref name="d"/> が頭である。
+        /// Returns one lobe's band as 4 points (Bézier control points).
+        /// <paramref name="a"/> is the tail and <paramref name="d"/> the head.
         ///
-        /// 帯が舌から完全に外れている・舌が短すぎるときは <c>false</c> を返し、
-        /// 出力は全て火口になる（**「それらしい」座標を作らない**）。
+        /// When the band has passed entirely off the lobe, or the lobe is too short, it
+        /// returns <c>false</c> and every output is the crater (**we do not fabricate
+        /// plausible-looking coordinates**).
         /// </summary>
         public static bool TryLobe(Vec2 vent, float baseAzimuth, float channelAzimuth,
                                    float reachMetres, float headMetres,
@@ -251,8 +284,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 舌の上、火口から <paramref name="distanceMetres"/> の点。
-        /// **裾へ行くほど谷の向きへ回り込む**（<see cref="ChannelPullAt"/>）。
+        /// The point on the lobe <paramref name="distanceMetres"/> from the crater.
+        /// **The further towards the foot, the more it swings round towards the valley's
+        /// direction** (<see cref="ChannelPullAt"/>).
         /// </summary>
         public static Vec2 PointAt(Vec2 vent, float baseAzimuth, float channelDeltaRadians,
                                    float reachMetres, float distanceMetres)
@@ -266,7 +300,7 @@ namespace DisasterPlus.Core.Volcano
             float delta = IsBad(channelDeltaRadians) ? 0f : channelDeltaRadians;
             double angle = baseAzimuth + delta * ChannelPullAt(t);
 
-            // 横へのふくらみ。**まっすぐな放射線は人工物に見える。**
+            // The sideways bow. **A dead straight ray looks artificial.**
             float bow = BowFactor * HalfWidthMetres(distanceMetres)
                         * (float)Math.Sin(Math.PI * t);
 
@@ -279,7 +313,8 @@ namespace DisasterPlus.Core.Volcano
             return new Vec2(x, z);
         }
 
-        /// <summary>1 周の秒数。経路が短いときも 0 を返さない（0 除算を外へ出さない）。</summary>
+        /// <summary>The length of one cycle in seconds. It never returns 0 even for a short
+        /// path (we do not let a division by zero out).</summary>
         public static float CycleSeconds(float pathLengthMetres)
         {
             float path = IsBad(pathLengthMetres) || pathLengthMetres < 0f ? 0f : pathLengthMetres;
@@ -288,7 +323,8 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 舌ごとの位相のずらし（秒）。**5 本が隊列を組んで走らないため**にある。
+        /// The per-lobe phase offset (seconds). It exists **so that the lobes do not run in
+        /// formation**.
         /// </summary>
         public static float LobePhaseSeconds(int index, int count, float pathLengthMetres)
         {
@@ -298,8 +334,8 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 帯の頭が今どこまで来ているか（火口からの距離 m）。
-        /// <paramref name="clockSeconds"/> は呼び出し側が積む時計。
+        /// How far the band's head has got (m from the crater).
+        /// <paramref name="clockSeconds"/> is the clock the caller keeps.
         /// </summary>
         public static float HeadMetres(float clockSeconds, float pathLengthMetres)
         {
@@ -314,13 +350,15 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 帯の密度。**経路に載っている割合で薄める**ので、
-        /// 走り始めと抜け際に唐突な出現・消失が起きない。
-        /// 経路が <see cref="MinPathMetres"/> に満たなければ 0（＝出さない）。
+        /// The band's density. **Thinned by the fraction of it that lies on the path**, so it
+        /// does not appear or vanish abruptly as it starts out and passes off the end.
+        /// If the path is shorter than <see cref="MinPathMetres"/> it is 0 (i.e. nothing is
+        /// emitted).
         ///
-        /// ★★ **帯の面積で正規化する。** ベジェ帯の粒子数は
-        /// <c>2 × halfWidth × 経路長 × pps</c> なので（IL 実測 §B-5）、
-        /// 幅と本数を増やしたぶんをここで割り戻さないと粒子が十数倍になる。
+        /// ★★ **Normalise by the band's area.** A Bézier band's particle count is
+        /// <c>2 × halfWidth × path length × pps</c> (measured from the IL, §B-5), so unless we
+        /// divide the increased width and count back out here, the particles go up more than
+        /// tenfold.
         /// </summary>
         public static float Magnitude(float intensityUnit, float headMetres,
                                       float pathLengthMetres, float halfWidthMetres)
@@ -339,14 +377,15 @@ namespace DisasterPlus.Core.Volcano
             if (!(area > 0f)) return 0f;
 
             float scale = ReferenceAreaSquareMetres / area;
-            if (scale > 1f) scale = 1f;   // 面積が基準より小さくても濃くはしない
+            if (scale > 1f) scale = 1f;   // an area below the reference never makes it denser
 
             float u = Clamp01(intensityUnit);
             float m = (MagnitudeMin + (MagnitudeMax - MagnitudeMin) * u) * share * scale;
             return IsBad(m) || m < 0f ? 0f : m;
         }
 
-        /// <summary>帯の半幅（m）。**下るほど広がる**が、必ず頭打ちになる。</summary>
+        /// <summary>The band's half-width (m). **It widens as it descends**, but always levels
+        /// off.</summary>
         public static float HalfWidthMetres(float headMetres)
         {
             float head = IsBad(headMetres) || headMetres < 0f ? 0f : headMetres;
@@ -356,8 +395,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 折れ線（＝溶岩の軌跡）の**全体の向き**（ラジアン）。谷の手がかりとして使う。
-        /// 点が足りない・座標が壊れているときは <c>false</c>。
+        /// The **overall bearing** (radians) of a polyline (i.e. a lava track). Used as the
+        /// clue to where the valleys are.
+        /// <c>false</c> when there are not enough points or the coordinates are broken.
         /// </summary>
         public static bool TryBearing(Vec2[] points, int start, int count, Vec2 vent,
                                       out float bearing)
@@ -369,7 +409,8 @@ namespace DisasterPlus.Core.Volcano
             if (start + limit > points.Length) limit = points.Length - start;
             if (limit < 2) return false;
 
-            // いちばん遠くまで届いた点を向きにする（途中の蛇行に引きずられない）。
+            // Take the bearing from the furthest point reached (so the meandering along the
+            // way does not drag it about).
             float bestX = 0f, bestZ = 0f, best = 0f;
             for (int i = 0; i < limit; i++)
             {
@@ -387,7 +428,7 @@ namespace DisasterPlus.Core.Volcano
             return true;
         }
 
-        /// <summary>帯のうち経路に載っている長さ（m）。</summary>
+        /// <summary>The length of the band (m) that lies on the path.</summary>
         private static float OverlapMetres(float headMetres, float pathLengthMetres)
         {
             float head = IsBad(headMetres) || headMetres < 0f ? 0f : headMetres;
@@ -401,7 +442,8 @@ namespace DisasterPlus.Core.Volcano
             return IsBad(overlap) || overlap < 0f ? 0f : overlap;
         }
 
-        /// <summary>2 つの方位の差を <c>[-π, π]</c> で返す（**巻き戻りを跨いでも近いほう**）。</summary>
+        /// <summary>The difference between two bearings, in <c>[-π, π]</c> (**the nearer way
+        /// round, even across the wrap**).</summary>
         private static float SignedDelta(float from, float to)
         {
             if (IsBad(from) || IsBad(to)) return 0f;

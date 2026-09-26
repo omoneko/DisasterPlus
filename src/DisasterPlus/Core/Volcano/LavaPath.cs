@@ -4,64 +4,76 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 溶岩の 1 歩。**純関数で、勾配の符号を知らない。**
+    /// One step of lava. **A pure function that knows nothing about the sign of the slope.**
     ///
-    /// 呼び出し側（<c>Game/Volcano/VolcanoLava</c>）が
-    /// <c>TerrainManager.SampleDetailHeight(Vector3, out slopeX, out slopeZ)</c> の結果を
-    /// **下り方向の単位ベクトル**に直してから渡す。ここに符号の解釈を置かないのは、
-    /// 事実文書 §B-6 が 3 引数版の存在を確定させている一方で
-    /// **slopeX / slopeZ の符号までは読んでいなかった**からである。
-    /// 取り違えると溶岩が山を登るが、例外は 1 つも出ない。
-    /// 符号は Game 側の 1 箇所で確定させ、そこで実行時にも観測する。
+    /// The caller (<c>Game/Volcano/VolcanoLava</c>) takes the result of
+    /// <c>TerrainManager.SampleDetailHeight(Vector3, out slopeX, out slopeZ)</c> and turns it
+    /// into **a unit vector pointing downhill** before passing it in. We keep the
+    /// interpretation of the sign out of here because, while §B-6 of the facts document
+    /// establishes that the 3-argument overload exists, **it did not go as far as reading
+    /// the signs of slopeX / slopeZ**.
+    /// Get it wrong and the lava climbs the mountain — without a single exception.
+    /// The sign is pinned down in one place on the Game side, where it is also observed at
+    /// runtime.
     ///
-    /// > **本タスクで IL を読んで符号は確定した**（<c>VolcanoLava</c> のクラス doc に
-    /// > 実測を書いてある）。それでも**この型には符号を持ち込まない** ——
-    /// > ここは「向きと歩幅から次の点を出す」だけの型で、地形の解釈を持たないことが
-    /// > テストで固定できる範囲を決めている。
+    /// > **In this task we read the IL and settled the sign** (the measurement is written up
+    /// > in <c>VolcanoLava</c>'s class doc). Even so, **we do not bring the sign into this
+    /// > type** — this is a type that does nothing but "produce the next point from a
+    /// > direction and a step length", and holding no interpretation of the terrain is what
+    /// > determines how much of it the tests can pin down.
     ///
-    /// **平ら・窪み・NaN は「進まない」を返す**（溜まる）。とりあえず前へ進めると、
-    /// 溶岩が窪地を素通りしてマップの端まで走り続ける。
+    /// **Flat ground, a hollow, or NaN all return "do not advance"** (it pools). Advance
+    /// anyway "for now" and the lava sails straight through the hollow and keeps running to
+    /// the edge of the map.
     ///
-    /// 乱数は <see cref="DisasterPlus.Core.Common.DeterministicRandom"/> だけを使う。
-    /// <c>VanillaRandomizer</c> は**使わない** —— ここで決めるのはバニラが引く値ではなく、
-    /// ⑤が発明した判断である（⑤はバニラの災害スロットに載らないので、
-    /// 同期すべきバニラの引きが構造上 1 つも存在しない）。
+    /// The only randomness used is
+    /// <see cref="DisasterPlus.Core.Common.DeterministicRandom"/>.
+    /// <c>VanillaRandomizer</c> is **not used** — what is decided here is not a value vanilla
+    /// draws but a judgement ⑤ invented (⑤ does not sit in a vanilla disaster slot, so
+    /// structurally there is not one vanilla draw to stay in step with).
     /// </summary>
     public static class LavaPath
     {
-        /// <summary>1 歩の距離（m）。地形の詳細セルが 4 m なので、その 3 倍。</summary>
+        /// <summary>The length of one step (m). The terrain's detail cell is 4 m, so this is
+        /// 3× that.</summary>
         public const float StepMetres = 12f;
 
         /// <summary>
-        /// これ未満の勾配は「平ら」とみなして止める（無次元。1 = 45 度）。
-        /// <c>SampleDetailHeight</c> の 3 引数版が返す傾斜は
-        /// **メートル毎メートル**なので、これはそのまま勾配である（§B-6 の実測）。
+        /// Slopes below this count as "flat" and we stop (dimensionless; 1 = 45 degrees).
+        /// The gradient returned by the 3-argument <c>SampleDetailHeight</c> is in **metres
+        /// per metre**, so this is the slope directly (measured in §B-6).
         /// </summary>
         public const float MinSlope = 0.002f;
 
-        /// <summary>1 本の流れが進める最大歩数。**止まらない溶岩を作らない。**</summary>
+        /// <summary>The most steps one flow may take. **We do not create lava that never
+        /// stops.**</summary>
         public const int MaxSteps = 512;
 
         /// <summary>
-        /// 溶岩を出す点を火口の縁からどれだけ外へ出すか（火口半径に対する比）。
+        /// How far outside the crater rim the lava emission point sits (as a ratio of the
+        /// crater's radius).
         ///
-        /// ★★ **縁のちょうど上から出さないこと。** 火口は 2026-08-22 から高さ
-        ///   プロファイルの一部で、縁は<b>稜線（局所的な最大）</b>である。その真上で
-        ///   <c>SampleDetailHeight</c> の勾配を読むと、下り方向が**火口の内側を指すことが
-        ///   ある** —— 溶岩は窪みへ流れ落ち、<c>StopFlat</c> でその場に溜まって終わる。
-        ///   例外は 1 つも出ないので、症状は「溶岩が 1 本も山を下らない」だけである。
+        /// ★★ **Do not emit from exactly on the rim.** Since 2026-08-22 the crater has been
+        ///   part of the height profile, and the rim is <b>a ridge line (a local maximum)</b>.
+        ///   Read <c>SampleDetailHeight</c>'s gradient directly on it and the downhill
+        ///   direction **can point into the crater** — the lava runs down into the hollow
+        ///   and ends there, pooling at <c>StopFlat</c>.
+        ///   Not one exception is raised, so the only symptom is "not a single lava flow
+        ///   runs down the mountain".
         /// </summary>
         public const float VentRimClearanceFactor = 1.15f;
 
         /// <summary>
-        /// 同上の絶対値の下限（m）。地形の raw セルが 16 m なので、その 1.5 倍だけ外へ出て
-        /// 「縁のセル」から確実に離れる。小さい火口（半径 40 m）では比より効く。
+        /// The absolute floor on the same thing (m). The terrain's raw cell is 16 m, so we
+        /// go out 1.5× that to be sure of clearing "the rim cell". For a small crater
+        /// (radius 40 m) this bites harder than the ratio does.
         /// </summary>
         public const float VentRimClearanceMetres = 24f;
 
         /// <summary>
-        /// 溶岩を出す半径（m）。<paramref name="craterRadiusMetres"/> が読めないときは
-        /// 1 歩ぶん（<see cref="StepMetres"/>）を返す —— **0 を返して中心から出さない。**
+        /// The radius (m) at which lava is emitted. When
+        /// <paramref name="craterRadiusMetres"/> cannot be read, it returns one step's worth
+        /// (<see cref="StepMetres"/>) — **it does not return 0 and emit from the centre.**
         /// </summary>
         public static float VentRadiusMetres(float craterRadiusMetres)
         {
@@ -72,39 +84,40 @@ namespace DisasterPlus.Core.Volcano
             return byFactor > byMetres ? byFactor : byMetres;
         }
 
-        /// <summary>火口を出た直後の流れの幅（半径 m）。</summary>
+        /// <summary>A flow's width (radius, m) just after it leaves the crater.</summary>
         public const float SpreadBaseMetres = 28f;
 
-        /// <summary>どれだけ流れても超えない幅（半径 m）。</summary>
+        /// <summary>The width (radius, m) it never exceeds however far it flows.</summary>
         public const float SpreadMaxMetres = 78f;
 
         /// <summary>
-        /// 倍率を掛けたあとでも**絶対に超えない**広がり（m）。
+        /// The spread (m) that is **never exceeded**, even after the multiplier is applied.
         ///
-        /// ★★ これは演出値ではなく<b>着火の走査が数え切れる上限</b>である
-        ///   （2026-08-22）。<c>VolcanoLava.Ignite</c> は 1 歩ごとに
-        ///   <c>p ± radius</c> の矩形を行優先で舐めるので、半径が大きくなると
-        ///   セル数が 1 歩あたりの上限（<c>MaxBuildingCellsPerStep</c> /
-        ///   <c>MaxTreeCellsPerStep</c>）を超えて**黙って打ち切られる** ——
-        ///   そうなると「光っている溶岩の下の建物が燃えない」が起きる。
+        /// ★★ This is not a presentation value but <b>the limit the ignition scan can count
+        ///   through</b> (2026-08-22). <c>VolcanoLava.Ignite</c> sweeps the
+        ///   <c>p ± radius</c> rectangle row-major at every step, so as the radius grows the
+        ///   cell count exceeds the per-step cap (<c>MaxBuildingCellsPerStep</c> /
+        ///   <c>MaxTreeCellsPerStep</c>) and the scan is **silently cut short** — and then
+        ///   you get "buildings under the glowing lava that do not burn".
         ///
-        ///   96 m のとき:
-        ///     建物グリッド（64 m 角）… 192 m を跨ぐので高々 4×4 ＝ 16 セル（上限 25）
-        ///     樹木グリッド（32 m 角）… 192 m を跨ぐので高々 7×7 ＝ 49 セル（上限 64）
+        ///   At 96 m:
+        ///     the building grid (64 m squares) … spans 192 m, so at most 4×4 = 16 cells (cap 25)
+        ///     the tree grid (32 m squares)     … spans 192 m, so at most 7×7 = 49 cells (cap 64)
         ///
-        ///   **ここを上げるなら、必ず両方の上限も上げ直すこと。**
+        ///   **If you raise this, you must raise both of those caps to match.**
         /// </summary>
         public const float SpreadHardMaxMetres = 96f;
 
-        /// <summary>1 km 進むごとに広がる量（m）。</summary>
+        /// <summary>How much it spreads (m) per kilometre travelled.</summary>
         public const float SpreadPerKilometre = 25f;
 
         /// <summary>
-        /// 下り方向へ 1 歩進む。<paramref name="downhill"/> は**下り方向のベクトル**で、
-        /// 長さは問わない（内部で正規化する）。
+        /// Takes one step downhill. <paramref name="downhill"/> is **a vector pointing
+        /// downhill**; its length does not matter (we normalise inside).
         ///
-        /// 進めないときは <paramref name="next"/> に <paramref name="current"/> を入れて
-        /// <c>false</c> を返す。**「とりあえず前へ」をやらない**（クラス doc）。
+        /// When it cannot advance it puts <paramref name="current"/> into
+        /// <paramref name="next"/> and returns <c>false</c>. **We never do "forward anyway"**
+        /// (see the class doc).
         /// </summary>
         public static bool NextPosition(Vec2 current, Vec2 downhill, float stepMetres,
                                         out Vec2 next)
@@ -125,12 +138,14 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// <paramref name="flowIndex"/> 本目の初期方向（**必ず単位長**）。
-        /// 等間隔に配りつつ <see cref="DeterministicRandom"/> で少し揺らす。
+        /// The initial direction of flow number <paramref name="flowIndex"/> (**always unit
+        /// length**). Spaced evenly, with a little jitter from
+        /// <see cref="DeterministicRandom"/>.
         ///
-        /// 揺らぎの幅を <c>±π/(2n)</c> に抑えてあるのは、隣の流れと入れ替わらない
-        /// ようにするためである（入れ替わると「放射状に出る」が崩れる）。
-        /// **フレーム番号は混ぜない** —— 混ぜると同じ流れが tick ごとに向きを引き直す。
+        /// The jitter is held to <c>±π/(2n)</c> so that a flow cannot swap places with its
+        /// neighbour (a swap would spoil the radial arrangement).
+        /// **Do not mix in the frame number** — mix it in and the same flow re-draws its
+        /// direction every tick.
         /// </summary>
         public static Vec2 InitialDirection(uint seed, int flowIndex, int flowCount)
         {
@@ -145,8 +160,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 流れた距離から今の広がり（半径 m）。遠くへ行くほど広がるが、必ず頭打ちになる。
-        /// おかしな入力は <see cref="SpreadBaseMetres"/> に落とす（**NaN を外へ出さない**）。
+        /// The current spread (radius, m) from the distance travelled. The further it goes
+        /// the wider it gets, but it always levels off.
+        /// Bad input falls back to <see cref="SpreadBaseMetres"/> (**we never let NaN
+        /// out**).
         /// </summary>
         public static float SpreadRadiusFor(float travelledMetres)
         {
@@ -154,16 +171,17 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 上と同じだが、<paramref name="widthFactor"/> のぶん太らせる
-        /// （<c>LavaVolume.WidthFactor</c>。2026-08-22、所有者の依頼
-        /// 「溶岩流の太さを、もう少し太くしてほしいです（噴火規模に合わせて）」）。
+        /// The same as above, but widened by <paramref name="widthFactor"/>
+        /// (<c>LavaVolume.WidthFactor</c>; 2026-08-22, at the owner's request: "I'd like the
+        /// lava flows a bit wider, please — scaled to the eruption").
         ///
-        /// ★★ <b>この 1 本が見た目と被害の両方を決める。</b>
-        ///   <c>VolcanoLavaFx</c> の帯の幅も <c>VolcanoLava.Ignite</c> の着火半径も
-        ///   ここから出ている。**片方だけ太らせない** —— 描いた溶岩が、
-        ///   その下の建物に火を付けないのは嘘である。
+        /// ★★ <b>This one function decides both the look and the damage.</b>
+        ///   The width of <c>VolcanoLavaFx</c>'s ribbon and the ignition radius of
+        ///   <c>VolcanoLava.Ignite</c> both come from here. **Never widen only one of them**
+        ///   — lava that is drawn but does not set fire to the buildings under it is a lie.
         ///
-        /// 結果は必ず <see cref="SpreadHardMaxMetres"/> 以下（あちらの doc の理由）。
+        /// The result is always at most <see cref="SpreadHardMaxMetres"/> (for the reason in
+        /// that field's doc).
         /// </summary>
         public static float SpreadRadiusFor(float travelledMetres, float widthFactor)
         {

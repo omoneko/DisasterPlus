@@ -1,46 +1,51 @@
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// 地震計のカバレッジが警報のリードタイムをどれだけ延ばすか。
+    /// How much seismometer coverage extends the warning lead time.
     ///
-    /// IL 事実文書 §A-2、<c>EarthquakeAI.SimulationStep</c> の Emerging 分岐:
+    /// §A-2 of the IL facts document, the Emerging branch of
+    /// <c>EarthquakeAI.SimulationStep</c>:
     /// <code>
     ///   CheckLocalResource(EarthquakeCoverage, m_targetPosition, out coverage)
     ///   coverage = Mathf.Min(coverage, 100)
-    ///   lead     = coverage * 6437 / 100 + 1755      // 整数除算（div.un）
+    ///   lead     = coverage * 6437 / 100 + 1755      // integer division (div.un)
     ///   if (currentFrame + lead &gt;= m_activationFrame) DetectDisaster(id, located: coverage != 0)
     /// </code>
     ///
-    /// カバレッジ 0 で 1755 フレーム（約 38.6 ゲーム内分）、100 で 8192 フレーム
-    /// （= 65536/8 = **ちょうど 3.0 ゲーム内時間**）。
+    /// At coverage 0 that is 1,755 frames (about 38.6 in-game minutes), at 100 it is 8,192
+    /// frames (= 65536/8 = **exactly 3.0 in-game hours**).
     ///
-    /// **カバレッジは震央で読まれる**（<c>m_targetPosition</c>）。地震計の位置でも
-    /// カーソルの位置でもない。効果範囲が震央に届いていない地震計は、その地震に対して
-    /// 何も寄与しない（§A-2 / §C-2）。
+    /// **Coverage is read at the epicentre** (<c>m_targetPosition</c>). Not at the
+    /// seismometer's position, and not at the cursor's. A seismometer whose effective range
+    /// does not reach the epicentre contributes nothing to that earthquake (§A-2 / §C-2).
     ///
-    /// **地震計の効果はもう 1 つある。** <c>located</c> が <c>coverage != 0</c> で決まるので、
-    /// 地震計が無いと地震はハザードマップに一切描かれない（§A-6 のゲート）。
-    /// そちらは <see cref="DisasterPhases.PaintsHazardMap(bool, EarthquakePhase)"/> が扱う。
-    /// **地震計自身は <c>DetectDisaster</c> を呼ばない**（§C-2）——呼ぶのは
-    /// <c>EarthquakeAI.SimulationStep</c> で、地震計がやっているのは
-    /// 半径内に resource 22 を撒くことだけである。因果の向きを逆に読まないこと。
+    /// **The seismometer has a second effect.** Since <c>located</c> is decided by
+    /// <c>coverage != 0</c>, without a seismometer the earthquake is never drawn on the
+    /// hazard map at all (the gate in §A-6). That side is handled by
+    /// <see cref="DisasterPhases.PaintsHazardMap(bool, EarthquakePhase)"/>.
+    /// **The seismometer itself never calls <c>DetectDisaster</c>** (§C-2) — the caller is
+    /// <c>EarthquakeAI.SimulationStep</c>, and all the seismometer does is scatter
+    /// resource 22 within its radius. Do not read the causality backwards.
     ///
-    /// ここは**バニラの式と定数だけ**でできている（第 1 層）。新しい物理は 1 つも無い。
+    /// This is built from **vanilla's formula and constants alone** (the first layer). There
+    /// is not one piece of new physics in it.
     /// </summary>
     public static class WarningLeadTime
     {
-        /// <summary>カバレッジ 0 のときのリードタイム。IL のリテラル <c>ldc.i4 1755</c>。</summary>
+        /// <summary>The lead time at coverage 0. The IL literal <c>ldc.i4 1755</c>.</summary>
         public const int BaseFrames = 1755;
 
-        /// <summary>カバレッジ 100 で上乗せされる分。IL のリテラル <c>ldc.i4 6437</c>。</summary>
+        /// <summary>What gets added on at coverage 100. The IL literal
+        /// <c>ldc.i4 6437</c>.</summary>
         public const int BonusFrames = 6437;
 
-        /// <summary><c>Mathf.Min(coverage, 100)</c> の 100。</summary>
+        /// <summary>The 100 in <c>Mathf.Min(coverage, 100)</c>.</summary>
         public const int MaxCoverage = 100;
 
         /// <summary>
-        /// バニラの <c>Mathf.Min(coverage, 100)</c>。負値はゲームには現れないが、
-        /// 読み取りが壊れたときに負のリードタイムを作らないよう 0 で止める。
+        /// Vanilla's <c>Mathf.Min(coverage, 100)</c>. Negative values never occur in the
+        /// game, but we clamp at 0 so that a broken reading cannot produce a negative lead
+        /// time.
         /// </summary>
         public static int ClampCoverage(int coverage)
         {
@@ -50,11 +55,11 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// カバレッジ（生値でよい。中でクランプする）→ リードタイム（フレーム）。
+        /// Coverage (the raw value is fine; we clamp inside) → lead time (frames).
         ///
-        /// **整数除算であることが重要。** float で書くと端数の扱いがゲームとずれ、
-        /// ゲームが実際には使わないリードタイムを表示することになる
-        /// （例: カバレッジ 1 は 1819 であって 1819.37 ではない）。
+        /// **It matters that this is integer division.** Write it in float and the rounding
+        /// drifts from the game's, and you end up displaying a lead time the game does not
+        /// actually use (for example, coverage 1 is 1,819, not 1,819.37).
         /// </summary>
         public static int FramesFor(int coverage)
         {
@@ -62,19 +67,19 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// リードタイムをゲーム内分で。
+        /// The lead time in in-game minutes.
         ///
-        /// <paramref name="framesPerMinute"/> は呼び出し側から渡す（Game 側は
-        /// <c>FeatureHost.FramesPerMinute</c>）。**定数を直書きしない** ——
-        /// ③でこれを直書きして全ての持続時間が 4 倍ずれた前科がある。
+        /// <paramref name="framesPerMinute"/> comes from the caller (on the Game side,
+        /// <c>FeatureHost.FramesPerMinute</c>). **Never hard-code the constant** — we have
+        /// form here: hard-coding it in ③ put every duration out by a factor of four.
         ///
-        /// 換算できないときは 0 を返す。呼び出し側はこれを「0 分」として表示せず、
-        /// 行ごと出さないこと（NaN や無限大をここから漏らさないための番人であって、
-        /// 「0 分」という意味のある値ではない）。
+        /// Returns 0 when the conversion cannot be done. Callers must not display that as
+        /// "0 minutes"; they should drop the whole line (it is a guard against leaking NaN
+        /// or infinity out of here, not a meaningful value of "0 minutes").
         /// </summary>
         public static float MinutesFor(int coverage, float framesPerMinute)
         {
-            // NaN は比較演算子を全て false にするので、明示的に弾く。
+            // NaN makes every comparison false, so reject it explicitly.
             if (float.IsNaN(framesPerMinute) || framesPerMinute <= 0f) return 0f;
             return FramesFor(coverage) / framesPerMinute;
         }

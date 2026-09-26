@@ -1,56 +1,65 @@
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// TerrainModify.UpdateArea へ渡す矩形の分割。**分割は呼び出し側の責任である。**
+    /// Splitting the rectangle handed to TerrainModify.UpdateArea. **The splitting is the
+    /// caller's responsibility.**
     ///
-    /// UpdateArea は矩形が 128×128 raw セルを超えると、**タイル分割せずに無言で
-    /// 切り捨てる**（§A-1、IL_026C の Min(m_maxX, m_minX + 120 + 8)）。
-    /// はみ出した部分は更新されないまま残る。バニラ自身
-    /// （TerrainManager.UpdateData）も 9×9 パッチ × 120 セルで自分で分割している。
+    /// When the rectangle exceeds 128×128 raw cells, UpdateArea **silently truncates it
+    /// rather than splitting it into tiles** (§A-1, the Min(m_maxX, m_minX + 120 + 8) at
+    /// IL_026C). Whatever overflows stays un-updated. Vanilla itself
+    /// (TerrainManager.UpdateData) also does its own splitting, into 9×9 patches of 120
+    /// cells.
     ///
-    /// もう 1 つ、**単発の要求面積が 10000 セルを超えると入れ子のバッチを無視して
-    /// 即フラッシュする**（§A-1 IL_0399 / §D-12）。
+    /// There is a second limit: **a single request over 10,000 cells in area ignores any
+    /// enclosing batch and flushes immediately** (§A-1 IL_0399 / §D-12).
     ///
-    /// **判定に掛かるのは UpdateArea に実際に渡した矩形である。** ⑤は境目に段差を
-    /// 作らないため各タイルを ±Margin だけ広げて渡すので、その広げたあとの寸法で
-    /// 両方の閾値を下回らなければならない:
+    /// **What these tests apply to is the rectangle actually passed to UpdateArea.** To
+    /// avoid a step at the seams, ⑤ widens each tile by ±Margin before passing it, so it is
+    /// the widened dimensions that must stay under both thresholds:
     ///
     ///     CoreTileSide (95) + 2 * Margin (2) = MaxPassedSide (99)
     ///     99 &lt; 128        99*99 = 9801 &lt; 10000
     ///
-    /// したがって <see cref="TileAt"/> は<b>広げたあとの矩形</b>を返す。
-    /// **呼び出し側で margin を足し直さないこと**（足すと 103×103 = 10609 セルになり、
-    /// 10000 の閾値を跨いで毎回フラッシュする）。
+    /// So <see cref="TileAt"/> returns <b>the already-widened rectangle</b>.
+    /// **The caller must not add the margin back on** (add it and you get 103×103 = 10,609
+    /// cells, which crosses the 10,000 threshold and flushes every time).
     /// </summary>
     public static class TileSplit
     {
-        /// <summary>raw セル添字の上限（§C-8 の <c>res = 1080</c>。配列そのものは 1081²）。</summary>
+        /// <summary>The upper bound on raw cell indices (the <c>res = 1080</c> from §C-8;
+        /// the array itself is 1081²).</summary>
         public const int RawResolution = 1080;
 
-        /// <summary>raw セルの一辺（m）。</summary>
+        /// <summary>The side of one raw cell (m).</summary>
         public const float RawCellSizeMetres = 16f;
 
-        /// <summary>ワールド座標 → セル添字のオフセット（§C-8 の <c>+ 540</c>）。</summary>
+        /// <summary>The offset from world coordinates to cell indices (the <c>+ 540</c> from
+        /// §C-8).</summary>
         public const int CellOffset = 540;
 
-        /// <summary>1 タイルが担当する（広げる前の）セル数。</summary>
+        /// <summary>How many cells one tile covers (before widening).</summary>
         public const int CoreTileSide = 95;
 
-        /// <summary>継ぎ目に段差を作らないための広げ幅（<c>MakeCrater</c> / <c>MakeCrack</c> と同じ ±2）。</summary>
+        /// <summary>How far we widen to avoid a step at the seams (the same ±2 as
+        /// <c>MakeCrater</c> / <c>MakeCrack</c>).</summary>
         public const int Margin = 2;
 
-        /// <summary>実際に UpdateArea へ渡す矩形の一辺の上限。**128 未満であること。**</summary>
+        /// <summary>The upper bound on the side of the rectangle actually passed to
+        /// UpdateArea. **Must be under 128.**</summary>
         public const int MaxPassedSide = CoreTileSide + 2 * Margin;
 
-        /// <summary>実際に UpdateArea へ渡す矩形のセル数の上限。**10000 未満であること。**</summary>
+        /// <summary>The upper bound on the cell count of the rectangle actually passed to
+        /// UpdateArea. **Must be under 10,000.**</summary>
         public const int MaxPassedCells = MaxPassedSide * MaxPassedSide;
 
         /// <summary>
-        /// 中心と半径から、覆うべき raw セルの矩形（両端を含む）を出す。
+        /// Works out, from a centre and a radius, the rectangle of raw cells to cover
+        /// (inclusive at both ends).
         ///
-        /// 式は <c>MakeCrater</c> の実測（§C-8 IL_002C–0085）と同じ ——
-        /// <c>(v / 16) + 540</c>、最大側は <c>+ 1</c>、両端を <c>[0, 1080]</c> でクランプ。
-        /// NaN や半径 0 以下は false（呼び出し側は何もしない）。
+        /// The formula is the same as the one measured in <c>MakeCrater</c>
+        /// (§C-8 IL_002C-0085) — <c>(v / 16) + 540</c>, <c>+ 1</c> on the maximum side, and
+        /// both ends clamped to <c>[0, 1080]</c>.
+        /// NaN, or a radius of zero or below, gives false (and the caller does nothing).
         /// </summary>
         public static bool CellRangeFor(float centreX, float centreZ, float radiusMetres,
                                         out int minX, out int minZ, out int maxX, out int maxZ)
@@ -72,20 +81,20 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// この矩形は**1 回の <c>UpdateArea</c> でそのまま出せるか**。
+        /// Whether this rectangle **can be emitted as-is in a single <c>UpdateArea</c>**.
         ///
-        /// 出せる条件は <see cref="TileAt"/> が守っているのと同じ 2 つで、
-        /// **±<see cref="Margin"/> を足したあと**に評価する:
+        /// The conditions are the same two <see cref="TileAt"/> respects, evaluated
+        /// **after adding ±<see cref="Margin"/>**:
         ///
-        ///     一辺 + 2*Margin &lt;= MaxPassedSide (99) &lt; 128     … 切り捨てない
-        ///     (一辺 + 2*Margin)^2 &lt;= MaxPassedCells (9801) &lt; 10000 … 途中フラッシュしない
+        ///     side + 2*Margin &lt;= MaxPassedSide (99) &lt; 128     … no truncation
+        ///     (side + 2*Margin)^2 &lt;= MaxPassedCells (9801) &lt; 10000 … no mid-way flush
         ///
-        /// 両方とも <c>CoreTileSide</c>（95）以下という 1 つの条件に帰着する。
+        /// Both reduce to the single condition "at most <c>CoreTileSide</c> (95)".
         ///
-        /// **これは「タイル分割を省いてよいか」を判定するためだけにある。**
-        /// false のときは今までどおり <see cref="TileAt"/> で分割すること。
-        /// 「だいたい入るから」で分割を省くと、はみ出した部分が
-        /// **更新されないまま残る**（切り捨ては例外にならない、§A-1）。
+        /// **This exists solely to decide whether the tile split can be skipped.**
+        /// When it is false, split with <see cref="TileAt"/> as before.
+        /// Skip the split because it "roughly fits" and whatever overflows **stays
+        /// un-updated** (truncation raises no exception, §A-1).
         /// </summary>
         public static bool FitsSinglePass(int minX, int minZ, int maxX, int maxZ)
         {
@@ -94,13 +103,13 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 矩形を <see cref="Margin"/> だけ広げてクランプする。**そのまま
-        /// <c>UpdateArea</c> へ渡す矩形**（<see cref="TileAt"/> の戻り値と同じ性質で、
-        /// 呼び出し側で margin を足し直してはいけない）。
+        /// Widens the rectangle by <see cref="Margin"/> and clamps it. **This is the
+        /// rectangle to pass straight to <c>UpdateArea</c>** (the same property as
+        /// <see cref="TileAt"/>'s return value: the caller must not add the margin back on).
         ///
-        /// <see cref="FitsSinglePass"/> が true の矩形にだけ使うこと。
-        /// クランプは縮める向きにしか働かないので、返り値が
-        /// <see cref="MaxPassedSide"/> を超えることはない。
+        /// Only use it on rectangles for which <see cref="FitsSinglePass"/> is true.
+        /// The clamp only ever shrinks, so the result can never exceed
+        /// <see cref="MaxPassedSide"/>.
         /// </summary>
         public static bool ExpandForPass(int minX, int minZ, int maxX, int maxZ,
                                          out int pMinX, out int pMinZ, out int pMaxX, out int pMaxZ)
@@ -119,7 +128,8 @@ namespace DisasterPlus.Core.Volcano
             return true;
         }
 
-        /// <summary>矩形を覆うのに要るタイル数。空の矩形なら 0。</summary>
+        /// <summary>How many tiles it takes to cover the rectangle. 0 for an empty
+        /// rectangle.</summary>
         public static int TileCountFor(int minX, int minZ, int maxX, int maxZ)
         {
             if (minX > maxX || minZ > maxZ) return 0;
@@ -127,8 +137,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// <paramref name="index"/> 番目のタイルの、**UpdateArea へそのまま渡す矩形**。
-        /// 行優先（X が先に進む）。**呼び出し側で margin を足し直さないこと**（クラス doc）。
+        /// The <paramref name="index"/>-th tile, as **the rectangle to pass straight to
+        /// UpdateArea**. Row-major (X advances first). **The caller must not add the margin
+        /// back on** (see the class doc).
         /// </summary>
         public static bool TileAt(int index, int minX, int minZ, int maxX, int maxZ,
                                   out int tMinX, out int tMinZ, out int tMaxX, out int tMaxZ)
@@ -154,8 +165,8 @@ namespace DisasterPlus.Core.Volcano
             if (coreMaxX > maxX) coreMaxX = maxX;
             if (coreMaxZ > maxZ) coreMaxZ = maxZ;
 
-            // ★ 広げてからクランプする。クランプは縮める向きにしか働かないので、
-            //   返り値の一辺が MaxPassedSide を超えることはない。
+            // ★ Widen first, then clamp. The clamp only ever shrinks, so the returned side
+            //   can never exceed MaxPassedSide.
             tMinX = ClampCell(coreMinX - Margin);
             tMinZ = ClampCell(coreMinZ - Margin);
             tMaxX = ClampCell(coreMaxX + Margin);

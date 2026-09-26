@@ -1,32 +1,33 @@
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 1 つの災害機能。①天気予報・②地震・④台風・⑤火山も同じ形で足せるようにする。
-    /// Mod.cs はこのリストを回すだけで、機能追加で既存コードを変更しなくて済む。
+    /// One disaster feature. ① forecast, ② earthquake, ④ typhoon and ⑤ volcano are all meant
+    /// to slot in the same way. Mod.cs only walks this list, so adding a feature does not
+    /// mean changing existing code.
     /// </summary>
     public interface IDisasterFeature
     {
         string Name { get; }
 
-        /// <summary>都市のロード完了時。main スレッド。</summary>
+        /// <summary>Once the city has finished loading. Main thread.</summary>
         void OnLevelLoaded();
 
-        /// <summary>シミュレーション tick 後。sim スレッド。バッファの生成・変更はここから。</summary>
-        /// <param name="deltaMinutes">前回からのゲーム内経過（分）。ポーズ中は 0。</param>
+        /// <summary>After a simulation tick. Sim thread. Create and modify buffers from here.</summary>
+        /// <param name="deltaMinutes">In-game time since the last call (minutes). 0 while paused.</param>
         void OnSimulationTick(uint frameIndex, float deltaMinutes);
 
-        /// <summary>毎フレーム。main スレッド。Unity オブジェクトはここからのみ触る。</summary>
+        /// <summary>Every frame. Main thread. Touch Unity objects only from here.</summary>
         void OnMainThreadUpdate();
 
-        /// <summary>都市のアンロード時。全セッション状態と静的キャッシュをここで捨てる。</summary>
+        /// <summary>On city unload. Drop all session state and static caches here.</summary>
         void OnLevelUnloading();
 
         /// <summary>
-        /// 自分の状態を診断行として書き出す。sim スレッドから呼ばれる。
-        /// 収集が有効なときだけ呼ばれるので、コストを気にしすぎなくてよい。
+        /// Write your own state out as diagnostic lines. Called from the sim thread.
+        /// Only called when collection is enabled, so there is no need to fret over the cost.
         ///
-        /// インターフェースに置いているのは意図的で、②〜⑤の機能を足すときに
-        /// 診断の実装を忘れられないようにするため。
+        /// Putting this on the interface is deliberate: it makes it impossible to forget the
+        /// diagnostics implementation when adding features ② to ⑤.
         /// </summary>
         void WriteDiagnostics(DiagnosticBuilder b);
     }

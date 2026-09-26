@@ -5,47 +5,54 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 渦車両の紐づけと、寿命が尽きたときの終了。すべて sim スレッドから呼ぶこと。
+    /// Attaching the vortex vehicle, and ending a whirl once its lifetime runs out. Call
+    /// all of it from the sim thread.
     /// </summary>
     public static class FireWhirlPinner
     {
-        // sim スレッド専用の使い回しバッファ。毎 tick 確保しない。
-        // 型は DisasterAI.m_tempList と同じ FastList<InstanceID>（確認済み）。
+        // A reusable buffer, sim thread only. Nothing is allocated per tick.
+        // The type is FastList<InstanceID>, the same as DisasterAI.m_tempList (confirmed).
         //
-        // 注: リフレクションで実測したところ、この版の Assembly-CSharp.dll では
-        // FastList<T> は実際にはグローバル名前空間にあり、この using は無くても
-        // ビルドは通る（obj/bin を全消去したクリーンビルドで 0 警告 0 エラーを確認済み）。
-        // ここでは将来のゲームバージョン差やレビュー可読性のために残す（実害はない）。
+        // Note: measured by reflection, in this build of Assembly-CSharp.dll FastList<T>
+        // actually sits in the global namespace, so the build succeeds without this using
+        // (confirmed with a clean build after wiping obj/bin: 0 warnings, 0 errors).
+        // We keep it here for future game-version differences and for readability during
+        // review (it does no harm).
         private static readonly FastList<InstanceID> _tempInstances = new FastList<InstanceID>();
 
         /// <summary>
-        /// 紐づけを受理する最大距離（発生地点からの水平距離）。
+        /// The maximum distance at which an attachment is accepted (horizontal distance
+        /// from the spawn point).
         ///
-        /// IL 実測（TornadoAI.ActivateDisaster）により、渦車両の生成位置は
-        /// targetPosition から distance = intensity*10 + 400 だけ離れた点である
-        /// ことが分かっている。この MOD の火災旋風は常に intensity = 60 固定
-        /// （FireWhirlFeature.SpawnIntensityBase）で生成するので、正規の紐づけは
-        /// 距離 1000 以内に必ず収まる。disasterId が使い回されて別の（無関係な）
-        /// 渦がこのグループに紛れ込むケースを弾きつつ、正規の紐づけを絶対に
-        /// 誤って弾かないよう、3 倍近い余裕（3000）を持たせている。
-        /// 誤って厳しすぎるより緩すぎる方が安全（緩ければ次 tick に再試行されるだけだが、
-        /// 厳しすぎるとバニラの竜巻が誤って固定されてしまう）。
+        /// Reading the IL of TornadoAI.ActivateDisaster established that the vortex
+        /// vehicle is created at a point distance = intensity*10 + 400 away from
+        /// targetPosition. This mod's fire whirls are always spawned at a fixed
+        /// intensity = 60 (FireWhirlFeature.SpawnIntensityBase), so a legitimate
+        /// attachment is always within 1000. We allow nearly three times that (3000) so
+        /// that we reject the case where a disasterId has been reused and a different,
+        /// unrelated vortex has slipped into this group, while never wrongly rejecting a
+        /// legitimate attachment.
+        /// Erring on the loose side is safer than erring on the tight side: if it is
+        /// loose we merely retry on the next tick, whereas if it is too tight one of
+        /// vanilla's tornadoes gets pinned by mistake.
         /// </summary>
         private const float MaxAttachDistance = 3000f;
         private const float MaxAttachDistanceSq = MaxAttachDistance * MaxAttachDistance;
 
         /// <summary>
-        /// まだ車両 ID が分かっていない旋風に、渦車両を紐づける。
-        /// 車両は ActivateDisaster が作るので、CreateDisaster の直後には存在しない。
+        /// Attaches the vortex vehicle to whirls whose vehicle ID is not yet known.
+        /// The vehicle is created by ActivateDisaster, so it does not exist immediately
+        /// after CreateDisaster.
         /// </summary>
         /// <summary>
-        /// この ID は<b>こちらが合成したもの</b>か（＝バニラの災害ではない）。
+        /// Whether this ID is <b>one we synthesised</b> (i.e. not a vanilla disaster).
         ///
-        /// ★★ 2026-08-29 以降、火災旋風は竜巻災害を 1 つも作らない
-        ///   （<c>FireWhirlSpawner.TrySpawn</c> のクラス doc）。したがって
-        ///   <b>この型の仕事はもう無い</b>。**消さずに残してあるのは、
-        ///   ここに書いてある IL 実測（渦車両の探し方・両スロットの目標・
-        ///   DeactivateNow の条件）が、再び渦を借りる日に要るからである。**
+        /// ★★ Since 2026-08-29 the fire whirl creates no tornado disaster at all (see the
+        ///   class doc on <c>FireWhirlSpawner.TrySpawn</c>). So <b>this type has no work
+        ///   left to do</b>. **It is kept rather than deleted because the IL findings
+        ///   written down here — how to find the vortex vehicle, the targets in both
+        ///   slots, the conditions on DeactivateNow — will be needed on the day we borrow
+        ///   the vortex again.**
         /// </summary>
         internal static bool IsSynthetic(ushort disasterId)
         {
@@ -57,10 +64,10 @@ namespace DisasterPlus.Game
             var views = FireWhirlRegistry.Snapshot();
             for (int i = 0; i < views.Count; i++)
             {
-                // ★★ **合成 ID には車両が存在しない。** 探しに行くと、
-                //    <c>InstanceManager.GetAllGroupInstances</c> が
-                //    <b>その番号を災害 ID として扱う</b>ので、
-                //    無関係な災害の車両を拾いうる。
+                // ★★ **A synthetic ID has no vehicle.** Go looking for one and
+                //    <c>InstanceManager.GetAllGroupInstances</c> <b>treats that number as
+                //    a disaster ID</b>, so we could pick up the vehicle of an unrelated
+                //    disaster.
                 if (IsSynthetic(views[i].DisasterId)) continue;
 
                 if (views[i].VehicleId != 0) continue;
@@ -74,14 +81,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 災害グループに属する車両のうち、渦の VehicleAI を持つものを探す。
-        /// TornadoAI.GetPosition が使っているのと同じ経路
-        /// （InstanceID.Disaster → InstanceManager.GetAllGroupInstances）を辿る。
+        /// Among the vehicles belonging to the disaster group, finds the one whose
+        /// VehicleAI is the vortex. Follows the same route TornadoAI.GetPosition uses
+        /// (InstanceID.Disaster → InstanceManager.GetAllGroupInstances).
         ///
-        /// disasterId が解放されて別の災害に使い回された場合、古い（VehicleId==0 のまま
-        /// 待っている）レジストリのエントリが無関係な渦車両を拾ってしまう恐れがある。
-        /// そうなるとバニラの竜巻が誤って固定されてしまう（このパッチが最も避けたい事故）ので、
-        /// 見つけた候補が自分の発生地点 (expectedCenter) から離れすぎていないかを必ず確認する。
+        /// If a disasterId has been released and reused for another disaster, an old
+        /// registry entry (still waiting with VehicleId==0) risks picking up an unrelated
+        /// vortex vehicle. That would pin one of vanilla's tornadoes by mistake — the
+        /// accident this patch most wants to avoid — so we always check that the candidate
+        /// we found is not too far from our own spawn point (expectedCenter).
         /// </summary>
         private static ushort FindVortexVehicle(ushort disasterId, Vec3 expectedCenter)
         {
@@ -105,8 +113,9 @@ namespace DisasterPlus.Game
                 float dz = pos.z - expectedCenter.Z;
                 if (dx * dx + dz * dz > MaxAttachDistanceSq)
                 {
-                    // 遠すぎる = disasterId 使い回しで無関係な渦を拾った可能性。
-                    // ここで固定してしまうとバニラの竜巻が動かなくなるので、候補として採用しない。
+                    // Too far away = we may have picked up an unrelated vortex through a
+                    // reused disasterId. Pinning it here would stop one of vanilla's
+                    // tornadoes moving, so we do not accept it as a candidate.
                     Log.Diag("fwAttachReject",
                         "vortex vehicle " + v + " for disaster " + disasterId +
                         " is too far from expected centre; rejecting (stale/reused id?)");
@@ -119,30 +128,34 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 寿命が尽きた旋風を、バニラの解体経路に乗せる。
+        /// Puts a whirl whose lifetime has run out onto vanilla's teardown path.
         ///
-        /// 車両を自前で解放しない。移動目標を現在位置に置けば、やがて
-        /// VortexAI.ArriveAtDestination が true を返し（m_waitCounter > 4）、
-        /// バニラが DisasterAI.DeactivateNow と Vehicle.Unspawn を正しく実行する。
+        /// We do not release the vehicle ourselves. Put the movement target at the current
+        /// position and in due course VortexAI.ArriveAtDestination returns true
+        /// (m_waitCounter > 4), and vanilla correctly performs DisasterAI.DeactivateNow
+        /// and Vehicle.Unspawn.
         ///
-        /// スロット 0 だけでは足りない（IL 実測で判明。設計書 5.6 の旧記述は誤り）。
-        /// VortexAI.SimulationStep(6 引数) は冒頭で
+        /// Slot 0 alone is not enough (established by reading the IL; the old text in §5.6
+        /// of the design document was wrong). VortexAI.SimulationStep (the 6-argument one)
+        /// opens with
         ///     if (LengthXZ(m_targetPos0 - frame.m_position) &lt; m_info.m_maxSpeed)
         ///         m_targetPos0 = m_targetPos1;
-        /// を行う。TornadoAI.ActivateDisaster は SetTargetPos(0, m_targetPosition) と
-        /// SetTargetPos(1, m_targetPosition - dir*(intensity*10+400)) を入れているので、
-        /// スロット 0 だけ現在位置に書いても次のステップで 1000m 先のスロット 1 に
-        /// 上書きされ、ArriveAtDestination には永遠に到達しない。両方に書く。
+        /// and TornadoAI.ActivateDisaster puts in SetTargetPos(0, m_targetPosition) and
+        /// SetTargetPos(1, m_targetPosition - dir*(intensity*10+400)), so writing only
+        /// slot 0 with the current position gets overwritten on the next step by slot 1,
+        /// 1000 m away, and ArriveAtDestination is never reached. Write both.
         ///
-        /// w は 0 にする。バニラは Vector3 -&gt; Vector4 の暗黙変換で目標を入れており
-        /// （ActivateDisaster の IL に op_Implicit）、VortexAI 側も Vector4 -&gt; Vector3 の
-        /// 暗黙変換で読むだけなので w は元から 0 で、意味を持たない。
+        /// We set w to 0. Vanilla puts the target in through the implicit
+        /// Vector3 -&gt; Vector4 conversion (the op_Implicit in ActivateDisaster's IL) and
+        /// VortexAI only reads it back through the implicit Vector4 -&gt; Vector3
+        /// conversion, so w was 0 to begin with and carries no meaning.
         /// </summary>
         public static void BeginEnding(FireWhirlView v)
         {
-            // ★★ **合成 ID はその場で畳む。** 借り物の災害も渦車両も無いので、
-            //    バニラの解体を待つ理由がまったく無い。
-            //    （待っていたのが実機ログの「deferring teardown」の山である。）
+            // ★★ **A synthetic ID is folded up on the spot.** There is no borrowed
+            //    disaster and no vortex vehicle, so there is no reason whatsoever to wait
+            //    for vanilla's teardown. (Waiting for it is what produced the pile of
+            //    "deferring teardown" lines in the in-game log.)
             if (IsSynthetic(v.DisasterId))
             {
                 FireWhirlRegistry.Remove(v.DisasterId, ModSettings.MaxLifetimeMinutes.value);
@@ -151,14 +164,16 @@ namespace DisasterPlus.Game
 
             if (v.VehicleId == 0)
             {
-                // 車両が付く前に寿命が尽きた。レジストリから外すだけだと、バニラの災害は
-                // 生きたまま追跡不能なドリフト竜巻になる。正規に停止できたときだけ外す。
+                // Its lifetime ran out before a vehicle was attached. Simply dropping it
+                // from the registry would leave vanilla's disaster alive as an untrackable
+                // drifting tornado. Drop it only once we have properly stopped it.
                 if (!TryDeactivateDisasterNow(v.DisasterId))
                 {
-                    // まだ Active になっていない（DisasterAI.DeactivateNow は
-                    // m_flags に Active が立っていなければ何もしない。IL 確認済み）。
-                    // Ending も付けずにこのまま生かし、次 tick に再判定させる。
-                    // 寿命判定は単調なので、Active になった時点で必ずここへ戻ってくる。
+                    // It is not Active yet (DisasterAI.DeactivateNow does nothing unless
+                    // Active is set in m_flags; confirmed in the IL). Leave it alive
+                    // without marking it Ending and let the next tick decide again. The
+                    // lifetime verdict is monotonic, so once it becomes Active we are
+                    // guaranteed to come back here.
                     Log.Diag("fwEndWait", "fire whirl " + v.DisasterId +
                              " is not active yet; deferring teardown");
                     return;
@@ -181,13 +196,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 渦車両を持たない災害をバニラの経路で止める。sim スレッド専用。
+        /// Stops a disaster that has no vortex vehicle, through vanilla's own path. Sim
+        /// thread only.
         ///
-        /// DisasterAI.DeactivateNow は public（IL 確認済み）だが、
-        /// m_flags に Active(8) が立っているときしか DeactivateDisaster に委譲しない。
-        /// まだ Emerging の災害には効かないので、その場合は false を返して呼び出し側に待たせる。
+        /// DisasterAI.DeactivateNow is public (confirmed in the IL), but it only delegates
+        /// to DeactivateDisaster when Active(8) is set in m_flags. It has no effect on a
+        /// disaster that is still Emerging, so in that case we return false and make the
+        /// caller wait.
         /// </summary>
-        /// <returns>災害が停止した（あるいは既に消えていた）なら true。まだ止められないなら false。</returns>
+        /// <returns>true if the disaster stopped (or had already gone). false if it cannot
+        /// be stopped yet.</returns>
         private static bool TryDeactivateDisasterNow(ushort disasterId)
         {
             try
@@ -195,7 +213,7 @@ namespace DisasterPlus.Game
                 var disasters = DisasterManager.instance.m_disasters.m_buffer;
                 if (disasterId == 0 || disasterId >= disasters.Length) return true;
 
-                // 既に消えている。掃除するだけでよい。
+                // It has already gone. All that is left is to tidy up.
                 if ((disasters[disasterId].m_flags & DisasterData.Flags.Created) == DisasterData.Flags.None)
                     return true;
 
@@ -207,7 +225,7 @@ namespace DisasterPlus.Game
                 {
                     Log.Warn("fire whirl " + disasterId +
                              " has no vortex vehicle and no DisasterInfo; leaving it to vanilla");
-                    return true;   // これ以上できることが無いので追跡だけやめる
+                    return true;   // nothing more we can do, so just stop tracking it
                 }
 
                 info.m_disasterAI.DeactivateNow(disasterId, ref disasters[disasterId]);
@@ -217,11 +235,11 @@ namespace DisasterPlus.Game
             catch (System.Exception e)
             {
                 Log.Error("could not deactivate vehicle-less fire whirl " + disasterId, e);
-                return true;   // 例外で毎 tick 再突入させない
+                return true;   // do not let an exception make us re-enter every tick
             }
         }
 
-        /// <summary>バニラに解体された旋風をレジストリから外す。</summary>
+        /// <summary>Drops whirls that vanilla has torn down from the registry.</summary>
         public static void CollectFinished()
         {
             var views = FireWhirlRegistry.Snapshot();
@@ -232,9 +250,10 @@ namespace DisasterPlus.Game
             {
                 ushort d = views[i].DisasterId;
 
-                // ★★ **合成 ID は災害バッファの添字ではない。** 見に行くと
-                //    範囲外か、他人の災害を読むことになる。畳むのは
-                //    <see cref="BeginEnding"/> と寿命の側の仕事である。
+                // ★★ **A synthetic ID is not an index into the disaster buffer.** Go
+                //    looking and you either run out of range or read somebody else's
+                //    disaster. Folding these up is the job of
+                //    <see cref="BeginEnding"/> and the lifetime side.
                 if (IsSynthetic(d)) continue;
 
                 if (d >= disasters.Length) { FireWhirlRegistry.Remove(d, cooldown); continue; }

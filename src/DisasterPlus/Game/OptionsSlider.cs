@@ -6,61 +6,66 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>設定画面のスライダーを 1 本置く。</b>**main スレッド（OnSettingsUI）専用。**
+    /// <b>Places one slider on the settings screen.</b> **Main thread (OnSettingsUI) only.**
     ///
-    /// ── 実機報告（2026-09-02、スクリーンショット付き）──────────────────
+    /// ── Report from the game (2026-09-02, with a screenshot) ──────────────────
     ///
-    /// &gt; Option パネルの UI で一部重複して操作がしづらいところがあります
-    /// &gt; （…修正後）治ってなかったです。
+    /// &gt; Parts of the Options panel UI overlap, which makes them awkward to use
+    /// &gt; (… after the fix) it wasn't fixed.
     ///
-    /// 送られてきた画像では、スライダーのラベルが 3 行に折り返したまま
-    /// <b>次のチェックボックスに重なって</b>いた。「風害…」の 3 行目と
-    /// 「Southern hemisphere」が同じ場所に描かれている、という壊れ方である。
+    /// In the image that came back, the slider's label was still wrapped over three lines and
+    /// <b>overlapping the next checkbox</b>. The third line of "Wind damage…" and
+    /// "Southern hemisphere" were being drawn in the same place — that is the breakage.
     ///
-    /// ── ★★ なぜ重なるのか（IL で確定）─────────────────────────────
+    /// ── ★★ Why they overlap (settled in the IL) ─────────────────────────────
     ///
-    /// <c>UIHelper.AddSlider</c> の中身は
+    /// The body of <c>UIHelper.AddSlider</c> is
     ///
     /// <code>
     /// UIPanel row = m_Root.AttachUIComponent(GetAsGameObject(kSliderTemplate));
     /// row.Find("Label").text = text;
     /// UISlider slider = row.Find("Slider");
     /// ...
-    /// return slider;                      // ★ 返るのは行ではなくスライダー
+    /// return slider;                      // ★ what comes back is the slider, not the row
     /// </code>
     ///
-    /// ★★ <b>行の高さはテンプレートの固定値のままである。</b>ラベルだけが
-    ///   折り返して伸びるので、はみ出した 2 行目以降が<b>次の行の領域へ食い込む</b>。
-    ///   親のオートレイアウトは行の高さしか見ないので、重なりは誰にも直されない。
+    /// ★★ <b>The row's height stays at the template's fixed value.</b> Only the label wraps
+    ///   and grows, so the second line onwards spills over and <b>eats into the area of the
+    ///   next row</b>. The parent's auto-layout only looks at the row height, so nobody
+    ///   fixes the overlap.
     ///
-    /// ── だから 2 段構えにする ────────────────────────────────────
+    /// ── So do it in two stages ────────────────────────────────────
     ///
     /// <list type="number">
-    /// <item><b>ラベルを短くする。</b>折り返さなければ問題は起きない。
-    ///   長い説明は<see cref="UIComponent.tooltip"/> へ移す ——
-    ///   説明を捨てるのではなく、<b>読みたい人だけが読む場所</b>へ置く。</item>
-    /// <item><b>それでも折り返したら行を伸ばす。</b>翻訳は英語より長くなることが
-    ///   あり、短いラベルでも他言語で 2 行になりうる。ここが最後の砦である。</item>
+    /// <item><b>Shorten the label.</b> If it does not wrap, the problem does not arise.
+    ///   Move the long explanation to <see cref="UIComponent.tooltip"/> — this is not
+    ///   throwing the explanation away, it is putting it <b>where only those who want it
+    ///   read it</b>.</item>
+    /// <item><b>If it wraps anyway, grow the row.</b> A translation can run longer than the
+    ///   English, so even a short label can take two lines in another language. This is the
+    ///   last line of defence.</item>
     /// </list>
     ///
-    /// ★ 失敗しても黙って諦める。**設定画面が開かなくなるより、少し不格好な方がまし**
-    ///   —— テンプレートの構造が将来変わっても、MOD の設定画面自体は開き続ける。
+    /// ★ Give up silently on failure. **A little ugliness beats a settings screen that will
+    ///   not open** — even if the template's structure changes in future, the mod's settings
+    ///   screen goes on opening.
     /// </summary>
     public static class OptionsSlider
     {
-        /// <summary>行の下に足す余白（px）。</summary>
+        /// <summary>Padding added below the row (px).</summary>
         private const float BottomPadding = 8f;
 
-        /// <summary>ラベルとスライダーのあいだ（px）。</summary>
+        /// <summary>The gap between the label and the slider (px).</summary>
         private const float LabelGap = 4f;
 
         private static bool _warned;
 
         /// <summary>
-        /// ラベルとツールチップを持つスライダーを足す。
+        /// Adds a slider with a label and a tooltip.
         /// </summary>
         /// <param name="tooltip">
-        /// 長い説明。<c>null</c> なら付けない。**ラベルに入り切らない話はここへ。**
+        /// The long explanation. <c>null</c> means none is attached. **Anything that will not
+        /// fit in the label goes here.**
         /// </param>
         public static void Add(UIHelperBase group, string label, string tooltip,
                                float min, float max, float step, float value,
@@ -75,7 +80,7 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ツールチップを付け、ラベルが折り返していれば行を伸ばす。
+        /// Attaches the tooltip and grows the row if the label has wrapped.
         /// </summary>
         private static void Fit(UISlider slider, string tooltip)
         {
@@ -84,19 +89,20 @@ namespace DisasterPlus.Game
                 var row = slider.parent as UIPanel;
                 if (row == null) return;
 
-                // ★ ツールチップは行ぜんぶに付ける。ラベルだけに付けると、
-                //   スライダーの上をなぞったときに出ない。
+                // ★ Attach the tooltip to the whole row. Attach it to the label alone and it
+                //   does not appear when you run over the slider.
                 if (!string.IsNullOrEmpty(tooltip)) row.tooltip = tooltip;
 
-                // "Label" / "Slider" という名前は AddSlider 自身が使っているので、
-                // ここで見つからないなら AddSlider も動いていない（クラス doc の IL）。
+                // The names "Label" / "Slider" are the ones AddSlider itself uses, so if they
+                // are not found here then AddSlider did not work either (see the IL in the
+                // class doc).
                 var label = row.Find<UILabel>("Label");
                 if (label == null) return;
 
                 float labelBottom = label.relativePosition.y + label.height;
                 float needed = labelBottom + LabelGap + slider.height + BottomPadding;
 
-                // 1 行で収まっているならテンプレートの高さで足りている。触らない。
+                // If it fits on one line, the template's height is enough. Leave it alone.
                 if (row.height >= needed) return;
 
                 slider.relativePosition = new Vector3(slider.relativePosition.x,
@@ -105,7 +111,7 @@ namespace DisasterPlus.Game
             }
             catch (Exception e)
             {
-                // 1 度だけ言う。スライダーの本数だけログが出ても読めない。
+                // Say it once. A log line per slider would be unreadable.
                 if (_warned) return;
                 _warned = true;
                 Log.Warn("could not fit an options slider row; a long label may overlap "

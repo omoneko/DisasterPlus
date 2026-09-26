@@ -3,107 +3,125 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 溶岩の<b>発光</b>。**時間の関数ではない。**
+    /// The lava's <b>glow</b>. **It is not a function of time.**
     ///
-    /// ── なぜ作り直したのか（2026-08-22、実機の指摘④）─────────────────────
+    /// ── Why it was rebuilt (2026-08-22, in-game report ④) ─────────────────────
     ///
-    /// > 熔岩流の光り方が点滅しているのはリアルではありません。（…）
-    /// > 噴火が終わっても光り続けているのは修正してください。
+    /// > The way the lava flow glows, flickering, is not realistic. (…)
+    /// > Please fix it still glowing after the eruption is over.
     ///
-    /// 別々の 2 つの不具合である。
+    /// These are two separate defects.
     ///
-    /// <b>1. 点滅。</b> 以前は帯のテクスチャに明暗の縞（正弦 3 周期）を焼き、
-    /// それを <c>SetTextureOffset</c> で毎フレーム 0.35/秒 で流していた。
-    /// 縞は帯の全長にちょうど 3 本しか無いので、**地面のある 1 点は 1 秒弱で
-    /// 明 → 暗 → 明を繰り返す**。これが「点滅」の正体である。
-    /// 実物の溶岩流は<b>冷えた黒い地殻</b>と、その板と板のあいだの<b>光る割れ目</b>で
-    /// できていて、**輝きは時間ではなく場所の関数**である。ゆっくり変わるのは
-    /// 「その場所が冷える」からであって、明るさが往復するからではない。
+    /// <b>1. The flicker.</b> The ribbon's texture used to have light and dark stripes
+    /// baked into it (three cycles of a sinusoid), which were then scrolled at 0.35/second
+    /// every frame with <c>SetTextureOffset</c>. There are only exactly three stripes
+    /// across the ribbon's whole length, so **any one point on the ground goes bright →
+    /// dark → bright in a little under a second**. That is what "flickering" actually was.
+    /// Real lava flows are made of <b>a cooled black crust</b> and <b>glowing cracks</b>
+    /// between the plates of it, and **the glow is a function of place, not of time**. What
+    /// changes slowly does so because "that place is cooling", not because the brightness
+    /// goes back and forth.
     ///
-    /// <b>2. 噴火が終わっても光り続ける。</b> 以前の色は
-    /// <c>k = 0.15 + 0.85 × cool</c>、不透明度 <c>0.55 + 0.45 × cool</c> で、
-    /// <c>cool = 0</c>（＝冷え切った）でも <b>k = 0.15 / α = 0.55</b> が残っていた。
-    /// **どれだけ待っても消えない式だった。** しかも描画側は軌跡の配列が残っている
-    /// かぎり描き続けるので、位相が <c>Done</c> になっても帯はそこに在り続ける。
+    /// <b>2. Still glowing after the eruption is over.</b> The old colour was
+    /// <c>k = 0.15 + 0.85 × cool</c> with opacity <c>0.55 + 0.45 × cool</c>, so even at
+    /// <c>cool = 0</c> (i.e. cooled right through) <b>k = 0.15 and α = 0.55</b> remained.
+    /// **It was a formula that never went out, however long you waited.** And on top of
+    /// that the drawing side keeps drawing for as long as the trail array is there, so even
+    /// once the phase became <c>Done</c> the ribbon went on existing.
     ///
-    /// ── 場所の関数としての明るさ ─────────────────────────────────
+    /// ── Brightness as a function of place ─────────────────────────────────
     ///
-    /// <c>u</c> は帯を横切る向き（0 と 1 が縁）、<c>v</c> は帯に沿う向きで、
-    /// **<c>v = 0</c> が火口、<c>v = 1</c> が前進端**である（<c>LavaRibbon</c> が
-    /// 折れ線の添字をそのまま <c>v</c> にしている）。明るいのは 2 か所だけ:
+    /// <c>u</c> runs across the ribbon (0 and 1 are the edges) and <c>v</c> runs along it,
+    /// with **<c>v = 0</c> the vent and <c>v = 1</c> the advancing front**
+    /// (<c>LavaRibbon</c> uses the polyline index directly as <c>v</c>). Only two places
+    /// are bright:
     ///
     /// <list type="number">
-    /// <item><b>火口</b>（<c>v ≒ 0</c>）—— 供給され続けているので冷えない</item>
-    /// <item><b>前進端</b>（<c>v ≒ 1</c>）—— 地殻が割れて中身が出るので、いちばん明るい</item>
+    /// <item><b>The vent</b> (<c>v ≈ 0</c>) — it is continuously supplied, so it does not
+    /// cool</item>
+    /// <item><b>The advancing front</b> (<c>v ≈ 1</c>) — the crust breaks and the insides
+    ///   come out, so it is the brightest of all</item>
     /// </list>
     ///
-    /// そのあいだは<b>冷えた地殻</b>で、光っているのは割れ目だけである。
+    /// Between them is <b>cooled crust</b>, where only the cracks glow.
     ///
-    /// ★★ <b>これが「年齢とともに冷える」の実装でもある。</b> 溶岩が前へ進むと
-    ///   折れ線に点が増え、既に置かれた場所の <c>v</c> は**小さいほうへずれる** ——
-    ///   つまり前進端の輝きの帯から外れて地殻の側へ入っていく。
-    ///   時間を 1 つも参照せずに、場所が冷えていく。
+    /// ★★ <b>This is also the implementation of "cooling with age".</b> As the lava
+    ///   advances, points are added to the polyline and the <c>v</c> of a place already
+    ///   laid down **shifts towards smaller values** — that is, it leaves the bright band
+    ///   at the advancing front and moves into the crust.
+    ///   A place cools without a single reference to time.
     ///
-    /// ── 全体の減衰 ───────────────────────────────────────
+    /// ── The overall fade ───────────────────────────────────────
     ///
-    /// <see cref="CoolFade"/> は <c>VolcanoLava.CoolUnit</c>（1 = まだ熱い、
-    /// 0 = 冷え切った）を受けて **0 でちょうど 0 を返す**。
-    /// <see cref="Visible"/> が false になったら描画側は面ごと畳む。
-    /// 「薄く光り続ける」余地をどこにも残さない。
+    /// <see cref="CoolFade"/> takes <c>VolcanoLava.CoolUnit</c> (1 = still hot, 0 = cooled
+    /// right through) and **returns exactly 0 at 0**.
+    /// Once <see cref="Visible"/> goes false, the drawing side folds the whole surface away.
+    /// No room anywhere for "goes on glowing faintly".
     /// </summary>
     public static class LavaGlow
     {
         /// <summary>
-        /// 焼くテクスチャの 1 辺。**Game 側と tools/VolcanoPreview がこれを共有する** ——
-        /// 割れ目の細かさ（<see cref="CrackAlong"/> / <see cref="CrackAcross"/>）は
-        /// この解像度で線に見えるように決めてあるので、片方だけ変えると
-        /// 実機とオフラインの絵が食い違う。実費は 128² × 4 B = 64 KB である。
+        /// The side length of the texture we bake. **The Game side and
+        /// tools/VolcanoPreview share this** — the fineness of the cracks
+        /// (<see cref="CrackAlong"/> / <see cref="CrackAcross"/>) is chosen so that they
+        /// read as lines at this resolution, so changing one without the other makes the
+        /// in-game and offline pictures disagree. The actual cost is 128² × 4 B = 64 KB.
         /// </summary>
         public const int TextureSize = 128;
 
-        /// <summary>火口側で光っている割合（帯の全長に対して）。</summary>
+        /// <summary>The fraction that glows at the vent end (relative to the ribbon's whole
+        /// length).</summary>
         public const float VentGlowFraction = 0.10f;
 
-        /// <summary>前進端で光っている割合（同上）。**いちばん明るいのはここ。**</summary>
+        /// <summary>The fraction that glows at the advancing front (likewise). **This is the
+        /// brightest part.**</summary>
         public const float FrontGlowFraction = 0.13f;
 
-        /// <summary>火口の輝きの強さ（前進端を 1 として）。</summary>
+        /// <summary>How bright the vent's glow is (taking the advancing front as 1).</summary>
         public const float VentGlowStrength = 0.85f;
 
-        /// <summary>地殻そのものの明るさ。**0 ではない**（余熱で赤黒く見える）。</summary>
+        /// <summary>The brightness of the crust itself. **Not 0** (residual heat makes it look
+        /// a dark red).</summary>
         public const float CrustFloor = 0.05f;
 
-        /// <summary>割れ目がどれだけ明るいか（地殻に対して足す量）。</summary>
+        /// <summary>How bright the cracks are (the amount added on top of the crust).</summary>
         public const float CrackStrength = 0.55f;
 
-        /// <summary>割れ目の細かさ（帯に沿う向きの繰り返し数）。</summary>
+        /// <summary>The fineness of the cracks (repeat count in the direction along the
+        /// ribbon).</summary>
         public const float CrackAlong = 10f;
 
-        /// <summary>割れ目の細かさ（帯を横切る向きの繰り返し数）。</summary>
+        /// <summary>The fineness of the cracks (repeat count in the direction across the
+        /// ribbon).</summary>
         public const float CrackAcross = 2.4f;
 
-        /// <summary>割れ目とみなす幅。細いほど「板と板の隙間」に見える。</summary>
+        /// <summary>The width counted as a crack. The narrower it is, the more it reads as
+        /// "the gap between two plates".</summary>
         public const float CrackWidth = 0.25f;
 
         /// <summary>
-        /// 冷え方の指数。**画面の明るさは この値の 2 乗**（色と不透明度の両方に掛かる）
-        /// なので、1 未満にして「しばらく赤いまま、終わりへ向かって一気に暗くなる」形にする。
+        /// The exponent of the cooling. **The brightness on screen goes as the square of
+        /// this value** (it multiplies both the colour and the opacity), so keep it below 1
+        /// to get the shape "stays red for a while, then darkens sharply towards the end".
         /// </summary>
         public const float CoolFadePower = 0.75f;
 
-        /// <summary>これ以下の冷え具合では 1 枚も描かない（＝完全に消える）。</summary>
+        /// <summary>At or below this much heat left, not one surface is drawn (i.e. it
+        /// disappears completely).</summary>
         public const float InvisibleBelow = 0.02f;
 
         /// <summary>
-        /// 帯に沿った位置 <paramref name="v"/>（0 = 火口、1 = 前進端）での輝き <c>[0,1]</c>。
-        /// **時間は 1 つも入らない。**
+        /// The glow <c>[0,1]</c> at position <paramref name="v"/> along the ribbon
+        /// (0 = the vent, 1 = the advancing front).
+        /// **Time does not enter into it at all.**
         /// </summary>
         public static float AlongFlowUnit(float v)
         {
             if (IsBad(v)) return 0f;
             float t = v < 0f ? 0f : (v > 1f ? 1f : v);
 
-            // 前進端。地殻が割れて中身が出るので、いちばん明るい。
+            // The advancing front. The crust breaks and the insides come out, so it is the
+            // brightest.
             float front = 0f;
             float toFront = 1f - t;
             if (FrontGlowFraction > 0f && toFront < FrontGlowFraction)
@@ -111,7 +129,7 @@ namespace DisasterPlus.Core.Volcano
                 front = 1f - toFront / FrontGlowFraction;
             }
 
-            // 火口。供給され続けているので冷えない。
+            // The vent. It is continuously supplied, so it does not cool.
             float vent = 0f;
             if (VentGlowFraction > 0f && t < VentGlowFraction)
             {
@@ -119,17 +137,18 @@ namespace DisasterPlus.Core.Volcano
             }
 
             float glow = front > vent ? front : vent;
-            // 端の立ち上がりを滑らかに（角のある帯は「塗り」に見える）。
+            // Smooth the rise at the ends (a band with sharp corners reads as "paint").
             return glow * glow * (3f - 2f * glow);
         }
 
         /// <summary>
-        /// 割れ目（板と板のあいだ）の明るさ <c>[0,1]</c>。**場所だけの関数**で、
-        /// 帯を斜めに横切る細い線が不規則に並ぶ。
+        /// The brightness <c>[0,1]</c> of a crack (the gap between two plates). **A function
+        /// of place alone**, giving irregularly spaced thin lines running diagonally across
+        /// the ribbon.
         ///
-        /// 正弦をそのまま明るさにすると「波板」になるので、
-        /// <see cref="VolcanoRelief"/> の放射谷と同じ**零交差**を使う ——
-        /// 割れ目は細く、板は広く平らになる。
+        /// Using a sinusoid directly as the brightness gives "corrugated iron", so we use
+        /// the same **zero crossings** as <see cref="VolcanoRelief"/>'s radial gullies —
+        /// which makes the cracks narrow and the plates broad and flat.
         /// </summary>
         public static float CrackUnit(float u, float v)
         {
@@ -147,21 +166,22 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// その一点の輝き <c>[0,1]</c>。地殻 ＋ 割れ目 ＋ 両端の熱い帯。
-        /// **1 を超えない。**
+        /// The glow <c>[0,1]</c> at that one point. Crust + cracks + the hot bands at each
+        /// end. **It never exceeds 1.**
         /// </summary>
         public static float GlowUnit(float u, float v)
         {
             float ends = AlongFlowUnit(v);
 
-            // ★ 割れ目は 1 回だけ評価する（三角関数 3 回）。2 回呼ぶと、
-            //   128² のテクスチャを焼くたびに sin が 10 万回近く走る。
+            // ★ Evaluate the cracks only once (three trigonometric calls). Call it twice
+            //   and baking a 128² texture runs sin close to a hundred thousand times.
             float crack = CrackUnit(u, v);
 
             float crust = CrustFloor + CrackStrength * crack;
             float glow = ends > crust ? ends : crust;
 
-            // 端の熱い帯では割れ目の模様も一緒に明るくなる（板ごと溶けている）。
+            // In the hot bands at the ends, the crack pattern brightens along with them
+            // (the plates themselves are melting).
             glow += ends * CrackStrength * crack * 0.5f;
 
             if (glow < 0f) return 0f;
@@ -169,8 +189,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 帯を横切る向きの不透明度 <c>[0,1]</c>。縁で 0 になる山型で、
-        /// **溶岩の縁がぼやける**（切り紙のような直線の縁にしない）。
+        /// The opacity <c>[0,1]</c> in the direction across the ribbon. A peaked shape going
+        /// to 0 at the edges, so that **the lava's edges blur** (rather than being the
+        /// straight edges of cut paper).
         /// </summary>
         public static float AcrossFalloff(float u)
         {
@@ -181,20 +202,24 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 全体の減衰。<paramref name="coolUnit"/> は 1 が「まだ熱い」、0 が「冷え切った」。
-        /// **0 でちょうど 0 を返す** —— 「薄く光り続ける」余地を残さない（指摘④）。
+        /// The overall fade. In <paramref name="coolUnit"/>, 1 is "still hot" and 0 is
+        /// "cooled right through".
+        /// **Returns exactly 0 at 0** — no room left for "goes on glowing faintly"
+        /// (report ④).
         /// </summary>
         public static float CoolFade(float coolUnit)
         {
             if (IsBad(coolUnit) || coolUnit <= 0f) return 0f;
             float c = coolUnit > 1f ? 1f : coolUnit;
-            // ★ 画面に出る明るさは**この値の 2 乗**である（色と不透明度の両方に
-            //   掛かるため）。したがって指数 0.75 で「しばらく赤いまま、終わりへ
-            //   向かって一気に暗くなる」——実物の溶岩の見え方に近い形になる。
+            // ★ The brightness that reaches the screen is **the square of this value**
+            //   (because it multiplies both the colour and the opacity). So an exponent of
+            //   0.75 gives "stays red for a while, then darkens sharply towards the end" —
+            //   a shape close to how real lava looks.
             return (float)Math.Pow(c, CoolFadePower);
         }
 
-        /// <summary>まだ描くべきか。false になったら描画側は面ごと畳む。</summary>
+        /// <summary>Should it still be drawn? Once this goes false, the drawing side folds the
+        /// whole surface away.</summary>
         public static bool Visible(float coolUnit)
         {
             return !IsBad(coolUnit) && coolUnit > InvisibleBelow;

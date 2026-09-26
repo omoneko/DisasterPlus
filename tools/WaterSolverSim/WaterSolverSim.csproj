@@ -8,15 +8,17 @@
     <RootNamespace>DisasterPlus.Tools.WaterSolverSim</RootNamespace>
     <LangVersion>7.3</LangVersion>
 
-    <!-- ★ このツールは 1 フレームあたり N*N セルを 2 周する。Debug の未最適化コードだと
-         512x512 で 1 フレーム 0.2 秒近くかかり、1500 フレームの確認が現実的でなくなる。
-         `dotnet run` は既定で Debug 構成なので、構成に関係なく最適化を有効にしておく。 -->
+    <!-- ★ This tool walks N*N cells twice for every frame. With unoptimised Debug code a
+         single frame at 512x512 takes close to 0.2 seconds, which makes checking 1500
+         frames impractical. `dotnet run` uses the Debug configuration by default, so
+         optimisation is turned on here whatever the configuration is. -->
     <Optimize>true</Optimize>
   </PropertyGroup>
 
-  <!-- Core の実物をそのままコンパイルする。**書き直した近似ではない。**
-       ここで要るのは DisasterPlus.Core.Earthquake.TsunamiSource（外力の段取り）で、
-       MOD が実機で使うのと 1 バイトも違わないものを駆動源にするため。 -->
+  <!-- Compile the real Core sources as they are. **Not a rewritten approximation.**
+       What is needed here is DisasterPlus.Core.Earthquake.TsunamiSource (the staging of the
+       forcing), so that what drives the simulation is not one byte different from what the
+       mod uses in the game. -->
   <ItemGroup>
     <Compile Include="..\..\src\DisasterPlus\Core\**\*.cs" />
     <Compile Include="..\Shared\Png.cs" />

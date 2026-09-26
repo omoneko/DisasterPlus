@@ -18,7 +18,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheDirectionIsNormalisedBeforeTheStepIsTaken()
         {
-            // 呼び出し側が長さ 1 でないベクトルを渡しても、歩幅は変わらない。
+            // Even if the caller passes a non-unit vector, the step length does not change.
             Vec2 a, b;
             LavaPath.NextPosition(new Vec2(0f, 0f), new Vec2(3f, 4f), 10f, out a);
             LavaPath.NextPosition(new Vec2(0f, 0f), new Vec2(30f, 40f), 10f, out b);
@@ -31,8 +31,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void AFlatOrPooledSpotStopsTheFlowInsteadOfDrifting()
         {
-            // 平らな場所で「とりあえず前へ」を続けると、溶岩が窪地を素通りして
-            // マップの端まで走り続ける。止めて溜まるのが正しい。
+            // Carrying on "forward anyway" over flat ground makes the lava sail past the
+            // hollow and keep running to the edge of the map. Stopping and pooling is right.
             Vec2 next;
             Assert.False(LavaPath.NextPosition(new Vec2(0f, 0f), new Vec2(0f, 0f), 12f, out next));
             Assert.False(LavaPath.NextPosition(new Vec2(0f, 0f),
@@ -42,7 +42,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void GarbageInputStopsTheFlowInsteadOfProducingNaN()
         {
-            // 「NaN の位置にある溶岩」は描画もグリッド走査も静かに壊す。
+            // "Lava at a NaN position" silently breaks both the drawing and the grid scan.
             Vec2 next;
             Assert.False(LavaPath.NextPosition(new Vec2(float.NaN, 0f), new Vec2(1f, 0f), 12f, out next));
             Assert.False(LavaPath.NextPosition(new Vec2(0f, 0f), new Vec2(float.NaN, 0f), 12f, out next));
@@ -54,7 +54,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheInitialDirectionsAreSpreadAroundTheCrater()
         {
-            // 全部同じ向きに出ると、火山の片側だけが溶岩に覆われる。
+            // If they all set off the same way, only one side of the volcano gets covered.
             const int n = 4;
             Vec2[] dirs = new Vec2[n];
             for (int i = 0; i < n; i++) dirs[i] = LavaPath.InitialDirection(7u, i, n);
@@ -98,7 +98,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             Vec2 one = LavaPath.InitialDirection(3u, 0, 1);
             float len = (float)System.Math.Sqrt(one.X * one.X + one.Z * one.Z);
             Assert.Equal(1f, len, 3);
-            // 範囲外の添字でも単位ベクトルを返し、NaN を出さない。
+            // Even an out-of-range index returns a unit vector and never produces NaN.
             Vec2 bad = LavaPath.InitialDirection(3u, 9, 4);
             Assert.False(float.IsNaN(bad.X) || float.IsNaN(bad.Z));
             Vec2 zero = LavaPath.InitialDirection(3u, 0, 0);
@@ -121,18 +121,20 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheVentSitsOutsideTheCraterRim()
         {
-            // ★ 縁の真上から出すと、下り方向が火口の内側を指して溶岩が窪みに溜まる。
-            //   必ず「比」と「絶対値」の両方より外へ出ること。
+            // ★ Vent right on top of the rim and the downhill direction points into the
+            //   crater, so the lava pools in the hollow. It must always sit outside both
+            //   the "ratio" and the "absolute" clearance.
             for (float crater = 40f; crater <= 400f; crater += 20f)
             {
                 float vent = LavaPath.VentRadiusMetres(crater);
                 Assert.True(vent >= crater * LavaPath.VentRimClearanceFactor - 0.001f);
                 Assert.True(vent >= crater + LavaPath.VentRimClearanceMetres - 0.001f);
-                // それでも山の外へ出るほどは離れない（いちばん小さい山でも半径 250 m）。
+                // Even so, not so far out that it leaves the mountain (even the smallest
+                // mountain has a radius of 250 m).
                 Assert.True(vent < 250f || crater > 180f);
             }
 
-            // 読めないときも中心から出さない（0 を返さない）。
+            // Even when it cannot be read, do not vent from the centre (never return 0).
             Assert.Equal(LavaPath.StepMetres, LavaPath.VentRadiusMetres(0f), 3);
             Assert.Equal(LavaPath.StepMetres, LavaPath.VentRadiusMetres(float.NaN), 3);
             Assert.Equal(LavaPath.StepMetres, LavaPath.VentRadiusMetres(-1f), 3);
@@ -141,7 +143,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheStepBudgetIsFiniteAndDeclared()
         {
-            // 「止まらない溶岩」を作らない。上限は定数として名乗る。
+            // Do not create "lava that never stops". The cap declares itself as a constant.
             Assert.InRange(LavaPath.MaxSteps, 1, 4096);
             Assert.True(LavaPath.StepMetres > 0f);
             Assert.True(LavaPath.MinSlope > 0f);

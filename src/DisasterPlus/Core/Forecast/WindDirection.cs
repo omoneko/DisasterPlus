@@ -1,14 +1,15 @@
 namespace DisasterPlus.Core.Forecast
 {
-    /// <summary>角度を 16 方位のラベルにする。</summary>
+    /// <summary>Turns an angle into one of the 16 compass-point labels.</summary>
     public static class WindDirection
     {
         private const int Sectors = 16;
         private const float SectorWidth = 360f / Sectors;   // 22.5
 
         /// <summary>
-        /// ラベルは static readonly 配列で持ってよい。方位略号は英語固定で、
-        /// ローカライズ対象ではないため（言語で凍結する問題が起きない）。
+        /// These labels may live in a static readonly array. The compass abbreviations are
+        /// fixed English and are not localised, so the freeze-on-first-language problem
+        /// cannot arise here.
         /// </summary>
         private static readonly string[] Labels =
         {
@@ -20,11 +21,11 @@ namespace DisasterPlus.Core.Forecast
         {
             if (float.IsNaN(degrees) || float.IsInfinity(degrees)) return "?";
 
-            // 負の角度と 360 超えの両方を 0-360 に畳む。
+            // Fold both negative angles and angles past 360 back into 0-360.
             float d = degrees % 360f;
             if (d < 0f) d += 360f;
 
-            // セクタ中心を境界にするため半セクタ分ずらしてから割る。
+            // Shift by half a sector before dividing, so the sector centres land on the boundaries.
             int index = (int)((d + SectorWidth * 0.5f) / SectorWidth);
             if (index >= Sectors) index -= Sectors;
             if (index < 0) index = 0;

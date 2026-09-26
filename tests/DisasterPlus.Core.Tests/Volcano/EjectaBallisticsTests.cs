@@ -6,22 +6,24 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 噴石の弾道。**固定するのは「落ちる」「大きいほど遠い」「山の大きさに追従する」**の
-    /// 3 つと、異常入力で NaN を外へ出さないことである。見た目そのものは
-    /// tools/VolcanoPreview が描いて目で確かめる。
+    /// The ballistics of volcanic blocks. **What is pinned down are the three properties
+    /// "it comes down", "bigger goes further" and "it follows the size of the mountain"**,
+    /// plus never letting a NaN escape on bad input. The look itself is drawn by
+    /// tools/VolcanoPreview and checked by eye.
     /// </summary>
     public class EjectaBallisticsTests
     {
         private const uint Seed = 0x1A2B3C4Du;
         private const float R = 1200f;
         private const float H = 600f;
-        private const float Vent = 540f;   // 火口の底（成層の既定でおよそこの高さ）
+        private const float Vent = 540f;   // the crater floor (roughly this height for the
+                                           // stratovolcano default)
 
         [Fact]
         public void EveryBlockLandsInFiniteTime()
         {
-            // ★ 位相機械が止まらないことの担保。飛び続ける岩が 1 個でもあると、
-            //   その枠は噴火が終わるまで塞がったままになる。
+            // ★ The guarantee that the phase machine never stalls. If even one rock keeps
+            //   flying, its slot stays occupied until the eruption ends.
             for (int blast = 0; blast < 24; blast++)
             {
                 for (int i = 0; i < EjectaBallistics.MaxBlocksPerBlast; i++)
@@ -29,8 +31,8 @@ namespace DisasterPlus.Core.Tests.Volcano
                     EjectaBlock b = EjectaBallistics.Plan(Seed, blast, i, 1f,
                                                           VolcanoForm.Strato, R, H, Vent);
                     Assert.True(b.Valid, "block " + blast + "/" + i + " has no trajectory");
-                    // ★ 帽子（MaxFlightSeconds）に**当たっていない**ことまで見る。
-                    //   当たっていたら、その岩は空中で止まったまま消えることになる。
+                    // ★ We also check that it has **not** hit the cap (MaxFlightSeconds).
+                    //   If it had, that rock would simply vanish while frozen in mid-air.
                     Assert.True(b.FlightSeconds > 0f
                                 && b.FlightSeconds < 40f,
                         "flight " + b.FlightSeconds + " s is not finite and sane");
@@ -43,8 +45,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void BiggerBlocksTravelFurther()
         {
-            // 所有者の依頼そのもの（「larger ones travelling further」）。
-            // 同じ噴出の中で、大きさの上位と下位を比べる。
+            // The owner's request itself ("larger ones travelling further").
+            // Within the same blast, compare the largest and the smallest blocks.
             float smallSum = 0f, bigSum = 0f;
             int smallCount = 0, bigCount = 0;
 
@@ -70,16 +72,17 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSpreadFollowsTheSizeOfTheMountain()
         {
-            // ★ ⑤はプレイヤーが大きさを選べる機能である。半径 350 m の溶岩ドームから
-            //   2 km 岩が飛んだら、それは物理ではなく不具合に見える。
+            // ★ Feature no. 5 lets the player choose the size. If a rock flew 2 km from a
+            //   lava dome with a radius of 350 m, that would look like a bug, not physics.
             float small = LongestRange(VolcanoForm.Dome, 350f, 300f, 270f);
             float large = LongestRange(VolcanoForm.Strato, R, H, Vent);
 
             Assert.True(large > small * 2f,
                 "the spread does not scale with the cone: " + large + " vs " + small);
-            // ★ 平地に落ちるとした飛距離より実際は伸びる —— 噴出口が火口の底
-            //   （ここでは 270 m）に在って、そこより低い裾へ落ちるからである。
-            //   その伸びを含めても、山 2 個ぶんより外へは行かない。
+            // ★ The real range is longer than the range assuming it lands on flat ground ——
+            //   because the vent sits on the crater floor (270 m here) and the block falls
+            //   to the lower slopes below it. Even with that extra reach it never goes
+            //   beyond two mountains' worth.
             Assert.True(small < 350f * 2.2f,
                 "the small cone throws blocks far beyond its own footprint: " + small);
         }
@@ -91,7 +94,7 @@ namespace DisasterPlus.Core.Tests.Volcano
                                                   VolcanoForm.Strato, R, H, Vent);
             Assert.True(b.Valid);
 
-            // 途中は必ず地面より上。
+            // In flight it is always above the ground.
             for (int i = 1; i < 10; i++)
             {
                 float t = b.FlightSeconds * i / 10f;
@@ -104,7 +107,8 @@ namespace DisasterPlus.Core.Tests.Volcano
                     "the block is underground at t=" + t + " (" + (Vent + dy) + " vs " + ground + ")");
             }
 
-            // 着弾では地面と一致する（二分法の刻み 0.15 ms ぶんの誤差だけ）。
+            // On impact it coincides with the ground (only the 0.15 ms step of the bisection
+            // as error).
             float lx, ly, lz;
             EjectaBallistics.OffsetAt(b, b.FlightSeconds, out lx, out ly, out lz);
             float landDistance = (float)Math.Sqrt(lx * lx + lz * lz);
@@ -116,7 +120,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSameBlastAlwaysThrowsTheSameBlocks()
         {
-            // フレーム番号を種に混ぜていないことの担保。混ぜると飛行中に行き先が変わる。
+            // The guarantee that the frame number is not mixed into the seed. Mix it in and
+            // the destination changes mid-flight.
             EjectaBlock a = EjectaBallistics.Plan(Seed, 5, 1, 0.7f,
                                                   VolcanoForm.Strato, R, H, Vent);
             EjectaBlock b = EjectaBallistics.Plan(Seed, 5, 1, 0.7f,
@@ -140,7 +145,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void BadInputIsRefusedAndNeverNaN()
         {
-            // .cgs も地形も手で編集されうる。**0 で代用せず「使えない」を返す。**
+            // Both the .cgs and the terrain can be edited by hand. **Do not substitute 0;
+            // return "unusable".**
             foreach (float bad in new float[] { 0f, -1f, float.NaN, float.PositiveInfinity })
             {
                 Assert.False(EjectaBallistics.Plan(Seed, 0, 0, 1f,
@@ -152,13 +158,13 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.False(EjectaBallistics.Plan(Seed, -1, 0, 1f,
                          VolcanoForm.Strato, R, H, Vent).Valid);
 
-            // 噴出口の高さが壊れていても弾道は成立する（0 に落とす）。
+            // The trajectory still holds when the vent height is broken (it falls back to 0).
             EjectaBlock ok = EjectaBallistics.Plan(Seed, 0, 0, 1f,
                                                    VolcanoForm.Strato, R, H, float.NaN);
             Assert.True(ok.Valid);
             Assert.False(float.IsNaN(ok.FlightSeconds));
 
-            // 無効な枠に位置を聞いても 0 が返るだけ（NaN を外へ出さない）。
+            // Asking an invalid slot for a position just returns 0 (no NaN escapes).
             float dx, dy, dz;
             EjectaBallistics.OffsetAt(default(EjectaBlock), 1f, out dx, out dy, out dz);
             Assert.Equal(0f, dx);
@@ -181,7 +187,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.Equal(EjectaBallistics.MaxBlocksPerBlast,
                          EjectaBallistics.BlocksPerBlast(1f));
 
-            // NaN は 0 と同じ扱い（いちばん静かな側）。
+            // NaN is treated the same as 0 (the quietest side).
             Assert.Equal(EjectaBallistics.MinBlocksPerBlast,
                          EjectaBallistics.BlocksPerBlast(float.NaN));
 

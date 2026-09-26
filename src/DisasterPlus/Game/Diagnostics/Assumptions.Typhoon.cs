@@ -4,37 +4,40 @@ using System.Reflection;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="Assumptions"/> のうち④台風 の前提。
+    /// The part of <see cref="Assumptions"/> covering the ④ typhoon.
     ///
-    /// **このファイルには検証しか置かない。** <c>Check</c> / <c>SetResult</c> /
-    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> は本体側の private のままで、
-    /// partial なので可視性を 1 つも上げずに使える（分割の要件そのもの）。
+    /// **This file holds nothing but checks.** <c>Check</c> / <c>SetResult</c> /
+    /// <c>HasField</c> / <c>_gate</c> / <c>_results</c> stay private on the main side, and
+    /// because this is partial they can be used without raising a single visibility
+    /// (that is exactly the requirement behind the split).
     ///
-    /// 件数は <see cref="TyphoonCheckCount"/> がこのファイルの中で宣言する。
-    /// **検証を足したらここも増やすこと** —— 本体の <c>TotalCheckCount</c> は
-    /// これらの和である。
+    /// The count is declared inside this file by <see cref="TyphoonCheckCount"/>.
+    /// **If you add a check, bump it here too** — the main file's <c>TotalCheckCount</c> is
+    /// the sum of these.
     /// </summary>
     public static partial class Assumptions
     {
-        /// <summary>このファイルが持つ検証の数。</summary>
+        /// <summary>The number of checks this file holds.</summary>
         private const int TyphoonCheckCount = 9;
 
         private static void RunTyphoon()
         {
-            // --- ④台風（Task 2: 骨格・プレハブ実測）ここから ---
+            // --- ④ typhoon (Task 2: the skeleton, prefab measurements) starts here ---
 
-            // ②の EarthquakeAI の項目と同じ性質の検証で、**実行時にしか値が取れない**。
-            // m_radius / m_emergingDuration / m_activeDuration の実数値は DLL に無く
-            // （プレハブのシリアライズ値、IL 事実文書 §A-0、PARTIAL）、④の
-            // 暴風域半径も持続時間も**進行速度**も全部この 3 値の上に乗る
-            // （TyphoonTrack.SpeedFor は m_activeDuration が 0 なら 0 を返し、
-            //  呼び出し側は台風を 1 個も起こさない）。読めないなら読めないと
-            // 名指しする以外に防波堤が無い。
+            // A check of the same character as ②'s EarthquakeAI entry: **the value can be
+            // obtained at runtime and nowhere else**. The actual values of m_radius /
+            // m_emergingDuration / m_activeDuration are not in the DLL (they are prefab
+            // serialised values, IL findings document §A-0, PARTIAL), and ④'s storm-force
+            // radius, its lifetime and **its travel speed** all rest on these three numbers
+            // (TyphoonTrack.SpeedFor returns 0 when m_activeDuration is 0, and the caller then
+            // starts no typhoon at all). If they cannot be read there is no breakwater other
+            // than naming that fact.
             //
-            // DLC 非所持環境ではこれが FAIL するのが正常。TornadoAI / TsunamiAI の
-            // 項目が既に同じ性質を持っており、それが確立した扱いである。
-            // 母数からは外さない——台風機能そのものが DLC 依存なので、
-            // 「使えない」と名指しするのが正しい。
+            // FAIL is the normal outcome in an environment without the DLC. The TornadoAI /
+            // TsunamiAI entries already have the same character, and that is the established
+            // treatment.
+            // It is not taken out of the denominator — the typhoon feature itself depends on
+            // the DLC, so naming it "unavailable" is the right thing to do.
             Check("ThunderStormAI disaster prefab exposes m_radius / m_emergingDuration / "
                   + "m_activeDuration, and m_radius / m_activeDuration are non-zero",
                   "no typhoon can be started at all: its radius, its lifetime and its travel "
@@ -50,41 +53,45 @@ namespace DisasterPlus.Game
                       {
                           return false;
                       }
-                      // 副作用の無い純粋な走査を使う。TyphoonReader の内部キャッシュは
-                      // sim スレッドが回しており、main スレッドのここから巻き戻しては
-                      // いけない（EarthquakeAI の項目と同じ理由）。
+                      // Use a pure, side-effect-free scan. TyphoonReader's internal cache is
+                      // turned by the sim thread and must not be wound back from here on the
+                      // main thread (the same reason as the EarthquakeAI entry).
                       //
-                      // ★★ **StormResolved ではなく Usable を見る**（全体レビュー C1）。
-                      //    StormResolved は「プレハブという*オブジェクト*が見つかり、
-                      //    3 つのフィールドを読み終えた」だけで立つ ——
-                      //    **中身は 1 バイトも見ていない。** 台風を起こしてよいかを
-                      //    実際に決めているのは TyphoonPrefabFacts.Usable
-                      //    （＝ StormResolved && StormRadius > 0 && ActiveDuration > 0）で、
-                      //    TyphoonController.Start はそちらで断っている。
-                      //    ここが Resolved のままだと、m_radius か m_activeDuration が
-                      //    0 でデシリアライズされた環境で**ボタンを押しても何も起きないのに、
-                      //    ダンプも設定画面もこの検証だけ PASS と名乗る**。
-                      //    「読めた」を「使える」の代わりに使わない。
+                      // ★★ **Look at Usable, not StormResolved** (overall review C1).
+                      //    StormResolved is set merely because "the prefab *object* was found
+                      //    and the three fields were read" —
+                      //    **it has not looked at one byte of the contents.** What actually
+                      //    decides whether a typhoon may be started is
+                      //    TyphoonPrefabFacts.Usable
+                      //    (= StormResolved && StormRadius > 0 && ActiveDuration > 0), and
+                      //    TyphoonController.Start refuses on that.
+                      //    Leave this at Resolved and, in an environment where m_radius or
+                      //    m_activeDuration deserialised as 0, **pressing the button would do
+                      //    nothing while the dump and the settings screen both claim this one
+                      //    check PASSed.**
+                      //    Do not use "it could be read" in place of "it is usable".
                       return TyphoonReader.ScanPrefabFacts().Usable;
                   },
                   true);
 
-            // --- ④台風（Task 2）ここまで ---
+            // --- ④ typhoon (Task 2) ends here ---
 
-            // --- ④台風（Task 3: 論理オブジェクトと経路追従）ここから ---
+            // --- ④ typhoon (Task 3: the logical object and track following) starts here ---
 
-            // ④の移動機構そのもの。DisasterData.m_targetPosition を毎 sim tick 書き換えて
-            // 災害を動かす（IL 事実文書 §E-1。本タスクで全アセンブリの
-            // stfld DisasterData::m_targetPosition を走査し直し、既存の災害のそれを
-            // 書くバニラのコードが 1 つも無いことを再確認した）。
+            // ④'s movement mechanism itself. It moves the disaster by rewriting
+            // DisasterData.m_targetPosition every sim tick (IL findings document §E-1. In this
+            // task every stfld DisasterData::m_targetPosition across the whole assembly was
+            // swept again, re-confirming that there is no vanilla code writing that on an
+            // existing disaster).
             //
-            // m_activationFrame は罠 1 の見張りに使う——SelfTrigger が効いていなければ
-            // StartDisaster が即 return し、この値が 0 のままになる（§A-1 IL_003F）。
-            // ここが読めなければ見張りごと成立しないので、同じ項目で照合する。
+            // m_activationFrame is used as the lookout for trap 1 — if SelfTrigger is not in
+            // effect, StartDisaster returns immediately and this value stays 0 (§A-1 IL_003F).
+            // If this cannot be read the lookout does not stand at all, so it is checked in
+            // the same entry.
             //
-            // メソッドは引数の型まで指定して見る（②の BuildingAI.CollapseBuilding の
-            // 検査と同じ形）。名前だけの一致では、シグネチャが変わったときに
-            // 偽 PASS を出す。
+            // The methods are checked with their argument types specified (the same shape as
+            // ②'s BuildingAI.CollapseBuilding check). Matching on the name alone yields a
+            // false PASS when the signature changes.
             Check("DisasterData exposes m_targetPosition / m_angle / m_intensity / "
                   + "m_activationFrame, and DisasterAI.StartNow / DeactivateNow / "
                   + "ClampDisasterTarget are resolvable",
@@ -124,17 +131,18 @@ namespace DisasterPlus.Game
                           null) != null;
                   });
 
-            // --- ④台風（Task 3）ここまで ---
+            // --- ④ typhoon (Task 3) ends here ---
 
-            // --- ④台風（Task 4: 天候の駆動）ここから ---
+            // --- ④ typhoon (Task 4: driving the weather) starts here ---
 
-            // ④が天候を握る 6 フィールド（§A-4）。どれが欠けても**例外は出ず**、
-            // 台風が晴天の下を進むだけになる。
+            // The six fields by which ④ takes hold of the weather (§A-4). If any of them is
+            // missing **no exception is raised**; the typhoon simply travels under a clear sky.
             //
-            // m_forceWeatherOn だけは性質が違う。これが無いと、天候を切っている
-            // プレイヤーの環境で m_targetRain / Cloud / Fog が毎ステップ 0 へ潰される
-            // （IL_053D の枝）。「一部の環境でだけ静かに何も起きない」という、
-            // いちばん報告されにくい壊れ方をするので、名指しで検証する。
+            // m_forceWeatherOn alone is different in character. Without it, m_targetRain /
+            // Cloud / Fog are crushed to 0 on every step in the environment of a player who
+            // has weather switched off (the branch at IL_053D). That breaks in the way that is
+            // hardest of all to get reported — "quietly does nothing, but only in some
+            // environments" — so it is checked by name.
             Check("WeatherManager exposes m_targetRain / m_targetCloud / m_targetFog / "
                   + "m_targetDirection / m_forceWeatherOn / m_enableWeather",
                   "the typhoon cannot drive the weather; it would move across the map under "
@@ -150,17 +158,19 @@ namespace DisasterPlus.Game
                              && HasField(w, "m_enableWeather", typeof(bool));
                   });
 
-            // --- ④台風（Task 4）ここまで ---
+            // --- ④ typhoon (Task 4) ends here ---
 
-            // --- ④台風（Task 6: 落雷）ここから ---
+            // --- ④ typhoon (Task 6: lightning) starts here ---
 
-            // 落雷は**実体**で、BurnBuilding / BurnTree / CollapseSegment を起こす
-            // （IL 事実文書 §A-3）。このメソッドが解決できなければ台風は雷を 1 発も
-            // 運ばないが、**例外は出ず、嵐は動き天候も駆動され続ける** ——
-            // 「雷の少ない台風」に見えるだけで、原因を指すものが他に無い。
+            // Lightning is **substantial**: it causes BurnBuilding / BurnTree /
+            // CollapseSegment (IL findings document §A-3). If this method cannot be resolved
+            // the typhoon carries not a single bolt, but **no exception is raised, the storm
+            // moves and the weather goes on being driven** — it just looks like "a typhoon
+            // with not much lightning", and nothing else points at the cause.
             //
-            // 引数の型まで指定して見る（1 引数版 QueueLightningStrike(uint) が別に
-            // 存在するので、名前だけの一致では偽 PASS になる）。
+            // Check with the argument types specified (a one-argument
+            // QueueLightningStrike(uint) exists separately, so matching on the name alone
+            // gives a false PASS).
             Check("WeatherManager.QueueLightningStrike(uint, Vector3, Quaternion, "
                   + "InstanceManager.Group) is resolvable",
                   "the typhoon carries no lightning; the storm still moves and drives the "
@@ -177,32 +187,36 @@ namespace DisasterPlus.Game
                           null) != null;
                   });
 
-            // --- ④台風（Task 6）ここまで ---
+            // --- ④ typhoon (Task 6) ends here ---
 
-            // --- ④台風（Task 7: 風害）ここから ---
+            // --- ④ typhoon (Task 7: wind damage) starts here ---
 
-            // 風害の 3 経路。**どれが欠けても例外は出ない** ——
-            // 台風が通っても建物が 1 棟も倒れないだけになる。
+            // The three paths for wind damage. **If any is missing, no exception is raised** —
+            // the typhoon simply passes over without a single building falling.
             //
-            // CollapseBuilding は②が既に検証している 6 引数版と同じ形で見る。
-            // AddWind / DestroyTrees の並びは Task 7 Step 1 で IL 実測し、
-            // §B-1 が DestroyStuff の転送から導いていた並びと一致することを確認した:
+            // CollapseBuilding is checked in the same shape as the six-argument version ②
+            // already checks. The argument order of AddWind / DestroyTrees was measured from
+            // the IL in Task 7 Step 1, and confirmed to match the order §B-1 had derived from
+            // DestroyStuff's forwarding:
             //
             //   public static void AddWind(Vector3, float, Vector3, float, float,
             //                              InstanceManager.Group)
             //   public static void DestroyTrees(int, InstanceManager.Group, Vector3,
             //                                   float, float, float, float, float, float)
             //
-            // ★ DestroyTrees だけが解決できない場合はこの検査を FAIL にしない。
-            //   風害本体（倒壊と AddWind）は動くので、FAIL にすると狼少年になる。
-            //   倒木を諦めた事実は TyphoonWind が FeatureHost.NoteDegraded で名乗る。
+            // ★ Do not FAIL this check when only DestroyTrees cannot be resolved.
+            //   Wind damage proper (the collapses and AddWind) still works, so a FAIL would
+            //   cry wolf. The fact that felling trees was given up is stated by TyphoonWind
+            //   through FeatureHost.NoteDegraded.
             //
-            // ★★ **ただし「見ていないものを名前で名乗らない」**（全体レビュー）。
-            //    この検査は以前 "AddWind / DestroyTrees are reachable" と名乗りながら
-            //    DestroyTrees を 1 度も引いていなかった —— PASS が、一度も調べて
-            //    いない相手について断定していたことになる。合否には入れないが
-            //    **実際に引き、結果を名前に書く**。名前は Check に渡す前に組み立てる
-            //    （AssumptionResult は Name しか表示しないので、ここが唯一の出口）。
+            // ★★ **But: do not claim in the name something you have not looked at**
+            //    (overall review). This check used to call itself
+            //    "AddWind / DestroyTrees are reachable" while never once looking
+            //    DestroyTrees up — a PASS that asserted something about a thing it had never
+            //    examined. It does not count towards pass/fail, but it **is actually looked up
+            //    and the result written into the name**. The name is assembled before being
+            //    passed to Check (AssumptionResult only displays Name, so this is the only
+            //    outlet).
             Check("BuildingAI.CollapseBuilding is resolvable and DisasterHelpers.AddWind is "
                   + "reachable (DisasterHelpers.DestroyTrees: "
                   + (DestroyTreesIsReachable()
@@ -228,8 +242,9 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      // AddWind が無ければ演出だけでなく「風害の経路が丸ごと違う」
-                      // 合図なので、こちらは FAIL に含める。
+                      // If AddWind is absent that is a sign not merely about the visuals but
+                      // that "the whole wind damage path is different", so this one does count
+                      // towards a FAIL.
                       return typeof(DisasterHelpers).GetMethod("AddWind",
                           BindingFlags.Public | BindingFlags.Static, null,
                           new Type[]
@@ -241,24 +256,27 @@ namespace DisasterPlus.Game
                           null) != null;
                   });
 
-            // --- ④台風（Task 7）ここまで ---
+            // --- ④ typhoon (Task 7) ends here ---
 
-            // --- ④台風（Task 8: 河川氾濫）ここから ---
+            // --- ④ typhoon (Task 8: river flooding) starts here ---
 
-            // 氾濫の到達経路。**解決できなければ TyphoonFlood は 1 バイトも書かない。**
+            // The path flooding reaches through. **If it cannot be resolved, TyphoonFlood
+            // writes not one byte.**
             //
-            // Task 8 Step 1 で IL 実測して確定させたこと:
-            //   TerrainManager.WaterSimulation  … public インスタンスプロパティ
-            //                                     （裏は private m_waterSimulation）
+            // What was settled by measuring the IL in Task 8 Step 1:
+            //   TerrainManager.WaterSimulation  … a public instance property
+            //                                     (backed by a private m_waterSimulation)
             //   WaterSimulation.m_waterSources  … public FastList<WaterSource>
-            //   LockWaterSource(ushort)         … public、m_buffer[source - 1] を返す
-            //                                     （**1 基点**）。Monitor を取ったまま返る
-            //   UnlockWaterSource(ushort, WaterSource) … public、書き戻して Monitor.Exit
-            //   WaterSource                     … public struct、m_type / m_target は
-            //                                     public UInt16、TYPE_NATURAL = 1
+            //   LockWaterSource(ushort)         … public, returns m_buffer[source - 1]
+            //                                     (**1-based**). Returns while still holding
+            //                                     the Monitor
+            //   UnlockWaterSource(ushort, WaterSource) … public, writes back then Monitor.Exit
+            //   WaterSource                     … a public struct; m_type / m_target are
+            //                                     public UInt16, TYPE_NATURAL = 1
             //
-            // ★ 代替経路へ逃げないことを impact に書く。CreateWaterWave は内陸で
-            //   **何も起こさない**（津波の波はマップ外周リングでしか評価されない。§D-3(a)）。
+            // ★ The impact says that we do not run off to an alternative path. CreateWaterWave
+            //   **does nothing at all** inland (a tsunami wave is only evaluated on the map
+            //   border ring. §D-3(a)).
             Check("WaterSimulation is reachable and exposes m_waterSources / LockWaterSource / "
                   + "UnlockWaterSource, and WaterSource exposes m_type / m_target",
                   "river flooding cannot run. The mod does nothing rather than reaching for "
@@ -274,7 +292,8 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      // FastList<WaterSource> であることまで見る（実測で確認済み）。
+                      // Check as far as it being a FastList<WaterSource> (confirmed by
+                      // measurement).
                       if (!HasField(typeof(WaterSimulation), "m_waterSources",
                                     typeof(FastList<WaterSource>)))
                       {
@@ -295,29 +314,31 @@ namespace DisasterPlus.Game
                           return false;
                       }
 
-                      // ★ 型まで見る（全体レビュー）。ここのコメントは以前から
-                      //    「public UInt16」と断定していたのに、検査は名前しか見て
-                      //    いなかった。TyphoonFlood は ushort として読み書きする。
+                      // ★ Check the types as well (overall review). The comment here had long
+                      //    asserted "public UInt16", yet the check looked only at the names.
+                      //    TyphoonFlood reads and writes them as ushort.
                       return HasField(typeof(WaterSource), "m_type", typeof(ushort))
                              && HasField(typeof(WaterSource), "m_target", typeof(ushort));
                   });
 
-            // --- ④台風（Task 8）ここまで ---
+            // --- ④ typhoon (Task 8) ends here ---
 
-            // --- ④台風（竜巻並みの局所被害）ここから ---
+            // --- ④ typhoon (tornado-strength local damage) starts here ---
 
-            // ★★ **随伴竜巻の 2 件（VortexAI のプレハブ値と Vehicle.SetTargetPos の
-            //    操舵経路）はここから消えた。** バニラの竜巻災害を借りる機能そのものが
-            //    退役し、竜巻並みの被害は TyphoonGust が自前で出すようになったので、
-            //    どちらも「この MOD が依存していない事実」になった。
-            //    使っていない依存を検証し続けると、FAIL したときに何が壊れるのか
-            //    誰も答えられなくなる。
+            // ★★ **The two checks for the accompanying tornado (VortexAI's prefab values and
+            //    the steering path through Vehicle.SetTargetPos) have gone from here.** The
+            //    feature of borrowing vanilla's tornado disaster was itself retired, and
+            //    tornado-strength damage is now produced by TyphoonGust itself, so both became
+            //    "facts this mod does not depend on".
+            //    Keep checking a dependency you do not use and nobody can answer what breaks
+            //    when it FAILs.
             //
-            // 局所被害が実際に門にしているのは **BuildingAI.CollapseBuilding** ただ 1 本で、
-            // ④の風害と同じ経路である（DisasterHelpers は 1 度も通らない ＝
-            // Natural Disasters Renewal のパッチ面を完全に迂回する）。
-            // 引数の型まで指定して見る —— 名前だけの一致では、シグネチャが変わったときに
-            // 偽 PASS を出す。
+            // What the local damage actually gates on is the single
+            // **BuildingAI.CollapseBuilding**, the same path as ④'s wind damage
+            // (DisasterHelpers is never gone through at all = Natural Disasters Renewal's
+            // patch surface is bypassed completely).
+            // Check with the argument types specified — matching on the name alone gives a
+            // false PASS when the signature changes.
             Check("BuildingAI.CollapseBuilding(ushort, ref Building, InstanceManager.Group, "
                   + "bool, bool, ushort) is resolvable",
                   "the typhoon's tornado-strength damage patches cannot collapse anything, "
@@ -338,41 +359,45 @@ namespace DisasterPlus.Game
                           null) != null;
                   });
 
-            // --- ④台風（竜巻並みの局所被害）ここまで ---
+            // --- ④ typhoon (tornado-strength local damage) ends here ---
 
-            // --- ④台風（Task 9: 巨大な回転雲）ここから ---
+            // --- ④ typhoon (Task 9: the giant rotating cloud) starts here ---
 
-            // ④の雲は**全部自前**である。バニラに流用できる雲は 1 つも無く
-            // （DisasterInfo.m_effect はフィールドごと存在しない。§C-1）、バニラの雲は
-            // ワールド座標を持たないスカイドームなので合成もできない（§C-2）。
-            // したがって雲の生死は「自前のマテリアルが作れるか」だけに掛かっている。
+            // ④'s cloud is **entirely our own**. There is not one vanilla cloud that can be
+            // reused (DisasterInfo.m_effect does not exist as a field at all. §C-1), and
+            // vanilla's clouds are a sky dome with no world coordinates, so they cannot be
+            // composited either (§C-2).
+            // So whether the cloud lives or dies hangs on nothing but "can we build our own
+            // material".
             //
-            // ★ ここが FAIL のとき、④は**何も描かない**。CS のマテリアルを借りる
-            //   逃げ道は取らない —— CS のシェーダはエンジンが供給する per-instance
-            //   データを要求するので、自前の DrawMesh に載せると不可視か真っ黒になる
-            //   （VortexAI.RenderExtraStuff がその実例。§C-1 / 火災旋風 §4.9）。
-            //   将来のゲーム更新でシェーダ名が変わったとき、黙って雲が消えるのではなく
-            //   ここが名指しする。
+            // ★ When this FAILs, ④ **draws nothing**. It does not take the escape route of
+            //   borrowing a CS material — CS's shaders demand per-instance data supplied by
+            //   the engine, so putting one on a hand-rolled DrawMesh comes out invisible or
+            //   pitch black (VortexAI.RenderExtraStuff is the worked example. §C-1 / fire
+            //   whirl §4.9).
+            //   When a future game update changes a shader name, this names it rather than the
+            //   cloud silently disappearing.
             //
-            // ShaderPool は main スレッド専用だが、Run() 自体が main スレッド専用なので
-            // 問題ない。**DayNightDynamicCloudsProperties の実在はここに入れない** ——
-            // 無いのは正当な環境（DLC・グラフィック設定）で、④の自前の雲には
-            // 影響しないため（FAIL にすると狼少年になる）。
+            // ShaderPool is main thread only, but Run() is itself main thread only, so that is
+            // fine. **The existence of DayNightDynamicCloudsProperties does not go in here** —
+            // its absence is a legitimate environment (DLC, graphics settings) and has no
+            // effect on ④'s own cloud (a FAIL would cry wolf).
             //
-            // ★★ **述語に「Standard が取れた」を混ぜない**（全体レビュー）。
-            //    以前はこの検査が `|| Shader.Find("Standard") != null` で終わっていた。
-            //    Standard は Unity 組み込みなので実質いつでも解決すると思われており、
-            //    **この検査は原理的に FAIL しない**形だった（実機では Shader.Find が
-            //    その Standard にすら null を返したので結果的に FAIL したが、
-            //    構造上の欠陥は欠陥のままである）。
-            //    ここが見るのは⑤の溶岩と同じく **「粒子系が取れたか」** で、
-            //    取れなければ Standard を透過モードにして描く（＝見えるが光らない）。
-            //    「1 つも取れなかった」は名前のほうに出る。
+            // ★★ **Do not mix "Standard resolved" into the predicate** (overall review).
+            //    This check used to end with `|| Shader.Find("Standard") != null`.
+            //    Standard is a Unity built-in and was believed to resolve effectively always,
+            //    so **this check could not FAIL in principle** (in the game Shader.Find
+            //    returned null even for that Standard, so it did FAIL in the end, but a
+            //    structural flaw is a flaw regardless).
+            //    What this looks at, as with ⑤'s lava, is **"did something in the particle
+            //    family resolve"**; if not, we draw with Standard forced into transparent mode
+            //    (i.e. visible but not glowing).
+            //    "Nothing resolved at all" shows up in the name.
             //
-            // ★ **述語は④が実際に門にしている式でなければならない。**
-            //    だから自前に順序を書き写さず、TyphoonCloud と**同じ** ShaderPool を
-            //    同じ preference で呼ぶ（順序を写すと、検査が報告する名前と
-            //    実際に使うシェーダが黙ってずれる）。
+            // ★ **The predicate must be the expression ④ actually gates on.**
+            //    So the ordering is not copied out here; it calls the **same** ShaderPool with
+            //    the same preference as TyphoonCloud (copy the ordering and the name the check
+            //    reports silently diverges from the shader actually used).
             ShaderPick cloudShader = ResolveCloudShader();
             Check("Graphics.DrawMesh(Mesh, Matrix4x4, Material, int, Camera, int, "
                   + "MaterialPropertyBlock, bool, bool) is reachable and an additive or "
@@ -387,10 +412,12 @@ namespace DisasterPlus.Game
                   + "shader off such a material is a different thing and is what it does",
                   delegate
                   {
-                      // ★ 4 引数版ではなく**実際に呼んでいる 9 引数版**を見る。
-                      //   4 引数版は castShadows: true / receiveShadows: true を転送するので、
-                      //   ④は影を落とさない 9 引数版へ移した（TyphoonCloud の doc）。
-                      //   検査する相手は、実際に呼ぶオーバーロードでなければ意味が無い。
+                      // ★ Look at **the nine-argument version we actually call**, not the
+                      //   four-argument one. The four-argument version forwards
+                      //   castShadows: true / receiveShadows: true, so ④ moved to the
+                      //   nine-argument version that casts no shadow (see the TyphoonCloud
+                      //   doc). Checking anything but the overload actually called is
+                      //   meaningless.
                       if (typeof(UnityEngine.Graphics).GetMethod("DrawMesh",
                               BindingFlags.Public | BindingFlags.Static, null,
                               new Type[]
@@ -409,26 +436,29 @@ namespace DisasterPlus.Game
                       return cloudShader.Particle;
                   });
 
-            // --- ④台風（Task 9）ここまで ---
+            // --- ④ typhoon (Task 9) ends here ---
 
-            // --- ④台風（渦を雲の粒で組む）ここから ---
+            // --- ④ typhoon (building the vortex from cloud particles) starts here ---
 
-            // 渦の**本経路**はバニラの粒子エフェクトを借りて入道雲の粒を撒くことである
-            // （TyphoonCloudFx）。借りられるかどうかは実行時にしか分からない ——
-            // EffectCollection の登録は 186 個だが蒸気系（Factory Steam）はそこに
-            // **入っておらず**（エフェクト実測文書 §A-3 の未登録 17 個）、実行時の在庫は
-            // EffectsWrapper.m_BuiltinEffects（Resources.FindObjectsOfTypeAll の結果）
-            // でしか確かめられない（同 §A-2、PARTIAL）。
+            // The vortex's **main path** is to borrow a vanilla particle effect and scatter
+            // cumulonimbus particles (TyphoonCloudFx). Whether it can be borrowed is only
+            // knowable at runtime — EffectCollection registers 186 effects, but the steam
+            // family (Factory Steam) is **not among them** (the 17 unregistered ones in §A-3
+            // of the effects measurements document), and the runtime inventory can only be
+            // confirmed through EffectsWrapper.m_BuiltinEffects (the result of
+            // Resources.FindObjectsOfTypeAll) (§A-2 of the same, PARTIAL).
             //
-            // ★ 述語は**この機能が実際に門にしている式**である。素材の選び方をここへ
-            //   書き写すと、報告する名前と実際に借りる素材が黙ってずれる ——
-            //   だから TyphoonCloudFx.Lookup をそのまま共有する（雲のシェーダ検証が
-            //   ShaderPool を共有しているのと同じ形）。あちらは名前ではなく
-            //   **粒子マテリアル名**で採点して選ぶので、ここが報告する名前は
-            //   「このビルドで実際にいちばん雲らしかったもの」である。
+            // ★ The predicate is **the expression this feature actually gates on**. Copy the
+            //   way the asset is chosen out to here and the name reported silently diverges
+            //   from the asset actually borrowed — so TyphoonCloudFx.Lookup is shared as-is
+            //   (the same shape as the cloud shader check sharing ShaderPool). That one scores
+            //   and chooses by **particle material name** rather than by a fixed name, so the
+            //   name reported here is "whatever turned out to be the most cloud-like in this
+            //   build".
             //
-            // ★ FAIL は「雲が消える」ではない。旧来の自前スパイラルメッシュへ退避する
-            //   （そちらの可否は 1 つ上の検証が名乗る）。台風の他の要素は 1 つも止まらない。
+            // ★ A FAIL does not mean "the cloud disappears". It falls back to the old
+            //   hand-rolled spiral mesh (whose viability is stated by the check just above).
+            //   Not one other part of the typhoon stops.
             string borrowed;
             bool canBorrow = TyphoonCloudFx.CanBorrow(out borrowed);
             Check("EffectInfo.RenderEffect(InstanceID, SpawnArea, Vector3, float, float, "
@@ -458,39 +488,40 @@ namespace DisasterPlus.Game
                       return canBorrow;
                   });
 
-            // --- ④台風（渦を雲の粒で組む）ここまで ---
+            // --- ④ typhoon (building the vortex from cloud particles) ends here ---
         }
 
         /// <summary>
-        /// ④の雲が実際に使うシェーダ。**<c>TyphoonCloud.BuildMaterial</c> と
-        /// 同じ <c>ShaderPool</c> を同じ preference で呼ぶ** —— 順序をここへ写すと、
-        /// 検査が報告する名前と実際に使うシェーダが黙ってずれる。
-        /// main スレッド専用だが、<see cref="Run"/> 自体が main スレッド専用なので問題ない。
+        /// The shader ④'s cloud actually uses. **It calls the same <c>ShaderPool</c> with the
+        /// same preference as <c>TyphoonCloud.BuildMaterial</c>** — copy the ordering out to
+        /// here and the name the check reports silently diverges from the shader actually used.
+        /// Main thread only, but <see cref="Run"/> is itself main thread only, so that is fine.
         /// </summary>
         private static ShaderPick ResolveCloudShader()
         {
-            // ★ **自分で try/catch する。** ここは検証の*名前*を組み立てるために
-            //   Check() の外側（＝あの try/catch の外）で呼ばれる。Assumptions.Run() は
-            //   DisasterPlusLoading.OnLevelLoaded から素で呼ばれているので、
-            //   ここから例外を投げるとレベルロードが壊れる
-            //   （DestroyTreesIsReachable が同じ理由で同じ形をしている）。
+            // ★ **It try/catches for itself.** This is called outside Check() (i.e. outside
+            //   that try/catch) in order to assemble the check's *name*. Assumptions.Run() is
+            //   called bare from DisasterPlusLoading.OnLevelLoaded, so throwing from here
+            //   would break the level load (DestroyTreesIsReachable has the same shape for the
+            //   same reason).
             try
             {
                 return ShaderPool.Resolve(ShaderPreference.AlphaBlended);
             }
             catch
             {
-                // 「解決しなかった」側に倒す。検証も FAIL になるので、
-                // 黙って PASS を出すことにはならない。
+                // Fall to the "did not resolve" side. The check then FAILs too, so this never
+                // amounts to quietly emitting a PASS.
                 return new ShaderPick(null, false, false, false);
             }
         }
 
         /// <summary>
-        /// <c>DisasterHelpers.DestroyTrees</c> が引数の型まで込みで解決できるか。
-        /// **合否には使わない**（倒木だけが使えない環境で風害まで FAIL にすると
-        /// 狼少年になる）。検証の名前に事実を書くためだけに引く。
-        /// 並びは Task 7 Step 1 で IL 実測したものと同じ。
+        /// Whether <c>DisasterHelpers.DestroyTrees</c> resolves, argument types included.
+        /// **Not used for pass/fail** (FAILing wind damage in an environment where only the
+        /// tree felling is unavailable would cry wolf). It is looked up solely to write the
+        /// fact into the check's name.
+        /// The argument order is the same as measured from the IL in Task 7 Step 1.
         /// </summary>
         private static bool DestroyTreesIsReachable()
         {

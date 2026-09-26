@@ -9,42 +9,45 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.VolcanoPreview
 {
     /// <summary>
-    /// **隆起が画面に出る刻み**をゲームを起動せずに測って描く。
+    /// Measures and draws **the steps in which the uplift appears on screen**, without
+    /// launching the game.
     ///
-    /// 実機の指摘⑤「噴火のアニメーションをもっとスムーズに（現在は断続的な
-    /// せり上がりです）」への確認。**目に見える 1 段は「1 tick の上昇量」ではない** ——
-    /// <c>RawHeights</c> に書いても <c>UpdateArea</c> が流すまで画面は変わらないので、
-    /// 見える 1 段は「そのセルが再び流されるまでの上昇量」である。
+    /// This checks point 5 from the in-game report: "make the eruption animation smoother (at
+    /// the moment it rises in fits and starts)". **A step you can see is not "the rise per
+    /// tick"** —— writing to <c>RawHeights</c> changes nothing on screen until
+    /// <c>UpdateArea</c> flushes it, so a visible step is "the rise accumulated until that
+    /// cell is flushed again".
     ///
-    /// ここでは <c>UpliftSchedule</c> / <c>VolcanoRelief</c> / <c>TileSplit</c> /
-    /// <c>UpliftFlushPlan</c> という**⑤が実際に使っている Core の実物**をそのまま回し、
-    /// セルごとに「最後に流された高さ」を持って、フレーム単位で追う。
-    /// 書き直した近似ではない。
+    /// Here <c>UpliftSchedule</c> / <c>VolcanoRelief</c> / <c>TileSplit</c> /
+    /// <c>UpliftFlushPlan</c> — **the real Core code that point 5 actually uses** — are run
+    /// directly, keeping the "last flushed height" per cell and following it frame by frame.
+    /// It is not a rewritten approximation.
     /// </summary>
     internal static class Pacing
     {
-        /// <summary>1 ゲーム内分あたりの sim フレーム数（DAYTIME_FRAMES 65536 / 1440）。</summary>
+        /// <summary>Sim frames per in-game minute (DAYTIME_FRAMES 65536 / 1440).</summary>
         private const float FramesPerMinute = 65536f / 1440f;
 
-        /// <summary>隆起にかけるゲーム内分（<c>ModSettings.VolcanoUpliftMinutes</c> の既定値）。</summary>
+        /// <summary>In-game minutes the uplift takes (the default of
+        /// <c>ModSettings.VolcanoUpliftMinutes</c>).</summary>
         private const int UpliftMinutes = 30;
 
-        private const int BeforeIntervalFrames = 16;   // 2026-08-20 より前
-        private const int AfterIntervalFrames = 4;     // 現在
+        private const int BeforeIntervalFrames = 16;   // before 2026-08-20
+        private const int AfterIntervalFrames = 4;     // current
 
         private const float RawUnitsPerMetre = UpliftSchedule.RawUnitsPerMetre;
 
-        /// <summary>1 回の実行の結果。</summary>
+        /// <summary>The result of one run.</summary>
         private sealed class Run
         {
             public int IntervalFrames;
             public int TotalTicks;
             public float RiseMetresPerTick;
 
-            /// <summary>フレームごとの「画面に出ている」山頂の高さ（m）。</summary>
+            /// <summary>The summit height "as shown on screen" per frame (m).</summary>
             public float[] SummitByFrame;
 
-            /// <summary>フレームごとの「画面に出ている」中腹（0.55R）の高さ（m）。</summary>
+            /// <summary>The mid-flank (0.55R) height "as shown on screen" per frame (m).</summary>
             public float[] FlankByFrame;
 
             public float MaxSummitStep;
@@ -58,8 +61,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
         internal static void Report(string dir, StringBuilder log)
         {
             const VolcanoForm form = VolcanoForm.Strato;
-            const float radius = 1200f;    // ModSettings.VolcanoRadius の既定値
-            const float height = 600f;     // ModSettings.VolcanoHeight の既定値
+            const float radius = 1200f;    // the default of ModSettings.VolcanoRadius
+            const float height = 600f;     // the default of ModSettings.VolcanoHeight
 
             Run before = Simulate(form, radius, height, BeforeIntervalFrames, true);
             Run after = Simulate(form, radius, height, AfterIntervalFrames, false);
@@ -98,10 +101,11 @@ namespace DisasterPlus.Tools.VolcanoPreview
                            + "   (cap 10000, side cap 128)");
             log.AppendLine();
 
-            // ★ 間隔をいくつにするかは費用と刻みの取引である。**選んだ理由を数字で残す。**
-            //   「流したセル数 / フレーム」がそのまま UpdateArea の平均負荷で、
-            //   1 回の UpdateArea は対象矩形を detail 解像度（raw 1 セルにつき 4x4）で
-            //   走査して 1 セルあたり SmoothSample を 5 回呼ぶ（IL facts A-1）。
+            // ★ Choosing the interval is a trade between cost and step size. **Record the
+            //   reason for the choice as numbers.** "Flushed cells per frame" is directly the
+            //   average load of UpdateArea, and one UpdateArea walks the target rectangle at
+            //   detail resolution (4x4 per raw cell) and calls SmoothSample five times per
+            //   cell (IL facts A-1).
             log.AppendLine("  interval | ticks | rise/tick m | VISIBLE step m | flushed cells/frame");
             int[] candidates = { 16, 8, 4, 2, 1 };
             for (int i = 0; i < candidates.Length; i++)
@@ -118,9 +122,10 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// 1 通りぶん回す。<paramref name="wholeFootprint"/> が true なら以前の挙動
-        /// （フットプリント全体をタイル総当たり）、false なら今の挙動
-        /// （<see cref="UpliftFlushPlan"/> ＝ 変わった矩形だけ）。
+        /// Runs one variant. If <paramref name="wholeFootprint"/> is true it is the old
+        /// behaviour (walk every tile of the whole footprint in turn); if false it is the
+        /// current behaviour (<see cref="UpliftFlushPlan"/>, i.e. only the rectangle that
+        /// changed).
         /// </summary>
         private static Run Simulate(VolcanoForm form, float radius, float height,
                                     int intervalFrames, bool wholeFootprint)
@@ -134,7 +139,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             int width = maxX - minX + 1;
             int depth = maxZ - minZ + 1;
 
-            // ⑤と同じ焼き方（VolcanoUplift.BakeProfile）。
+            // Baked the same way as in point 5 (VolcanoUplift.BakeProfile).
             uint seed = DeterministicRandom.Hash(0u, 0u);
             var relief = VolcanoRelief.For(form, seed, 1f);
 
@@ -161,13 +166,14 @@ namespace DisasterPlus.Tools.VolcanoPreview
             };
 
             int frames = (int)(UpliftMinutes * FramesPerMinute);
-            // 目標に届いたあとの流し切りも見たいので、少し長めに回す。
+            // Run a little longer, so the flushing that finishes after the target is reached
+            // is visible too.
             int simFrames = frames + intervalFrames * 8;
             run.SummitByFrame = new float[simFrames + 1];
             run.FlankByFrame = new float[simFrames + 1];
 
-            var raw = new ushort[width * depth];        // 書いた値（まだ画面に出ていない）
-            var shown = new ushort[width * depth];      // 最後に UpdateArea で流された値
+            var raw = new ushort[width * depth];        // what was written (not on screen yet)
+            var shown = new ushort[width * depth];      // what UpdateArea last flushed
 
             int summit = SummitIndex(minX, minZ, width, depth);
             int flank = FlankIndex(minX, minZ, width, depth, radius, 0.55f);
@@ -224,7 +230,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                     bool flush;
                     if (wholeFootprint)
                     {
-                        // 以前の挙動: 書いた範囲に関わらずフットプリントのタイルを総当たり。
+                        // The old behaviour: walk every tile of the footprint in turn,
+                        // regardless of what was actually written.
                         flush = TileSplit.TileAt(footprintCursor, minX, minZ, maxX, maxZ,
                                                  out pMinX, out pMinZ, out pMaxX, out pMaxZ);
                         footprintCursor++;
@@ -312,7 +319,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             return z * width + x;
         }
 
-        // ── 描画 ────────────────────────────────────────────────
+        // ── Rendering ────────────────────────────────────────────────
 
         private static void Draw(string dir, Run before, Run after, float height, int frames)
         {
@@ -333,7 +340,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
             Png.Write(Path.Combine(dir, "uplift-pacing.png"), w, h, rgb);
         }
 
-        /// <summary>白 = 以前（断続）、橙 = 現在。薄い灰 = 理想の直線。</summary>
+        /// <summary>White = before (in fits and starts), orange = current. Faint grey = the
+        /// ideal straight line.</summary>
         private static void Chart(byte[] rgb, int imageWidth, int top, int width, int height,
                                   float[] before, float[] after, float maxMetres, int frames)
         {
@@ -344,7 +352,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
 
             int span = frames + 1;
 
-            // 理想（連続に上がったとき）の直線。
+            // The ideal straight line (if it rose continuously).
             for (int x = 0; x < width; x++)
             {
                 int frame = (int)((long)x * span / width);

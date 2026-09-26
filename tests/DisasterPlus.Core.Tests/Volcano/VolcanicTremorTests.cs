@@ -6,8 +6,8 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 火山性地震。**固定するのは「切れ目が無いこと」「噴火で最大になること」
-    /// 「距離で消えること」「折り返さないこと」**である。
+    /// Volcanic earthquakes. **What is pinned down is "there are no gaps", "it peaks at the
+    /// eruption", "it dies out with distance" and "it does not alias".**
     /// </summary>
     public class VolcanicTremorTests
     {
@@ -16,7 +16,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheActivityRisesBeforeTheEruptionPeaksDuringItAndDiesAwayAfter()
         {
-            // 火山性地震の看板そのもの。**噴火の前から揺れていること**が要点である。
+            // The headline of volcanic seismicity itself. The point is **that it shakes
+            // before the eruption**.
             float early = VolcanicTremor.ActivityUnit(0.05f, false, 0f, false, 0f);
             float late = VolcanicTremor.ActivityUnit(0.95f, false, 0f, false, 0f);
             float erupting = VolcanicTremor.ActivityUnit(1f, true, 1f, false, 0f);
@@ -34,7 +35,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ZeroActivityIsExactlyStill()
         {
-            // **切ったら 1 mm も揺れない。** 「弱く揺れる」ではない。
+            // **Switch it off and it does not shake by even 1 mm.** Not "shakes faintly".
             for (float t = 0f; t < 20f; t += 0.13f)
             {
                 Assert.Equal(0f, VolcanicTremor.DisplacementAt(Seed, t, 0f));
@@ -45,8 +46,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheTremorIsContinuousAndNeverStopsWhileTheVolcanoIsActive()
         {
-            // ★ 火山性微動の定義そのもの —— **切れ目が無い。**
-            //   1 秒ごとの窓を取って、どの窓にも動きが在ることを見る。
+            // ★ The definition of volcanic tremor itself —— **there are no gaps.**
+            //   Take one-second windows and check that there is movement in every one.
             const float activity = 0.6f;
             for (float start = 0f; start < 120f; start += 1f)
             {
@@ -71,7 +72,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void MostEventsAreSmallAndBigOnesAreRare()
         {
-            // 規模別頻度の向き（Gutenberg–Richter と同じ向き。マグニチュードではない）。
+            // The direction of the frequency-size relation (the same direction as
+            // Gutenberg–Richter; this is not a magnitude).
             int small = 0, big = 0;
             for (int slot = 0; slot < 600; slot++)
             {
@@ -98,8 +100,9 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NothingFasterThanSixSamplesPerCycleIsUsed()
         {
-            // ★ カメラの揺れは描画フレームごと（60 fps ⇒ ナイキスト 30 Hz）に評価する。
-            //   いちばん速い成分でも 1 周期あたり 6 点は要る。
+            // ★ The camera shake is evaluated once per rendered frame
+            //   (60 fps ⇒ Nyquist 30 Hz). Even the fastest component needs at least
+            //   6 samples per cycle.
             const float renderHz = 60f;
             Assert.True(renderHz / VolcanicTremor.EventFastHz >= 6f,
                 "the event carrier aliases at 60 fps");
@@ -115,7 +118,7 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.True(VolcanicTremor.AttenuationAt(1000f, reach)
                         > VolcanicTremor.AttenuationAt(3000f, reach));
 
-            // **外はきっかり 0。** 街の反対側は揺れない。
+            // **Outside it is exactly 0.** The far side of the city does not shake.
             Assert.Equal(0f, VolcanicTremor.AttenuationAt(reach, reach));
             Assert.Equal(0f, VolcanicTremor.AttenuationAt(reach * 2f, reach));
         }
@@ -140,7 +143,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSameVolcanoAlwaysShakesTheSameWay()
         {
-            // フレーム番号を種に混ぜていないことの担保（t の閉じた式であること）。
+            // The guarantee that the frame number is not mixed into the seed
+            // (it must be a closed-form expression in t).
             for (float t = 0f; t < 30f; t += 0.7f)
             {
                 Assert.Equal(VolcanicTremor.DisplacementAt(Seed, t, 0.8f),

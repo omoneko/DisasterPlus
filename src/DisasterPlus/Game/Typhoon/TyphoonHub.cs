@@ -3,55 +3,61 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// main スレッドから sim スレッドへ渡す唯一の依頼。
+    /// The only request that travels from the main thread to the sim thread.
     ///
-    /// **台風はプレイヤーが明示的に起こす**（計画 §3.1）。バニラの雷雨災害を
-    /// 見つけて台風に昇格させる案は却下してある —— ④が雨を上げると
-    /// <c>m_currentRain &gt; 0.8</c> の条件でゲーム自身が雷雨災害を作りうるので
-    /// （IL 事実文書 §A-3）、昇格方式は「④の雨がゲームに嵐を作らせ、それを④が
-    /// 台風に昇格させ、その台風がまた雨を上げる」自己増殖になり、しかも
-    /// プレイヤーからは原因が MOD だと分からない。
+    /// **A typhoon is something the player raises explicitly** (plan §3.1). The idea of
+    /// finding a vanilla thunderstorm disaster and promoting it to a typhoon was
+    /// rejected — once ④ raises the rain, the game itself can create a thunderstorm
+    /// disaster under the <c>m_currentRain &gt; 0.8</c> condition (IL facts document
+    /// §A-3), so a promotion scheme becomes self-breeding: ④'s rain makes the game
+    /// create a storm, ④ promotes that to a typhoon, and that typhoon raises the rain
+    /// again — and on top of that the player cannot tell that the mod is the cause.
     /// </summary>
     public enum TyphoonRequest
     {
         None,
         Start,
 
-        // ★★ **Stop は撤去した**（2026-09-02、所有者
-        //    「停止に関しては蒸し返さないでください。自然災害を止めることは
-        //      誰にもできません。停止の概念そのものを削除」）。
+        // ★★ **Stop has been removed** (2026-09-02, the owner: "Please do not bring the
+        //    subject of stopping back up. Nobody can stop a natural disaster. Delete the
+        //    very concept of stopping.")
         //
-        //    ★ <c>TyphoonController.Stop()</c> という<b>メソッド</b>は残っている。
-        //      あれは台風の<b>終わり方</b>（マップを抜けた／持続時間を使い切った）
-        //      の後始末を 1 本にまとめたもので、プレイヤーの操作とは無関係である。
-        //      消えたのは<b>プレイヤーが止められるという概念</b>のほうだけ。
+        //    ★ The <b>method</b> <c>TyphoonController.Stop()</c> is still there. That one
+        //      gathers into a single place the cleanup for how a typhoon <b>ends</b>
+        //      (it left the map, or it used up its duration) and has nothing to do with
+        //      anything the player does. What disappeared is only <b>the notion that the
+        //      player can stop it</b>.
     }
 
     /// <summary>
-    /// 依頼 1 件。**⑤の <see cref="VolcanoRequestData"/> と同じ形にしてある。**
+    /// One request. **Shaped exactly like ⑤'s <see cref="VolcanoRequestData"/>.**
     ///
-    /// ★★ ④のタイルはバニラの災害ボタンと同じように**配置カーソルを構える**ように
-    ///    なったので、依頼は<b>座標を運ぶ</b>（<see cref="TyphoonPlacementTool"/>）。
-    ///    enum 1 本のままにすると、sim 側が「どこに」を自分で発明することになる。
+    /// ★★ ④'s tile now **arms a placement cursor** just like the vanilla disaster
+    ///    buttons do, so the request <b>carries coordinates</b>
+    ///    (<see cref="TyphoonPlacementTool"/>). Leave it as a bare enum and the sim side
+    ///    would have to invent the "where" for itself.
     ///
-    /// <see cref="Kind"/> が <see cref="TyphoonRequest.None"/> ／
-    /// <see cref="TyphoonRequest.Stop"/> のとき <see cref="Point"/> は読まれない。
+    /// <see cref="Point"/> is not read when <see cref="Kind"/> is
+    /// <see cref="TyphoonRequest.None"/> or <see cref="TyphoonRequest.Stop"/>.
     /// </summary>
     public struct TyphoonRequestData
     {
         public readonly TyphoonRequest Kind;
 
-        /// <summary>クリックされたワールド座標（<c>Start</c> のときだけ意味を持つ）。</summary>
+        /// <summary>The world coordinate that was clicked (only meaningful for
+        /// <c>Start</c>).</summary>
         public readonly Vec3 Point;
 
         /// <summary>
-        /// クリックした瞬間に**バニラの強度スライダーが指していた生値**
-        /// （<c>Start</c> のときだけ意味を持つ）。バニラの
-        /// <c>DisasterData.m_intensity</c> と同じ意味・同じ尺度で、表示だけが /10 される。
+        /// **The raw value the vanilla intensity slider was pointing at** at the moment
+        /// of the click (only meaningful for <c>Start</c>). Same meaning and same scale
+        /// as vanilla's <c>DisasterData.m_intensity</c>; only the display divides it
+        /// by 10.
         ///
-        /// ★ ここに載せるのは「そのとき選ばれていた値」であって、設定画面の値では
-        ///   ない。設定画面の値は**スライダーが無い環境の落とし所**であり、
-        ///   sim 側で読み直すと「押した時と違う強度で始まる」ようになる。
+        /// ★ What goes in here is "the value that was selected at the time", not the
+        ///   value from the settings screen. The settings value is **the fallback for
+        ///   environments with no slider**, and re-reading it on the sim side would make
+        ///   the storm "start at a different intensity from the one you pressed".
         /// </summary>
         public readonly int Intensity;
 
@@ -62,13 +68,15 @@ namespace DisasterPlus.Game
             Intensity = intensity;
         }
 
-        /// <summary>地点も強度も要らない依頼（<c>Stop</c>）。</summary>
+        /// <summary>A request that needs neither a point nor an intensity
+        /// (<c>Stop</c>).</summary>
         public static TyphoonRequestData Of(TyphoonRequest kind)
         {
             return new TyphoonRequestData(kind, new Vec3(0f, 0f, 0f), 0);
         }
 
-        /// <summary>「依頼なし」。<c>default(TyphoonRequestData)</c> と同じだが、意図を名乗る。</summary>
+        /// <summary>"No request". The same as <c>default(TyphoonRequestData)</c>, but it
+        /// states its intent.</summary>
         public static TyphoonRequestData None
         {
             get { return Of(TyphoonRequest.None); }
@@ -76,16 +84,16 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// sim スレッドが Publish し main スレッドが <see cref="Latest"/> を読む。
-    /// ①の <c>ForecastHub</c>・②の <see cref="EarthquakeHub"/> と同形
-    /// （net35 に <c>System.Collections.Concurrent</c> は無いので素の lock 1 本）。
-    /// <see cref="TyphoonSnapshot"/> は不変なので参照を渡すだけで安全。
+    /// The sim thread Publishes and the main thread reads <see cref="Latest"/>.
+    /// Same shape as ①'s <c>ForecastHub</c> and ②'s <see cref="EarthquakeHub"/>
+    /// (net35 has no <c>System.Collections.Concurrent</c>, so it is one plain lock).
+    /// <see cref="TyphoonSnapshot"/> is immutable, so handing the reference over is safe.
     ///
-    /// **T3 が逆向きの経路を足した**（パネルの「台風を発生させる／止める」を
-    /// main → sim へ渡す <see cref="TyphoonRequest"/>）。**同じ <c>_gate</c> 1 本で
-    /// 守っている。** 別のロックを足さないこと —— 2 本のロックの取得順という、
-    /// この MOD がまだ一度も抱えていない種類の問題を作ることになる
-    /// （<see cref="EarthquakeHub"/> のクラス doc が同じ判断を書いている）。
+    /// **T3 added a route in the opposite direction** (the panel's "raise a typhoon /
+    /// stop it" as a <see cref="TyphoonRequest"/> passed main → sim). **It is guarded by
+    /// the same single <c>_gate</c>.** Do not add a second lock — that would create a
+    /// lock-ordering problem, a kind of problem this mod has never once had
+    /// (<see cref="EarthquakeHub"/>'s class doc records the same decision).
     /// </summary>
     public static class TyphoonHub
     {
@@ -98,18 +106,19 @@ namespace DisasterPlus.Game
             lock (_gate) { _latest = snapshot; }
         }
 
-        /// <summary>まだ publish されていなければ null。呼び出し側で判定すること。</summary>
+        /// <summary>null until something has been published. The caller must check.</summary>
         public static TyphoonSnapshot Latest
         {
             get { lock (_gate) { return _latest; } }
         }
 
         /// <summary>
-        /// **main スレッドから。** ボタンの押下を 1 個だけ積む。
+        /// **From the main thread.** Queue exactly one button press.
         ///
-        /// 直前の依頼がまだ sim に拾われていなければ**上書きする**。押した順ではなく
-        /// 「最後に押したほうが勝つ」で正しい —— 発生と停止を続けて押した人が
-        /// 望んでいるのは後者だけである。
+        /// If the previous request has not been picked up by the sim yet, this
+        /// **overwrites it**. "Last press wins" rather than "in press order" is the
+        /// correct behaviour — someone who presses raise and then stop in quick
+        /// succession only wants the latter.
         /// </summary>
         public static void Request(TyphoonRequestData request)
         {
@@ -117,15 +126,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッドから（表示専用）。** まだ sim に拾われていない依頼。
+        /// **From the main thread (display only).** The request the sim has not picked
+        /// up yet.
         ///
-        /// パネルが「依頼中」を出すためだけに在る。押してから実際に台風が現れるまでは
-        /// **設計上 1 tick かかる**（実行は次の sim tick の <see cref="TyphoonController"/>）
-        /// ので、この口が無いとボタンを押した直後のパネルは「台風は発生していません」の
-        /// ままになり、**プレイヤーはもう一度押す**。
+        /// It exists purely so the panel can show "requested". **By design it takes one
+        /// tick** between the press and the typhoon actually appearing (the work happens
+        /// in <see cref="TyphoonController"/> on the next sim tick), so without this
+        /// accessor the panel would still read "no typhoon" right after the press and
+        /// **the player would press it again**.
         ///
-        /// <see cref="TakeRequest"/> と違って**取り出さない**。ここで消費すると
-        /// パネルを開いているかどうかで sim の挙動が変わる。
+        /// Unlike <see cref="TakeRequest"/> this **does not take the request**.
+        /// Consuming it here would make the sim's behaviour depend on whether the panel
+        /// is open.
         /// </summary>
         public static TyphoonRequestData PendingRequest
         {
@@ -133,9 +145,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **sim スレッドから。** 積まれている依頼を取り出し、<see cref="TyphoonRequest.None"/>
-        /// に戻す。**1 tick に 1 回だけ呼ぶこと**（2 回呼ぶと 2 回目が必ず None になり、
-        /// 呼び出し順に依存した取りこぼしを作る）。
+        /// **From the sim thread.** Take the queued request and reset it to
+        /// <see cref="TyphoonRequest.None"/>. **Call it exactly once per tick** (call it
+        /// twice and the second call always sees None, which creates drops that depend
+        /// on call order).
         /// </summary>
         public static TyphoonRequestData TakeRequest()
         {
@@ -148,15 +161,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// レベルロード／アンロード時。都市をまたいで状態を持ち越さない。
+        /// On level load/unload. Do not carry state across cities.
         /// </summary>
         public static void Clear()
         {
             lock (_gate)
             {
                 _latest = null;
-                // ★ 戻し忘れると、次の都市がロードされた瞬間に
-                //    前の都市で押されたボタンが発火する。
+                // ★ Forget to reset this and a button pressed in the previous city fires
+                //    the moment the next city finishes loading.
                 _request = TyphoonRequestData.None;
             }
         }

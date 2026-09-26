@@ -3,53 +3,60 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.FireWhirl
 {
     /// <summary>
-    /// 「なぜ今、火災旋風が出ていないのか」を 1 個の値にしたもの。
+    /// "Why is no fire whirl appearing right now", boiled down to a single value.
     ///
-    /// ── なぜ要るか ────────────────────────────────────────
+    /// ── Why it is needed ────────────────────────────────────────
     ///
-    /// ③は**自然発生しか経路を持たない**（手動の配置ツールは撤去した）。
-    /// つまり「出ない」が既定の状態であり、実機テストでは
+    /// ③ has **no route other than spontaneous formation** (the manual placement tool was
+    /// removed). So "nothing appears" is the default state, and playtesting produced an
+    /// actual report of getting nothing but the single line
     ///
     ///   DIAG fireWhirl: burning=0 active=0
     ///
-    /// の 1 行しか出ないまま「壊れているのか、まだ火が足りないのか」が
-    /// 分からない、という報告が実際に上がっている。**その 2 つを見分けられない
-    /// 診断は診断ではない。**
+    /// with no way to tell "is it broken, or is there simply not enough fire yet".
+    /// **A diagnostic that cannot separate those two is not a diagnostic.**
     ///
-    /// ここは <see cref="FireWhirlDetector.Detect(System.Collections.Generic.IList{BurningBuilding},
-    /// FireWhirlConfig, System.Collections.Generic.IList{Vec2}, out FireWhirlProspect)"/> が
-    /// 判定と**同じ 1 パスの中で**埋める。別パスで数え直すと、診断が本判定と
-    /// 食い違う（＝いちばん質の悪い診断になる）。
+    /// This is filled in by <see
+    /// cref="FireWhirlDetector.Detect(System.Collections.Generic.IList{BurningBuilding},
+    /// FireWhirlConfig, System.Collections.Generic.IList{Vec2}, out FireWhirlProspect)"/>
+    /// **within the same single pass as the decision itself**. Count it again in a separate
+    /// pass and the diagnostic disagrees with the real decision — which is the worst kind
+    /// of diagnostic there is.
     ///
-    /// エンジン非依存の値型。<see cref="Describe"/> の文面はユニットテストで固定する。
+    /// An engine-free value type. The wording of <see cref="Describe"/> is pinned by unit tests.
     /// </summary>
     public struct FireWhirlProspect
     {
-        /// <summary>直近に完了した走査で燃えていた建物の総数。</summary>
+        /// <summary>The total number of buildings burning in the most recently completed
+        /// sweep.</summary>
         public readonly int BurningCount;
 
         /// <summary>
-        /// **いちばん密な塊の棟数**（判定半径以内、自分自身を含む）。
-        /// <see cref="RequiredCount"/> に届いていなければ、それが「出ない理由」である。
+        /// **The size of the densest cluster** (within the detection radius, counting
+        /// itself). If it has not reached <see cref="RequiredCount"/>, that is "the reason
+        /// nothing appears".
         /// </summary>
         public readonly int DensestCount;
 
-        /// <summary>いちばん密な塊の重心。<see cref="DensestCount"/> が 0 のときは意味を持たない。</summary>
+        /// <summary>The centroid of the densest cluster. Meaningless when
+        /// <see cref="DensestCount"/> is 0.</summary>
         public readonly Vec2 DensestCentre;
 
-        /// <summary>判定半径（m）。診断の 1 行だけを読んで意味が通るように、閾値も一緒に運ぶ。</summary>
+        /// <summary>The detection radius (m). The thresholds travel with it so that a single
+        /// diagnostic line makes sense on its own.</summary>
         public readonly float RadiusMetres;
 
-        /// <summary>判定棟数。</summary>
+        /// <summary>The number of buildings required.</summary>
         public readonly int RequiredCount;
 
         /// <summary>
-        /// 条件は満たしたのに、生存中の旋風／クールダウン中の地点に近すぎて
-        /// 捨てられた候補の数。**「火は足りているのに出ない」の唯一の説明**である。
+        /// The number of candidates that met the conditions but were discarded for being
+        /// too close to a live fire whirl or to a spot still on cooldown. **The one and
+        /// only explanation for "there is plenty of fire and still nothing appears".**
         /// </summary>
         public readonly int SuppressedCount;
 
-        /// <summary>この tick に実際に採用された候補の数。</summary>
+        /// <summary>The number of candidates actually accepted this tick.</summary>
         public readonly int AcceptedCount;
 
         public FireWhirlProspect(int burningCount, int densestCount, Vec2 densestCentre,
@@ -65,7 +72,7 @@ namespace DisasterPlus.Core.FireWhirl
             AcceptedCount = acceptedCount;
         }
 
-        /// <summary>あと何棟足りないか。足りていれば 0。</summary>
+        /// <summary>How many more buildings are needed. 0 if there are enough.</summary>
         public int Shortfall
         {
             get
@@ -76,12 +83,14 @@ namespace DisasterPlus.Core.FireWhirl
         }
 
         /// <summary>
-        /// 診断の 1 行（英語）。**「条件が足りない」と「壊れている」を必ず言い分ける。**
+        /// One line of diagnostics (in English). **It always distinguishes "the conditions
+        /// are not met" from "it is broken".**
         ///
-        /// この関数は「壊れている」とは決して言わない —— 壊れているかどうかを
-        /// 知っているのは呼び出し側（prefab の解決可否や延焼の空振り検知）である。
-        /// ここが言えるのは<b>条件の側の事実</b>だけで、それを言い切ることが
-        /// 「条件は足りているのに何も起きない」を残りの診断に押し出す。
+        /// This function never says "it is broken" — whoever knows whether something is
+        /// broken is the caller (prefab resolution, or detecting that the spread came up
+        /// empty). All this can speak to are <b>the facts on the conditions side</b>, and
+        /// stating those outright is what pushes "the conditions are met and still nothing
+        /// happens" out to the rest of the diagnostics.
         /// </summary>
         public string Describe()
         {
@@ -107,8 +116,9 @@ namespace DisasterPlus.Core.FireWhirl
 
             if (AcceptedCount <= 0)
             {
-                // 密度は足りている・離隔でも弾かれていない。ここから先で止まっているなら
-                // 原因は条件の側ではない（prefab / スポーン失敗）。**そう言い切る。**
+                // Dense enough, and not rejected by the separation rule either. If it is
+                // stuck past this point, the cause is not on the conditions side (it is the
+                // prefab, or a failed spawn). **Say so outright.**
                 return "the fire is dense enough (" + DensestCount + " within "
                      + Format(RadiusMetres) + " m) and nothing suppressed it; "
                      + "if no fire whirl appears, the cause is not the fire conditions";

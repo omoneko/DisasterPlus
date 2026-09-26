@@ -3,64 +3,71 @@ using ColossalFramework;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ④が読む唯一の場所。プレハブ 6 値（<see cref="TyphoonPrefabFacts"/>）と
-    /// <c>WeatherManager</c> の実測値を集めて <see cref="TyphoonSnapshot"/> にする。
+    /// The only place ④ reads from. It gathers the six prefab values
+    /// (<see cref="TyphoonPrefabFacts"/>) and <c>WeatherManager</c>'s measured values
+    /// into a <see cref="TyphoonSnapshot"/>.
     ///
-    /// **sim スレッドから呼ぶこと。** <c>DisasterManager</c> / <c>WeatherManager</c> /
-    /// <c>SimulationManager</c> はいずれもシミュレーションが所有する。main スレッドから
-    /// 直接触ると、スタックトレースの出ない <c>IndexOutOfRangeException</c> ポップアップが
-    /// 後になってバニラ側から出る（この MOD の try/catch では捕まえられない）。
-    /// 形は②の <see cref="EarthquakeReader"/> をそのまま手本にしている。
+    /// **Call it from the sim thread.** <c>DisasterManager</c> / <c>WeatherManager</c> /
+    /// <c>SimulationManager</c> are all owned by the simulation. Touch them directly from
+    /// the main thread and vanilla throws an <c>IndexOutOfRangeException</c> popup with
+    /// no stack trace, some time later (this mod's try/catch cannot catch it).
+    /// The shape is copied straight from ②'s <see cref="EarthquakeReader"/>.
     ///
-    /// <c>Singleton&lt;T&gt;.exists</c> を**必ず先に見る**。<c>Singleton&lt;T&gt;.instance</c> は
-    /// <c>sInstance</c> が null のとき <c>FindObjectOfType</c> と <c>new GameObject</c> を
-    /// 走らせる **main スレッド専用 API** で、sim スレッドから踏むと落ちる
-    /// （<c>LongPeriodDamage.Sweep</c> / <c>TsunamiChain</c> の同じ注記）。
+    /// **Always look at <c>Singleton&lt;T&gt;.exists</c> first.**
+    /// <c>Singleton&lt;T&gt;.instance</c> runs <c>FindObjectOfType</c> and
+    /// <c>new GameObject</c> when <c>sInstance</c> is null, which makes it a **main
+    /// thread only API**; step on it from the sim thread and you crash (the same note is
+    /// on <c>LongPeriodDamage.Sweep</c> / <c>TsunamiChain</c>).
     ///
-    /// ★ **設計書の記述を 1 箇所だけ訂正する。**
-    /// 設計書 §6 と付録は「<c>VortexAI</c> の <c>m_maxSpeed</c>」と書いているが、
-    /// <c>VortexAI</c> に <c>m_maxSpeed</c> というフィールドは**存在しない**。
-    /// IL 事実文書 §B-1 の <c>IL_00AF maxSpeed = m_info.m_maxSpeed</c> が読んでいるのは
-    /// <c>VehicleAI.m_info</c>、すなわち **<c>VehicleInfo.m_maxSpeed</c>** である。
-    /// 本 MOD 側でもリフレクションで再確認済み（<c>VortexAI</c> の宣言フィールドは
-    /// <c>m_destructionRadiusMin</c> / <c>m_destructionRadiusMax</c> /
-    /// <c>m_upgradeRadiusMin</c> / <c>m_upgradeRadiusMax</c> / <c>m_debrisCount</c> の 5 つだけ）。
-    /// 到達経路は <c>TornadoAI.m_vortexInfo</c>（<c>VehicleInfo</c>）<c>.m_maxSpeed</c>。
-    /// **<c>VortexAI</c> に <c>m_maxSpeed</c> を探しに行かないこと** —— 見つからず、
-    /// 推測で別のフィールドを掴むことになる。
+    /// ★ **One correction to what the design doc says.**
+    /// The design doc §6 and its appendix say "<c>VortexAI</c>'s <c>m_maxSpeed</c>", but
+    /// there is **no** field called <c>m_maxSpeed</c> on <c>VortexAI</c>. What
+    /// <c>IL_00AF maxSpeed = m_info.m_maxSpeed</c> in §B-1 of the IL facts document reads
+    /// is <c>VehicleAI.m_info</c>, i.e. **<c>VehicleInfo.m_maxSpeed</c>**.
+    /// Re-confirmed on this mod's side by reflection (<c>VortexAI</c>'s declared fields
+    /// are only the five <c>m_destructionRadiusMin</c> / <c>m_destructionRadiusMax</c> /
+    /// <c>m_upgradeRadiusMin</c> / <c>m_upgradeRadiusMax</c> / <c>m_debrisCount</c>).
+    /// The route to it is <c>TornadoAI.m_vortexInfo</c> (a <c>VehicleInfo</c>)
+    /// <c>.m_maxSpeed</c>.
+    /// **Do not go looking for <c>m_maxSpeed</c> on <c>VortexAI</c>** — you will not find
+    /// it, and you will end up guessing at some other field.
     /// </summary>
     public static class TyphoonReader
     {
         /// <summary>
-        /// 直近のプレハブ走査が失敗してから何回呼ばれたか。<see cref="Read"/> は毎 sim tick
-        /// 呼ばれるので、失敗を毎回リトライすると全 prefab 走査が毎 tick 走る。
-        /// <c>EarthquakeReader._missCallCount</c> と同じ間引き。
+        /// How many calls there have been since the last prefab scan failed.
+        /// <see cref="Read"/> is called on every sim tick, so retrying the failure every
+        /// time would sweep all prefabs every tick. The same thinning as
+        /// <c>EarthquakeReader._missCallCount</c>.
         /// </summary>
         private static int _missCallCount;
 
-        /// <summary>失敗キャッシュを効かせる呼び出し回数。0 にはしない（＝毎回リトライになる）。</summary>
+        /// <summary>How many calls the failure cache holds for. Never make it 0 (that
+        /// means retrying every time).</summary>
         private const int MissRetryCalls = 64;
 
         private static TyphoonPrefabFacts _prefab;
         private static bool _prefabSearched;
 
         /// <summary>
-        /// <see cref="Read"/> 内の想定外例外を <c>Log.Error</c> で鳴らしたか。
+        /// Whether an unexpected exception inside <see cref="Read"/> has already been
+        /// sounded through <c>Log.Error</c>.
         ///
-        /// <c>Log.Warn</c> / <c>Log.Error</c> はスロットルされない。<see cref="Read"/> は
-        /// sim tick ごと（通常速度でおよそ 50 回/秒）に呼ばれるので、恒常的に投げる状態に
-        /// なると毎秒 50 行を output_log.txt に書き続けてログを使い物にならなくする。
-        /// 1 回目だけ確実に目立たせ、以後は <c>Log.Diag</c> のキー単位スロットル
-        /// （512 sim フレームに 1 回）へ落とす。
+        /// <c>Log.Warn</c> / <c>Log.Error</c> are not throttled. <see cref="Read"/> is
+        /// called once per sim tick (roughly 50 times a second at normal speed), so a
+        /// state that throws permanently would write 50 lines a second into
+        /// output_log.txt and make the log useless. Make the first one stand out
+        /// reliably, then drop to <c>Log.Diag</c>'s per-key throttle (once per 512 sim
+        /// frames).
         ///
-        /// **レベルアンロードでリセットしない。** 「投げる」はこの DLL が参照している
-        /// ゲームのビルドに対する事実であって、都市ごとの状態ではない。
+        /// **Not reset on level unload.** "It throws" is a fact about the game build this
+        /// DLL is referencing, not per-city state.
         /// </summary>
         private static bool _readErrorLogged;
 
         /// <summary>
-        /// レベルのロード／アンロードで呼ぶ。都市をまたいでプレハブキャッシュを持ち越さない
-        /// （「全セッション状態はレベルアンロードでリセットする」がこの MOD の規則）。
+        /// Call on level load/unload. Do not carry the prefab cache across cities
+        /// ("all per-session state is reset on level unload" is this mod's rule).
         /// </summary>
         public static void Reset()
         {
@@ -69,7 +76,7 @@ namespace DisasterPlus.Game
             _missCallCount = 0;
         }
 
-        /// <summary>**sim スレッド専用。**</summary>
+        /// <summary>**Sim thread only.**</summary>
         public static TyphoonSnapshot Read()
         {
             try
@@ -84,10 +91,11 @@ namespace DisasterPlus.Game
                 bool weatherReadable = ReadWeather(out rain, out cloud, out fog,
                                                    out windDirection, out weatherEnabled);
 
-                // ★ TyphoonController は sim スレッドの static で、この Read() と
-                //    同じスレッドから読んでいる（TyphoonFeature.OnSimulationTick）。
-                //    載るのは **TyphoonController.Tick が走る前**＝前 tick の状態である
-                //    （TyphoonSnapshot の T3 節の注記）。
+                // ★ TyphoonController is sim-thread static state, and we read it from the
+                //    same thread as this Read() (TyphoonFeature.OnSimulationTick).
+                //    What goes in is the state from **before TyphoonController.Tick
+                //    runs**, i.e. the previous tick's (see the note in TyphoonSnapshot's
+                //    T3 section).
                 return new TyphoonSnapshot(true, prefab, frame,
                                            rain, cloud, fog, windDirection,
                                            weatherEnabled, weatherReadable,
@@ -146,10 +154,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 天候の実測値。**④で <c>[measured]</c> を名乗ってよい唯一の出所**（設計書 §7-1）。
+        /// The measured weather values. **The only provenance in ④ allowed to claim
+        /// <c>[measured]</c>** (design doc §7-1).
         ///
-        /// 読めなければ false を返し、呼び出し側は数値を出さない。
-        /// **0 と「読めなかった」を混ぜない**（①②が繰り返し確立した規律）。
+        /// If it cannot be read it returns false and the caller shows no numbers.
+        /// **Do not mix up 0 with "could not read"** (a discipline ① and ② established
+        /// over and over).
         /// </summary>
         private static bool ReadWeather(out float rain, out float cloud, out float fog,
                                         out float windDirection, out bool weatherEnabled)
@@ -162,7 +172,7 @@ namespace DisasterPlus.Game
 
             try
             {
-                // ★ exists を先に見る（クラス doc）。
+                // ★ Look at exists first (class doc).
                 if (!Singleton<WeatherManager>.exists) return false;
 
                 var w = Singleton<WeatherManager>.instance;
@@ -185,19 +195,20 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// プレハブ 6 値をキャッシュ越しに返す。**sim スレッド専用**
-        /// （<c>_prefabSearched</c> / <c>_missCallCount</c> を書き換える）。
+        /// Returns the six prefab values through the cache. **Sim thread only**
+        /// (it writes <c>_prefabSearched</c> / <c>_missCallCount</c>).
         ///
-        /// 解決するまでは間引きつきで再走査する。DLC 非所持環境では
-        /// 永久に解決しないので、そこでは 64 呼び出しに 1 回の走査で落ち着く。
+        /// Until it resolves it rescans, thinned out. In an environment without the DLC
+        /// it never resolves, so there it settles at one scan per 64 calls.
         /// </summary>
         private static TyphoonPrefabFacts ResolvePrefabFacts()
         {
             if (_prefabSearched && _prefab.StormResolved) return _prefab;
 
-            // 直前の走査が失敗している場合は、レベルロード直後で prefab がまだ
-            // 揃っていないだけの可能性がある。「二度と探さない」にはせず、
-            // かといって毎 tick 全 prefab を舐めもしない。呼び出し回数で間引く。
+            // If the previous scan failed, it may simply be that we are right after a
+            // level load and the prefabs are not all in place yet. So do not make it
+            // "never look again" — but do not lick every prefab every tick either. Thin
+            // it out by call count.
             if (_prefabSearched)
             {
                 _missCallCount++;
@@ -210,8 +221,8 @@ namespace DisasterPlus.Game
 
             if (!_prefab.StormResolved)
             {
-                // Warn はスロットルされないので Diag に落とす。DLC 非所持環境では
-                // これが恒常的な正常状態になる。
+                // Warn is not throttled, so drop to Diag. In an environment without the
+                // DLC this is the permanent, correct state.
                 Log.Diag("TyPrefab",
                     "no ThunderStormAI DisasterInfo found; Natural Disasters DLC required for typhoons");
             }
@@ -219,17 +230,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// プレハブを走査するだけの純粋関数。キャッシュもミス回数も一切触らないので、
-        /// **どのスレッドから呼んでもこのクラスの状態を壊さない**。
-        /// <see cref="Assumptions"/>（main スレッド）はこちらを使うこと
-        /// —— <see cref="ResolvePrefabFacts"/> を呼ぶと、sim スレッドが回している
-        /// キャッシュを main スレッドから巻き戻すことになる
-        /// （<c>FireWhirlSpawner.HasTornadoPrefab</c> で同じ欠陥を直した経緯がある）。
+        /// A pure function that only scans the prefabs. It touches neither the cache nor
+        /// the miss count, so **calling it from any thread cannot damage this class's
+        /// state**. <see cref="Assumptions"/> (main thread) must use this one — calling
+        /// <see cref="ResolvePrefabFacts"/> would rewind, from the main thread, a cache
+        /// that the sim thread is driving (we have fixed exactly this defect before, in
+        /// <c>FireWhirlSpawner.HasTornadoPrefab</c>).
         ///
-        /// <c>DisasterManager.FindDisasterInfo&lt;T&gt;()</c> は public static generic で、
-        /// <c>PrefabCollection&lt;DisasterInfo&gt;</c> を走査して <c>m_disasterAI is T</c> の
-        /// 最初のプレハブを返すだけ。DLC 判定は中に無く、**DLC が無ければプレハブ自体が
-        /// 存在せず null が返る**のが権威。
+        /// <c>DisasterManager.FindDisasterInfo&lt;T&gt;()</c> is a public static generic
+        /// that simply sweeps <c>PrefabCollection&lt;DisasterInfo&gt;</c> and returns the
+        /// first prefab where <c>m_disasterAI is T</c>. There is no DLC check inside it;
+        /// the authority is that **without the DLC the prefab does not exist at all and
+        /// null comes back**.
         ///
         /// </summary>
         public static TyphoonPrefabFacts ScanPrefabFacts()
@@ -259,10 +271,12 @@ namespace DisasterPlus.Game
                 active = 0u;
             }
 
-            // ★ **竜巻プレハブはもう読まない。** 随伴竜巻が退役し、竜巻並みの被害は
-            //   TyphoonGust が自前で出すようになったので、VortexAI の破壊半径も
-            //   VehicleInfo.m_maxSpeed も使う場所が 1 つも無い。読める値だからといって
-            //   診断に並べ続けると、次の担当者が「これは効いている」と読む。
+            // ★ **We no longer read the tornado prefab.** The accompanying tornado was
+            //   retired and tornado-grade damage is now produced by TyphoonGust itself,
+            //   so there is not one place left that uses VortexAI's destruction radii or
+            //   VehicleInfo.m_maxSpeed. Keep listing a value in the diagnostics just
+            //   because it can be read, and the next person will read it as "this is
+            //   having an effect".
 
             return new TyphoonPrefabFacts(stormResolved, stormRadius, emerging, active);
         }

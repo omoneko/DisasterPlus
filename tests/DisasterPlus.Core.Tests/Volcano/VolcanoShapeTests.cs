@@ -20,7 +20,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void NothingIsRaisedBeyondTheRadius()
         {
-            // 半径の外に 1 mm でも残ると、UpdateArea の矩形が際限なく広がる。
+            // If even 1 mm is left outside the radius, the UpdateArea rectangle grows without bound.
             for (int i = 0; i < AllForms.Length; i++)
             {
                 Assert.Equal(0f, VolcanoShape.ProfileAt(AllForms[i], 1000f, 1000f, 400f), 3);
@@ -31,7 +31,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheProfileNeverGoesBackUp()
         {
-            // 単調非増加でないと、山の中腹に環状の尾根ができる。
+            // Unless it is monotonically non-increasing, a ring-shaped ridge forms halfway
+            // up the mountain.
             for (int i = 0; i < AllForms.Length; i++)
             {
                 float previous = float.MaxValue;
@@ -48,15 +49,17 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheShieldMatchesTheProfileMakeCraterWouldHaveDrawn()
         {
-            // §C-8 の実測表（raiseEdges:false、depth に −H）の 3 点をそのまま固定する。
-            // ここがずれると「MakeCrater 1 発と同じ形」という前提が嘘になる。
+            // Pins down, verbatim, three points from the measured table of §C-8
+            // (raiseEdges:false, −H as the depth). Drift here and the premise
+            // "the same shape as a single MakeCrater" becomes a lie.
             const float r = 1000f;
             const float h = 100f;
             Assert.Equal(100.00f, VolcanoShape.ProfileAt(VolcanoForm.Shield, 0f, r, h), 2);
             Assert.Equal(95.97f, VolcanoShape.ProfileAt(VolcanoForm.Shield, 0.375f * r, r, h), 1);
             Assert.Equal(36.23f, VolcanoShape.ProfileAt(VolcanoForm.Shield, 0.750f * r, r, h), 1);
 
-            // 内側分岐と外側分岐の境目（0.73R）が連続していること（誤差 7e-4 まで）。
+            // The boundary between the inner and outer branches (0.73R) must be continuous
+            // (to within an error of 7e-4).
             float inner = VolcanoShape.ProfileAt(VolcanoForm.Shield, 0.7299f * r, r, h);
             float outer = VolcanoShape.ProfileAt(VolcanoForm.Shield, 0.7301f * r, r, h);
             Assert.True(System.Math.Abs(inner - outer) < 0.01f,
@@ -69,15 +72,16 @@ namespace DisasterPlus.Core.Tests.Volcano
             const float r = 1000f;
             const float h = 400f;
 
-            // 盾状: 頂が平ら。半径の半分でもまだ 8 割以上残っている。
+            // Shield: a flat top. Even at half the radius more than 80 per cent is left.
             Assert.True(VolcanoShape.ProfileAt(VolcanoForm.Shield, 0.5f * r, r, h) > 0.80f * h);
-            // 成層: 直線。半径の半分でちょうど半分。
+            // Strato: a straight line. Exactly half at half the radius.
             Assert.Equal(0.5f * h, VolcanoShape.ProfileAt(VolcanoForm.Strato, 0.5f * r, r, h), 2);
-            // ドーム: 0.7071R で 1/4。
+            // Dome: a quarter at 0.7071R.
             Assert.Equal(0.25f * h, VolcanoShape.ProfileAt(VolcanoForm.Dome, 0.70711f * r, r, h), 1);
 
-            // 「ドームが急峻」なのはプロファイルではなく**半径が小さい**から（§C-9）。
-            // 既定値の平均勾配が 盾状 < 成層 < ドーム の順であること。
+            // "The dome is steep" comes not from the profile but from its **small radius**
+            // (§C-9). At the default values the mean gradient must go
+            // shield < strato < dome.
             float shield = VolcanoShape.DefaultHeightOf(VolcanoForm.Shield)
                          / VolcanoShape.DefaultRadiusOf(VolcanoForm.Shield);
             float strato = VolcanoShape.DefaultHeightOf(VolcanoForm.Strato)
@@ -91,7 +95,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheDomeRadiusIsNeverAllowedBelowTwoHundredAndFiftyMetres()
         {
-            // ★ §C-9: 250 m は片側 8 raw セル。それ以下は「山」ではなく地面のノイズ。
+            // ★ §C-9: 250 m is 8 raw cells on each side. Below that it is not a "mountain"
+            //   but noise in the ground.
             Assert.Equal(VolcanoShape.MinDomeRadiusMetres,
                          VolcanoShape.MinRadiusOf(VolcanoForm.Dome), 3);
             Assert.Equal(VolcanoShape.MinDomeRadiusMetres,
@@ -105,16 +110,18 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSummitNeverReachesTheTerrainCeiling()
         {
-            // ★ §C-10: 天井に当たっても例外は出ず、山頂が無言で平らな台地になる。
-            //   ⑤が書く最大の高さは base + H ちょうどである（火口の縁が H で、
-            //   そこから上には 1 mm も書かない。VolcanoCrater のクラス doc）。
+            // ★ §C-10: hitting the ceiling raises no exception; the summit silently becomes
+            //   a flat plateau. The greatest height feature no. 5 writes is exactly
+            //   base + H (the crater rim is at H, and not 1 mm is written above it —— see
+            //   the VolcanoCrater class doc).
             const float baseHeight = 900f;
             float h = VolcanoShape.HeightFor(VolcanoForm.Strato, 700f, baseHeight);
             Assert.True(baseHeight + h <= VolcanoShape.MaxTerrainMetres,
                 "the summit would be clipped at " + (baseHeight + h));
             Assert.True(VolcanoShape.HeightWasLimitedByCeiling(VolcanoForm.Strato, 700f, baseHeight));
 
-            // 海面 40 m の平地なら 700 m は素通りする（§C-10 の 983.98 m の余裕）。
+            // On flat ground at a sea level of 40 m, 700 m passes straight through
+            // (the 983.98 m of headroom in §C-10).
             Assert.Equal(700f, VolcanoShape.HeightFor(VolcanoForm.Strato, 700f, 40f), 2);
             Assert.False(VolcanoShape.HeightWasLimitedByCeiling(VolcanoForm.Strato, 700f, 40f));
         }
@@ -122,7 +129,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void RadiusAndHeightAreClampedToTheDeclaredRange()
         {
-            // .cgs は公開契約で、手で編集されうる。範囲外でも読み捨てずクランプする。
+            // The .cgs is a public contract and can be edited by hand. Out-of-range values
+            // are clamped rather than discarded.
             for (int i = 0; i < AllForms.Length; i++)
             {
                 var f = AllForms[i];
@@ -156,7 +164,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void AnOutOfRangeSettingValueFallsBackToTheDefaultForm()
         {
-            // 設定値は .cgs に保存される公開契約。番号は詰め直さない。
+            // The setting value is a public contract stored in the .cgs. The numbers are
+            // never renumbered.
             Assert.Equal(VolcanoForm.Shield, VolcanoShape.FormOf(0));
             Assert.Equal(VolcanoForm.Strato, VolcanoShape.FormOf(1));
             Assert.Equal(VolcanoForm.Dome, VolcanoShape.FormOf(2));
@@ -177,14 +186,15 @@ namespace DisasterPlus.Core.Tests.Volcano
             for (float r = 250f; r <= 3000f; r += 50f)
             {
                 Assert.True(VolcanoShape.CraterRadiusOf(r) < r);
-                // 火口の矩形が 128 セル（2048 m）を跨がないこと。
+                // The crater rectangle must not span more than 128 cells (2048 m).
                 Assert.True(VolcanoShape.CraterRadiusOf(r) <= 400f);
             }
             Assert.Equal(0f, VolcanoShape.CraterDepthOf(float.NaN), 4);
             Assert.Equal(0f, VolcanoShape.CraterRadiusOf(float.NaN), 4);
 
-            // ★ 低い山では「高さの 45 %」の上限のほうが効く（10 m の下限より優先）。
-            //   これが無いと 15 m の山に 10 m の穴が空き、火口の底が元の地面まで抜ける。
+            // ★ On a low mountain the "45 % of the height" cap takes effect instead
+            //   (it takes priority over the 10 m floor). Without this line a 15 m mountain
+            //   gets a 10 m hole and the crater floor punches through to the original ground.
             Assert.True(VolcanoShape.CraterDepthOf(15f) <= 15f * 0.45f + 0.001f);
             Assert.True(VolcanoShape.CraterDepthOf(15f) > 0f);
         }

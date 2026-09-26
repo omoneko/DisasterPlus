@@ -5,79 +5,91 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 台風パネル。**main スレッド専用。**
+    /// The typhoon panel. **Main thread only.**
     ///
-    /// 枠組みは②の <see cref="EarthquakePanel"/> をそのまま踏襲する
-    /// （<c>UIView.AddUIComponent(Type)</c> の**非総称**オーバーロード、
-    /// 構築途中の例外で孤児 GameObject を残さない try/catch、
-    /// <c>backgroundSprite = "MenuPanel2"</c>、DLC 非所持で本体を組まない
-    /// <see cref="_bodyBuilt"/>、<c>Tick()</c> の先頭で設定を見るガード）。
+    /// The frame follows ②'s <see cref="EarthquakePanel"/> exactly (the **non-generic**
+    /// overload of <c>UIView.AddUIComponent(Type)</c>, the try/catch that leaves no
+    /// orphan GameObject if construction throws part-way,
+    /// <c>backgroundSprite = "MenuPanel2"</c>, the <see cref="_bodyBuilt"/> flag that
+    /// skips building the body without the DLC, and the guard at the top of
+    /// <c>Tick()</c> that looks at the setting).
     ///
-    /// ── ④が新しく持ち込むもの: 出所の見出し ────────────────────────
+    /// ── What ④ brings that is new: the provenance heading ────────────────
     ///
-    /// ②は行ごとに <c>[measured]</c> / <c>[Disaster + model]</c> を付けた。
-    /// **④はそれをしない。** バニラに原資が無いので④の数値はほぼ全部が本 MOD のもので、
-    /// 全部が同じ出所なら行ごとの印は情報を持たない（設計書 §1.2 / §7-1）。
-    /// 代わりに<b>見出しで一度だけ</b>名乗る —— それが
-    /// <c>Strings.TyphoonModelHeader</c> と <c>Strings.TyphoonModelNote</c> の 2 行で、
-    /// **このパネルにおいて最も重要な 2 行である**。行を足す担当者はここを消さないこと。
+    /// ② put <c>[measured]</c> / <c>[Disaster + model]</c> on every row.
+    /// **④ does not.** Vanilla has no source material, so nearly all of ④'s numbers are
+    /// this mod's own, and if everything has the same provenance then a per-row marker
+    /// carries no information (design doc §1.2 / §7-1). Instead it names itself
+    /// <b>once, in a heading</b> — those are the two lines
+    /// <c>Strings.TyphoonModelHeader</c> and <c>Strings.TyphoonModelNote</c>, and
+    /// **they are the two most important lines on this panel**. Whoever adds rows must
+    /// not delete them.
     ///
-    /// 担保の実体は <see cref="TyphoonRows"/> に置いてある。
-    /// **このファイルには <c>UILabel</c> の生成も <c>.text</c> への代入も 1 つも無い。**
+    /// The guarantee itself lives in <see cref="TyphoonRows"/>.
+    /// **There is not a single <c>UILabel</c> creation or <c>.text</c> assignment in this
+    /// file.**
     ///
-    /// ── 発生は「地点を指す」から始まる ───────────────────────────
+    /// ── Raising one starts with "point at a spot" ─────────────────────────
     ///
-    /// ★★ 災害パネルの④のタイルも、このパネルの「発生」ボタンも、押すと
-    ///    <b>配置カーソルを構える</b>（<see cref="TyphoonPlacementTool"/>）。
-    ///    バニラの災害ボタンと同じ約束で、地図をクリックした地点から台風が始まる。
-    ///    <see cref="ArmPlacement"/> がその入口で、**タイルはこれを呼ぶ**。
+    /// ★★ Both ④'s tile on the disaster panel and this panel's "raise" button
+    ///    <b>arm a placement cursor</b> when pressed
+    ///    (<see cref="TyphoonPlacementTool"/>). Same contract as vanilla's disaster
+    ///    buttons: the typhoon begins at the point you click on the map.
+    ///    <see cref="ArmPlacement"/> is the entry point, and **the tile calls it**.
     ///
-    /// 「止める」ボタンだけは地点を要らないので、従来どおり
-    /// <see cref="TyphoonHub.Request"/> に依頼を積むだけである。
-    /// どちらも **main スレッドから <c>DisasterManager</c> に触らない**。実際に災害を
-    /// 作るのは次の sim tick の <see cref="TyphoonController"/> である。したがって
-    /// 指してから見た目が変わるまで **1 tick の遅れがある**。二度指して 2 個発生したように
-    /// 見えないよう、その間は「最初のシミュレーション更新を待っています」を出す
-    /// （<see cref="TyphoonStatusRows"/> が <see cref="TyphoonHub.PendingRequest"/> を見る）。
-    /// なお sim 側は同時に 1 個しか作らない（<c>TyphoonController.Start</c>）。
+    /// The "stop" button alone needs no point, so as before it just queues a request on
+    /// <see cref="TyphoonHub.Request"/>.
+    /// Neither one **touches <c>DisasterManager</c> from the main thread**. What actually
+    /// creates the disaster is <see cref="TyphoonController"/> on the next sim tick.
+    /// So there is **a one-tick delay** between pointing and anything changing on screen.
+    /// To stop it looking as though pointing twice raised two, "waiting for the first
+    /// simulation update" is shown in the meantime
+    /// (<see cref="TyphoonStatusRows"/> looks at
+    /// <see cref="TyphoonHub.PendingRequest"/>). The sim side only ever creates one at a
+    /// time anyway (<c>TyphoonController.Start</c>).
     ///
-    /// ── 縦の予算 ──────────────────────────────────────
+    /// ── The vertical budget ───────────────────────────────────────
     ///
-    /// T6〜T10 が <c>TyphoonEffectRows</c> に行を足す。パネルの高さは**中身に合わせて
-    /// 決め、固定値を焼き込まない**（<see cref="ClampToView"/> がビューからはみ出す
-    /// ときに警告する）。
+    /// T6 to T10 add rows to <c>TyphoonEffectRows</c>. The panel height is **decided from
+    /// the contents, with no fixed value burnt in** (<see cref="ClampToView"/> warns when
+    /// it sticks out past the view).
     /// </summary>
     public static class TyphoonPanel
     {
-        /// <summary>ボタン 1 個の動作。net35 なので <c>Action</c> ではなく自前の delegate。</summary>
+        /// <summary>What one button does. This is net35, so a hand-written delegate
+        /// rather than <c>Action</c>.</summary>
         private const string PanelName = FreeSlotFinder.SelfPrefix + "TyphoonPanel";
 
-        /// <summary>ボタン 1 個の大きさ。発生・停止の 2 個を横に並べる。</summary>
+        /// <summary>The size of one button. Raise and stop sit side by side.</summary>
 
 
         private static UIPanel _panel;
         private static UILabel _titleLabel;
 
         /// <summary>
-        /// 台風の行を構築したか。Natural Disasters DLC が無い環境では
-        /// <c>ThunderStormAI</c> のプレハブが存在せず台風は原理的に 1 個も起きないので、
-        /// 行を組まずに理由を 1 行だけ出す（②の <c>EarthquakePanel._bodyBuilt</c> と同じ）。
+        /// Whether the typhoon rows have been built. In an environment without the
+        /// Natural Disasters DLC the <c>ThunderStormAI</c> prefab does not exist and a
+        /// typhoon is impossible in principle, so we skip the rows and show a single line
+        /// giving the reason (the same as ②'s <c>EarthquakePanel._bodyBuilt</c>).
         /// </summary>
         private static bool _bodyBuilt;
 
-        /// <summary>左上。既定値は <see cref="InfoHub"/> が位置を決める前だけ使う。</summary>
+        /// <summary>Top-left corner. The default is only used before
+        /// <see cref="InfoHub"/> has decided the position.</summary>
         private static Vector3 _origin = new Vector3(1260f, 120f);
 
         public static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
 
-        /// <summary>このパネルの幅。<see cref="InfoHub"/> がタブ帯の幅を合わせるために読む。</summary>
+        /// <summary>This panel's width. <see cref="InfoHub"/> reads it to match the tab
+        /// strip's width.</summary>
         internal static float Width { get { return TyphoonRows.PanelWidth; } }
 
         /// <summary>
-        /// 左上を決める。**位置を決める主体は <see cref="InfoHub"/> 1 つだけである**
-        /// （<c>DisasterPanelBar</c> のクラス doc「位置を決める主体が複数ある限り、
-        /// この事故は形を変えて何度でも起きる」と同じ規律）。
-        /// ここで座標を発明しないこと。
+        /// Set the top-left corner. **<see cref="InfoHub"/> is the one and only thing
+        /// that decides positions** (the same discipline as <c>DisasterPanelBar</c>'s
+        /// class doc: "as long as more than one thing decides the position, this accident
+        /// will keep happening in new forms").
+        /// Do not invent coordinates here.
         /// </summary>
         internal static void MoveTo(Vector3 origin)
         {
@@ -100,13 +112,15 @@ namespace DisasterPlus.Game
             if (_panel != null) _panel.Hide();
         }
 
-        /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
+        /// <summary>Every frame from the main thread. Only updates the contents while
+        /// visible.</summary>
         public static void Tick()
         {
-            // 設定で無効化されたときにパネルが開いたままだと、OnSimulationTick が
-            // publish を止めた古いスナップショットを永遠に出し続ける「凍りついたのに
-            // 生きて見える」パネルになり、閉じる手段のボタンも既に撤去済みで消せない
-            // （①のレビュー指摘。②も同じガードを持っている）。
+            // If the panel is left open when the setting is disabled, OnSimulationTick
+            // stops publishing and the panel shows the same stale snapshot for ever — a
+            // "frozen but looks alive" panel, and the button that would close it has
+            // already been removed, so it cannot be dismissed (①'s review finding; ② has
+            // the same guard).
             if (!ModSettings.TyphoonEnabled.value)
             {
                 if (IsVisible) Hide();
@@ -117,10 +131,12 @@ namespace DisasterPlus.Game
             Refresh();
         }
 
-        /// <summary>レベルアンロード時。**セッション状態を 1 つも持ち越さない。**</summary>
+        /// <summary>On level unload. **Do not carry over a single piece of session
+        /// state.**</summary>
         public static void Destroy()
         {
-            // 参照を捨てるだけ。実体はパネルの GameObject と一緒に消える。
+            // Only drops the references. The objects themselves go with the panel's
+            // GameObject.
             TyphoonStatusRows.Destroy();
             TyphoonEffectRows.Destroy();
 
@@ -133,7 +149,7 @@ namespace DisasterPlus.Game
             _titleLabel = null;
             _bodyBuilt = false;
 
-            // ★ 破棄されたカメラの参照を次の都市へ持ち越さない。
+            // ★ Do not carry a reference to a destroyed camera into the next city.
             CameraJump.Reset();
             CameraFocus.Reset();
         }
@@ -161,10 +177,11 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ _panel への代入は構築の最後の 1 行にしない。途中の例外で
-            //    EnsureBuilt() の catch が呼ぶ Destroy() は _panel==null を見て何もせず、
-            //    UIView に取り付け済みの GameObject が孤児のまま残る
-            //    （クリックのたびに 1 枚ずつ積み上がる。①のレビュー指摘）。
+            // ★ Do not make the assignment to _panel the last line of construction. If
+            //    something part-way through throws, the Destroy() that EnsureBuilt()'s
+            //    catch calls sees _panel==null and does nothing, leaving the GameObject
+            //    already attached to UIView orphaned (one more piles up on every click;
+            //    ①'s review finding).
             UIPanel panel = null;
             try
             {
@@ -186,8 +203,9 @@ namespace DisasterPlus.Game
             panel.width = TyphoonRows.PanelWidth;
             panel.backgroundSprite = "MenuPanel2";
             panel.color = new Color32(255, 255, 255, 240);
-            // 位置は InfoHub が決める（MoveTo）。ここには既定値しか無い ——
-            // パネルは同時に 1 枚しか出ないので、互いに避ける座標はもう要らない。
+            // InfoHub decides the position (MoveTo). All there is here is the default —
+            // only one panel is ever on screen at a time, so coordinates that dodge each
+            // other are no longer needed.
             panel.relativePosition = _origin;
             panel.isVisible = false;
 
@@ -197,10 +215,12 @@ namespace DisasterPlus.Game
                 TyphoonRows.PanelWidth - 44f, 24f);
             _titleLabel.textScale = 1.1f;
 
-            // ★ 閉じるボタンはここには無い。**タブ帯の X が 1 つだけ持つ**（InfoHub）。
+            // ★ There is no close button here. **The tab strip's X is the only one**
+            //    (InfoHub).
             y += 30f;
 
-            // DLC が無い環境では台風そのものが存在しない。行を出さずに理由を書く。
+            // Without the DLC the typhoon itself does not exist. Write the reason instead
+            // of the rows.
             _bodyBuilt = ModCompat.NaturalDisastersOwned;
             if (!_bodyBuilt)
             {
@@ -210,18 +230,22 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★★ ④の表示規約を名乗る 2 行。**行ごとの印を付けない代わりに、
-            //     ここで一度だけ全部の出所を言う**（クラス doc / 設計書 §7-1）。
-            // ★★ **出所を名乗る 2 行は外した**（2026-08-22）。
-            //    ④の数値がゲームの実測ではないことは、雨量と雲量の 2 行に付く
-            //    [実測] の印と、診断ダンプが引き続き名乗る。
-            //    印の仕組みそのもの（<c>TyphoonRows</c>）は 1 バイトも変えていない。
+            // ★★ The two lines that name ④'s display convention. **In place of per-row
+            //     markers, this says where everything comes from, once** (class doc /
+            //     design doc §7-1).
+            // ★★ **The two provenance lines have been taken out** (2026-08-22).
+            //    That ④'s numbers are not the game's own measurements is still named by
+            //    the [measured] marker on the rainfall and cloud rows, and by the
+            //    diagnostics dump.
+            //    The marker machinery itself (<c>TyphoonRows</c>) is unchanged, to the
+            //    byte.
 
             AddActionButtons(panel, ref y);
 
             TyphoonStatusRows.Build(panel, ref y);
-            // ★ 各要素（落雷・風害・氾濫・雲・竜巻）の行は台風そのものの状態より下。
-            //   T7〜T10 は TyphoonEffectRows の中に足すこと（ここの並びは変えない）。
+            // ★ The rows for each element (lightning, wind damage, flooding, clouds,
+            //   tornadoes) go below the state of the typhoon itself. T7 to T10 must be
+            //   added inside TyphoonEffectRows (do not change the order here).
             TyphoonEffectRows.Build(panel, ref y);
 
             panel.height = y + 8f;
@@ -229,33 +253,35 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **ボタンは 1 個も無い。** このパネルは<b>読むための場所</b>である。
+        /// **There is not one button.** This panel is <b>a place to read</b>.
         ///
-        /// ★★ **発生させるボタンはここには無い。** 台風を起こすのは災害パネルの
-        ///    ④タイル（バニラの災害ボタンと同じ 3 手）だけである ——
-        ///    2 か所から起こせると、「押してから地図をクリック」という約束の
-        ///    入口が 2 つになる。
+        /// ★★ **The button that raises one is not here.** The only thing that raises a
+        ///    typhoon is ④'s tile on the disaster panel (the same three steps as
+        ///    vanilla's disaster buttons) — with two ways to raise one, the contract
+        ///    "press, then click the map" would have two entrances.
         ///
-        /// ★★ **「台風を止める」も撤去した**（2026-09-02、所有者
-        ///    「自然災害を止めることは誰にもできません。停止の概念そのものを削除」）。
+        /// ★★ **"Stop the typhoon" has been removed too** (2026-09-02, the owner:
+        ///    "Nobody can stop a natural disaster. Delete the very concept of
+        ///    stopping.")
         ///
-        /// ★★ **「暴風域へ移動」も撤去した。** 同じ日に、このパネルが
-        ///    <b>そもそも開けない</b>ことが分かった —— <c>Show()</c> を呼ぶ経路は
-        ///    どこにも無い（2026-08-22 に D+ のタブが予報と地震の 2 枚に絞られた
-        ///    ときから）。地図へ寄せる機能は<b>予報パネル</b>へ移した。
+        /// ★★ **"Jump to the storm" has been removed as well.** On the same day it turned
+        ///    out that this panel <b>cannot be opened at all</b> — there is no route
+        ///    anywhere that calls <c>Show()</c> (not since 2026-08-22, when D+'s tabs were
+        ///    narrowed to the two of forecast and earthquake). The jump-to-the-map feature
+        ///    moved to <b>the forecast panel</b>.
         ///
-        /// ★ このメソッド自体は残してある。**行を足す場所が要る**ときのための
-        ///   足場で、いま呼んでも何もしない。
+        /// ★ The method itself is kept. It is a foothold for when **somewhere to add rows
+        ///   is needed**; calling it now does nothing.
         /// </summary>
         private static void AddActionButtons(UIPanel panel, ref float y)
         {
         }
 
         /// <summary>
-        /// パネルの下端がビューからはみ出さない位置まで上げる。②の
-        /// <c>EarthquakePanel.ClampToView</c> と同じで、**行を足すたびにパネルは伸びる**。
-        /// いちばん下の行——注記や「なぜ何も起きないか」——が静かに画面外へ出るのを
-        /// 黙って許さない。
+        /// Raise the panel until its bottom edge no longer sticks out of the view. Same
+        /// as ②'s <c>EarthquakePanel.ClampToView</c>: **the panel grows every time a row
+        /// is added**. Do not quietly let the bottom row — a note, or "why nothing is
+        /// happening" — slip off screen.
         /// </summary>
         private static void ClampToView(UIPanel panel)
         {
@@ -274,20 +300,24 @@ namespace DisasterPlus.Game
                 }
                 if (top < Margin)
                 {
-                    // ★ ここに来たら**内容がビューより高い**。上端に寄せても
-                    //    いちばん下の行が画面外に出る。**黙って切れさせない。**
-                    //    構築時の 1 回だけなのでスロットル不要。
+                    // ★ Getting here means **the contents are taller than the view**.
+                    //    Even pushed to the top edge, the bottom row goes off screen.
+                    //    **Do not let it be cut off silently.** This happens once at build
+                    //    time, so no throttling is needed.
                     top = Margin;
                     Log.Warn("typhoon panel is taller than the view ("
                              + panel.height.ToString("F0") + " > " + viewHeight.ToString("F0")
                              + "); the bottom rows will be off-screen");
                 }
-                // ★★ **上へは <c>InfoHub</c> が指定した位置（＝タブ帯の真下）より上に出さない。**
-                //    （2026-08-22、実機報告「天気タブ・地震タブの中に X で閉じられない
-                //    タブがあり」の正体。）上の 2 つの寄せは下端を画面に収めるためだけに
-                //    パネルを上へ上げるので、背の高いパネルは**タブ帯をまるごと覆い隠して
-                //    いた** —— 閉じる手段そのものが押せなくなる。収まらないぶんは下へはみ出すが、
-                //    帯の左端を掴めば一緒に動かせる（<c>InfoHub</c> のドラッググリップ）。
+                // ★★ **Never go above the position <c>InfoHub</c> specified (i.e. just
+                //    below the tab strip).** (2026-08-22; this was the cause of the
+                //    in-game report "there is a tab inside the weather and earthquake tabs
+                //    that the X will not close".) The two clamps above only ever move the
+                //    panel up to fit its bottom edge on screen, so a tall panel **covered
+                //    the whole tab strip** — the very means of closing it became
+                //    unclickable. Whatever does not fit now sticks out below, and you can
+                //    move the lot by grabbing the left end of the strip (<c>InfoHub</c>'s
+                //    drag grip).
                 if (top < _origin.y) top = _origin.y;
                 panel.relativePosition = new Vector3(pos.x, top);
             }
@@ -301,10 +331,11 @@ namespace DisasterPlus.Game
         {
             TyphoonRows.SetPlain(_titleLabel, Strings.TyphoonTitle);
 
-            // DLC が無い環境では説明の 1 行しか構築していない（_bodyBuilt の doc）。
+            // Without the DLC only the one explanatory line was built (the doc on
+            // _bodyBuilt).
             if (!_bodyBuilt) return;
 
-            // ★ スナップショットは 1 フレームに 1 回だけ取る（ロックを 2 回取らない）。
+            // ★ Take the snapshot once per frame (do not take the lock twice).
             var snapshot = TyphoonHub.Latest;
 
             TyphoonStatusRows.Refresh(snapshot);

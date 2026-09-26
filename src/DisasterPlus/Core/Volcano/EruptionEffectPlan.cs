@@ -1,149 +1,168 @@
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 噴火の見た目に渡す量（<b>粒子の密度と、湧かす円の半径</b>）を強さから決める。
-    /// **エンジン非依存の純関数だけ。** Unity の型も、ゲームの型も、乱数も出てこない。
+    /// Decides, from the strength, the quantities handed to the eruption's visuals
+    /// (<b>the particle density and the radius of the circle they spawn in</b>).
+    /// **Pure, engine-free functions only.** No Unity types, no game types, no randomness.
     ///
-    /// ── なぜ Core に置くのか ─────────────────────────────────
+    /// ── Why it lives in Core ─────────────────────────────────
     ///
-    /// バニラの <c>ParticleEffect.RenderEffect</c> に渡す <c>magnitude</c> は
-    /// **粒子の密度**であって大きさではない。1 フレームに湧く粒子数は
+    /// The <c>magnitude</c> passed to vanilla's <c>ParticleEffect.RenderEffect</c> is
+    /// **the particle density**, not a size. The number of particles spawned per frame is
     ///
     /// <code>
     /// count = max(100, PI * r^2) * (timeDelta * magnitude * 0.01) * rateOverTime
     /// </code>
     ///
-    /// で決まる（IL 実測）。つまり「見た目の強さ」を作るつまみは <c>magnitude</c> と
-    /// <c>r</c> の 2 本で、どちらも**単なる数の写像**である。写像を Game 側に散らすと
-    /// 実機を起動しないと 1 行も確かめられなくなるので、ここに集めてテストで固定する。
+    /// (measured from the IL). So the two knobs that make "visual strength" are
+    /// <c>magnitude</c> and <c>r</c>, and both are **just mappings between numbers**. Scatter
+    /// the mappings across the Game side and you cannot verify a single line without
+    /// launching the game, so we collect them here and pin them down with tests.
     ///
-    /// ── 帯の根拠 ────────────────────────────────────────
+    /// ── The basis for the ranges ────────────────────────────────────────
     ///
-    /// <c>magnitude &lt;= 1</c> の帯は<b>建物火災の慣習</b>（<c>m_fireIntensity / 255</c>）で
-    /// あって、<c>ParticleEffect</c> を直に呼ぶときには当てはまらない。
-    /// バニラ自身、陥没穴は 2.0 まで上げているし、<c>rateOverTime</c> が 15 しかない
-    /// <c>Factory Smoke</c> を柱に見せるには 2 桁が要る（半径 30 m・60 fps で
-    /// <c>magnitude = 1</c> だと毎フレーム 5 粒子にしかならない）。
-    /// **したがってここの数はすべて⑤が決めた演出値**であり、物理量ではない。
+    /// The <c>magnitude &lt;= 1</c> range is <b>the convention for building fires</b>
+    /// (<c>m_fireIntensity / 255</c>) and does not apply when calling
+    /// <c>ParticleEffect</c> directly.
+    /// Vanilla itself takes sinkholes up to 2.0, and making <c>Factory Smoke</c> — whose
+    /// <c>rateOverTime</c> is only 15 — look like a column takes two digits (at radius 30 m
+    /// and 60 fps, <c>magnitude = 1</c> gives only 5 particles a frame).
+    /// **So every number here is a presentation value ⑤ chose**, not a physical quantity.
     /// </summary>
     public static class EruptionEffectPlan
     {
-        // ── 噴煙（灰の柱）──────────────────────────────────
+        // ── The plume (the ash column) ──────────────────────────────────
 
-        /// <summary>噴煙の密度の下限（強さ 0 のとき）。</summary>
+        /// <summary>The floor on the plume's density (at strength 0).</summary>
         public const float PlumeMagnitudeMin = 14f;
 
-        /// <summary>噴煙の密度の上限（強さ 1 のとき）。</summary>
+        /// <summary>The ceiling on the plume's density (at strength 1).</summary>
         public const float PlumeMagnitudeMax = 78f;
 
-        /// <summary>噴煙を湧かす円の半径（火口半径に対する比）の下限。</summary>
+        /// <summary>The floor on the radius of the circle the plume spawns in (as a ratio of
+        /// the crater's radius).</summary>
         public const float PlumeRadiusFloorRatio = 0.30f;
 
-        /// <summary>強さで足される半径（火口半径に対する比）。</summary>
+        /// <summary>The radius added by the strength (as a ratio of the crater's
+        /// radius).</summary>
         public const float PlumeRadiusGainRatio = 0.28f;
 
-        // ── 炎（火口とラバの縁）─────────────────────────────
+        // ── The flames (the crater and the lava's edges) ─────────────────────
 
-        /// <summary>炎の密度の下限。<c>Fire Particles</c> は <c>rateOverTime</c> が 200 と
-        /// 高いので、噴煙よりずっと小さい数で足りる。</summary>
+        /// <summary>The floor on the flames' density. <c>Fire Particles</c> has a high
+        /// <c>rateOverTime</c> of 200, so far smaller numbers suffice than for the
+        /// plume.</summary>
         public const float FlameMagnitudeMin = 1.6f;
 
-        /// <summary>炎の密度の上限。</summary>
+        /// <summary>The ceiling on the flames' density.</summary>
         public const float FlameMagnitudeMax = 9f;
 
-        /// <summary>炎を湧かす円の半径（火口半径に対する比）の下限。</summary>
+        /// <summary>The floor on the radius of the circle the flames spawn in (as a ratio of
+        /// the crater's radius).</summary>
         public const float FlameRadiusFloorRatio = 0.18f;
 
-        /// <summary>強さで足される炎の半径（火口半径に対する比）。</summary>
+        /// <summary>The flame radius added by the strength (as a ratio of the crater's
+        /// radius).</summary>
         public const float FlameRadiusGainRatio = 0.22f;
 
-        // ── 噴石 ───────────────────────────────────────
+        // ── Ejecta ───────────────────────────────────────
 
-        /// <summary>噴石が 1 回噴き上がる長さ（秒）。</summary>
+        /// <summary>How long one burst of ejecta is thrown up for (seconds).</summary>
         public const float EjectaBurstSeconds = 0.55f;
 
-        /// <summary>噴石の間隔の上限（＝いちばん弱いとき。秒）。</summary>
+        /// <summary>The longest interval between ejecta (i.e. at its weakest;
+        /// seconds).</summary>
         public const float EjectaPeriodMaxSeconds = 7.5f;
 
-        /// <summary>噴石の間隔の下限（＝いちばん強いとき。秒）。</summary>
+        /// <summary>The shortest interval between ejecta (i.e. at its strongest;
+        /// seconds).</summary>
         public const float EjectaPeriodMinSeconds = 1.6f;
 
-        /// <summary>噴石 1 回の密度の下限。</summary>
+        /// <summary>The floor on one ejecta burst's density.</summary>
         public const float EjectaMagnitudeMin = 6f;
 
-        /// <summary>噴石 1 回の密度の上限。</summary>
+        /// <summary>The ceiling on one ejecta burst's density.</summary>
         public const float EjectaMagnitudeMax = 34f;
 
-        /// <summary>噴石を湧かす円の半径（火口半径に対する比）。</summary>
+        /// <summary>The radius of the circle the ejecta spawn in (as a ratio of the crater's
+        /// radius).</summary>
         public const float EjectaRadiusRatio = 0.22f;
 
-        // ── 爆発と噴石の着弾（2026-08-22、所有者の依頼「爆発＋噴石」）────────
+        // ── The blast and the ejecta's impacts (2026-08-22, at the owner's request:
+        //    "explosions + ejecta") ────────
 
         /// <summary>
-        /// 1 回の爆発の密度の下限。**<c>DispatchEffect</c> の一発もの**なので、
-        /// 継続モードの噴煙のような 2 桁は要らない
-        /// （<c>Medium Explosion Particles</c> は <c>m_renderDuration</c> が 1.0 秒で、
-        /// 1 回積むだけで <c>m_intensityCurve</c> に沿って減衰して消える）。
+        /// The floor on one blast's density. It is **a one-shot through
+        /// <c>DispatchEffect</c>**, so it does not need two digits the way the plume does in
+        /// its continuous mode
+        /// (<c>Medium Explosion Particles</c> has an <c>m_renderDuration</c> of 1.0 second,
+        /// and one push is enough for it to decay along <c>m_intensityCurve</c> and
+        /// disappear).
         /// </summary>
         public const float BlastMagnitudeMin = 1.4f;
 
-        /// <summary>1 回の爆発の密度の上限。</summary>
+        /// <summary>The ceiling on one blast's density.</summary>
         public const float BlastMagnitudeMax = 5.5f;
 
-        /// <summary>爆発を湧かす円の半径（火口半径に対する比）の下限。</summary>
+        /// <summary>The floor on the radius of the circle the blast spawns in (as a ratio of
+        /// the crater's radius).</summary>
         public const float BlastRadiusFloorRatio = 0.35f;
 
-        /// <summary>強さで足される爆発の半径（同上）。</summary>
+        /// <summary>The blast radius added by the strength (same units).</summary>
         public const float BlastRadiusGainRatio = 0.45f;
 
-        /// <summary>飛んでいる岩 1 個に付ける尾の密度（大きい岩でこの値）。</summary>
+        /// <summary>The density of the trail attached to one flying rock (this value for a
+        /// large rock).</summary>
         public const float BlockTrailMagnitudeMax = 1.2f;
 
-        /// <summary>同上の下限（いちばん小さい岩）。</summary>
+        /// <summary>The floor on the same (the smallest rock).</summary>
         public const float BlockTrailMagnitudeMin = 0.4f;
 
-        /// <summary>飛んでいる岩を湧かす円の半径（m）。**岩 1 個ぶんの大きさ。**</summary>
+        /// <summary>The radius of the circle a flying rock spawns in (m). **The size of one
+        /// rock.**</summary>
         public const float BlockTrailRadiusMetres = 9f;
 
-        /// <summary>着弾の土煙が出ている時間（秒）。</summary>
+        /// <summary>How long the dust cloud from an impact lasts (seconds).</summary>
         public const float ImpactSeconds = 0.9f;
 
-        /// <summary>着弾の土煙の密度（大きい岩でこの値）。</summary>
+        /// <summary>The density of an impact's dust cloud (this value for a large
+        /// rock).</summary>
         public const float ImpactMagnitudeMax = 2.6f;
 
-        /// <summary>着弾の土煙の広がり（m、大きい岩で）。</summary>
+        /// <summary>The spread of an impact's dust cloud (m, for a large rock).</summary>
         public const float ImpactRadiusMetresMax = 34f;
 
-        /// <summary>爆発の密度。</summary>
+        /// <summary>The blast's density.</summary>
         public static float BlastMagnitude(float unit)
         {
             return Lerp(BlastMagnitudeMin, BlastMagnitudeMax, Clamp01(unit));
         }
 
-        /// <summary>爆発を湧かす円の半径（m）。</summary>
+        /// <summary>The radius (m) of the circle the blast spawns in.</summary>
         public static float BlastRadiusMetres(float craterRadiusMetres, float unit)
         {
             return RadiusFrom(craterRadiusMetres, BlastRadiusFloorRatio,
                               BlastRadiusGainRatio, unit);
         }
 
-        /// <summary>飛んでいる岩の尾の密度。<paramref name="sizeUnit"/> は岩の大きさ。</summary>
+        /// <summary>The density of a flying rock's trail. <paramref name="sizeUnit"/> is the
+        /// rock's size.</summary>
         public static float BlockTrailMagnitude(float sizeUnit)
         {
             return Lerp(BlockTrailMagnitudeMin, BlockTrailMagnitudeMax, Clamp01(sizeUnit));
         }
 
         /// <summary>
-        /// 着弾の土煙の密度。<paramref name="ageSeconds"/> が
-        /// <see cref="ImpactSeconds"/> を超えたら <b>0</b> を返すので、
-        /// 呼び出し側は <c>&gt; 0</c> のときだけ描けばよい。
+        /// The density of an impact's dust cloud. Once <paramref name="ageSeconds"/> passes
+        /// <see cref="ImpactSeconds"/> it returns <b>0</b>, so the caller need only draw
+        /// while it is <c>&gt; 0</c>.
         /// </summary>
         public static float ImpactMagnitude(float sizeUnit, float ageSeconds)
         {
             if (IsBad(ageSeconds) || ageSeconds < 0f) return 0f;
             if (ageSeconds >= ImpactSeconds) return 0f;
 
-            // 立ち上がりは速く、消えるのはゆっくり（土煙の見え方）。
+            // A fast rise and a slow fade (how a dust cloud looks).
             float w = ageSeconds / ImpactSeconds;
             float shape = w < 0.15f ? w / 0.15f : (1f - w) / 0.85f;
             if (shape < 0f) shape = 0f;
@@ -151,7 +170,8 @@ namespace DisasterPlus.Core.Volcano
             return ImpactMagnitudeMax * (0.4f + 0.6f * Clamp01(sizeUnit)) * shape;
         }
 
-        /// <summary>着弾の土煙の広がり（m）。大きい岩ほど広い。</summary>
+        /// <summary>The spread (m) of an impact's dust cloud. The larger the rock, the
+        /// wider.</summary>
         public static float ImpactRadiusMetres(float sizeUnit)
         {
             float r = ImpactRadiusMetresMax * (0.35f + 0.65f * Clamp01(sizeUnit));
@@ -159,46 +179,48 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 半径がこれ未満なら「火口が読めていない」とみなして使わない（m）。
-        /// 0 を渡されても <c>max(100, PI r^2)</c> のおかげで粒子は湧くので、
-        /// **0 のまま素通りさせると 1 点から噴くことになる。**
+        /// A radius below this is treated as "the crater could not be read" and not used (m).
+        /// Pass 0 and particles still spawn, thanks to <c>max(100, PI r^2)</c>, so
+        /// **letting a 0 through unchanged would make it erupt from a single point.**
         /// </summary>
         public const float MinRadiusMetres = 4f;
 
-        /// <summary>噴煙の密度。<paramref name="unit"/> は強さ <c>[0,1]</c>。</summary>
+        /// <summary>The plume's density. <paramref name="unit"/> is the strength
+        /// <c>[0,1]</c>.</summary>
         public static float PlumeMagnitude(float unit)
         {
             return Lerp(PlumeMagnitudeMin, PlumeMagnitudeMax, Clamp01(unit));
         }
 
-        /// <summary>噴煙を湧かす円の半径（m）。</summary>
+        /// <summary>The radius (m) of the circle the plume spawns in.</summary>
         public static float PlumeRadiusMetres(float craterRadiusMetres, float unit)
         {
             return RadiusFrom(craterRadiusMetres, PlumeRadiusFloorRatio,
                               PlumeRadiusGainRatio, unit);
         }
 
-        /// <summary>炎の密度。</summary>
+        /// <summary>The flames' density.</summary>
         public static float FlameMagnitude(float unit)
         {
             return Lerp(FlameMagnitudeMin, FlameMagnitudeMax, Clamp01(unit));
         }
 
-        /// <summary>炎を湧かす円の半径（m）。</summary>
+        /// <summary>The radius (m) of the circle the flames spawn in.</summary>
         public static float FlameRadiusMetres(float craterRadiusMetres, float unit)
         {
             return RadiusFrom(craterRadiusMetres, FlameRadiusFloorRatio,
                               FlameRadiusGainRatio, unit);
         }
 
-        /// <summary>噴石を湧かす円の半径（m）。**強さでは変えない**（火口の口の広さである）。</summary>
+        /// <summary>The radius (m) of the circle the ejecta spawn in. **Not varied by the
+        /// strength** (it is the width of the crater's mouth).</summary>
         public static float EjectaRadiusMetres(float craterRadiusMetres)
         {
             return RadiusFrom(craterRadiusMetres, EjectaRadiusRatio, 0f, 0f);
         }
 
         /// <summary>
-        /// 噴石の間隔（秒）。強いほど短い。
+        /// The interval between ejecta (seconds). The stronger, the shorter.
         /// </summary>
         public static float EjectaPeriodSeconds(float unit)
         {
@@ -206,8 +228,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 時計を間隔で畳んだ位相（秒、<c>[0, period)</c>）。
-        /// **負の時計と 0 以下の間隔でも NaN を外へ出さない。**
+        /// The phase (seconds, in <c>[0, period)</c>) obtained by folding the clock by the
+        /// interval.
+        /// **Neither a negative clock nor an interval of zero or below lets a NaN out.**
         /// </summary>
         public static float BurstPhaseSeconds(float clockSeconds, float periodSeconds)
         {
@@ -222,11 +245,11 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 噴石の密度。<b>噴いていないあいだは 0 を返す</b>ので、
-        /// 呼び出し側は <c>&gt; 0</c> のときだけ <c>RenderEffect</c> を呼べばよい。
+        /// The ejecta's density. <b>It returns 0 while nothing is being thrown</b>, so the
+        /// caller need only call <c>RenderEffect</c> while it is <c>&gt; 0</c>.
         ///
-        /// 山なりの窓（立ち上がって落ちる）にしてあるのは、切り替えを矩形にすると
-        /// 1 フレームだけ濃い粒子が出て**点滅して見える**ためである。
+        /// The window is a hump (rising then falling) because with a rectangular switch you
+        /// get a single frame of dense particles and **it looks like it is blinking**.
         /// </summary>
         public static float EjectaMagnitude(float unit, float phaseSeconds)
         {
@@ -234,7 +257,7 @@ namespace DisasterPlus.Core.Volcano
             if (IsBad(phaseSeconds) || phaseSeconds < 0f) return 0f;
             if (phaseSeconds >= EjectaBurstSeconds) return 0f;
 
-            // 0 → 1 → 0 の山。頂点は窓の真ん中。
+            // A 0 → 1 → 0 hump, peaking in the middle of the window.
             float w = phaseSeconds / EjectaBurstSeconds;
             float shape = 1f - System.Math.Abs(w * 2f - 1f);
             if (shape < 0f) shape = 0f;

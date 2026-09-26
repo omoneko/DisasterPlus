@@ -7,36 +7,36 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 噴火音がこの環境で鳴らせるか。**「解決した」ではなく「使える」を持たせる**
-    /// （<see cref="VolcanoVanillaFacts"/> と同じ規律。④のレビューと②の監査が、
-    /// 「フィールドが解決したか」を述語にした検査が値の使えない環境で PASS を出す
-    /// 欠陥を見つけている）。
+    /// Whether the eruption sound can be played in this environment. **It carries "usable", not
+    /// "resolved"** (the same discipline as <see cref="VolcanoVanillaFacts"/>. ④'s review and
+    /// ②'s audit found the defect where a check whose predicate is "did the field resolve"
+    /// reports PASS in an environment where the value is unusable).
     ///
-    /// bool と int しか持たないので、キャッシュしても Unity の fake-null 問題を
-    /// 持ち込まない。既定値は全て false ＝「まだ／もう読めていない」。
+    /// It holds nothing but bools and ints, so caching it does not drag in Unity's fake-null
+    /// problem. All defaults are false = "not read yet / no longer readable".
     /// </summary>
     public struct VolcanoAudioFacts
     {
-        /// <summary><c>AudioManager</c> が居て <c>EffectGroup</c> に届いたか。</summary>
+        /// <summary>Whether <c>AudioManager</c> was there and we reached <c>EffectGroup</c>.</summary>
         public readonly bool EffectGroupResolved;
 
         /// <summary>
-        /// <c>AudioManager.AddEvent(AudioGroup, AudioInfo, Vector3, Vector3, float, float,
-        /// float, int)</c> を解決できたか。**⑤が音を出す唯一の経路**である。
+        /// Whether <c>AudioManager.AddEvent(AudioGroup, AudioInfo, Vector3, Vector3, float, float,
+        /// float, int)</c> could be resolved. **It is the only path by which ⑤ makes a sound.**
         /// </summary>
         public readonly bool AddEventResolved;
 
         /// <summary>
-        /// <c>AudioClip.Create(string,int,int,int,bool)</c> と
-        /// <c>AudioClip.SetData(float[],int)</c> を解決できたか。
-        /// **同期でクリップを作る唯一の経路**である。
+        /// Whether <c>AudioClip.Create(string,int,int,int,bool)</c> and
+        /// <c>AudioClip.SetData(float[],int)</c> could be resolved.
+        /// **It is the only path for building a clip synchronously.**
         /// </summary>
         public readonly bool ClipApiResolved;
 
-        /// <summary>同梱 wav が MOD フォルダに在るか。**無くても⑤は今日どおり動く。**</summary>
+        /// <summary>Whether the bundled wav is in the mod folder. **⑤ works exactly as today without it.**</summary>
         public readonly bool FileFound;
 
-        /// <summary>同梱 wav のバイト数（在れば）。</summary>
+        /// <summary>Size of the bundled wav in bytes (if present).</summary>
         public readonly long FileBytes;
 
         public VolcanoAudioFacts(bool effectGroupResolved, bool addEventResolved,
@@ -50,10 +50,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 音を鳴らす経路がこのゲームのビルドで成立するか。
-        /// **<see cref="FileFound"/> は含めない** —— ファイルの有無はプレイヤーの都合
-        /// （消せる）であって、ゲーム更新の兆候ではない。混ぜると、自分で消した人に
-        /// 「前提が壊れた」と名乗ることになる（狼少年にしない）。
+        /// Whether the path for making a sound holds in this build of the game.
+        /// **<see cref="FileFound"/> is not included** — the presence of the file is the player's
+        /// business (they may delete it) and not a sign of a game update. Mix it in and you tell
+        /// someone who deleted it themselves that "an assumption broke" (do not cry wolf).
         /// </summary>
         public bool Usable
         {
@@ -62,215 +62,224 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// 噴火の音。**main スレッド専用**（Unity のオーディオ資産は全て main）。
+    /// The eruption sound. **Main thread only** (all of Unity's audio assets are main).
     ///
-    /// ── なぜ「バニラの経路に載せる」のか（IL 実測）────────────────────
+    /// ── why we "ride the vanilla path" (measured in IL) ────────────────────────────────────
     ///
-    /// 自前で <c>GameObject</c> ＋ <c>AudioSource</c> を作ると、**プレイヤーの音量
-    /// スライダーもミュートも効かない**（生の音量で鳴り続ける）。バニラの災害の音が
-    /// どこを通っているかを IL で全数当たると、答えは 1 本道だった ——
-    /// **どれも <c>AudioManager.EffectGroup</c> へ流し込んでいる**
-    /// （呼び出し元の一覧は⑤ IL 事実文書 §H-23。⑤の doc はそれらの型名を書かない ——
-    /// 「⑤は災害まわりの型に触れていない」の担保が grep だからである。
-    /// <see cref="VolcanoFeature"/> のクラス doc）:
+    /// Build your own <c>GameObject</c> + <c>AudioSource</c> and **neither the player's volume
+    /// slider nor mute has any effect** (it keeps playing at raw volume). Going through every
+    /// vanilla disaster sound in IL, the answer was a single road —
+    /// **they all feed into <c>AudioManager.EffectGroup</c>**
+    /// (the list of callers is in ⑤'s IL facts doc §H-23. ⑤'s docs do not write those type
+    /// names — because the guarantee for "⑤ does not touch the disaster-related types" is a grep.
+    /// See the class doc of <see cref="VolcanoFeature"/>):
     ///
     /// <code>
     /// AudioManager.AddEvent(EffectGroup, info, position, velocity,
     ///                       maxDistance, volume, pitch, playerID)
-    ///     → m_eventBuffer へ積むだけ（Monitor.TryEnter で守られている）
-    ///     → AudioManager.LateUpdate が掃き出して EffectGroup.AddPlayer を呼ぶ
+    ///     → it only pushes onto m_eventBuffer (guarded by Monitor.TryEnter)
+    ///     → AudioManager.LateUpdate drains it and calls EffectGroup.AddPlayer
     ///
     /// AudioManager.Awake:
     ///     m_effectGroup = new AudioGroup(3, new SavedFloat(Settings.effectAudioVolume,
     ///                                                      Settings.gameSettingsFile, …))
-    /// AudioGroup.UpdatePlayers 末尾:
-    ///     m_cachedVolume = (float)m_groupVolume      ← 効果音スライダーそのもの
-    ///     m_totalVolume  = m_cachedVolume * master   ← master にミュートが入る
-    /// AudioGroup.AddPlayer 冒頭:
-    ///     if (m_totalVolume &lt; 0.01) return;         ← ミュート／0 なら 1 音も出さない
+    /// end of AudioGroup.UpdatePlayers:
+    ///     m_cachedVolume = (float)m_groupVolume      ← the sound-effects slider itself
+    ///     m_totalVolume  = m_cachedVolume * master   ← mute goes into master
+    /// top of AudioGroup.AddPlayer:
+    ///     if (m_totalVolume &lt; 0.01) return;         ← muted or 0 and not one sound is emitted
     ///     m_targetVolume = info.m_volume * volume * m_cachedVolume
     /// </code>
     ///
-    /// つまり <c>EffectGroup</c> へ流し込みさえすれば、**効果音スライダーとミュートは
-    /// ゲームが掛けてくれる**。3D の距離減衰（<c>rolloffMode = Linear</c>、
-    /// <c>minDistance = 0</c>、<c>maxDistance</c> は渡した値）・ドップラ・優先度・
-    /// フェードも全部あちら側にある。
+    /// So as long as you feed into <c>EffectGroup</c>, **the game applies the sound-effects
+    /// slider and mute for you**. The 3D distance attenuation (<c>rolloffMode = Linear</c>,
+    /// <c>minDistance = 0</c>, <c>maxDistance</c> as passed), Doppler, priority and fading are
+    /// all on their side too.
     ///
-    /// ★ <b><see cref="AudioSource"/> も <see cref="GameObject"/> も本 MOD は 1 つも作らない。</b>
-    ///   <c>AudioManager.ObtainPlayer</c> がプールから出して <c>AudioInfo.ObtainClip()</c>
-    ///   （＝ <c>m_clip</c> をそのまま返すだけ）を <c>source.clip</c> に挿す。
-    ///   本 MOD が持つ Unity オブジェクトは <see cref="AudioClip"/> 1 個と
-    ///   <see cref="AudioInfo"/> 1 個だけで、どちらも <see cref="Destroy"/> で消す。
+    /// ★ <b>This mod builds not a single <see cref="AudioSource"/> or <see cref="GameObject"/>.</b>
+    ///   <c>AudioManager.ObtainPlayer</c> takes one out of the pool and plugs
+    ///   <c>AudioInfo.ObtainClip()</c> (which just returns <c>m_clip</c> as is) into
+    ///   <c>source.clip</c>.
+    ///   The only Unity objects this mod holds are one <see cref="AudioClip"/> and one
+    ///   <see cref="AudioInfo"/>, and both are destroyed by <see cref="Destroy"/>.
     ///
-    /// ── <c>AddEvent</c> か <c>AddPlayer</c> か ─────────────────────
+    /// ── <c>AddEvent</c> or <c>AddPlayer</c> ────────────────────────────────────────────────
     ///
-    /// <c>AddPlayer</c> を直接呼ぶと、**<c>UpdatePlayers</c> より後に呼んでしまった
-    /// フレームでは音が消える**（<c>m_playerDataCount</c> は <c>UpdatePlayers</c> の
-    /// 末尾で 0 に戻る）。MOD の更新フックがバニラの <c>LateUpdate</c> の前後どちらで
-    /// 走るかは保証が無いので、その賭けはしない。
-    /// <c>AddEvent</c> は <c>m_eventBuffer</c> へ積むだけで、<c>AudioManager.LateUpdate</c>
-    /// が**必ず <c>UpdatePlayers</c> より前に**掃き出す。しかも
-    /// <c>Monitor.TryEnter(m_eventBuffer, SYNCHRONIZE_TIMEOUT)</c> で守られていて、
-    /// バニラ自身が sim スレッドから呼んでいる（呼び出し元は⑤ IL 事実文書 §H-23）。
-    /// **順序でもスレッドでも賭けが無い側**を採る。
+    /// Call <c>AddPlayer</c> directly and **on any frame where you happen to call it after
+    /// <c>UpdatePlayers</c>, the sound disappears** (<c>m_playerDataCount</c> is reset to 0 at
+    /// the end of <c>UpdatePlayers</c>). There is no guarantee whether a mod's update hook runs
+    /// before or after vanilla's <c>LateUpdate</c>, so we do not take that bet.
+    /// <c>AddEvent</c> only pushes onto <c>m_eventBuffer</c>, and
+    /// <c>AudioManager.LateUpdate</c> **always** drains it before <c>UpdatePlayers</c>. On top of
+    /// that it is guarded by
+    /// <c>Monitor.TryEnter(m_eventBuffer, SYNCHRONIZE_TIMEOUT)</c> and vanilla itself calls it
+    /// from the sim thread (the callers are in ⑤'s IL facts doc §H-23).
+    /// **Take the side with no bet on either ordering or threading.**
     ///
-    /// ── ループの維持と停止 ───────────────────────────────
+    /// ── keeping the loop alive, and stopping it ────────────────────────────────────────────
     ///
-    /// <c>UpdatePlayers</c> は <b><c>m_id</c> が一致する <c>PlayerData</c> が今フレーム
-    /// 在るかどうか</b>だけを見てループを維持する。したがって
+    /// <c>UpdatePlayers</c> keeps a loop alive purely by whether <b>a <c>PlayerData</c> with a
+    /// matching <c>m_id</c> exists on this frame</b>. So:
     ///
     /// <code>
-    /// 鳴らし続ける = 毎フレーム同じ id で AddEvent する
-    /// 止める       = AddEvent をやめる（あとはバニラが m_fadeLength でフェードして解放する）
+    /// keep it playing = AddEvent with the same id every frame
+    /// stop it         = stop calling AddEvent (vanilla then fades it out over m_fadeLength and releases it)
     /// </code>
     ///
-    /// 明示的な <c>Stop()</c> は要らないし、**在ってもいけない**（プールされた
-    /// <c>AudioSource</c> は本 MOD のものではない）。
+    /// An explicit <c>Stop()</c> is not needed, and **must not exist** (the pooled
+    /// <c>AudioSource</c> is not this mod's).
     ///
-    /// ★ 1 フレームに 1 回だけ呼ぶこと。2 回呼ぶと <c>PlayerData</c> が 2 本積まれ、
-    ///   <c>EffectGroup</c> の枠（<c>m_maxActiveCount = 3</c>）を 1 つの音で潰す。
-    ///   だから sim スレッド（速度 3 では 1 フレームに複数 tick 回る）ではなく
-    ///   **main スレッドの描画側から**呼ぶ。
+    /// ★ Call it exactly once per frame. Call it twice and two <c>PlayerData</c> are pushed, and
+    ///   one sound occupies a slot of <c>EffectGroup</c>'s budget
+    ///   (<c>m_maxActiveCount = 3</c>).
+    ///   That is why it is called **from the main thread's drawing side**, not from the sim
+    ///   thread (which runs several ticks in one frame at speed 3).
     ///
-    /// ── 毎フレームの費用 ────────────────────────────────
+    /// ── the per-frame cost ─────────────────────────────────────────────────────────────────
     ///
-    /// <c>AddEvent</c> 1 回（<c>SimulationEvent</c> は struct、<c>FastList.Add</c> は
-    /// 償却で確保なし）と <c>Vector3</c> 2 個。**ヒープ確保は 0 バイト、ログは 0 行。**
+    /// One <c>AddEvent</c> (<c>SimulationEvent</c> is a struct and <c>FastList.Add</c> allocates
+    /// nothing amortised) plus two <c>Vector3</c>.
+    /// **Zero bytes of heap allocation, zero lines of log.**
     ///
-    /// ── 1 都市 1 回だけの費用 ──────────────────────────────
+    /// ── the once-per-city cost ─────────────────────────────────────────────────────────────
     ///
-    /// <b>最初の噴火のフレーム</b>で 6.2 MB を読み、サンプルへ変換し（オフライン実測で 6 ms）、
-    /// 山の 10 秒を切り出して <c>AudioClip</c> にする。**一瞬引っかかる。**
-    /// レベルロードで先読みしないのは、⑤がプレイヤーの操作でしか始まらない機能で、
-    /// 火山を置かない都市に毎回この費用を払わせたくないからである。
-    /// 失敗しても**二度は試さない**（<see cref="_loadAttempted"/>）。
+    /// On <b>the frame of the first eruption</b> it reads 6.2 MB, converts it to samples (6 ms
+    /// measured offline), and cuts the 10 seconds of the peak into an <c>AudioClip</c>.
+    /// **There is a brief hitch.** It is not preloaded on level load because ⑤ is a feature that
+    /// only ever starts on a player action, and we do not want to make every city that never
+    /// places a volcano pay this cost.
+    /// On failure it **does not try twice** (<see cref="_loadAttempted"/>).
     /// </summary>
     public static class VolcanoEruptionAudio
     {
-        /// <summary>同梱 wav の置き場所（MOD フォルダからの相対）。<c>Locales</c> と同じ扱い。</summary>
+        /// <summary>Where the bundled wav lives (relative to the mod folder). Handled like <c>Locales</c>.</summary>
         public const string AudioFolderName = "Audio";
 
-        /// <summary>同梱 wav のファイル名。**設定でも翻訳でもない固定の名前**である。</summary>
+        /// <summary>The bundled wav's file name. **A fixed name, neither a setting nor a translation.**</summary>
         public const string FileName = "erupting-volcano.wav";
 
         /// <summary>
-        /// ループに使う窓（秒）。**実測に基づく**（<see cref="LoopSlice"/> のクラス doc）——
-        /// 同梱ファイルは 36 秒の噴火 1 回ぶんの録音で、3〜13 秒が山である。
+        /// The window used for the loop (seconds). **Based on measurement** (the class doc of
+        /// <see cref="LoopSlice"/>) — the bundled file is a 36-second recording of one eruption,
+        /// and 3–13 seconds is the peak.
         /// </summary>
         private const float LoopStartSeconds = 3.0f;
 
         private const float LoopLengthSeconds = 10.0f;
 
-        /// <summary>継ぎ目のクロスフェード（秒）。</summary>
+        /// <summary>The crossfade at the seam (seconds).</summary>
         private const float LoopFadeSeconds = 1.0f;
 
         /// <summary>
-        /// 聞こえる範囲（m）。バニラの竜巻が 5000、雷が 10000 を渡している
-        /// （<c>rolloffMode</c> は <c>Linear</c>、<c>minDistance</c> は 0 なので、
-        /// 音量はここまで直線的に落ちる）。⑤は竜巻と同じ帯に置く。
+        /// The audible range (m). Vanilla passes 5000 for tornadoes and 10000 for thunder
+        /// (<c>rolloffMode</c> is <c>Linear</c> and <c>minDistance</c> is 0, so the volume falls
+        /// off linearly out to here). ⑤ sits in the same band as the tornado.
         /// </summary>
         private const float MaxDistanceMetres = 5000f;
 
         /// <summary>
-        /// 噴出の強さ 0 のときの音量比。0 にしないのは、⑤の強さが 1 区切りごとに
-        /// ゆらぐため —— 0 まで落とすと噴火の途中で音が切れたように聞こえる。
+        /// The volume ratio at an eruption strength of 0. It is not 0 because ⑤'s strength
+        /// fluctuates from one segment to the next — drop it to 0 and the sound seems to cut out
+        /// partway through the eruption.
         /// </summary>
         private const float MinVolumeUnit = 0.35f;
 
         /// <summary>
-        /// 読み込んだ波形に掛ける倍率（2026-08-22、所有者の依頼
-        /// 「噴火の音が小さいです。もう倍くらいの音量にしてください」）。
+        /// The factor applied to the loaded waveform (2026-08-22, the owner's request
+        /// "the eruption sound is too quiet. Please make it about twice as loud").
         ///
-        /// ★★ **<c>AddEvent</c> に渡す <c>volume</c> を上げては届かない。**
-        ///   あちらは既に噴出の強さで 1.0 まで使い切っており、
-        ///   1 を超えた値を <c>AudioSource.volume</c> が受け付けるかは
-        ///   Unity の native 側の実装に依り、**IL に出てこないのでこの MOD からは
-        ///   実測できない**。確かめられないものに 2 倍を賭けない。
-        ///   波形そのものを大きくすれば、効果音スライダーもミュートも
-        ///   距離減衰も今までどおり効いたままで、上がるのは大きさだけである。
+        /// ★★ **Raising the <c>volume</c> passed to <c>AddEvent</c> does not get there.**
+        ///   That one is already used all the way up to 1.0 by the eruption strength, and whether
+        ///   <c>AudioSource.volume</c> accepts a value above 1 depends on Unity's native-side
+        ///   implementation — **it does not appear in IL, so this mod cannot measure it**.
+        ///   Do not bet a doubling on something you cannot confirm.
+        ///   Make the waveform itself louder and the sound-effects slider, the mute and the
+        ///   distance attenuation all keep working as before; the only thing that goes up is the
+        ///   loudness.
         ///
-        /// 単純に 2 倍すると割れる（素材のピークは既に 0.837）ので、
-        /// <see cref="LoudnessBoost"/> が小さい音だけを厳密に 2 倍にし、
-        /// ピークを 1 へ漸近させる（あちらのクラス doc に実測値）。
+        /// A plain doubling clips (the source already peaks at 0.837), so
+        /// <see cref="LoudnessBoost"/> doubles only the quiet parts exactly and makes the peak
+        /// approach 1 asymptotically (the measurements are in that class's doc).
         /// </summary>
         private const float LoudnessGain = 2f;
 
         /// <summary>
-        /// <c>AudioInfo.m_fadeLength</c>（秒）。<c>PlayerData.m_fadeSpeed = 1 / これ</c>
-        /// なので、**0 にしてはいけない**（除算が ∞ になり、フェードが消える）。
-        /// 止めたときにこの秒数でフェードアウトして解放される。
+        /// <c>AudioInfo.m_fadeLength</c> (seconds). <c>PlayerData.m_fadeSpeed = 1 / this</c>, so
+        /// **it must not be 0** (the division becomes ∞ and the fade disappears).
+        /// When stopped, it fades out over this many seconds and is released.
         /// </summary>
         private const float FadeSeconds = 2f;
 
         /// <summary>
-        /// <c>AddEvent</c> に渡す固定の player ID。
+        /// The fixed player ID passed to <c>AddEvent</c>.
         ///
-        /// ★ バニラの id と衝突しない値を選ぶ。バニラが使うのは
-        ///   <c>InstanceID.RawData</c>（型番号 × 2^24 ＋ 添字。実際には小さい正の数）と、
-        ///   <c>m_effectPlayerID</c> が 0 から 1 ずつ**減らしていく**負の数である。
-        ///   どちらの側からも遠い大きな正の定数を置く。
-        ///   **⑤の噴火は同時に 1 つしか無い**（位相機械が 1 本）ので、
-        ///   火山ごとに変える必要は無い。
+        /// ★ Pick a value that does not collide with vanilla's ids. Vanilla uses
+        ///   <c>InstanceID.RawData</c> (type number × 2^24 + index; in practice a small positive
+        ///   number) and the negative numbers <c>m_effectPlayerID</c> produces by **decrementing**
+        ///   from 0 one at a time.
+        ///   Put a large positive constant far away from both.
+        ///   **⑤ only ever has one eruption at a time** (there is one phase machine), so there is
+        ///   no need to vary it per volcano.
         /// </summary>
         private const int PlayerId = 0x7D15A570;
 
-        // ── main 側の状態（★ 配列にしない。参照 1 個ずつ）──────────────────
+        // ── main-side state (★ not an array. One reference each) ────────────────────────────
 
         private static AudioClip _clip;
         private static AudioInfo _info;
 
-        /// <summary>この都市で読み込みを既に試したか。**失敗しても二度は試さない。**</summary>
+        /// <summary>Whether loading has already been attempted in this city. **Do not try twice, even on failure.**</summary>
         private static bool _loadAttempted;
 
-        /// <summary>直近の読み込み結果（**英語・診断用**）。</summary>
+        /// <summary>The most recent load result (**English, for diagnostics**).</summary>
         private static string _detail = "not loaded yet";
 
         private static bool _errorLogged;
 
         /// <summary>
-        /// 直近の走査結果。**<see cref="ScanAudioFacts"/> が main スレッドで書き、
-        /// 診断（sim スレッド）が読む。** ③④⑤が既に使っている形と同じで、
-        /// bool と long しか持たない struct なのでキャッシュしても
-        /// Unity の fake-null 問題を持ち込まない。
+        /// The most recent scan result. **<see cref="ScanAudioFacts"/> writes it on the main
+        /// thread, and the diagnostics (sim thread) read it.** The same shape ③, ④ and ⑤ already
+        /// use: a struct holding nothing but bools and a long, so caching it does not drag in
+        /// Unity's fake-null problem.
         /// </summary>
         private static VolcanoAudioFacts _facts;
 
         private static bool _factsScanned;
 
-        /// <summary>クリップを持っているか（診断用）。</summary>
+        /// <summary>Whether we hold a clip (for diagnostics).</summary>
         public static bool ClipLoaded { get { return _clip != null && _info != null; } }
 
         /// <summary>
-        /// 直近に走査した事実。**まだ 1 度も走査していなければ既定値（全て false）** なので、
-        /// 読む側は <see cref="FactsScanned"/> を先に見ること ——
-        /// 「走査していない」を「経路が無い」と名乗ると、診断が嘘をつく。
+        /// The most recently scanned facts. **If it has never been scanned these are the defaults
+        /// (all false)**, so the reader must check <see cref="FactsScanned"/> first — report
+        /// "not scanned" as "there is no path" and the diagnostics are lying.
         /// </summary>
         public static VolcanoAudioFacts LastFacts { get { return _facts; } }
 
-        /// <summary><see cref="ScanAudioFacts"/> が 1 度でも走ったか。</summary>
+        /// <summary>Whether <see cref="ScanAudioFacts"/> has ever run.</summary>
         public static bool FactsScanned { get { return _factsScanned; } }
 
         /// <summary>
-        /// 読み込みの顛末を 1 行で（**英語**）。**将来ファイルが差し替えられたり
-        /// 消されたりしたときの唯一の手がかり**なので、何が起きたかを必ず名乗る。
+        /// How the load went, in one line (**English**). It is **the only clue if the file is
+        /// ever replaced or deleted**, so always state what happened.
         /// </summary>
         public static string Detail { get { return _detail; } }
 
         /// <summary>
-        /// **main スレッドから呼ぶこと。** 音の経路がこの環境で成立するかを調べるだけの走査で、
-        /// Unity オブジェクトを 1 つも作らず、クリップも読まない
-        /// （6 MB のファイル I/O をレベルロードに持ち込まない）。
-        /// <see cref="Update"/> が門にするのも**この同じ式**である。
+        /// **Call from the main thread.** A probe that only checks whether the audio path holds
+        /// in this environment; it builds not a single Unity object and does not load the clip
+        /// (do not drag 6 MB of file I/O into level load).
+        /// <see cref="Update"/> gates on **this same expression**.
         ///
-        /// ★★ <b>sim スレッドから呼ばないこと。</b> <c>File.Exists</c> の
-        ///   ブロッキング I/O と、<see cref="LocaleLoader.ModDirectoryPath"/> の中の
-        ///   <c>PluginManager.GetInstances</c> を sim スレッドへ持ち込むことになる。
-        ///   診断（<c>IDisasterFeature.WriteDiagnostics</c>）は**sim スレッドの契約**なので、
-        ///   あちらは走査せず <see cref="LastFacts"/> のキャッシュを読む。
-        ///   結果をここで <see cref="_facts"/> に置いているのはそのためである。
+        /// ★★ <b>Do not call it from the sim thread.</b> That would drag the blocking I/O of
+        ///   <c>File.Exists</c>, and the <c>PluginManager.GetInstances</c> inside
+        ///   <see cref="LocaleLoader.ModDirectoryPath"/>, onto the sim thread.
+        ///   The diagnostics (<c>IDisasterFeature.WriteDiagnostics</c>) are **a sim-thread
+        ///   contract**, so they do not scan; they read the <see cref="LastFacts"/> cache.
+        ///   That is why the result is stored in <see cref="_facts"/> here.
         ///
-        /// <c>Singleton&lt;T&gt;.exists</c> を先に見る（<c>instance</c> は <c>sInstance</c> が
-        /// null のとき <c>FindObjectOfType</c> と <c>new GameObject</c> を走らせる）。
+        /// Check <c>Singleton&lt;T&gt;.exists</c> first (when <c>sInstance</c> is null,
+        /// <c>instance</c> runs <c>FindObjectOfType</c> and <c>new GameObject</c>).
         /// </summary>
         public static VolcanoAudioFacts ScanAudioFacts()
         {
@@ -313,8 +322,8 @@ namespace DisasterPlus.Game
 
             try
             {
-                // ★ 引数の型まで指定する。Create には 6 引数の旧 _3D 版（Obsolete）が
-                //   同居しているので、名前だけで引くと別物を掴む。
+                // ★ Specify the parameter types too. Create has an old 6-argument _3D version
+                //   (Obsolete) living alongside it, so a name-only lookup grabs the wrong one.
                 bool create = typeof(AudioClip).GetMethod(
                     "Create",
                     System.Reflection.BindingFlags.Public
@@ -362,11 +371,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッド、毎フレーム。** <see cref="VolcanoHub"/> のスナップショットだけを
-        /// 読み、ゲームの状態を 1 つも変えない。
+        /// **Main thread, every frame.** It reads nothing but the <see cref="VolcanoHub"/>
+        /// snapshot and changes not one piece of game state.
         ///
-        /// 噴火していないフレームは**何もしない**（＝ <c>AddEvent</c> をやめる）。
-        /// それがそのまま「きれいに止まる」の実装である。
+        /// On frames where nothing is erupting it **does nothing** (i.e. it stops calling
+        /// <c>AddEvent</c>). That is the whole implementation of "stopping cleanly".
         /// </summary>
         public static void Update(VolcanoSnapshot snapshot)
         {
@@ -376,7 +385,7 @@ namespace DisasterPlus.Game
             }
             catch (Exception e)
             {
-                // ★ 1 回だけ鳴らす。ここは毎フレームの経路なので Log.Error を繰り返さない。
+                // ★ Sound it once. This is on the per-frame path, so do not repeat Log.Error.
                 if (!_errorLogged)
                 {
                     _errorLogged = true;
@@ -384,24 +393,23 @@ namespace DisasterPlus.Game
                 }
                 _detail = "the audio path threw " + e.GetType().Name;
 
-                // ★★ **ここで Destroy() を呼んではいけない。** あちらは
-                //    <c>_loadAttempted</c> を false に戻すので、次のフレームが
-                //    6 MB の wav を読み直し、また同じ例外で落ちる ——
-                //    **毎フレームのファイル I/O**になる。手放すのはオブジェクトだけで、
-                //    「もう試した」は立てたままにする（この都市ではもう鳴らさない）。
+                // ★★ **Do not call Destroy() here.** That resets <c>_loadAttempted</c> to false,
+                //    so the next frame re-reads the 6 MB wav and falls over on the same exception
+                //    again — **file I/O every frame**. Release only the objects and leave
+                //    "already tried" standing (this city simply gets no sound).
                 ReleaseObjects();
             }
         }
 
         private static void UpdateStep(VolcanoSnapshot snapshot)
         {
-            // 噴火していない ＝ 積むのをやめる。バニラが FadeSeconds かけて畳む。
+            // Not erupting = stop pushing. Vanilla folds it away over FadeSeconds.
             if (snapshot == null || !snapshot.Valid || !snapshot.EruptionActive) return;
 
             EnsureClip();
-            // ★ 参照そのものを毎フレーム見る（配列に入れない）。破棄済みなら Unity の
-            //   fake-null で null と等価になる。ここでは作り直さない ——
-            //   読み込みは 1 都市 1 回で、失敗を毎フレーム再試行しない。
+            // ★ Examine the references themselves every frame (never put them in an array).
+            //   If destroyed, Unity's fake-null makes them compare equal to null. Do not rebuild
+            //   here — loading happens once per city and a failure is not retried every frame.
             if (_clip == null || _info == null) return;
 
             if (!Singleton<AudioManager>.exists) return;
@@ -410,29 +418,32 @@ namespace DisasterPlus.Game
             AudioGroup group = audio.EffectGroup;
             if (group == null) return;
 
-            // 音量は噴出の強さに従う（竜巻が m_intensity で同じことをしている）。
-            // **プレイヤーの効果音スライダーとミュートはこの値に掛からない** ——
-            // それは AudioGroup 側が m_cachedVolume / m_totalVolume で掛ける。
+            // The volume follows the eruption strength (the tornado does the same thing with
+            // m_intensity).
+            // **The player's sound-effects slider and mute are not applied to this value** —
+            // AudioGroup applies those through m_cachedVolume / m_totalVolume.
             float unit = Clamp01(snapshot.EruptionIntensityUnit);
             float volume = MinVolumeUnit + (1f - MinVolumeUnit) * unit;
 
             Vec3 vent = snapshot.VentWorld;
             var position = new Vector3(vent.X, vent.Y, vent.Z);
 
-            // 火口は動かないので velocity は 0（ドップラを掛けない）。
-            // pitch は 1 のまま —— 噴出の強さは音量で表す。ループの再生速度を
-            // 動かすと、区切りごとのゆらぎがそのまま音程のふらつきになる。
+            // The crater does not move, so velocity is 0 (no Doppler).
+            // pitch stays at 1 — the eruption strength is expressed by volume. Move the loop's
+            // playback rate and the fluctuation between segments turns straight into wobbling
+            // pitch.
             audio.AddEvent(group, _info, position, Vector3.zero,
                            MaxDistanceMetres, volume, 1f, PlayerId);
         }
 
         /// <summary>
-        /// 同梱 wav を読み、<see cref="AudioClip"/> と <see cref="AudioInfo"/> を 1 個ずつ作る。
-        /// **都市ごとに 1 回だけ。失敗しても再試行しない**（毎フレーム 6 MB を読み直さない）。
+        /// Read the bundled wav and build one <see cref="AudioClip"/> and one
+        /// <see cref="AudioInfo"/>.
+        /// **Once per city, and never retried on failure** (do not re-read 6 MB every frame).
         ///
-        /// ★ <b>ここが「ファイルが無くても今日どおり」の実体である。</b>
-        ///   見つからない・壊れている・API が無い —— どれも <see cref="_detail"/> に
-        ///   理由を残して黙って戻るだけで、例外は 1 つも外へ出さない。
+        /// ★ <b>This is the substance of "it works exactly as today without the file".</b>
+        ///   Missing, corrupt, no API — each one merely leaves the reason in
+        ///   <see cref="_detail"/> and returns quietly; not a single exception gets out.
         /// </summary>
         private static void EnsureClip()
         {
@@ -449,8 +460,8 @@ namespace DisasterPlus.Game
 
             if (!File.Exists(path))
             {
-                // ★ **Warn ではなく Info。** ファイルを消すのはプレイヤーの自由で、
-                //   消した結果は「今日どおりの無音の噴火」である。異常ではない。
+                // ★ **Info, not Warn.** Deleting the file is the player's prerogative, and the
+                //   result of deleting it is "a silent eruption, exactly as today". Not an anomaly.
                 _detail = "no " + FileName + " in the mod's " + AudioFolderName
                           + " folder; the eruption is silent";
                 Log.Info("volcano eruption sound: " + _detail);
@@ -479,13 +490,15 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 1 回きりの録音から山の部分だけを切り出す（LoopSlice のクラス doc に実測）。
-            // 切れないほど短いファイルに差し替えられていたら、元の波形がそのまま返る。
+            // Cut just the peak out of a one-shot recording (the measurements are in the class doc
+            // of LoopSlice). If the file has been replaced with one too short to cut, the original
+            // waveform comes straight back.
             float[] samples = LoopSlice.Build(pcm.Samples, pcm.Channels, pcm.SampleRate,
                                               LoopStartSeconds, LoopLengthSeconds,
                                               LoopFadeSeconds);
-            // ★ 切り出しとクロスフェードの**あと**で掛ける。先に掛けると
-            //   フェードの乗算が膣の中で行われ、継ぎ目が滑らかでなくなる。
+            // ★ Apply it **after** the slicing and the crossfade. Apply it first and the fade
+            //   ends up multiplying samples the boost has already altered, and the seam is no
+            //   longer smooth.
             float boostedPeak = LoudnessBoost.Apply(samples, LoudnessGain);
 
             int frames = samples.Length / pcm.Channels;
@@ -513,9 +526,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ AudioInfo は PrefabInfo ではなく素の ScriptableObject で、
-            //   ObtainClip() は m_clip をそのまま返すだけである（IL 実測）。
-            //   だから実行時に組み立ててよい —— セーブにプレハブ名は焼き付かない。
+            // ★ AudioInfo is not a PrefabInfo but a plain ScriptableObject, and ObtainClip()
+            //   merely returns m_clip as is (measured in IL).
+            //   So it is fine to assemble it at runtime — no prefab name is baked into the save.
             AudioInfo info = ScriptableObject.CreateInstance<AudioInfo>();
             if (info == null)
             {
@@ -527,20 +540,21 @@ namespace DisasterPlus.Game
 
             info.name = "DisasterPlus_VolcanoEruption";
             info.m_clip = clip;
-            info.m_volume = 1f;      // 実際の音量は AddEvent の引数と効果音スライダーで決まる
+            info.m_volume = 1f;      // the real volume comes from AddEvent's argument and the sound-effects slider
             info.m_pitch = 1f;
             info.m_fadeLength = FadeSeconds;
             info.m_loop = true;
-            info.m_is3D = true;      // これが 3D 減衰（spatialBlend = 1）の門である
+            info.m_is3D = true;      // this is the gate for 3D attenuation (spatialBlend = 1)
             info.m_randomTime = false;
             info.m_variations = null;
 
             _clip = clip;
             _info = info;
 
-            // ★ 掛けた倍率と**実際に出たピーク**を出す。
-            //   1.00 に張り付いていたら素材が差し替わって膣を踏み抜いている
-            //   （<see cref="LoudnessBoost"/> は割らせないが、潰れていることは知らせる）。
+            // ★ Report the gain applied and **the peak that actually came out**.
+            //   If it is pinned at 1.00, the source has been replaced and is going through the
+            //   ceiling (<see cref="LoudnessBoost"/> will not let it clip, but it does tell you
+            //   that it is being squashed).
             _detail = "loaded " + pcm.SampleRate + " Hz, " + pcm.Channels + " ch, "
                       + pcm.BitsPerSample + " bit, "
                       + pcm.LengthSeconds.ToString("F1") + " s source -> "
@@ -550,7 +564,7 @@ namespace DisasterPlus.Game
             Log.Info("volcano eruption sound: " + _detail);
         }
 
-        /// <summary>同梱 wav の絶対パス。MOD フォルダが引けなければ null。</summary>
+        /// <summary>The absolute path of the bundled wav. null if the mod folder cannot be looked up.</summary>
         private static string FilePath()
         {
             string dir = LocaleLoader.ModDirectoryPath();
@@ -559,41 +573,42 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッド。** 音を畳む。冪等。
-        /// **レベルアンロードと、設定で音を切ったときに呼ぶ。**
+        /// **Main thread.** Fold the sound away. Idempotent.
+        /// **Call on level unload, and when the sound is turned off in the settings.**
         ///
-        /// ★ <c>AudioSource</c> も <c>GameObject</c> も本 MOD のものではないので触らない
-        ///   （<c>Stop()</c> も呼ばない）。持っているのはこの 2 個だけで、どちらも
-        ///   <c>Component</c> ではないから <c>GameObject</c> の道連れにならない ——
-        ///   **自分で <c>Object.Destroy</c> する。** ここを飛ばすと都市を出入りする
-        ///   たびにクリップ 1 個（数 MB）が残る。
+        /// ★ Neither the <c>AudioSource</c> nor the <c>GameObject</c> is this mod's, so do not
+        ///   touch them (do not call <c>Stop()</c> either). We hold only those two objects, and
+        ///   neither is a <c>Component</c>, so they do not go down with the <c>GameObject</c> —
+        ///   **call <c>Object.Destroy</c> on them ourselves.** Skip this and one clip (several MB)
+        ///   is left behind every time the player enters and leaves a city.
         ///
-        /// ★ 破棄した瞬間にバニラのプレイヤーがまだこのクリップを指していることは在りうるが、
-        ///   <c>UpdatePlayers</c> がクリップを触るのは <c>m_notReady</c> のときだけで、
-        ///   <c>m_notReady</c> は <c>loadState != Loaded</c> のときにしか立たない。
-        ///   <c>AudioClip.Create</c> ＋ <c>SetData</c> のクリップは最初から
-        ///   <c>Loaded</c> なので、その枝には入らない（IL 実測）。
+        /// ★ It is possible for a vanilla player to still be pointing at this clip at the moment
+        ///   it is destroyed, but <c>UpdatePlayers</c> only touches the clip when
+        ///   <c>m_notReady</c> is set, and <c>m_notReady</c> is only set when
+        ///   <c>loadState != Loaded</c>.
+        ///   A clip from <c>AudioClip.Create</c> + <c>SetData</c> is <c>Loaded</c> from the start,
+        ///   so that branch is never entered (measured in IL).
         /// </summary>
         public static void Destroy()
         {
             ReleaseObjects();
 
-            // ここでだけ「もう試した」を戻す。**次の都市（あるいは設定を入れ直したとき）は
-            // もう一度読む**のが正しい —— 前の都市で消されていたファイルが戻っていることも、
-            // 逆に消されたこともある。
+            // This is the only place "already tried" is reset. **The next city (or turning the
+            // setting back on) should read it again** — the file that was deleted in the previous
+            // city may have come back, and it may equally have been deleted since.
             _loadAttempted = false;
             _detail = "not loaded yet";
         }
 
         /// <summary>
-        /// 持っている Unity オブジェクト 2 個だけを手放す。**「もう試した」は戻さない。**
-        /// 例外経路からはこちらを呼ぶ（<see cref="Update"/> の catch の理由を参照）。
-        /// 冪等。
+        /// Release only the two Unity objects we hold. **"Already tried" is not reset.**
+        /// The exception path calls this one (see the reasoning in <see cref="Update"/>'s catch).
+        /// Idempotent.
         /// </summary>
         private static void ReleaseObjects()
         {
-            // info を先に消す。PlayerData / AudioPlayer の照合は Object.op_Equality なので
-            // fake-null になった時点で一致しなくなり、そのフレームで解放へ回る。
+            // Destroy info first. PlayerData / AudioPlayer match with Object.op_Equality, so the
+            // moment it becomes fake-null it stops matching and gets released on that frame.
             if (_info != null) UnityEngine.Object.Destroy(_info);
             _info = null;
 

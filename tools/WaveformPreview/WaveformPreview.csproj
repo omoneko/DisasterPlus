@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- 合成記象（P 波・S 波・コーダ）をゲームを起動せずに描いて確かめるための開発用ツール。
-       MOD 本体（net35）には入らない。Core だけを直接コンパイルする。 -->
+  <!-- A development tool for drawing the synthetic seismogram (P wave, S wave, coda) and
+       checking it without starting the game. It is not part of the mod itself (net35).
+       It compiles only Core, directly. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>

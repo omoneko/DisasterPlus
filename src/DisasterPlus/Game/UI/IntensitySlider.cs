@@ -4,68 +4,71 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// **バニラの強度スライダーを、④⑤のタイルからも使う。** main スレッド専用。
+    /// **Reuse vanilla's intensity slider from the ④ and ⑤ tiles too.** Main thread only.
     ///
-    /// ── バニラの流れ（IL 実測） ──────────────────────────────
+    /// ── What vanilla does (measured from the IL) ──────────────────────
     ///
-    /// <c>DisastersPanel.OnButtonClicked</c> は、押されたタイルの
-    /// <c>objectUserData</c> が <c>DisasterInfo</c> のときだけ動き、
-    /// <c>SetTool&lt;DisasterTool&gt;()</c> → <c>m_prefab</c> 代入 →
-    /// <c>SupportIntensity()</c> なら <c>ShowDisastersOptionPanel()</c> を呼ぶ。
-    /// その <c>ShowDisastersOptionPanel</c> の実体は
-    /// <c>GetOptionPanel("DisastersOptionPanel").ShowPanel()</c> だけである。
+    /// <c>DisastersPanel.OnButtonClicked</c> only acts when the pressed tile's
+    /// <c>objectUserData</c> is a <c>DisasterInfo</c>; it does
+    /// <c>SetTool&lt;DisasterTool&gt;()</c> → assign <c>m_prefab</c> → and, if
+    /// <c>SupportIntensity()</c>, call <c>ShowDisastersOptionPanel()</c>.
+    /// The body of that <c>ShowDisastersOptionPanel</c> is nothing but
+    /// <c>GetOptionPanel("DisastersOptionPanel").ShowPanel()</c>.
     ///
-    /// <c>DisastersOptionPanel</c>（<c>OptionPanelBase</c> 派生、public）は
-    ///   - <c>Awake</c> で <c>Find&lt;UISlider&gt;("Slider")</c> と
-    ///     <c>Find&lt;UILabel&gt;("LabelIntensity")</c> を掴み、
-    ///   - <c>OnSliderValueChanged</c> でラベルに <c>value / 10</c> を <c>"F1"</c> で出し、
-    ///     <c>DisasterTool.m_intensity = (int)value</c> を書く。
+    /// <c>DisastersOptionPanel</c> (derives from <c>OptionPanelBase</c>, public)
+    ///   - grabs <c>Find&lt;UISlider&gt;("Slider")</c> and
+    ///     <c>Find&lt;UILabel&gt;("LabelIntensity")</c> in <c>Awake</c>, and
+    ///   - in <c>OnSliderValueChanged</c> writes <c>value / 10</c> to the label as
+    ///     <c>"F1"</c> and sets <c>DisasterTool.m_intensity = (int)value</c>.
     ///
-    /// つまり<b>スライダーの生値がそのまま byte 強度で、表示だけが /10</b>
-    /// （<see cref="IntensityUnlock"/> が上限を 255 まで開けているのと同じ事実）。
+    /// So <b>the slider's raw value is the byte intensity as-is, and only the display is
+    /// divided by 10</b> (the same fact behind <see cref="IntensityUnlock"/> opening the
+    /// ceiling up to 255).
     ///
-    /// ── ④⑤がこれをそのまま借りられる理由 ──────────────────────
+    /// ── Why ④ and ⑤ can borrow this outright ──────────────────────
     ///
-    /// <c>ShowPanel()</c> / <c>HidePanel()</c> は <c>OptionPanelBase</c> の
-    /// **public** メソッドで、リフレクションは要らない（IL 実測）。
-    /// スライダー本体も <c>UICustomControl.Find&lt;T&gt;(name)</c> で取れる
-    /// （<see cref="IntensityUnlock"/> が既に同じ経路で上限を書き換えている）。
+    /// <c>ShowPanel()</c> / <c>HidePanel()</c> are **public** methods on
+    /// <c>OptionPanelBase</c>, so no reflection is needed (measured from the IL).
+    /// The slider itself is reachable through <c>UICustomControl.Find&lt;T&gt;(name)</c>
+    /// (<see cref="IntensityUnlock"/> already rewrites the ceiling through the same path).
     ///
-    /// ★ この型は <c>DisasterTool</c> を**現在のツールにしない**。④⑤は自前の
-    ///   配置ツールを使うので、スライダーが書く <c>DisasterTool.m_intensity</c> は
-    ///   その場では何も動かさない —— **こちらは値を読むだけ**である。
-    ///   バニラの災害を次に選んだときにスライダーの値が引き継がれるのは、
-    ///   バニラのタイルどうしで切り替えたときと同じ挙動である。
+    /// ★ This type **does not make <c>DisasterTool</c> the current tool**. ④ and ⑤ use their
+    ///   own placement tools, so the <c>DisasterTool.m_intensity</c> the slider writes moves
+    ///   nothing there and then — **we only read the value**. The slider value carrying over
+    ///   the next time a vanilla disaster is selected is the same behaviour as switching
+    ///   between two vanilla tiles.
     ///
-    /// ── 「意味」はタイルごとに違う。だから構えるたびに初期値を入れる ──────
+    /// ── The "meaning" differs per tile, so seed it every time the tool is armed ──────
     ///
-    /// スライダーは 1 本しか無いのに、④では**台風の強度**、⑤では
-    /// **設定サイズに対する倍率**（<c>VolcanoSizeScale</c>）を意味する。
-    /// 構えた瞬間に <see cref="Seed"/> でその機能の既定値を入れることで、
-    /// **画面に出ている数字が、今構えている機能の数字であること**を保つ。
-    /// 構え直すと既定へ戻るが、それは「別の意味の数字が残っている」より良い。
+    /// There is only one slider, yet for ④ it means **the typhoon's intensity** and for ⑤
+    /// **a multiplier on the configured size** (<c>VolcanoSizeScale</c>). Seeding that
+    /// feature's default via <see cref="Seed"/> the moment the tool is armed keeps
+    /// **the number on screen being the number for the feature currently armed**.
+    /// Re-arming resets it to the default, but that beats leaving a number behind that means
+    /// something else.
     ///
-    /// ── 状態を持たない ────────────────────────────────
+    /// ── Holds no state ────────────────────────────────
     ///
-    /// **Unity オブジェクトを static に持たない。** 呼ばれるのは「構えたとき」と
-    /// 「地図をクリックしたとき」だけなので、そのつど探して構わない。
-    /// 持たないので、都市をまたいで破棄済みの参照が残る経路が存在しない。
+    /// **Never hold a Unity object in a static.** This is only called when the tool is armed
+    /// and when the map is clicked, so looking it up each time is fine. Since nothing is
+    /// held, there is no path by which a destroyed reference survives across cities.
     /// </summary>
     public static class IntensitySlider
     {
-        /// <summary>スライダーの生値の下限。</summary>
+        /// <summary>Lower bound of the slider's raw value.</summary>
         public const int MinRaw = 0;
 
-        /// <summary>生値の上限（<c>DisasterData.m_intensity</c> は byte）。</summary>
+        /// <summary>Upper bound of the raw value (<c>DisasterData.m_intensity</c> is a byte).</summary>
         public const int MaxRaw = 255;
 
-        /// <summary>この環境でスライダーに手が届くか（値は変えない）。</summary>
+        /// <summary>Whether the slider is reachable in this environment (does not change the value).</summary>
         public static bool Available { get { return FindSlider() != null; } }
 
         /// <summary>
-        /// 強度スライダーを出す。バニラのタイルを押したときと同じ場所に同じものが出る。
-        /// 出せない環境（<c>DisastersOptionPanel</c> が無い等）では黙って何もしない ——
-        /// **④⑤はスライダーが無くても既定値で動く。**
+        /// Show the intensity slider. The same thing appears in the same place as when a
+        /// vanilla tile is pressed. In an environment where it cannot be shown (no
+        /// <c>DisastersOptionPanel</c>, and so on) it quietly does nothing —
+        /// **④ and ⑤ work off their default values without the slider.**
         /// </summary>
         public static void Show()
         {
@@ -76,8 +79,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 強度スライダーを畳む。**④⑤の配置ツールを降りるときだけ呼ぶこと** ——
-        /// バニラの災害を構えている最中に呼ぶと、あちらのスライダーを横から消す。
+        /// Fold the intensity slider away. **Only call this when leaving the ④/⑤ placement
+        /// tool** — calling it while a vanilla disaster is armed yanks their slider away
+        /// from under them.
         /// </summary>
         public static void Hide()
         {
@@ -88,17 +92,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// スライダーに初期値を入れる（クラス doc の「意味はタイルごとに違う」）。
-        /// 上限は他 MOD が動かしうるので、<c>UISlider</c> 自身のクランプに任せる。
+        /// Seed the slider with a starting value (see "the meaning differs per tile" in the
+        /// class doc). Other mods may move the ceiling, so leave the clamping to
+        /// <c>UISlider</c> itself.
         /// </summary>
         public static void Seed(int raw)
         {
             var slider = FindSlider();
             if (slider == null)
             {
-                // ★ 黙って落とさない。初回の実機テストでは
-                //   「警告が 1 行も出ていないのでスライダーは読めているはず」と
-                //   推論するしか無かった。**読めなかったことも 1 行残す。**
+                // ★ Do not drop this silently. In the first playtest the only available
+                //   inference was "no warning line came out, so the slider must be readable".
+                //   **Leave a line when it could not be read, too.**
                 Log.Diag("intensitySlider", "no slider to seed; the tile will fall back to the options value");
                 return;
             }
@@ -107,10 +112,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 今の生値。読めなければ <paramref name="fallback"/> をそのまま返す。
+        /// The current raw value. Returns <paramref name="fallback"/> unchanged if it cannot
+        /// be read.
         ///
-        /// ★ **読めなかったことを「0」で表さない。** 0 は「いちばん弱い」という
-        ///   有効な値であり、「読めなかった」とは違う。
+        /// ★ **Do not express "could not read" as 0.** 0 is a valid value meaning
+        ///   "the weakest setting", which is not the same thing as "could not read".
         /// </summary>
         public static int ReadOr(int fallback)
         {
@@ -137,8 +143,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// <c>Object.FindObjectOfType</c> は Unity 5.6 では非アクティブな GameObject を
-        /// 返さないので使わない（<see cref="SceneObjects"/> のクラス doc）。
+        /// <c>Object.FindObjectOfType</c> is not used, because on Unity 5.6 it does not
+        /// return inactive GameObjects (see the <see cref="SceneObjects"/> class doc).
         /// </summary>
         private static DisastersOptionPanel FindPanel()
         {

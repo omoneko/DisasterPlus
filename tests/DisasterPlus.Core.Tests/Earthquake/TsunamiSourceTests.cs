@@ -4,30 +4,33 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// 所有者の指示（2026-08-29）:
+    /// Owner's instruction (2026-08-29):
     ///
-    /// &gt; natural DisasterDLC の津波のメカニズムを研究して、
-    /// &gt; 私が求めているものを一から作り直してください。
+    /// &gt; Study the tsunami mechanism of the Natural Disasters DLC,
+    /// &gt; and rebuild what I am asking for from scratch.
     ///
-    /// 研究は <c>docs/superpowers/specs/2026-08-29-tsunami-il-facts.md</c>。
-    /// ここが固定するのは<b>震源に与える外力の形と、その大きさの決め方</b>だけである
-    /// —— 波そのものはゲームの浅水ソルバが作るので、こちらには無い。
+    /// The research is in <c>docs/superpowers/specs/2026-08-29-tsunami-il-facts.md</c>.
+    /// What is pinned down here is only <b>the shape of the forcing applied at the
+    /// epicentre, and how its magnitude is decided</b> — the wave itself is produced by
+    /// the game's shallow-water solver, so it is not ours.
     /// </summary>
     public class TsunamiSourceTests
     {
-        /// <summary>ゲーム速度 1 の目安。**フレームと実秒を混ぜないための注釈。**</summary>
+        /// <summary>A rough figure for game speed 1.
+        /// **A note so that frames and real seconds are not mixed up.**</summary>
         private const float FramesPerRealSecond = 60f;
 
-        /// <summary>試験に使う外力の大きさ（<c>m_delta</c> の単位）。</summary>
+        /// <summary>The magnitude of the forcing used in the tests
+        /// (in <c>m_delta</c> units).</summary>
         private const int Drive = 40000;
 
-        // ── バニラの目盛り（IL とプレハブの実測値）─────────────────────
+        // ── The vanilla scale (values measured from IL and the prefab) ─────────────
 
         [Fact]
         public void TheVanillaScaleMatchesTheGamesOwnFormula()
         {
             // IL: m_delta = round(m_height * 65536/1024 * intensity / 55)
-            //     プレハブ実測 m_height = 64
+            //     measured on the prefab: m_height = 64
             Assert.Equal(64f, TsunamiSource.VanillaHeightMetres);
             Assert.Equal(7447, TsunamiSource.VanillaDeltaUnits(100));
             Assert.Equal(4096, TsunamiSource.VanillaDeltaUnits(55));
@@ -35,12 +38,13 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.Equal(18991, TsunamiSource.VanillaDeltaUnits(255));
         }
 
-        // ── 重ねた波への配分 ─────────────────────────────────────
+        // ── Sharing the forcing out over the stacked waves ─────────────────────────
 
         [Fact]
         public void EveryWaveGetsAValueTheGameCanStoreInAnInt16()
         {
-            // ★★ m_delta は Int16。ここを超えると**符号が折り返して外力が反転する。**
+            // ★★ m_delta is an Int16. Go beyond it and **the sign wraps round, so the
+            //    forcing reverses.**
             for (int drive = -TsunamiSource.MaxDriveUnits;
                  drive <= TsunamiSource.MaxDriveUnits; drive += 977)
             {
@@ -56,8 +60,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheWavesTogetherCarryExactlyTheDrive()
         {
-            // ★★ **これが「重ねる」の意味である。** 外力は波ごとに加算されるので、
-            //    分けて配ったぶんの合計が、狙った外力そのものでなければならない。
+            // ★★ **This is what "stacking" means.** The forcing is added up wave by wave,
+            //    so the total of the shares handed out must be exactly the forcing we aimed
+            //    for.
             foreach (int drive in new[] { 0, 1, 2000, 32767, 32768, 70000,
                                           TsunamiSource.MaxDriveUnits,
                                           TsunamiSource.MaxDriveUnits + 50000 })
@@ -106,11 +111,11 @@ namespace DisasterPlus.Core.Tests.Earthquake
                          TsunamiSource.WavesNeeded(TsunamiSource.MaxDriveUnits));
             Assert.Equal(2, TsunamiSource.WavesNeeded(-TsunamiSource.MaxDeltaUnits - 1));
 
-            // 使わない枠は 0（＝その波は何もしない）。
+            // Unused slots are 0 (that wave does nothing).
             Assert.Equal(0, TsunamiSource.DeltaForWave(1, TsunamiSource.MaxDeltaUnits));
         }
 
-        // ── 外力の大きさ（tools/WaterSolverSim で測って決めた）────────────
+        // ── The magnitude of the forcing (measured and settled with tools/WaterSolverSim) ──
 
         private const float Deep = TsunamiSource.ReferenceDepthMetres;
 
@@ -133,9 +138,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheStrongestQuakeStaysInsideTheBandWeMeasured()
         {
-            // ★★ 上限を超えると「強い」ではなく**壊れる** ——
-            //    水深 40 m で drive 1500 は震源を海底まで掘り抜いた
-            //    （tools/WaterSolverSim、格子 1081）。
+            // ★★ Beyond the ceiling it is not "strong" but **broken** ——
+            //    at a depth of 40 m, a drive of 1500 dug the epicentre right through to the
+            //    seabed (tools/WaterSolverSim, grid 1081).
             for (int i = 0; i <= 255; i++)
             {
                 Assert.InRange(TsunamiSource.DriveUnitsFor((byte)i, Deep),
@@ -147,13 +152,14 @@ namespace DisasterPlus.Core.Tests.Earthquake
                         "above 1200 the epicentre is dug down to bare seabed");
         }
 
-        // ── ★★ 水深で割る ───────────────────────────────────────
+        // ── ★★ Divide by the water depth ──────────────────────────────────────────
 
         [Fact]
         public void ShallowSeasGetAProportionallySmallerSource()
         {
-            // ★★ ソルバの流量は v = min(v, m_height) で水深に頭打ちされる。
-            //    浅い海に深い海用の外力を出すと**震源が海底むき出しになる**。
+            // ★★ The solver's flow is capped at the water depth by v = min(v, m_height).
+            //    Apply a deep-sea forcing to a shallow sea and **the seabed is laid bare at
+            //    the epicentre**.
             int deep = TsunamiSource.DriveUnitsFor(100, Deep);
             int shallow = TsunamiSource.DriveUnitsFor(100, Deep * 0.25f);
 
@@ -175,14 +181,15 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheDriveScalesWithDepthSoTheDugFractionStaysTheSame()
         {
-            // ★★ **これが 2026-08-30 の実機報告「津波が発生しない」の再発防止である。**
-            //    上限を 1.0 にしていたので、水深 174 m の海に水深 40 m ぶんの外力しか
-            //    出しておらず、<b>水柱の 15% しか掘らず</b>、環は 2〜3 m にしかならず、
-            //    外洋では見えなかった。
+            // ★★ **This is what stops the 2026-08-30 in-game report "no tsunami appears"
+            //    from happening again.** The ceiling had been set to 1.0, so a sea 174 m
+            //    deep was only given the forcing meant for 40 m of water; <b>only 15% of the
+            //    water column was dug out</b>, the ring reached only 2-3 m, and it was
+            //    invisible on the open sea.
             //
-            //    応答は水深に無依存（tools/WaterSolverSim で 40 m と 174 m が
-            //    全列一致）なので、掘る割合は 0.0329 * drive / depth。
-            //    70% を超えない線は drive ≒ 21 * depth である。
+            //    The response is independent of depth (in tools/WaterSolverSim, 40 m and
+            //    174 m agreed in every column), so the dug fraction is 0.0329 * drive /
+            //    depth. The line that never exceeds 70% is drive ≒ 21 * depth.
             for (float depth = 24f; depth <= 500f; depth += 8f)
             {
                 for (int i = 0; i <= 255; i += 17)
@@ -203,7 +210,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheDeepestPossibleSeaStillFitsTheStackedWaves()
         {
-            // WaterSimulation.MAX_SEA_LEVEL は 500（IL 実測）。
+            // WaterSimulation.MAX_SEA_LEVEL is 500 (measured from IL).
             int deepest = TsunamiSource.DriveUnitsFor(255, 500f);
 
             Assert.InRange(deepest, 1, TsunamiSource.MaxDriveUnits);
@@ -213,18 +220,20 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void AShallowSeaStillGetsSomething()
         {
-            // **0 にしてはいけない。** 浅瀬でも津波は起きる（むしろ被害はそこで出る）。
+            // **It must not be 0.** Tsunamis happen in shallow water too
+            // (indeed that is where the damage is done).
             Assert.True(TsunamiSource.DriveUnitsFor(255, 1f) > 0);
             Assert.True(TsunamiSource.MinDepthFactor > 0f);
         }
 
-        // ── ① 隆起: 水を中心へ集める（外力は負）───────────────────────
+        // ── ① Uplift: gather the water towards the centre (forcing is negative) ────
 
         [Fact]
         public void TheSeaIsDrawnInFirstSoABulgeCanRise()
         {
-            // ★★ ここが所有者の「すぐに震源地に海面の巨大な隆起が生成」である。
-            //    IMPACT の外力が**負** ＝ 仮想の窪み ＝ 水は中心へ流れ込む。
+            // ★★ This is the owner's "a huge bulge of sea surface is created at the
+            //    epicentre straight away". A **negative** IMPACT forcing = a virtual hollow
+            //    = the water flows in towards the centre.
             Assert.True(TsunamiSource.DeltaAt(TsunamiSource.DrawInSteps * 0.5f, Drive) < 0,
                         "the sea is not being drawn in during stage 1");
             Assert.True(TsunamiSource.DeltaAt(TsunamiSource.DrawInSteps * 0.9f, Drive) < 0);
@@ -233,7 +242,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheDrawInComesFirstAndThePushSecond()
         {
-            // ①長く引く（負）→ ②短く強く押す（正）。掃引で勝った形。
+            // ① a long draw-in (negative) -> ② a short, hard push (positive).
+            // The shape that won the sweep.
             Assert.True(TsunamiSource.DriveAt(TsunamiSource.TotalSteps * 0.3f) < 0f);
             Assert.True(TsunamiSource.DriveAt(TsunamiSource.TotalSteps * 0.8f) > 0f);
         }
@@ -251,18 +261,20 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheDriveHasNoNetPush()
         {
-            // 時間積分がほぼ 0 —— 正味の押し出しが残ると穴になる。
+            // The time integral is nearly 0 —— if a net push is left over it becomes a hole.
             double sum = 0.0;
             for (float f = 0f; f < TsunamiSource.TotalSteps; f += 0.25f)
             {
                 sum += TsunamiSource.DriveAt(f) * 0.25f;
             }
 
-            // ★ 完全な 0 は要求しない（そこまで縛ると形が選べない）。
-            //   縛りたいのは「押しっぱなし」で、それは +0.5*T あたりに出る。
-            //   現行の形は -0.085*T（わずかに引き寄りで、穴ではなく僅かな盛り上がり）。
-            // ★★ **ちょうど 0 になる形を選んである** ——
-            //    0.6 * (2/pi) == 0.4 * 1.5 * (2/pi)。押しっぱなしなら +0.5*T になる。
+            // ★ Exactly 0 is not demanded (tying it that tightly would leave no choice of
+            //   shape). What we want to rule out is "pushing the whole time", and that shows
+            //   up around +0.5*T.
+            //   The current shape gives -0.085*T (slightly draw-heavy, so a small rise rather
+            //   than a hole).
+            // ★★ **A shape that comes out at exactly 0 has been chosen** ——
+            //    0.6 * (2/pi) == 0.4 * 1.5 * (2/pi). Pushing the whole time would give +0.5*T.
             Assert.True(System.Math.Abs(sum) < TsunamiSource.TotalSteps * 0.01f,
                         "the drive has a net push of " + sum
                         + " (a push-only drive would be about +"
@@ -279,7 +291,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
             Assert.True(a < b && b < c, a + " " + b + " " + c);
         }
 
-        // ── ② ③ 押し出し: 外力は正 ────────────────────────────────
+        // ── ② ③ Pushing outward: the forcing is positive ───────────────────────────
 
         [Fact]
         public void TheBulgeIsThenPushedOutward()
@@ -293,8 +305,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheDriveTurnsOverWithoutAStep()
         {
-            // ★★ ソルバは<b>傾きの差分</b>を積むので、段差はそのまま衝撃になる。
-            const float span = 2f;   // 外力は [-1, 1]
+            // ★★ The solver accumulates <b>differences of slope</b>, so a step goes straight
+            //    in as a shock.
+            const float span = 2f;   // the forcing lies in [-1, 1]
 
             for (float f = 0f; f < TsunamiSource.TotalSteps; f += 1f)
             {
@@ -306,14 +319,15 @@ namespace DisasterPlus.Core.Tests.Earthquake
             }
         }
 
-        // ── ④ 外力を切る ────────────────────────────────────────
+        // ── ④ Release the forcing ─────────────────────────────────────────────────
 
         [Fact]
         public void TheDriveIsReleasedSoTheSolverCanCarryTheRing()
         {
-            // ★★ **これが作り直しの肝である。** 水の壁を自分で描き続けるのではなく、
-            //    外力を切って、あとはゲームの浅水ソルバに運ばせる ——
-            //    バニラの津波とまったく同じ経路。
+            // ★★ **This is the heart of the rebuild.** Instead of carrying on drawing the
+            //    wall of water ourselves, we release the forcing and let the game's
+            //    shallow-water solver carry it from there ——
+            //    exactly the same path as the vanilla tsunami.
             Assert.Equal(0, TsunamiSource.DeltaAt(TsunamiSource.TotalSteps, Drive));
             Assert.Equal(0, TsunamiSource.DeltaAt(TsunamiSource.TotalSteps + 600f, Drive));
             Assert.True(TsunamiSource.IsFinished(TsunamiSource.TotalSteps));
@@ -323,23 +337,23 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheDriveFadesRatherThanBeingCutOff()
         {
-            // 終わりぎわは 0 へ滑らかに戻る（段差はソルバに衝撃として入る）。
+            // Near the end it returns smoothly to 0 (a step enters the solver as a shock).
             float c = System.Math.Abs(TsunamiSource.DriveAt(TsunamiSource.TotalSteps - 1f));
             Assert.True(c < 0.1f, "the drive is cut off at " + c);
         }
 
-        // ── 時計と寸法 ──────────────────────────────────────────
+        // ── Clock and dimensions ──────────────────────────────────────────────────
 
         [Fact]
         public void TheDriveRunsLongEnoughToMoveRealWater()
         {
-            // ★ 目盛りはバニラ: DLC の発生源は 256 フレーム（≒4.3 実秒）しかない。
-            //   こちらは円形に広げるぶん、それより長く押す。
-            // DLC の発生源は m_duration 16384 / 64 = 256 水ステップ。
-            // DLC の発生源は m_duration 16384 / 64 = 256 水ステップ。同じ桁にする。
+            // ★ The scale is vanilla: the DLC source lasts only 256 frames (≒4.3 real
+            //   seconds). Ours pushes for longer than that, because it spreads in a circle.
+            // The DLC source is m_duration 16384 / 64 = 256 water steps.
+            // The DLC source is m_duration 16384/64 = 256 water steps. Same order of size.
             Assert.InRange(TsunamiSource.TotalSteps, 60f, 400f);
 
-            // 1 水ステップ = 64 sim フレーム。
+            // 1 water step = 64 sim frames.
             float seconds = TsunamiSource.TotalSteps * 64f / FramesPerRealSecond;
             Assert.InRange(seconds, 60f, 500f);
         }
@@ -355,12 +369,12 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void TheSourceIsBigEnoughToBeATsunamiAndFitsTheMap()
         {
-            // 1 セル 16 m、マップ半辺 8640 m。
+            // 1 cell is 16 m, the map half-extent is 8640 m.
             Assert.Equal(TsunamiSource.RadiusCells * 16f, TsunamiSource.RadiusMetres, 3);
             Assert.InRange(TsunamiSource.RadiusMetres, 800f, 4000f);
         }
 
-        // ── 壊れた入力 ────────────────────────────────────────
+        // ── Broken input ──────────────────────────────────────────────────────────
 
         [Fact]
         public void BrokenInputDrivesNothing()

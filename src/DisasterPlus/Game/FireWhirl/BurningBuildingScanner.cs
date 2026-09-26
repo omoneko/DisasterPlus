@@ -6,24 +6,27 @@ using DisasterPlus.Core.FireWhirl;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 燃焼中の建物を集める。sim スレッドから読み取り専用で走査する。
+    /// Collects the buildings that are on fire. Sweeps read-only from the sim thread.
     ///
-    /// Building.Flags.Fire は存在しない（IL 確認済み）。燃焼中は m_fireIntensity &gt; 0。
+    /// Building.Flags.Fire does not exist (confirmed in the IL). A building is burning
+    /// when m_fireIntensity &gt; 0.
     ///
-    /// 建物バッファは 49152 スロットの固定長でほとんど空。毎 tick 全走査すると無駄なので、
-    /// 数 tick かけて一周する。1 周が完了したときだけ結果を差し替える
-    /// （走査途中の中途半端なリストで発生判定をしないため）。
+    /// The building buffer is a fixed 49152 slots and mostly empty. Sweeping all of it
+    /// every tick would be wasteful, so one pass is spread over several ticks. The result
+    /// is only swapped in when a full pass completes (so the spawn check never runs
+    /// against a half-finished list).
     /// </summary>
     public class BurningBuildingScanner
     {
-        /// <summary>1 tick あたりの走査スロット数。49152 を 8 tick で一周する。</summary>
+        /// <summary>How many slots are swept per tick. 49152 takes 8 ticks for one
+        /// pass.</summary>
         private const int SliceSize = 6144;
 
         private int _cursor;
         private List<BurningBuilding> _building = new List<BurningBuilding>();
         private List<BurningBuilding> _current = new List<BurningBuilding>();
 
-        /// <summary>直近に完了した 1 周の結果。</summary>
+        /// <summary>The result of the most recently completed pass.</summary>
         public IList<BurningBuilding> Current { get { return _current; } }
 
         public void Reset()
@@ -33,7 +36,7 @@ namespace DisasterPlus.Game
             _current = new List<BurningBuilding>();
         }
 
-        /// <summary>1 スライスぶん進める。sim スレッドから呼ぶこと。</summary>
+        /// <summary>Advances by one slice. Call from the sim thread.</summary>
         public void ScanSlice()
         {
             var buffer = BuildingManager.instance.m_buildings.m_buffer;
@@ -55,17 +58,19 @@ namespace DisasterPlus.Game
 
             if (_cursor >= len)
             {
-                // 一周した。ここで初めて結果を差し替える。
+                // A full pass. Only now do we swap the result in.
                 _cursor = 0;
                 _current = _building;
                 _building = new List<BurningBuilding>();
             }
         }
 
-        /// <summary>診断表示用の 1 行。走査の進み具合が分かる。</summary>
+        /// <summary>One line for the diagnostics display. Shows how far the sweep has
+        /// got.</summary>
         public string DiagnosticSummary()
         {
-            // _cursor は建物バッファ内の走査位置。1 周ぶんの進捗として出す。
+            // _cursor is the sweep position within the building buffer. We report it as
+            // progress through one pass.
             return "burning " + (_current == null ? 0 : _current.Count)
                  + " / cursor " + _cursor
                  + " (+" + SliceSize + "/tick)";

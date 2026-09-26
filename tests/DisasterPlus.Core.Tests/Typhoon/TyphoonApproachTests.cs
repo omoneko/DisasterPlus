@@ -5,11 +5,11 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Typhoon
 {
     /// <summary>
-    /// <b>台風はマップ端から来て、クリック地点で最盛期を迎え、通過して去る。</b>
-    /// （2026-09-02、所有者の依頼）
+    /// <b>The typhoon comes in from the edge of the map, reaches its peak at the clicked
+    /// point, and passes on by.</b> (2026-09-02, the owner's request)
     ///
-    /// ★ 経路そのものは変えていない。同じ円弧の<b>どこを t = 0 と呼ぶか</b>を
-    ///   <c>ApproachFramesFor</c> ぶんずらしただけである。
+    /// ★ The track itself is unchanged. All we did was shift <b>which point on the same
+    ///   arc we call t = 0</b> by <c>ApproachFramesFor</c>.
     /// </summary>
     public class TyphoonApproachTests
     {
@@ -23,7 +23,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void It_arrives_at_the_clicked_point()
         {
-            // ★★ **これがこの機能の定義である。** クリック地点は出発点ではなく到達点。
+            // ★★ **This is the definition of the feature.** The clicked point is not where
+            //    it starts but where it arrives.
             var click = new Vec2(1000f, -2000f);
             float speed = Speed();
             uint approach = TyphoonTrack.ApproachFramesFor(click, 12345u, speed, Lifetime);
@@ -37,9 +38,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void It_starts_outside_the_map()
         {
-            // ★★ **これが「マップ端で発生して」の中身である。**
-            //    いちばん厳しいのはマップ中央 —— どの端からも半辺ぶん離れている。
-            //    そこで外へ出られるだけの道のりを <c>NominalPathLength</c> が取っている。
+            // ★★ **This is the substance of "it forms at the edge of the map".**
+            //    The hardest case is the centre of the map —— half a side away from every
+            //    edge. <c>NominalPathLength</c> reserves enough track to get out from there.
             var click = new Vec2(0f, 0f);
             float speed = Speed();
 
@@ -58,7 +59,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void It_still_starts_outside_from_a_corner()
         {
-            // 端の近くを指されたら、戻る距離は短くて済む（頭打ちにも当たらない）。
+            // When a point near the edge is clicked, the distance to back up is short
+            // (and it never hits the cap).
             var click = new Vec2(7000f, -7000f);
             float speed = Speed();
 
@@ -84,7 +86,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
 
             float moved = Distance(atArrival, later);
 
-            // 2000 フレームぶん進んでいること（円弧なので直線距離はやや短い）。
+            // It must have travelled 2000 frames' worth (the straight-line distance is a
+            // little shorter, since the track is an arc).
             Assert.True(moved > speed * 2000f * 0.7f,
                 "it should carry on past the clicked point, moved " + moved + " m");
         }
@@ -92,13 +95,14 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void The_approach_never_eats_more_than_half_the_life()
         {
-            // ★ 端から遠い地点を指しても、頭打ちに当たるだけで暴走しない。
-            //   （最盛期は寿命の真ん中なので、そこを越えて接近に使うと
-            //     衰えてから到達することになる。）
+            // ★ Clicking a point far from the edge only hits the cap; it never runs away.
+            //   (The peak is at the middle of the lifetime, so spending more than that on
+            //    the approach would mean arriving after it has already weakened.)
             var click = new Vec2(0f, 0f);
             uint approach = TyphoonTrack.ApproachFramesFor(click, 3u, Speed(), Lifetime);
 
-            // ★ 強度の台形が平らな 25〜75% の中に着く。**その外だと弱い台風になる。**
+            // ★ It lands within the 25–75% where the intensity trapezium is flat.
+            //   **Outside that it becomes a weak typhoon.**
             Assert.InRange(approach,
                            (uint)(Lifetime * TyphoonTrack.MinApproachFraction),
                            (uint)(Lifetime * TyphoonTrack.ApproachFraction));
@@ -107,7 +111,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void A_dead_storm_asks_for_no_approach()
         {
-            // 速度 0 は「m_activeDuration が読めなかった」の意味（SpeedFor の doc）。
+            // A speed of 0 means "m_activeDuration could not be read" (see the SpeedFor doc).
             Assert.Equal(0u, TyphoonTrack.ApproachFramesFor(new Vec2(0f, 0f), 1u, 0f, Lifetime));
             Assert.Equal(0u, TyphoonTrack.ApproachFramesFor(new Vec2(0f, 0f), 1u, 1f, 0u));
         }
@@ -115,8 +119,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void Zero_approach_is_the_old_behaviour()
         {
-            // ★ 5 引数版に 0 を渡したら 4 引数版と同じ ——
-            //   既存のテストと診断がそこに乗っている。
+            // ★ Passing 0 to the 5-argument version must be identical to the 4-argument one
+            //   —— the existing tests and the diagnostics rest on that.
             var click = new Vec2(500f, 500f);
             float speed = Speed();
 
@@ -135,7 +139,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void The_heading_matches_the_direction_it_is_actually_moving()
         {
-            // ★★ 位置だけずらして向きを忘れると、**進んでいる向きと表示が食い違う**。
+            // ★★ Shift the position but forget the heading and **the direction it is moving
+            //    disagrees with the direction displayed**.
             var click = new Vec2(0f, 0f);
             float speed = Speed();
             uint approach = TyphoonTrack.ApproachFramesFor(click, 21u, speed, Lifetime);

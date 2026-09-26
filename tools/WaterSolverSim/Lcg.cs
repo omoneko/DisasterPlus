@@ -1,36 +1,36 @@
 namespace DisasterPlus.Tools.WaterSolverSim
 {
     /// <summary>
-    /// <c>ColossalFramework.Math.Randomizer</c> の<b>写し</b>（代役ではない）。
+    /// A <b>copy</b> of <c>ColossalFramework.Math.Randomizer</c> (not a stand-in).
     ///
-    /// ★★ <b>ColossalManaged.dll を逆アセンブルして確定させた。</b>
-    ///   <c>ilload.ps1</c> は ColossalManaged を先読みしているので、
-    ///   <c>$global:preloaded['ColossalManaged'].GetType('ColossalFramework.Math.Randomizer')</c>
-    ///   から IL が取れる。実体は 64 bit LCG（Knuth / MMIX の定数）1 個:
+    /// ★★ <b>Pinned down by disassembling ColossalManaged.dll.</b>
+    ///   <c>ilload.ps1</c> preloads ColossalManaged, so the IL can be obtained from
+    ///   <c>$global:preloaded['ColossalManaged'].GetType('ColossalFramework.Math.Randomizer')</c>.
+    ///   It is really just a single 64-bit LCG (the Knuth / MMIX constants):
     ///
     /// <code>
     ///   struct Randomizer { ulong seed; }
     ///
     ///   .ctor(int s)     : seed = 6364136223846793005 * (ulong)(long)s + 1442695040888963407;
     ///
-    ///   int Int32(uint m):                                   // ★ 値を先に作り、種は後で進める
+    ///   int Int32(uint m):                        // ★ build the value first, advance the seed after
     ///       r    = (int)(((seed >> 32) * (ulong)m) >> 32);
     ///       seed = 6364136223846793005 * seed + 1442695040888963407;
     ///       return r;
     /// </code>
     ///
-    /// ★ <b>値域は <c>[0, max)</c></b>。<c>(seed&gt;&gt;32)</c> は <c>[0, 2^32)</c> なので
-    ///   <c>((seed&gt;&gt;32) * m) &gt;&gt; 32</c> は <c>[0, m)</c> —— 上限は取らない。
-    ///   <c>(rnd + v*2047) &gt;&gt; 11</c> や <c>(diff + rnd) &gt;&gt; 2</c> の丸めは
-    ///   これを前提に読む（IL_0AF8 / 0B37 ほか）。
+    /// ★ <b>The range is <c>[0, max)</c></b>. <c>(seed&gt;&gt;32)</c> is <c>[0, 2^32)</c>, so
+    ///   <c>((seed&gt;&gt;32) * m) &gt;&gt; 32</c> is <c>[0, m)</c> —— the upper bound is never hit.
+    ///   Read the rounding in <c>(rnd + v*2047) &gt;&gt; 11</c> and <c>(diff + rnd) &gt;&gt; 2</c>
+    ///   with that in mind (IL_0AF8 / 0B37 and others).
     ///
-    /// ★ 剰余ではなく<b>上位 32 bit の乗算</b>で範囲へ落とすので、
-    ///   <c>max</c> が 2 の冪でなくても偏らない。<c>%</c> で代用してはいけない ——
-    ///   数列がずれてビット一致しなくなる。
+    /// ★ The range is reached by a <b>multiply of the top 32 bits</b> rather than a remainder,
+    ///   so there is no bias even when <c>max</c> is not a power of two. Do not substitute
+    ///   <c>%</c> —— the sequence would drift and no longer match bit for bit.
     ///
-    /// ★ 本物と同じく <b>1 フレームに 1 個</b>だけ作り、<c>m_stepIndex</c> の
-    ///   <b>増やす前</b>の値を種にする（IL_02EA-0300）。フレームを跨いで
-    ///   同じ列を使い回さないこと。
+    /// ★ As in the real thing, create <b>exactly one per frame</b> and seed it with the value of
+    ///   <c>m_stepIndex</c> <b>before</b> it is incremented (IL_02EA-0300). Do not reuse the
+    ///   same sequence across frames.
     /// </summary>
     internal struct Lcg
     {
@@ -39,18 +39,18 @@ namespace DisasterPlus.Tools.WaterSolverSim
 
         private ulong _state;
 
-        /// <summary><c>Randomizer::.ctor(Int32)</c>。種を 1 段回してから持つ。</summary>
+        /// <summary><c>Randomizer::.ctor(Int32)</c>. Advances the seed one step before storing it.</summary>
         public Lcg(ulong seed)
         {
             _state = Mul * seed + Inc;
         }
 
         /// <summary>
-        /// <c>Randomizer::Int32(UInt32)</c> の写し。<c>[0, max)</c>。
+        /// A copy of <c>Randomizer::Int32(UInt32)</c>. Returns <c>[0, max)</c>.
         ///
-        /// ★ <b>返す値は「進める前」の種から作る。</b>順序を入れ替えると
-        ///   1 個ずれた数列になる（本物と一致しなくなる）。
-        /// ★ <c>max == 0</c> でも本物は種を進めるので、ここでも進める。
+        /// ★ <b>The returned value is built from the seed as it was *before* advancing.</b>
+        ///   Swapping the order gives a sequence shifted by one (no longer matching the real thing).
+        /// ★ The real thing advances the seed even when <c>max == 0</c>, so we do too.
         /// </summary>
         public int Int32(int max)
         {

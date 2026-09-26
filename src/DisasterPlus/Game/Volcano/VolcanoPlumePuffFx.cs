@@ -6,91 +6,95 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 噴煙を<b>雲の塊の群れ</b>として描く。**main スレッド専用**（Unity のオブジェクト）。
+    /// Draws the plume as <b>a swarm of cloud puffs</b>. **Main thread only** (Unity objects).
     ///
-    /// ── 所有者の依頼（2026-08-22）─────────────────────────────────
+    /// ── the owner's request (2026-08-22) ───────────────────────────────────────────────────
     ///
-    /// &gt; 噴煙のアニメーションもまだまだリアルではありません。幾何的なものではなく
-    /// &gt; もっと自然的なカオスな煙のアニメーションを作ってほしいです。煙のエフェクトに
-    /// &gt; 加えて核キノコ雲（MissileDisaster）のエフェクトも一部利用してリアルにして
-    /// &gt; ください。
+    /// &gt; The plume animation still isn't realistic. I'd like a more natural, chaotic smoke
+    /// &gt; animation rather than something geometric. As well as the smoke effect, please also
+    /// &gt; use part of the nuclear mushroom cloud (MissileDisaster) effect to make it realistic.
     ///
-    /// ── ★★ MissileDisaster から借りたのは「描き方」である ────────────────
+    /// ── ★★ what was borrowed from MissileDisaster is "how to draw" ────────────────────────
     ///
-    /// キノコ雲の <c>MushroomCloudPuffsFx</c> と同じ手を使う ——
-    /// <b>放出を止めた <c>ParticleSystem</c> を「描画係」としてだけ使い、
-    /// 粒は毎フレーム <c>SetParticles</c> でこちらが置く</b>。
-    /// ④の <c>TyphoonVortexPuffFx</c> で一度通した道である。
+    /// It uses the same technique as the mushroom cloud's <c>MushroomCloudPuffsFx</c> —
+    /// <b>use a <c>ParticleSystem</c> with emission turned off purely as a renderer, and place the
+    /// particles ourselves every frame with <c>SetParticles</c></b>.
+    /// A road already travelled in ④'s <c>TyphoonVortexPuffFx</c>.
     ///
-    /// これが要るのは、ゲームの粒子プレハブでは<b>粒 1 個の大きさを変えられない</b>
-    /// からである（<c>SpawnArea</c> の半径を広げても粒は大きくならず、
-    /// 同じ大きさの粒が薄く散るだけ。<c>BlastCluster</c> のクラス doc に同じ話がある）。
-    /// 自分で置けば、塊を何百 m の大きさで描ける。
+    /// This is needed because with the game's particle prefabs **you cannot change the size of an
+    /// individual particle** (widen <c>SpawnArea</c>'s radius and the particles do not get bigger;
+    /// the same-sized particles just scatter more thinly. The same story is in the class doc of
+    /// <c>BlastCluster</c>).
+    /// Place them ourselves and the puffs can be drawn hundreds of metres across.
     ///
-    /// ★★ <b>形は借りない。</b> 位置は <see cref="PlumeParcels"/> ——
-    ///   核の単発の泡ではなく、供給が続く火山の噴煙柱である。
+    /// ★★ <b>The shape is not borrowed.</b> The positions come from <see cref="PlumeParcels"/> —
+    ///   this is a volcanic plume column with a continuing supply, not a nuclear one-shot puff.
     ///
-    /// ── ★★ これが噴煙の<b>唯一</b>の描き手になった（2026-08-22）────────────
+    /// ── ★★ this became the <b>only</b> thing drawing the plume (2026-08-22) ───────────────
     ///
-    /// はじめはゲーム粒子の灰の柱（<see cref="EruptionColumn"/> の 9 段）と
-    /// 重ねて出していた。所有者の指示でそれをやめた:
+    /// At first it was layered over the game particles' ash column (the 9 segments of
+    /// <see cref="EruptionColumn"/>). The owner's instruction stopped that:
     ///
-    /// &gt; 白色の噴煙のエフェクトが優れているので、既存の灰色の煙のエフェクトは
-    /// &gt; オミットでお願いします。その代わり白色の噴煙に少し灰色も足してください。
+    /// &gt; The white plume effect is the better one, so please omit the existing grey smoke
+    /// &gt; effect. Instead, add a little grey into the white plume.
     ///
-    /// 重ねると、塊の隙間から細かい灰の粒が見えて<b>2 つの噴煙が重なっている</b>
-    /// ように見えた。灰色ぶんはこちらの色（<c>AshColor</c> と <c>AshMixSpread</c>）へ移した。
+    /// Layered, the fine ash particles showed through the gaps between the puffs and it looked
+    /// like <b>two plumes overlapping</b>. The grey has been moved into this one's colour
+    /// (<c>AshColor</c> and <c>AshMixSpread</c>).
     ///
-    /// ★ <c>VolcanoEruptionFx.RenderColumn</c> と灰の複製は**消していない**。
-    ///   柱の形（<see cref="EruptionColumn"/>）は噴煙の高さと雷の通り道に今も要るし、
-    ///   <b>塊が 1 個も描けない環境</b>（マテリアルが引けない）では
-    ///   そちらへ戻すのが唯一の逃げ道だからである。
-    ///   2 つの表現が同じ太さを名乗るよう、<see cref="PlumeParcels.ColumnRadiusAt"/> は
-    ///   <see cref="EruptionColumn"/> の定数をそのまま使っている。
+    /// ★ <c>VolcanoEruptionFx.RenderColumn</c> and the ash clones **have not been deleted**.
+    ///   The column's shape (<see cref="EruptionColumn"/>) is still needed for the plume height
+    ///   and the lightning's path, and in <b>an environment where not one puff can be drawn</b>
+    ///   (the material cannot be looked up) falling back to it is the only way out.
+    ///   So that the two representations claim the same thickness,
+    ///   <see cref="PlumeParcels.ColumnRadiusAt"/> uses <see cref="EruptionColumn"/>'s constants
+    ///   as they are.
     ///
-    /// ── 落ちたら畳む ───────────────────────────────────────
+    /// ── fold it away if it falls over ──────────────────────────────────────────────────────
     ///
-    /// <see cref="Update"/> が false を返したら**何も描いていない**。
-    /// 呼び出し側はゲーム粒子だけの絵へ退避すればよい（それは今までの絵である）。
+    /// If <see cref="Update"/> returns false, **nothing was drawn**.
+    /// The caller can fall back to the game-particles-only picture (which is the old picture).
     /// </summary>
     public static class VolcanoPlumePuffFx
     {
         /// <summary>
-        /// 噴出口の近くの色。**灰は黒い。** 真っ白にすると水蒸気に見える。
+        /// The colour near the vent. **Ash is dark.** Pure white looks like steam.
         ///
-        /// ★ 2026-08-22 に少し明るくした。ゲーム粒子の灰色の噴煙を止めたので
-        ///   （所有者の指示）、<b>灰色ぶんはこちらが受け持つ</b>ことになった。
-        ///   真っ黒のままだと、根元が煤の塊に見える。
+        /// ★ Brightened slightly on 2026-08-22. Since the game particles' grey plume was stopped
+        ///   (the owner's instruction), <b>this one now has to carry the grey</b>.
+        ///   Left pitch black, the base looks like a lump of soot.
         /// </summary>
         private static readonly Color32 AshColor = new Color32(96, 91, 88, 255);
 
-        /// <summary>傘の色。日を受けた灰白。**真っ白にしない**（光って見える）。</summary>
+        /// <summary>The umbrella's colour. Sunlit ash-white. **Not pure white** (it would look like it is glowing).</summary>
         private static readonly Color32 SunlitColor = new Color32(226, 226, 230, 255);
 
         /// <summary>
-        /// 塊ごとの灰色の混ざり方の幅。
+        /// The spread of the per-puff grey mixing.
         ///
-        /// ── ★★ なぜ塊ごとに変えるのか（2026-08-22、所有者の指示）─────────────
+        /// ── ★★ why it varies per puff (2026-08-22, the owner's instruction) ────────────────
         ///
-        /// &gt; 白色の噴煙のエフェクトが優れているので、既存の灰色の煙のエフェクトは
-        /// &gt; オミットでお願いします。その代わり白色の噴煙に少し灰色も足してください。
+        /// &gt; The white plume effect is the better one, so please omit the existing grey smoke
+        /// &gt; effect. Instead, add a little grey into the white plume.
         ///
-        /// 高さだけで白 → 灰を決めると、**同じ高さの塊が全部同じ色**になり、
-        /// きれいな縞に見える（＝また「幾何的」に戻る）。塊ごとに ±この幅で
-        /// 灰色寄りへずらすと、白い雲の中に灰の濃い塊が混じる、本物の噴煙の色になる。
+        /// Decide white → grey by height alone and **every puff at the same height comes out the
+        /// same colour**, which reads as neat stripes (i.e. back to "geometric" again). Shift each
+        /// puff towards grey by ± this spread and you get the colour of a real plume: darker ash
+        /// puffs mixed in among white cloud.
         /// </summary>
         private const float AshMixSpread = 0.34f;
 
         /// <summary>
-        /// 画面に対する粒の大きさの上限（<c>ParticleSystemRenderer.maxParticleSize</c>）。
-        /// 既定の 0.5 のままだと、**近寄ったとたんに噴煙が縮む**。
+        /// The cap on a particle's size relative to the screen
+        /// (<c>ParticleSystemRenderer.maxParticleSize</c>).
+        /// Leave it at the default 0.5 and **the plume shrinks the moment you get close**.
         /// </summary>
         private const float MaxScreenFraction = 6f;
 
         /// <summary>
-        /// 塊の見かけの大きさに掛ける倍率。**1 より大きい** ——
-        /// 塊どうしが重ならないと、煙ではなく点々に見える
-        /// （<c>tools/PlumePreview</c> の cover が 3 割を切ったらここを疑う）。
+        /// The factor applied to a puff's apparent size. **Greater than 1** —
+        /// unless the puffs overlap each other it reads as dots rather than smoke
+        /// (if <c>tools/PlumePreview</c>'s cover drops below 30 %, suspect this).
         /// </summary>
         private const float PuffSizeGain = 1.15f;
 
@@ -99,23 +103,23 @@ namespace DisasterPlus.Game
         private static ParticleSystem.Particle[] _buffer;
         private static bool _errorLogged;
 
-        /// <summary>直近のフレームで置いた塊の数（診断用）。0 は「描いていない」。</summary>
+        /// <summary>The number of puffs placed in the last frame (for diagnostics). 0 means "not drawing".</summary>
         public static int PuffsPlaced { get; private set; }
 
-        /// <summary>直近のフレームで描いたか。false なら呼び出し側が退避する。</summary>
+        /// <summary>Whether it drew in the last frame. If false, the caller falls back.</summary>
         public static bool Drawing { get; private set; }
 
-        /// <summary>直近の失敗（診断用）。**黙って描かないをやらない。**</summary>
+        /// <summary>The most recent failure (for diagnostics). **Do not fail to draw silently.**</summary>
         public static string LastFailure { get; private set; }
 
         /// <summary>
-        /// **main スレッド、毎フレーム。**
+        /// **Main thread, every frame.**
         /// </summary>
-        /// <param name="vent">噴出口のワールド座標（<c>VolcanoSnapshot.Vent</c>）。</param>
-        /// <param name="ventRadiusMetres">火口の半径（m）。</param>
-        /// <param name="columnHeightMetres">柱の高さ（m）。</param>
-        /// <param name="intensityUnit">噴火の強さ <c>[0,1]</c>。薄さと数に効く。</param>
-        /// <param name="timeSeconds">噴火が始まってからの秒数（**連続で増える値**）。</param>
+        /// <param name="vent">The vent's world coordinates (<c>VolcanoSnapshot.Vent</c>).</param>
+        /// <param name="ventRadiusMetres">The crater's radius (m).</param>
+        /// <param name="columnHeightMetres">The column's height (m).</param>
+        /// <param name="intensityUnit">The eruption strength <c>[0,1]</c>. It affects the thinness and the count.</param>
+        /// <param name="timeSeconds">Seconds since the eruption began (**a continuously increasing value**).</param>
         public static bool Update(Vec3 vent, float ventRadiusMetres, float columnHeightMetres,
                                   float intensityUnit, float timeSeconds,
                                   float windX, float windZ, uint seed)
@@ -143,7 +147,7 @@ namespace DisasterPlus.Game
                              "plume puffs failed: " + e.GetType().Name);
                 }
 
-                // ★ 落ちたら畳む。**壊れた噴煙を出したままにしない。**
+                // ★ Fold it away if it falls over. **Do not leave a broken plume on screen.**
                 Destroy();
                 return false;
             }
@@ -171,8 +175,8 @@ namespace DisasterPlus.Game
 
             float unit = Clamp01(intensityUnit);
 
-            // ★★ **弱い噴火では塊の数そのものを減らす。** 薄くするだけだと、
-            //    「弱い噴火」ではなく「同じ大きさの薄い噴煙」に見える。
+            // ★★ **For a weak eruption, cut the number of puffs itself.** Merely making them
+            //    thinner reads as "a thin plume of the same size", not "a weak eruption".
             int count = (int)(PlumeParcels.Count * (0.35f + 0.65f * unit));
             if (count < 1) count = 1;
             if (count > PlumeParcels.Count) count = PlumeParcels.Count;
@@ -184,42 +188,44 @@ namespace DisasterPlus.Game
 
                 _buffer[i].position = new Vector3(vent.X + p.X, vent.Y + p.Y, vent.Z + p.Z);
 
-                // startSize は**直径**なので、半径を 2 倍する。
+                // startSize is a **diameter**, so double the radius.
                 _buffer[i].startSize = p.RadiusMetres * PuffSizeGain * 2f;
                 _buffer[i].rotation = p.RotationDegrees;
 
-                // ★ 強さは濃さにも効く。弱い噴火の噴煙は透ける。
+                // ★ The strength affects the density too. A weak eruption's plume is see-through.
                 float alpha = p.Alpha * (0.45f + 0.55f * unit);
 
-                // ★ 明るさは高さで決まる（下が灰、上が白）が、そこへ塊ごとの
-                //   ばらつきを足す。足さないと同じ高さが全部同じ色になる。
+                // ★ The brightness is decided by height (ash at the bottom, white at the top), but
+                //   a per-puff scatter is added on top. Without it, everything at the same height
+                //   comes out the same colour.
                 float mix = p.Brightness
                             - AshMixSpread * 0.5f
                             + AshMixSpread * DeterministicRandom.Unit(seed, (uint)i * 13u + 5u);
 
                 _buffer[i].startColor = Blend(SunlitColor, AshColor, mix, alpha);
 
-                // ★ 毎フレーム上限へ戻す。**シミュレーションに歳を取らせない**
-                //   （クラス doc の「描画係としてだけ使う」の実体である）。
+                // ★ Reset to the cap every frame. **Do not let the simulation age them**
+                //   (this is the substance of "use it purely as a renderer" in the class doc).
                 _buffer[i].remainingLifetime = 1000f;
                 _buffer[i].startLifetime = 1000f;
             }
 
             _system.SetParticles(_buffer, count);
 
-            // ★★ **GameObject を粒のところへ動かす。**（2026-08-22、実機報告
-            //    「雷が発生した瞬間消えてしまいます」）
+            // ★★ **Move the GameObject to where the particles are.** (2026-08-22, live report
+            //    "it disappears the moment lightning strikes")
             //
-            //    粒はワールド座標で置いているが（simulationSpace = World）、
-            //    <b>GameObject はずっと原点(0,0,0)に置きっぱなしだった</b>。
-            //    Unity は <c>ParticleSystemRenderer</c> を<b>transform を基準にした
-            //    境界</b>で視錐台カリングするので、**原点が画面から外れた瞬間に
-            //    システムごと消える**。
+            //    The particles are placed in world coordinates (simulationSpace = World), but
+            //    <b>the GameObject was left sitting at the origin (0,0,0) the whole time</b>.
+            //    Unity frustum-culls a <c>ParticleSystemRenderer</c> by <b>bounds based on the
+            //    transform</b>, so **the moment the origin leaves the screen the whole system
+            //    disappears**.
             //
-            //    ④で見つかった（あちらは雷でカメラが寄ると消えていた）。⑤は
-            //    火口を見ていることが多いので表に出にくいだけで、**同じ穴である**。
+            //    Found in ④ (there it vanished when the camera moved in on the lightning). ⑤ is
+            //    usually looking at the crater, so it just surfaces less often — **it is the same
+            //    hole**.
             //
-            //    ★ 例外が出る経路ではないので try で包まない。
+            //    ★ This is not a path that throws, so it is not wrapped in a try.
             _object.transform.position = new Vector3(vent.X, vent.Y, vent.Z);
 
             PuffsPlaced = count;
@@ -229,18 +235,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 描画係の <c>ParticleSystem</c> を用意する。**1 都市に 1 個。**
+        /// Prepare the <c>ParticleSystem</c> that acts as the renderer. **One per city.**
         /// </summary>
         private static bool EnsureSystem(Material material)
         {
             if (_object != null && _system != null && _buffer != null)
             {
-                // ★★ **マテリアルは④と共有している**（<see cref="CloudParticleAssets"/>）。
-                //    <c>TyphoonCloudFx.Destroy</c> があれを消すので、台風が終わったり
-                //    設定で雲を切られたりすると、<b>噴火の最中に足元から素材が消える。</b>
-                //    そのとき <c>renderer.material</c> は Unity の fake-null になり、
-                //    噴煙は無言で見えなくなる —— GameObject は生きているので、
-                //    ここで見ないと誰も気づけない。
+                // ★★ **The material is shared with ④** (<see cref="CloudParticleAssets"/>).
+                //    <c>TyphoonCloudFx.Destroy</c> destroys it, so when a typhoon ends or the
+                //    clouds are turned off in the settings, <b>the material vanishes from under us
+                //    in the middle of an eruption.</b>
+                //    At that point <c>renderer.material</c> becomes a Unity fake-null and the
+                //    plume goes silently invisible — the GameObject is still alive, so unless we
+                //    check here, nobody can notice.
                 var live = _system.GetComponent<ParticleSystemRenderer>();
                 if (live != null && live.sharedMaterial == null)
                 {
@@ -255,20 +262,21 @@ namespace DisasterPlus.Game
             var ps = go.AddComponent<ParticleSystem>();
 
             ParticleSystem.MainModule main = ps.main;
-            // ★ 位置は**世界座標のメートル**で入れる。
+            // ★ Positions go in as **world coordinates in metres**.
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.playOnAwake = false;
             main.maxParticles = PlumeParcels.Count;
             main.startLifetime = 1000f;
             main.startSpeed = 0f;
 
-            // ★★ **ゲームには 1 粒も生ませない。** 置くのはこちらである。
+            // ★★ **Do not let the game spawn a single particle.** We place them.
             ParticleSystem.EmissionModule emission = ps.emission;
             emission.enabled = false;
 
             var renderer = ps.GetComponent<ParticleSystemRenderer>();
             renderer.renderMode = ParticleSystemRenderMode.Billboard;
-            // ★ 大きく・柔らかく・重なる塊なので、奥行き順に並べないと縁が汚れる。
+            // ★ These are large, soft, overlapping puffs, so without depth sorting the edges come
+            //   out dirty.
             renderer.sortMode = ParticleSystemSortMode.Distance;
             renderer.maxParticleSize = MaxScreenFraction;
             renderer.material = material;
@@ -282,10 +290,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **レベルアンロードと、噴火が終わったときに呼ぶ。** 冪等。
+        /// **Call on level unload and when the eruption ends.** Idempotent.
         ///
-        /// <c>GameObject</c> はこちらのものなので消す。<c>Material</c> と
-        /// <c>Texture2D</c> は <see cref="CloudParticleAssets"/> のものなので**触らない**。
+        /// The <c>GameObject</c> is ours, so it is destroyed. The <c>Material</c> and
+        /// <c>Texture2D</c> belong to <see cref="CloudParticleAssets"/>, so **do not touch them**.
         /// </summary>
         public static void Destroy()
         {

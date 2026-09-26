@@ -5,15 +5,18 @@ using DisasterPlus.Core.Earthquake;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 断層帯と、建物ごとの余裕度（＝本機能の目玉）の行。**main スレッド専用。**
+    /// The rows for the fault band and for each building's headroom (this feature's
+    /// centrepiece). **Main thread only.**
     ///
-    /// <see cref="EarthquakePanel"/> から切り出したのは、あのファイルがプロジェクト規約の
-    /// 800 行を大きく超えていたためで、**内容は 1 文字も変えていない**。
-    /// 行の生成も <c>.text</c> の代入もこのファイルには無く、
-    /// <see cref="EarthquakeRows"/> を通してしか行えない（あちらのクラス doc の担保）。
+    /// It was split out of <see cref="EarthquakePanel"/> because that file had grown far
+    /// past the project's 800-line rule, and **not one character of the content was
+    /// changed**. Neither row creation nor assignment to <c>.text</c> appears in this
+    /// file; both can only go through <see cref="EarthquakeRows"/> (the guarantee set out
+    /// in its class doc).
     ///
-    /// ここは全て**第 1 層**である。バニラが (建物, 災害) の組ごとに引く固定のしきい値を
-    /// 同じ種から再構成しているだけで、新しい物理は 1 つも足していない（§A-3）。
+    /// Everything here is **layer 1**. It merely reconstructs, from the same seed, the
+    /// fixed threshold vanilla draws for each (building, disaster) pair; not one piece of
+    /// new physics is added (§A-3).
     /// </summary>
     internal static class EarthquakeDamageRows
     {
@@ -28,28 +31,31 @@ namespace DisasterPlus.Game
         {
             _faultLabel = EarthquakeRows.AddLayer1Row(p, "FaultBand", ref y);
 
-            // 断層帯の行には**常に**この注記が付く（計画の共通規則）。
-            // 4 円盤の位置は毎ステップ振り直されるので、帯は「当たりうる範囲」であって
-            // 「当たる場所」ではない。テキストは固定なのでここで一度だけ入れる。
+            // The fault band row **always** carries this note (a rule shared across the
+            // plan). The positions of the four discs are re-drawn every step, so the band
+            // is "where it could hit", not "where it will hit". The text is fixed, so it
+            // is put in once here.
 
             _marginBuildingLabel = EarthquakeRows.AddLayer1Row(p, "MarginBuilding", ref y);
             _marginVerdictLabel = EarthquakeRows.AddLayer1Row(p, "MarginVerdict", ref y);
 
-            // ★ 出火の行（全体レビュー M1）。依頼文が「揺れによる火災や建物の倒壊」と
-            //    名指ししていたうちの半分がここで、材料（2 回目の引き）は
-            //    BuildingMargin.BurnThresholdValue に最初から入っていた。
+            // ★ The fire row (whole-feature review M1). This is half of what the request
+            //    named when it said "fires and building collapses from the shaking", and
+            //    the raw material (the second draw) was in
+            //    BuildingMargin.BurnThresholdValue from the start.
             _marginBurnLabel = EarthquakeRows.AddLayer1Row(p, "MarginBurn", ref y, 28f);
 
-            // この注記は**常に**併記する。全体円盤についての判定でしかないことと、
-            // それが地震開始の瞬間に既に決まっていることの両方を、行の隣で名乗る。
+            // This note is **always** printed alongside. Next to the row it states both
+            // that the verdict covers only the whole-quake disc, and that it was already
+            // settled the moment the earthquake began.
             _marginNoteLabel = EarthquakeRows.AddPlainRow(p, "MarginNote", ref y,
                 Strings.EarthquakeGlobalDiscOnly, 38f);
 
-            // ★ NDR が居るなら、倒壊・出火の判定は**この環境では出せない**ことを
-            //    常設で名乗る（全体レビュー C2、§E-2）。NDR は
-            //    DisasterHelpers.DestroyBuildings を完全置換して probability を
-            //    0.02 → 0.04 に差し替えるので、この MOD が読んでいるランプは
-            //    どこでも実行されていない。①の ForecastNdrNote と同じ扱い。
+            // ★ If NDR is present, state permanently that the collapse and fire verdicts
+            //    **cannot be given in this environment** (whole-feature review C2, §E-2).
+            //    NDR replaces DisasterHelpers.DestroyBuildings wholesale and swaps the
+            //    probability from 0.02 to 0.04, so the ramp this mod reads is not being
+            //    executed anywhere. Treated the same way as ①'s ForecastNdrNote.
             if (ModCompat.NdrPresent)
             {
                 _ndrNoteLabel = EarthquakeRows.AddPlainRow(p, "NdrNote", ref y,
@@ -65,8 +71,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 値だけを消す。**NDR の注記は消さない** —— あれは「この環境では判定を出せない」
-        /// という常設の説明であって観測値ではない。
+        /// Clears the values only. **The NDR note is not cleared** — it is a permanent
+        /// explanation that no verdict can be given in this environment, not a reading.
         /// </summary>
         internal static void Clear()
         {
@@ -77,7 +83,7 @@ namespace DisasterPlus.Game
             EarthquakeRows.SetPlain(_marginNoteLabel, "");
         }
 
-        /// <summary>レベルアンロード時。参照を捨てるだけ（実体はパネルごと消える）。</summary>
+        /// <summary>On level unload. Just drop the references (the objects go with the panel).</summary>
         internal static void Destroy()
         {
             _faultLabel = null;
@@ -89,9 +95,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 断層帯。プレハブ 4 値（<c>m_crackLength</c> / <c>m_crackWidth</c>）が読めて
-        /// いなければ幾何が確定しないので、**行ごと出さない**。
-        /// 「分からない」を「外側」と言い換えない（<see cref="FaultBand.Known"/> の doc）。
+        /// The fault band. Without the prefab values (<c>m_crackLength</c> /
+        /// <c>m_crackWidth</c>) the geometry is not determined, so **the whole row is
+        /// omitted**. Never restate "we do not know" as "outside" (see
+        /// <see cref="FaultBand.Known"/>'s doc).
         /// </summary>
         private static void RefreshFaultRow(EarthquakeReading primary, bool haveCursor, Vec3 cursor)
         {
@@ -99,8 +106,9 @@ namespace DisasterPlus.Game
 
             if (!haveCursor) return;
 
-            // ★ 収束中の地震には破壊円盤が落ちない（§A-3、Active 分岐にしか無い）。
-            //    「断層帯: 内側」はこれから壊れうる場所の話なので、行ごと出さない。
+            // ★ A subsiding earthquake drops no destruction discs (§A-3; they only exist
+            //    in the Active branch). "Fault band: inside" is about where damage could
+            //    still occur, so the whole row is omitted.
             if (!QuakeSelection.RunsDamage(primary.Phase)) return;
 
             var band = new FaultBand(primary.Epicentre.ToVec2(), primary.AngleRadians,
@@ -111,41 +119,47 @@ namespace DisasterPlus.Game
                 + (band.Contains(cursor.ToVec2())
                     ? Strings.EarthquakeFaultInside
                     : Strings.EarthquakeFaultOutside));
-            // この注記は必ず併記する（計画の共通規則）。帯は「当たりうる範囲」であって
-            // 「当たる場所」ではない。
+            // This note is always printed alongside (a rule shared across the plan). The
+            // band is "where it could hit", not "where it will hit".
         }
 
         /// <summary>
-        /// **本機能の目玉。** カーソル下の建物が、その地震で倒れるかどうか。
+        /// **This feature's centrepiece.** Whether the building under the cursor will
+        /// fall in this earthquake.
         ///
-        /// バニラは建物ごとに <c>new Randomizer(buildingID | (disasterID &lt;&lt; 16))</c> から
-        /// 固定のしきい値を引く（§A-3）。この種はフレームにもステップにも依存せず、
-        /// 全体円盤の震央も動かないので、**結論は地震が始まった瞬間に既に確定している**。
-        /// 依頼文の「揺れによる火災や倒壊はおそらくランダム」への回答がこれで、
-        /// だからこの行だけは「予測」ではなく事実として書ける。
+        /// For each building, vanilla draws a fixed threshold from
+        /// <c>new Randomizer(buildingID | (disasterID &lt;&lt; 16))</c> (§A-3). That seed
+        /// depends on neither the frame nor the step, and the whole-quake disc's epicentre
+        /// does not move, so **the conclusion is already settled the moment the earthquake
+        /// begins**. That is the answer to the request's "fires and collapses from the
+        /// shaking are probably random", and it is why this row alone can be written as
+        /// fact rather than as a prediction.
         ///
-        /// ただし断定してよい範囲は狭い。ここで扱っているのは全体円盤
-        /// （probability = 0.02、震央中心）だけで、断層 4 円盤（probability = 1、
-        /// 毎ステップ位置が振り直される）については何も言えない。**帯の内側と、
-        /// 帯の幾何が読めていないときは、「倒壊しません」と言わない**
-        /// —— それを保証しているのは <see cref="BuildingMargin.Evaluate"/> 側の分岐順で、
-        /// ここはその結論を書き出すだけである。
+        /// The range over which we may assert anything is narrow, though. What is handled
+        /// here is only the whole-quake disc (probability = 0.02, centred on the
+        /// epicentre); nothing can be said about the four fault discs (probability = 1,
+        /// re-positioned every step). **Inside the band, and when the band's geometry
+        /// cannot be read, never say "it will not collapse"** — that is guaranteed by the
+        /// order of the branches over in <see cref="BuildingMargin.Evaluate"/>, and this
+        /// method only writes its conclusion out.
         ///
-        /// 値は全て 1 tick 前の sim スレッドの読み取りで、**このメソッドは建物バッファに
-        /// 一切触らない**（<see cref="BuildingProbe"/> のクラス doc）。
+        /// Every value is from the sim thread's read one tick ago, and **this method never
+        /// touches the building buffers** (see <see cref="BuildingProbe"/>'s class doc).
         /// </summary>
         private static void RefreshMarginRows(EarthquakeSnapshot snapshot)
         {
             var margin = snapshot.CursorBuilding;
 
-            // 注記は行が出ているときだけ添える（空行の下に注記だけ残さない）。
+            // The note only accompanies a row that is actually shown (never leave the
+            // note alone below a blank row).
             EarthquakeRows.SetPlain(_marginNoteLabel, "");
 
-            // CursorQuakeId == 0 は「まだ調べていない」——カーソルが地形の上に無い、
-            // あるいは破壊判定が走る地震（Active / Emerging）が 1 つも無い。
-            // **この状態で「カーソルの下に建物がありません」と書いてはいけない。**
-            // 建物の上にカーソルがあっても同じ 0 になるので、それは嘘になる。
-            // 言えることが無いときは、何も言わない。
+            // CursorQuakeId == 0 means "we have not looked yet" — either the cursor is not
+            // over terrain, or there is no earthquake running a destruction pass
+            // (Active / Emerging).
+            // **Never write "there is no building under the cursor" in this state.**
+            // It is the same 0 when the cursor IS over a building, so that would be a lie.
+            // When there is nothing we can say, say nothing.
             if (snapshot.CursorQuakeId == 0)
             {
                 EarthquakeRows.SetPlain(_marginBuildingLabel, "");
@@ -154,11 +168,11 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 「調べたが建物が無かった」と「調べられなかった」を言い分ける
-            //    （全体レビュー I3）。以前は BuildingManager が取れなくても走査が
-            //    例外を投げても、同じ「カーソルの下に建物がありません」が出ていた
-            //    —— 読み取り失敗が実測値の顔で出てくる、この機能が他の全ての行で
-            //    禁じている壊れ方そのものである。
+            // ★ Tell "we looked and there was no building" apart from "we could not
+            //    look" (whole-feature review I3). It used to print the same "there is no
+            //    building under the cursor" whether BuildingManager was unavailable or
+            //    the sweep threw — a failed read wearing the face of a measurement,
+            //    exactly the breakage this feature forbids in every other row.
             if (snapshot.CursorProbe == BuildingProbeOutcome.Failed)
             {
                 EarthquakeRows.SetPlain(_marginBuildingLabel, Strings.EarthquakeProbeFailed);
@@ -176,9 +190,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // どの地震についての判定かを必ず名乗る。複数同時進行のとき、上の行が
-            // 選んでいる地震（SelectPrimary）とここで判定した地震（sim 側の
-            // QuakeSelection.SelectDamaging）は一致しないことがある。
+            // Always name which earthquake the verdict is about. With several running at
+            // once, the earthquake the rows above have picked (SelectPrimary) and the one
+            // judged here (QuakeSelection.SelectDamaging on the sim side) can differ.
             EarthquakeRows.SetLayer1(_marginBuildingLabel,
                 Strings.EarthquakeBuildingUnderCursor + ": #" + margin.BuildingId
                 + "   (#" + snapshot.CursorQuakeId + ")");
@@ -189,15 +203,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 結論の 1 行。**設計書 §3.2 と計画 5.2 の表がそのままこの switch である。**
-        /// 断定してよい状態としてはいけない状態を、ここで取り違えないこと。
+        /// The conclusion, in one row. **The tables in design doc §3.2 and plan 5.2 are
+        /// this switch, verbatim.** Do not mix up, here, the states where an assertion is
+        /// allowed with the states where it is not.
         /// </summary>
         private static string VerdictText(BuildingMargin margin)
         {
             string current = Strings.EarthquakeCurrentDistance + " "
                              + margin.Distance.ToString("F0") + " m";
-            // 「倒壊するのは震央から X m 以内」。X ≦ 0 の建物は、震央に居ても
-            // 全体円盤では倒れない（しきい値が 200 以上）。
+            // "It collapses within X m of the epicentre". A building with X <= 0 does not
+            // fall to the whole-quake disc even standing on the epicentre (its threshold
+            // is 200 or more).
             string within = Strings.EarthquakeCollapseWithin + " "
                             + margin.CollapseWithin.ToString("F0") + " m";
 
@@ -207,24 +223,27 @@ namespace DisasterPlus.Game
                     return Strings.EarthquakeAlreadyDown;
 
                 case CollapseVerdict.OutOfRange:
-                    // バニラが preRadius で判定自体を打ち切っている領域。
+                    // The region where vanilla's preRadius cuts the check off entirely.
                     return Strings.EarthquakeOutOfRange + "   (" + current + ")";
 
                 case CollapseVerdict.Unknown:
-                    // 断層の幾何が読めていない。数値は出すが、判定は出さない。
+                    // The fault geometry could not be read. Show the numbers, but give no
+                    // verdict.
                     return within + " / " + current + "   -> "
                            + Strings.EarthquakeVerdictUnknown;
 
                 case CollapseVerdict.DamageModelReplaced:
-                    // ★ 破壊コードが他 MOD に置き換えられている（§E-2）。
-                    //    **距離も出さない。** バニラの 0.02 から導いた「X m 以内」は、
-                    //    その環境では誰も使っていない数字であり、隣に書けば
-                    //    判定を伏せた意味が無くなる。
+                    // ★ The destruction code has been replaced by another mod (§E-2).
+                    //    **Not even the distance is shown.** "Within X m", derived from
+                    //    vanilla's 0.02, is a number nobody is using in that environment,
+                    //    and printing it alongside would defeat the point of withholding
+                    //    the verdict.
                     return current + "   -> " + Strings.EarthquakeVerdictNdr;
 
                 case CollapseVerdict.InsideFaultZone:
-                    // 倒壊距離は出す。しかし「倒れません」とは言わない
-                    // （帯の内側は probability = 1 の破壊円盤が別に判定する）。
+                    // Show the collapse distance, but never say "it will not fall"
+                    // (inside the band, the probability = 1 destruction discs decide
+                    // separately).
                     return within + " / " + current + "   -> "
                            + Strings.EarthquakeFaultBand + ": " + Strings.EarthquakeFaultInside;
 
@@ -233,31 +252,34 @@ namespace DisasterPlus.Game
                            + Strings.EarthquakeVerdictCollapse;
 
                 case CollapseVerdict.Survives:
-                    // 全体円盤についてのみの「倒壊しません」。
-                    // ここへ来られるのは断層帯の**外側**の建物だけである
-                    // （BuildingMargin.Evaluate の分岐順がそれを保証している）。
+                    // "It will not collapse", with respect to the whole-quake disc only.
+                    // The only buildings that can reach here are those **outside** the
+                    // fault band (the branch order in BuildingMargin.Evaluate guarantees
+                    // it).
                     return margin.CollapseWithin > 0f
                         ? within + " / " + current + "   -> " + Strings.EarthquakeVerdictSurvive
                         : current + "   -> " + Strings.EarthquakeVerdictSurviveAnyDistance;
 
                 default:
-                    // ★ 既定を「倒壊しません」にしない。将来 CollapseVerdict に
-                    //    値が増えてここを直し忘れたとき、黙って生存を断定することに
-                    //    なる——この機能がいちばん避けたい壊れ方そのもの。
-                    //    知らない結論は「判定できません」に倒す。
+                    // ★ The default must not be "it will not collapse". If a value is
+                    //    added to CollapseVerdict in future and this is not updated, we
+                    //    would be silently asserting survival — exactly the breakage this
+                    //    feature most wants to avoid. Fall back on "no verdict" for any
+                    //    conclusion we do not recognise.
                     return Strings.EarthquakeVerdictUnknown;
             }
         }
 
         /// <summary>
-        /// 出火の結論の 1 行（全体レビュー M1）。**構造は倒壊とまったく同じ**で、
-        /// 違うのは引くしきい値（2 回目の引き）と文言だけである（§A-3）。
+        /// The fire conclusion, in one row (whole-feature review M1). **Structurally
+        /// identical to the collapse row**; only the threshold drawn (the second draw)
+        /// and the wording differ (§A-3).
         ///
-        /// **倒壊が優先する。** IL は <c>else if (hitB &amp;&amp; ...)</c> なので、
-        /// 同じ建物で倒壊も当たっているならバニラは出火の分岐へ行かない
-        /// （倒壊側が <c>burnAmount = Round(fB*255)</c> を持って行く）。
-        /// その順序を隠すと、「倒壊します」と「出火します」が同時に出て
-        /// 両方起きるように読める。
+        /// **Collapse takes precedence.** The IL is <c>else if (hitB &amp;&amp; ...)</c>,
+        /// so when the same building is also hit by the collapse, vanilla never reaches
+        /// the fire branch (the collapse side takes <c>burnAmount = Round(fB*255)</c>
+        /// with it). Hide that ordering and "it will collapse" and "it will catch fire"
+        /// appear together, reading as though both will happen.
         /// </summary>
         private static string BurnVerdictText(BuildingMargin margin)
         {
@@ -296,11 +318,13 @@ namespace DisasterPlus.Game
                     break;
 
                 default:
-                    // 倒壊側と同じ理由で、知らない結論は「判定できません」に倒す。
+                    // For the same reason as the collapse side, fall back on "no verdict"
+                    // for any conclusion we do not recognise.
                     return Strings.EarthquakeBurnLabel + ": " + Strings.EarthquakeVerdictUnknown;
             }
 
-            // 倒壊が確定しているなら、出火の分岐には来ないことを併記する。
+            // If the collapse is settled, state alongside that the fire branch is never
+            // reached.
             if (margin.Verdict == CollapseVerdict.WillCollapse)
             {
                 body += "\n" + Strings.EarthquakeBurnAfterCollapse;

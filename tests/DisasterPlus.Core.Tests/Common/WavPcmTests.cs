@@ -6,17 +6,18 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Common
 {
     /// <summary>
-    /// <see cref="WavPcm"/> の固定。
+    /// Pinning <see cref="WavPcm"/>.
     ///
-    /// ここが守っているのは 2 つだけである:
+    /// Only two things are protected here:
     ///
-    /// 1. **読めたものは正しく読める**（ビット数・チャンネル数・チャンクの並びを変えても）
-    /// 2. **読めないものは投げずに断る** —— 火山は wav が壊れていても今日どおり動く、
-    ///    という要件の実体がこちら側にある。
+    /// 1. **What can be read is read correctly** (whatever the bit depth, channel count or
+    ///    chunk order)
+    /// 2. **What cannot be read is refused rather than thrown** —— the requirement that the
+    ///    volcano still works as it does today even with a broken wav lives on this side.
     /// </summary>
     public class WavPcmTests
     {
-        // ── バイト列を組み立てる小道具 ──────────────────────────
+        // ── Small helpers for assembling byte arrays ──────────────
 
         private static void PutAscii(List<byte> to, string s)
         {
@@ -37,7 +38,8 @@ namespace DisasterPlus.Core.Tests.Common
             to.Add((byte)((v >> 8) & 0xFF));
         }
 
-        /// <summary>fmt ＋ data だけの最小 wav。<paramref name="extraChunk"/> があれば間に挟む。</summary>
+        /// <summary>A minimal wav with only fmt + data. <paramref name="extraChunk"/>, if
+        /// given, is inserted between them.</summary>
         private static byte[] Build(int format, int channels, int sampleRate, int bits,
                                     byte[] data, string extraChunk = null)
         {
@@ -60,7 +62,7 @@ namespace DisasterPlus.Core.Tests.Common
                 body.Add(1);
                 body.Add(2);
                 body.Add(3);
-                body.Add(0);   // 奇数長のパディング
+                body.Add(0);   // padding for an odd length
             }
 
             PutAscii(body, "data");
@@ -85,7 +87,7 @@ namespace DisasterPlus.Core.Tests.Common
             return b.ToArray();
         }
 
-        // ── 読めるもの ───────────────────────────────────
+        // ── What can be read ──────────────────────────────────
 
         [Fact]
         public void ReadsSixteenBitStereoAndReportsTheHeaderItActuallyFound()
@@ -97,7 +99,7 @@ namespace DisasterPlus.Core.Tests.Common
             Assert.Equal(44100, pcm.SampleRate);
             Assert.Equal(2, pcm.Channels);
             Assert.Equal(16, pcm.BitsPerSample);
-            // 4 サンプル ÷ 2 チャンネル = 2 フレーム。lengthSamples は**フレーム数**である。
+            // 4 samples / 2 channels = 2 frames. lengthSamples is the **frame count**.
             Assert.Equal(2, pcm.FrameCount);
             Assert.Equal(4, pcm.Samples.Length);
         }
@@ -117,7 +119,7 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void EightBitPcmIsUnsignedWithSilenceAtOneTwentyEight()
         {
-            // ★ 8 bit だけ符号なし。128 を 0 と読まないと、無音が全開の直流になる。
+            // ★ Only 8 bit is unsigned. Unless 128 is read as 0, silence becomes full-scale DC.
             byte[] wav = Build(1, 1, 8000, 8, new byte[] { 128, 255, 0, 192 });
             WavPcm pcm = WavPcm.Parse(wav);
 
@@ -131,7 +133,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TwentyFourBitIsSignExtended()
         {
-            // -1 は 0xFFFFFF。符号拡張を忘れると +0.99999 になり、波形の下半分が跳ね返る。
+            // -1 is 0xFFFFFF. Forget the sign extension and it becomes +0.99999, which
+            // flips the bottom half of the waveform back up.
             byte[] data = new byte[] { 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x40 };
             WavPcm pcm = WavPcm.Parse(Build(1, 1, 8000, 24, data));
 
@@ -146,7 +149,7 @@ namespace DisasterPlus.Core.Tests.Common
         {
             var data = new List<byte>();
             data.AddRange(BitConverter.GetBytes(0.25f));
-            data.AddRange(BitConverter.GetBytes(4f));      // 1 を超える値は実在する
+            data.AddRange(BitConverter.GetBytes(4f));      // values above 1 do occur
             data.AddRange(BitConverter.GetBytes(-9f));
             WavPcm pcm = WavPcm.Parse(Build(3, 1, 48000, 32, data.ToArray()));
 
@@ -159,7 +162,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void ChunksBetweenFmtAndDataAreSkipped()
         {
-            // ★ 決め打ちのオフセットで読むと、この形のファイルで**無音ではなく雑音**になる。
+            // ★ Reading at a hard-coded offset gives **noise, not silence**, for this
+            //   shape of file.
             byte[] wav = Build(1, 1, 22050, 16, Pcm16(1000, -1000), "LIST");
             WavPcm pcm = WavPcm.Parse(wav);
 
@@ -181,8 +185,9 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void ATruncatedDataChunkReadsTheFramesThatAreActuallyThere()
         {
-            // data が「1024 バイトある」と名乗っているが 4 バイトしか入っていないファイル
-            // （録音が途中で切れるとこうなる）。断らずに在るぶんだけ読む。
+            // A file whose data chunk claims "there are 1024 bytes" but only contains 4
+            // (which is what you get when a recording is cut off part-way). Read what is
+            // there rather than refusing.
             var all = new List<byte>();
             PutAscii(all, "RIFF");
             PutInt32(all, 4 + 24 + 8 + 4);
@@ -207,7 +212,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void ALyingBlockAlignDoesNotMoveTheSampleBoundaries()
         {
-            // blockAlign に 0 を書くエンコーダが実在する。信じると 0 除算か大化けする。
+            // Encoders that write 0 into blockAlign do exist. Believe it and you get either
+            // a division by zero or wildly wrong values.
             var all = new List<byte>();
             PutAscii(all, "RIFF");
             PutInt32(all, 4 + 24 + 8 + 4);
@@ -218,7 +224,7 @@ namespace DisasterPlus.Core.Tests.Common
             PutUInt16(all, 1);
             PutInt32(all, 8000);
             PutInt32(all, 16000);
-            PutUInt16(all, 0);      // 嘘の blockAlign
+            PutUInt16(all, 0);      // a lying blockAlign
             PutUInt16(all, 16);
             PutAscii(all, "data");
             PutInt32(all, 4);
@@ -233,7 +239,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void ExtensibleFormatIsResolvedThroughItsSubFormat()
         {
-            // WAVE_FORMAT_EXTENSIBLE(0xFFFE) を見ないと、ふつうの PCM を未知の形式と断る。
+            // Without looking at WAVE_FORMAT_EXTENSIBLE (0xFFFE), ordinary PCM is refused
+            // as an unknown format.
             var body = new List<byte>();
             PutAscii(body, "WAVE");
             PutAscii(body, "fmt ");
@@ -247,7 +254,7 @@ namespace DisasterPlus.Core.Tests.Common
             PutUInt16(body, 22);       // cbSize
             PutUInt16(body, 16);       // validBitsPerSample
             PutInt32(body, 4);         // channelMask
-            PutUInt16(body, 1);        // SubFormat GUID の先頭 2 バイト = PCM
+            PutUInt16(body, 1);        // first 2 bytes of the SubFormat GUID = PCM
             for (int i = 0; i < 14; i++) body.Add(0);
             PutAscii(body, "data");
             PutInt32(body, 4);
@@ -264,7 +271,7 @@ namespace DisasterPlus.Core.Tests.Common
             Assert.Equal(2, pcm.FrameCount);
         }
 
-        // ── 読めないもの（**どれも投げてはいけない**）────────────────
+        // ── What cannot be read (**none of it may throw**) ─────────────
 
         [Fact]
         public void NullBytesAreRefusedWithoutThrowing()
@@ -286,7 +293,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void AnMp3IsRefusedRatherThanReadAsNoise()
         {
-            // 拡張子を .wav に変えただけの別形式。**それらしい既定値で読み進めない。**
+            // A different format with nothing but the extension changed to .wav.
+            // **Do not carry on reading with plausible-looking defaults.**
             byte[] mp3 = new byte[] { 0x49, 0x44, 0x33, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
             WavPcm pcm = WavPcm.Parse(mp3);
             Assert.False(pcm.Valid);
@@ -351,7 +359,7 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void CompressedWavEncodingsAreNamedRatherThanGuessed()
         {
-            // format 17 = IMA ADPCM。PCM として読むと**雑音を全開で鳴らす**。
+            // format 17 = IMA ADPCM. Read as PCM it **plays noise at full volume**.
             WavPcm pcm = WavPcm.Parse(Build(17, 1, 8000, 4, new byte[] { 1, 2, 3, 4 }));
             Assert.False(pcm.Valid);
             Assert.Contains("unsupported", pcm.Error);
@@ -389,7 +397,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void AHeaderThatClaimsMoreSamplesThanTheCapIsRefusedBeforeAllocating()
         {
-            // ヘッダの数字だけを信じて確保すると、壊れたファイル 1 個でゲームごと落ちる。
+            // Allocating on the header's number alone means one broken file takes the whole
+            // game down with it.
             var all = new List<byte>();
             PutAscii(all, "RIFF");
             PutInt32(all, 36);
@@ -404,11 +413,12 @@ namespace DisasterPlus.Core.Tests.Common
             PutUInt16(all, 16);
             PutAscii(all, "data");
             PutInt32(all, int.MaxValue);
-            // 本体は 4 バイトしか無いので、実際に読めるのは 2 フレームだけ。
+            // The body only holds 4 bytes, so only 2 frames can really be read.
             all.AddRange(Pcm16(1, 2));
 
             WavPcm pcm = WavPcm.Parse(all.ToArray());
-            // 宣言ではなく**実在するバイト数**で決まるので、これは読める。
+            // It is decided by the **bytes that actually exist**, not by the declaration,
+            // so this one reads.
             Assert.True(pcm.Valid, pcm.Error);
             Assert.Equal(2, pcm.FrameCount);
         }
@@ -416,7 +426,7 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TheCapIsSmallEnoughToKeepTheAllocationBounded()
         {
-            // 4 バイト／サンプルなので、上限そのものが確保量の上限である。
+            // At 4 bytes per sample, the cap itself is the bound on how much is allocated.
             Assert.True(WavPcm.MaxTotalSamples <= 32000000,
                         "the sample cap must stay small enough to bound the float[] allocation");
         }

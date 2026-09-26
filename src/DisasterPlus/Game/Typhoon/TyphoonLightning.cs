@@ -6,86 +6,98 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 台風の落雷。<b>sim スレッド専用。</b>
+    /// The typhoon's lightning. <b>Sim thread only.</b>
     ///
-    /// ── これは演出ではなく実害である ─────────────────────────────
+    /// ── This is real damage, not decoration ───────────────────────────────
     ///
-    /// <c>WeatherManager.QueueLightningStrike</c> が積む落雷は**実体**で、
-    /// <c>StrikeNow</c> が <c>BuildingAI.BurnBuilding</c>（建物が燃える）・
-    /// <c>TreeManager.BurnTree</c>（木が燃える）・<c>NetAI.CollapseSegment</c>
-    /// （送電線が落ちる）を起こす（IL 事実文書 §A-3）。飾りではない。
+    /// The strikes <c>WeatherManager.QueueLightningStrike</c> queues are **real**:
+    /// <c>StrikeNow</c> triggers <c>BuildingAI.BurnBuilding</c> (a building catches fire),
+    /// <c>TreeManager.BurnTree</c> (a tree catches fire) and <c>NetAI.CollapseSegment</c>
+    /// (a power line comes down) (IL facts document §A-3). It is not ornament.
     ///
-    /// 地区政策 <c>CityPlanning.LightningRods (4096)</c> が建物落雷の 70% を消す。
-    /// **④は補正しない** —— 避雷針を建てた区域で落雷被害が減るのは正しい挙動である。
+    /// The district policy <c>CityPlanning.LightningRods (4096)</c> removes 70% of
+    /// building strikes. **④ does not compensate for that** — damage being lower in a
+    /// district that put up lightning rods is the correct behaviour.
     ///
-    /// 落雷で燃えた建物は災害グループの <c>m_refCount</c> を上げ、
-    /// <c>DisasterAI.IsStillClearing</c>（base）を伸ばす（§A-1 の 5）。
-    /// **嵐は火が消えるまで終わらない。** これは正しい挙動で、
-    /// <see cref="TyphoonSlot.Deactivate"/> が災害スロットを解放しないことと整合している。
+    /// A building set alight by lightning raises the disaster group's <c>m_refCount</c>
+    /// and extends <c>DisasterAI.IsStillClearing</c> (the base) (§A-1 item 5).
+    /// **The storm does not end until the fires are out.** This is correct behaviour and
+    /// is consistent with <see cref="TyphoonSlot.Deactivate"/> not releasing the disaster
+    /// slot.
     ///
-    /// ── 仕事の本体は「上限 20 発に当てないこと」 ──────────────────────
+    /// ── The real job is "do not hit the ceiling of 20" ────────────────────
     ///
-    /// 判断は全部 <see cref="LightningBudget"/>（Core、テスト 8 件）にある。ここは
-    /// **④が撃ったぶんの台帳**と、実際の撒き方だけを持つ。台帳は
-    /// <see cref="LightningBudget.QueueCapacity"/> 要素の固定長配列で、0 が空きスロット。
-    /// **<c>List</c> を毎 tick 作らない** —— ここは毎 sim tick 通る経路である。
+    /// All the judgement lives in <see cref="LightningBudget"/> (Core, 8 tests). This
+    /// class holds only **the ledger of what ④ fired** and the actual scattering. The
+    /// ledger is a fixed-length array of <see cref="LightningBudget.QueueCapacity"/>
+    /// elements, where 0 is a free slot. **Do not build a <c>List</c> every tick** — this
+    /// route runs on every sim tick.
     ///
-    /// 在庫から落とすのは<b>発火した時点ではなく</b>
-    /// <see cref="LightningBudget.HasExpired"/>（予定 + 45 フレーム）である。
-    /// ゲームがスロットを空けるのがそこだから（§A-3）。
+    /// An entry is dropped from the stock <b>not when it fires</b> but at
+    /// <see cref="LightningBudget.HasExpired"/> (scheduled + 45 frames), because that is
+    /// when the game frees the slot (§A-3).
     ///
-    /// ── 環境落雷は「撒き続ける」に倒した（設計書 §4.2） ─────────────────
+    /// ── We came down on "keep scattering" for ambient lightning (design doc §4.2) ──
     ///
-    /// <c>m_currentRain &gt; 0.8 &amp;&amp; m_lightningQueue.m_size == 0</c> のとき、ゲームは
-    /// 自前の落雷を積む（§A-3）。**条件は「キューが空」なので、④が 1 発でも積んで
-    /// いれば環境落雷は完全に止まる。** ④は台風の全期間にわたって雨を 0.8 以上に
-    /// 保つ（<see cref="TyphoonWeather"/>）ので、撒き続けるほうへ倒す ——
-    /// <c>inFlight == 0</c> なら間隔を待たずに必ず 1 発補充する。
+    /// When <c>m_currentRain &gt; 0.8 &amp;&amp; m_lightningQueue.m_size == 0</c>, the game
+    /// queues lightning of its own (§A-3). **The condition is "the queue is empty", so if
+    /// ④ has even one entry queued, ambient lightning stops completely.** ④ keeps the
+    /// rain at or above 0.8 for the whole life of the typhoon
+    /// (<see cref="TyphoonWeather"/>), so we come down on the side of scattering
+    /// continuously — if <c>inFlight == 0</c> we always top up with one strike without
+    /// waiting for the interval.
     ///
-    /// **ただし予算が 0 のときは補充しない。** 強度が高いと宿主の嵐の取り分だけで
-    /// 予算を使い切る（強度 170 あたりから <see cref="LightningBudget.Allowance"/> は 0）。
-    /// そこで無理に積むと、宿主の嵐自身の落雷が捨てられる —— 環境落雷が 1 発戻ることより
-    /// そちらのほうが悪い。**しかもその状態では宿主が大量に積んでいるので、
-    /// 実際にはキューが空になっていない。** 診断に予算と在庫の両方を出すのは、
-    /// この 2 つの状態を後から見分けるためである。
+    /// **Except that we do not top up when the budget is 0.** At high intensities the host
+    /// storm's share alone uses the whole budget up (from around intensity 170,
+    /// <see cref="LightningBudget.Allowance"/> is 0). Forcing an entry in there means the
+    /// host storm's own strikes get thrown away — and that is worse than one ambient
+    /// strike coming back. **What is more, in that state the host is queueing plenty, so
+    /// the queue is not actually empty.** The diagnostics show both the budget and the
+    /// stock precisely so these two states can be told apart afterwards.
     ///
-    /// ── 落着点は壁雲に偏らせる ───────────────────────────────
+    /// ── Bias the strike points towards the eyewall ────────────────────────
     ///
-    /// 実際の台風の雷は眼ではなく眼の外側の壁雲で起きる（設計書 §4.2）。
-    /// 眼の中を避けると**画面上で眼が読める**という実利もある。
-    /// 乱数は <see cref="DeterministicRandom"/> だけを使う ——
-    /// ここで決めるのはバニラが引く値ではなく④が発明した判断である
-    /// （<c>VanillaRandomizer</c> は使わない）。
+    /// Lightning in a real typhoon happens not in the eye but in the eyewall outside it
+    /// (design doc §4.2). Avoiding the inside of the eye also has the practical benefit
+    /// that **you can read the eye on screen**.
+    /// The only randomness used is <see cref="DeterministicRandom"/> — what we decide here
+    /// is a judgement ④ invented, not a value vanilla draws
+    /// (do not use <c>VanillaRandomizer</c>).
     ///
-    /// なお環境落雷の落着点は**マップ一様の乱数点**（1 引数版 IL_000F–004D）なので、
-    /// 台風から遠く離れて落ちる雷を④のものと数えないこと。
+    /// Note that ambient lightning strikes at a **uniformly random point over the map**
+    /// (the one-argument overload, IL_000F-004D), so do not count a bolt falling far away
+    /// from the typhoon as one of ④'s.
     /// </summary>
     public static class TyphoonLightning
     {
         /// <summary>
-        /// 最強のときの発射間隔（フレーム）。1 tick に 1 発までしか積まないので、
-        /// これは「連射の上限」である。実際にはたいてい
-        /// <see cref="LightningBudget.Allowance"/> のほうが先に効く。
+        /// The firing interval at full strength (frames). We queue at most one per tick,
+        /// so this is "the ceiling on the rate of fire". In practice
+        /// <see cref="LightningBudget.Allowance"/> usually bites first.
         /// </summary>
         private const uint MinIntervalFrames = 30u;
 
-        /// <summary>いちばん弱いときの発射間隔（フレーム）。</summary>
+        /// <summary>The firing interval at the weakest (frames).</summary>
         private const uint MaxIntervalFrames = 240u;
 
-        /// <summary>強度の最大値（<c>DisasterData.m_intensity</c> は byte）。</summary>
+        /// <summary>Maximum intensity (<c>DisasterData.m_intensity</c> is a
+        /// byte).</summary>
         private const float MaxIntensity = 255f;
 
-        /// <summary>壁雲の外側どこまで散らすか（<c>WallFraction</c> に対する倍率）。</summary>
+        /// <summary>How far outside the eyewall to scatter (a multiplier on
+        /// <c>WallFraction</c>).</summary>
         private const float WallSpread = 1.3f;
 
-        /// <summary>1 発ぶんに使う乱数の本数。塩をこれだけ進めれば系列が重ならない。</summary>
+        /// <summary>How many random draws one strike uses. Advance the salt by this much
+        /// and the sequences do not overlap.</summary>
         private const uint DrawsPerStrike = 5u;
 
         private const float TwoPi = 6.2831855f;
 
         /// <summary>
-        /// ④が積んだ落雷の予定フレーム。0 は空きスロット。
-        /// **固定長**（毎 sim tick 通る経路で <c>List</c> を作らない）。
+        /// The scheduled frames for the strikes ④ queued. 0 is a free slot.
+        /// **Fixed length** (no <c>List</c> allocation on a route that runs every sim
+        /// tick).
         /// </summary>
         private static readonly uint[] _scheduled = new uint[LightningBudget.QueueCapacity];
 
@@ -101,46 +113,53 @@ namespace DisasterPlus.Game
         private static bool _errorLogged;
 
         /// <summary>
-        /// 「キューが満杯で捨てられた」を 1 回だけ <c>Log.Warn</c> で出したか。
-        /// <see cref="_errorLogged"/> と分けてあるのは、片方が立つともう片方の
-        /// 1 回目が黙って消えるから。どちらも <see cref="Reset"/> で戻さない
-        /// （毎 tick の経路に <c>Log.Warn</c> を置かないため）。
+        /// Whether "dropped because the queue was full" has been reported once through
+        /// <c>Log.Warn</c>. It is separate from <see cref="_errorLogged"/> because if one
+        /// were raised, the other's first report would silently disappear. Neither is
+        /// reset by <see cref="Reset"/> (so that no <c>Log.Warn</c> sits on an
+        /// every-tick route).
         /// </summary>
         private static bool _rejectionLogged;
 
-        /// <summary>④が今キューに載せている数（予定 + 45 フレームで落ちる）。</summary>
+        /// <summary>How many ④ currently has in the queue (they drop at scheduled + 45
+        /// frames).</summary>
         public static int InFlight { get { return _inFlight; } }
 
-        /// <summary>直近の tick に積んだ数（0 か 1）。</summary>
+        /// <summary>How many were queued on the most recent tick (0 or 1).</summary>
         public static int LastQueued { get { return _lastQueued; } }
 
-        /// <summary>直近の tick に**ゲームに捨てられた**数。**常に 0 であるべき値。**</summary>
+        /// <summary>How many **the game threw away** on the most recent tick. **A value
+        /// that should always be 0.**</summary>
         public static int LastRejected { get { return _lastRejected; } }
 
-        /// <summary>この台風が積んだ累計。</summary>
+        /// <summary>The cumulative count this typhoon queued.</summary>
         public static int TotalQueued { get { return _totalQueued; } }
 
         /// <summary>
-        /// この台風でゲームに捨てられた累計。**0 以外なら上限 20 に当たっている**
-        /// ＝宿主の嵐や他 MOD の落雷まで消えている（<see cref="LightningBudget"/> の doc）。
+        /// The cumulative count the game threw away during this typhoon. **Anything other
+        /// than 0 means we are hitting the ceiling of 20**, i.e. the host storm's and
+        /// other mods' lightning is being wiped out too (<see cref="LightningBudget"/>'s
+        /// doc).
         /// </summary>
         public static int TotalRejected { get { return _totalRejected; } }
 
-        /// <summary>直近に見積もった宿主の嵐の取り分。</summary>
+        /// <summary>The most recent estimate of the host storm's share.</summary>
         public static int LastVanillaReserve { get { return _lastVanillaReserve; } }
 
-        /// <summary>直近の④の取り分。0 は異常ではない（クラス doc）。</summary>
+        /// <summary>④'s most recent share. 0 is not an anomaly (class doc).</summary>
         public static int LastAllowance { get { return _lastAllowance; } }
 
         /// <summary>
-        /// sim スレッド。<c>TyphoonFeature.OnSimulationTick</c> のポーズガードより下、
-        /// <c>TyphoonWeather.Drive</c> の直後に、台風が動いているときだけ呼ぶ。
+        /// Sim thread. Call it below the pause guard in
+        /// <c>TyphoonFeature.OnSimulationTick</c>, right after
+        /// <c>TyphoonWeather.Drive</c>, and only while a typhoon is running.
         ///
-        /// <paramref name="snapshot"/> は使わない。あれは**前 tick の状態**なので
-        /// （<see cref="TyphoonSnapshot"/> の T3 節の注記）、位置も強度も
-        /// <see cref="TyphoonController"/> の static から同じスレッドで直接読む。
-        /// 引数に残してあるのは他の要素と呼び出しの形をそろえるためである
-        /// （<c>TyphoonWeather.Drive</c> と同じ扱い）。
+        /// <paramref name="snapshot"/> is not used. That holds **the previous tick's
+        /// state** (the note in <see cref="TyphoonSnapshot"/>'s T3 section), so both
+        /// position and intensity are read directly from <see cref="TyphoonController"/>'s
+        /// statics on the same thread. It is kept as a parameter only to give every
+        /// element the same call shape (treated the same way as
+        /// <c>TyphoonWeather.Drive</c>).
         /// </summary>
         public static void Tick(TyphoonSnapshot snapshot, uint frame)
         {
@@ -176,7 +195,8 @@ namespace DisasterPlus.Game
                                                  TyphoonController.Intensity));
             _lastAllowance = LightningBudget.Allowance(_inFlight, _lastVanillaReserve);
 
-            // ★ キューを空にしない（クラス doc）。在庫が 0 なら間隔を待たない。
+            // ★ Never let the queue go empty (class doc). With a stock of 0 we do not wait
+            //   for the interval.
             bool due = _inFlight == 0 || frame >= _nextStrikeFrame;
             if (due && _lastAllowance > 0) QueueOne(frame);
 
@@ -184,7 +204,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ゲームがスロットを空けたぶんを台帳から落とす（§A-3、予定 + 45 フレーム）。
+        /// Drop from the ledger the entries whose slots the game has freed (§A-3,
+        /// scheduled + 45 frames).
         /// </summary>
         private static void Expire(uint frame)
         {
@@ -201,7 +222,8 @@ namespace DisasterPlus.Game
         private static void QueueOne(uint frame)
         {
             float stormRadius = TyphoonController.StormRadius;
-            // プレハブ半径が読めていなければ 0。**推測した半径に落とさない**（設計書 §6）。
+            // 0 if the prefab radius could not be read. **Do not fall back to a guessed
+            // radius** (design doc §6).
             if (!(stormRadius > 0f)) return;
 
             if (!Singleton<WeatherManager>.exists) return;
@@ -210,13 +232,14 @@ namespace DisasterPlus.Game
             if (float.IsNaN(centre.X) || float.IsNaN(centre.Z)) return;
 
             int slot = FreeSlot();
-            if (slot < 0) return;   // 台帳が満杯 ＝ 予算計算と矛盾するので黙って降りる
+            if (slot < 0) return;   // the ledger is full = contradicts the budget calc, so bow out quietly
 
             uint seed = TyphoonController.DisasterId;
             uint salt = _salt;
             _salt += DrawsPerStrike;
 
-            // 落着点は壁雲に偏らせる（実際の台風の構造。設計書 §4.2）。
+            // Bias the strike points towards the eyewall (the structure of a real typhoon;
+            // design doc §4.2).
             float angle = DeterministicRandom.Unit(seed, salt) * TwoPi;
             float band = TyphoonProfile.EyeFraction
                        + DeterministicRandom.Unit(seed, salt + 1u)
@@ -225,28 +248,30 @@ namespace DisasterPlus.Game
 
             var p = new Vector3(centre.X + Mathf.Cos(angle) * d, 0f,
                                 centre.Z + Mathf.Sin(angle) * d);
-            // §A-1 が ThunderStormAI 自身で使っている高さ取得。sim スレッド。
+            // The height lookup §A-1 shows ThunderStormAI itself using. Sim thread.
             if (Singleton<TerrainManager>.exists)
             {
                 p.y = Singleton<TerrainManager>.instance
                       .SampleRawHeightSmoothWithWater(p, false, 0f);
             }
 
-            // §A-1 と同じ姿勢の作り方。
+            // The same way of building the orientation as in §A-1.
             var q = Quaternion.AngleAxis(DeterministicRandom.Unit(seed, salt + 2u) * 360f,
                                          Vector3.up)
                   * Quaternion.AngleAxis(DeterministicRandom.Unit(seed, salt + 3u) * 30f - 15f,
                                          Vector3.right);
 
-            // ★ 遅延は自分で足す。EarliestFrame より手前はゲームが切り上げるので（§A-3）、
-            //   足さないと台帳の予定フレームと実際の発火フレームがずれる。
+            // ★ We add the delay ourselves. The game rounds anything earlier than
+            //   EarliestFrame up (§A-3), so without adding it the ledger's scheduled frame
+            //   and the actual firing frame drift apart.
             uint when = LightningBudget.EarliestFrame(frame)
                       + (uint)(DeterministicRandom.Unit(seed, salt + 4u)
                                * LightningBudget.MaxDelayFrames);
 
             var group = GroupOf(TyphoonController.DisasterId);
 
-            // ★ 戻り値を必ず見る。false は「キューが満杯で捨てられた」の唯一の合図（§A-3）。
+            // ★ Always look at the return value. false is the only signal for "dropped
+            //   because the queue is full" (§A-3).
             if (Singleton<WeatherManager>.instance.QueueLightningStrike(when, p, q, group))
             {
                 _scheduled[slot] = when;
@@ -259,8 +284,8 @@ namespace DisasterPlus.Game
             {
                 _lastRejected++;
                 _totalRejected++;
-                // **黙って捨てさせない。** 1 回目だけ Warn を出し、以後はスロットル付きの
-                // Diag へ落とす（Log.Warn は毎 tick の経路に置けない）。
+                // **Do not let it be dropped silently.** Warn on the first one only, then
+                // drop to a throttled Diag (Log.Warn cannot sit on an every-tick route).
                 if (!_rejectionLogged)
                 {
                     _rejectionLogged = true;
@@ -268,12 +293,14 @@ namespace DisasterPlus.Game
                              + "full (cap " + LightningBudget.QueueCapacity + "). The host "
                              + "storm's own strikes are being thrown away too.");
                 }
-                // 上限に当たったなら、次の tick も当たる。間隔を空けて叩き続けない。
+                // If we hit the ceiling, we will hit it next tick too. Do not keep
+                // hammering at it on a shorter interval.
                 _nextStrikeFrame = frame + MaxIntervalFrames;
             }
         }
 
-        /// <summary>強いほど短く。0〜255 を <see cref="MaxIntervalFrames"/>〜<see cref="MinIntervalFrames"/> に写す。</summary>
+        /// <summary>The stronger the shorter. Maps 0-255 onto
+        /// <see cref="MaxIntervalFrames"/>-<see cref="MinIntervalFrames"/>.</summary>
         private static uint IntervalFor(byte intensity)
         {
             float t = intensity / MaxIntensity;
@@ -292,13 +319,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 落雷を台風の災害グループに束ねる。②の <c>LongPeriodDamage.GroupOf</c> と同じ形。
-        /// null でも <c>QueueLightningStrike</c> は通る（グループに入らないだけ）。
+        /// Bundle the strike into the typhoon's disaster group. The same shape as ②'s
+        /// <c>LongPeriodDamage.GroupOf</c>. <c>QueueLightningStrike</c> works with null
+        /// too (the strike simply does not join a group).
         /// </summary>
         private static InstanceManager.Group GroupOf(ushort disasterId)
         {
-            // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-            // new GameObject を走らせる main スレッド専用 API。ここは sim スレッド。
+            // Singleton<T>.instance runs FindObjectOfType and new GameObject when
+            // sInstance is null, which makes it a main thread only API. This is the sim
+            // thread.
             if (disasterId == 0 || !Singleton<InstanceManager>.exists) return null;
 
             var groupId = InstanceID.Empty;
@@ -307,10 +336,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **撃った数が 0 のときも毎回出す**（③の「延焼が動いているか診断から一切
-        /// 見えなかった」失敗を繰り返さない）。<c>Log.Diag</c> は同一キーで 512 sim
-        /// フレームに 1 回に間引かれるが、**引数の文字列連結は毎 tick 走ってしまう**ので
-        /// <c>DiagEnabled</c> で先に落とす（C# は引数を呼び出し前に評価し切る）。
+        /// **Written every time, even when nothing was fired** (so as not to repeat ③'s
+        /// failure where "you could not tell from the diagnostics at all whether fire
+        /// spread was running"). <c>Log.Diag</c> thins the same key down to once per 512
+        /// sim frames, but **the string concatenation in the arguments would still run
+        /// every tick**, so we bail out first with <c>DiagEnabled</c> (C# evaluates the
+        /// arguments fully before the call).
         /// </summary>
         private static void WriteDiag(uint frame)
         {
@@ -328,11 +359,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 台風を手放すとき（<c>TyphoonController.Forget</c>）とレベルアンロードで呼ぶ。
-        /// **在庫を都市や次の台風へ持ち越さない。** 持ち越すと、次の台風は
-        /// 実際には空いているキューを「埋まっている」と見て撃たなくなる。
+        /// Call when letting go of a typhoon (<c>TyphoonController.Forget</c>) and on
+        /// level unload. **Do not carry the stock over to another city or to the next
+        /// typhoon.** Carry it over and the next typhoon sees a queue that is actually
+        /// free as "full" and never fires.
         ///
-        /// 冪等である（重ねて呼んでよい）。
+        /// It is idempotent (calling it repeatedly is fine).
         /// </summary>
         public static void Reset()
         {
@@ -347,8 +379,8 @@ namespace DisasterPlus.Game
             _lastAllowance = 0;
             _nextStrikeFrame = 0u;
             _salt = 0u;
-            // ★ _errorLogged は戻さない（ゲームのビルドに対する事実であって
-            //    都市ごとの状態ではない。TyphoonWeather / TyphoonReader と同じ扱い）。
+            // ★ _errorLogged is not reset (it is a fact about the game build, not
+            //    per-city state. Treated the same way as TyphoonWeather / TyphoonReader).
         }
     }
 }

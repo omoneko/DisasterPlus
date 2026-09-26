@@ -4,31 +4,35 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <see cref="TyphoonCloudFx"/> のうち<b>「何を借りて、どこを変えるか」</b>。
-    /// **main スレッド専用。**
+    /// The part of <see cref="TyphoonCloudFx"/> covering <b>what we borrow and what we
+    /// change on it</b>. **Main thread only.**
     ///
-    /// 撒き方は本体側にある。ここに在るのは<b>素材の望み</b>と
-    /// <b>複製 1 個ぶんの数値の書き込み</b>だけ。分けてあるのは 800 行の上限のためだけ
-    /// ではない —— 見た目を調整するときに読むのはこのファイルと
-    /// <c>Core/Typhoon/VortexCloudProfile</c> だけで済む。
+    /// How the puffs are scattered lives in the main body. All that is here is <b>what we
+    /// want from the source material</b> and <b>writing the numbers for one clone</b>.
+    /// The split is not only for the 800-line limit — when you come to tune the look,
+    /// this file and <c>Core/Typhoon/VortexCloudProfile</c> are the only two you need to
+    /// read.
     ///
-    /// 列挙・採点・複製・初期化・後始末は <see cref="VanillaParticles"/> が持っている
-    /// （<c>TyphoonSquallFx</c> と共有する）。**名前ではなくマテリアルで選ぶ**理由と、
-    /// 出荷アセットから測ったテクスチャの平均 RGB もあちらの doc にある。
+    /// Enumeration, scoring, cloning, initialisation and cleanup all belong to
+    /// <see cref="VanillaParticles"/> (shared with <c>TyphoonSquallFx</c>). The reason we
+    /// **pick by material rather than by name**, and the average RGB measured from the
+    /// shipped assets, are in that doc.
     /// </summary>
     public static partial class TyphoonCloudFx
     {
-        /// <summary>複製側に固定する <c>emission.rateOverTime</c>。
-        /// **0 にしてはいけない**（0 だと粒子が 1 個も出ない。§D-2 の罠）。
-        /// 借りた素材ごとに違う値（9.67〜200）が入っているので、ここで揃えて
-        /// <see cref="VortexPuffLayout.MagnitudeFor"/> の入力を確定させる。</summary>
+        /// <summary>The <c>emission.rateOverTime</c> we pin on the clone.
+        /// **It must not be 0** (at 0 not a single particle comes out; the trap in §D-2).
+        /// Each borrowed source carries a different value (9.67 to 200), so we level it
+        /// here to fix the input to
+        /// <see cref="VortexPuffLayout.MagnitudeFor"/>.</summary>
         private const float RateOverTime = 20f;
 
         /// <summary>
-        /// 望む粒子マテリアル（良い順）。**<c>Steam</c> が本命である** ——
-        /// 出荷アセットの <c>steam</c> テクスチャは平均 RGB (168, 184, 189) の
-        /// 淡い青白の綿で、雲そのものである。<c>Smoke</c> は (75, 78, 80) の
-        /// 煤の絵なので**最後**に置く（旧実装はこれを第 1 候補にしていた）。
+        /// The particle materials we want, best first. **<c>Steam</c> is the one we are
+        /// after** — the shipped <c>steam</c> texture is pale blue-white cotton with an
+        /// average RGB of (168, 184, 189), which is cloud itself. <c>Smoke</c> is a
+        /// picture of soot at (75, 78, 80), so it goes **last** (the old implementation
+        /// had it as first choice).
         /// </summary>
         private static readonly string[] CloudMaterials =
         {
@@ -36,9 +40,10 @@ namespace DisasterPlus.Game
         };
 
         /// <summary>
-        /// 同点のときの並べ替えにだけ使う名前の順。**引く順ではない。**
-        /// <c>Large Pool Steam</c> を先頭にしてあるのは、素の初速が 0.1〜0.2 m/s で
-        /// いちばん「動かない大きな雲」に近いからである（§A-6）。
+        /// The name order, used only to break ties in the ordering. **Not the order we
+        /// draw in.** <c>Large Pool Steam</c> is at the front because its raw initial
+        /// speed of 0.1-0.2 m/s is the closest thing to a "big cloud that does not move"
+        /// (§A-6).
         /// </summary>
         private static readonly string[] CloudNames =
         {
@@ -49,10 +54,11 @@ namespace DisasterPlus.Game
             "Collapse Particles",
         };
 
-        // ★ 参照 1 個ずつで持つ（配列にしない）。UnityEngine.Object の == は
-        //   破棄済みを null と等価に見せるが、**配列参照の比較にはそれが効かない** ——
-        //   static な配列は破棄済みの中身を抱えたまま非 null であり続け、
-        //   2 つ目の都市で無言のまま見えなくなる（③火災旋風 §4.8）。
+        // ★ Hold them one reference at a time (not in an array). UnityEngine.Object's ==
+        //   makes a destroyed object compare equal to null, but **that does not apply to
+        //   comparing the array reference** — a static array stays non-null while holding
+        //   destroyed contents, and goes silently invisible in the second city (③ fire
+        //   whirl §4.8).
         private static GameObject _deckObject;
         private static ParticleEffect _deckEffect;
         private static ParticleSystem _deckParticles;
@@ -68,22 +74,25 @@ namespace DisasterPlus.Game
         private static string _sourceName;
         private static string _sourceMaterial;
 
-        /// <summary>借りられないことを 1 度だけ名乗ったか。**<see cref="Destroy"/> で戻さない**
-        /// （ゲームのビルドに対する事実であって都市ごとの状態ではない）。</summary>
+        /// <summary>Whether we have named the unavailability once. **Not reset by
+        /// <see cref="Destroy"/>** (it is a fact about the game build, not per-city
+        /// state).</summary>
         private static bool _unavailableLogged;
 
         internal static string SourceName { get { return _sourceName; } }
 
         internal static string SourceMaterial { get { return _sourceMaterial; } }
 
-        /// <summary>層に対応する複製。**参照そのものを見る**（fake-null の自己修復）。</summary>
+        /// <summary>The clone for a layer. **Look at the reference itself** (fake-null
+        /// self-repair).</summary>
         private static ParticleEffect CloneFor(VortexCloudLayer layer)
         {
             if (layer == VortexCloudLayer.Deck) return _deckEffect != null ? _deckEffect : null;
             if (layer == VortexCloudLayer.Canopy)
             {
-                // ★ かなとこが作れなければ塔の複製で代用する（天蓋が塔の色になるだけで、
-                //   消えはしない）。⑤の傘と同じ判断。
+                // ★ If the anvil could not be made, stand in with the tower's clone (the
+                //   canopy just takes the tower's colour; it does not disappear). The
+                //   same decision as ⑤'s umbrella.
                 if (_canopyEffect != null) return _canopyEffect;
                 return _towerEffect != null ? _towerEffect : null;
             }
@@ -114,7 +123,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 借りられるかだけを見る（<c>Assumptions</c> と共有する式）。副作用は無い。
+        /// Only checks whether it can be borrowed (the formula shared with
+        /// <c>Assumptions</c>). No side effects.
         /// </summary>
         private static ParticleEffect Lookup(out string name, out string material)
         {
@@ -122,11 +132,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 借りて、3 つ複製して、初期化する。1 つも作れなければ false（**例外は投げない**）。
+        /// Borrow, clone three times and initialise. false if not one could be made
+        /// (**it does not throw**).
         /// </summary>
         private static bool Acquire()
         {
-            // ★ 毎フレーム探しに行かない。列挙は辞書 1 周ぶんの費用がある。
+            // ★ Do not go looking every frame. Enumeration costs a full pass over the
+            //   dictionary.
             if (_lookupMissCount > 0)
             {
                 _lookupMissCount--;
@@ -194,9 +206,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 層ぶん複製して入道雲に仕立てる。**共有状態は 1 バイトも触らない**（§D-5）。
-        /// 数値表は <see cref="VortexCloudProfile"/>（Core）に在る ——
-        /// <c>tools/TyphoonPreview</c> が同じ数字で渦を描くので**ここに直書きしない**。
+        /// Clone one layer and dress it up as a cumulonimbus. **It does not touch a single
+        /// byte of shared state** (§D-5). The table of numbers lives in
+        /// <see cref="VortexCloudProfile"/> (Core) — <c>tools/TyphoonPreview</c> draws the
+        /// vortex from the same figures, so **do not write them inline here**.
         /// </summary>
         private static GameObject BuildClone(ParticleEffect source, VortexCloudLayer layer,
                                              string name)
@@ -217,15 +230,15 @@ namespace DisasterPlus.Game
             effect.m_maxStartSpeed = profile.SpeedMax;
             effect.m_minSpawnAngle = profile.SpawnAngleMinDegrees;
             effect.m_maxSpawnAngle = profile.SpawnAngleMaxDegrees;
-            effect.m_renderDuration = 0f;      // 継続モードで使う（§B-3）
-            effect.m_extraRadius = 0f;         // 借り元によっては 2〜9 m 勝手に足す
+            effect.m_renderDuration = 0f;      // used in continuous mode (§B-3)
+            effect.m_extraRadius = 0f;         // some sources add 2-9 m of their own accord
 
             var main = ps.main;
             main.startColor = new ParticleSystem.MinMaxGradient(
                 new Color(profile.BrightRed, profile.BrightGreen, profile.BrightBlue,
                           profile.Alpha),
                 new Color(profile.DarkRed, profile.DarkGreen, profile.DarkBlue, profile.Alpha));
-            main.startSize = MinSizeMetres;    // 実際の値は毎フレーム ApplySizes が入れる
+            main.startSize = MinSizeMetres;    // ApplySizes puts the real value in each frame
             main.gravityModifier = profile.GravityModifier;
             main.maxParticles = profile.MaxParticles;
 
@@ -236,8 +249,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 粒径を渦の大きさに合わせる。**複製側なので毎フレーム書いてよい**
-        /// （<c>MainModule</c> は struct、確保は 0 バイト）。
+        /// Match the particle size to the size of the vortex. **These are our clones, so
+        /// writing every frame is fine** (<c>MainModule</c> is a struct; zero bytes
+        /// allocated).
         /// </summary>
         private static void ApplySizes(float radius)
         {
@@ -248,7 +262,8 @@ namespace DisasterPlus.Game
 
         private static void ApplySize(ParticleSystem particles, float radius, float fraction)
         {
-            // ★ 参照そのものを見る。破棄済みなら fake-null で null と等価になる。
+            // ★ Look at the reference itself. If it has been destroyed, fake-null makes it
+            //   compare equal to null.
             if (particles == null) return;
 
             float size = radius * fraction;

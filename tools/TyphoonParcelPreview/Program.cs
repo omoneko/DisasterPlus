@@ -6,12 +6,15 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.TyphoonParcelPreview
 {
     /// <summary>
-    /// <see cref="TyphoonCloudParcels"/> の雲を、**ゲームを起動せずに**上から描いて
-    /// 確かめる（2026-08-22、所有者の指示「火山の噴火の雲が質感としてはふさわしいので、
-    /// 噴火雲エフェクトを応用して台風の雲を作ってください」）。
+    /// Draws the clouds of <see cref="TyphoonCloudParcels"/> from above and checks them
+    /// **without launching the game** (2026-08-22, the owner's instruction: "the volcano's
+    /// eruption cloud has the right texture for it, so please build the typhoon's cloud by
+    /// applying the eruption cloud effect").
     ///
-    /// 上から見るのは、台風の形（目・壁雲・らせんの腕）がそこにしか出ないからである。
-    /// <b>Core の実物をそのままコンパイルして呼ぶ</b>ので、書き直した近似ではない。
+    /// It is viewed from above because that is the only place the typhoon's shape (the eye,
+    /// the eyewall and the spiral arms) shows up.
+    /// It compiles and calls <b>the real thing from Core</b> directly, so it is not a
+    /// rewritten approximation.
     ///
     ///   dotnet run --project tools/TyphoonParcelPreview -- docs/images/typhoon
     /// </summary>
@@ -19,10 +22,11 @@ namespace DisasterPlus.Tools.TyphoonParcelPreview
     {
         private const int Size = 820;
 
-        /// <summary>渦の外周半径（m）。実機の既定に近い値。</summary>
+        /// <summary>Outer radius of the vortex (m). Close to the game's default.</summary>
         private const float Radius = 4200f;
 
-        /// <summary>見る範囲（m、片側）。渦の外まで入れる。</summary>
+        /// <summary>The extent shown (m, half-width). Wide enough to include the area beyond
+        /// the vortex.</summary>
         private const float ViewHalf = 5200f;
 
         private const uint Seed = 20260822u;
@@ -44,8 +48,9 @@ namespace DisasterPlus.Tools.TyphoonParcelPreview
         }
 
         /// <summary>
-        /// 目で見るだけにしない。**数で確かめる**もの:
-        /// 覆っている割合、時間で動いているか、そして<b>目が空いているか</b>。
+        /// Do not just look at it. Things to **confirm with numbers**:
+        /// the fraction covered, whether it moves over time, and <b>whether the eye is
+        /// open</b>.
         /// </summary>
         private static void Measure()
         {
@@ -69,7 +74,7 @@ namespace DisasterPlus.Tools.TyphoonParcelPreview
                     }
                 }
 
-                // 目（中心）がどれだけ埋まっているか。**空いていること**の確認。
+                // How much the eye (the centre) is filled in. Confirms **that it is open**.
                 int eyeLit = 0, eyeAll = 0;
                 float eyePx = TyphoonCloudParcels.EyeFraction * Radius / ViewHalf * (Size / 2f);
                 for (int y = 0; y < Size; y++)
@@ -98,10 +103,10 @@ namespace DisasterPlus.Tools.TyphoonParcelPreview
             var rgb = new byte[Size * Size * 3];
             for (int i = 0; i < rgb.Length; i += 3)
             {
-                rgb[i] = 20; rgb[i + 1] = 40; rgb[i + 2] = 62;   // 海
+                rgb[i] = 20; rgb[i + 1] = 40; rgb[i + 2] = 62;   // the sea
             }
 
-            // 低い塊から先に塗る（上のものが上に来る）。
+            // Paint the lower parcels first (so the higher ones end up on top).
             var order = new int[TyphoonCloudParcels.Count];
             var height = new float[TyphoonCloudParcels.Count];
             for (int i = 0; i < TyphoonCloudParcels.Count; i++)

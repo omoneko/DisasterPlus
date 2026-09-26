@@ -5,20 +5,23 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 渦車両をその場に留める。
+    /// Holds the vortex vehicle in place.
     ///
-    /// IL 実測（設計書 付録 A-1）で分かった VortexAI.SimulationStep(6 引数) の順序:
-    ///   1. Frame.m_position を書く
-    ///   2. m_targetPos0 までの距離を測る
-    ///   3. ArriveAtDestination が true なら DeactivateNow + Unspawn
-    ///   4. Frame.m_velocity を再計算
-    ///   5. Frame.m_position = m_position + m_velocity * dt   ← 実際の移動
+    /// The order inside VortexAI.SimulationStep (the 6-argument one), as established by
+    /// reading the IL (design document, appendix A-1):
+    ///   1. write Frame.m_position
+    ///   2. measure the distance to m_targetPos0
+    ///   3. if ArriveAtDestination is true, DeactivateNow + Unspawn
+    ///   4. recompute Frame.m_velocity
+    ///   5. Frame.m_position = m_position + m_velocity * dt   ← the actual movement
     ///   6. AddWind / DestroyStuff / BurnGround / UpgradeBuildings
     ///
-    /// Postfix で m_position を発生地点に戻せば、5 の積算が毎ステップ帳消しになる。
+    /// Put m_position back to the spawn point in a Postfix and step 5's accumulation is
+    /// cancelled out every step.
     ///
-    /// m_velocity は書き換えない。4 で毎ステップ再計算されるので無意味であり、
-    /// 6 の AddWind が向きに使っているのでゼロにすると風の演出が死ぬ。
+    /// We do not touch m_velocity. Rewriting it is pointless because step 4 recomputes it
+    /// every step, and step 6's AddWind uses it for direction, so zeroing it would kill
+    /// the wind effect.
     /// </summary>
     [HarmonyPatch(typeof(VortexAI), "SimulationStep",
         new[] { typeof(ushort), typeof(Vehicle), typeof(Vehicle.Frame),
@@ -29,12 +32,13 @@ namespace DisasterPlus.Game
     {
         public static void Postfix(ushort vehicleID, ref Vehicle.Frame frameData)
         {
-            // 自分が作った渦だけを固定する。バニラの竜巻には一切触らない。
+            // Pin only the vortices we created. Never touch vanilla's tornadoes.
             Vec3 center;
             if (!FireWhirlRegistry.TryGetPinnedCenter(vehicleID, out center)) return;
 
-            // y は書き戻さない。バニラが SampleRawHeightSmoothWithWater で地形に合わせているので、
-            // 水平位置だけ固定すれば地面から浮いたり埋まったりしない。
+            // We do not write y back. Vanilla already fits it to the terrain with
+            // SampleRawHeightSmoothWithWater, so pinning the horizontal position alone
+            // keeps it from floating above the ground or sinking into it.
             frameData.m_position = new Vector3(center.X, frameData.m_position.y, center.Z);
         }
     }

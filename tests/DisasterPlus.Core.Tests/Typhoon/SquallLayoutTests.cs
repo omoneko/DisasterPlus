@@ -8,9 +8,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void NothingIsDrawnOutsideTheStorm()
         {
-            // ★★ **台風の外に居るのに飛沫が舞ってはいけない。**
-            //   TyphoonProfile.WindAt は強風域の外でちょうど 0 を返すので、
-            //   ここが 0 を返せば「外では 1 粒も出ない」が構造で保証される。
+            // ★★ **Spray must never blow about while you are outside the typhoon.**
+            //   TyphoonProfile.WindAt returns exactly 0 outside the gale-force area, so if
+            //   this returns 0 then "not one particle outside" is guaranteed structurally.
             Assert.Equal(0f, SquallLayout.StrengthOf(0f), 6);
             Assert.Equal(0f, SquallLayout.StrengthOf(SquallLayout.MinWindUnit), 6);
             Assert.Equal(0f, SquallLayout.StrengthOf(float.NaN), 6);
@@ -37,15 +37,16 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheWindTurnsAroundTheEyeAndLeansInward()
         {
-            // 台風の二次循環。接線（渦の回る向き＝角度が増える向き）＋ 吸い込み。
-            // ここが逆だと、雲と雨が逆向きに流れる。
+            // The secondary circulation of a typhoon. Tangential (the direction the vortex
+            // turns, i.e. increasing angle) plus inflow. Reverse it and the cloud and the
+            // rain flow in opposite directions.
             float wx, wz;
             SquallLayout.WindDirection(1000f, 0f, out wx, out wz);
 
-            // 単位ベクトルであること。
+            // It must be a unit vector.
             Assert.Equal(1f, wx * wx + wz * wz, 4);
 
-            // (+X, 0) では接線は +Z、吸い込みは -X。
+            // At (+X, 0) the tangent is +Z and the inflow is -X.
             Assert.True(wz > 0f, "the wind does not turn the same way as the vortex");
             Assert.True(wx < 0f, "the wind does not lean towards the eye");
         }
@@ -53,7 +54,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheCentreOfTheEyeDoesNotProduceNaN()
         {
-            // 中心のちょうど真上は向きが決まらない。**例外も NaN も出さない。**
+            // Directly over the centre the direction is undetermined.
+            // **Emit neither an exception nor a NaN.**
             float wx, wz;
             SquallLayout.WindDirection(0f, 0f, out wx, out wz);
             Assert.False(float.IsNaN(wx));
@@ -77,7 +79,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
                 Assert.InRange(p.BandFraction, 0f, 1f);
                 Assert.InRange(p.DensityFraction, 0f, 1f);
 
-                // 散らばりの半径を大きくはみ出さない（カメラの周りに留まる）。
+                // It does not stray far beyond the scatter radius (it stays around the camera).
                 float r = p.OffsetXFraction * p.OffsetXFraction
                           + p.OffsetZFraction * p.OffsetZFraction;
                 Assert.True(r <= 1.25f, "patch " + i + " is thrown too far from the camera");
@@ -87,7 +89,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheLayoutIsTheSameEveryTime()
         {
-            // 添字だけの関数。フレームを混ぜると飛沫の湧く場所が毎フレーム跳ぶ。
+            // A function of the index alone. Mix the frame in and the spray's spawn points
+            // jump about every frame.
             for (int i = 0; i < SquallLayout.PatchCount; i++)
             {
                 SquallPatch a = SquallLayout.PatchAt(i);
@@ -110,16 +113,17 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void TheSprayFallsAndStaysLow()
         {
-            // 雨である。**浮いてはいけない**（重力は正）。
+            // This is rain. **It must not float** (gravity is positive).
             Assert.True(SquallLayout.GravityModifier > 0f);
-            // ほぼ水平に散る（軸が上向きなので、角度が大きいほど横向きになる）。
+            // It scatters almost horizontally (the axis points up, so a larger angle is
+            // more sideways).
             Assert.True(SquallLayout.SpawnAngleMinDegrees >= 60f);
-            // 短命（飛んで落ちて消える）。渦の粒より遥かに短いこと。
+            // Short-lived (it flies, falls and is gone). Far shorter than the vortex puffs.
             Assert.True(SquallLayout.LifeMaxSeconds
                         < VortexCloudProfile.Tower.LifeMinSeconds);
-            // ★ 0 にすると 1 粒も出ない（§D-2 の罠）。
+            // ★ Set it to 0 and not one particle appears (the trap of §D-2).
             Assert.True(SquallLayout.RateOverTime > 0f);
-            // 都市が見えなくなってはいけない。
+            // The city must never become invisible.
             Assert.InRange(SquallLayout.Alpha, 0.05f, 0.5f);
         }
     }

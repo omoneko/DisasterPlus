@@ -4,27 +4,27 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 診断のタブ。**main スレッド専用。**
+    /// The diagnostics tab. **Main thread only.**
     ///
-    /// ── なぜ画面に置くのか ────────────────────────────────
+    /// ── Why it goes on screen ────────────────────────────────
     ///
-    /// 診断ダンプはこれまで <c>Ctrl + ホットキー</c> でしか出せなかった。
-    /// 押し方はオプション画面の説明文にしか書いておらず、**説明を消すと
-    /// 出し方ごと消える**。そこで押せるボタンにしてタブの 1 枚に置く ——
-    /// 説明を減らすというのは、機能を隠すことではない。
+    /// Until now the diagnostic dump could only be produced with <c>Ctrl + hotkey</c>.
+    /// How to press it was written only in the prose on the options screen, and
+    /// **deleting that prose deletes the way to produce it**. So it becomes a button you can
+    /// press, on one of the tabs — reducing the explanation does not mean hiding the feature.
     ///
-    /// ── 出すのは 4 行だけ ────────────────────────────────
+    /// ── Only four rows are shown ────────────────────────────────
     ///
-    /// 状態そのものはダンプファイルの中にある。ここに要約を積み上げると、
-    /// **同じ内容が 2 か所にあって片方だけ古くなる**（この MOD が
-    /// <c>DiagnosticFormatter</c> をオーバーレイとダンプで共有している理由と同じ）。
-    /// ここに置くのは「どうやって出すか」と「どこに出るか」だけである。
+    /// The state itself is inside the dump file. Pile a summary up here and **the same content
+    /// exists in two places and one of them goes stale** (the same reason this mod shares
+    /// <c>DiagnosticFormatter</c> between the overlay and the dump).
+    /// All that goes here is "how to produce it" and "where it appears".
     /// </summary>
     internal static class DiagnosticsPanel
     {
         private const string PanelName = FreeSlotFinder.SelfPrefix + "DiagnosticsPanel";
 
-        /// <summary>①②④⑤と同じ 640。<see cref="InfoHub"/> がタブ帯の幅に使う。</summary>
+        /// <summary>640, the same as ①②④⑤. <see cref="InfoHub"/> uses it for the tab strip's width.</summary>
         internal const float PanelWidth = 640f;
 
         private const float RowLeft = 12f;
@@ -36,7 +36,7 @@ namespace DisasterPlus.Game
         private static UILabel _hintLabel;
         private static UIButton _dumpButton;
 
-        /// <summary>左上。既定値は <see cref="InfoHub"/> が位置を決める前だけ使う。</summary>
+        /// <summary>The top-left. The default is used only before <see cref="InfoHub"/> decides the position.</summary>
         private static Vector3 _origin = new Vector3(8f, 120f);
 
         internal static bool IsVisible { get { return _panel != null && _panel.isVisible; } }
@@ -64,14 +64,14 @@ namespace DisasterPlus.Game
             if (_panel != null) _panel.Hide();
         }
 
-        /// <summary>main スレッドから毎フレーム。表示中のときだけ内容を更新する。</summary>
+        /// <summary>Every frame from the main thread. Refreshes the contents only while displayed.</summary>
         internal static void Tick()
         {
             if (_panel == null || !_panel.isVisible) return;
             Refresh();
         }
 
-        /// <summary>レベルアンロード時。**セッション状態を 1 つも持ち越さない。**</summary>
+        /// <summary>On level unload. **Do not carry over a single piece of session state.**</summary>
         internal static void Destroy()
         {
             if (_panel != null) Object.Destroy(_panel.gameObject);
@@ -103,8 +103,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ _panel への代入を構築の最後の 1 行にしない（他のパネルと同じ理由 ——
-            //    途中の例外で孤児 GameObject が残る）。
+            // ★ Do not make the assignment to _panel the last line of construction (the same
+            //    reason as the other panels — an exception part-way would leave an orphaned
+            //    GameObject behind).
             UIPanel panel = null;
             try
             {
@@ -146,8 +147,8 @@ namespace DisasterPlus.Game
             _dumpButton.normalBgSprite = "ButtonMenu";
             _dumpButton.hoveredBgSprite = "ButtonMenuHovered";
             _dumpButton.pressedBgSprite = "ButtonMenuPressed";
-            // ★ ここではファイルを書かない。main が依頼し、sim が組み立て、
-            //   main が書き出す 3 段（DiagnosticDump のクラス doc）。
+            // ★ Do not write the file here. Three stages: main requests, sim assembles, main
+            //   writes (see the DiagnosticDump class doc).
             _dumpButton.eventClick += (c, e) => DiagnosticDump.RequestDump();
             y += 34f;
 
@@ -205,12 +206,15 @@ namespace DisasterPlus.Game
                 float top = pos.y;
                 if (top + panel.height > viewHeight - Margin) top = viewHeight - Margin - panel.height;
                 if (top < Margin) top = Margin;
-                // ★★ **上へは <c>InfoHub</c> が指定した位置（＝タブ帯の真下）より上に出さない。**
-                //    （2026-08-22、実機報告「天気タブ・地震タブの中に X で閉じられない
-                //    タブがあり」の正体。）上の 2 つの寄せは下端を画面に収めるためだけに
-                //    パネルを上へ上げるので、背の高いパネルは**タブ帯をまるごと覆い隠して
-                //    いた** —— 閉じる手段そのものが押せなくなる。収まらないぶんは下へはみ出すが、
-                //    帯の左端を掴めば一緒に動かせる（<c>InfoHub</c> のドラッググリップ）。
+                // ★★ **Never rise above the position <c>InfoHub</c> specified (i.e. directly
+                //    below the tab strip).**
+                //    (2026-08-22; this was the real cause of the report from the game, "inside
+                //    the weather tab and the earthquake tab there's a tab you can't close with
+                //    the X".) The two nudges above raise the panel purely to fit its bottom
+                //    edge on screen, so a tall panel **covered the tab strip entirely** — and
+                //    the very means of closing it became unpressable. Whatever does not fit
+                //    now overflows downwards, but grabbing the strip's left edge moves it
+                //    along with it (<c>InfoHub</c>'s drag grip).
                 if (top < _origin.y) top = _origin.y;
                 panel.relativePosition = new Vector3(pos.x, top);
             }

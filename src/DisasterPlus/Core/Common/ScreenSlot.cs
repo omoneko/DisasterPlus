@@ -1,32 +1,36 @@
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// 「画面の中に置く」という判断だけを持つ純算術。<b>Core なのでエンジンには
-    /// 一切触らない</b>（<c>UnityEngine.Rect</c> も <c>Mathf</c> も使わない）。
+    /// Pure arithmetic holding one judgement only: "put it inside the screen". <b>This is
+    /// Core, so it touches the engine not at all</b> (it uses neither
+    /// <c>UnityEngine.Rect</c> nor <c>Mathf</c>).
     ///
-    /// ── なぜ Core に切り出したのか ─────────────────────────────
+    /// ── Why it was lifted into Core ─────────────────────────────
     ///
-    /// <c>Game/UI/FreeSlotFinder</c> は「空いている場所を下へ探す」だけを書いており、
-    /// **その候補が画面の中かどうかを一度も見ていなかった。** 実機の
-    /// output_log には
-    /// <c>Disaster + info button installed at (8,1094)</c> と残っている ——
-    /// 高さ 1080 の画面で y = 1094、つまり探索は下端を歩いて画面の外へ出て、
-    /// そこを「空いている」と正しく判定していた。**空いていたのは画面の外だから**である。
+    /// <c>Game/UI/FreeSlotFinder</c> only ever wrote "search downwards for a free spot" and
+    /// **never once checked whether the candidate was on the screen at all.** The
+    /// output_log from a real run still has
+    /// <c>Disaster + info button installed at (8,1094)</c> in it —
+    /// y = 1094 on a screen 1080 tall. In other words the search walked off the bottom edge
+    /// and out of the screen, and then correctly judged that spot "free".
+    /// **It was free because it was off the screen.**
     ///
-    /// 以前はこの逆（4 個のボタンが同じ座標に積み上がる）で壊れていた。
-    /// 重なるのと見えないのは<b>どちらも使えない</b>が、重なるほうがまだ押せる。
-    /// その優先順位を、テストの掛かる形でここに置く。
+    /// Previously it was broken the other way round (four buttons stacked at the same
+    /// coordinates). Overlapping and invisible are <b>both unusable</b>, but at least you
+    /// can still click the overlapping one. That ordering of preference lives here, in a
+    /// form the tests can reach.
     /// </summary>
     public static class ScreenSlot
     {
         /// <summary>
-        /// 幅・高さ <paramref name="size"/> の矩形を <paramref name="pos"/> に置いたとき、
-        /// <c>[0, extent]</c> に完全に収まるか。
+        /// When a rectangle of width and height <paramref name="size"/> is placed at
+        /// <paramref name="pos"/>, does it fit entirely within <c>[0, extent]</c>?
         ///
-        /// <paramref name="extent"/> が 0 以下（＝画面サイズが読めなかった）なら
-        /// <b>true を返す</b> —— 読めない寸法で「画面外」と決めつけると、
-        /// この関数のせいでボタンが 1 個も置けなくなる。読めないことは
-        /// 呼び出し側が <see cref="IsUsableExtent"/> で先に見分ける。
+        /// If <paramref name="extent"/> is 0 or less (i.e. the screen size could not be
+        /// read), it <b>returns true</b> — deciding "off screen" from a dimension you could
+        /// not read would mean this function alone stops a single button from being placed.
+        /// The caller distinguishes "could not read" beforehand with
+        /// <see cref="IsUsableExtent"/>.
         /// </summary>
         public static bool FitsWithin(float pos, float size, float extent)
         {
@@ -35,18 +39,20 @@ namespace DisasterPlus.Core.Common
             return pos >= 0f && pos + size <= extent;
         }
 
-        /// <summary>画面サイズとして意味のある値か（正で、NaN でも無限でもない）。</summary>
+        /// <summary>Is this a meaningful value for a screen size (positive, and neither NaN
+        /// nor infinite)?</summary>
         public static bool IsUsableExtent(float extent)
         {
             return extent > 0f && !float.IsNaN(extent) && !float.IsInfinity(extent);
         }
 
         /// <summary>
-        /// <paramref name="pos"/> を <c>[0, extent - size]</c> へ丸める。
+        /// Rounds <paramref name="pos"/> into <c>[0, extent - size]</c>.
         ///
-        /// **矩形が画面より大きいときは 0 を返す**（左上を優先する）——
-        /// 負の位置に置くと、押せる部分がいちばん少なくなる。
-        /// <paramref name="extent"/> が読めないときは <paramref name="pos"/> をそのまま返す。
+        /// **When the rectangle is larger than the screen it returns 0** (favouring the top
+        /// left) — putting it at a negative position leaves the smallest clickable area.
+        /// When <paramref name="extent"/> cannot be read, <paramref name="pos"/> comes back
+        /// as it stands.
         /// </summary>
         public static float ClampInto(float pos, float size, float extent)
         {
@@ -61,22 +67,25 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// <paramref name="startX"/> / <paramref name="startY"/> から
-        /// <c>(stepX, stepY)</c> ずつ進むとき、**両軸とも画面に収まったまま検査できる
-        /// 候補の数**。<see cref="CandidatesInside(float,float,float,float,int)"/> の
-        /// 2 軸版で、あちらは <c>stepX = 0</c> の場合にあたる。
+        /// Stepping by <c>(stepX, stepY)</c> from <paramref name="startX"/> /
+        /// <paramref name="startY"/>, **how many candidates can be examined while still
+        /// fitting on the screen on both axes**. This is the two-axis version of
+        /// <see cref="CandidatesInside(float,float,float,float,int)"/>, which is the case
+        /// <c>stepX = 0</c>.
         ///
-        /// ── なぜ横向きが要るのか（2026-08-22、所有者の依頼）───────────────
+        /// ── Why we need to go sideways (2026-08-22, the owner's request) ───────────────
         ///
-        /// > D＋ボタンが左サイドメニューと重なる位置にあるので、バニラのサイドメニューを
-        /// > 操作する際に邪魔になります。CSWARFRONT ボタンや SIREN Alert ボタンと
-        /// > 同じ高さで並んで表示されるようにしてください
+        /// > The D+ button sits where it overlaps the left side menu, so it gets in the way
+        /// > when operating vanilla's side menu. Please make it line up at the same height
+        /// > as the CSWARFRONT button and the SIREN Alert button.
         ///
-        /// あの 2 つは**画面最上段の横 1 列**に居る。縦にしか進めない探索では
-        /// その列に並べない —— 1 歩目で塞がっていたら、次の候補はもう下の段である。
+        /// Those two live in **a single horizontal row at the very top of the screen**. A
+        /// search that can only go downwards cannot line up in that row — if the first step
+        /// is blocked, the next candidate is already a row lower.
         ///
-        /// 両軸のどちらかが 0 以下でも、もう一方が正なら探索は進む。
-        /// **両方 0 以下なら候補は 1 つ**（同じ点を検査し続けても探索にならない）。
+        /// If one of the two axes is 0 or less, the search still advances as long as the
+        /// other is positive. **If both are 0 or less there is a single candidate**
+        /// (examining the same point over and over is not a search).
         /// </summary>
         public static int CandidatesInside(float startX, float startY,
                                            float sizeX, float sizeY,
@@ -104,8 +113,8 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// 1 軸ぶん。<paramref name="extent"/> が読めなければ <paramref name="maxTries"/>
-        /// （＝この軸は制限しない）。
+        /// One axis' worth. If <paramref name="extent"/> cannot be read, returns
+        /// <paramref name="maxTries"/> (i.e. this axis imposes no limit).
         /// </summary>
         private static int StepsInside(float start, float size, float step,
                                        float extent, int maxTries)
@@ -124,15 +133,17 @@ namespace DisasterPlus.Core.Common
         }
 
         /// <summary>
-        /// <paramref name="startY"/> から <paramref name="stepY"/> ずつ下へ進むとき、
-        /// **画面に収まったまま検査できる候補の数**。
+        /// Stepping down by <paramref name="stepY"/> from <paramref name="startY"/>,
+        /// **how many candidates can be examined while still fitting on the screen**.
         ///
-        /// <paramref name="maxTries"/> が上限で、返るのは常に <c>[0, maxTries]</c>。
-        /// 0 が返るのは「最初の候補すら画面に入らない」ときで、そのときは
-        /// 探索そのものが無意味である（下へ進めばもっと外れる）。
+        /// <paramref name="maxTries"/> is the cap, and the result is always in
+        /// <c>[0, maxTries]</c>.
+        /// A 0 comes back when "even the first candidate does not fit on the screen", and
+        /// in that case the search itself is pointless (going further down only takes it
+        /// further off).
         ///
-        /// <paramref name="stepY"/> が 0 以下なら候補は 1 つしかない
-        /// （同じ点を検査し続けても探索にならない）。
+        /// If <paramref name="stepY"/> is 0 or less there is only one candidate
+        /// (examining the same point over and over is not a search).
         /// </summary>
         public static int CandidatesInside(float startY, float sizeY, float stepY,
                                            float extentY, int maxTries)
@@ -143,7 +154,8 @@ namespace DisasterPlus.Core.Common
             if (!(stepY > 0f)) return 1;
 
             float last = extentY - (sizeY > 0f ? sizeY : 0f);
-            // startY は上で収まっていることが確かめてある。あと何歩ぶん降りられるか。
+            // startY has already been confirmed to fit above. How many more steps down is
+            // there room for?
             float room = last - startY;
             if (room < 0f) return 0;
 

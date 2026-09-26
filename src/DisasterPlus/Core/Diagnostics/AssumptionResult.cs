@@ -1,8 +1,9 @@
 namespace DisasterPlus.Core.Diagnostics
 {
     /// <summary>
-    /// 前提 1 件の検証結果。
-    /// Impact は「破れたときに何が壊れるか」で、プレイヤーにそのまま見せる文。
+    /// The verification result for one assumption.
+    /// Impact is "what breaks when this assumption fails", written as a sentence shown to
+    /// the player as-is.
     /// </summary>
     public struct AssumptionResult
     {

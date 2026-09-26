@@ -4,15 +4,20 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Common
 {
     /// <summary>
-    /// 所有者の依頼（2026-08-22）「タブアイコンの火山と台風をイラストにしてほしいです」。
+    /// Owner's request (2026-08-22): "I would like the volcano and typhoon tab icons
+    /// made into illustrations."
     ///
-    /// ★★ 絵の良し悪しはテストで決められない（<c>tools/IconPreview</c> で目で見る）。
-    ///    ここが固定するのは<b>小さくしても読める形の条件</b>である ——
-    ///    どちらの絵も、実寸 70 px でこれらが崩れると意味が分からなくなる。
+    /// ★★ Whether the artwork is any good cannot be decided by a test (look at it with
+    ///    <c>tools/IconPreview</c>). What is pinned here are the <b>conditions for a
+    ///    shape that still reads when made small</b> —— for either picture, if these
+    ///    break at the real size of 70 px it stops making any sense.
     /// </summary>
     public class DisasterIconArtTests
     {
-        /// <summary>実寸に近い解像度で走査する（拡大した絵ではなく、実際に出る絵を見る）。</summary>
+        /// <summary>
+        /// Scan at close to the real size (look at the picture that actually appears,
+        /// not a blown-up one).
+        /// </summary>
         private const int Steps = 70;
 
         [Fact]
@@ -25,7 +30,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void NeitherIconFillsTheWholeSquare()
         {
-            // 端まで塗ると、タイルの背景から浮かずに「四角い板」に見える。
+            // Painting right out to the edge makes it look like a "square plate" rather
+            // than standing out from the tile background.
             Assert.True(Coverage(true) < 0.75f, "the volcano icon is a solid block");
             Assert.True(Coverage(false) < 0.85f, "the typhoon icon is a solid block");
         }
@@ -33,7 +39,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TheVolcanoHasGroundAtTheBottomAndSkyAtTheTopCorners()
         {
-            // 山は下に、噴煙は真ん中の上。**四隅の上は空いている**こと。
+            // The mountain goes at the bottom, the plume up the middle. **The top
+            // corners must be left empty.**
             Assert.True(DisasterIconArt.Volcano(0.5f, 0.05f).A > 0, "no mountain at the bottom");
             Assert.Equal(0, DisasterIconArt.Volcano(0.04f, 0.96f).A);
             Assert.Equal(0, DisasterIconArt.Volcano(0.96f, 0.96f).A);
@@ -42,7 +49,7 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TheVolcanoShowsLava()
         {
-            // 溶岩が 1 画素も出ないなら、ただの山である。
+            // If not a single pixel of lava shows, it is just a mountain.
             int hot = 0;
             for (int y = 0; y < Steps; y++)
             {
@@ -59,11 +66,12 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TheTyphoonIsRoundAndKeepsItsEyeOpen()
         {
-            // 角は透明（丸い）。
+            // The corners are transparent (it is round).
             Assert.Equal(0, DisasterIconArt.Typhoon(0.02f, 0.02f).A);
             Assert.Equal(0, DisasterIconArt.Typhoon(0.98f, 0.98f).A);
 
-            // 中心は雲ではなく海（眼）。**雲で埋まると台風に見えない。**
+            // The centre is the sea, not cloud (the eye). **Filled in with cloud, it
+            // does not look like a typhoon.**
             IconPixel eye = DisasterIconArt.Typhoon(0.5f, 0.5f);
             Assert.True(eye.A > 0, "the eye should still be part of the disc");
             Assert.True(eye.B > eye.R, "the eye should be the dark sea, not white cloud");
@@ -72,8 +80,8 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void TheTyphoonActuallySpirals()
         {
-            // 同じ半径を一周して、雲と海が**何度も入れ替わる**こと。
-            // 入れ替わらなければ、渦ではなくただの輪である。
+            // Going once round at the same radius, cloud and sea must **swap over
+            // several times**. If they do not swap, it is just a ring, not a spiral.
             int flips = 0;
             bool wasCloud = false;
 
@@ -96,8 +104,9 @@ namespace DisasterPlus.Core.Tests.Common
         [Fact]
         public void EveryDrawnPixelIsFullyOpaque()
         {
-            // 半透明の画素を作らない。タイルの背景は明るくも暗くもなりうるので、
-            // 半透明だと**背景しだいで色が変わる**。
+            // Do not produce half-transparent pixels. The tile background can be either
+            // light or dark, so a half-transparent one **changes colour depending on
+            // the background**.
             for (int y = 0; y < Steps; y++)
             {
                 for (int x = 0; x < Steps; x++)

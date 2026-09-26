@@ -66,7 +66,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void BarIsAsciiOnly()
         {
-            // ①の HazardLevel と同じ判断。CS の UI フォントに罫線素片がある保証は無い。
+            // The same decision as feature no. 1's HazardLevel. There is no guarantee that
+            // CS's UI font has box-drawing characters.
             for (int i = 0; i <= 1000; i += 13)
             {
                 foreach (char c in SeismicScale.BarOf(i / 1000f))

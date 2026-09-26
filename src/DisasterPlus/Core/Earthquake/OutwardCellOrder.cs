@@ -1,53 +1,65 @@
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// 矩形のグリッドを**震央のセルから外側へ**辿るための順序。整数演算だけで、
-    /// 序数 <c>n</c> ↔ 相対セル <c>(dx, dz)</c> を双方向に持たない**片道の写像**である
-    /// （序数から相対セルを出せれば足りる）。
+    /// The ordering used to walk a rectangular grid **outwards from the epicentre's cell**.
+    /// Integer arithmetic only, and a **one-way map** rather than a bidirectional one
+    /// between an ordinal <c>n</c> and a relative cell <c>(dx, dz)</c> (being able to get
+    /// the relative cell from the ordinal is enough).
     ///
-    /// ── なぜ順序を発明するのか（第 2 層レビュー I1）─────────────────────
+    /// ── Why invent an ordering (second-layer review I1) ─────────────────────
     ///
-    /// 長周期の走査は 1 回あたりの仕事量に上限を持ち、上限に達したら打ち切って
-    /// 次回は続きから再開する。ところが打ち切りの順序が**行優先（row-major）**だと、
-    /// 最初に見るセルは矩形の <c>(minX, minZ)</c> ＝ **震央からいちばん遠い角**になる。
-    /// 追加倒壊確率は <c>(1 - d/range)</c> に比例するので、そこは確率がほぼ 0 の場所で
-    /// ある。強度 55（range 6200 m）なら矩形はおよそ 194×194 セルで、成熟した都市の
-    /// 1 セルに建物が 3 棟あるとすると建物の上限 2048 棟は 3 行半で尽きる。震央の行
-    /// （97 行目）へ届くには 28 回ぶんの走査 ＝ 7,200 フレーム前後を要し、
-    /// <c>m_activeDuration</c> がそれより短ければ**震央の街区には一切被害が出ないまま
-    /// 地震が終わる**。遠くの高層が数棟だけ倒れて、震央の周りが無傷になる。
+    /// The long-period sweep has a cap on the work it does per pass; when it hits the cap
+    /// it stops and resumes where it left off next time. But if the cut-off order is
+    /// **row-major**, the first cell it looks at is the rectangle's <c>(minX, minZ)</c>,
+    /// i.e. **the corner furthest from the epicentre**. The additional collapse probability
+    /// is proportional to <c>(1 - d/range)</c>, so that is a place where the probability is
+    /// nearly 0. At intensity 55 (range 6200 m) the rectangle is roughly 194×194 cells, and
+    /// if a mature city has three buildings per cell, the 2048-building cap is used up in
+    /// three and a half rows. Reaching the epicentre's row (row 97) would take 28 sweeps,
+    /// around 7,200 frames, and if <c>m_activeDuration</c> is shorter than that **the
+    /// earthquake ends without the neighbourhoods at the epicentre taking any damage at
+    /// all**. A few distant tower blocks fall and everything around the epicentre is
+    /// untouched.
     ///
-    /// そこで**チェビシェフ距離の輪（リング）順**にする。序数 0 が震央のセル、
-    /// 以後は <c>max(|dx|,|dz|)</c> が小さい順に 1 周ずつ回る。上限で打ち切られたとき
-    /// 落ちるのは**いちばん確率の低い外側**になり、震央の周りは必ず最初の走査で
-    /// 評価される。
+    /// So it goes by **rings of Chebyshev distance** instead. Ordinal 0 is the epicentre's
+    /// cell, and from there it goes round one ring at a time in increasing order of
+    /// <c>max(|dx|,|dz|)</c>. When the cap cuts it off, what gets dropped is **the outside,
+    /// where the probability is lowest**, and the area around the epicentre is always
+    /// evaluated on the very first sweep.
     ///
-    /// **ユークリッド距離ではなくチェビシェフ距離**にしてあるのは、序数から相対セルを
-    /// 整数演算だけで出せるからである。真の距離順との差は 1 リングぶん（最大 64 m の
-    /// 判定順の前後）で、「近い方を先に見る」という目的には十分であり、
-    /// **選定そのものは順序に一切依存しない**（<c>IsSelected</c> は地震 ID と建物 ID
-    /// だけで決まり、フレームもセル順も混ぜない）ので、順序が結論を変えることはない。
+    /// It is **Chebyshev distance rather than Euclidean** because the relative cell can then
+    /// be derived from the ordinal with integer arithmetic alone. The difference from a
+    /// true distance ordering is one ring's worth (at most 64 m of reordering), which is
+    /// plenty for the goal of "look at the near ones first", and **the selection itself
+    /// does not depend on the order at all** (<c>IsSelected</c> is decided by the
+    /// earthquake ID and the building ID alone, mixing in neither the frame nor the cell
+    /// order), so the ordering can never change the conclusion.
     ///
-    /// ── 矩形の外は「飛ばす」──────────────────────────────
+    /// ── Anything outside the rectangle is "skipped" ──────────────────────────────
     ///
-    /// リングは震央を中心とした正方形なので、クランプされた矩形からはみ出す。
-    /// はみ出したセルは<b>飛ばすだけ</b>で、1 回の走査の上限（セル数）には数えない。
-    /// 飛ばしは整数演算 2〜3 個で、最悪でも <see cref="OrdinalCount"/> ＝ 29 万回ぶん
-    /// （震央がマップの端にある場合）だが、走査の間隔は 256 フレームなので
-    /// 実測が要るほどの量ではない。数えてしまうと、上限がはみ出しの分だけ
-    /// 目減りして「実際に見た建物が上限より少ない」という読めない診断になる。
+    /// The rings are squares centred on the epicentre, so they stick out past the clamped
+    /// rectangle. Cells that stick out are <b>simply skipped</b> and are not counted
+    /// against the per-sweep cap (which is a cell count). A skip is two or three integer
+    /// operations, and at worst it is <see cref="OrdinalCount"/> = 290 thousand of them (if
+    /// the epicentre is at the edge of the map), but the sweeps are 256 frames apart, so
+    /// this is not enough work to warrant measuring. Count them and the cap is eroded by
+    /// however many were skipped, giving the unreadable diagnostic "fewer buildings were
+    /// actually examined than the cap".
     ///
-    /// **④台風の風害走査もこの順序を使う**（<c>Game/Typhoon/TyphoonWind</c>）。名前空間が
-    /// Earthquake のままなのは意図的で、型を動かすと②のテストとレビュー済みの doc 参照が
-    /// 全部動く。順序そのものは災害に依存しない。
+    /// **④'s typhoon wind-damage sweep uses this ordering too** (<c>Game/Typhoon/TyphoonWind</c>).
+    /// Leaving the namespace as Earthquake is deliberate: moving the type would move every
+    /// ② test and every already-reviewed doc reference with it. The ordering itself does not
+    /// depend on the disaster.
     /// </summary>
     public static class OutwardCellOrder
     {
         /// <summary>
-        /// 中心セルから見て、この矩形の全セルを覆うのに必要なリングの半径。
+        /// The ring radius needed, seen from the centre cell, to cover every cell in this
+        /// rectangle.
         ///
-        /// 中心が矩形の外にあっても正しい（矩形内の任意の <c>(x, z)</c> について
-        /// <c>|x - cx| ≤ max(|minX - cx|, |maxX - cx|)</c> が成り立つ）。
+        /// It is correct even when the centre lies outside the rectangle (for any
+        /// <c>(x, z)</c> in the rectangle,
+        /// <c>|x - cx| ≤ max(|minX - cx|, |maxX - cx|)</c> holds).
         /// </summary>
         public static int RingRadiusFor(int centreX, int centreZ,
                                         int minX, int maxX, int minZ, int maxZ)
@@ -60,13 +72,15 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 半径 <paramref name="ringRadius"/> までを 1 度ずつ辿るのに必要な序数の総数
-        /// <c>(2r+1)²</c>。負の半径は 0 として 1 を返す（中心セルだけ）。
+        /// The total number of ordinals needed to visit everything out to radius
+        /// <paramref name="ringRadius"/> once each: <c>(2r+1)²</c>. A negative radius is
+        /// treated as 0 and returns 1 (the centre cell alone).
         ///
-        /// 呼び出し側の実際の上限（グリッド 270 辺）では最大 541² ＝ 292,681 で、
-        /// <c>int</c> の範囲に十分収まる。それでも桁あふれを塞いでおく ——
-        /// あふれた値で <c>while (ordinal &lt; count)</c> を回すと**走査が 1 セルも
-        /// 走らない**という、いちばん見えにくい壊れ方をする。
+        /// At the callers' real limits (a grid 270 cells on a side) the maximum is
+        /// 541² = 292,681, comfortably inside the range of an <c>int</c>. The overflow is
+        /// blocked anyway — run <c>while (ordinal &lt; count)</c> on an overflowed value and
+        /// **the sweep does not run over a single cell**, which is the hardest kind of
+        /// breakage to spot.
         /// </summary>
         public static int OrdinalCount(int ringRadius)
         {
@@ -77,13 +91,16 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 序数 <paramref name="ordinal"/> に対応する中心からの相対セル。
-        /// 序数が負なら false（このとき <paramref name="dx"/> / <paramref name="dz"/> は 0）。
+        /// The cell, relative to the centre, corresponding to the ordinal
+        /// <paramref name="ordinal"/>.
+        /// False if the ordinal is negative (in which case <paramref name="dx"/> /
+        /// <paramref name="dz"/> are 0).
         ///
-        /// 順序は 序数 0 が中心、以後リング <c>r = 1, 2, ...</c> を
-        /// 東辺（南→北）→ 北辺（東→西）→ 西辺（北→南）→ 南辺（西→東）の順に 1 周する。
-        /// **同じリング内のどの順で回るかは意味を持たない** —— 重要なのは
-        /// 「リングの外側は必ず内側より後」だけである。
+        /// In the ordering, ordinal 0 is the centre, and from there each ring
+        /// <c>r = 1, 2, ...</c> is walked once round: east side (south→north) → north side
+        /// (east→west) → west side (north→south) → south side (west→east).
+        /// **The order taken within one ring carries no meaning** — all that matters is
+        /// "the outside of a ring always comes after the inside".
         /// </summary>
         public static bool Offset(int ordinal, out int dx, out int dz)
         {
@@ -92,8 +109,9 @@ namespace DisasterPlus.Core.Earthquake
             if (ordinal < 0) return false;
             if (ordinal == 0) return true;
 
-            // (2r-1)² ≤ ordinal < (2r+1)² を満たす r。整数平方根で出す
-            // （double の Sqrt だと (2r+1)² 直前で 1 ずれる環境がありうる）。
+            // The r satisfying (2r-1)² ≤ ordinal < (2r+1)². Derived with an integer square
+            // root (with a double Sqrt there could be environments that come out one off
+            // just below (2r+1)²).
             int r = (IntegerSqrt(ordinal) + 1) / 2;
             int inner = 2 * r - 1;
             int k = ordinal - inner * inner;   // 0 .. 8r-1
@@ -109,21 +127,23 @@ namespace DisasterPlus.Core.Earthquake
             return true;
         }
 
-        /// <summary>この相対セルのチェビシェフ距離（＝そのセルが属するリングの半径）。</summary>
+        /// <summary>This relative cell's Chebyshev distance (i.e. the radius of the ring it
+        /// belongs to).</summary>
         public static int RingOf(int dx, int dz)
         {
             return Max(Abs(dx), Abs(dz));
         }
 
         /// <summary>
-        /// <c>floor(sqrt(n))</c>。<c>n &lt;= 0</c> は 0。
+        /// <c>floor(sqrt(n))</c>. <c>n &lt;= 0</c> gives 0.
         ///
-        /// **初期値をビット長から作る。** <c>x₀ = n</c> のニュートン法は
-        /// <c>log₂(sqrt(n))</c> 回（n ≒ 29 万で 9 回）除算するが、
-        /// <c>x₀ = 2^⌈bits/2⌉</c> なら 3 回前後で収まる。
-        /// <see cref="Offset"/> は 1 セルにつき 1 回ここを通り、はみ出しを飛ばす
-        /// 経路も通るので、最悪の走査（震央がマップの角・範囲が全域・建物がほとんど
-        /// 無いマップ）では 1 回の走査で 13 万回ほど呼ばれる。
+        /// **The initial guess is built from the bit length.** Newton's method with
+        /// <c>x₀ = n</c> divides <c>log₂(sqrt(n))</c> times (nine times at n ≈ 290
+        /// thousand), whereas <c>x₀ = 2^⌈bits/2⌉</c> settles in about three.
+        /// <see cref="Offset"/> comes through here once per cell, including on the path
+        /// that skips cells sticking out, so in the worst sweep (epicentre in a corner of
+        /// the map, the range covering everything, a map with barely any buildings) it is
+        /// called some 130 thousand times in a single sweep.
         /// </summary>
         private static int IntegerSqrt(int n)
         {

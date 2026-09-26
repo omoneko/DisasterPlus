@@ -3,159 +3,178 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// **破局噴火（カルデラ噴火）。** <b>Core なのでエンジンには一切触らない。</b>
+    /// **The caldera-forming (super) eruption.** <b>This is Core, so it never touches the
+    /// engine.</b>
     ///
-    /// ── 依頼（2026-08-22）─────────────────────────────────
+    /// ── The request (2026-08-22) ─────────────────────────────────
     ///
-    /// &gt; 火山の 25.5 スケールが小さすぎるように思います。25.5 のときだけ、
-    /// &gt; 破局噴火の再現をできるか調べて実装してください。
-    /// &gt; 地下のマグマ上昇による火山の形成 → 数万年かけた巨大なマグマだまりの成長
-    /// &gt; → 内圧限界による破局噴火（大爆発） → 地面の自重による大陥没とカルデラ形成。
+    /// &gt; I think the volcano's 25.5 scale is too small. Please look into whether a
+    /// &gt; caldera-forming eruption can be reproduced at 25.5 only, and implement it.
+    /// &gt; A volcano forming as magma rises from below → a vast magma chamber growing over
+    /// &gt; tens of thousands of years → a caldera-forming eruption (a huge explosion) as the
+    /// &gt; internal pressure reaches its limit → a great collapse under the ground's own
+    /// &gt; weight, forming a caldera.
     ///
-    /// ── できるか（調べた結果）────────────────────────────────
+    /// ── Can it be done (what the investigation found) ──────────────────────
     ///
-    /// **できる。** ⑤は既に地形を書いており（<c>VolcanoUplift</c>）、
-    /// 最終段の書き込み（<c>UpliftSchedule.RawTargetAt</c>）は
-    /// <b>プロファイルの符号を問わない</b> —— 火口を彫るのに既に負の
-    /// プロファイルを使っている（あちらの doc:「<c>profileMetres</c> は**負を許す**」）。
+    /// **Yes.** ⑤ already writes terrain (<c>VolcanoUplift</c>), and the final write
+    /// (<c>UpliftSchedule.RawTargetAt</c>) <b>does not care about the profile's sign</b> —
+    /// we already use a negative profile to carve the crater (its doc:
+    /// "<c>profileMetres</c> **may be negative**").
     ///
-    /// ★★ <b>ただし「同じ仕組みでそのまま」ではなかった。</b>（実装時に判明・2026-08-22）
+    /// ★★ <b>But it was not "the same mechanism, unchanged".</b> (Discovered during
+    ///   implementation, 2026-08-22.)
     ///
-    ///   円錐は <c>UpliftSchedule.GrowthMetresAt</c> を通って
-    ///   「山頂から外へ広がる」育ち方をする。あれの先頭に
+    ///   The cone goes through <c>UpliftSchedule.GrowthMetresAt</c> and grows by "spreading
+    ///   outwards from the summit". At the top of that function sits
     ///
     /// <code>
     ///   if (profileMetres &lt;= 0f) return 0f;
     /// </code>
     ///
-    ///   が在るので、<b>負のプロファイルはそこで 0 に潰され、カルデラは
-    ///   1 mm も掘れない。</b> だから膨らみと陥没は<b>成長の規則を通さず</b>
-    ///   <c>profile × progress</c>（＝全体が一様に動く）で書く
-    ///   ——<c>VolcanoUplift.Terrain.cs</c> の <c>UpliftStage</c> 分岐。
-    ///   膨らみも陥没も「縁から中心へ広がる」ものではないので、
-    ///   一様に動くほうが元々正しい。
+    ///   so <b>a negative profile is crushed to 0 there and the caldera is not dug a single
+    ///   millimetre.</b> So the inflation and the collapse are written <b>without going
+    ///   through the growth rule</b>, as <c>profile × progress</c> (i.e. everything moves
+    ///   uniformly) — the <c>UpliftStage</c> branch in <c>VolcanoUplift.Terrain.cs</c>.
+    ///   Neither the inflation nor the collapse is something that "spreads from the rim to
+    ///   the centre", so moving uniformly was the right thing anyway.
     ///
-    /// 新しい地形の書き込み経路は 1 本も要らない（矩形の取り方・退避・
-    /// フラッシュ・天井の数え方は 3 段とも <c>VolcanoUplift</c> のまま）。
+    /// Not one new terrain-writing path is needed (taking the rectangle, saving the old
+    /// heights, flushing and counting against the ceiling are all exactly as
+    /// <c>VolcanoUplift</c> does them, across all three stages).
     ///
-    /// ── 4 つの段（依頼の順序そのもの）────────────────────────────
+    /// ── The four stages (in exactly the order the request gave) ────────────────────
     ///
-    /// | 依頼の言葉 | ⑤の位相 | 地形に何が起きるか |
+    /// | The request's words | ⑤'s phase | What happens to the terrain |
     /// |---|---|---|
-    /// | 地下のマグマ上昇による火山の形成 | <c>Uplifting</c> | 円錐が立つ（今までどおり） |
-    /// | 数万年かけた巨大なマグマだまりの成長 | <c>Inflating</c> | **裾ごと広く持ち上がる** |
-    /// | 内圧限界による破局噴火（大爆発） | <c>Erupting</c> | 地形は動かない（噴煙と爆発） |
-    /// | 地面の自重による大陥没とカルデラ形成 | <c>Collapsing</c> | **山ごと陥没して平底の窪地** |
+    /// | A volcano forming as magma rises from below | <c>Uplifting</c> | The cone rises (as before) |
+    /// | A vast magma chamber growing over tens of thousands of years | <c>Inflating</c> | **The whole foot lifts over a wide area** |
+    /// | A caldera-forming eruption (a huge explosion) as the internal pressure reaches its limit | <c>Erupting</c> | The terrain does not move (plume and blast) |
+    /// | A great collapse under the ground's own weight, forming a caldera | <c>Collapsing</c> | **The whole mountain founders into a flat-floored basin** |
     ///
-    /// ★★ <b>膨らみは山ではなく「裾ごと」である。</b> マグマだまりは山より深く広いので、
-    ///   地表の膨らみは<b>山の何倍もの半径にわたる、ごく低いドーム</b>になる
-    ///   （実在のカルデラ火山で観測される地盤の隆起がそれである）。
-    ///   山だけを高くすると、ただの「もっと高い山」にしかならない。
+    /// ★★ <b>The inflation lifts "the whole foot", not the mountain.</b> The magma chamber
+    ///   is deeper and wider than the mountain, so the swelling at the surface is <b>an
+    ///   extremely low dome spanning several times the mountain's radius</b> (that is the
+    ///   ground uplift observed at real caldera volcanoes).
+    ///   Raise only the mountain and all you get is "a taller mountain".
     ///
-    /// ★★ <b>カルデラは円錐の穴ではない。</b> 屋根が抜けて落ちるので、
-    ///   <b>平らな底と切り立った壁</b>になる（<see cref="BowlProfileAt"/>）。
-    ///   すり鉢を彫ると「大きい火口」にしか見えない。
+    /// ★★ <b>A caldera is not a conical hole.</b> The roof gives way and drops, so it has
+    ///   <b>a flat floor and steep walls</b> (<see cref="BowlProfileAt"/>).
+    ///   Carve a funnel and it reads as nothing but "a big crater".
     /// </summary>
     public static class SuperEruption
     {
         /// <summary>
-        /// 破局噴火になる強度スライダーの生値。**上限ちょうど**（表示 25.5）である。
+        /// The raw slider value at which the eruption becomes caldera-forming. **Exactly the
+        /// maximum** (displayed as 25.5).
         ///
-        /// 所有者の指示は「25.5 のときだけ」なので、24.9 では起きない。
-        /// <c>IntensityUnlock</c> が上限を 255 まで開けているので、
-        /// スライダーをいちばん右へ振り切ったときだけこの規模になる。
+        /// The owner's instruction was "at 25.5 only", so it does not happen at 24.9.
+        /// <c>IntensityUnlock</c> opens the limit up to 255, so you only get this scale by
+        /// pushing the slider all the way to the right.
         /// </summary>
         public const int RawThreshold = 255;
 
-        /// <summary>膨らみの半径が山の半径の何倍か。**裾よりずっと外まで持ち上がる。**</summary>
+        /// <summary>How many times the mountain's radius the inflation's radius is. **The
+        /// lift extends far beyond the foot.**</summary>
         public const float InflationRadiusFactor = 2.4f;
 
-        /// <summary>膨らみの高さが山の高さの何割か。**低くて広い**のが要点。</summary>
+        /// <summary>What fraction of the mountain's height the inflation's height is. The
+        /// point is that it is **low and wide**.</summary>
         public const float InflationHeightFraction = 0.22f;
 
-        /// <summary>カルデラの半径が山の半径の何倍か。</summary>
+        /// <summary>How many times the mountain's radius the caldera's radius is.</summary>
         public const float CalderaRadiusFactor = 1.9f;
 
         /// <summary>
-        /// カルデラの床が、元の地面より<b>山の高さの何倍ぶん下</b>に来るか。
+        /// How far below the original ground the caldera's floor sits, <b>as a multiple of
+        /// the mountain's height</b>.
         ///
-        /// ── ★★ 1.35 は大きすぎた（2026-08-22、所有者の問い）──────────────
+        /// ── ★★ 1.35 was too much (2026-08-22, the owner's question) ──────────────
         ///
-        /// &gt; カルデラ内部の標高が必ず海抜より低くなる理由は何ですか？
+        /// &gt; Why does the elevation inside the caldera always end up below sea level?
         ///
-        /// <b>この係数がそのまま原因である。</b> 1.35・上限 900 m だったので:
+        /// <b>This coefficient was the cause, plain and simple.</b> It was 1.35, capped at
+        /// 900 m, so:
         ///
         /// <code>
-        ///   山 1000 m → 深さ 1350 m → 上限で 900 m
-        ///   地面 120 m − 900 m = **−780 m**
-        ///   ゲームの海面は 40 m（WaterSimulation.DEFAULT_SEA_LEVEL、IL 実測）
-        ///   → 海面より 820 m 下。**どこに置いても必ず水没する。**
+        ///   a 1,000 m mountain → a depth of 1,350 m → capped at 900 m
+        ///   ground at 120 m − 900 m = **−780 m**
+        ///   the game's sea level is 40 m (WaterSimulation.DEFAULT_SEA_LEVEL, from the IL)
+        ///   → 820 m below sea level. **Wherever you place it, it floods.**
         /// </code>
         ///
-        /// 実際のカルデラの床は<b>まわりの地面より数百 m 下</b>までである。
-        /// 落ちるのは<b>山体</b>であって、まわりの大地ごと 900 m 沈むわけではない
-        /// （イエローストーンの床はまわりの台地とほぼ同じ高さで、穴ですらない）。
+        /// A real caldera's floor is at most <b>a few hundred metres below the surrounding
+        /// ground</b>. What drops is <b>the edifice</b>; the land around it does not sink
+        /// 900 m with it (Yellowstone's floor is at roughly the same height as the
+        /// surrounding plateau, and is not even a hole).
         ///
-        /// 0.35・上限 400 m なら、<b>高い土地では乾いたカルデラ、海に近い土地では
-        /// 水没したカルデラ</b>になる —— サントリーニやクラカタウのように
-        /// 水没するのは正しい姿だが、<b>「必ず」水没するのは間違い</b>だった。
+        /// At 0.35 capped at 400 m, you get <b>a dry caldera on high ground and a flooded one
+        /// near the sea</b> — flooding, as at Santorini or Krakatoa, is a correct outcome,
+        /// but <b>flooding "always" was wrong</b>.
         /// </summary>
         public const float CalderaDepthFactor = 0.35f;
 
         /// <summary>
-        /// カルデラの底が全体に占める割合（ここまでは平ら）。残りが壁である。
+        /// What fraction of the whole the caldera's floor takes up (flat out to here). The
+        /// rest is wall.
         ///
-        /// ★★ <b>0.55 では壁が緩すぎた</b>（2026-08-22、断面を描いて気づいた）。
-        ///   半径 5563 m・深さ 900 m のとき、壁が水平に 2500 m もかかって
-        ///   <b>約 20 度</b>——「カルデラ」ではなく「浅い盆地」に見える。
-        ///   実際のカルデラは環状断層でほぼ垂直に落ち、崩れた岩屑が積もって
-        ///   30〜45 度の急崖になる。0.78 なら水平 1220 m で 900 m 落ちて
-        ///   <b>約 36 度</b>で、その帯に入る。
+        /// ★★ <b>At 0.55 the walls were far too gentle</b> (2026-08-22, noticed by drawing
+        ///   the cross-section). At a radius of 5,563 m and a depth of 900 m, the wall spans
+        ///   2,500 m horizontally, giving <b>about 20 degrees</b> — which reads as "a shallow
+        ///   basin", not "a caldera".
+        ///   A real caldera drops almost vertically along ring faults, and collapsed debris
+        ///   piles up to give a 30-45 degree scarp. At 0.78 it drops 900 m over 1,220 m
+        ///   horizontally, <b>about 36 degrees</b>, which is inside that band.
         /// </summary>
         public const float FloorFraction = 0.78f;
 
-        /// <summary>壁の外側で地形に戻りきる割合。ここから外は 1 m も動かない。</summary>
+        /// <summary>The fraction at which we are fully back to the terrain outside the wall.
+        /// Beyond this, nothing moves by even a metre.</summary>
         public const float RimFraction = 1.0f;
 
-        /// <summary>カルデラの深さの下限（m）。浅いと「大きい火口」に見える。</summary>
+        /// <summary>The floor on the caldera's depth (m). Too shallow and it reads as "a big
+        /// crater".</summary>
         public const float MinDepthMetres = 120f;
 
-        /// <summary>カルデラの深さの上限（m）。</summary>
+        /// <summary>The ceiling on the caldera's depth (m).</summary>
         public const float MaxDepthMetres = 400f;
 
         /// <summary>
-        /// カルデラの床のでこぼこの大きさ（深さに対する比）。
+        /// How rough the caldera's floor is (as a ratio of the depth).
         ///
-        /// ★★ **床は平らではない。**（2026-08-22、所有者の指摘
-        ///   「カルデラ内部が平地になるのはおかしい」）落ちた屋根は 1 枚の板のまま
-        ///   無傷で着地するのではなく、**割れて崩れた岩塊の山**（崩壊角礫岩）になる。
-        ///   そのうえに火砕流が溜まる。
+        /// ★★ **The floor is not flat.** (2026-08-22, the owner's observation: "it's odd for
+        ///   the inside of a caldera to be flat ground".) The roof that falls does not land
+        ///   intact as a single slab; it becomes **a heap of fractured, collapsed blocks**
+        ///   (collapse breccia). Pyroclastic flows then accumulate on top of that.
         /// </summary>
         public const float FloorRoughFraction = 0.22f;
 
-        /// <summary>床のでこぼこの間隔（m）。岩塊 1 つぶんの大きさである。</summary>
+        /// <summary>The spacing of the floor's roughness (m). The size of one block.</summary>
         public const float RoughWavelengthMetres = 340f;
 
-        /// <summary>細かいほうのでこぼこの間隔（m）。</summary>
+        /// <summary>The spacing of the finer roughness (m).</summary>
         public const float FineRoughWavelengthMetres = 110f;
 
         /// <summary>
-        /// 中央火口丘（resurgent dome）の半径（カルデラ半径に対する比）。
+        /// The radius of the resurgent dome (as a ratio of the caldera's radius).
         ///
-        /// ★ 実在の大カルデラ（イエローストーン・トバ・阿蘇）には、陥没のあとに
-        ///   下からまた押し上げられた<b>中央の高まり</b>が必ずある。
-        ///   これが無いと「まっさらな鉢」に見える。
+        /// ★ Every real large caldera (Yellowstone, Toba, Aso) has <b>a central high</b>
+        ///   pushed back up from below after the collapse.
+        ///   Without one it reads as "a plain bowl".
         /// </summary>
         public const float ResurgentRadiusFraction = 0.34f;
 
-        /// <summary>中央火口丘の高さ（深さに対する比）。**床より上、縁より下。**</summary>
+        /// <summary>The resurgent dome's height (as a ratio of the depth). **Above the floor,
+        /// below the rim.**</summary>
         public const float ResurgentHeightFraction = 0.42f;
 
-        /// <summary>カルデラの半径の上限（m）。マップは一辺 17,280 m しかない。</summary>
+        /// <summary>The cap on the caldera's radius (m). The map is only 17,280 m on a
+        /// side.</summary>
         public const float MaxRadiusMetres = 6000f;
 
         /// <summary>
-        /// この強度は破局噴火か。<paramref name="raw"/> はスライダーの生値。
+        /// Whether this intensity gives a caldera-forming eruption. <paramref name="raw"/> is
+        /// the slider's raw value.
         /// </summary>
         public static bool IsSuper(int raw)
         {
@@ -163,8 +182,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// マグマだまりの膨らみが届く半径（m）。山の半径の
-        /// <see cref="InflationRadiusFactor"/> 倍で、<see cref="MaxRadiusMetres"/> で切る。
+        /// The radius (m) the magma chamber's inflation reaches.
+        /// <see cref="InflationRadiusFactor"/> times the mountain's radius, cut at
+        /// <see cref="MaxRadiusMetres"/>.
         /// </summary>
         public static float InflationRadiusMetres(float volcanoRadiusMetres)
         {
@@ -174,7 +194,8 @@ namespace DisasterPlus.Core.Volcano
             return r > MaxRadiusMetres ? MaxRadiusMetres : r;
         }
 
-        /// <summary>膨らみの最大の高さ（m）。**山の高さより低い。**</summary>
+        /// <summary>The inflation's maximum height (m). **Lower than the mountain's
+        /// height.**</summary>
         public static float InflationHeightMetres(float volcanoHeightMetres)
         {
             if (IsBad(volcanoHeightMetres) || volcanoHeightMetres <= 0f) return 0f;
@@ -182,11 +203,11 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 膨らみの形（m、**正**）。中心がいちばん高く、
-        /// <paramref name="reachMetres"/> でちょうど 0 になる<b>とても平たいドーム</b>。
+        /// The inflation's shape (m, **positive**). Highest at the centre and exactly 0 at
+        /// <paramref name="reachMetres"/>: <b>a very flat dome</b>.
         ///
-        /// <c>cos</c> の膨らみを使うのは、縁で高さも傾きも 0 になるからである ——
-        /// 放物線だと縁に折れ目が出て、そこが崖に見える。
+        /// We use a <c>cos</c> bulge because both the height and the slope go to 0 at the
+        /// edge — a parabola leaves a crease at the edge that reads as a cliff.
         /// </summary>
         public static float InflationAt(float distanceMetres, float reachMetres,
                                         float heightMetres)
@@ -197,12 +218,12 @@ namespace DisasterPlus.Core.Volcano
             if (distanceMetres >= reachMetres) return 0f;
 
             float t = distanceMetres / reachMetres;
-            // (1 + cos(pi t)) / 2 —— t=0 で 1、t=1 で 0、両端で傾き 0。
+            // (1 + cos(pi t)) / 2 — 1 at t=0, 0 at t=1, with zero slope at both ends.
             float bell = 0.5f * (1f + (float)Math.Cos(Math.PI * t));
             return heightMetres * bell;
         }
 
-        /// <summary>カルデラの半径（m）。</summary>
+        /// <summary>The caldera's radius (m).</summary>
         public static float CalderaRadiusMetres(float volcanoRadiusMetres)
         {
             if (IsBad(volcanoRadiusMetres) || volcanoRadiusMetres <= 0f) return 0f;
@@ -212,16 +233,17 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// カルデラの深さ（m、**正の値**）。<paramref name="volcanoHeightMetres"/> は
-        /// 山の高さで、それより深く落ちる（<see cref="CalderaDepthFactor"/>）。
+        /// The caldera's depth (m, **a positive value**).
+        /// <paramref name="volcanoHeightMetres"/> is the mountain's height, and it drops
+        /// below that (see <see cref="CalderaDepthFactor"/>).
         /// </summary>
         public static float CalderaDepthMetres(float volcanoHeightMetres)
         {
-            // ★★ **壊れた高さから深さを合成しない。** 0 を返せば
-            //   <see cref="BowlProfileAt"/> が 1 mm も掘らない ——
-            //   ここで <c>MinDepthMetres</c> を返すと、読めなかった値から
-            //   120 m の窪地が生まれる（他の形の関数はどれも 0 を返す）。
-            //   Codex のセカンダリレビューが拾った。
+            // ★★ **Do not synthesise a depth from a broken height.** Returning 0 means
+            //   <see cref="BowlProfileAt"/> does not dig a single millimetre — return
+            //   <c>MinDepthMetres</c> here and a value we could not read would produce a
+            //   120 m basin (every other shape function returns 0).
+            //   Caught by Codex's secondary review.
             if (IsBad(volcanoHeightMetres) || volcanoHeightMetres <= 0f) return 0f;
 
             float d = volcanoHeightMetres * CalderaDepthFactor;
@@ -231,13 +253,13 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// カルデラの形（m、**負**）。<b>平らな底と切り立った壁</b>で、
-        /// <paramref name="calderaRadiusMetres"/> の外はきっかり 0。
+        /// The caldera's shape (m, **negative**). <b>A flat floor and steep walls</b>, and
+        /// exactly 0 beyond <paramref name="calderaRadiusMetres"/>.
         ///
-        /// ★★ すり鉢（円錐の穴）にしないこと —— それは「大きい火口」にしか見えない。
-        ///   屋根が抜けて<b>塊のまま落ちる</b>のがカルデラなので、
-        ///   底は平ら（<see cref="FloorFraction"/> まで）で、そこから縁までを
-        ///   なめらかな段で繋ぐ。
+        /// ★★ Do not make it a funnel (a conical hole) — that reads as nothing but "a big
+        ///   crater". A caldera is the roof giving way and <b>dropping as a block</b>, so the
+        ///   floor is flat (out to <see cref="FloorFraction"/>) and we join that to the rim
+        ///   with a smooth step.
         /// </summary>
         public static float BowlProfileAt(float distanceMetres, float calderaRadiusMetres,
                                           float depthMetres)
@@ -249,10 +271,11 @@ namespace DisasterPlus.Core.Volcano
 
             float t = distanceMetres / calderaRadiusMetres;
 
-            // 底は平ら。**ここが「大きい火口」との違いである。**
+            // The floor is flat. **This is what distinguishes it from "a big crater".**
             if (t <= FloorFraction) return -depthMetres;
 
-            // 壁。smoothstep で底から縁へ。縁で深さも傾きも 0 になる。
+            // The wall. A smoothstep from floor to rim, with both depth and slope reaching 0
+            // at the rim.
             float w = (t - FloorFraction) / (RimFraction - FloorFraction);
             if (w > 1f) w = 1f;
             float k = 1f - w * w * (3f - 2f * w);
@@ -260,27 +283,31 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// カルデラの床の形（m、**0 か負**）。1 セルぶん。
-        /// <see cref="BowlProfileAt"/> の滑らかな鉢に、<b>中央火口丘</b>と
-        /// <b>崩れた岩塊のでこぼこ</b>を足したものである。
+        /// The shape of the caldera's floor (m, **0 or negative**), for one cell.
+        /// It is <see cref="BowlProfileAt"/>'s smooth bowl plus <b>a resurgent dome</b> and
+        /// <b>the roughness of collapsed blocks</b>.
         ///
-        /// ── なぜ鉢だけではだめなのか（2026-08-22、所有者の指摘）─────────────
+        /// ── Why the bowl alone will not do (2026-08-22, the owner's observation) ────────
         ///
-        /// &gt; カルデラ内部が平地になるのはおかしい（元の地形や火山の山体の残骸も
-        /// &gt; 加味してリアルに寄せてください）
+        /// &gt; It's odd for the inside of a caldera to be flat ground (please take the
+        /// &gt; original terrain and the remains of the volcanic edifice into account and
+        /// &gt; bring it closer to reality)
         ///
-        /// そのとおりで、<see cref="BowlProfileAt"/> は<b>まっ平らな床</b>を返す。
-        /// 実際には落ちた屋根が割れて岩塊の山になり（崩壊角礫岩）、
-        /// そのうえに火砕流が溜まり、やがて中央が再び押し上げられる。
+        /// Quite right: <see cref="BowlProfileAt"/> returns <b>a dead flat floor</b>.
+        /// In reality the fallen roof fractures into a heap of blocks (collapse breccia),
+        /// pyroclastic flows accumulate on top of it, and in time the centre is pushed back
+        /// up.
         ///
-        /// ★ <b>元の地形</b>のほうは呼び出し側が受け持つ ——
-        ///   <c>VolcanoUplift.ProfileFor</c> が、山体の外では
-        ///   <b>そのセルの本物の地面</b>を基準に落とす（中心 1 点の高さで
-        ///   塗り潰さない）。ここが返すのは「その基準からどれだけ下か」である。
+        /// ★ <b>The original terrain</b> is handled by the caller —
+        ///   <c>VolcanoUplift.ProfileFor</c> drops from <b>that cell's real ground</b> as the
+        ///   reference outside the edifice (it does not paint over everything with the height
+        ///   at the single centre point). What this returns is "how far below that reference".
         /// </summary>
-        /// <param name="dx">中心からの距離（m、X 方向）。でこぼこの位相に使う。</param>
-        /// <param name="dz">同上（Z 方向）。</param>
-        /// <param name="seed">この火山の種。同じ場所なら同じ床になる。</param>
+        /// <param name="dx">The distance from the centre (m, in X). Used for the roughness's
+        /// phase.</param>
+        /// <param name="dz">The same, in Z.</param>
+        /// <param name="seed">This volcano's seed. The same place always gives the same
+        /// floor.</param>
         public static float CalderaFloorOffsetAt(float dx, float dz,
                                                  float calderaRadiusMetres, float depthMetres,
                                                  uint seed)
@@ -291,75 +318,85 @@ namespace DisasterPlus.Core.Volcano
             float bowl = BowlProfileAt(distance, calderaRadiusMetres, depthMetres);
             if (!(bowl < 0f)) return 0f;
 
-            // ★ でこぼこも中央火口丘も、**縁へ向かって消す**。消さないと、
-            //   カルデラの外の平地に岩塊がぽつぽつ残る。
+            // ★ Both the roughness and the resurgent dome **fade out towards the rim**.
+            //   Without that you get blocks scattered across the flat ground outside the
+            //   caldera.
             float rim = calderaRadiusMetres > 0f ? distance / calderaRadiusMetres : 1f;
             if (rim > 1f) rim = 1f;
             float inside = 1f - rim * rim;
 
-            // ── 崩れた岩塊（2 つの間隔を重ねる）────────────────────────
+            // ── The collapsed blocks (two spacings stacked) ──────────────────────
             float rough =
                 VolcanoRelief.ValueNoise(dx / RoughWavelengthMetres,
                                          dz / RoughWavelengthMetres, seed) * 0.7f
                 + VolcanoRelief.ValueNoise(dx / FineRoughWavelengthMetres,
                                            dz / FineRoughWavelengthMetres, seed + 7717u) * 0.3f;
-            // ★★ <c>ValueNoise</c> は<b>すでに [-1,1]</b> である（あちらの doc）。
-            //    ここで (n*2-1) と書いていたとき、実際の範囲は [-3,1] になり、
-            //    床が深さの 1.4 倍まで抜けた（-505 m / 深さ 350 m）。
-            //    **[0,1] を [-1,1] へ直す型の書き癖をそのまま持ち込まないこと。**
+            // ★★ <c>ValueNoise</c> is <b>already in [-1,1]</b> (see its doc).
+            //    When this was written as (n*2-1), the actual range came out as [-3,1] and
+            //    the floor dropped out to 1.4 times the depth (-505 m against a depth of
+            //    350 m).
+            //    **Do not bring over the habit of remapping [0,1] to [-1,1] from other
+            //    types.**
             rough *= FloorRoughFraction * depthMetres * inside;
 
-            // ── 中央火口丘 ────────────────────────────────────────
+            // ── The resurgent dome ────────────────────────────────────────
             float dome = 0f;
             float domeRadius = calderaRadiusMetres * ResurgentRadiusFraction;
             if (domeRadius > 0f && distance < domeRadius)
             {
                 float k = distance / domeRadius;
-                // 余弦の山。縁で高さも傾きも 0 になる（＝継ぎ目が出ない）。
+                // A cosine hump. Both the height and the slope reach 0 at its edge (so no
+                // seam shows).
                 dome = depthMetres * ResurgentHeightFraction
                        * 0.5f * (1f + (float)Math.Cos(Math.PI * k));
             }
 
             float offset = bowl + rough + dome;
 
-            // ★★ **床は元の地面より上には来ない。** 上がると、陥没したはずの
-            //   カルデラの中に元の高さの島が残る。
+            // ★★ **The floor never comes above the original ground.** If it did, islands at
+            //   the original height would be left inside a caldera that is supposed to have
+            //   foundered.
             if (offset > 0f) return 0f;
             return offset;
         }
 
         /// <summary>
-        /// **山体が落ち込む量**（m、**0 か負**）。1 セルぶん。
+        /// **How far the edifice founders** (m, **0 or negative**), for one cell.
         ///
-        /// ── なぜ「引き算」ではないのか（2026-08-22、所有者の指摘）───────────
+        /// ── Why it is not "a subtraction" (2026-08-22, the owner's observation) ─────────
         ///
-        /// &gt; カルデラ形成時は、山体が大きく落ち込んで大爆発するんじゃないでしょうか…？
+        /// &gt; When a caldera forms, doesn't the edifice drop a long way and explode
+        /// &gt; enormously…?
         ///
-        /// はじめ⑤は<b>今の地面から深さぶんを引いて</b>いた。円錐が +1000 m、深さが
-        /// 900 m だったので、<b>山頂に 100 m の切り株が残り</b>、そのまわりだけ
-        /// 900 m 掘れた —— 「山が落ちた」ではなく「山のまわりに溝を掘った」絵である。
+        /// ⑤ originally <b>subtracted the depth from the current ground</b>. The cone was
+        /// +1,000 m and the depth 900 m, so <b>a 100 m stump was left at the summit</b> with
+        /// 900 m dug out only around it — a picture of "a trench dug around the mountain",
+        /// not "the mountain dropping".
         ///
-        /// 実際のカルデラは<b>屋根が 1 枚の板として落ちる</b>ので、床は
-        /// <b>元の地面より下の 1 つの高さで平ら</b>になり、山体は跡形も無くなる。
-        /// だから目標は絶対の高さ（<c>元の地面 + bowl</c>）で置き、
-        /// 動かす量はそこまでの差分にする。
+        /// In a real caldera <b>the roof drops as a single slab</b>, so the floor comes out
+        /// <b>flat at one height below the original ground</b> and the edifice is gone
+        /// without a trace. So we set the target as an absolute height
+        /// (<c>original ground + bowl</c>) and make the amount we move the difference to it.
         ///
         /// <code>
-        ///   山頂  base=+1000  目標 = 0 - 900 = -900   → -1900 落ちる
-        ///   中腹  base= +400  目標 = 0 - 900 = -900   → -1300 落ちる
-        ///   縁    base=    0  目標 = 0 -   0 =    0   →     0（動かない）
+        ///   summit    base=+1000  target = 0 - 900 = -900   → drops -1900
+        ///   mid-slope base= +400  target = 0 - 900 = -900   → drops -1300
+        ///   rim       base=    0  target = 0 -   0 =    0   →     0 (does not move)
         /// </code>
         ///
-        /// ★★ <b>陥没は地面を上げない。</b> <paramref name="groundMetres"/> は火山の
-        ///   中心の地面の高さ 1 点なので、傾いた土地では外縁で目標が今の地面より
-        ///   高くなりうる。そこを持ち上げると<b>落ちるはずの縁が盛り上がる</b>ので、
-        ///   正の差分は 0 に切る。
+        /// ★★ <b>The collapse never raises the ground.</b>
+        ///   <paramref name="groundMetres"/> is a single ground height at the volcano's
+        ///   centre, so on sloping land the target at the outer edge can come out above the
+        ///   current ground. Lifting there would make <b>the rim that ought to be dropping
+        ///   rise instead</b>, so a positive difference is cut to 0.
         /// </summary>
         /// <param name="bowlMetres">
-        /// <see cref="BowlProfileAt"/> の値（0 か負）。窪地の形そのもの。
+        /// <see cref="BowlProfileAt"/>'s value (0 or negative). The basin's shape itself.
         /// </param>
-        /// <param name="baseMetres">このセルの**今の**地面の高さ（m。円錐を含む）。</param>
-        /// <param name="groundMetres">火山を置く前の地面の高さ（m）。</param>
+        /// <param name="baseMetres">This cell's **current** ground height (m, including the
+        /// cone).</param>
+        /// <param name="groundMetres">The ground height before the volcano was placed
+        /// (m).</param>
         public static float FounderDropAt(float bowlMetres, float baseMetres, float groundMetres)
         {
             if (IsBad(bowlMetres) || IsBad(baseMetres) || IsBad(groundMetres)) return 0f;

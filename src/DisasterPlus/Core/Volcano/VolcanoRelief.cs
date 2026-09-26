@@ -4,257 +4,306 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 山肌の凹凸。<see cref="VolcanoShape.ProfileAt"/> が返す**軸対称の円錐**へ、
-    /// 方位（azimuth）に依存する起伏を掛けて「旋盤で挽いた円錐」を崩す型である。
+    /// The relief of a mountain's flanks. This type multiplies the **axisymmetric cone**
+    /// returned by <see cref="VolcanoShape.ProfileAt"/> by azimuth-dependent relief, breaking
+    /// up the "cone turned on a lathe" look.
     ///
-    /// ── なぜ「ノイズを足す」ではないのか ─────────────────────────
+    /// ── Why not just "add noise" ─────────────────────────
     ///
-    /// 無指向のノイズを高さへ足すと、山ではなく**砂嵐**に見える。実際の成層火山の
-    /// 肌を決めているのは 3 つで、優先度もこの順である。
+    /// Add undirected noise to the height and it looks less like a mountain than like **a
+    /// sandstorm**. Three things determine the surface of a real stratovolcano, in this order
+    /// of priority.
     ///
-    ///   1. **放射谷（バランコ）** —— 斜面を上から下へ走る溝。方位方向にほぼ等間隔で、
-    ///      **山頂側は浅く、裾へ向かって深くなる**。成層火山の見た目そのものである
-    ///   1b. **細谷（リル）** —— 主谷のあいだの尾根を刻む、細くて浅くて短い溝。
-    ///      主谷より 3 次高い帯で、**裾のほうにしか存在しない**（後述の格子の床）
-    ///   2. **円でない裾** —— 低周波の方位変化。footprint が真円でなくなる
-    ///   3. **一般の粗さ** —— 波長 64〜380 m の 4 オクターブのうねり
-    ///   4. **非対称** —— 片側の裾が長い / 急である（1 次の方位成分が担う）
+    ///   1. **Radial gullies (barrancos)** — channels running down the slope from top to
+    ///      bottom, spaced almost evenly around the azimuth, **shallow near the summit and
+    ///      deepening towards the foot**. This is the look of a stratovolcano itself
+    ///   1b. **Rills** — narrow, shallow, short channels cutting the ridges between the main
+    ///      gullies. They sit in a band three harmonics above the main gullies and
+    ///      **exist only towards the foot** (because of the grid floor described below)
+    ///   2. **A non-circular foot** — low-frequency azimuthal variation, so the footprint
+    ///      stops being a perfect circle
+    ///   3. **General roughness** — four octaves of undulation with wavelengths of 64-380 m
+    ///   4. **Asymmetry** — one side's foot is longer or steeper (carried by the first
+    ///      azimuthal harmonic)
     ///
-    /// ── 谷は 1 段ではなく階層である（2026-08-22、所有者の指摘）──────────────
+    /// ── Gullies are a hierarchy, not a single level (2026-08-22, the owner's observation) ──
     ///
-    /// > 各タイプの火山の細かいディテールも、もっと自然の火山っぽく凹凸をつけてほしい
-    /// > （いまは太い谷の筋だけですが、細かい谷も作ってほしい）
+    /// > For the fine detail of each type of volcano too, I'd like more natural-looking
+    /// > relief (at the moment there are only the thick gully lines — please make finer
+    /// > gullies as well)
     ///
-    /// 主谷（<see cref="GullyCount"/> 本）だけだと、尾根がそのぶん広く平らに残る
-    /// （零交差を谷にしている以上、これは避けられない）。実際の成層火山では、
-    /// その尾根を**もっと細かい溝**が刻んでいて、しかも
-    /// **上流ほど疎、下流ほど密**という階層になっている。
-    /// そこで同じ仕掛け（方位の帯 × 零交差）を**もう 1 段、高い次数で**重ねる。
-    /// 細谷は主谷の中では浅くし（<see cref="RillRidgeFloor"/>）、
-    /// **尾根の上でいちばん深くなる** —— それが「主谷のあいだを刻む」の実体である。
+    /// With only the main gullies (<see cref="GullyCount"/> of them), the ridges are left
+    /// correspondingly broad and flat (unavoidable, given that we make the gullies at the
+    /// zero crossings). On a real stratovolcano those ridges are cut by **finer channels**,
+    /// arranged in a hierarchy that is **sparser upstream and denser downstream**.
+    /// So we stack the same mechanism (an azimuthal band × zero crossings) **once more, at a
+    /// higher harmonic**. The rills are made shallow inside the main gullies
+    /// (<see cref="RillRidgeFloor"/>) and **deepest on top of the ridges** — that is what
+    /// "cutting between the main gullies" actually is.
     ///
-    /// ── 2 つの硬い制約を「掛け算だけ」で構造的に守る ───────────────
+    /// ── Two hard constraints, upheld structurally by "multiplication only" ───────────
     ///
-    /// **半径 R を 1 mm も超えない。** 準備（破壊）が届いていない場所を持ち上げると
-    /// 道路が <c>NetSegment.TerrainUpdated</c> でセルを道路の y へ引き戻し、
-    /// 山の中に平らな溝が残る（設計書 §1.2）。したがって方位変調は
-    /// **実効半径を縮める向きにしか働かない**:
+    /// **It never exceeds the radius R by a single millimetre.** Raise ground the
+    /// preparation (destruction) has not reached and the roads pull the cells back to the
+    /// road's y via <c>NetSegment.TerrainUpdated</c>, leaving flat trenches inside the
+    /// mountain (design document §1.2). So the azimuthal modulation
+    /// **only ever works in the direction of shrinking the effective radius**:
     ///
     /// <code>
     /// Reff(θ) = R × (1 − shrink(θ))     shrink(θ) ∈ [0, shrinkMax]   ⇒  Reff ≤ R
     /// </code>
     ///
-    /// **最終高 H を 1 mm も超えない。** <c>HeightFor</c> / <c>HeadroomMetres</c> /
-    /// <c>HeightWasLimitedByCeiling</c> と 1024 m の
-    /// 生の天井（§C-10）が全部 H を基準に考えている。したがって起伏は
-    /// **削る向きにしか働かない**:
+    /// **It never exceeds the final height H by a single millimetre.** <c>HeightFor</c>,
+    /// <c>HeadroomMetres</c>, <c>HeightWasLimitedByCeiling</c> and the 1024 m raw ceiling
+    /// (§C-10) all reason in terms of H. So the relief
+    /// **only ever works in the direction of carving away**:
     ///
-    /// > ★ 呼び出し側（<c>VolcanoCrater.ProfileAt</c>）が渡してくる H は
-    /// > **火口の縁で山の高さに届くように立て直した仮想の頂**である。
-    /// > この型の約束は「渡された H を超えない」であって、そこは 1 つも変わらない ——
-    /// > 仮想の頂は火口の天井が必ず切り落とすので、地形には 1 セルも書かれない
-    /// > （あちらのクラス doc）。
+    /// > ★ The H the caller (<c>VolcanoCrater.ProfileAt</c>) passes in is
+    /// > **a virtual summit, rebuilt so that the crater's rim reaches the mountain's
+    /// > height**. This type's promise is "never exceed the H you were given", and that does
+    /// > not change one bit — the virtual summit is always cut off by the crater's ceiling,
+    /// > so not a single cell of it is ever written to the terrain (see that class's doc).
     ///
     /// <code>
     /// profile = VolcanoShape.ProfileAt(form, d, Reff(θ), H) × carve(θ, d)
     ///                                                         carve ∈ [0, 1]
     /// </code>
     ///
-    /// <c>VolcanoShape.ProfileAt</c> は d=0 で必ず H を返し、それ以外では H 未満なので、
-    /// <c>carve ≤ 1</c> であるかぎり結果は必ず H 以下である。**足し算を 1 つも
-    /// 持ち込まないこと** —— 持ち込んだ瞬間に上の 2 つが両方とも「たぶん大丈夫」に落ちる。
-    /// 削る向きだけというのは物理的にも正しい: 円錐は堆積の包絡線で、谷はそこを侵食して
-    /// 削った跡である。
+    /// <c>VolcanoShape.ProfileAt</c> always returns H at d=0 and less than H everywhere else,
+    /// so as long as <c>carve ≤ 1</c> the result is always at most H. **Do not bring in a
+    /// single addition** — the moment you do, both of the above drop to "probably fine".
+    /// Carving only is physically right too: the cone is the envelope of deposition, and the
+    /// gullies are what erosion has cut out of it.
     ///
-    /// ── 強さ 0 は「今日と完全に同じ」でなければならない ────────────
+    /// ── A strength of 0 must be "exactly identical to today" ────────────
     ///
-    /// <see cref="StrengthUnit"/> が 0 のとき、この型は <c>VolcanoShape.ProfileAt</c> を
-    /// **そのまま返す**（分岐 1 本で早期に抜ける）。設定を 0 にした人が得るのは
-    /// 「起伏が小さい山」ではなく**今日の出力そのもの**である。
+    /// When <see cref="StrengthUnit"/> is 0, this type **returns
+    /// <c>VolcanoShape.ProfileAt</c> unchanged** (an early exit on a single branch). Someone
+    /// who sets the setting to 0 gets **today's output itself**, not "a mountain with a
+    /// little relief".
     ///
-    /// ── 乱数 ────────────────────────────────────────────
+    /// ── Randomness ────────────────────────────────────────────
     ///
-    /// <see cref="DeterministicRandom"/> だけを使う。<c>VanillaRandomizer</c> は
-    /// **使わない** —— あれはバニラが引く値を先読みするためだけの型で、⑤はバニラの
-    /// 災害スロットに載らないので同期すべき引きが 1 つも存在しない。
-    /// <c>System.Random</c> も <c>Mathf.PerlinNoise</c> も使わない（Core は engine-free で、
-    /// net35 と net8.0 で同じ値を出す必要がある）。
+    /// Only <see cref="DeterministicRandom"/> is used. <c>VanillaRandomizer</c> is
+    /// **not used** — that type exists purely to read ahead the values vanilla draws, and ⑤
+    /// does not sit in a vanilla disaster slot, so there is not one draw to stay in step
+    /// with. Neither <c>System.Random</c> nor <c>Mathf.PerlinNoise</c> is used either (Core
+    /// is engine-free and has to give the same values on net35 and net8.0).
     ///
-    /// ── 16 m 格子 ───────────────────────────────────────
+    /// ── The 16 m grid ───────────────────────────────────────
     ///
-    /// <c>RawHeights</c> のセルは 16 m である。**「もっと細かく」には床がある。**
-    /// 床は 2 つあり、どちらも <c>tools/VolcanoPreview</c> の
-    /// <c>## grid limit</c> 節が数えた**極値密度**（1 セル進むごとに斜面の向きが
-    /// 反転する頻度）で決めた。滑らかな斜面なら 1 波長に 2 個、
-    /// 市松模様なら 1 セルに 1 個（＝ 0.5）になる指標である。
+    /// <c>RawHeights</c>' cells are 16 m. **There is a floor on "make it finer".**
+    /// There are two floors, and both were decided from the **extremum density** (how often
+    /// the slope's direction reverses per cell advanced) counted by the
+    /// <c>## grid limit</c> section of <c>tools/VolcanoPreview</c>. It is a measure that
+    /// gives 2 per wavelength on a smooth slope and 1 per cell (= 0.5) for a chequerboard.
     ///
-    ///   - **半径方向**（値ノイズ）: <see cref="MinWavelengthMetres"/> ＝ **64 m（4 セル）**。
-    ///     実測で 64 m は極値密度 0.19、48 m（3 セル）で 0.28、32 m（2 セル）で 0.42 ——
-    ///     0.5 が市松模様そのものなので、**3 セルはもう起伏ではない。**
-    ///     4 セルは補間が 4 点に効くいちばん細かい格子で、ここが正直な床である。
-    ///   - **方位方向**: <see cref="MinAzimuthWavelengthMetres"/> ＝ **96 m（6 セル）**。
-    ///     方位の波長は円周 ÷ 次数なので**山頂に近いほど短くなる** ——
-    ///     半径方向と違って場所ごとに変わるので、床ではなく
-    ///     「そこを割ったら消す」フェードとして働く（<see cref="ProfileAt"/>）。
-    ///     6 セルなのは、円周方向の 1 波は 16 m 格子の上では斜めに走る階段になり、
-    ///     4 セルでは階段の段が波と同じ大きさになるからである（実測で確認した）。
+    ///   - **Radially** (value noise): <see cref="MinWavelengthMetres"/> = **64 m (4 cells)**.
+    ///     Measured, 64 m gives an extremum density of 0.19, 48 m (3 cells) gives 0.28 and
+    ///     32 m (2 cells) gives 0.42 — and since 0.5 is a chequerboard exactly, **3 cells is
+    ///     no longer relief at all.**
+    ///     4 cells is the finest grid on which interpolation still involves 4 points, and
+    ///     that is the honest floor.
+    ///   - **Azimuthally**: <see cref="MinAzimuthWavelengthMetres"/> = **96 m (6 cells)**.
+    ///     The azimuthal wavelength is the circumference ÷ the harmonic, so **it gets shorter
+    ///     the nearer the summit** — unlike the radial case it varies with position, so it
+    ///     acts not as a floor but as a fade that "removes it once it goes below" (see
+    ///     <see cref="ProfileAt"/>).
+    ///     It is 6 cells because one wave in the circumferential direction becomes a
+    ///     staircase running diagonally across the 16 m grid, and at 4 cells the steps of
+    ///     that staircase are as big as the wave itself (confirmed by measurement).
     ///
-    /// ★★ この 2 つが、細谷（リル）が**裾にしか出ない**理由でもある。
-    ///   主谷より 3 次高い帯で回すと、成層火山（R = 1200 m）では 0.24R より内側で
-    ///   方位の波長が 96 m を割って消え、0.36R より外でだけ深さいっぱいになる。
-    ///   **これは制限ではなく、実際の火山の見え方（上流ほど疎）と一致する。**
+    /// ★★ These two are also why the rills **only appear towards the foot**.
+    ///   Running them in a band three harmonics above the main gullies, on a stratovolcano
+    ///   (R = 1200 m) the azimuthal wavelength falls below 96 m inside 0.24R and they vanish,
+    ///   reaching full depth only beyond 0.36R.
+    ///   **This is not a limitation; it matches how real volcanoes look (sparser
+    ///   upstream).**
     ///
-    /// ── 費用 ────────────────────────────────────────────
+    /// ── Cost ────────────────────────────────────────────
     ///
-    /// 1 セルあたり三角関数は 0 回である。方位の高調波 cos(kθ) / sin(kθ) は
-    /// 単位複素数 (ux + i·uz) の累乗で作る（<see cref="ProfileAt"/> のループ）ので、
-    /// 掛け算と足し算しか出てこない。それでも 1 セル 300 flop 程度はあるので、
-    /// 呼び出し側（<c>Game/Volcano/VolcanoUplift</c>）は**隆起の開始時に 1 回だけ
-    /// 全セルを評価して配列に焼く**。毎 tick 呼ぶ型ではない。
+    /// Zero trigonometric calls per cell. The azimuthal harmonics cos(kθ) / sin(kθ) are built
+    /// from powers of the unit complex number (ux + i·uz) (the loop in
+    /// <see cref="ProfileAt"/>), so nothing but multiplications and additions appear.
+    /// Even so it is around 300 flops per cell, so the caller
+    /// (<c>Game/Volcano/VolcanoUplift</c>) **evaluates every cell exactly once at the start of
+    /// the uplift and bakes the result into an array**. This is not a type to call every tick.
     /// </summary>
     public sealed class VolcanoRelief
     {
-        /// <summary>設定から受け取る強さの上限。1 が形態ごとの既定値そのもの。</summary>
+        /// <summary>The cap on the strength taken from the settings. 1 is the per-form default
+        /// itself.</summary>
         public const float MaxStrengthUnit = 1.5f;
 
         /// <summary>
-        /// 半径方向のいちばん細かい成分の波長の下限（m）。**16 m 格子で 4 セル。**
-        /// 100 m（6 セル強）から下げた根拠は極値密度の実測（クラス doc の「16 m 格子」）。
+        /// The floor on the finest radial component's wavelength (m). **4 cells on the 16 m
+        /// grid.** The basis for lowering it from 100 m (a little over 6 cells) is the
+        /// measured extremum density (see "The 16 m grid" in the class doc).
         /// </summary>
         public const float MinWavelengthMetres = 64f;
 
         /// <summary>
-        /// 方位方向の谷が成立する最小の波長（m）。**山頂に近づくほど方位の波長は
-        /// 短くなる**（円周 2πd を谷の本数で割った値）ので、ここを守らないと
-        /// 山頂まわりで谷が 16 m 格子に食い込み、起伏ではなく市松模様になる。
-        /// 6 セル。
+        /// The shortest azimuthal wavelength at which a gully holds up (m). **The azimuthal
+        /// wavelength gets shorter the nearer the summit** (the circumference 2πd divided by
+        /// the number of gullies), so without respecting this the gullies bite into the 16 m
+        /// grid around the summit and give a chequerboard rather than relief.
+        /// 6 cells.
         /// </summary>
         public const float MinAzimuthWavelengthMetres = 96f;
 
-        /// <summary>裾の輪郭に使う方位の高調波の本数（k = 1..4）。1 次が非対称を担う。</summary>
+        /// <summary>The number of azimuthal harmonics used for the foot's outline
+        /// (k = 1..4). The first carries the asymmetry.</summary>
         private const int ShapeHarmonics = 4;
 
-        /// <summary>谷に使う方位の高調波の本数（k = n-2 .. n+2）。側帯が等間隔を崩す。</summary>
+        /// <summary>The number of azimuthal harmonics used for the gullies
+        /// (k = n-2 .. n+2). The sidebands break up the even spacing.</summary>
         private const int GullyHarmonics = 5;
 
-        /// <summary>細谷（リル）に使う方位の高調波の本数。主谷と同じ 5 本の帯。</summary>
+        /// <summary>The number of azimuthal harmonics used for the rills. The same 5-wide band
+        /// as the main gullies.</summary>
         private const int RillHarmonics = 5;
 
         /// <summary>
-        /// 細谷の次数を主谷より<b>いくつ上げるか</b>。**倍率ではなく差である。**
+        /// <b>How many harmonics above</b> the main gullies the rills sit. **A difference, not
+        /// a multiplier.**
         ///
-        /// ── ★★ ここは 2026-08-22 のレビューで 1 度差し戻されている ────────────
+        /// ── ★★ This was reverted once in the review of 2026-08-22 ────────────
         ///
-        /// 最初は「主谷の 2.2 倍」（成層で 40 本）にしていた。**実機の絵では
-        /// 裾の細谷がまるごと点線に見えた。** 差し戻しを受けて計測をやり直した結果:
+        /// It was originally "2.2× the main gullies" (40 of them on a stratovolcano).
+        /// **In the on-hardware images, the rills at the foot looked like dotted lines,
+        /// every one of them.** After the revert we measured again:
         ///
-        /// | 細谷の本数 | 半深での弧の幅（0.85R） | 見え方 |
+        /// | Rill count | Arc width at half depth (0.85R) | Appearance |
         /// |---|---|---|
-        /// | 40（2.2 倍） | 1.8 セル | **点線。使えない** |
-        /// | 28（+5）     | 4.0 セル | まだ帯が 2〜3 本点線になる |
-        /// | **24（+3）** | **4.7 セル** | **実線。主谷と同じ連続性**（出荷値） |
+        /// | 40 (2.2×)  | 1.8 cells | **dotted. Unusable** |
+        /// | 28 (+5)    | 4.0 cells | 2-3 bands still come out dotted |
+        /// | **24 (+3)** | **4.7 cells** | **solid. As continuous as the main gullies** (shipped) |
         ///
-        /// **効いていたのは幅でも深さでもなく本数だった。** 幅（0.55→0.95）も
-        /// 深さ（0.25→0.80）も尾根での抑制の有無も、どれを動かしても
-        /// 溝 1 本あたりの連続性は 0.83 前後から動かなかった（下の計測の話）。
-        /// 動いたのは**画面に出る溝の総本数**で、それが多いほど
-        /// 「どの溝も 15 % は途切れる」という格子の性質が目に付くようになる。
+        /// **What mattered was neither the width nor the depth but the count.** Whether we
+        /// moved the width (0.55→0.95), the depth (0.25→0.80) or the suppression on the
+        /// ridges, the continuity of any single channel did not budge from about 0.83
+        /// (that is what the measurement below is about).
+        /// What did change was **the total number of channels on screen**, and the more there
+        /// are, the more the grid's inherent property that "every channel breaks up 15% of the
+        /// time" catches the eye.
         /// </summary>
         private const int RillHarmonicOffset = 3;
 
-        /// <summary>細谷の深さ（主谷に対する比）。**主谷より浅い**のが階層の要点。</summary>
+        /// <summary>The rills' depth (as a ratio of the main gullies'). **Shallower than the
+        /// main gullies** is the whole point of the hierarchy.</summary>
         private const float RillDepthRatio = 0.60f;
 
         /// <summary>
-        /// 細谷の幅（方位系列の <c>|A|</c> の閾値）。主谷より**広く**取る。
+        /// The rills' width (the threshold on the azimuthal series' <c>|A|</c>). Taken
+        /// **wider** than the main gullies'.
         ///
-        /// ★ 効く幅は <c>|A| &lt; W</c> の全幅ではなく、<b>半分の深さになるところの幅</b>
-        ///   <c>2 d·asin(W/2) / n₂</c> である。全幅で見積もると倍近く見えるので、
-        ///   「3 セルある」と言いながら実際は 1.6 セルしかない、という間違いをやる
-        ///   （最初の版がまさにそれだった）。
-        ///   出荷値（n₂ = 12、W = 0.85）で 0.85R の半深幅は **4.7 セル**である。
+        /// ★ The width that matters is not the full width of <c>|A| &lt; W</c> but
+        ///   <b>the width at half depth</b>, <c>2 d·asin(W/2) / n₂</c>. Estimate from the full
+        ///   width and it looks nearly twice as wide, which is how you make the mistake of
+        ///   saying "there are 3 cells" when there are actually only 1.6
+        ///   (the first version did exactly that).
+        ///   At the shipped values (n₂ = 12, W = 0.85) the half-depth width at 0.85R is
+        ///   **4.7 cells**.
         /// </summary>
         private const float RillChannelWidth = 0.85f;
 
         /// <summary>
-        /// 細谷を出すのに最低限必要な斜面（実効半径に対する比）。
+        /// The minimum flank needed before we emit rills at all (as a ratio of the effective
+        /// radius).
         ///
-        /// ★ 方位の床（<see cref="MinAzimuthWavelengthMetres"/>）のせいで、細谷は
-        ///   小さい山ほど外側の細い環にしか residence しない。**環が細すぎると
-        ///   溝ではなく「裾に並んだ窪みの輪」に見える**ので、
-        ///   斜面の外側 3 割を取れないなら<b>1 本も出さない</b>。
-        ///   ⑤は大きさをプレイヤーが選べる機能なので、小さくした山でも破綻しないこと。
+        /// ★ Because of the azimuthal floor (<see cref="MinAzimuthWavelengthMetres"/>), the
+        ///   smaller the mountain the narrower the outer ring the rills can live in. **Too
+        ///   narrow a ring reads not as channels but as "a ring of dimples around the
+        ///   foot"**, so unless we can have the outer 30% of the flank we emit <b>none at
+        ///   all</b>.
+        ///   ⑤ is a feature where the player chooses the size, so it must not fall apart on a
+        ///   mountain they made small.
         /// </summary>
         private const float RillMinFlankFraction = 0.70f;
 
-        /// <summary>細谷が出はじめる山頂からの距離（実効半径に対する比）。主谷より外。</summary>
+        /// <summary>The distance from the summit at which the rills start (as a ratio of the
+        /// effective radius). Further out than the main gullies.</summary>
         private const float RillStartFraction = 0.34f;
 
-        /// <summary>細谷が深さいっぱいになるまでの距離（同上）。</summary>
+        /// <summary>The distance over which the rills reach full depth (same units).</summary>
         private const float RillRampFraction = 0.26f;
 
         /// <summary>
-        /// 主谷の底に居るときの細谷の深さ（尾根の上を 1 とする比）。
-        /// **0 にしない** —— 主谷の中だけ細谷が消えると、そこに不自然な帯が残る。
-        /// この比が「細谷は主谷のあいだの尾根を刻む」を作っている唯一の式である。
+        /// The rills' depth when at the bottom of a main gully (as a ratio, taking the ridge
+        /// tops as 1).
+        /// **Never 0** — if the rills vanished only inside the main gullies, an unnatural band
+        /// would be left there.
+        /// This ratio is the one and only expression that produces "the rills cut the ridges
+        /// between the main gullies".
         /// </summary>
         private const float RillRidgeFloor = 0.30f;
 
-        /// <summary>谷が出はじめる山頂からの距離（実効半径に対する比）の最小値。</summary>
+        /// <summary>The minimum distance from the summit at which the gullies start (as a
+        /// ratio of the effective radius).</summary>
         private const float GullyStartFraction = 0.16f;
 
         /// <summary>
-        /// 谷ごとに出はじめる距離をずらす幅（同上）。**0 にすると全部の谷が
-        /// 山頂の 1 点へ集まり、山ではなく放射状の縞模様に見える。**
+        /// The spread over which each gully's start distance is offset (same units).
+        /// **Set it to 0 and every gully converges on a single point at the summit, giving a
+        /// radial stripe pattern rather than a mountain.**
         /// </summary>
         private const float GullyStartSpread = 0.24f;
 
-        /// <summary>出はじめてから深さいっぱいになるまでの距離（同上）。裾で深い。</summary>
+        /// <summary>The distance from starting to reaching full depth (same units). Deep at
+        /// the foot.</summary>
         private const float GullyRampFraction = 0.30f;
 
         /// <summary>
-        /// 谷の幅。方位の系列 A(θ) の**零交差**を谷の底とし、|A| がこの値を超えたら
-        /// 谷の外（尾根）とする。
+        /// The gullies' width. The **zero crossings** of the azimuthal series A(θ) are the
+        /// gully floors, and anywhere |A| exceeds this value is outside the gully (on a
+        /// ridge).
         ///
-        /// 正弦波をそのまま深さに使うと「波板」になる（山肌の半分が谷になる）。
-        /// 零交差を使うと、谷は必ず深さいっぱいに達し、**尾根は広く平ら**になる ——
-        /// これが成層火山の見え方である。幅は A の局所的な傾きで決まるので、
-        /// 谷ごとに自然に広狭が出る。谷の本数は零交差の数、すなわち
-        /// **中心の高調波の 2 倍**である（<see cref="GullyCount"/>）。
+        /// Use a sine directly as the depth and you get corrugated iron (half the flank
+        /// becomes gully). Use the zero crossings and each gully always reaches full depth
+        /// while **the ridges stay broad and flat** — which is how a stratovolcano looks.
+        /// The width is set by A's local gradient, so gullies come out naturally wider and
+        /// narrower. The number of gullies is the number of zero crossings, that is
+        /// **twice the central harmonic** (see <see cref="GullyCount"/>).
         /// </summary>
         private const float ChannelWidth = 0.30f;
 
         /// <summary>
-        /// 谷を蛇行させる量（ラジアン）。**まっすぐな放射線は人工物に見える。**
-        /// 単位ベクトルを微小角だけ回すだけなので三角関数は要らない。
+        /// How much the gullies meander (radians). **A dead straight ray looks artificial.**
+        /// It only rotates a unit vector by a small angle, so no trigonometry is needed.
         /// </summary>
         private const float WarpRadians = 0.13f;
 
-        /// <summary>粗さが出はじめる距離（同上）。山頂は火口が彫られるので触らない。</summary>
+        /// <summary>The distance at which the roughness starts (same units). We leave the
+        /// summit alone, since the crater is carved there.</summary>
         private const float RoughStartFraction = 0.04f;
 
-        /// <summary>粗さがいっぱいになる距離（同上）。</summary>
+        /// <summary>The distance at which the roughness reaches full strength (same
+        /// units).</summary>
         private const float RoughFullFraction = 0.18f;
 
-        /// <summary>方位系列を [-1,1] へ均す係数（分散から出した経験値）。</summary>
+        /// <summary>The factor that normalises the azimuthal series to [-1,1] (an empirical
+        /// value derived from the variance).</summary>
         private const float NormaliseSpread = 1.45f;
 
-        /// <summary>削り量の上限。これを超えると carve が負に振れうる。</summary>
+        /// <summary>The cap on how much we carve. Beyond this, carve could swing
+        /// negative.</summary>
         private const float MaxCarveAmplitude = 0.6f;
 
-        /// <summary>実効半径を縮める量の上限。</summary>
+        /// <summary>The cap on how much the effective radius shrinks.</summary>
         private const float MaxShrink = 0.30f;
 
-        /// <summary>いちばん長い粗さの成分の波長（<c>coarse</c> に対する比）。裾のうねり。</summary>
+        /// <summary>The longest roughness component's wavelength (as a ratio of
+        /// <c>coarse</c>). The undulation of the foot.</summary>
         private const float BroadOctaveRatio = 2.2f;
 
         /// <summary>
-        /// いちばん細かい粗さの成分の波長（<c>fine</c> に対する比）。
-        /// 結果は必ず <see cref="MinWavelengthMetres"/> で床を打つ。
+        /// The finest roughness component's wavelength (as a ratio of <c>fine</c>).
+        /// The result always hits the floor at <see cref="MinWavelengthMetres"/>.
         /// </summary>
         private const float MicroOctaveRatio = 0.58f;
 
-        /// <summary>谷の深さが方位ごとにばらつく下限（1 なら全部同じ深さ）。</summary>
+        /// <summary>The floor on how much the gullies' depth varies with azimuth (1 means
+        /// all the same depth).</summary>
         private const float GullyDepthFloor = 0.40f;
 
         private readonly VolcanoForm _form;
@@ -269,19 +318,24 @@ namespace DisasterPlus.Core.Volcano
         private readonly float[] _rillCos;
         private readonly float[] _rillSin;
 
-        /// <summary>谷の系列がはじまる高調波の番号（= 本数 n − 2）。</summary>
+        /// <summary>The harmonic number at which the gully series starts (= the count
+        /// n − 2).</summary>
         private readonly int _gullyFirst;
 
-        /// <summary>細谷の系列がはじまる高調波の番号（= 本数 n₂ − 2）。</summary>
+        /// <summary>The harmonic number at which the rill series starts (= the count
+        /// n₂ − 2).</summary>
         private readonly int _rillFirst;
 
-        /// <summary>主谷の帯の上端（= n + 2）。方位の折り返し判定に使う。</summary>
+        /// <summary>The top of the main gullies' band (= n + 2). Used for the azimuthal
+        /// aliasing test.</summary>
         private readonly int _gullyMaxHarmonic;
 
-        /// <summary>ループを回す最大の高調波（= 主谷と細谷の帯の上端のうち大きいほう）。</summary>
+        /// <summary>The highest harmonic the loop runs to (= the higher of the main gullies'
+        /// and the rills' band tops).</summary>
         private readonly int _maxHarmonic;
 
-        /// <summary>細谷の帯の上端（= n₂ + 2）。**方位の折り返し判定は主谷と別に行う。**</summary>
+        /// <summary>The top of the rills' band (= n₂ + 2). **The azimuthal aliasing test is
+        /// done separately from the main gullies'.**</summary>
         private readonly int _rillMaxHarmonic;
 
         private readonly float _shapeNorm;
@@ -302,27 +356,30 @@ namespace DisasterPlus.Core.Volcano
         private readonly uint _seedMicro;
         private readonly uint _seedWarp;
 
-        /// <summary>この起伏の強さ（0 = 今日の滑らかな円錐そのもの）。</summary>
+        /// <summary>This relief's strength (0 = today's smooth cone exactly).</summary>
         public float StrengthUnit { get { return _strength; } }
 
         /// <summary>
-        /// この起伏が作られた形態。<see cref="VolcanoCrater"/> が火口の天井を出すのに使う
-        /// （形態ごとに、火口半径のところで円錐が残している割合が違う）。
+        /// The form this relief was built for. <see cref="VolcanoCrater"/> uses it to work out
+        /// the crater's ceiling (the fraction of the cone remaining at the crater radius
+        /// differs by form).
         /// </summary>
         public VolcanoForm Form { get { return _form; } }
 
-        /// <summary>放射谷の本数（診断とテスト用）。方位系列の零交差の数である。</summary>
+        /// <summary>The number of radial gullies (for diagnostics and tests). It is the
+        /// number of zero crossings of the azimuthal series.</summary>
         public int GullyCount { get { return (_gullyFirst + 2) * 2; } }
 
         /// <summary>
-        /// 細谷（リル）の本数（診断とテスト用）。**裾でしか成立しない本数**であり、
-        /// 山頂側では <see cref="MinAzimuthWavelengthMetres"/> のフェードが消している。
+        /// The number of rills (for diagnostics and tests). **It is a count that only holds
+        /// up towards the foot**; nearer the summit, the
+        /// <see cref="MinAzimuthWavelengthMetres"/> fade has removed them.
         /// </summary>
         public int RillCount { get { return (_rillFirst + 2) * 2; } }
 
         /// <summary>
-        /// この半径の山に細谷を出せるか。**出せないなら 1 本も出さない**
-        /// （<see cref="RillMinFlankFraction"/>）。
+        /// Whether rills can be emitted on a mountain of this radius. **If not, none at all
+        /// are emitted** (see <see cref="RillMinFlankFraction"/>).
         /// </summary>
         public bool RillsFitOn(float radiusMetres)
         {
@@ -331,8 +388,9 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 細谷が深さいっぱいで出はじめる最小の半径（m）。
-        /// **これより内側に細谷は 1 本も無い**（16 m 格子で方位の波長が足りない）。
+        /// The smallest radius (m) at which the rills start at full depth.
+        /// **There is not a single rill inside this** (the azimuthal wavelength is too short
+        /// for the 16 m grid).
         /// </summary>
         public float RillOnsetRadiusMetres
         {
@@ -342,23 +400,25 @@ namespace DisasterPlus.Core.Volcano
             }
         }
 
-        /// <summary>粗さの 3 番目のオクターブの波長（m。診断とテスト用）。</summary>
+        /// <summary>The wavelength of the roughness's third octave (m; for diagnostics and
+        /// tests).</summary>
         public float FineWavelengthMetres { get { return _wavelengthFine; } }
 
         /// <summary>
-        /// いちばん細かい成分の波長（m。診断とテスト用）。
-        /// **<see cref="MinWavelengthMetres"/> を下回らない。**
+        /// The finest component's wavelength (m; for diagnostics and tests).
+        /// **It never falls below <see cref="MinWavelengthMetres"/>.**
         /// </summary>
         public float MicroWavelengthMetres { get { return _wavelengthMicro; } }
 
         /// <summary>
-        /// 起伏を 1 個作る。<paramref name="seed"/> は火山の地点から出した種
-        /// （<c>DeterministicRandom.Hash(round(X), round(Z))</c>）を渡すこと ——
-        /// **同じ地点なら何度作り直しても同じ山になる。**
+        /// Builds one relief. Pass a <paramref name="seed"/> derived from the volcano's
+        /// location (<c>DeterministicRandom.Hash(round(X), round(Z))</c>) —
+        /// **the same location always gives the same mountain, however many times it is
+        /// rebuilt.**
         ///
-        /// <paramref name="strengthUnit"/> は 0 で「今日と完全に同じ」、
-        /// 1 で形態ごとの既定値、上限は <see cref="MaxStrengthUnit"/>。
-        /// NaN と負は 0 に落とす（設定ファイルは手で編集されうる）。
+        /// <paramref name="strengthUnit"/> is 0 for "exactly identical to today", 1 for the
+        /// per-form default, capped at <see cref="MaxStrengthUnit"/>.
+        /// NaN and negatives fall back to 0 (the settings file can be hand-edited).
         /// </summary>
         public static VolcanoRelief For(VolcanoForm form, uint seed, float strengthUnit)
         {
@@ -373,10 +433,12 @@ namespace DisasterPlus.Core.Volcano
             if (s > MaxStrengthUnit) s = MaxStrengthUnit;
             _strength = s;
 
-            // ── 形態ごとの性格 ────────────────────────────────
-            // 盾状: 玄武岩質の楯状火山は実際になめらかなので、いちばん今日に近い。
-            // 成層: **放射谷はここのもの。** 変化がいちばん強く出る。
-            // 鐘状: ごつごつして塊状。いちばん短波長で、いちばん粗い。
+            // ── The character of each form ────────────────────────────────
+            // Shield: a basaltic shield volcano really is smooth, so this is the closest to
+            //   today.
+            // Strato: **the radial gullies belong to this one.** The change shows up most
+            //   strongly here.
+            // Dome:  craggy and blocky. The shortest wavelengths and the roughest.
             int harmonic;
             float shrink, gully, rough, coarse, fine;
             switch (form)
@@ -402,7 +464,8 @@ namespace DisasterPlus.Core.Volcano
             _rillAmplitude = Clamp(gully * RillDepthRatio * s, 0f, MaxCarveAmplitude);
             _roughAmplitude = Clamp(rough * s, 0f, MaxCarveAmplitude);
 
-            // ★ 16 m 格子。MinWavelengthMetres を下回る波長はノイズに化ける。
+            // ★ The 16 m grid. Any wavelength below MinWavelengthMetres degenerates into
+            //   noise.
             _wavelengthCoarse = coarse < MinWavelengthMetres ? MinWavelengthMetres : coarse;
             _wavelengthFine = fine < MinWavelengthMetres ? MinWavelengthMetres : fine;
             _wavelengthBroad = _wavelengthCoarse * BroadOctaveRatio;
@@ -412,7 +475,8 @@ namespace DisasterPlus.Core.Volcano
             _gullyFirst = harmonic - 2;
             _gullyMaxHarmonic = harmonic + 2;
 
-            // 細谷の中心次数（RillHarmonicOffset の doc に計測の経緯がある）。
+            // The rills' central harmonic (the history of the measurements is in
+            // RillHarmonicOffset's doc).
             int rillHarmonic = harmonic + RillHarmonicOffset;
             _rillFirst = rillHarmonic - 2;
             _rillMaxHarmonic = rillHarmonic + 2;
@@ -426,11 +490,14 @@ namespace DisasterPlus.Core.Volcano
             _seedMicro = DeterministicRandom.Hash(seed, 0x5EEDBEEFu);
             _seedWarp = DeterministicRandom.Hash(seed, 0x5EED1A2Bu);
 
-            // 裾の輪郭。1 次を最大にしてあるのが「片側の裾が長い」の実体である。
+            // The foot's outline. Making the first harmonic the largest is what produces "one
+            // side's foot is longer".
             float[] shapeWeights = { 1.00f, 0.55f, 0.35f, 0.22f };
-            // 谷。中央（k = n）を最大に、側帯 n±1 / n±2 が等間隔と深さを崩す。
+            // The gullies. The centre (k = n) is the largest, and the sidebands n±1 / n±2
+            // break up the even spacing and the depth.
             float[] gullyWeights = { 0.55f, 0.80f, 1.00f, 0.80f, 0.55f };
-            // 細谷。主谷より側帯を重くして、本数と深さをもっとばらつかせる。
+            // The rills. Heavier sidebands than the main gullies, to vary the count and depth
+            // more.
             float[] rillWeights = { 0.70f, 0.88f, 1.00f, 0.88f, 0.70f };
 
             _shapeCos = new float[ShapeHarmonics];
@@ -455,8 +522,9 @@ namespace DisasterPlus.Core.Volcano
                 _gullyCos[i] = gullyWeights[i] * (float)Math.Cos(phase);
                 _gullySin[i] = gullyWeights[i] * (float)Math.Sin(phase);
 
-                // 同じ帯・別の位相。**谷ごとに出はじめる高さを変える**ためだけの系列で、
-                // これが無いと全部の谷が山頂の 1 点へ集まる。
+                // The same band at a different phase. A series whose only job is **varying the
+                // height at which each gully starts**; without it every gully converges on a
+                // single point at the summit.
                 double varPhase = 2.0 * Math.PI * DeterministicRandom.Unit(seed, (uint)(0x300 + i));
                 _gullyVarCos[i] = gullyWeights[i] * (float)Math.Cos(varPhase);
                 _gullyVarSin[i] = gullyWeights[i] * (float)Math.Sin(varPhase);
@@ -475,13 +543,13 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 中心から <paramref name="dx"/> / <paramref name="dz"/> だけ離れた地点の
-        /// **地形からの盛り上がり**（m）。
+        /// **The rise above the terrain** (m) at the point <paramref name="dx"/> /
+        /// <paramref name="dz"/> from the centre.
         ///
-        /// **返り値は必ず [0, <paramref name="heightMetres"/>] で、
-        /// <c>√(dx²+dz²) ≥ radiusMetres</c> なら必ずきっかり 0 である。**
-        /// この 2 つはクラス doc の 2 つの硬い制約そのもので、掛け算しか使わないことで
-        /// 構造的に守られている。異常入力（NaN・R≤0・H≤0）も 0。
+        /// **The result is always in [0, <paramref name="heightMetres"/>], and is always
+        /// exactly 0 when <c>√(dx²+dz²) ≥ radiusMetres</c>.**
+        /// Those two are the class doc's two hard constraints themselves, upheld structurally
+        /// by using nothing but multiplication. Bad input (NaN, R≤0, H≤0) also gives 0.
         /// </summary>
         public float ProfileAt(float dx, float dz, float radiusMetres, float heightMetres)
         {
@@ -492,7 +560,8 @@ namespace DisasterPlus.Core.Volcano
             float d2 = dx * dx + dz * dz;
             float d = (float)Math.Sqrt(d2);
 
-            // ★★ 強さ 0 は「起伏の小さい山」ではなく**今日の出力そのもの**である。
+            // ★★ A strength of 0 is **today's output itself**, not "a mountain with a little
+            //    relief".
             if (!(_strength > 0f)) return VolcanoShape.ProfileAt(_form, d, radiusMetres, heightMetres);
 
             if (d >= radiusMetres) return 0f;
@@ -502,9 +571,11 @@ namespace DisasterPlus.Core.Volcano
             float ux = dx * inv;
             float uz = dz * inv;
 
-            // ── 2. 円でない裾。**方位だけの関数**なので輪郭は閉じた滑らかな曲線になる ──
-            //   ★ 三角関数は使わない。cos(kθ) / sin(kθ) は単位複素数の累乗で出す。
-            //     (ux + i·uz)^k の実部が cos(kθ)、虚部が sin(kθ) である。
+            // ── 2. The non-circular foot. **A function of azimuth alone**, so the outline is
+            //    a closed, smooth curve ──
+            //   ★ No trigonometry. cos(kθ) / sin(kθ) come from powers of a unit complex
+            //     number: the real part of (ux + i·uz)^k is cos(kθ) and the imaginary part is
+            //     sin(kθ).
             float shapeAz = 0f;
             float cr = ux;
             float ci = uz;
@@ -517,7 +588,8 @@ namespace DisasterPlus.Core.Volcano
             }
             shapeAz = Clamp(shapeAz * _shapeNorm, -1f, 1f);
 
-            // ★★ **縮める向きにしか働かない**（クラス doc の制約 1）。
+            // ★★ **It only ever works in the direction of shrinking** (constraint 1 in the
+            //    class doc).
             float effectiveRadius = radiusMetres * (1f - _shrink * 0.5f * (1f - shapeAz));
             if (!(effectiveRadius > 0f)) return 0f;
             if (d >= effectiveRadius) return 0f;
@@ -527,9 +599,10 @@ namespace DisasterPlus.Core.Volcano
 
             float t = d / effectiveRadius;
 
-            // ── 1. 放射谷（バランコ）───────────────────────────
-            //   まっすぐな放射線は人工物に見えるので、方位を場所ごとに微小角だけ回す。
-            //   微小角の回転は (ux − uz·w, uz + ux·w) を正規化するだけで、三角関数は要らない。
+            // ── 1. The radial gullies (barrancos) ───────────────────────────
+            //   A dead straight ray looks artificial, so we rotate the azimuth by a small
+            //   angle that varies with position. A small-angle rotation is just normalising
+            //   (ux − uz·w, uz + ux·w); no trigonometry needed.
             float warp = WarpRadians
                        * ValueNoise(dx / (_wavelengthCoarse * 2f), dz / (_wavelengthCoarse * 2f),
                                     _seedWarp);
@@ -553,9 +626,11 @@ namespace DisasterPlus.Core.Volcano
                     gullyVarAz += _gullyVarCos[g] * cr + _gullyVarSin[g] * ci;
                 }
 
-                // ★ 細谷は**同じ累乗の梯子**から拾う（三角関数も 2 本目の梯子も要らない）。
-                //   同じ蛇行（warp）に乗っているので、主谷と一緒に曲がる ——
-                //   それが「主谷へ流れ込む支谷」の見え方である。
+                // ★ The rills are picked off **the same ladder of powers** (no trigonometry
+                //   and no second ladder needed).
+                //   They ride the same meander (warp), so they bend together with the main
+                //   gullies — which is what "tributaries feeding into the main gullies" looks
+                //   like.
                 int rl = k - _rillFirst;
                 if (rl >= 0 && rl < RillHarmonics)
                 {
@@ -570,55 +645,68 @@ namespace DisasterPlus.Core.Volcano
             gullyVarAz = Clamp(gullyVarAz * _gullyNorm, -1f, 1f);
             rillAz = Clamp(rillAz * _rillNorm, -1f, 1f);
 
-            //   谷ごとに出はじめる高さが違う。**これが無いと全部の谷が山頂の 1 点へ集まり、
-            //   山ではなく放射状の縞模様に見える。**
+            //   Each gully starts at a different height. **Without this every gully converges
+            //   on a single point at the summit and it looks like a radial stripe pattern
+            //   rather than a mountain.**
             float start = GullyStartFraction + GullyStartSpread * 0.5f * (1f + gullyVarAz);
             float depth = SmoothStep(start, start + GullyRampFraction, t);
 
-            //   ★★ **山頂に近いほど方位の波長は短い。** 円周を谷の本数で割った波長が
-            //   16 m 格子に対して短くなりすぎるところでは谷を消す ——
-            //   消さないと山頂まわりが起伏ではなく市松模様になる（実測で確認した）。
+            //   ★★ **The nearer the summit, the shorter the azimuthal wavelength.** Where
+            //   the circumference divided by the number of gullies becomes too short against
+            //   the 16 m grid, we remove the gullies — without that, the area around the
+            //   summit becomes a chequerboard rather than relief (confirmed by measurement).
             float azWavelength = 6.2831853f * d / _gullyMaxHarmonic;
             depth *= SmoothStep(MinAzimuthWavelengthMetres, MinAzimuthWavelengthMetres * 2f,
                                 azWavelength);
 
-            //   谷の底は方位系列の零交差。**尾根は広く平ら**になる（クラス doc）。
+            //   The gully floors are the azimuthal series' zero crossings. **The ridges come
+            //   out broad and flat** (see the class doc).
             float abs = gullyAz < 0f ? -gullyAz : gullyAz;
             float channel = 1f - SmoothStep(0f, ChannelWidth, abs);
 
-            //   深さは方位と場所でばらつかせる。**全部の谷が同じ深さだと花の模様に見える。**
+            //   The depth varies with azimuth and position. **With every gully the same depth
+            //   it looks like a flower pattern.**
             float broad = ValueNoise(dx / _wavelengthBroad, dz / _wavelengthBroad, _seedBroad);
             float depthScale = GullyDepthFloor
                              + (1f - GullyDepthFloor) * 0.5f * (1f + broad);
 
             float carve = 1f - _gullyAmplitude * depth * channel * depthScale;
 
-            // ── 1b. 細谷（リル）。**主谷のあいだの尾根を刻む** ────────────────
-            //   仕掛けは主谷と同じ（零交差を底にする）が、
-            //     * 次数が 3 つ上 → 本数が 6 本多い、弧の幅はやや狭い（W で取り戻す）
-            //     * 出はじめが外 → 短い
-            //     * 主谷の中では浅い（RillRidgeFloor）→ 尾根を刻んでいるように見える
-            //   ★ 方位の折り返し判定は**細谷自身の次数**で行う。主谷の次数で見ると、
-            //     細谷が 16 m 格子を割っている内側まで生き残って市松模様になる。
+            // ── 1b. The rills. **They cut the ridges between the main gullies** ───────────
+            //   The mechanism is the same as the main gullies' (zero crossings as the floors),
+            //   but
+            //     * three harmonics higher → 6 more of them, with slightly narrower arcs
+            //       (recovered via W)
+            //     * they start further out → shorter
+            //     * shallow inside the main gullies (RillRidgeFloor) → they look like they are
+            //       cutting the ridges
+            //   ★ The azimuthal aliasing test uses **the rills' own harmonic**. Test against
+            //     the main gullies' harmonic and the rills survive inwards past where they
+            //     break the 16 m grid, giving a chequerboard.
             float rillDepth = SmoothStep(RillStartFraction,
                                          RillStartFraction + RillRampFraction, t);
             float rillAzWavelength = 6.2831853f * d / _rillMaxHarmonic;
             rillDepth *= SmoothStep(MinAzimuthWavelengthMetres, MinAzimuthWavelengthMetres * 2f,
                                     rillAzWavelength);
 
-            // ★ 細い環にしか入らない山では**1 本も出さない**（RillMinFlankFraction）。
+            // ★ On a mountain where they would only fit in a narrow ring, we emit **none at
+            //   all** (RillMinFlankFraction).
             if (rillDepth > 0f && _rillAmplitude > 0f && RillsFitOn(effectiveRadius))
             {
                 float rillAbs = rillAz < 0f ? -rillAz : rillAz;
                 float rillChannel = 1f - SmoothStep(0f, RillChannelWidth, rillAbs);
-                // 主谷の底（channel = 1）では浅く、尾根（channel = 0）でいちばん深い。
+                // Shallow at the main gully's floor (channel = 1) and deepest on the ridge
+                // (channel = 0).
                 float ridgeGate = RillRidgeFloor + (1f - RillRidgeFloor) * (1f - channel);
                 carve *= 1f - _rillAmplitude * rillDepth * rillChannel * ridgeGate;
             }
 
-            // ── 3. 一般の粗さ。4 オクターブ（裾のうねり / 中間 / 肌 / いちばん細かい肌）──
-            //   ★ 4 本目は 16 m 格子の床（MinWavelengthMetres = 4 セル）に張り付く。
-            //     **これ以上細かい成分を足さないこと**（クラス doc の実測）。
+            // ── 3. The general roughness. Four octaves (the foot's undulation / mid / the
+            //    surface / the finest surface) ──
+            //   ★ The fourth sits right on the 16 m grid's floor
+            //     (MinWavelengthMetres = 4 cells).
+            //     **Do not add any component finer than this** (see the measurements in the
+            //     class doc).
             float rough = 0.36f * broad
                         + 0.30f * ValueNoise(dx / _wavelengthCoarse, dz / _wavelengthCoarse, _seedCoarse)
                         + 0.21f * ValueNoise(dx / _wavelengthFine, dz / _wavelengthFine, _seedFine)
@@ -626,16 +714,18 @@ namespace DisasterPlus.Core.Volcano
             carve *= 1f - _roughAmplitude * SmoothStep(RoughStartFraction, RoughFullFraction, t)
                                           * 0.5f * (1f - rough);
 
-            // ★★ **carve は決して 1 を超えない**（クラス doc の制約 2）。
-            //    振幅の設計上ここには来ないが、.cgs は手で編集されうる。
+            // ★★ **carve never exceeds 1** (constraint 2 in the class doc).
+            //    By the design of the amplitudes it never gets here, but the .cgs can be
+            //    hand-edited.
             carve = Clamp(carve, 0f, 1f);
             return baseMetres * carve;
         }
 
         /// <summary>
-        /// 方位系列を [-1,1] へ均す係数。素の和は最大 Σw だが実際にはめったにそこまで
-        /// 振れないので、RMS から出した幅で割ってから <see cref="ProfileAt"/> が
-        /// クランプする。**割った結果が [-1,1] を出ることは織り込み済みである。**
+        /// The factor that normalises the azimuthal series to [-1,1]. The raw sum can reach
+        /// Σw, but in practice it rarely swings that far, so we divide by a spread derived
+        /// from the RMS and let <see cref="ProfileAt"/> clamp afterwards.
+        /// **That the quotient can go outside [-1,1] is accounted for.**
         /// </summary>
         private static float NormOf(float[] weights)
         {
@@ -647,15 +737,16 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 2 次元の値ノイズ（[-1,1]）。格子点の値は <see cref="DeterministicRandom"/> の
-        /// ハッシュそのもので、補間は 3t²−2t³ である。
-        /// **<c>Mathf.PerlinNoise</c> を使わない** —— Core は engine-free で、
-        /// net35 と net8.0 で同じ値を出さなければならない。
+        /// Two-dimensional value noise ([-1,1]). The lattice values are
+        /// <see cref="DeterministicRandom"/>'s hash itself, and the interpolation is 3t²−2t³.
+        /// **We do not use <c>Mathf.PerlinNoise</c>** — Core is engine-free and has to give
+        /// the same values on net35 and net8.0.
         ///
-        /// ★ <c>internal</c> なのは <c>tools/VolcanoPreview</c> が
-        ///   <see cref="MinWavelengthMetres"/> の床を実測するためである
-        ///   （道具は Core のソースを直接コンパイルするので同一アセンブリになる）。
-        ///   **書き直した近似で床を決めない**、というこのプロジェクトの決まりのため。
+        /// ★ It is <c>internal</c> so that <c>tools/VolcanoPreview</c> can measure the
+        ///   <see cref="MinWavelengthMetres"/> floor for real
+        ///   (the tool compiles Core's source directly, so they end up in the same assembly).
+        ///   This follows the project's rule of **never deciding a floor from a rewritten
+        ///   approximation**.
         /// </summary>
         internal static float ValueNoise(float x, float z, uint seed)
         {
@@ -687,14 +778,16 @@ namespace DisasterPlus.Core.Volcano
             }
         }
 
-        /// <summary><c>Math.Floor</c> を通さない整数化（負でも下へ丸める）。</summary>
+        /// <summary>Conversion to an integer without going through <c>Math.Floor</c> (it
+        /// rounds downwards for negatives too).</summary>
         private static int FloorToInt(float v)
         {
             int i = (int)v;
             return v < 0f && v != i ? i - 1 : i;
         }
 
-        /// <summary>[<paramref name="from"/>, <paramref name="to"/>] で 0 → 1 へ滑らかに。</summary>
+        /// <summary>Smoothly 0 → 1 over
+        /// [<paramref name="from"/>, <paramref name="to"/>].</summary>
         private static float SmoothStep(float from, float to, float t)
         {
             if (!(to > from)) return t >= to ? 1f : 0f;

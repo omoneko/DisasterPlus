@@ -6,155 +6,165 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 火口の見た目 —— <b>噴煙・炎・噴出口の噴水</b>と、
-    /// <b>爆発＋飛ぶ噴石</b>（そちらの実体は <see cref="VolcanoBlastFx"/>。
-    /// **時計はこの型が 1 本だけ持ち、あちらへ渡す**）。**main スレッド専用、毎フレーム。**
+    /// How the crater looks — <b>the plume, the flames and the fountain at the vent</b>, plus
+    /// <b>the blast and the flying ejecta</b> (the substance of which is
+    /// <see cref="VolcanoBlastFx"/>. **This type holds the one and only clock and hands it over
+    /// to that one**). **Main thread only, every frame.**
     ///
-    /// ── ★★ 自前のポリゴンはもう 1 枚も出さない ────────────────────────
+    /// ── ★★ not one home-made polygon is emitted any more ──────────────────────────────────
     ///
-    /// 以前ここは自前の <c>ParticleSystem</c> ＋ 自前 <c>Material</c> で噴煙を出していた。
-    /// **実機では 1 粒も描かれていなかった** —— <c>Shader.Find</c> が組み込みの
-    /// <c>"Standard"</c> を含めて全ての名前に null を返す環境だったためである。
-    /// いま出しているのは**ゲーム自身の粒子エフェクト 3 つ**で、
-    /// どれも <b>DLC 不要</b>（Natural Disasters の爆発・隕石は DLC 所持者にしか
-    /// 存在しないので、既定経路には決してしない）。
-    ///
-    /// <code>
-    /// 噴煙柱 Factory Smoke              複製して 暗い灰褐色 / 粒 30 / 寿命 4-9s
-    /// 傘     Factory Smoke              **もう 1 個**複製して 淡い灰 / 粒 95 / 寿命 18-34s
-    /// 炎     Fire Particles             **複製しない**（建物火災と同じ見た目が欲しい）
-    /// 噴石   Medium Explosion Particles 複製して 重力を下向き / 粒径 6 に
-    /// </code>
-    ///
-    /// ── ★★ 噴煙は「柱」である（2026-08-22、実機の指摘③）──────────────────
-    ///
-    /// > 噴煙がただの煙だまりになってしまっています。これは MissileMOD のキノコ雲の
-    /// > Method を参考にリアルな噴煙（キノコ雲ではない …）を作ってほしいです。
-    ///
-    /// 以前は <c>RenderEffect</c> **1 回**で、噴出口の真上の円盤（半径 40〜80 m）から
-    /// 煙を湧かせていただけだった。粒子は自分の初速で 7〜16 秒上がって消えるので、
-    /// 出来上がるのは<b>火口の上に浮いた煙の塊</b>である。柱にも傘にもならない。
-    ///
-    /// いまは形を <c>Core/Volcano/EruptionColumn</c>（純粋・テスト付き）が決め、ここは
-    /// **その 9 段を <c>SpawnArea(位置, 上, 半径, 高さ)</c> の円柱として湧かすだけ**である
-    /// （ミサイル MOD の <c>CloudPuffs</c> と同じ分業。形は借りない ——
-    /// あちらは単発の泡、こちらは火口から供給され続ける柱で、物理が違う）。
-    /// ガス推力域 → 対流域 → 傘の 3 区間と風下への傾きはあちらのクラス doc にある。
-    ///
-    /// **粒子の総量は今までと同じ**である。段ごとの密度は面積で正規化してあり
-    /// （<c>EruptionColumn.MagnitudeFor</c>）、重みの和が 1 なので、
-    /// 柱ぜんぶで従来の 1 回ぶんに等しい。増えるのは <c>RenderEffect</c> の
-    /// 回数（1 → 最大 9）だけで、1 回あたりの粒子数はむしろ減る。
-    ///
-    /// ── ★ 高さの基準は「噴出口 ＝ 火口の底」である（指摘②）───────────────
-    ///
-    /// 4 つとも <c>snapshot.VentWorld</c>（火口の底 ＋ 少しの浮き）に乗せる。
-    /// 山頂（火口の縁）に乗せると**窪みの深さのぶんだけ丸ごと宙に浮く**。
-    /// 底は山と一緒に上がるので、sim 側が毎 tick 引き直したものをそのまま使う
-    /// （<c>VolcanoEruption.SampleVent</c>）。
-    ///
-    /// ── 強弱の付け方（magnitude は密度であってサイズではない）───────────────
-    ///
-    /// <c>ParticleEffect.RenderEffect</c> の <c>magnitude</c> は**粒子の密度**で、
-    /// 見た目の大きさを決めるのは <c>SpawnArea</c> の半径である。
-    /// どちらを噴火の強さ <c>[0,1]</c> からどう作るかは
-    /// <see cref="EruptionEffectPlan"/>（Core、テスト付き）にある。
-    ///
-    /// ── ★ 直っている不具合 1: magnitude が確率に潰れていた ───────────────
-    ///
-    /// 以前は <c>BuildingProperties.m_fireEffect</c>（<c>FireEffect</c> 合成型）を
-    /// 通していた。<c>FireEffect.RenderEffect</c> は IL で
+    /// This used to emit the plume with its own <c>ParticleSystem</c> and its own
+    /// <c>Material</c>. **In the live game not one particle was ever drawn** — because it was an
+    /// environment where <c>Shader.Find</c> returned null for every name, including the built-in
+    /// <c>"Standard"</c>.
+    /// What is emitted now is **three of the game's own particle effects**, all of them
+    /// <b>DLC-free</b> (Natural Disasters' explosions and meteors only exist for DLC owners, so
+    /// they are never on the default path).
     ///
     /// <code>
-    /// probability = RoundToInt(magnitude * 100)   ← magnitude は「確率」になる
-    /// particlesPerSquare = timeDelta * 0.01f      ← magnitude が入っていない
+    /// plume column  Factory Smoke              cloned, dark grey-brown / 30 particles / life 4-9s
+    /// umbrella      Factory Smoke              **a second** clone, pale grey / 95 particles / life 18-34s
+    /// flames        Fire Particles             **not cloned** (we want the same look as a building fire)
+    /// ejecta        Medium Explosion Particles cloned, gravity turned downwards / particle size 6
     /// </code>
     ///
-    /// であり、しかも <c>EmitParticles</c> は <c>new Randomizer(id.RawData)</c> の
-    /// **1 発目**しか使わない。<c>default(InstanceID)</c> は <c>RawData == 0</c> で、
-    /// <c>new Randomizer(0).Int32(100)</c> の 1 発目は**必ず 7** である。
-    /// つまり ⑤ が渡していた <c>0.25 + 0.75 * unit</c> は
-    /// <c>7 &gt; 25…100</c> が常に偽 → **常に「出る」に張り付き、濃さは一定**だった。
-    /// 噴火の強弱は 1 度も画面に出ていなかったことになる。
-    /// **いまは <c>ParticleEffect</c> を直に呼ぶ**ので <c>magnitude</c> は素直に密度である
-    /// （<c>ParticleEffect</c> は <c>probability</c> に定数 100 を渡す＝必ず出す）。
+    /// ── ★★ the plume is a "column" (2026-08-22, live report ③) ────────────────────────────
     ///
-    /// ── ★ 直っている不具合 2: 時間差が <c>Time.deltaTime</c> だった ────────────
+    /// > The plume has turned into nothing but a pool of smoke. Please take the MissileMOD
+    /// > mushroom-cloud method as a reference and make a realistic plume (not a mushroom cloud …).
     ///
-    /// バニラの <c>EffectManager.EndRenderingImpl</c> は
-    /// <c>SimulationManager.m_simulationTimeDelta</c> を渡している（IL 実測）。
-    /// <c>Time.deltaTime</c> だと**一時停止しても噴き続け、速度を上げても濃さが変わらない**。
-    /// いまは <see cref="VolcanoVanillaFx.EffectTimeDelta"/> を通す。
+    /// It used to be **one** <c>RenderEffect</c>, welling smoke up from a disc (radius 40–80 m)
+    /// directly above the vent. The particles rise on their own initial velocity for 7–16 seconds
+    /// and vanish, so what you get is <b>a lump of smoke hanging over the crater</b>. Neither a
+    /// column nor an umbrella.
     ///
-    /// ── ★ 引けなかったときに何が起きるか ────────────────────────────
+    /// Now the shape is decided by <c>Core/Volcano/EruptionColumn</c> (pure, with tests), and this
+    /// code **merely wells up its 9 segments as cylinders via
+    /// <c>SpawnArea(position, up, radius, height)</c>** (the same division of labour as the
+    /// missile mod's <c>CloudPuffs</c>. The shape is not borrowed — theirs is a single puff,
+    /// ours is a column continuously fed from the crater, and the physics differ).
+    /// The three regions (gas-thrust, convective, umbrella) and the downwind lean are in that
+    /// class's doc.
     ///
-    /// **その 1 つを出さないだけ。** 例外は出さず、ログは 1 行、噴火は続く。
-    /// カメラ情報が取れないフレームは全部飛ばす
-    /// （<c>ParticleEffect.RenderEffect</c> は先頭で <c>cameraInfo</c> を参照するので
-    /// null を渡すと NRE になる）。
+    /// **The total number of particles is the same as before.** The per-segment density is
+    /// normalised by area (<c>EruptionColumn.MagnitudeFor</c>) and the weights sum to 1, so the
+    /// whole column equals one of the old calls. All that goes up is the number of
+    /// <c>RenderEffect</c> calls (1 → at most 9); the particle count per call actually falls.
     ///
-    /// ── 毎フレームの費用 ─────────────────────────────────
+    /// ── ★ the height datum is "the vent = the crater floor" (report ②) ────────────────────
     ///
-    /// <c>RenderEffect</c> を最大 11 回（噴煙柱の 9 段 ＋ 炎 ＋ 噴石）。
-    /// **1 回あたりの粒子数は以前より少ない** —— 段ごとの密度を面積で正規化してあり、
-    /// 柱ぜんぶで従来の噴煙 1 回ぶんと同じ量だからである。
-    /// <c>SpawnArea</c> / <c>InstanceID</c> /
-    /// <c>Vector3</c> はすべて struct で、<c>EmitParticles</c> の経路にヒープ確保は無い
-    /// （IL 実測）。**ヒープ確保は 0 バイト。**
-    /// 粒子数は <c>maxParticles</c> に対する自動絞り込みで頭打ちになる。
+    /// All four sit on <c>snapshot.VentWorld</c> (the crater floor plus a small lift).
+    /// Put them on the summit (the crater rim) and **the whole lot floats in mid-air by the depth
+    /// of the hollow**. The floor rises with the mountain, so use what the sim side re-sampled
+    /// every tick, as is (<c>VolcanoEruption.SampleVent</c>).
     ///
-    /// ── この型は sim スレッドから 1 度も呼ばれない ────────────────────
+    /// ── how the intensity is applied (magnitude is density, not size) ──────────────────────
     ///
-    /// 読むのは <see cref="VolcanoHub"/> の不変スナップショットだけで、
-    /// <c>VolcanoEruption</c> の内部状態には触らない。
+    /// <c>ParticleEffect.RenderEffect</c>'s <c>magnitude</c> is **particle density**; what decides
+    /// the apparent size is <c>SpawnArea</c>'s radius.
+    /// How each of the two is built from the eruption strength <c>[0,1]</c> is in
+    /// <see cref="EruptionEffectPlan"/> (Core, with tests).
+    ///
+    /// ── ★ fixed bug 1: magnitude was being collapsed into a probability ───────────────────
+    ///
+    /// It used to go through <c>BuildingProperties.m_fireEffect</c> (a composite
+    /// <c>FireEffect</c>). In IL, <c>FireEffect.RenderEffect</c> is
+    ///
+    /// <code>
+    /// probability = RoundToInt(magnitude * 100)   ← magnitude becomes a "probability"
+    /// particlesPerSquare = timeDelta * 0.01f      ← magnitude does not enter this
+    /// </code>
+    ///
+    /// and on top of that <c>EmitParticles</c> only ever uses **the first draw** of
+    /// <c>new Randomizer(id.RawData)</c>. <c>default(InstanceID)</c> has <c>RawData == 0</c>, and
+    /// the first draw of <c>new Randomizer(0).Int32(100)</c> is **always 7**.
+    /// So the <c>0.25 + 0.75 * unit</c> ⑤ was passing made <c>7 &gt; 25…100</c> always false →
+    /// **it was pinned at "emit" and the density was constant**.
+    /// Which means the eruption's intensity never once reached the screen.
+    /// **It now calls <c>ParticleEffect</c> directly**, so <c>magnitude</c> is plainly a density
+    /// (<c>ParticleEffect</c> passes a constant 100 for <c>probability</c>, i.e. it always emits).
+    ///
+    /// ── ★ fixed bug 2: the time delta was <c>Time.deltaTime</c> ───────────────────────────
+    ///
+    /// Vanilla's <c>EffectManager.EndRenderingImpl</c> passes
+    /// <c>SimulationManager.m_simulationTimeDelta</c> (measured in IL).
+    /// With <c>Time.deltaTime</c> it **keeps erupting while paused, and the density does not
+    /// change when you speed the game up**.
+    /// It now goes through <see cref="VolcanoVanillaFx.EffectTimeDelta"/>.
+    ///
+    /// ── ★ what happens when something cannot be looked up ─────────────────────────────────
+    ///
+    /// **That one thing is simply not emitted.** No exception, one line of log, and the eruption
+    /// carries on.
+    /// Frames where the camera info cannot be obtained are skipped entirely
+    /// (<c>ParticleEffect.RenderEffect</c> dereferences <c>cameraInfo</c> right at the top, so
+    /// passing null gives an NRE).
+    ///
+    /// ── the per-frame cost ─────────────────────────────────────────────────────────────────
+    ///
+    /// At most 11 <c>RenderEffect</c> calls (9 plume segments + flames + ejecta).
+    /// **The particle count per call is lower than before** — the per-segment density is
+    /// normalised by area, so the whole column comes to the same amount as one of the old plume
+    /// calls.
+    /// <c>SpawnArea</c> / <c>InstanceID</c> / <c>Vector3</c> are all structs, and there is no heap
+    /// allocation on the <c>EmitParticles</c> path (measured in IL).
+    /// **Zero bytes of heap allocation.**
+    /// The particle count is capped by the automatic throttling against <c>maxParticles</c>.
+    ///
+    /// ── this type is never called from the sim thread ──────────────────────────────────────
+    ///
+    /// All it reads is the immutable snapshot in <see cref="VolcanoHub"/>; it never touches
+    /// <c>VolcanoEruption</c>'s internal state.
     /// </summary>
     public static class VolcanoEruptionFx
     {
-        /// <summary>噴煙柱の足元を噴出口からどれだけ上げるか（m）。</summary>
+        /// <summary>How far above the vent the foot of the plume column starts (m).</summary>
         private const float PlumeLiftMetres = 8f;
 
         /// <summary>
-        /// 火口の底から縁までの高さを、**火口の半径から**見積もる比。
+        /// The ratio used to estimate the height from the crater floor up to the rim **from the
+        /// crater radius**.
         ///
-        /// <c>VolcanoShape.CraterDepthOf</c> は山の高さから深さを出すが、
-        /// ここに届いているのは**火口の半径**だけである（スナップショットが運んでいるのは
-        /// 影響範囲の半径と最終高で、形態ごとの比はどちらも 0.12 で揃えてある）。
-        /// 半径と深さが同じ比なので、縁の高さは半径に比例するとしてよい。
-        /// **多めに見積もる** —— 足りないと煙が碗に戻るが、
-        /// 多すぎても「少し上から出ている」にしかならない。
+        /// <c>VolcanoShape.CraterDepthOf</c> derives the depth from the mountain's height, but all
+        /// that reaches here is **the crater radius** (what the snapshot carries is the affected
+        /// range's radius and the final height, and the per-form ratios are both set to 0.12).
+        /// Since the radius and the depth use the same ratio, it is fine to treat the rim height
+        /// as proportional to the radius.
+        /// **Overestimate it** — fall short and the smoke falls back into the bowl, while
+        /// overshooting only ever amounts to "it comes out a little higher up".
         /// </summary>
         private const float CraterRimLiftRatio = 0.55f;
 
-        /// <summary>火口の底から縁まで（m）。</summary>
+        /// <summary>From the crater floor to the rim (m).</summary>
         private static float CraterRimLiftMetres(float craterRadiusMetres)
         {
             if (float.IsNaN(craterRadiusMetres) || craterRadiusMetres <= 0f) return 0f;
             return craterRadiusMetres * CraterRimLiftRatio;
         }
 
-        /// <summary>炎を噴出口からどれだけ上げるか（m）。</summary>
+        /// <summary>How far above the vent the flames sit (m).</summary>
         private const float FlameLiftMetres = 3f;
 
-        /// <summary>噴石を噴出口からどれだけ上げるか（m）。</summary>
+        /// <summary>How far above the vent the ejecta sit (m).</summary>
         private const float EjectaLiftMetres = 4f;
 
-        /// <summary>風向きを引く塩（<see cref="DeterministicRandom"/>）。**地点だけから決める。**</summary>
+        /// <summary>The salt for drawing the wind direction (<see cref="DeterministicRandom"/>). **Decided from the location alone.**</summary>
         private const uint WindDirectionSalt = 0x57494E44u;
 
-        /// <summary>風速を引く塩。</summary>
+        /// <summary>The salt for drawing the wind speed.</summary>
         private const uint WindSpeedSalt = 0x57535044u;
 
-        /// <summary>噴煙を倒す風速の下限（m/秒）。**⑤が決めた演出値**（気象の実測ではない）。</summary>
+        /// <summary>The lower bound of the wind speed that leans the plume (m/s). **A presentation value ⑤ chose** (not a meteorological measurement).</summary>
         private const float WindSpeedMinMetresPerSecond = 6f;
 
-        /// <summary>同上の上限。</summary>
+        /// <summary>As above, the upper bound.</summary>
         private const float WindSpeedMaxMetresPerSecond = 16f;
 
         /// <summary>
-        /// 噴石の窓を刻む時計（秒）。**バニラの効果時計**である ——
-        /// <c>EffectManager</c> 自身が描画 1 フレームごとに
-        /// <c>m_simulationTimeDelta</c> を足しているので、⑤も同じ足し方をする。
-        /// 一時停止で止まり、ゲーム速度に追随する。
+        /// The clock that ticks the ejecta's window (seconds). **It is the vanilla effect clock** —
+        /// <c>EffectManager</c> itself adds <c>m_simulationTimeDelta</c> once per rendered frame,
+        /// so ⑤ adds it the same way.
+        /// It stops when paused and follows the game speed.
         /// </summary>
         private static float _clockSeconds;
 
@@ -166,16 +176,16 @@ namespace DisasterPlus.Game
         private static bool _flameDrawn;
         private static bool _ejectaDrawn;
 
-        /// <summary>今フレームに湧かせた噴煙柱の段数（診断用。0 なら柱は 1 段も出ていない）。</summary>
+        /// <summary>Plume-column segments welled up this frame (for diagnostics. 0 means not one segment of the column is showing).</summary>
         private static int _plumeSegments;
 
-        /// <summary>直近に組んだ柱の高さ（m。診断用）。</summary>
+        /// <summary>The height of the last column built (m. For diagnostics).</summary>
         private static float _plumeHeightMetres;
 
         /// <summary>
-        /// 今フレーム、火口に何か 1 つでも出したか。
-        /// **診断（sim スレッド）から読まれるので <c>bool</c> のまま持つ** ——
-        /// ここで Unity の参照を <c>== null</c> と比べてはいけない。
+        /// Whether anything at all was emitted at the crater this frame.
+        /// **It is read by the diagnostics (sim thread), so keep it as a <c>bool</c>** —
+        /// do not compare a Unity reference with <c>== null</c> here.
         /// </summary>
         public static bool Drawing
         {
@@ -186,25 +196,27 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>今フレームに湧かせた噴煙柱の段数（診断用）。</summary>
+        /// <summary>Plume-column segments welled up this frame (for diagnostics).</summary>
         public static int PlumeSegments { get { return _plumeSegments; } }
 
-        /// <summary>直近に組んだ噴煙柱の高さ（m。噴出口からの相対。診断用）。</summary>
+        /// <summary>The height of the last plume column built (m, relative to the vent. For diagnostics).</summary>
         public static float PlumeHeightMetres { get { return _plumeHeightMetres; } }
 
         /// <summary>
-        /// 直近のフレームで実際に門にした借用の可否（診断とパネルの断りに出す）。
+        /// Which borrowings were actually gated on in the last frame (reported in the diagnostics
+        /// and in the panel's refusal).
         ///
-        /// ★ <c>DustResolved</c> は<b>ここでは埋まらない</b>（常に false）。
-        ///   火砕流もどきは <see cref="VolcanoPyroclasticFx"/> の持ち物で、
-        ///   成否も別に決まる。読むなら <c>VolcanoPyroclasticFx.DustResolved</c> のほう。
+        /// ★ <c>DustResolved</c> is <b>not filled in here</b> (it is always false).
+        ///   The pyroclastic lookalike belongs to <see cref="VolcanoPyroclasticFx"/> and its
+        ///   success is decided separately. If you want to read it, read
+        ///   <c>VolcanoPyroclasticFx.DustResolved</c>.
         /// </summary>
         public static VolcanoVanillaFacts Facts { get { return _facts; } }
 
-        /// <summary>診断に出す 1 行（**英語**）。</summary>
+        /// <summary>The one line reported in the diagnostics (**English**).</summary>
         public static string Detail { get { return VolcanoVanillaFx.Detail; } }
 
-        /// <summary>**main スレッド、毎フレーム。**</summary>
+        /// <summary>**Main thread, every frame.**</summary>
         public static void Update(VolcanoSnapshot snapshot)
         {
             try
@@ -228,23 +240,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **main スレッド。** 設定で切ったときとレベルアンロードで呼ぶ。
-        /// 借りているエフェクトそのものは <see cref="VolcanoVanillaFx"/> が持っているので、
-        /// ここで畳むのは⑤自身の時計だけである。冪等。
+        /// **Main thread.** Call when turned off in the settings and on level unload.
+        /// The borrowed effects themselves are held by <see cref="VolcanoVanillaFx"/>, so all that
+        /// is folded away here is ⑤'s own clock. Idempotent.
         /// </summary>
-        /// <summary>直近のフレームで塊の群れを描いたか（診断用）。</summary>
+        /// <summary>Whether the swarm of puffs was drawn in the last frame (for diagnostics).</summary>
         public static bool PuffsDrawn { get { return _puffsDrawn; } }
 
         private static bool _puffsDrawn;
 
-        /// <summary>塊が描けなくて灰の柱へ戻したことを 1 度だけ言う。</summary>
+        /// <summary>Say exactly once that the puffs could not be drawn and we fell back to the ash column.</summary>
         private static bool _puffFallbackLogged;
 
         public static void Destroy()
         {
             VolcanoBlastFx.Reset();
-            // ★ 塊の群れは**こちらが作った GameObject** なので、ここで消す
-            //   （借り物のエフェクトと違う）。
+            // ★ The swarm of puffs is **a GameObject we created**, so it is destroyed here
+            //   (unlike the borrowed effects).
             VolcanoPlumePuffFx.Destroy();
             _puffsDrawn = false;
             _clockSeconds = 0f;
@@ -265,27 +277,30 @@ namespace DisasterPlus.Game
 
             if (snapshot == null || !snapshot.Valid || !snapshot.EruptionActive)
             {
-                // 噴火が終わったフレームで**自分で**時計を戻す。sim 側からは呼ばれない。
-                // ★ 柱の高さも一緒に捨てる。残すと診断が
-                //   「0 段しか出ていないのに 1450 m の柱」という読めない行を出し続ける。
+                // Reset the clock **ourselves** on the frame the eruption ends. Never called from
+                // the sim side.
+                // ★ Discard the column height with it. Leave it and the diagnostics keep printing
+                //   the unreadable line "a 1450 m column when only 0 segments are showing".
                 _clockSeconds = 0f;
                 _plumeHeightMetres = 0f;
-                // ★ 飛んでいる岩も捨てる。残すと**噴火が終わった空に岩が落ち続ける。**
+                // ★ Discard the flying rocks too. Leave them and **rocks keep falling out of a
+                //   sky where the eruption has finished.**
                 VolcanoBlastFx.Reset();
 
-                // ★★ **塊の群れも畳む**（2026-08-22、実機報告
-                //    「中央の煙が残ったままになるバグ」）。
+                // ★★ **Fold the swarm of puffs away as well** (2026-08-22, live report
+                //    "a bug where the smoke in the middle stays behind").
                 //
-                //    こちらの ParticleSystem は<b>描画係</b>で、粒の寿命を毎フレーム
-                //    1000 秒へ戻している（あちらのクラス doc）。つまり
-                //    <b>置きっぱなしにすると永久に消えない</b> ——
-                //    ゲーム粒子と違って自然に死んでくれない。
-                //    ここを飛ばすと、噴火が終わった火口に煙が貼り付いたまま残る。
+                //    This ParticleSystem is <b>a renderer</b>, and it resets the particles'
+                //    lifetime to 1000 seconds every frame (that class's doc). In other words
+                //    <b>leave it in place and it never goes away</b> — unlike the game particles,
+                //    it does not die off by itself.
+                //    Skip this and the smoke stays stuck to the crater after the eruption ends.
                 VolcanoPlumePuffFx.Destroy();
                 return;
             }
 
-            // ★ 在庫は実機で 1 度だけ数える（事実文書の在庫が PARTIAL のままなので）。
+            // ★ Count the inventory exactly once in the live game (the inventory in the facts doc
+            //   is still PARTIAL).
             VolcanoVanillaFx.LogInventoryOnce();
 
             RenderManager.CameraInfo camera = VolcanoVanillaFx.CameraInfo();
@@ -296,7 +311,7 @@ namespace DisasterPlus.Game
                 if (!_cameraWarned)
                 {
                     _cameraWarned = true;
-                    // ★ 毎フレームの経路なので 1 度だけ。Warn は使わない。
+                    // ★ This is on the per-frame path, so once only. Do not use Warn.
                     Log.Info("volcano eruption effects: the game is not reporting a camera "
                              + "this frame, so nothing is drawn at the crater; the eruption "
                              + "itself is unaffected");
@@ -317,25 +332,29 @@ namespace DisasterPlus.Game
             ParticleEffect flames = VolcanoVanillaFx.Flames();
             ParticleEffect ejecta = VolcanoVanillaFx.Ejecta();
 
-            // ★ 第 4 引数（土煙）はここでは埋めない。あれは VolcanoPyroclasticFx の
-            //   持ち物で、こちらの門には 1 度も入らない（Facts の doc）。
+            // ★ The fourth argument (the dust) is not filled in here. That belongs to
+            //   VolcanoPyroclasticFx and never enters this gate (the doc of Facts).
             _facts = new VolcanoVanillaFacts(ash != null, flames != null, ejecta != null,
                                              false, true);
 
-            // ★ dt == 0（一時停止・読めない）のフレームは 1 粒も出さないのが正しい。
-            //   継続モードの粒子数は timeDelta に比例するので、渡しても 0 になる。
+            // ★ On frames where dt == 0 (paused, or unreadable) emitting not one particle is the
+            //   right thing. The particle count in continuous mode is proportional to timeDelta,
+            //   so passing it through would come to 0 anyway.
             if (dt <= 0f) return;
 
-            // ★ 柱の形は 1 回だけ作る。噴煙も雷も塊の群れも**同じ形**を見る。
+            // ★ Build the column's shape once. The plume, the lightning and the swarm of puffs
+            //   all look at **the same shape**.
             float windX, windZ;
             uint plumeSeed;
             EruptionColumn plume = BuildColumn(snapshot.Footprint.Centre, craterRadius, unit,
                                                out windX, out windZ, out plumeSeed);
 
-            // ★★ **雲の塊の群れ**（所有者の依頼「幾何的なものではなくカオスな煙」）。
-            //    ゲーム粒子の灰の柱を**置き換えない** —— 依頼は「煙のエフェクトに
-            //    加えて」であり、役割も違う（あちらは細かい霞、こちらは大きな塊）。
-            //    描けなくても噴火は続く（今までの絵になるだけ）。
+            // ★★ **The swarm of cloud puffs** (the owner's request for "chaotic smoke rather than
+            //    something geometric").
+            //    It does **not replace** the game particles' ash column — the request was "in
+            //    addition to the smoke effect", and their roles differ (that one is a fine haze,
+            //    this one is big lumps).
+            //    The eruption carries on even if it cannot be drawn (you just get the old picture).
             _puffsDrawn = VolcanoPlumePuffFx.Update(
                 vent, craterRadius, plume.HeightMetres, unit, _clockSeconds,
                 windX, windZ, plumeSeed);
@@ -348,55 +367,63 @@ namespace DisasterPlus.Game
                          + "); falling back to the game's own ash particles");
             }
 
-            // ★★ **灰色のゲーム粒子の噴煙はもう出さない**（2026-08-22、所有者の指示）。
+            // ★★ **The grey game-particle plume is no longer emitted** (2026-08-22, owner's
+            //    instruction).
             //
-            //    > 白色の噴煙のエフェクトが優れているので、既存の灰色の煙の
-            //    > エフェクトはオミットでお願いします。
+            //    > The white plume effect is the better one, so please omit the existing grey
+            //    > smoke effect.
             //
-            //    白い塊の群れ（VolcanoPlumePuffFx）と重ねると、塊の隙間から
-            //    細かい灰の粒が見えて**2 つの噴煙が重なっている**ように見えた。
-            //    灰色の分は塊そのものの色へ移してある（あちらの AshColor）。
+            //    Layered with the white swarm of puffs (VolcanoPlumePuffFx), the fine ash
+            //    particles showed through the gaps between the puffs and it looked like
+            //    **two plumes overlapping**.
+            //    The grey has been moved into the colour of the puffs themselves (their AshColor).
             //
-            //    ★ RenderColumn と AshPlume/AshUmbrella の複製は**残してある**。
-            //      柱の形（EruptionColumn）は噴煙の高さと雷の通り道に今も要るし、
-            //      塊が 1 個も描けない環境（マテリアルが引けない）では
-            //      こちらへ戻すのが唯一の逃げ道だからである。
+            //    ★ RenderColumn and the AshPlume/AshUmbrella clones are **kept**.
+            //      The column's shape (EruptionColumn) is still needed for the plume height and
+            //      for the lightning's path, and in an environment where not one puff can be
+            //      drawn (the material cannot be looked up) falling back to this is the only way
+            //      out.
             _plumeDrawn = _puffsDrawn
                 ? false
                 : RenderColumn(ash, umbrella, camera, vent, plume, craterRadius, dt);
             _flameDrawn = RenderFlames(flames, camera, vent, craterRadius, unit, dt);
             _ejectaDrawn = RenderEjecta(ejecta, camera, vent, craterRadius, unit, dt);
 
-            // ★ 爆発と噴石（飛ぶ岩）。**時計はこの型のものを渡す** ——
-            //   あちらに 2 本目を持たせると、弾ける瞬間と噴出口の噴水がずれる。
+            // ★ The blast and the ejecta (the flying rocks). **Hand over this type's clock** —
+            //   give that one a second clock and the moment it bursts drifts out of step with the
+            //   fountain at the vent.
             VolcanoBlastFx.Update(camera, vent, snapshot.Footprint.Centre, snapshot.Footprint,
                                   craterRadius, unit, _clockSeconds, dt,
                                   snapshot.SupereruptionClimax, snapshot.RingFissureRadiusMetres);
 
-            // ★★ 火口のマグマだまり・噴煙への光・噴煙の中の雷。
-            //    **粒子では出せない**ので自前の <c>DrawMesh</c> である
-            //    （<see cref="VolcanoCraterFx"/> のクラス doc）。
-            //    柱の形を渡すのは、雷が**噴煙の中を**走るためである。
+            // ★★ The crater's magma pool, the light on the plume, and the lightning inside the
+            //    plume. **Particles cannot do these**, so it is our own <c>DrawMesh</c>
+            //    (the class doc of <see cref="VolcanoCraterFx"/>).
+            //    The column's shape is passed in so that the lightning runs **through the plume**.
             VolcanoCraterFx.Update(snapshot, camera, plume.HeightMetres, plume);
         }
 
         /// <summary>
-        /// <b>噴火柱</b>。<c>Core/Volcano/EruptionColumn</c> が決めた 9 段を、段ごとに
-        /// <c>SpawnArea(位置, 上, 半径, 高さ)</c> の**円柱**として湧かす。
-        /// **継続モード**（<c>timeOffset &lt; 0</c>）で毎フレーム押し出す。
+        /// <b>The eruption column.</b> The 9 segments decided by
+        /// <c>Core/Volcano/EruptionColumn</c> are welled up segment by segment as **cylinders**
+        /// via <c>SpawnArea(position, up, radius, height)</c>.
+        /// Pushed out every frame in **continuous mode** (<c>timeOffset &lt; 0</c>).
         ///
-        /// ★ 傘の段は別の複製（<c>AshUmbrella</c>）で描く —— 淡くて粒が大きく、寿命が長い。
-        ///   引けなければ**柱の複製で代用する**（傘が濃くなるだけで、消えはしない）。
+        /// ★ The umbrella segments are drawn with a separate clone (<c>AshUmbrella</c>) — pale,
+        ///   with large, long-lived particles.
+        ///   If it cannot be looked up, **the column's clone stands in** (the umbrella just comes
+        ///   out denser; it does not disappear).
         ///
-        /// ★ 風は火山の地点から決まる（<see cref="DeterministicRandom"/>）ので、
-        ///   **同じ山なら毎回同じ向きに倒れる**。<c>SwayAt</c> の 1 本の正弦だけが
-        ///   ゆっくり左右へ振る（37 秒周期）。フレーム番号は 1 度も混ぜない。
+        /// ★ The wind is decided from the volcano's location (<see cref="DeterministicRandom"/>),
+        ///   so **the same mountain always leans the same way**. Only the single sine of
+        ///   <c>SwayAt</c> swings it slowly left and right (a 37-second period). The frame number
+        ///   is never mixed in.
         /// </summary>
         /// <summary>
-        /// 今のフレームの柱の形。**描画の前に 1 回だけ作る** ——
-        /// 以前は <see cref="RenderColumn"/> の中で作っていたが、
-        /// 雷（<see cref="VolcanoCraterFx"/>）も**同じ形**を見なければならない
-        /// （別に作ると、雷だけが別の太さの柱の中を走る）。
+        /// This frame's column shape. **Built once, before drawing** — it used to be built inside
+        /// <see cref="RenderColumn"/>, but the lightning (<see cref="VolcanoCraterFx"/>) has to
+        /// look at **the same shape** (build it separately and the lightning alone runs through a
+        /// column of a different width).
         /// </summary>
         private static EruptionColumn BuildColumn(Vec3 centre, float craterRadius, float unit)
         {
@@ -406,9 +433,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 同上。**風と種も返す** —— <see cref="VolcanoPlumePuffFx"/> が
-        /// 同じ風・同じ種で塊を動かすためである。別に引き直すと、
-        /// <b>灰の柱と塊の群れが違う方向へ倒れる。</b>
+        /// As above. **It also returns the wind and the seed** — so that
+        /// <see cref="VolcanoPlumePuffFx"/> moves the puffs on the same wind and the same seed.
+        /// Draw them separately and <b>the ash column and the swarm of puffs lean in different
+        /// directions.</b>
         /// </summary>
         private static EruptionColumn BuildColumn(Vec3 centre, float craterRadius, float unit,
                                                   out float windX, out float windZ,
@@ -440,15 +468,16 @@ namespace DisasterPlus.Game
             _plumeHeightMetres = plume.HeightMetres;
 
             float baseX = vent.X;
-            // ★★ **火口の底ではなく縁から立ち上げる**（2026-08-22、所有者の依頼
-            //    「噴火口に滞留する煙を消して、立ち上る噴煙のみに」）。
+            // ★★ **Start it from the rim, not the crater floor** (2026-08-22, the owner's request
+            //    "get rid of the smoke lingering in the crater and leave only the rising plume").
             //
-            //    <c>VentWorld.Y</c> は**火口の底**である（炎が浮いて見えるのを直したときに
-            //    そう揃えた）。そこから 8 m だけ上で煙を湧かせていたので、煙は
-            //    **火口の碗の中に溜まって上へ抜けにくかった** ——
-            //    見た目は「立ち上る柱」ではなく「火口に溜まった煙」になる。
-            //    縁の高さまで持ち上げれば、湧いた煙は必ず外へ出る。
-            //    碗の中に見えるのは、これからはマグマだまり（<see cref="VolcanoCraterFx"/>）である。
+            //    <c>VentWorld.Y</c> is **the crater floor** (it was lined up that way when the
+            //    flames looked like they were floating). Welling smoke up just 8 m above that
+            //    meant the smoke **pooled inside the crater bowl and struggled to escape upwards** —
+            //    the result looks like "smoke pooled in the crater" rather than "a rising column".
+            //    Lift it to the height of the rim and the smoke that wells up always gets out.
+            //    From now on, what you see inside the bowl is the magma pool
+            //    (<see cref="VolcanoCraterFx"/>).
             float baseY = vent.Y + CraterRimLiftMetres(craterRadius) + PlumeLiftMetres;
             float baseZ = vent.Z;
 
@@ -471,13 +500,14 @@ namespace DisasterPlus.Game
                     segment.RadiusMetres,
                     segment.HalfHeightMetres);
 
-                // InstanceID は空でよい。ParticleEffect は probability に定数 100 を渡す
-                // （＝必ず出す）ので、Randomizer の種が 0 に固定されても影響が無い。
-                // 建物の旗の検査も「建物 0 なら飛ばす」形になっている（IL 実測）。
+                // An empty InstanceID is fine. ParticleEffect passes a constant 100 for
+                // probability (i.e. it always emits), so it does not matter that the Randomizer
+                // seed is pinned at 0.
+                // The building-flag check is also shaped as "skip if building is 0" (measured in IL).
                 effect.RenderEffect(default(InstanceID), area,
                                     new Vector3(segment.DriftX, segment.DriftY, segment.DriftZ),
                                     0f, segment.Magnitude,
-                                    -1f,   // ★ 継続モード。バニラの陥没穴と同じ形
+                                    -1f,   // ★ continuous mode. The same shape as vanilla's sinkhole
                                     dt, camera);
                 drawn++;
             }
@@ -486,7 +516,7 @@ namespace DisasterPlus.Game
             return drawn > 0;
         }
 
-        /// <summary>火口の炎。<b>ゲーム自身の建物火災の炎そのもの。</b></summary>
+        /// <summary>The flames in the crater. <b>The game's own building-fire flames themselves.</b></summary>
         private static bool RenderFlames(ParticleEffect effect, RenderManager.CameraInfo camera,
                                          Vec3 vent, float craterRadius, float unit, float dt)
         {
@@ -503,13 +533,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴石。**噴いていない間は 1 度も呼ばない**（<c>magnitude</c> が 0 を返す）。
+        /// The ejecta. **Never called between bursts** (<c>magnitude</c> returns 0).
         ///
-        /// <c>DispatchEffect</c> を使わないのは、あれが積んだ予定を
-        /// <c>EffectManager</c> が**あとで**実行するためである。⑤の複製を
-        /// レベルアンロードで破棄したあとに実行されると、
-        /// バニラの中で破棄済みオブジェクトを触ることになる。
-        /// 継続モードで自分で窓を作れば、生存期間は完全にこちらの手の内にある。
+        /// <c>DispatchEffect</c> is not used because <c>EffectManager</c> runs what it queues
+        /// **later**. If that ran after ⑤'s clones had been destroyed on level unload, vanilla
+        /// would be touching destroyed objects.
+        /// Make the window ourselves in continuous mode and the lifetime is entirely in our hands.
         /// </summary>
         private static bool RenderEjecta(ParticleEffect effect, RenderManager.CameraInfo camera,
                                          Vec3 vent, float craterRadius, float unit, float dt)

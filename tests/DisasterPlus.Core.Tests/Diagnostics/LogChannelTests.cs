@@ -29,9 +29,9 @@ namespace DisasterPlus.Core.Tests.Diagnostics
         [Fact]
         public void DefaultMask_EnablesGeneralOnly()
         {
-            // 既存の Log.Diag(key, msg) 呼び出しは General 扱いになる。
-            // ここを 0 にすると現在出ている診断ログが黙って消え、
-            // docs/playtest-checklist.md の手順が壊れる。
+            // Existing Log.Diag(key, msg) calls are treated as General.
+            // Setting this to 0 would silently make the diagnostic logs that currently
+            // appear vanish, and break the procedure in docs/playtest-checklist.md.
             Assert.True(LogChannel.IsEnabled(LogChannel.General, LogChannel.DefaultMask));
             Assert.False(LogChannel.IsEnabled(LogChannel.FireWhirl, LogChannel.DefaultMask));
             Assert.False(LogChannel.IsEnabled(LogChannel.Forecast, LogChannel.DefaultMask));
@@ -44,8 +44,9 @@ namespace DisasterPlus.Core.Tests.Diagnostics
         [Fact]
         public void BitPositions_AreFrozen()
         {
-            // 保存値は公開契約。ビット位置を変えると既存プレイヤーの
-            // .cgs に入っている値が別の意味になる。廃止するときも詰めない。
+            // Saved values are a public contract. Changing a bit position makes the value
+            // held in an existing player's .cgs mean something else. Do not close up the
+            // gaps when retiring one either.
             Assert.Equal(1, LogChannel.General);
             Assert.Equal(2, LogChannel.FireWhirl);
             Assert.Equal(4, LogChannel.Forecast);

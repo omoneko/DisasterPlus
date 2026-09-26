@@ -6,20 +6,21 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.CalderaPreview
 {
     /// <summary>
-    /// 破局噴火の 4 つの段の地形断面を、**ゲームを起動せずに**描いて確かめる
-    /// （2026-08-22、所有者の指摘「カルデラ形成時は、山体が大きく落ち込んで
-    /// 大爆発するんじゃないでしょうか…？」）。
+    /// Draws and checks the terrain cross-sections of the four stages of a caldera-forming
+    /// eruption **without launching the game** (2026-08-22, the owner's remark: "when a
+    /// caldera forms, shouldn't the edifice collapse dramatically and blow up...?").
     ///
-    /// このプロジェクトの決まり「見た目の変更は自分でオフラインに描画・計測してから
-    /// 実機テストを頼む」のための道具である。<b>Core の実物をそのままコンパイルして
-    /// 呼ぶ</b>ので、書き直した近似ではない。
+    /// This is the tool for this project's rule that "visual changes are drawn and measured
+    /// offline by yourself before asking for a test in the game". It compiles and calls
+    /// <b>the real thing from Core</b> directly, so it is not a rewritten approximation.
     ///
     ///   dotnet run --project tools/CalderaPreview -- docs/images/volcano
     /// </summary>
     internal static class Program
     {
-        // 成層火山・スライダー上端（表示 25.5）の実寸。VolcanoState が
-        // 半径をカルデラ側から割り戻すので、円錐はこの大きさになる。
+        // The real size of a stratovolcano at the top of the slider (displayed as 25.5).
+        // VolcanoState works the radius back from the caldera side, so the cone comes out
+        // this size.
         private const float ConeRadius = 2928f;
         private const float ConeHeight = 1000f;
         private const float Ground = 120f;
@@ -27,12 +28,14 @@ namespace DisasterPlus.Tools.CalderaPreview
         private const int Width = 1100;
         private const int Height = 520;
 
-        /// <summary>横に見る範囲（m、片側）。カルデラの外まで入れる。</summary>
+        /// <summary>The horizontal extent shown (m, half-width). Wide enough to include the
+        /// area beyond the caldera.</summary>
         private const float ViewHalfWidth = 7000f;
 
         private const uint Seed = 20260822u;
 
-        /// <summary>海面（m）。<c>WaterSimulation.DEFAULT_SEA_LEVEL</c> の実測値。</summary>
+        /// <summary>Sea level (m). Measured from
+        /// <c>WaterSimulation.DEFAULT_SEA_LEVEL</c>.</summary>
         private const float SeaLevel = 40f;
 
         private static readonly VolcanoRelief Flat =
@@ -57,8 +60,9 @@ namespace DisasterPlus.Tools.CalderaPreview
                               + " (ground was " + Ground.ToString("F0")
                               + ", sea level " + SeaLevel.ToString("F0") + ")");
 
-            // ★ 床が海面より上か下かを**必ず名乗る**。以前は必ず下だった
-            //   （所有者の問い「必ず海抜より低くなる理由は何ですか？」）。
+            // ★ **Always state** whether the floor is above or below sea level. It used to be
+            //   below without exception (the owner's question: "what is the reason it always
+            //   ends up below sea level?").
             float floor = Ground - depth;
             Console.WriteLine(floor >= SeaLevel
                 ? "         the caldera floor stays ABOVE sea level (dry caldera)"
@@ -73,7 +77,8 @@ namespace DisasterPlus.Tools.CalderaPreview
             return 0;
         }
 
-        /// <summary>その段のあとの地面の高さ（m）。距離は中心から（符号なし）。</summary>
+        /// <summary>The ground height (m) after that stage. The distance is from the centre
+        /// (unsigned).</summary>
         private static float Stage1Cone(float d)
         {
             return Ground + VolcanoCrater.ProfileAt(Flat, d, 0f, ConeRadius, ConeHeight);
@@ -87,20 +92,23 @@ namespace DisasterPlus.Tools.CalderaPreview
         private static float Stage4Caldera(float d, float calderaR, float depth,
                                            float bulgeR, float bulgeH)
         {
-            // ★ 陥没は「膨らんだあとの地面」から落ちる（実機と同じ順序）。
+            // ★ The collapse drops from "the ground after the inflation" (the same order as
+            //   the game).
             float baseMetres = Stage2Bulge(d, bulgeR, bulgeH);
 
-            // ★ 床は鉢だけではない —— 崩れた岩塊と中央火口丘が乗る。
+            // ★ The floor is not just a bowl —— collapsed blocks and a central cone sit on it.
             float offset = SuperEruption.CalderaFloorOffsetAt(d, 0f, calderaR, depth, Seed);
 
-            // ★ 山体の外では**そのセルの本物の地面**が基準（元の地形を残す）。
-            //   実機の VolcanoUplift.ReferenceGroundFor と同じ規則。
+            // ★ Outside the edifice the reference is **that cell's real ground** (so the
+            //   original terrain is preserved). The same rule as the game's
+            //   VolcanoUplift.ReferenceGroundFor.
             float reference = ReferenceGround(d, baseMetres);
 
             return baseMetres + SuperEruption.FounderDropAt(offset, baseMetres, reference);
         }
 
-        /// <summary>実機の <c>VolcanoUplift.ReferenceGroundFor</c> と同じ規則。</summary>
+        /// <summary>The same rule as the game's
+        /// <c>VolcanoUplift.ReferenceGroundFor</c>.</summary>
         private static float ReferenceGround(float distance, float baseMetres)
         {
             float band = ConeRadius * 0.25f;
@@ -132,7 +140,7 @@ namespace DisasterPlus.Tools.CalderaPreview
         {
             var rgb = new byte[Width * Height * 3];
 
-            // 縦の見る範囲は「いちばん高いところ」と「床」から決める。
+            // The vertical extent is set from "the highest point" and "the floor".
             float top = Ground + ConeHeight + bulgeH + 150f;
             float bottom = Ground - depth - 150f;
 
@@ -141,10 +149,10 @@ namespace DisasterPlus.Tools.CalderaPreview
                 rgb[i] = 16; rgb[i + 1] = 18; rgb[i + 2] = 24;
             }
 
-            // 元の地面の線（基準）。
+            // The line of the original ground (the reference).
             PlotLine(rgb, top, bottom, d => Ground, 70, 70, 80);
 
-            // 3 本の断面。
+            // The three cross-sections.
             PlotLine(rgb, top, bottom, Stage1Cone, 210, 140, 90);
             PlotLine(rgb, top, bottom, d => Stage2Bulge(d, bulgeR, bulgeH), 240, 200, 90);
             PlotLine(rgb, top, bottom,
@@ -167,7 +175,8 @@ namespace DisasterPlus.Tools.CalderaPreview
                 if (py < 0) py = 0;
                 if (py >= Height) py = Height - 1;
 
-                // 縦に飛ぶところ（崖）も繋いで塗る —— 点が飛ぶと壁が見えない。
+                // Fill in where it jumps vertically (a cliff) as well —— with isolated points
+                // the wall would not be visible.
                 int from = previous < 0 ? py : previous;
                 int lo = from < py ? from : py;
                 int hi = from < py ? py : from;

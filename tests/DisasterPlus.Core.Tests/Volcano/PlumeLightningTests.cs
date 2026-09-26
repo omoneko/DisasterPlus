@@ -4,18 +4,20 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 所有者の依頼「噴煙の中で雷（噴石同士が当たって生じるやつ）が発生するのを再現」。
+    /// Owner's request: "Reproduce lightning occurring inside the eruption plume (the
+    /// kind produced by volcanic bombs striking one another)."
     ///
-    /// ★★ 火山雷は**柱の中で完結する**（地面へは落ちない）。
-    ///    そして <c>VolcanicTremor</c> と同じく**状態を 1 つも持たない**ので、
-    ///    強さが変わっても「もう光っている閃光」が消えてはいけない。
+    /// ★★ Volcanic lightning **is self-contained within the column** (it does not fall
+    ///    to the ground). And, just like <c>VolcanicTremor</c>, it **holds no state at
+    ///    all**, so a flash that is already lit must not disappear when the strength
+    ///    changes.
     /// </summary>
     public class PlumeLightningTests
     {
         private const uint Seed = 0x5EED1234u;
         private const float Height = 1200f;
 
-        /// <summary>柱の形の代用。中ほどがいちばん太い。</summary>
+        /// <summary>Stand-in for the column's shape. Thickest around the middle.</summary>
         private static float Radius(float t)
         {
             return 40f + 160f * (t < 0.8f ? t / 0.8f : 1f);
@@ -24,7 +26,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void EverySlotHoldsExactlyOneFlashAndItEnds()
         {
-            // 枠ごとに 1 本。**光り続けない。**
+            // One per slot. **It does not stay lit.**
             for (int slot = 0; slot < 20; slot++)
             {
                 float start = PlumeLightning.StartOf(Seed, slot);
@@ -39,7 +41,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void AFlashStaysInsideItsOwnSlot()
         {
-            // はみ出すと、さかのぼる枠の数（MaxBolts）では拾いきれない本が出る。
+            // If it overruns, some bolts cannot be picked up by the number of slots we
+            // look back over (MaxBolts).
             for (int slot = 0; slot < 50; slot++)
             {
                 float start = PlumeLightning.StartOf(Seed, slot);
@@ -53,8 +56,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ChangingTheStrengthDoesNotEraseAFlashThatIsAlreadyLit()
         {
-            // ★ ここが VolcanicTremor から引き継いだ規律である。
-            //   強さは明るさだけを決め、起きる／起きないは決めない。
+            // ★ This is the discipline inherited from VolcanicTremor. The strength
+            //   decides only the brightness, not whether it happens or not.
             for (int slot = 0; slot < 20; slot++)
             {
                 float t = PlumeLightning.StartOf(Seed, slot) + 0.05f;
@@ -85,11 +88,11 @@ namespace DisasterPlus.Core.Tests.Volcano
                 {
                     LightningPoint p = points[i];
 
-                    // 高さは柱の中。**地面へは落ちない。**
+                    // The height is inside the column. **It does not fall to the ground.**
                     Assert.InRange(p.Y, Height * PlumeLightning.LowFraction - 1e-3f,
                                    Height * PlumeLightning.HighFraction + 1e-3f);
 
-                    // 横方向はその高さの柱の半径の中。
+                    // Horizontally, inside the column radius at that height.
                     float r = Radius(p.Y / Height);
                     float d = (float)System.Math.Sqrt(p.X * p.X + p.Z * p.Z);
                     Assert.True(d <= r + 1e-3f, "bolt left the column: " + d + " > " + r);
@@ -100,7 +103,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheBoltIsNotAStraightLine()
         {
-            // 真っ直ぐだと雷に見えない（PointCount の doc）。
+            // If it is straight it does not look like lightning (see the doc on PointCount).
             var points = new LightningPoint[PlumeLightning.PointCount];
             PlumeLightning.PathInto(points, Seed, 5, Height, Radius);
 

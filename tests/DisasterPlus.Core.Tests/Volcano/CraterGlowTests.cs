@@ -4,17 +4,19 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 所有者の依頼「噴火口のマグマだまり（溶岩同様光る）と噴煙への光の放射」。
+    /// The owner's request: "a magma pool in the crater (glowing like lava) and light
+    /// radiating into the eruption plume".
     ///
-    /// ★★ いちばん大事なのは**点滅しないこと**である。<c>LavaGlow</c> は一度
-    ///    UV スクロールで溶岩流を点滅させて指摘を受けている。
+    /// ★★ The most important thing is that it **must not strobe**. <c>LavaGlow</c> once
+    ///    made the lava flow flicker with UV scrolling and was called out for it.
     /// </summary>
     public class CraterGlowTests
     {
         [Fact]
         public void ThePoolNeverStrobes()
         {
-            // 60 fps で 10 秒ぶん。**1 フレームあたりの変化が目に見える段にならない**こと。
+            // Ten seconds' worth at 60 fps. **The per-frame change must never become a
+            // visible step.**
             const float Step = 1f / 60f;
             float previous = CraterGlow.PoolBrightness(1f, 0f);
             float worst = 0f;
@@ -27,14 +29,16 @@ namespace DisasterPlus.Core.Tests.Volcano
                 previous = now;
             }
 
-            // いちばん速い成分は 0.19 Hz。1 フレームの変化は 1% にも満たないはずである。
+            // The fastest component is 0.19 Hz. A single frame's change should not even
+            // reach 1%.
             Assert.True(worst < 0.01f, "per-frame change was " + worst);
         }
 
         [Fact]
         public void TheCraterIsAlreadyRedBeforeTheEruptionPeaks()
         {
-            // 強さ 0 でも消えない。**火口は噴火前から赤い。**
+            // It does not go out even at strength 0. **The crater is red before the
+            // eruption starts.**
             for (int i = 0; i < 40; i++)
             {
                 Assert.True(CraterGlow.PoolBrightness(0f, i * 0.37f) > 0f);
@@ -52,7 +56,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void ThePoolNeverSpillsOverTheCraterRim()
         {
-            // 縁からあふれて見えるのは溶岩流の仕事であって、だまりの仕事ではない。
+            // Looking as though it spills over the rim is the lava flow's job, not the
+            // pool's.
             foreach (float u in new[] { 0f, 0.5f, 1f, 5f })
             {
                 Assert.True(CraterGlow.PoolRadiusMetres(100f, u) <= 100f);

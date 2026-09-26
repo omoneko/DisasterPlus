@@ -8,7 +8,7 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void FlagBitsMatchTheGame()
         {
-            // IL 事実文書 §A-1 / §A-6。ここがずれると全ての判定が静かに壊れる。
+            // IL facts document §A-1 / §A-6. If these drift, every check breaks silently.
             Assert.Equal(1, DisasterPhases.Created);
             Assert.Equal(2, DisasterPhases.Deleted);
             Assert.Equal(4, DisasterPhases.Emerging);
@@ -46,18 +46,20 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void HazardMapNeedsBothGates()
         {
-            // IL 事実文書 §A-6: Located && (Emerging|Active)。嵐と**バイト単位で同一**。
+            // IL facts document §A-6: Located && (Emerging|Active).
+            // **Byte-for-byte identical** to the storm.
             int located = DisasterPhases.Created | DisasterPhases.Located;
-            Assert.False(DisasterPhases.PaintsHazardMap(located));                              // 進行中でない
+            Assert.False(DisasterPhases.PaintsHazardMap(located));                              // not in progress
             Assert.True(DisasterPhases.PaintsHazardMap(located | DisasterPhases.Emerging));
             Assert.True(DisasterPhases.PaintsHazardMap(located | DisasterPhases.Active));
-            Assert.False(DisasterPhases.PaintsHazardMap(located | DisasterPhases.Clearing));    // 進行中でない
+            Assert.False(DisasterPhases.PaintsHazardMap(located | DisasterPhases.Clearing));    // not in progress
         }
 
         [Fact]
         public void HazardMapIsNeverPaintedWithoutLocated()
         {
-            // 地震計が無ければ地震はハザードマップに出ない。0 を「安全」と読ませない根拠。
+            // Without a seismometer the earthquake never shows on the hazard map. That is
+            // the grounds for not letting 0 be read as "safe".
             int inProgress = DisasterPhases.Created | DisasterPhases.Active;
             Assert.False(DisasterPhases.PaintsHazardMap(inProgress));
             Assert.False(DisasterPhases.IsLocated(inProgress));
@@ -66,12 +68,14 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void PhaseBasedGateAgreesWithTheRawFlagGate()
         {
-            // Task 4 が足した位相版のゲートが、生の m_flags 版と一致することを固定する。
-            // 一致の根拠は「位相のビットが互いに排他」であること（§A-1: ActivateDisaster は
-            // (m_flags & ~4)|8、DeactivateDisaster は (m_flags & ~12)|16 と、遷移のたびに
-            // 前のビットを落とす）。したがって走査するのも排他な組み合わせだけにする——
-            // Active|Clearing のような**到達しない**組み合わせまで一致を要求すると、
-            // 実在しない状態のために生の m_flags 版の忠実さを曲げることになる。
+            // Pins down that the phase-based gate added by Task 4 agrees with the raw
+            // m_flags one. The grounds for that agreement are that the phase bits are
+            // mutually exclusive (§A-1: ActivateDisaster is (m_flags & ~4)|8 and
+            // DeactivateDisaster is (m_flags & ~12)|16, so every transition drops the
+            // previous bit). We therefore scan only mutually exclusive combinations ——
+            // demanding agreement even for **unreachable** combinations such as
+            // Active|Clearing would mean bending the faithfulness of the raw m_flags
+            // version for the sake of a state that does not exist.
             int[] phaseBits =
             {
                 0,
@@ -99,7 +103,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
         [Fact]
         public void SelfTriggerIsIndependentOfPhase()
         {
-            // 立て忘れると Emerging で永久に止まる（§A-1）。読み側はこの区別が要る。
+            // Forget to set it and it stalls in Emerging forever (§A-1). The reading side
+            // needs to tell the two apart.
             int emerging = DisasterPhases.Created | DisasterPhases.Emerging;
             Assert.Equal(EarthquakePhase.Emerging, DisasterPhases.PhaseOf(emerging));
             Assert.Equal(EarthquakePhase.Emerging,

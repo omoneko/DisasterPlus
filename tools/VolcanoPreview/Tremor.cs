@@ -9,22 +9,23 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.VolcanoPreview
 {
     /// <summary>
-    /// 火山性地震の地動を**ゲームを起動せずに**描いて確かめる。
-    /// 呼ぶのは <see cref="VolcanicTremor"/> の実物である。
+    /// Draws and checks the ground motion of volcanic earthquakes **without launching the
+    /// game**. What is called is the real <see cref="VolcanicTremor"/>.
     ///
-    /// 揺れは動画でしか見えないので、ここでは<b>記象（波形）</b>として描く ——
-    /// 「切れ目が無いか」「群発の山が立っているか」「噴火で最大になるか」は
-    /// 波形を見れば分かる。
+    /// Shaking can only be seen in a video, so here it is drawn as a <b>seismogram (the
+    /// waveform)</b> —— "are there any gaps", "do the swarm peaks stand out" and "is it
+    /// strongest at the eruption" can all be read off the waveform.
     /// </summary>
     internal static class Tremor
     {
         private const int Width = 900;
         private const int RowHeight = 110;
 
-        /// <summary>描画フレーム（60 fps）。**ゲームが評価するのと同じ刻み。**</summary>
+        /// <summary>Render frames (60 fps). **The same step at which the game evaluates
+        /// it.**</summary>
         private const float SampleHz = 60f;
 
-        /// <summary>1 段に描く秒数。</summary>
+        /// <summary>Seconds drawn per row.</summary>
         private const float WindowSeconds = 30f;
 
         private static readonly float[] Activities = { 0.18f, 0.45f, 0.75f, 1.00f };

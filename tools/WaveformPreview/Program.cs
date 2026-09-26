@@ -10,29 +10,31 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.WaveformPreview
 {
     /// <summary>
-    /// バニラの揺れの式（<see cref="ShakeWaveform"/>）と合成記象
-    /// （<see cref="SeismogramModel"/>）を**ゲームを起動せずに**描いて確かめる。
+    /// Draws and checks vanilla's shake formula (<see cref="ShakeWaveform"/>) and the
+    /// synthetic seismogram (<see cref="SeismogramModel"/>) **without launching the game**.
     ///
-    /// 「見た目の変更は自分でオフラインに描画・計測してから実機テストを頼む」という
-    /// このプロジェクトの決まりのための道具である。Core の実物をそのままコンパイルして
-    /// 呼ぶので、**書き直した近似ではない**。パネルの絵も
-    /// <see cref="WaveformPlot"/> と同じ列計算・同じ画素サイズで描く。
+    /// This is the tool for this project's rule that "visual changes are drawn and measured
+    /// offline by yourself before asking for a test in the game". It compiles and calls the
+    /// real thing from Core directly, so it is **not a rewritten approximation**. The panel
+    /// image is drawn with the same column maths and the same pixel size as
+    /// <see cref="WaveformPlot"/>.
     ///
     ///   dotnet run --project tools/WaveformPreview -- docs/images/earthquake
     /// </summary>
     internal static class Program
     {
         /// <summary>
-        /// 揺れの窓（フレーム）。<c>EarthquakeAI</c> のフィールド初期化子の実測値
-        /// （IL 事実文書 §A-0a、<c>m_activeDuration = 1024</c>）。
-        /// プレハブが上書きしうるので、実機の値がこれと違うことはありうる。
+        /// The shake window (frames). Measured from <c>EarthquakeAI</c>'s field initialiser
+        /// (the IL facts document §A-0a, <c>m_activeDuration = 1024</c>).
+        /// A prefab can override it, so the value in the game may differ from this.
         /// </summary>
         private const uint Window = 1024u;
 
-        /// <summary>震源からの距離（m）。CS のマップは一辺 17,280 m。</summary>
+        /// <summary>Distance from the epicentre (m). A CS map is 17,280 m on a side.</summary>
         private static readonly float[] Distances = { 500f, 2000f, 5000f, 10000f };
 
-        /// <summary>地震 3 つぶんの種。**同じ距離でも形が違う**ことを見るためにある。</summary>
+        /// <summary>Seeds for three earthquakes. They are here to show that **the shape
+        /// differs even at the same distance**.</summary>
         private static readonly uint[] Seeds =
         {
             DeterministicRandom.Hash(11u, 900000u),
@@ -65,7 +67,7 @@ namespace DisasterPlus.Tools.WaveformPreview
             return 0;
         }
 
-        // ── 1. 距離ごとの記象（バニラと合成を上下に並べる） ──────────────────
+        // ── 1. Seismograms per distance (vanilla above, synthetic below) ──────────────────
 
         private static void Traces(string dir, StringBuilder log)
         {
@@ -109,16 +111,18 @@ namespace DisasterPlus.Tools.WaveformPreview
             Png.Write(Path.Combine(dir, "waveform-model-traces.png"), width, height, rgb);
         }
 
-        /// <summary>1 本ぶんの帯。上段がバニラ（白）、下段が合成記象（橙）。</summary>
+        /// <summary>One lane. The upper row is vanilla (white), the lower is the synthetic
+        /// seismogram (orange).</summary>
         private static void DrawRow(byte[] rgb, int width, int top, int height, float distance,
                                     SeismogramModel model, bool synthesized, float tP, float tS)
         {
             int middle = top + height / 2;
 
-            // 中央線と、満目盛り（±0.60）の位置。
+            // The centre line and the position of full scale (+/-0.60).
             for (int x = 0; x < width; x++) Set(rgb, width, x, middle, 70, 76, 90);
 
-            // P / S の到達に縦線を引く。**これが見えないなら距離の効きが出ていない。**
+            // Vertical lines at the P and S arrivals. **If these are not visible, the effect
+            // of distance is not coming through.**
             VerticalLine(rgb, width, (int)tP, top, top + height, 80, 200, 220);
             VerticalLine(rgb, width, (int)tS, top, top + height, 210, 90, 200);
 
@@ -140,15 +144,17 @@ namespace DisasterPlus.Tools.WaveformPreview
             }
         }
 
-        // ── 2b. 火山性微動の段（第 3 層）────────────────────
+        // ── 2b. The volcanic tremor lane (the third layer) ────────────────────
 
         /// <summary>
-        /// **地震計に記録される火山性地震**（2026-08-22）を、ゲームと同じ
-        /// 320x80 の格子で描いて確かめる。
+        /// Draws and checks **the volcanic earthquakes recorded by the seismograph**
+        /// (2026-08-22) on the same 320x80 grid as the game.
         ///
-        /// 値の作り方は <c>Game/Volcano/VolcanoTremorTrace.DisplacementAt</c> と同じである。
-        /// **Core の実物をそのまま呼んでいる**ので近似の書き直しではない
-        /// （倍率の定数だけは Game 側にあるので同じ式をここで書いている）。
+        /// The values are produced the same way as
+        /// <c>Game/Volcano/VolcanoTremorTrace.DisplacementAt</c>.
+        /// **The real thing from Core is called directly**, so it is not an approximate
+        /// rewrite (only the gain constant lives on the Game side, so the same formula is
+        /// written out here).
         /// </summary>
         private static void TremorPanel(string dir, StringBuilder log)
         {
@@ -158,7 +164,7 @@ namespace DisasterPlus.Tools.WaveformPreview
             const int gap = 8;
             const int plotWindow = 512;
 
-            // 山の半径 1200 m -> 届く距離は 4.5 倍 = 5400 m。
+            // Mountain radius 1200 m -> the reach is 4.5 times that = 5400 m.
             const float reach = 1200f * 4.5f;
             const float gain = 0.7f * ShakeWaveform.MaxDisplacement;
             float[] distances = { 300f, 1500f, 4000f };
@@ -215,7 +221,8 @@ namespace DisasterPlus.Tools.WaveformPreview
             Png.Write(Path.Combine(dir, "waveform-tremor-panel.png"), width, height, rgb);
         }
 
-        /// <summary>1 段だけ。色は <c>WaveformView.TremorColor</c>（青緑）と同じ。</summary>
+        /// <summary>A single lane. The colour is the same as
+        /// <c>WaveformView.TremorColor</c> (blue-green).</summary>
         private static void TremorLane(byte[] rgb, int width, int top, int pw, int ph, int zoom,
                                        int[] columns)
         {
@@ -245,11 +252,12 @@ namespace DisasterPlus.Tools.WaveformPreview
             }
         }
 
-        // ── 2. パネルに出る画素そのもの ────────────────────────────────
+        // ── 2. The actual pixels that appear on the panel ────────────────────────────────
 
         /// <summary>
-        /// ゲームの <c>WaveformView</c> と**同じ 320x80 の格子・同じ列計算**で描く。
-        /// 4 倍に拡大して並べる（拡大は最後だけ。格子はゲームのまま）。
+        /// Drawn on **the same 320x80 grid with the same column maths** as the game's
+        /// <c>WaveformView</c>. Laid out at 4x magnification (the magnification happens last
+        /// only; the grid stays exactly as in the game).
         /// </summary>
         private static void PanelPixels(string dir, StringBuilder log)
         {
@@ -266,10 +274,10 @@ namespace DisasterPlus.Tools.WaveformPreview
 
             var model = SeismogramModel.For(Seeds[0], Window);
 
-            // 窓は「最新サンプルまでの 512 フレーム」。ゲームと同じ幅にする。
+            // The window is "the 512 frames up to the newest sample". Same width as the game.
             const int plotWindow = 512;
-            const uint newest = 900000u + plotWindow;      // e = 512 の瞬間を切り取る
-            const uint origin = 900000u;                   // e = 0 のフレーム
+            const uint newest = 900000u + plotWindow;      // take the snapshot at e = 512
+            const uint origin = 900000u;                   // the frame where e = 0
 
             log.AppendLine("## panel pixels (320x80, e = 0..512, the game's own column maths)");
 
@@ -291,7 +299,8 @@ namespace DisasterPlus.Tools.WaveformPreview
                 }
                 float scale = peak > 0f ? 1f / peak : 1f;
 
-                // ★ ゲームと同じ 2 段組（上段 = バニラ、下段 = 合成記象、尺度は共通）。
+                // ★ The same two-lane layout as the game (upper = vanilla, lower = the
+                //   synthetic seismogram, on a shared scale).
                 int lane = ph / 2;
                 int[] vanillaColumns = WaveformPlot.Columns(frames, vanilla, plotWindow,
                                                             newest - plotWindow, newest,
@@ -315,7 +324,8 @@ namespace DisasterPlus.Tools.WaveformPreview
         }
 
         /// <summary>
-        /// <c>WaveformView.Draw</c> と同じ 2 段組。上段が第 1 層（白）、下段が第 2 層（橙）。
+        /// The same two-lane layout as <c>WaveformView.Draw</c>. The upper lane is layer 1
+        /// (white), the lower is layer 2 (orange).
         /// </summary>
         private static void Panel(byte[] rgb, int width, int top, int pw, int ph, int zoom,
                                   int[] modelColumns, int[] vanillaColumns)
@@ -329,9 +339,10 @@ namespace DisasterPlus.Tools.WaveformPreview
                 {
                     byte r = 16, g = 18, b = 24;
 
-                    // ★ 行番号 0 は**上端**である（WaveformView.SetPixel の doc）。
-                    //   PNG も y = 0 が上端なので、ここは反転しない。反転すると
-                    //   ゲームの画面と上下が逆の絵を見て確認したことになる。
+                    // ★ Row 0 is **the top edge** (see the doc of WaveformView.SetPixel).
+                    //   In PNG too, y = 0 is the top edge, so nothing is flipped here. Flip it
+                    //   and you would be checking a picture that is upside down relative to
+                    //   the game's screen.
                     int row = y;
 
                     if (row == middle || row == lane + middle) { r = 70; g = 76; b = 90; }
@@ -359,12 +370,13 @@ namespace DisasterPlus.Tools.WaveformPreview
             return row >= lo && row <= hi;
         }
 
-        // ── 3. 折り返しの確認 ────────────────────────────────────
+        // ── 3. Checking for aliasing ────────────────────────────────────
 
         /// <summary>
-        /// **1 フレームに 1 点**（記録側が飛んだフレームを埋めた状態）と、
-        /// **9 フレームに 1 点**（速度 3 で埋めなかった状態）を並べる。
-        /// 後者に偽の長周期波が出ることと、埋めれば出ないことを目で確かめる。
+        /// Lays out **one point per frame** (the recorder having filled in the frames it
+        /// skipped) alongside **one point every 9 frames** (at speed 3 without filling in).
+        /// Confirms by eye that the latter produces a spurious long-period wave, and that
+        /// filling in removes it.
         /// </summary>
         private static void Aliasing(string dir, StringBuilder log)
         {
@@ -439,12 +451,13 @@ namespace DisasterPlus.Tools.WaveformPreview
             return count;
         }
 
-        // ── 4. 帯域の確認（数値だけ） ──────────────────────────────
+        // ── 4. Checking the band limit (numbers only) ──────────────────────────────
 
         /// <summary>
-        /// **1 フレーム刻みで標本化定理を満たしているか。** 隣り合うサンプルの
-        /// 位相差が π を超えると折り返す。ここで見るのは、各成分の
-        /// rad/frame が π 未満であること（1 周期あたり何点取れているか）。
+        /// **Is the sampling theorem satisfied at one sample per frame?** If the phase
+        /// difference between adjacent samples exceeds π, it aliases. What is checked here is
+        /// that each component's rad/frame is below π (i.e. how many points are taken per
+        /// cycle).
         /// </summary>
         private static void BandLimit(StringBuilder log)
         {
@@ -464,8 +477,9 @@ namespace DisasterPlus.Tools.WaveformPreview
         }
 
         /// <summary>
-        /// <see cref="SeismogramModel.Gain"/> の頭打ち（|shape| == 1）がどれだけ出るか。
-        /// **多いと記録計が振り切れっぱなしの絵になる**ので、割合で見張る。
+        /// How often <see cref="SeismogramModel.Gain"/> hits its ceiling (|shape| == 1).
+        /// **Too often and the picture is just a recorder pinned at full deflection**, so the
+        /// proportion is watched.
         /// </summary>
         private static void Clipping(StringBuilder log)
         {
@@ -496,7 +510,7 @@ namespace DisasterPlus.Tools.WaveformPreview
             log.AppendLine();
         }
 
-        // ── 描画の道具 ────────────────────────────────────────
+        // ── Drawing helpers ────────────────────────────────────────
 
         private static void Fill(byte[] rgb, byte r, byte g, byte b)
         {

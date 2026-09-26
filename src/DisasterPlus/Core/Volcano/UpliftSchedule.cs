@@ -3,58 +3,67 @@ using System;
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// 隆起の進み方。**increment ではなく、その時刻における絶対目標を返す。**
+    /// How the uplift progresses. **It returns the absolute target at a given moment, not an
+    /// increment.**
     ///
-    /// 素朴な <c>raw[i] += step</c> は必ず無言で壊れる。RawHeights は ushort の raw/64 m で、
-    /// 書き込み側は <c>if (n != raw)</c> で省略する（§C-8）。1 tick の変化がセル高さで
-    /// 1/64 m = 0.015625 m を下回ると**丸めで消え、そのセルは永久に動かない**。
-    /// 外周ほど遅く上がるので、素朴な実装では**裾だけが最初から完全停止する**。
-    /// 例外は 1 つも出ない。
+    /// The naive <c>raw[i] += step</c> is certain to break silently. RawHeights is ushort in
+    /// units of raw/64 m, and the writing side skips with <c>if (n != raw)</c> (§C-8). If one
+    /// tick's change in a cell's height falls below 1/64 m = 0.015625 m it **vanishes in the
+    /// rounding and that cell never moves again**. Cells further out rise more slowly, so in
+    /// the naive implementation **the foot of the mountain stops dead from the very start**.
+    /// Not one exception is raised.
     ///
-    /// 絶対目標にすると、まだ 1 raw 単位に届かないセルは「書かれないだけ」で、
-    /// 進捗は progress という float に蓄積されている。届いた瞬間に 1 段上がる。
+    /// With an absolute target, a cell that has not yet reached one raw unit is merely "not
+    /// written", and the progress is accumulated in the float called progress. The moment it
+    /// gets there, it steps up by one.
     ///
-    /// **それでも山頂だけは毎 tick 動かなければならない。** 動かなければ隆起そのものが
-    /// 止まって見えるからで、<see cref="TotalTicksFor"/> が要求 tick 数を H×64 で
-    /// 切り詰めることで構造的に保証している。**この切り詰めを外さないこと。**
+    /// **Even so, the summit must move every tick.** If it does not, the uplift itself looks
+    /// stopped, and <see cref="TotalTicksFor"/> guarantees it structurally by truncating the
+    /// requested tick count at H×64. **Do not remove that truncation.**
     ///
-    /// <see cref="ActiveRadiusMetres"/> は⑤全体でいちばん重要な 1 行である。
-    /// **準備（道路と建物の破壊）が届いていない場所を持ち上げてはいけない。**
-    /// 道路は m_flattenTerrain のとき Heights.PrimaryLevel でセルを道路の y に
-    /// **強制固定**し、建物は SecondaryLevel で自分の y に固定する。しかもそれは
-    /// 毎フラッシュゼロからやり直される（§A-2）ので、**書き続けても勝てない**。
-    /// 準備を先にしないと、山の中に平らな溝とすり鉢が残る（設計書 §1.2）。
-    /// clearedRadius が 0（＝まだ 1 本も壊していない）なら 0 を返す。
-    /// **これを「制限なし」に読み替えてはいけない。**
+    /// <see cref="ActiveRadiusMetres"/> is the single most important line in all of ⑤.
+    /// **Never raise ground that the preparation (destroying roads and buildings) has not
+    /// reached.** With m_flattenTerrain, a road **pins** its cells to the road's y via
+    /// Heights.PrimaryLevel, and a building pins them to its own y via SecondaryLevel.
+    /// What is more, that is redone from scratch on every flush (§A-2), so **you cannot win
+    /// by writing harder**. Without preparing first you are left with flat trenches and
+    /// bowls inside the mountain (design document §1.2).
+    /// When clearedRadius is 0 (i.e. nothing has been destroyed yet) it returns 0.
+    /// **That must not be reinterpreted as "no limit".**
     ///
-    /// <see cref="BlockHeightCatchUpFrames"/> は「建てられる地面」と水位が遅れる量である。
-    /// m_blockHeights はゲームモードで上へ 2 m / 64 sim フレームしか動かず（§A-2）、
-    /// WaterSimulation.m_heightBuffer はその配列そのもの（§A-4）。**これは不具合ではない。**
-    /// 呼び出し側はこの値をプレイヤーに説明すること（設計書 §7.3）。
+    /// <see cref="BlockHeightCatchUpFrames"/> is how far "the buildable ground" and the water
+    /// level lag behind. In game mode m_blockHeights only moves up 2 m per 64 sim frames
+    /// (§A-2), and WaterSimulation.m_heightBuffer is that very array (§A-4). **This is not a
+    /// defect.** Callers should explain this value to the player (design document §7.3).
     /// </summary>
     public static class UpliftSchedule
     {
-        /// <summary><c>RawHeights</c> の表現上限。**キャストの前に必ずここへクランプする。**</summary>
+        /// <summary>The representable limit of <c>RawHeights</c>. **Always clamp to this
+        /// before the cast.**</summary>
         public const int MaxRaw = 65535;
 
-        /// <summary>1 メートルあたりの raw 単位（<see cref="VolcanoShape.RawUnitsPerMetre"/> と同値）。</summary>
+        /// <summary>Raw units per metre (the same value as
+        /// <see cref="VolcanoShape.RawUnitsPerMetre"/>).</summary>
         public const float RawUnitsPerMetre = 64f;
 
         /// <summary>
-        /// <c>m_blockHeights</c> が 1 周期で上へ動ける raw 量（§A-2、ゲームモード）。
-        /// 128 raw = 2 m。エディタでは 512 raw = 8 m だが、⑤はゲームモードだけを名乗る。
+        /// How much raw <c>m_blockHeights</c> can move upwards per cycle (§A-2, game mode).
+        /// 128 raw = 2 m. In the editor it is 512 raw = 8 m, but ⑤ only claims game mode.
         /// </summary>
         public const int BlockHeightRiseRawPerCycle = 128;
 
-        /// <summary><c>m_blockHeights</c> の 1 周期（sim フレーム）。§A-2 の 1/64 行走査。</summary>
+        /// <summary>One cycle of <c>m_blockHeights</c> (sim frames). The 1/64-of-the-rows
+        /// sweep from §A-2.</summary>
         public const int BlockHeightCycleFrames = 64;
 
         /// <summary>
-        /// 隆起に使う tick 数。**要求値を H×64 で切り詰める**（罠 2）。
+        /// The number of ticks the uplift uses. **The requested value is truncated at H×64**
+        /// (trap 2).
         ///
-        /// H メートルの山は最大 H×64 raw 単位ぶんしか刻めない。それより細かく刻むと
-        /// 山頂の 1 tick あたりの変化が 1 raw 単位を割り、丸めで消えて隆起が
-        /// 無言で停止する。**この切り詰めを「余計なお世話」だと思って外さないこと。**
+        /// An H-metre mountain can only be divided into H×64 raw units at most. Divide it
+        /// more finely than that and the summit's change per tick falls below one raw unit,
+        /// vanishes in the rounding and the uplift stops silently. **Do not remove this
+        /// truncation thinking it is meddling.**
         /// </summary>
         public static int TotalTicksFor(float heightMetres, int requestedTicks)
         {
@@ -70,7 +79,8 @@ namespace DisasterPlus.Core.Volcano
             return requestedTicks > maxTicks ? maxTicks : requestedTicks;
         }
 
-        /// <summary>tick 番号 → [0,1] の進捗。<paramref name="totalTicks"/> が 0 以下なら 0。</summary>
+        /// <summary>Tick number → progress in [0,1]. 0 when <paramref name="totalTicks"/> is
+        /// zero or below.</summary>
         public static float ProgressAt(int tick, int totalTicks)
         {
             if (totalTicks <= 0) return 0f;
@@ -80,38 +90,42 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// **山頂から外へ広がる隆起**（m）。<paramref name="progress"/> の時点で
-        /// この地点がどれだけ盛り上がっているか。
+        /// **The uplift spreading outwards from the summit** (m). How far this point has
+        /// risen at <paramref name="progress"/>.
         ///
-        /// ── なぜ <c>profile × progress</c> ではないのか ──────────────
+        /// ── Why not <c>profile × progress</c> ──────────────
         ///
-        /// <c>profile × progress</c> は**山全体が一様に膨らむ**。完成した山が地面から
-        /// 音もなく空気を入れられたように見え、SimCity 4 の隆起とは順序が逆である。
-        /// あちらは噴出したものが**積もって**山になる —— 山頂が先に立ち上がり、
-        /// 裾が後から外へ広がる。
+        /// <c>profile × progress</c> makes **the whole mountain swell uniformly**. The
+        /// finished mountain looks as if it were being silently inflated out of the ground,
+        /// and the order is the reverse of SimCity 4's uplift. There, erupted material
+        /// **piles up** into a mountain — the summit rises first and the foot spreads
+        /// outwards afterwards.
         ///
-        /// それをそのまま式にすると「最終形を H(1−p) だけ下へ沈めて、地面から
-        /// 出ている分だけが今の山」になる:
+        /// Writing that down directly gives "sink the final shape by H(1−p) and the mountain
+        /// right now is whatever sticks out of the ground":
         ///
         /// <code>
         /// grown(d, p) = max(0, profile(d) − H·(1 − p))
         /// </code>
         ///
-        /// p のとき地表に出ているのは <c>profile(d) &gt; H(1−p)</c> の範囲、つまり
-        /// **山頂まわりの小さな円錐**で、それが p とともに外へ広がる。
-        /// 直線の円錐（成層）なら前線はちょうど <c>R·p</c> で、
-        /// <see cref="ClearingFrontMetres"/> が先行させる準備の前線と噛み合う。
+        /// At p, what is above ground is the region <c>profile(d) &gt; H(1−p)</c>, that is
+        /// **a small cone around the summit**, and it spreads outwards with p.
+        /// For a straight cone (a stratovolcano) the front is exactly <c>R·p</c>, which meshes
+        /// with the preparation front that <see cref="ClearingFrontMetres"/> runs ahead of it.
         ///
-        /// ── 罠 2 に対しては<b>むしろ強くなる</b>───────────────────
+        /// ── Against trap 2 it is <b>stronger, not weaker</b> ───────────────────
         ///
-        /// 育っている最中のセルは<b>どれも同じ速さ</b> H/totalTicks で上がる
-        /// （p で微分すると H）。<see cref="TotalTicksFor"/> が totalTicks を H×64 で
-        /// 切り詰めているので、これは必ず 1 raw 単位/tick 以上である。
-        /// <c>profile × progress</c> では外周ほど 1 tick の変化が小さく、
-        /// **「合計の盛り上がりが小さいセル」は丸めで消えていた**。この式にはその場所が無い。
+        /// Every cell that is currently growing rises at <b>the same rate</b>, H/totalTicks
+        /// (differentiate with respect to p and you get H). Since
+        /// <see cref="TotalTicksFor"/> truncates totalTicks at H×64, this is always at least
+        /// one raw unit per tick.
+        /// With <c>profile × progress</c> the change per tick got smaller further out, and
+        /// **"cells whose total rise is small" vanished in the rounding**. This formula has
+        /// no such place.
         ///
-        /// 異常入力は 0。<paramref name="heightMetres"/> が 0 以下のときだけは
-        /// 従来どおり比例で返す（H が分からなければ沈める量も決まらない）。
+        /// Bad input gives 0. Only when <paramref name="heightMetres"/> is zero or below do
+        /// we fall back to the old proportional result (without knowing H there is no way to
+        /// decide how far to sink it).
         /// </summary>
         public static float GrowthMetresAt(float profileMetres, float heightMetres, float progress)
         {
@@ -130,12 +144,13 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// このセルの、この時刻における**絶対目標** raw 高さ。
+        /// This cell's **absolute target** raw height at this moment.
         ///
-        /// <paramref name="progress"/> は [0,1] へクランプするが、
-        /// <paramref name="profileMetres"/> は**負を許す**（火口を彫る側が使う）。
-        /// 返り値は必ず [0, <see cref="MaxRaw"/>]。**ushort へのキャストの前にクランプする**
-        /// —— しないと山頂が海面に巻き戻る。
+        /// <paramref name="progress"/> is clamped to [0,1], but
+        /// <paramref name="profileMetres"/> **may be negative** (the crater-carving side uses
+        /// that).
+        /// The result is always in [0, <see cref="MaxRaw"/>]. **Clamp before the cast to
+        /// ushort** — without it the summit wraps around to sea level.
         /// </summary>
         public static ushort RawTargetAt(ushort baseRaw, float profileMetres, float progress)
         {
@@ -151,28 +166,29 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// このセルは**ゲームの高さの天井に当たって削られたか**。
+        /// Whether this cell **hit the game's height ceiling and got clipped**.
         ///
-        /// ── 天井は 1024 m であり、MOD からは上げられない（IL 実測）──────
+        /// ── The ceiling is 1024 m and cannot be raised from a mod (measured from the IL) ──
         ///
-        /// | 実測したもの | 値 |
+        /// | What was measured | Value |
         /// |---|---|
-        /// | <c>TerrainManager.m_rawHeights</c> の型 | <c>ushort[]</c>（最大 65535） |
-        /// | raw → メートルの換算 | <c>0.015625</c>（＝ 1/64）を**各呼び出し元に直書き** |
+        /// | the type of <c>TerrainManager.m_rawHeights</c> | <c>ushort[]</c> (max 65535) |
+        /// | the raw → metres conversion | <c>0.015625</c> (= 1/64), **hard-coded at each call site** |
         /// | <c>TerrainManager.TERRAIN_HEIGHT</c> | <c>const int = 1024</c> |
         ///
-        /// つまり高さの上限は <c>65535 / 64 = 1023.98 m</c> である。
-        /// **これは MOD から拡張できない**:
+        /// So the height limit is <c>65535 / 64 = 1023.98 m</c>.
+        /// **A mod cannot extend it**:
         ///
-        ///   1. 配列が <c>ushort[]</c> である以上、65535 を超える値を入れられない
-        ///   2. <c>TERRAIN_HEIGHT</c> は <c>const</c>（コンパイル時のリテラル）なので、
-        ///      <b>全ての使用箇所に焼き込まれている</b>。フィールドを書き換えても何も変わらない
-        ///   3. 描画側は高さを**テクスチャ**（<c>_TerrainHeight</c>）で受け取っており、
-        ///      縦の尺度はコンパイル済みシェーダの中にある。managed 側を全部
-        ///      書き換えたとしても、**地形は古い尺度で描かれる**
+        ///   1. As long as the array is <c>ushort[]</c>, no value above 65535 fits in it
+        ///   2. <c>TERRAIN_HEIGHT</c> is <c>const</c> (a compile-time literal), so it is
+        ///      <b>baked into every place it is used</b>. Rewriting the field changes nothing
+        ///   3. The rendering side receives the heights as a **texture**
+        ///      (<c>_TerrainHeight</c>), and the vertical scale lives inside a compiled
+        ///      shader. Even if you rewrote everything on the managed side, **the terrain
+        ///      would still be drawn at the old scale**
         ///
-        /// だから⑤は天井を上げようとせず、**当たったことを名乗る**。
-        /// 黙って平らな山頂を出すのは、この MOD がいちばん避けている形である。
+        /// So ⑤ does not try to raise the ceiling; it **says that it hit it**.
+        /// Quietly producing a flat summit is exactly the sort of thing this mod avoids most.
         /// </summary>
         public static bool CeilingClipped(ushort baseRaw, float profileMetres, float progress)
         {
@@ -183,17 +199,19 @@ namespace DisasterPlus.Core.Volcano
             return baseRaw + delta > MaxRaw;
         }
 
-        /// <summary>天井の高さ（m）。<c>65535 / 64</c>。</summary>
+        /// <summary>The ceiling height (m). <c>65535 / 64</c>.</summary>
         public const float CeilingMetres = MaxRaw / RawUnitsPerMetre;
 
         /// <summary>
-        /// **⑤全体でいちばん重要な 1 行**（罠 1）。隆起してよい半径（m）。
+        /// **The single most important line in all of ⑤** (trap 1). The radius (m) it is
+        /// permitted to raise.
         ///
-        /// <paramref name="clearedRadiusMetres"/> に渡してよいのは
-        /// <c>VolcanoClearing.ClearedRadiusMetres</c> だけである（計画 T5→T6 の型の縛り）。
-        /// **まだ 1 本も壊していない（0 以下・NaN）なら 0 を返す。**
-        /// これを「制限なし」に読み替えると、隆起がいきなり全域を持ち上げ、
-        /// 道路と建物が毎フラッシュ押し戻して山の中に平らな溝とすり鉢が残る。
+        /// The only thing that may be passed as <paramref name="clearedRadiusMetres"/> is
+        /// <c>VolcanoClearing.ClearedRadiusMetres</c> (the type constraint from plan T5→T6).
+        /// **When nothing has been destroyed yet (zero and below, or NaN) it returns 0.**
+        /// Reinterpret that as "no limit" and the uplift raises the whole area at once, the
+        /// roads and buildings push it back on every flush, and you are left with flat
+        /// trenches and bowls inside the mountain.
         /// </summary>
         public static float ActiveRadiusMetres(float shapeRadiusMetres, float clearedRadiusMetres)
         {
@@ -203,21 +221,24 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 隆起の前線が進捗 <paramref name="progress"/> でどこまで出ているか（半径に対する比）。
+        /// How far the uplift front has come at progress <paramref name="progress"/> (as a
+        /// ratio of the radius).
         ///
-        /// <c>GrowthMetresAt</c> は <c>profile(d) &gt; H(1−p)</c> の範囲だけを地表に出す。
-        /// 直線の円錐（成層）で、火口のぶん立て直した倍率を <paramref name="summitScale"/> と
-        /// すると <c>profile(d) = H·scale·(1 − d/R)</c> なので、前線はちょうど
+        /// <c>GrowthMetresAt</c> brings only the region <c>profile(d) &gt; H(1−p)</c> above
+        /// ground. For a straight cone (a stratovolcano), writing the factor by which the
+        /// profile was rebuilt to allow for the crater as <paramref name="summitScale"/>, we
+        /// have <c>profile(d) = H·scale·(1 − d/R)</c>, so the front is exactly
         ///
         /// <code>
         /// front / R = 1 − (1 − p) / scale
         /// </code>
         ///
-        /// である。**倍率 1 なら今までどおり p そのもの**に戻る。
+        /// **At a factor of 1 it reduces to plain p, as before.**
         ///
-        /// ★ 盾状・鐘状の前線はこの式より少しだけ先に出る（プロファイルが直線でないため）。
-        ///   そこは <c>ClearingFrontMetres</c> の <c>leadMetres</c> が呑む —— 火口を
-        ///   入れる前からその関係だったので、ここで新しく甘くなったものは 1 つも無い。
+        /// ★ The fronts of shield and dome volcanoes run slightly ahead of this formula
+        ///   (their profiles are not straight). That is absorbed by
+        ///   <c>ClearingFrontMetres</c>'s <c>leadMetres</c> — the relationship was the same
+        ///   before the crater was introduced, so nothing here has newly become lax.
         /// </summary>
         public static float GrowthFrontUnit(float progress, float summitScale)
         {
@@ -232,9 +253,10 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 準備（破壊）の前線が今どこまで行っているべきか（m）。
-        /// 隆起の前線（<c>shapeRadius × progress</c>）より <paramref name="leadMetres"/> だけ先行し、
-        /// 山の半径を超えない。**決して後ろへ下がらない。**
+        /// Where the preparation (destruction) front should have got to by now (m).
+        /// It runs <paramref name="leadMetres"/> ahead of the uplift front
+        /// (<c>shapeRadius × progress</c>) and never exceeds the mountain's radius.
+        /// **It never moves backwards.**
         /// </summary>
         public static float ClearingFrontMetres(float shapeRadiusMetres, float progress,
                                                 float leadMetres)
@@ -250,11 +272,12 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// 「建てられる地面」と水位が追いつくまでの sim フレーム数。
+        /// How many sim frames it takes "the buildable ground" and the water level to catch
+        /// up.
         ///
-        /// <c>m_blockHeights</c> はゲームモードで上へ 2 m / 64 sim フレームしか動かず（§A-2）、
-        /// 水シミュの <c>m_heightBuffer</c> はその配列そのものである（§A-4）。
-        /// **これは不具合ではない。** 呼び出し側はこの値をプレイヤーに説明すること。
+        /// In game mode <c>m_blockHeights</c> only moves up 2 m per 64 sim frames (§A-2), and
+        /// the water simulation's <c>m_heightBuffer</c> is that very array (§A-4).
+        /// **This is not a defect.** Callers should explain this value to the player.
         /// </summary>
         public static int BlockHeightCatchUpFrames(float heightMetres)
         {

@@ -14,9 +14,10 @@ namespace DisasterPlus.Game
             ModSettings.Ensure();
             FireWhirlRegistry.Clear();
 
-            // OnLoadData（DisasterPlusSerialization）は LoadSimulationData の中で走り、
-            // この OnLevelLoaded より前に完了している。だが Clear() は今しがた実行したばかりなので、
-            // 復元の適用は必ず Clear() の後、ここで行う。順序を逆にすると Clear() が復元を消す。
+            // OnLoadData (DisasterPlusSerialization) runs inside LoadSimulationData and has
+            // already finished before this OnLevelLoaded. But Clear() has only just run, so
+            // the restore must be applied after Clear(), here. Reverse the order and Clear()
+            // wipes out the restore.
             var pendingRestore = DisasterPlusSerialization.TakePendingRestore();
             if (pendingRestore != null)
             {
@@ -36,24 +37,25 @@ namespace DisasterPlus.Game
             FeatureHost.LevelLoaded();
             Log.Info("level loaded; features=" + FeatureHost.Features.Count);
 
-            // Harmony の適用と prefab の解決を見るので、機能の初期化が終わってから走らせる。
+            // It looks at Harmony's patches and the resolved prefabs, so run it after the
+            // features have finished initialising.
             Assumptions.Run();
 
-            // オーバーレイはここでは作らない。ロード時の設定値で固定すると、
-            // 途中で ON にしても何も起きない片道の設定になる。
-            // FeatureHost.MainThreadUpdate() が毎フレーム現在値に追従させる。
+            // The overlay is not created here. Pinning it to the setting's value at load time
+            // would make it a one-way setting where switching it ON later does nothing.
+            // FeatureHost.MainThreadUpdate() keeps it following the current value every frame.
         }
 
         public override void OnLevelUnloading()
         {
-            // アンロード中は sim スレッドが既に停止しているので、
-            // ここから直接クリアしてよい（この場面に限り安全）。
+            // The sim thread has already stopped during unloading, so it is fine to clear
+            // directly from here (safe in this situation only).
             FeatureHost.LevelUnloading();
             FireWhirlRegistry.Clear();
             Assumptions.Reset();
             DiagnosticOverlay.Destroy();
-            // OnLoadData 自身も次回ロードの先頭で必ずクリアするが、二重の安全策として
-            // ここでも捨てる。都市をまたいで保留中の復元データを持ち越さない。
+            // OnLoadData itself always clears at the start of the next load, but drop it here
+            // too as a second line of defence. Never carry pending restore data across cities.
             DisasterPlusSerialization.TakePendingRestore();
             base.OnLevelUnloading();
         }

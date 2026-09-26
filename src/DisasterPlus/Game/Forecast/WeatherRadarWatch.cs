@@ -4,45 +4,47 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <b>稼働している気象レーダーが街にあるか。</b>**sim スレッドが数え、main が読む。**
+    /// <b>Whether the city has a working weather radar.</b> **The sim thread counts, the
+    /// main thread reads.**
     ///
-    /// ── 所有者の依頼（2026-09-02）────────────────────────────────
+    /// ── What the owner asked for (2026-09-02) ──────────────────────────────
     ///
-    /// &gt; 今後の天気予報タブ（気象レーダーを置くことで解禁）
+    /// &gt; A tab for the weather to come (unlocked by placing a weather radar)
     ///
-    /// 予報を<b>建てて手に入れるもの</b>にする。天気が読めるのは観測しているから、
-    /// というのは筋が通っているし、ND DLC の気象レーダーに<b>今まで無かった用途</b>を
-    /// 与えることにもなる（バニラでは雷雨と竜巻の検知範囲を広げるだけ）。
+    /// This makes the forecast <b>something you build to obtain</b>. Being able to read
+    /// the weather because you are observing it makes sense, and it also gives the ND
+    /// DLC's weather radar <b>a use it never had before</b> (in vanilla it only widens
+    /// the detection range for thunderstorms and tornadoes).
     ///
-    /// ── ★★ サービス種別を決め打ちしない ───────────────────────────
+    /// ── ★★ Do not hard-code the service type ──────────────────────────────
     ///
-    /// <c>ItemClass.Service.Disaster</c> だろうと<b>推測して書かない</b>。
-    /// プレハブ側から <c>m_class.m_service</c> を<b>読んで</b>覚える
-    /// （<see cref="ResolveService"/>）。決め打ちして外れると、
-    /// <b>レーダーを建てても永久に解禁されない</b>という、例外の出ない壊れ方をする。
+    /// <b>Do not write a guess</b> that it will be <c>ItemClass.Service.Disaster</c>.
+    /// <b>Read</b> <c>m_class.m_service</c> off the prefab and remember it (see
+    /// <see cref="ResolveService"/>). Hard-code it and get it wrong, and it breaks without
+    /// any exception at all: <b>you build a radar and nothing ever unlocks</b>.
     ///
-    /// プレハブが 1 つも見つからない ＝ ND DLC を持っていない。そのときは
-    /// <see cref="PrefabKnown"/> が false になり、パネルは
-    /// 「解禁されていない」ではなく「DLC が要る」と言う。
+    /// Finding no prefab at all means the ND DLC is not owned. In that case
+    /// <see cref="PrefabKnown"/> is false and the panel says "you need the DLC" rather
+    /// than "it is not unlocked".
     ///
-    /// ── 費用 ────────────────────────────────────────────
+    /// ── Cost ───────────────────────────────────────────────────────────────
     ///
-    /// プレハブ走査は<b>都市ごとに 1 回</b>。数えるほうは
-    /// <c>GetServiceBuildings</c> が返す<b>そのサービスの一覧だけ</b>を見るので、
-    /// 建物バッファ 49152 件の全走査にはならない。しかも
-    /// <see cref="IntervalMinutes"/> ごとにしか走らない —— レーダーは
-    /// 1 分に何度も建ったり壊れたりしない。
+    /// The prefab sweep runs <b>once per city</b>. The counting side looks only at
+    /// <b>that service's own list</b> as returned by <c>GetServiceBuildings</c>, so it is
+    /// not a full sweep of the 49152-entry building buffer. And it only runs once every
+    /// <see cref="IntervalMinutes"/> — radars are not built and demolished several times
+    /// a minute.
     /// </summary>
     public static class WeatherRadarWatch
     {
-        /// <summary>数え直す間隔（ゲーム内分）。</summary>
+        /// <summary>How often the count is redone (in-game minutes).</summary>
         private const float IntervalMinutes = 1f;
 
         /// <summary>
-        /// 「動いている」の条件。<c>Active</c> は電気・道路・従業員が足りているとき
-        /// だけ立つ（<c>WeatherRadarAI.GetColor</c> が IL_001D で同じ
-        /// <c>131072</c> を見て、情報ビューの色を分けている）。
-        /// **建てただけで停電している建物を数えない。**
+        /// What counts as "working". <c>Active</c> is only set when there is enough
+        /// electricity, road access and staff (<c>WeatherRadarAI.GetColor</c> checks the
+        /// same <c>131072</c> at IL_001D to pick the info-view colour).
+        /// **A building that has merely been placed and has no power is not counted.**
         /// </summary>
         private const Building.Flags Working =
             Building.Flags.Created | Building.Flags.Active;
@@ -58,21 +60,22 @@ namespace DisasterPlus.Game
         private static bool _announced;
 
         /// <summary>
-        /// 稼働しているレーダーが 1 基以上あるか。**main スレッドから読んでよい。**
+        /// Whether there is at least one working radar. **May be read from the main
+        /// thread.**
         /// </summary>
         public static bool HasWorkingRadar { get { return _hasWorking; } }
 
-        /// <summary>稼働している基数（診断とパネル用）。</summary>
+        /// <summary>How many are working (for the diagnostics and the panel).</summary>
         public static int WorkingCount { get { return _workingCount; } }
 
         /// <summary>
-        /// 気象レーダーのプレハブが見つかっているか。
-        /// **false は「DLC を持っていない」の意味**で、「まだ建てていない」ではない。
-        /// この 2 つを同じ文言にしないこと。
+        /// Whether the weather radar prefab has been found.
+        /// **false means "the DLC is not owned"**, not "one has not been built yet".
+        /// Do not use the same wording for the two.
         /// </summary>
         public static bool PrefabKnown { get { return _prefabKnown; } }
 
-        /// <summary>レベルアンロード時。**都市をまたいで持ち越さない。**</summary>
+        /// <summary>On level unload. **Nothing is carried across cities.**</summary>
         public static void Reset()
         {
             _minutesSinceScan = 0f;
@@ -84,7 +87,7 @@ namespace DisasterPlus.Game
             _announced = false;
         }
 
-        /// <summary>**sim スレッド。** 毎 tick 呼んでよい（中で間引く）。</summary>
+        /// <summary>**Sim thread.** Safe to call every tick (it throttles inside).</summary>
         public static void Poll(float deltaMinutes)
         {
             if (deltaMinutes > 0f) _minutesSinceScan += deltaMinutes;
@@ -100,7 +103,8 @@ namespace DisasterPlus.Game
 
                     if (!_prefabKnown)
                     {
-                        // ★ DLC が無い環境。以後は数えない（一覧そのものが無い）。
+                        // ★ A setup without the DLC. Never count again (there is no list
+                        //   to count in the first place).
                         _hasWorking = false;
                         _workingCount = 0;
                         return;
@@ -112,7 +116,8 @@ namespace DisasterPlus.Game
                 _workingCount = CountWorking(_service);
                 bool has = _workingCount > 0;
 
-                // ★ 解禁された瞬間だけ 1 行残す。毎分書かない。
+                // ★ Leave one line at the moment it unlocks, and no more. Do not write
+                //   every minute.
                 if (has && !_announced)
                 {
                     _announced = true;
@@ -129,16 +134,17 @@ namespace DisasterPlus.Game
                     _errorLogged = true;
                     Log.Error("could not count the weather radars", e);
                 }
-                // ★ 数えられなかったときは**解禁しない**。解禁したまま固まるより、
-                //   ロックされたままのほうが「何かがおかしい」と気付ける。
+                // ★ If we could not count, **do not unlock**. Staying locked makes it
+                //   easier to notice something is wrong than freezing in the unlocked
+                //   state.
                 _hasWorking = false;
                 _workingCount = 0;
             }
         }
 
         /// <summary>
-        /// 気象レーダーのプレハブを探し、その <c>ItemClass.Service</c> を覚える。
-        /// **1 度だけ。** 見つからなければ false（＝ND DLC を持っていない）。
+        /// Finds the weather radar prefab and remembers its <c>ItemClass.Service</c>.
+        /// **Once only.** Returns false if none is found (i.e. the ND DLC is not owned).
         /// </summary>
         private static bool ResolveService(out ItemClass.Service service)
         {
@@ -164,10 +170,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// そのサービスの一覧から、稼働している気象レーダーを数える。
+        /// Counts the working weather radars in that service's list.
         ///
-        /// ★ サービスの一覧には他の災害系建物（避難所・地震計など）も並ぶので、
-        ///   <c>is WeatherRadarAI</c> で必ず絞ること。
+        /// ★ Other disaster buildings (shelters, seismometers and so on) sit in the same
+        ///   service list, so always narrow it down with <c>is WeatherRadarAI</c>.
         /// </summary>
         private static int CountWorking(ItemClass.Service service)
         {

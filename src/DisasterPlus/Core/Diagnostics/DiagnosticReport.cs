@@ -3,8 +3,8 @@ using System.Collections.Generic;
 namespace DisasterPlus.Core.Diagnostics
 {
     /// <summary>
-    /// 診断の不変スナップショット。sim スレッドで作り、main スレッドで読む。
-    /// 一度作ったら書き換えない。
+    /// An immutable snapshot of the diagnostics. Built on the sim thread, read on the main
+    /// thread. Once built, it is never rewritten.
     /// </summary>
     public class DiagnosticReport
     {
@@ -20,10 +20,10 @@ namespace DisasterPlus.Core.Diagnostics
             IList<AssumptionResult> assumptions,
             IList<DiagnosticSection> sections)
         {
-            // Game 層が null を渡してもオーバーレイが毎フレーム落ちないようにする。
-            // また、呼び出し元が渡したリストを後から変更・クリアすることから保護するため、
-            // 防御的コピーを作る。_passed/_failed はここで計算されるため、
-            // 元のリストが変更されても counts は不変のままになる。
+            // Keeps the overlay from dying every frame if the Game layer passes null.
+            // We also take defensive copies, to protect against the caller modifying or
+            // clearing the lists it handed us afterwards. _passed/_failed are computed
+            // here, so the counts stay fixed even if the original lists are changed.
             Header = header == null ? new List<DiagnosticLine>() : new List<DiagnosticLine>(header);
             Assumptions = assumptions == null ? new List<AssumptionResult>() : new List<AssumptionResult>(assumptions);
             Sections = sections == null ? new List<DiagnosticSection>() : new List<DiagnosticSection>(sections);

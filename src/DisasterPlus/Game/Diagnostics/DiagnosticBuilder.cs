@@ -4,8 +4,9 @@ using DisasterPlus.Core.Diagnostics;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 診断行の組み立て。sim スレッドで 1 機能ずつ使い回す。
-    /// Take() で中身を引き渡し、自分は空になる（次の機能で再利用するため）。
+    /// Assembles diagnostic lines. Reused one feature at a time on the sim thread.
+    /// Take() hands the contents over and leaves this empty (ready to be reused by the next
+    /// feature).
     /// </summary>
     public class DiagnosticBuilder
     {
@@ -21,7 +22,7 @@ namespace DisasterPlus.Game
             _lines.Add(new DiagnosticLine(indent, label, ""));
         }
 
-        /// <summary>組み立てた行を渡し、自身を空にする。</summary>
+        /// <summary>Hands over the assembled lines and empties itself.</summary>
         public IList<DiagnosticLine> Take()
         {
             var taken = _lines;

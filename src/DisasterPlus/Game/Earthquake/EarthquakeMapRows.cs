@@ -8,19 +8,21 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 2 種類の地図（バニラのハザードビューと本 MOD の震度分布オーバーレイ）と、
-    /// カーソル 1 点についてその 2 つが出す数字。**main スレッド専用。**
+    /// The two kinds of map (vanilla's hazard view and this mod's seismic-intensity
+    /// overlay) and the numbers each of them gives for the single point under the cursor.
+    /// **Main thread only.**
     ///
-    /// <see cref="EarthquakePanel"/> から切り出したのは、あのファイルがプロジェクト規約の
-    /// 800 行を超えていたためで、**内容は 1 文字も変えていない**。
-    /// 行の生成も <c>.text</c> の代入もこのファイルには無く、
-    /// <see cref="EarthquakeRows"/> を通してしか行えない。
+    /// It was split out of <see cref="EarthquakePanel"/> because that file had grown past
+    /// the project's 800-line rule, and **not one character of the content was changed**.
+    /// Neither row creation nor assignment to <c>.text</c> appears in this file; both can
+    /// only go through <see cref="EarthquakeRows"/>.
     ///
-    /// **2 つの地図は別の量を塗る。** バニラのハザードビューは亀裂**線分**までの距離・
-    /// 2 次減衰・<c>Rmax = R + 400</c>、しかも <c>Located</c>（＝地震計）が無いと
-    /// 1 セルも塗られない（§A-6）。オーバーレイは震央からの線形ランプで、
-    /// 地震計が無くても出る。並べたうえで注記と凡例にその違いを名乗らせるのが、
-    /// 取り違えを防ぐいちばん確実な形になる。
+    /// **The two maps paint different quantities.** Vanilla's hazard view uses distance
+    /// to the crack **line segment**, quadratic falloff and <c>Rmax = R + 400</c> — and
+    /// without <c>Located</c> (i.e. a seismograph) not a single cell is painted (§A-6).
+    /// The overlay is a linear ramp from the epicentre and shows up with no seismograph.
+    /// Putting them side by side and having the note and the legend name the difference
+    /// is the surest way to stop one being mistaken for the other.
     /// </summary>
     internal static class EarthquakeMapRows
     {
@@ -40,30 +42,34 @@ namespace DisasterPlus.Game
             showButton.normalBgSprite = "ButtonMenu";
             showButton.hoveredBgSprite = "ButtonMenuHovered";
             showButton.pressedBgSprite = "ButtonMenuPressed";
-            // ①のラッパーは一切変更しない。②はそのまま使うだけ（計画 4.1）。
+            // ①'s wrapper is left completely untouched. ② just uses it as it is (plan 4.1).
             showButton.eventClick += (c, e) =>
                 InfoModeSwitch.ShowHazard(InfoManager.SubInfoMode.EarthquakeHazard);
             y += 30f;
 
-            // この 1 行が、数値か「空である理由」かのどちらか一方だけを出す。
-            // 2 つのラベルに分けないのは意図的で、「理由を書いたのに隣に数値も残っている」
-            // という状態を構造的に作れなくするため。3 行ぶんの高さを取る。
+            // This single row shows either the number or the reason it is empty, never
+            // both. Keeping it to one label rather than two is deliberate: it makes the
+            // state "a reason was written but a number is still sitting next to it"
+            // structurally impossible. It takes up three rows' worth of height.
             _hazardLabel = EarthquakeRows.AddPlainRow(p, "Hazard", ref y,
                 Strings.EarthquakeSwitchHazardView, 42f);
 
-            // ★ カーソル 1 点について 2 つの別モデルの数字が並ぶ（全体レビュー M3）。
-            //    上は震央からの線形ランプ（R = 2000+20i）、こちらはバニラのハザード
-            //    グリッド（亀裂**線分**までの距離・2 次減衰・Rmax = 2000+20i+400、§A-6）。
-            //    どちらも実測なのに一致しないので、一致しない理由を画面で名乗る。
+            // ★ For one point under the cursor, numbers from two different models sit
+            //    side by side (whole-feature review M3). The one above is a linear ramp
+            //    from the epicentre (R = 2000+20i); this one is vanilla's hazard grid
+            //    (distance to the crack **line segment**, quadratic falloff,
+            //    Rmax = 2000+20i+400, §A-6). Both are measured values and yet they
+            //    disagree, so the screen says why they disagree.
 
-            // ── 震度分布の地図オーバーレイ ──────────────────────────
-            // 上の「マップに表示」（バニラのハザードビュー）の**すぐ下**に置く。
-            // 中身は EarthquakeOverlayRows（行を作るのは EarthquakeRows のヘルパー）。
+            // ── The seismic-intensity map overlay ───────────────────────
+            // It goes **directly below** "Show on map" (vanilla's hazard view) above.
+            // The content lives in EarthquakeOverlayRows (the rows themselves are made by
+            // EarthquakeRows' helpers).
             y += 6f;
             EarthquakeOverlayRows.Build(p, ref y);
         }
 
-        /// <summary>レベルアンロード時。参照を捨てるだけ（実体はパネルごと消える）。</summary>
+        /// <summary>On level unload. Just drop the references (the objects go with the panel).</summary>
         internal static void Destroy()
         {
             _hazardLabel = null;
@@ -71,8 +77,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// スナップショットが読めていないとき。**凡例は消さない**
-        /// （絵の読み方は観測値ではない）。ボタンの表示だけは実状に合わせる。
+        /// For when the snapshot could not be read. **The legend is not cleared** (how to
+        /// read the picture is not a reading). Only the button's caption is brought into
+        /// line with reality.
         /// </summary>
         internal static void ShowUnavailable()
         {
@@ -84,40 +91,44 @@ namespace DisasterPlus.Game
                                      bool haveCursor, Vec3 cursor)
         {
             RefreshHazardRow(snapshot, hazardViewOn, haveCursor, cursor);
-            // hazardViewOn を渡すのは、同じフレームで InfoManager を 2 回引かないため。
+            // hazardViewOn is passed along so InfoManager is not queried twice in the
+            // same frame.
             EarthquakeOverlayRows.Refresh(hazardViewOn);
         }
 
         /// <summary>
-        /// ハザードマップの読み取り。**このメソッドが数値を出せる経路は 1 本だけで、
-        /// そこへ至るには 4 つの門を全て通る必要がある。**
+        /// Reading the hazard map. **There is exactly one path by which this method can
+        /// print a number, and reaching it means passing all four gates.**
         ///
-        ///   1. 地震のハザードビューが表示中であること
-        ///      （<c>m_hazardAmount</c> は単一グリッドで、表示中のサブモード 1 種類ぶんの
-        ///        値しか持たない。<see cref="HazardMapReader"/> のクラス doc）
-        ///   2. スナップショットが有効であること（件数が読めていなければ何も断定しない）
-        ///   3. <c>Located &amp;&amp; (Emerging|Active)</c> を満たす地震が 1 つ以上あること
-        ///      （§A-6。**ここが 0 なら、グリッドは正常に全ゼロである**）
-        ///   4. カーソルが地形の上にあり、グリッドの内側であること
+        ///   1. the earthquake hazard view must be on screen
+        ///      (<c>m_hazardAmount</c> is a single grid and holds values for only the one
+        ///       sub-mode currently displayed. See <see cref="HazardMapReader"/>'s class doc)
+        ///   2. the snapshot must be valid (assert nothing if the counts could not be read)
+        ///   3. there must be at least one earthquake satisfying
+        ///      <c>Located &amp;&amp; (Emerging|Active)</c>
+        ///      (§A-6. **If this is 0, the grid is correctly all zeros**)
+        ///   4. the cursor must be over terrain and inside the grid
         ///
-        /// どこで落ちても**数値の代わりに落ちた理由**を出す。これが①の全体レビューが
-        /// 突き止めた欠陥（全ゼロのグリッドを「落雷: 0」と表示していた）の直接の修正で、
-        /// 地震は同じゲートを持つので同じ扱いが要る。
+        /// Wherever it falls out, it prints **the reason it fell out instead of a
+        /// number**. This is the direct fix for the flaw ①'s whole-feature review turned
+        /// up (an all-zero grid was being displayed as "Lightning: 0"), and earthquakes
+        /// have the same gate, so they need the same treatment.
         /// </summary>
         private static void RefreshHazardRow(EarthquakeSnapshot snapshot, bool hazardViewOn,
                                              bool haveCursor, Vec3 cursor)
         {
             if (!hazardViewOn)
             {
-                // 「読み取れません」を使い回さない。原因は特定できていて、
-                // しかもワンクリックで直せる（①の ForecastSwitchHazardView と同じ扱い）。
+                // Don't fall back on "cannot be read". The cause is known, and it is one
+                // click away from being fixed (treated the same way as ①'s
+                // ForecastSwitchHazardView).
                 EarthquakeRows.SetPlain(_hazardLabel, Strings.EarthquakeSwitchHazardView);
                 return;
             }
 
             if (CountPaintingQuakes(snapshot.Quakes) <= 0)
             {
-                // ★ ここが本タスクでいちばん重要な分岐。数値は一切出さない。
+                // ★ The most important branch in this whole task. No number at all is shown.
                 EarthquakeRows.SetPlain(_hazardLabel, Strings.EarthquakeNotLocated);
                 return;
             }
@@ -138,16 +149,18 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ラベルは①と共用する（"Hazard at cursor" は災害種別に依らない文言で、
-            // ここでは地震のハザードビューが表示中であることを 1 で確認済み）。
+            // The label is shared with ① ("Hazard at cursor" does not name a disaster
+            // type, and gate 1 above has already confirmed the earthquake hazard view is
+            // the one on screen).
             EarthquakeRows.SetLayer1(_hazardLabel, Strings.ForecastAtCursor + ": " + value
                 + "  [" + HazardLevel.BarOf(value) + "]");
         }
 
         /// <summary>
-        /// 今ハザードマップに何かを塗っている地震の数（§A-6 の 2 段ゲート）。
-        /// 判定は <see cref="DisasterPhases.PaintsHazardMap(bool, EarthquakePhase)"/> に
-        /// 任せる —— このゲートをここで書き直すと、ゲートの定義が 2 箇所に分かれる。
+        /// How many earthquakes are painting anything on the hazard map right now (the
+        /// two-stage gate of §A-6). The decision is left to
+        /// <see cref="DisasterPhases.PaintsHazardMap(bool, EarthquakePhase)"/> — rewrite
+        /// the gate here and its definition ends up split across two places.
         /// </summary>
         private static int CountPaintingQuakes(IList<EarthquakeReading> quakes)
         {

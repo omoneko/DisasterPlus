@@ -3,34 +3,40 @@ using DisasterPlus.Core.Volcano;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ⑤火山。プレイヤーが指した地点で、範囲内の道路と建物を段階的に壊しながら
-    /// 地面が隆起し、山頂の火口から噴火して溶岩が斜面を流れ下る。
+    /// ⑤ Volcano. At the spot the player picks, the ground rises while the roads and buildings
+    /// inside the range are destroyed in stages, then it erupts from the summit crater and lava
+    /// flows down the flanks.
     ///
-    /// **⑤はバニラの災害スロットに載らない**（設計書 §2）。ND DLC 無しでは
-    /// バニラの災害プレハブが 1 つも存在せず（§D-11）、自前プレハブの
-    /// 実行時登録はセーブにプレハブ名を焼き込む。したがって⑤は自前の位相機械
-    /// （T4 の <c>VolcanoState</c>）で動く。**災害まわりの型には一切触らない。**
+    /// **⑤ does not occupy a vanilla disaster slot** (design doc §2). Without the ND DLC there is
+    /// not a single vanilla disaster prefab (§D-11), and registering our own prefab at runtime
+    /// bakes the prefab name into the save. So ⑤ runs on its own phase machine
+    /// (T4's <c>VolcanoState</c>). **It does not touch the disaster-related types at all.**
     ///
-    /// > **その担保は grep である。** <c>src/DisasterPlus/Game/Volcano/</c> と
-    /// > <c>src/DisasterPlus/Core/Volcano/</c> と <c>Game/UI/Volcano*.cs</c> に対して、
-    /// > 災害マネージャ・災害プレハブ・災害データ・災害の生成／検索／検出の各 API 名を
-    /// > 探して**0 件**であること。**doc コメントにもそれらの名前を書かないこと** ——
-    /// > 書くと担保が「0 件」で読めなくなる。名前が要るときは事実文書 §D-11 を指す。
+    /// > **The guarantee is a grep.** Search <c>src/DisasterPlus/Game/Volcano/</c>,
+    /// > <c>src/DisasterPlus/Core/Volcano/</c> and <c>Game/UI/Volcano*.cs</c> for the API names of
+    /// > the disaster manager, the disaster prefab, the disaster data and disaster
+    /// > creation/lookup/detection, and expect **0 hits**. **Do not write those names in doc
+    /// > comments either** — write them and the guarantee can no longer be read as "0 hits".
+    /// > When the names are needed, point at the facts doc §D-11.
     ///
-    /// **①②④と違い、⑤にはバニラの原資がまったく無い。** 火山という現象は
-    /// バニラに存在せず、溶岩・マグマ・溶融物のプレハブもマテリアルもシェーダも
-    /// DLL の文字列ヒープにすら 1 件も無い（§B-5）。したがって⑤が出す数値は
-    /// **原則すべて本 MOD のもの**で、パネルは見出しで一度だけそう名乗る（設計書 §7.4）。
+    /// **Unlike ①, ② and ④, ⑤ has no vanilla material to build on whatsoever.** Volcanoes do not
+    /// exist in vanilla, and there is not one prefab, material or shader for lava, magma or melt —
+    /// not even in the DLL's string heap (§B-5). So the numbers ⑤ shows are
+    /// **in principle all this mod's own**, and the panel says so once, in its heading
+    /// (design doc §7.4).
     ///
-    /// このタスク（Task 2）の時点では**パネルも火山も無い機能**である。やることは
-    /// sim スレッドで読んで <see cref="VolcanoHub"/> へ publish することと、
-    /// **地形 API が解決できるかを診断ダンプに出すこと**だけ。それが分からなければ
-    /// T3 以降は 1 行も意味を持たない（<see cref="VolcanoTerrainFacts.Usable"/>）。
+    /// At this task (Task 2) it is **a feature with neither a panel nor a volcano**. All it does
+    /// is read on the sim thread and publish to <see cref="VolcanoHub"/>, and
+    /// **report in the diagnostic dump whether the terrain API can be resolved**. Without knowing
+    /// that, not one line of T3 onwards means anything
+    /// (<see cref="VolcanoTerrainFacts.Usable"/>).
     ///
-    /// <see cref="IPausedTickFeature"/> を実装しているのは①②④と同じ理由
-    /// （ロード直後にポーズしたままパネルを開くと全行が「読み取れません」になる）。
-    /// **ただし⑤は T4 以降でゲームの状態を進める。しかも⑤が進めるのは地形であり、
-    /// 取り消せない。** その契約を守る仕掛けは <see cref="OnSimulationTick"/> の中にある。
+    /// It implements <see cref="IPausedTickFeature"/> for the same reason as ①, ② and ④
+    /// (open the panel while still paused right after a load and every row would read
+    /// "cannot be read").
+    /// **But ⑤ advances the game state from T4 onwards. And what ⑤ advances is terrain, which
+    /// cannot be undone.** The machinery that keeps that contract is inside
+    /// <see cref="OnSimulationTick"/>.
     /// </summary>
     public class VolcanoFeature : IDisasterFeature, IPausedTickFeature
     {
@@ -44,29 +50,32 @@ namespace DisasterPlus.Game
             VolcanoReader.Reset();
             VolcanoState.Reset();
 
-            // ★★ **毎レベルロードで登録し直すこと。** ToolController.m_tools は
-            //    Awake で一度だけ構築され、ToolsModifierControl.SetTool<T> は静的辞書を
-            //    引くだけなので、登録しないと SetTool<T>() が**黙って空振りする**
-            //    （火災旋風 付録 A。VolcanoPlacementTool のクラス doc）。
-            //    ToolController は都市ごとに作り直されるので、前の都市の登録は使えない。
+            // ★★ **Re-register on every level load.** ToolController.m_tools is built once in
+            //    Awake and ToolsModifierControl.SetTool<T> merely looks up a static dictionary,
+            //    so without registering, SetTool<T>() **silently does nothing**
+            //    (firestorm appendix A; the class doc of VolcanoPlacementTool).
+            //    ToolController is rebuilt per city, so the previous city's registration is
+            //    useless.
             ToolRegistration.Register<VolcanoPlacementTool>();
         }
 
         /// <summary>
-        /// sim スレッド。<c>TerrainManager</c> / <c>TerrainModify</c> /
-        /// <c>SimulationManager</c> の読み書きは必ずここで行う。
+        /// Sim thread. All reads and writes of <c>TerrainManager</c> / <c>TerrainModify</c> /
+        /// <c>SimulationManager</c> must happen here.
         ///
-        /// ポーズ中（deltaMinutes == 0）にも呼ばれる（<see cref="IPausedTickFeature"/>）。
+        /// It is also called while paused (deltaMinutes == 0) (<see cref="IPausedTickFeature"/>).
         /// </summary>
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
             if (!ModSettings.VolcanoEnabled.value)
             {
-                // ★ 機能を切ったら、積まれている依頼と位相を捨てる（計画 §4.1）。
-                //   捨てないと、切っている間に積まれた依頼が**入れ直した瞬間に発火**して、
-                //   プレイヤーが忘れた地点に山が生えはじめる。
-                //   **既に変わった地形は戻らない。** 捨てるのは「これからの予定」だけである。
-                //   条件を付けているのは、切っている間ずっとロックを取り続けないため。
+                // ★ When the feature is turned off, discard the queued request and the phase
+                //   (plan §4.1). Without discarding them, a request queued while it was off
+                //   **fires the instant it is turned back on**, and a mountain starts growing at
+                //   a spot the player has forgotten about.
+                //   **Terrain already changed does not come back.** All that is discarded is
+                //   "what was going to happen next".
+                //   The condition is there so we do not hold the lock the whole time it is off.
                 if (VolcanoState.Phase != VolcanoPhase.Idle
                     || VolcanoHub.PendingRequest.Kind != VolcanoRequest.None)
                 {
@@ -76,76 +85,80 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ここまでが「読んで publish するだけ」。ポーズ中もここは通る。
+            // Everything up to here is "just read and publish". This is reached while paused too.
             var snapshot = VolcanoReader.Read();
             VolcanoHub.Publish(snapshot);
 
-            // Volcano チャンネルは既定 OFF。この if が無いと、下の文字列連結が
-            // 毎 sim tick（通常速度でおよそ 50 回/秒）実行されてから Log.Diag に
-            // 捨てられる —— C# は引数を呼び出し前に評価し切るので、Diag の内側の
-            // マスク判定では手遅れになる。
+            // The Volcano channel is off by default. Without this if, the string concatenation
+            // below would run on every sim tick (about 50 times a second at normal speed) before
+            // being thrown away by Log.Diag — C# evaluates the arguments fully before the call,
+            // so the mask test inside Diag is too late.
             //
-            // ①の ForecastFeature と違い、ここは early-return にしてはいけない。
-            // 下のポーズガードと以後の全処理を丸ごと飛ばすことになる
-            // （②④が同じ注記を持っている）。
+            // Unlike ①'s ForecastFeature, this must not be an early return. That would skip the
+            // pause guard below and everything after it
+            // (② and ④ carry the same note).
             if (Log.DiagEnabled(DisasterPlus.Core.Diagnostics.LogChannel.Volcano))
             {
                 Log.Diag(DisasterPlus.Core.Diagnostics.LogChannel.Volcano, "volcano",
                     snapshot.Valid
                         ? "terrain=" + (snapshot.Terrain.Usable ? "usable" : "UNUSABLE")
                           + " raw=" + snapshot.Terrain.RawArrayLength
-                          // ★ 火山性地震の行。**揺れていないときも必ず出す** ——
-                          //   「機能が死んでいる」と「今は揺れない位相なのだ」が
-                          //   ログ上で区別できなくなる（③で実際に起きた形）。
+                          // ★ The volcanic-earthquake row. **Always emit it, including when
+                          //   nothing is shaking** — otherwise "the feature is dead" and "this is
+                          //   simply a phase that does not shake" become indistinguishable in the
+                          //   log (which is what actually happened in ③).
                           + " tremor=" + (VolcanoTremorTrace.Active
                               ? VolcanoTremorTrace.ActivityUnit.ToString("F2")
                               : "off")
                         : "snapshot invalid");
             }
 
-            // ★★ **依頼の受け取りはポーズガードより上**（全体レビュー I1）。
-            //    受け取り自体は建物も道路も地形も 1 つも変えない ——
-            //    設置の依頼は位相を Clearing にするだけで、実際に壊すのは
-            //    下の VolcanoState.Tick である。**答えないと「黙って何もしない」に
-            //    なる** —— 山を作る前にポーズしてから地面をクリックしたプレイヤーには、
-            //    何も起きなかった。**1 tick に 1 回だけ呼ぶこと。**
+            // ★★ **Taking the request sits above the pause guard** (whole-project review I1).
+            //    Taking it changes not one building, road or terrain cell — a placement request
+            //    only sets the phase to Clearing, and what actually destroys things is
+            //    VolcanoState.Tick below. **Not answering would mean "failing silently"** — a
+            //    player who paused before making a mountain and then clicked the ground got
+            //    nothing at all. **Call it exactly once per tick.**
             VolcanoState.HandleRequest(snapshot);
 
-            // ★ ここから下は状態を進める。⑤が進めるのは**取り消せない地形**である。
-            //    ポーズ中（deltaMinutes == 0）は絶対に通さない。
-            //    T4〜T9 が足す処理は必ずこの行より下に置くこと。
-            //    このコメントを消すと「ポーズ中に山が育ち、建物が消え、溶岩が流れる」が起きる。
+            // ★ Everything below advances state. What ⑤ advances is **terrain that cannot be
+            //    undone**. Never let it through while paused (deltaMinutes == 0).
+            //    Anything T4–T9 adds must go below this line.
+            //    Delete this comment and you get "the mountain grows, buildings vanish and lava
+            //    flows while paused".
             if (deltaMinutes <= 0f) return;
 
-            // T5〜T9 はこの中の位相分岐から呼ばれる。**ここに直接足さないこと。**
+            // T5–T9 are called from the phase branches inside this. **Do not add to them here
+            // directly.**
             VolcanoState.Tick(snapshot, frameIndex, deltaMinutes);
 
-            // ★ 位相が進んだ**あと**に、火山性地震の記録側を合わせる
-            //   （②の地震計がここから読む。<see cref="VolcanoTremorTrace"/>）。
-            //   前に置くと 1 tick 古い位相で記録することになる。
-            //   カメラの揺れ（main）とは別経路で、あちらは触らない。
+            // ★ **After** the phase has advanced, bring the volcanic-earthquake recording side
+            //   into line (②'s seismograph reads from here; <see cref="VolcanoTremorTrace"/>).
+            //   Put it before and you record against a phase that is one tick stale.
+            //   The camera shake (main) is a separate path and is not touched here.
             VolcanoTremorTrace.Update(frameIndex);
         }
 
         /// <summary>
-        /// main スレッド。**ここから sim 側の型を呼ばないこと。**
-        /// 読むのは <see cref="VolcanoHub.Latest"/> のスナップショットだけである。
+        /// Main thread. **Do not call the sim-side types from here.**
+        /// The only thing read is the snapshot in <see cref="VolcanoHub.Latest"/>.
         /// </summary>
         public void OnMainThreadUpdate()
         {
-            // ボタンは DisasterPanelBar が 4 個まとめて持つ（FeatureHost が呼ぶ）。
-            // ★ ⑤が開く窓はこれ 1 枚だけである。確認の窓は 2026-08-21 に撤去した ——
-            //   タイル → スライダー → 地図をクリックで火山が起きる。
+            // The buttons are held four at a time by DisasterPanelBar (FeatureHost calls it).
+            // ★ This is the only window ⑤ opens. The confirmation window was removed on
+            //   2026-08-21 — tile → slider → click the map and the volcano happens.
             VolcanoPanel.Tick();
 
-            // ★ ⑤を構えているあいだだけ、強度スライダーのラベルを「山の大きさ」に
-            //   読み替える（VolcanoSizeReadout のクラス doc）。構えていないフレームは
-            //   バニラの表示へ書き戻して何もしない。
+            // ★ Only while ⑤ is armed, relabel the intensity slider as "the size of the
+            //   mountain" (the class doc of VolcanoSizeReadout). On frames when it is not armed
+            //   it writes the vanilla text back and does nothing.
             VolcanoSizeReadout.Update();
 
-            // ★ 噴火の描画は main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
-            //   設定で切った瞬間に自分で畳む（切ったまま噴煙が残らないこと）。
-            //   描いているのは**ゲーム自身の粒子エフェクト**である（VolcanoEruptionFx）。
+            // ★ Drawing the eruption is a main-thread-only feature. It is never called from the
+            //   sim side. It folds itself away the moment the setting is turned off (so no plume
+            //   is left behind while it is off).
+            //   What it draws is **the game's own particle effects** (VolcanoEruptionFx).
             bool eruptionFx = ModSettings.VolcanoEruptionFx.value;
             if (eruptionFx)
             {
@@ -154,26 +167,29 @@ namespace DisasterPlus.Game
             else
             {
                 VolcanoEruptionFx.Destroy();
-                // ★ 火口のマグマだまり・光・雷は噴煙の描画の中から呼ばれるので、
-                //   噴煙を切ったらこちらも自分で畳む（抱えたままにしない）。
+                // ★ The crater's magma pool, light and lightning are called from inside the
+                //   plume drawing, so when the plume is turned off this folds itself away too
+                //   (it is not kept hanging around).
                 VolcanoCraterFx.Destroy();
             }
 
-            // ★ 火砕流「もどき」の土煙。**別の設定で独立に切れる** ——
-            //   帯 1 本あたり粒子数が大きく、切りたい人が居る見た目である。
-            //   これは火砕流の再現ではない（VolcanoPyroclasticFx のクラス doc）。
+            // ★ The dust of the pyroclastic-flow "lookalike". **It can be turned off
+            //   independently, with its own setting** — the particle count per lobe is large and
+            //   some people will want it gone.
+            //   This is not a reproduction of a pyroclastic flow (the class doc of
+            //   VolcanoPyroclasticFx).
             bool pyroclasticFx = ModSettings.VolcanoPyroclasticFx.value;
             if (pyroclasticFx) VolcanoPyroclasticFx.Update(VolcanoHub.Latest);
             else VolcanoPyroclasticFx.Destroy();
 
-            // ★ 両方切ってあるあいだは借り物の複製も手放す（切ったまま抱えない）。
-            //   次に入れ直したフレームで作り直される。
+            // ★ While both are off, let go of the borrowed clones too (do not keep holding them
+            //   while off). They are rebuilt on the frame they are turned back on.
             if (!eruptionFx && !pyroclasticFx) VolcanoVanillaFx.Destroy();
 
-            // ★ 噴火の音も main スレッドだけの機能。sim 側からは 1 度も呼ばれない。
-            //   **1 フレームに 1 回だけ**呼ぶこと（2 回積むとバニラの効果音の枠を
-            //   1 つの音で潰す。VolcanoEruptionAudio のクラス doc）。
-            //   切った瞬間にクリップを手放す（切ったまま数 MB を抱えないこと）。
+            // ★ The eruption sound is a main-thread-only feature too. It is never called from the
+            //   sim side. **Call it exactly once per frame** (stack two and one sound occupies a
+            //   whole vanilla sound-effect slot; the class doc of VolcanoEruptionAudio).
+            //   Release the clip the moment it is turned off (do not hold several MB while off).
             if (ModSettings.VolcanoEruptionSound.value)
             {
                 VolcanoEruptionAudio.Update(VolcanoHub.Latest);
@@ -183,73 +199,80 @@ namespace DisasterPlus.Game
                 VolcanoEruptionAudio.Destroy();
             }
 
-            // ★ 溶岩の描画も main スレッドだけの機能。sim 側からは 1 度も呼ばれない
-            //   （T9 の独立性の実体。VolcanoLavaFx のクラス doc の grep）。
+            // ★ Drawing the lava is a main-thread-only feature too. It is never called from the
+            //   sim side (the substance of T9's independence; the grep in the class doc of
+            //   VolcanoLavaFx).
             if (ModSettings.VolcanoLavaRender.value) VolcanoLavaFx.Update(VolcanoHub.Latest);
             else VolcanoLavaFx.Destroy();
 
-            // ★ 火山性地震の揺れ。**②の設定を 1 つも見ない**（VolcanoTremorShake の
-            //   クラス doc）。切った瞬間に足すのをやめれば、次のフレームで消える
-            //   （CameraController.LateUpdate が毎フレーム 0 に戻す）。
+            // ★ The volcanic-earthquake shake. **It does not look at a single one of ②'s
+            //   settings** (the class doc of VolcanoTremorShake). Stop adding to it the moment it
+            //   is turned off and it is gone on the next frame
+            //   (CameraController.LateUpdate resets it to 0 every frame).
             if (ModSettings.VolcanoQuake.value) VolcanoTremorShake.Update(VolcanoHub.Latest);
             else VolcanoTremorShake.Reset();
         }
 
         public void OnLevelUnloading()
         {
-            // ★★ 配置ツールが選ばれたまま都市を出させない。次の都市でカーソルが
-            //    「火山を置く」のまま始まると、プレイヤーが意図せず地点を指しうる
-            //    （地形は取り消せない）。**アクティブでないときは何もしない**ので、
-            //    他 MOD が選んでいたツールを横から戻すことはない。
+            // ★★ Do not let the player leave the city with the placement tool still selected.
+            //    If the next city starts with the cursor still on "place a volcano", the player
+            //    could pick a spot unintentionally (and terrain cannot be undone).
+            //    **It does nothing when not active**, so it never reaches in and reverts a tool
+            //    another mod had selected.
             VolcanoPlacementTool.Deactivate();
 
-            // ★ UI から先に畳む。2 つ目の都市が**ボタン 1 個・パネル 1 枚**で
-            //    始まること（残すと都市を読み込むたびに 1 枚ずつ積み上がる）。
-            //    ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
+            // ★ Fold the UI away first, so that the second city starts with **one button and one
+            //    panel** (leave them and one more piles up on every city load).
+            //    Removing the button is done by FeatureHost.LevelUnloading via
+            //    DisasterPanelBar.Remove.
             VolcanoPanel.Destroy();
 
-            // ★ スライダーのラベルは**触らずに参照だけ手放す**（もう破棄されている）。
-            //   ツールを降りたときの書き戻しは VolcanoPlacementTool.Deactivate の側で
-            //   既に済んでいる（上の 1 行がそれを呼ぶ）。
+            // ★ For the slider label, **just drop the reference without touching it** (it has
+            //   already been destroyed). Writing the text back when leaving the tool has already
+            //   been done by VolcanoPlacementTool.Deactivate (the line above calls it).
             VolcanoSizeReadout.Reset();
 
-            // ★ 噴火の描画側の時計を戻す。
+            // ★ Reset the clock on the eruption's drawing side.
             VolcanoEruptionFx.Destroy();
-            // ★ 火口の Mesh / Material / Texture2D も自分で Object.Destroy する
-            //   （どれも Component ではないので GameObject の道連れにならない）。
+            // ★ The crater's Mesh / Material / Texture2D are Object.Destroy'd by us too
+            //   (none of them is a Component, so they do not go down with the GameObject).
             VolcanoCraterFx.Destroy();
             VolcanoPyroclasticFx.Destroy();
 
-            // ★★ 借り物の複製（GameObject と、その内側に出来る粒子系）は自分で消す。
-            //    内側の複製は "Particle Effects" ルート（DontDestroyOnLoad）の下に
-            //    ぶら下がっていて**外側を消しても道連れにならない**ので、
-            //    ここを飛ばすと都市を出入りするたびに粒子系が 1 組ずつ残る。
+            // ★★ The borrowed clones (the GameObject and the particle systems created inside it)
+            //    are destroyed by us. The inner clones hang under the "Particle Effects" root
+            //    (DontDestroyOnLoad) and **do not go down with the outer object**, so skip this
+            //    and one more set of particle systems is left behind every time the player enters
+            //    and leaves a city.
             VolcanoVanillaFx.Destroy();
-            // ★ 噴火音の AudioClip と AudioInfo も自分で Object.Destroy する
-            //   （どちらも Component ではないので GameObject の道連れにならない）。
-            //   ここを飛ばすと都市を出入りするたびに数 MB のクリップが 1 個ずつ残る。
+            // ★ The eruption sound's AudioClip and AudioInfo are Object.Destroy'd by us too
+            //   (neither is a Component, so they do not go down with the GameObject).
+            //   Skip this and one more multi-MB clip is left behind every time the player enters
+            //   and leaves a city.
             VolcanoEruptionAudio.Destroy();
-            // ★ 溶岩の Mesh / Material / Texture2D も自分で Object.Destroy する
-            //   （どれも Component ではないので GameObject の道連れにならない）。
+            // ★ The lava's Mesh / Material / Texture2D are Object.Destroy'd by us too
+            //   (none of them is a Component, so they do not go down with the GameObject).
             VolcanoLavaFx.Destroy();
-            // ★ 火山性地震の時計とカメラの参照も持ち越さない。
+            // ★ Do not carry over the volcanic-earthquake clock or the camera reference either.
             VolcanoTremorShake.Reset();
 
             VolcanoHub.Clear();
-            // ★ 地形の実測（RawHeights の長さ）を都市をまたいで持ち越さない。
-            //    持ち越すと 2 つ目の都市で前の都市の事実を名乗ることになる。
+            // ★ Do not carry the terrain measurements (the length of RawHeights) across cities.
+            //    Carry them and the second city would be quoting the previous city's facts.
             VolcanoReader.Reset();
-            // ★ 位相と調査結果も持ち越さない。持ち越すと、次の都市で前の都市の
-            //    地点の火山がそのまま育ち続ける。
+            // ★ Do not carry over the phase or the survey result either. Carry them and a volcano
+            //    at the previous city's location keeps growing in the next one.
             VolcanoState.Reset();
         }
 
         /// <summary>
-        /// **このタスクの主目的。** ⑤が地形を書けるかどうかを、行の有無ごと出す。
+        /// **The main purpose of this task.** Report whether ⑤ can write terrain, with the
+        /// presence or absence of each row carrying meaning.
         ///
-        /// **解決できなかった項目は <c>NOT RESOLVED</c> と出し、その下に
-        /// 「何ができなくなるか」を 1 行足す。** 推測値を表示しないことを、
-        /// 行の有無そのもので示す（設計書 §6）。
+        /// **An item that could not be resolved is reported as <c>NOT RESOLVED</c>, with one line
+        /// below it saying what becomes impossible.** That we do not display guessed values is
+        /// shown by the presence or absence of the rows themselves (design doc §6).
         /// </summary>
         public void WriteDiagnostics(DiagnosticBuilder b)
         {
@@ -273,17 +296,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **画面から降ろした説明の行き場。**
+        /// **Where the explanations taken off the screen went.**
         ///
-        /// 所有者の指示は「あれこれ説明は出さなくていい」「ほかの災害と同じように
-        /// クリックしたら起こるようにしてほしい」だった。⑤は確認の窓ごと撤去したので、
-        /// 説明はすべてここと火山タブにある。
-        /// **落としたのは説明の置き場所であって、情報ではない。**
-        /// テスターと不具合報告が読むのはこのファイルであり、
-        /// 山を建てようとしている人が読む場所ではない。
+        /// The owner's instruction was "you don't need to show all these explanations" and
+        /// "make it happen on a click like the other disasters". ⑤ removed the confirmation
+        /// window entirely, so all the explanation is here and on the volcano tab.
+        /// **What was dropped is where the explanation lives, not the information.**
+        /// This file is what testers and bug reports read; it is not where someone trying to
+        /// build a mountain reads.
         ///
-        /// ★ ここは sim スレッドである（<c>DiagnosticDump</c> のクラス doc）。
-        ///   ゲームのバッファにも UI にも触らない、定数の行だけにすること。
+        /// ★ This is the sim thread (the class doc of <c>DiagnosticDump</c>).
+        ///   Keep it to constant lines that touch neither the game's buffers nor the UI.
         /// </summary>
         private static void WriteNotes(DiagnosticBuilder b)
         {
@@ -314,18 +337,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴火音の 2〜3 行。
+        /// The two or three lines for the eruption sound.
         ///
-        /// **音が出ないときの切り分けはここにしか無い。** 「設定で切った」「同梱 wav が
-        /// 無い／壊れている」「ゲーム側の経路が解決しない」は、プレイヤーから見ると
-        /// どれも同じ無音である。3 つを別々の行にする。
+        /// **This is the only place to narrow down why there is no sound.** "Turned off in the
+        /// settings", "the bundled wav is missing or corrupt" and "the game-side path does not
+        /// resolve" all look like the same silence to the player. Give the three their own lines.
         ///
-        /// ★★ <b>ここは sim スレッドである</b>（<c>DiagnosticDump</c> のクラス doc:
-        ///   main がホットキーで頼み、sim が組み立てる）。だから
-        ///   <c>ScanAudioFacts</c> を**ここから呼ばない** —— あちらは
-        ///   <c>File.Exists</c> と <c>PluginManager.GetInstances</c> に触るので、
-        ///   sim スレッドへ持ち込んではいけない。読むのは main（<c>Assumptions.Run</c>）が
-        ///   レベルロードのたびに走査して置いた <c>LastFacts</c> のキャッシュだけである。
+        /// ★★ <b>This is the sim thread</b> (the class doc of <c>DiagnosticDump</c>: main asks
+        ///   via a hotkey and sim assembles it). So **do not call <c>ScanAudioFacts</c> from
+        ///   here** — that touches <c>File.Exists</c> and <c>PluginManager.GetInstances</c>,
+        ///   which must not be brought onto the sim thread. All that is read is the
+        ///   <c>LastFacts</c> cache that main (<c>Assumptions.Run</c>) scans and stores on every
+        ///   level load.
         /// </summary>
         private static void WriteAudio(DiagnosticBuilder b)
         {
@@ -337,7 +360,7 @@ namespace DisasterPlus.Game
 
             if (!VolcanoEruptionAudio.FactsScanned)
             {
-                // 「まだ走査していない」を「経路が無い」と混ぜない。
+                // Do not mix "not scanned yet" with "there is no path".
                 b.Line(1, "eruption sound", "not scanned yet");
                 return;
             }
@@ -365,13 +388,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 位相と、直近の調査結果。
+        /// The phase, and the latest survey result.
         ///
-        /// **<c>refusal</c> は必ず出す。** 「断られた」を「何も起きていない」と
-        /// 見分ける手段がここにしか無い（④の <c>TyphoonSnapshot.Refusal</c> と同じ扱い）。
+        /// **Always report <c>refusal</c>.** This is the only way to tell "it was refused" from
+        /// "nothing is happening" (handled the same way as ④'s <c>TyphoonSnapshot.Refusal</c>).
         ///
-        /// **数えられなかった道路は <c>not counted</c> と出す。0 と混ぜない**
-        /// （<see cref="VolcanoFootprint.SegmentCount"/> の doc）。
+        /// **Roads that could not be counted are reported as <c>not counted</c>. Do not mix that
+        /// with 0** (the doc of <see cref="VolcanoFootprint.SegmentCount"/>).
         /// </summary>
         private static void WriteState(DiagnosticBuilder b, VolcanoSnapshot snapshot)
         {
@@ -407,11 +430,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 準備（T5）の実績。**壊した数が 0 のときも出す** —— 「機能が死んでいる」と
-        /// 「範囲内に何も無い」を診断で区別できるようにするため（③で実際に起きた形）。
+        /// The clearing's (T5) tally. **Report it even when the number destroyed is 0** — so that
+        /// "the feature is dead" and "there is nothing in range" can be told apart in the
+        /// diagnostics (which is what actually happened in ③).
         ///
-        /// <c>refused</c> は必ず出す。0 でないなら、その足元のセルは元の高さに固定された
-        /// まま隆起に取り残される（<see cref="VolcanoClearing"/> のクラス doc の 4）。
+        /// Always report <c>refused</c>. If it is not 0, the cells under them stay pinned at
+        /// their original height and are left behind by the uplift (point 4 in the class doc of
+        /// <see cref="VolcanoClearing"/>).
         /// </summary>
         private static void WriteClearing(DiagnosticBuilder b, VolcanoSnapshot snapshot)
         {
@@ -443,16 +468,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 隆起（T6）の実績。
+        /// The uplift's (T6) tally.
         ///
-        /// ★ <c>cells written</c> と <c>active radius</c> の 2 つが、罠 1 と罠 2 を
-        /// 実機で切り分ける唯一の材料である ——
-        /// <c>cells written</c> が 0 なら 1 tick の増分が丸めで消えているか、
-        /// もう目標に届いている。<c>active radius</c> が伸びないなら準備が止まっている。
+        /// ★ <c>cells written</c> and <c>active radius</c> are the only two things that let you
+        /// tell trap 1 and trap 2 apart in the live game —
+        /// if <c>cells written</c> is 0, either one tick's increment is vanishing in the rounding
+        /// or the target has already been reached. If <c>active radius</c> is not growing, the
+        /// clearing has stalled.
         ///
-        /// ★ <c>refused buildings</c> をここにも出すのは、§A-3 のフィードバックループの
-        /// 規模がそれそのものだからである（<c>m_flattenTerrain == false</c> の建物が
-        /// 動くたびに追加の <c>UpdateArea</c> が 1 回増える）。
+        /// ★ <c>refused buildings</c> is reported here too because it *is* the scale of the
+        /// feedback loop of §A-3 (every time a building with <c>m_flattenTerrain == false</c>
+        /// moves, one extra <c>UpdateArea</c> is added).
         /// </summary>
         private static void WriteUplift(DiagnosticBuilder b, VolcanoSnapshot snapshot)
         {
@@ -462,10 +488,11 @@ namespace DisasterPlus.Game
                                 + (snapshot.UpliftComplete ? " (complete)" : ""));
             b.Line(2, "active radius", snapshot.ActiveRadiusMetres.ToString("F0")
                                        + " m (as far as the clearing has reached)");
-            // ★ flush 1/1 は「この tick に変わった全域が、同じ tick で画面に出た」
-            //   ＝ いちばん滑らかな状態。2 以上なら分割してタイル総当たりに落ちており、
-            //   目に見える 1 段はその枚数ぶんの上昇量になる（VolcanoUplift のクラス doc）。
-            //   **「断続的なせり上がり」の切り分けはこの 1 行でしかできない。**
+            // ★ flush 1/1 means "the whole area changed this tick made it on screen in the same
+            //   tick" = the smoothest state. 2 or more means it has been split and fallen back to
+            //   round-robin tiling, and the visible step is the rise over that many flushes
+            //   (the class doc of VolcanoUplift).
+            //   **This one line is the only way to narrow down "it heaves up in steps".**
             b.Line(2, "cells written", VolcanoUplift.CellsWrittenLastTick
                                        + " last tick; flush " + snapshot.UpliftTileCursor
                                        + "/" + snapshot.UpliftTileCount
@@ -474,7 +501,8 @@ namespace DisasterPlus.Game
                                        + " tile(s)");
             b.Line(2, "summit crater", snapshot.CraterFormed
                 ? "at full depth" : "still shallower than its final depth");
-            // 山肌の凹凸。0% なら滑らかな円錐そのもの（設定の意味を診断でも名乗る）。
+            // The relief on the flanks. At 0% it is a smooth cone exactly (the diagnostics state
+            // the meaning of the setting too).
             b.Line(2, "flank relief", ModSettings.VolcanoReliefStrength.value
                                       + "% (0 = a smooth cone)"
                                       + (VolcanoUplift.Complete
@@ -485,8 +513,9 @@ namespace DisasterPlus.Game
                                            + VolcanoUplift.RiseMetresPerFrame.ToString("F3")
                                            + " m per sim frame)"));
 
-            // 「建てられる地面」と水位の遅れ。**これは不具合ではない**（設計書 §7.3）。
-            // 換算は FeatureHost.FramesPerMinute から出す（定数を直書きしない）。
+            // The lag of the buildable ground and the water level. **This is not a bug**
+            // (design doc §7.3).
+            // Derive the conversion from FeatureHost.FramesPerMinute (never hard-code the constant).
             int frames = snapshot.Footprint.BlockHeightCatchUpFrames;
             float framesPerMinute = FeatureHost.FramesPerMinute;
             string catchUp = frames + " frames";
@@ -511,21 +540,21 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 噴火（T7）。**借り物のエフェクトが使えないのは不具合ではない** ——
-        /// ⑤自前の噴出物だけで噴火は成立する。だから
-        /// <c>not available in this environment</c> にはその旨を添える。
+        /// The eruption (T7). **Borrowed effects being unusable is not a bug** — the eruption
+        /// works on ⑤'s own ejecta alone. That is why
+        /// <c>not available in this environment</c> comes with a note saying so.
         ///
-        /// ★ 借り物の 4 つを 1 行ずつ出すのは、実機で「何も見えない」を切り分ける材料が
-        ///   ここにしか無いからである。<c>NOT resolved</c> はその 1 つだけが描かれない
-        ///   ということで、噴火も山も溶岩も止まらない。
+        /// ★ The four borrowed items get a line each because this is the only material available
+        ///   for narrowing down "I can't see anything" in the live game. <c>NOT resolved</c> only
+        ///   means that one thing is not drawn; the eruption, the mountain and the lava all keep
+        ///   going.
         ///
-        /// ★★ <b>ここは sim スレッドである</b>（<c>DiagnosticDump</c> のクラス doc:
-        ///   main がホットキーで頼み、sim が組み立てる）。だから
-        ///   <c>VolcanoVanillaFx</c> の解決経路を**ここから呼ばない** ——
-        ///   あちらは <c>Object.Instantiate</c> と <c>ParticleSystem</c> に触る。
-        ///   読むのは main スレッドが描画のときに書いておいた
-        ///   <c>bool</c> / <c>int</c> / <c>string</c> のキャッシュだけである
-        ///   （<c>WriteAudio</c> が同じ理由で同じ形をしている）。
+        /// ★★ <b>This is the sim thread</b> (the class doc of <c>DiagnosticDump</c>: main asks
+        ///   via a hotkey and sim assembles it). So **do not call <c>VolcanoVanillaFx</c>'s
+        ///   resolution path from here** — that touches <c>Object.Instantiate</c> and
+        ///   <c>ParticleSystem</c>. All that is read is the <c>bool</c> / <c>int</c> /
+        ///   <c>string</c> cache the main thread wrote while drawing
+        ///   (<c>WriteAudio</c> has the same shape for the same reason).
         /// </summary>
         private static void WriteEruption(DiagnosticBuilder b, VolcanoSnapshot snapshot)
         {
@@ -542,9 +571,10 @@ namespace DisasterPlus.Game
                                   + ")");
             var facts = VolcanoEruptionFx.Facts;
 
-            // ★★ **噴煙の塊の群れ**（所有者の依頼「カオスな煙」）。
-            //    ゲーム粒子の灰の柱とは別物なので、別の行で名乗る ——
-            //    まとめると「噴煙は出ている」で塊が消えているのが隠れる。
+            // ★★ **The swarm of plume puffs** (the owner's request for "chaotic smoke").
+            //    It is a different thing from the game particles' ash column, so it gets its own
+            //    line — merge them and "the plume is showing" hides the fact that the puffs have
+            //    disappeared.
             b.Line(2, "plume puffs", VolcanoPlumePuffFx.Drawing
                 ? VolcanoPlumePuffFx.PuffsPlaced + " cloud puffs (own ParticleSystem, "
                   + "the MissileDisaster mushroom-cloud technique)"
@@ -552,8 +582,9 @@ namespace DisasterPlus.Game
                   + (VolcanoPlumePuffFx.LastFailure != null
                      ? " (" + VolcanoPlumePuffFx.LastFailure + ")" : ""));
 
-            // ★ 爆発は「1 回」ではなく「何発に割ったか」で大きさが決まる
-            //   （Core.Volcano.BlastCluster）。**数を出さないと、しょぼい理由が分からない。**
+            // ★ A blast's size is decided not by "once" but by "how many bursts it was split
+            //   into" (Core.Volcano.BlastCluster). **Without the number you cannot tell why it
+            //   looks feeble.**
             b.Line(2, "blast bursts", VolcanoBlastFx.BurstsLastBlast > 0
                 ? VolcanoBlastFx.BurstsLastBlast + " per blast"
                   + (snapshot.RingFissureRadiusMetres > 0f
@@ -566,16 +597,18 @@ namespace DisasterPlus.Game
                 ? "drawing (the game's own particle effects)"
                 : (ModSettings.VolcanoEruptionFx.value ? "not drawing" : "off (setting)"));
 
-            // ★ 何が引けて何が複製できたかを必ず名乗る。将来のゲーム更新で
-            //   黙って何も出なくなったときの唯一の手がかりである。
+            // ★ Always state what could be looked up and what could be cloned. It is the only
+            //   clue if a future game update makes everything silently stop appearing.
             b.Line(3, "borrowed effects", VolcanoEruptionFx.Detail);
             b.Line(3, "ash plume", facts.AshResolved
                 ? VolcanoVanillaFx.AshName + " (no DLC needed)" : "NOT resolved");
-            // ★ 噴煙は 1 回ではなく「柱の段」で出す（Core/Volcano/EruptionColumn）。
-            //   0 段なら柱は 1 本も立っていない ——「引けている」と「出ている」は別である。
-            // ★ 火口のマグマだまり・噴煙への光・火山雷（2026-08-22）。
-            //   **描いていないときも出す** ——「切ってある」「シェーダが引けない」
-            //   「今は光っていない」が、出さないとログ上で区別できない。
+            // ★ The plume is emitted not once but as "segments of a column"
+            //   (Core/Volcano/EruptionColumn). 0 segments means not one column is standing —
+            //   "it resolved" and "it is showing" are different things.
+            // ★ The crater's magma pool, the light on the plume, and volcanic lightning
+            //   (2026-08-22). **Report it even when nothing is being drawn** — otherwise
+            //   "it is turned off", "the shader could not be looked up" and "it is not glowing
+            //   right now" cannot be told apart in the log.
             b.Line(3, "crater glow", VolcanoCraterFx.MaterialResolved
                 ? (VolcanoCraterFx.Drawing ? "drawing" : "idle (not erupting this frame)")
                 : "NO MATERIAL - the magma pool, the light and the lightning are not drawn");
@@ -596,7 +629,8 @@ namespace DisasterPlus.Game
                 b.Line(3, "camera info", "NOT resolved - nothing is drawn this frame");
             }
 
-            // ★★ 火砕流は**バニラに存在しない**。代用であることを診断でも名乗る。
+            // ★★ Pyroclastic flows **do not exist in vanilla**. The diagnostics state that this
+            //    is a stand-in.
             b.Line(2, "pyroclastic flow", ModSettings.VolcanoPyroclasticFx.value
                 ? (VolcanoPyroclasticFx.DustResolved
                     ? VolcanoPyroclasticFx.BandsDrawn + " of "
@@ -607,9 +641,9 @@ namespace DisasterPlus.Game
                     : "NOT resolved")
                 : "off (setting)");
 
-            // ★ 粒子を描く経路から音は出ない。**IL 実測**（RenderEffect は
-            //   m_soundEffect に 1 度も触れず、音は PlayEffect の経路にある）。
-            //   ⑤の噴火音は VolcanoEruptionAudio の別経路である。
+            // ★ The particle drawing path emits no sound. **Measured in IL** (RenderEffect never
+            //   touches m_soundEffect; the sound is on the PlayEffect path).
+            //   ⑤'s eruption sound is a separate path in VolcanoEruptionAudio.
             b.Line(2, "sound", "the particle path is silent by design; the eruption sound is "
                                + "Disaster +'s own file on a separate audio path");
 
@@ -622,16 +656,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 溶岩（T8）。**本数 0（設定で無効）のときは行ごと出さない** ——
-        /// 「0 本流れた」と「切ってある」を混ぜない。
+        /// The lava (T8). **When the flow count is 0 (disabled in the settings) the rows are not
+        /// emitted at all** — do not mix "0 flows ran" with "it is turned off".
         ///
-        /// ★ <c>slope sign</c> はこの機能でいちばん重要な 1 行である。
-        ///   勾配の符号を取り違えると溶岩が山を登るが、例外は 1 つも出ない（§8.1）。
-        ///   IL では確定させてあるので、ここが <c>NOT VERIFIED</c> のまま進まないなら
-        ///   ゲームの更新で挙動が変わっている。
+        /// ★ <c>slope sign</c> is the most important line in this feature.
+        ///   Get the sign of the gradient wrong and the lava climbs the mountain, with not one
+        ///   exception thrown (§8.1). It has been settled in IL, so if this does not move on from
+        ///   <c>NOT VERIFIED</c>, a game update has changed the behaviour.
         ///
-        /// ★ 樹木・道路の 2 行は**できないことの説明**である。
-        ///   どちらも⑤の手抜きではなくゲーム側の制約なので、診断でもそう名乗る。
+        /// ★ The two lines on trees and roads are **explanations of what cannot be done**.
+        ///   Neither is a corner cut by ⑤ but a constraint on the game side, and the diagnostics
+        ///   say so.
         /// </summary>
         private static void WriteLava(DiagnosticBuilder b, VolcanoSnapshot snapshot)
         {
@@ -654,8 +689,9 @@ namespace DisasterPlus.Game
                 ? "verified at runtime (the first steps of a flow lost altitude)"
                 : "NOT VERIFIED YET (a flow has not finished its observation window)");
 
-            // ★ refused は**呼び出しの回数**であって建物の数ではない（VolcanoLava の doc）。
-            //   同じ建物を何度も叩くので、燃えた数より遥かに大きくなるのが正常である。
+            // ★ refused is **the number of calls**, not the number of buildings (the doc of
+            //   VolcanoLava). The same building is hit repeatedly, so it is normal for it to be
+            //   far larger than the number that burned.
             b.Line(2, "ignited", "buildings " + snapshot.LavaBuildingsIgnited
                                  + " (refused calls " + VolcanoLava.BuildingsRefused
                                  + "; mostly re-hits on buildings that are already burning)"
@@ -684,10 +720,10 @@ namespace DisasterPlus.Game
                 b.Line(2, "lava failure", VolcanoLava.LastFailure);
             }
 
-            // ★ 溶岩の描画（T9）。**この 1 行が T9 の唯一の診断出力**である
-            //   （この型を参照するファイルは 4 つだけ。あちらのクラス doc の grep）。
-            //   どのシェーダで解決したかを必ず名乗る —— 将来のゲーム更新で
-            //   黙って不可視になったときの、唯一の手がかりだからである。
+            // ★ Drawing the lava (T9). **This one line is T9's only diagnostic output**
+            //   (only four files reference that type; the grep in its class doc).
+            //   Always state which shader it resolved with — it is the only clue if a future game
+            //   update makes it silently invisible.
             b.Line(1, "lava surface", VolcanoLavaFx.Drawing
                 ? VolcanoLavaFx.DrawCalls + " draw call/frame, "
                   + VolcanoLavaFx.PointsDrawn + " points"
@@ -696,19 +732,20 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// UI の状態。①②③④と同じ形（<see cref="DisasterPanelBar"/> に問い合わせるだけ）。
+        /// The UI state. The same shape as ①②③④ (it just asks <see cref="DisasterPanelBar"/>).
         /// </summary>
         private static void WriteUiState(DiagnosticBuilder b)
         {
-            // ボタンは⑤専用ではなく DisasterPanelBar が 4 個まとめて置く。座標は
-            // もうこの MOD が決めていないので、出すのは「居るか」と「どこに居るか」だけ。
+            // The button is not ⑤'s own; DisasterPanelBar places all four together. This mod no
+            // longer decides the coordinates, so all that is reported is "is it there" and
+            // "where is it".
             b.Line(1, "button", (DisasterPanelBar.IsInstalled(DisasterPanelBar.IdVolcano)
                 ? "installed" : "not installed") + "  (" + DisasterPanelBar.Placement + ")");
             b.Line(1, "panel body", VolcanoPanel.IsVisible ? "shown" : "hidden");
         }
 
         /// <summary>
-        /// 地形 API の 4 行。**⑤が動けるかどうかはここだけで決まる。**
+        /// The four terrain-API lines. **Whether ⑤ can run at all is decided here and nowhere else.**
         /// </summary>
         private static void WriteTerrain(DiagnosticBuilder b, VolcanoTerrainFacts terrain)
         {
@@ -774,8 +811,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ⑤が自分に課している 2 つの上限（罠 3）と、地形高さの天井（§C-10）。
-        /// **どちらも本 MOD の数字であって、ゲームが計算した値ではない。**
+        /// The two limits ⑤ imposes on itself (trap 3), and the terrain height ceiling (§C-10).
+        /// **Both are this mod's numbers, not values the game computed.**
         /// </summary>
         private static void WriteBudgets(DiagnosticBuilder b)
         {
@@ -788,14 +825,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ゲームモードかエディタか。**定数を 2 つ持たず、実際のモードから選ぶ。**
-        /// <c>m_blockHeights</c> の追随速度が変わる（§A-2 の表）ので、
-        /// 「建てられる地面」と水位の遅れの見積りがそのまま変わる。
+        /// Game mode or editor. **Do not keep two constants; pick from the actual mode.**
+        /// The catch-up speed of <c>m_blockHeights</c> changes (the table in §A-2), which directly
+        /// changes the estimated lag of the buildable ground and the water level.
         /// </summary>
         private static void WriteMode(DiagnosticBuilder b, bool gameMode)
         {
-            // ゲーム 2 m / エディタ 8 m（§A-2）。UpliftSchedule はゲームモードの
-            // 定数だけを持つので、エディタのときは 4 倍速いと名乗る。
+            // 2 m in game, 8 m in the editor (§A-2). UpliftSchedule only holds the game-mode
+            // constant, so in the editor we state that it is four times faster.
             float gameMetres = UpliftSchedule.BlockHeightRiseRawPerCycle
                                / UpliftSchedule.RawUnitsPerMetre;
             float metres = gameMode ? gameMetres : gameMetres * 4f;
@@ -807,8 +844,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **DLC 非所持は FAIL ではない。** ⑤は Natural Disasters を要らない
-        /// （設計書 §1.4）。分岐するのは樹木の着火だけである（§B-7c）。
+        /// **Not owning the DLC is not a FAIL.** ⑤ does not need Natural Disasters
+        /// (design doc §1.4). The only thing that branches on it is igniting trees (§B-7c).
         /// </summary>
         private static void WriteDlc(DiagnosticBuilder b, VolcanoTerrainFacts terrain)
         {
@@ -819,9 +856,9 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 「測って所持」と「判定に失敗したので所持に倒した」を混ぜない
-            //   （全体レビュー M11）。後者で「owned」と出すと、木が燃えない理由を
-            //   探す人に嘘の手がかりを渡す。
+            // ★ Do not mix "measured as owned" with "the check failed so we assumed owned"
+            //   (whole-project review M11). Printing "owned" for the latter hands a false clue to
+            //   someone trying to work out why the trees do not burn.
             b.Line(1, "Natural Disasters DLC", ModCompat.NaturalDisastersOwnedKnown
                 ? "owned"
                 : "ASSUMED owned - the DLC check itself failed. If the trees do not burn, "

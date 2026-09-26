@@ -1,52 +1,58 @@
 namespace DisasterPlus.Core.Forecast
 {
     /// <summary>
-    /// WeatherManager の current と target の差から傾向を出す。
+    /// Works out the trend from the gap between WeatherManager's current and target.
     ///
-    /// これがこの機能の中核。バニラは hazard（静的な危険度）しか見せず、
-    /// 「今どちらへ向かっているか」を出さない。current/target の両方が
-    /// public フィールドとして読めるので、そこから時間軸を作る。
+    /// This is the heart of the feature. Vanilla only ever shows hazard (a static risk
+    /// figure) and never tells you "which way it is heading right now". Both current and
+    /// target are readable as public fields, so we build a time axis out of them.
     /// </summary>
     public static class TrendMath
     {
         /// <summary>
-        /// 既定の不感帯。current は target へ連続的に補間されるので、
-        /// 厳密比較だと常に Rising か Falling になり矢印が意味を失う。
+        /// The default deadband. current is interpolated continuously towards target, so a
+        /// strict comparison would always say Rising or Falling and the arrow would stop
+        /// meaning anything.
         ///
-        /// 雨・雲・霧はいずれも 0.0-1.0 に正規化された値なので、この 0.02 は
-        /// 「全レンジの 2%」を意味する。同じ数字を気温に使ってはいけない
-        /// （<see cref="TemperatureDeadband"/> 参照）。
+        /// Rain, clouds and fog are all normalised to 0.0-1.0, so this 0.02 means "2% of
+        /// the full range". Do not use the same number for temperature (see
+        /// <see cref="TemperatureDeadband"/>).
         /// </summary>
         public const float DefaultDeadband = 0.02f;
 
         /// <summary>
-        /// 気温専用の不感帯（度）。
+        /// The deadband for temperature only (degrees).
         ///
-        /// 気温だけスケールが違う。雨・雲・霧は 0.0-1.0 の正規化値だが、気温は摂氏の
-        /// 実値（季節推移でおよそ -20〜+35）を取るため、<see cref="DefaultDeadband"/>
-        /// の 0.02 は「0.02 度」＝実質ゼロになる。季節補間は毎 tick わずかに動くので、
-        /// それでは傾向が常時 Rising か Falling に張り付き、「今どちらへ向かっているか」
-        /// という本機能の中核の表示が意味を失う。
+        /// Temperature is the one reading on a different scale. Rain, clouds and fog are
+        /// normalised 0.0-1.0, but temperature is a real Celsius value (roughly -20 to +35
+        /// as the seasons turn), so <see cref="DefaultDeadband"/>'s 0.02 would mean "0.02
+        /// degrees", which is effectively zero. The seasonal interpolation moves a touch
+        /// every tick, so the trend would sit permanently on Rising or Falling and the
+        /// "which way is it heading right now" display — the whole point of this feature —
+        /// would stop meaning anything.
         ///
-        /// 0.5 度という値は、パネルの表示が F1（0.1 度刻み）で丸めることより粗く、かつ
-        /// ゲーム内の季節変化（1 ゲーム内日で数度）は取り逃さない水準として選んだ。
+        /// 0.5 degrees was chosen to be coarser than the panel's own F1 rounding (0.1
+        /// degree steps), while still fine enough not to miss the in-game seasonal drift
+        /// (a few degrees per in-game day).
         ///
-        /// この定数がここ（Core）にあるのは意図的。以前は WeatherReader（Game/、
-        /// ユニットテスト不可）に 0.5f がベタ書きされており、他の不感帯が全て
-        /// TrendMath から来ているのに気温だけがテストの当たらない場所にあった。
+        /// This constant living here (in Core) is deliberate. It used to be a hard-coded
+        /// 0.5f inside WeatherReader (in Game/, where unit tests cannot reach), so
+        /// temperature was the one deadband sitting outside the tests while every other
+        /// one came from TrendMath.
         /// </summary>
         public const float TemperatureDeadband = 0.5f;
 
         public static Trend Of(float current, float target, float deadband)
         {
-            // 破損値で矢印が嘘をつかないこと。NaN の比較は全て false になるため明示的に弾く。
+            // The arrow must not lie because of a corrupt value. Every comparison against
+            // NaN is false, so reject it explicitly.
             if (float.IsNaN(current) || float.IsNaN(target)) return Trend.Steady;
             if (float.IsInfinity(current) || float.IsInfinity(target)) return Trend.Steady;
 
             float band = deadband > 0f ? deadband : 0f;
             float diff = target - current;
 
-            // 境界はちょうど band のとき Steady 側へ倒す（ちらつきを減らす）。
+            // Exactly on the boundary falls to the Steady side (it cuts down on flicker).
             if (diff > band) return Trend.Rising;
             if (diff < -band) return Trend.Falling;
             return Trend.Steady;

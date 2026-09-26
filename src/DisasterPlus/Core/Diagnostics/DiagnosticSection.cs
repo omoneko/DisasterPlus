@@ -2,7 +2,8 @@ using System.Collections.Generic;
 
 namespace DisasterPlus.Core.Diagnostics
 {
-    /// <summary>1 機能ぶんの診断。Note は劣化理由など。</summary>
+    /// <summary>The diagnostics for one feature. Note carries things like why it
+    /// degraded.</summary>
     public class DiagnosticSection
     {
         public readonly string Name;
@@ -15,7 +16,8 @@ namespace DisasterPlus.Core.Diagnostics
             Name = name ?? "";
             Health = health;
             Note = note ?? "";
-            // 呼び出し元が渡したリストを後から変更することから保護するため防御的コピーを作る。
+            // Take a defensive copy, so that the caller changing the list it passed in later
+            // cannot reach us.
             Lines = lines == null ? new List<DiagnosticLine>() : new List<DiagnosticLine>(lines);
         }
     }

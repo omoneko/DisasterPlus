@@ -3,256 +3,279 @@ using System;
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// <b>海溝型地震の津波の「発生源」。</b>**エンジン非依存の純関数だけ。**
+    /// <b>The "source" of the tsunami from a trench earthquake.</b> **Pure engine-free
+    /// functions only.**
     ///
-    /// ── 研究（2026-08-29）──────────────────────────────────────
+    /// ── The research (2026-08-29) ──────────────────────────────────────
     ///
-    /// 全文は <c>docs/superpowers/specs/2026-08-29-tsunami-il-facts.md</c>。結論:
+    /// The full text is in <c>docs/superpowers/specs/2026-08-29-tsunami-il-facts.md</c>.
+    /// The conclusion:
     ///
-    /// &gt; **バニラの津波は「波」ではない。**マップ外周の一区画で海面を
-    /// &gt; 1.5 周期ぶん上下させるだけの<b>境界条件</b>であり、街を襲う水の壁は
-    /// &gt; すべてゲーム自身の浅水ソルバ（<c>WaterSimulation.SimulateWater</c>）が
-    /// &gt; その揺さぶりを内陸へ伝播させた結果である。
+    /// &gt; **Vanilla's tsunami is not a "wave".** It is a <b>boundary condition</b> that
+    /// &gt; merely moves the sea level up and down through 1.5 cycles in one patch on the
+    /// &gt; map's rim, and the wall of water that hits the city is entirely the result of the
+    /// &gt; game's own shallow-water solver (<c>WaterSimulation.SimulateWater</c>)
+    /// &gt; propagating that shaking inland.
     ///
-    /// 同じソルバには<b>マップのどこにでも置ける外力</b>がある（<c>TYPE_IMPACT</c>、
-    /// IL_0845–0A49）。1 セルごとに
+    /// That same solver has <b>an external force that can be placed anywhere on the map</b>
+    /// (<c>TYPE_IMPACT</c>, IL_0845–0A49). Per cell:
     ///
     /// <code>
-    ///   f(d) = delta * (1 - d^2 / R^2)          d はセル単位の距離、d&gt;=R で 0
-    ///   accX += f(dx,dz) - f(dx+1,dz)           ← **水面の傾き**に足される
+    ///   f(d) = delta * (1 - d^2 / R^2)          d is the distance in cells, 0 for d&gt;=R
+    ///   accX += f(dx,dz) - f(dx+1,dz)           ← added to **the water surface's slope**
     /// </code>
     ///
-    /// つまり<b>そこに水の山があるかのようにソルバを騙す仮想の山</b>で、
-    /// <b>海底が隆起したのと同じ</b> —— 津波の教科書どおりの発生源である。
-    /// <c>delta &gt; 0</c> なら水は外へ、<c>delta &lt; 0</c> なら中へ流れる。
+    /// In other words <b>a virtual hill that fools the solver into thinking there is a hill
+    /// of water there</b>, which is <b>the same as the seabed being uplifted</b> — the
+    /// textbook source of a tsunami.
+    /// With <c>delta &gt; 0</c> the water flows outwards, with <c>delta &lt; 0</c> inwards.
     ///
-    /// ── ★★ 時計の単位は「水ステップ」。sim フレームではない ────────────────
+    /// ── ★★ The clock's unit is the "water step", not the sim frame ────────────────
     ///
-    /// **2026-08-30、これが「津波が発生しない」の真の原因だった。**
+    /// **On 2026-08-30 this turned out to be the real cause of "the tsunami does not happen".**
     ///
     /// <code>
-    ///   SimulateWater は最後に SetCurrentWaterFrame(start, progress, .., max, ..) を呼び、
+    ///   SimulateWater ends by calling SetCurrentWaterFrame(start, progress, .., max, ..),
     ///     m_waterFrameIndex = (start &amp; ~63) + (progress &lt;&lt; 6)/max = start + 64
-    ///   WaterThread は m_waterFrameIndex &lt; m_simulationFrameIndex のあいだだけ回り、
-    ///   SimulationStep は m_simulationFrameIndex &gt; m_waterFrameIndex + 1 で待つ。
-    ///   ＝ **SimulateWater は 64 sim フレームに 1 回しか走らない。**
+    ///   WaterThread only runs while m_waterFrameIndex &lt; m_simulationFrameIndex, and
+    ///   SimulationStep waits at m_simulationFrameIndex &gt; m_waterFrameIndex + 1.
+    ///   = **SimulateWater runs only once every 64 sim frames.**
     /// </code>
     ///
-    /// だから「1080 フレーム押す」は<b>水ステップにして 17 回</b>でしかなかった。
-    /// 実機で 0.7 m しか上がらなかったのはこれである。
+    /// So "drive it for 1080 frames" was <b>only 17 water steps</b>. That is why it only
+    /// rose 0.7 m in the game.
     ///
-    /// ★★ 独立した裏取りが 2 つある:
-    ///   ・オフライン再現（<c>tools/WaterSolverSim</c>）で測った波の速さ
-    ///     8.22 m / 水ステップ ÷ 64 ＝ **0.128 m / sim フレーム**
-    ///   ・<c>TsunamiAI.IsStillActive</c> がバニラで使う寿命定数が
-    ///     **0.125 m / sim フレーム**（IL_0024）
-    ///   小数第 2 位まで一致する。
+    /// ★★ There are two independent confirmations:
+    ///   · the wave speed measured in the offline reproduction (<c>tools/WaterSolverSim</c>),
+    ///     8.22 m / water step ÷ 64 = **0.128 m / sim frame**
+    ///   · the lifetime constant vanilla uses in <c>TsunamiAI.IsStillActive</c>,
+    ///     **0.125 m / sim frame** (IL_0024)
+    ///   They agree to two decimal places.
     ///
-    /// ★ 1 水ステップ ＝ 64 sim フレーム ＝ ゲーム速度 1 でおよそ **1.07 実秒**。
+    /// ★ One water step = 64 sim frames ≈ **1.07 real seconds** at game speed 1.
     ///
-    /// ── ★★ 外力は「引き → 押し → 引き」でなければならない ────────────────
+    /// ── ★★ The forcing has to be "draw → push → draw" ────────────────
     ///
-    /// **2026-08-30、オフライン再現で分かった 2 つ目の間違い。**
-    /// 前の版は「①引き（40 歩）→ ②③押しっぱなし（140 歩）」だった。結果:
+    /// **The second mistake, found by the offline reproduction on 2026-08-30.**
+    /// The previous version was "① draw (40 steps) → ②③ push and hold (140 steps)". The result:
     ///
     /// <code>
-    ///   drive 800 で 300 歩まわすと ——
-    ///     震源の海面 -13.9 m（海底が露出）、環はたった 1.8 m
-    ///   drive 4000 なら震源は -40.00 m ＝ **海底まで掘り切った。**
+    ///   running 300 steps at drive 800 —
+    ///     sea level at the hypocentre -13.9 m (the seabed exposed), the ring a mere 1.8 m
+    ///   at drive 4000 the hypocentre hit -40.00 m = **dug right through to the seabed.**
     /// </code>
     ///
-    /// 押しっぱなしの外力は<b>定常的な流出</b>を作る。定常的な流出は波ではなく
-    /// **穴**である。波を作るのは<b>移り変わり</b>のほうで、
-    /// だからバニラの津波も 1.5 周期の<b>振動</b>なのである（引き波→押し波→引き波）。
+    /// A forcing that is held on creates <b>a steady outflow</b>. A steady outflow is not a
+    /// wave, it is **a hole**. What makes a wave is <b>the change</b>, which is why
+    /// vanilla's tsunami is 1.5 cycles of <b>oscillation</b> too (drawback → push →
+    /// drawback).
     ///
-    /// ★★ **どの形がいちばん良いかは、6 つ振ってオフライン再現で決めた**
-    ///   （2026-08-30。<c>tools/WaterSolverSim</c> で 5 つのゲート
-    ///    G1 隆起 / G2 穴を残さない / G3 環 / G4 到達 / G5 安全 を判定）。
-    ///   勝ったのは<b>「長く引いて、短く強く押す」</b>:
+    /// ★★ **Which shape is best was decided by trying six of them in the offline
+    ///   reproduction** (2026-08-30; judged in <c>tools/WaterSolverSim</c> against five
+    ///   gates: G1 bulge / G2 no hole left / G3 ring / G4 reach / G5 safety).
+    ///   The winner was <b>"draw in for a long time, push hard for a short time"</b>:
     ///
     /// <code>
     ///   w = t / TotalSteps
-    ///   w &lt; 0.6 : drive = -sin(pi * w / 0.6)              ①**隆起が育つ**
-    ///   w &gt;= 0.6: drive = +sin(pi * (w-0.6)/0.4) * 1.5    ②台地→ドーナツ→環
-    ///   そのあとは外力 0 ＝ ③ソルバだけが環を運ぶ
+    ///   w &lt; 0.6 : drive = -sin(pi * w / 0.6)              ① **the bulge grows**
+    ///   w &gt;= 0.6: drive = +sin(pi * (w-0.6)/0.4) * 1.5    ② plateau → doughnut → ring
+    ///   after that the forcing is 0 = ③ the solver alone carries the ring
     /// </code>
     ///
-    /// ★ 時間積分はちょうど 0（0.6×(2/pi) ＝ 0.4×1.5×(2/pi)）。**穴が残らない。**
+    /// ★ The time integral is exactly 0 (0.6×(2/pi) = 0.4×1.5×(2/pi)). **No hole is left.**
     ///
-    /// ★ 落ちた形の記録:
-    ///   ・1.5 周期（引き→押し→引き）は隆起が 3.2 m までしか育たなかった
-    ///   ・半径 200 セルは<b>源が桶になって共振し</b>、中心が海底まで抜けたあと
-    ///     **+111 m まで跳ね上がった**（420 歩で止めていたので最初は「緑」に見えた
-    ///     —— 1080 歩まで回して初めて分かった）
+    /// ★ A record of the shapes that lost:
+    ///   · 1.5 cycles (draw → push → draw) only grew the bulge to 3.2 m
+    ///   · a radius of 200 cells <b>turned the source itself into a tub that resonated</b>;
+    ///     after the centre punched through to the seabed it **rebounded to +111 m**
+    ///     (we had been stopping at 420 steps, so at first it looked "green" — it only
+    ///     showed up once we ran to 1080 steps)
     /// </summary>
     public static class TsunamiSource
     {
-        // ── 時計（**水ステップ**。クラス doc の ★★ を読むこと）──────────────
+        // ── The clock (**water steps**. Read the ★★ in the class doc) ──────────────
 
         /// <summary>
-        /// 外力が動いている長さ（水ステップ）。300 歩 ≒ 320 実秒 ≒ 5.3 実分。
+        /// How long the forcing runs (water steps). 300 steps ≈ 320 real seconds ≈ 5.3 real
+        /// minutes.
         ///
-        /// ★ 目盛りはバニラ: DLC の津波の発生源は <c>m_duration 16384 / 64</c>
-        ///   ＝ **256 水ステップ**（≒ 4.5 実分）。同じ桁である。
+        /// ★ The scale comes from vanilla: the DLC tsunami's source is
+        ///   <c>m_duration 16384 / 64</c> = **256 water steps** (≈ 4.5 real minutes).
+        ///   The same order of magnitude.
         /// </summary>
         public const float TotalSteps = 300f;
 
         /// <summary>
-        /// 引き込みに使う割合。**残りが押し出し。**
+        /// The fraction spent drawing in. **The rest is the push out.**
         ///
-        /// ★★ 0.6 は<b>オフライン再現の掃引で勝った値</b>（6 つの形を並列に振って
-        ///   5 つのゲートで判定した。<c>docs/…/2026-08-29-tsunami-il-facts.md</c>）。
-        ///   長く引いてから短く強く押す —— これがいちばん
-        ///   「隆起がしっかり見えてから、環になって走り出す」形だった。
+        /// ★★ 0.6 is <b>the value that won the offline reproduction's sweep</b> (six shapes
+        ///   tried in parallel and judged against five gates; see
+        ///   <c>docs/…/2026-08-29-tsunami-il-facts.md</c>).
+        ///   Draw in for a long time, then push hard for a short time — that was the shape
+        ///   that best gave "the bulge is clearly visible, then it becomes a ring and runs".
         /// </summary>
         public const float DrawInFraction = 0.6f;
 
         /// <summary>
-        /// 押し出しの山の高さ（引き込みの山を 1 としたとき）。
+        /// The height of the push's peak (taking the draw-in's peak as 1).
         ///
-        /// ★ <c>0.6 : 0.4</c> の時間配分に対して <c>1 : 1.5</c> の高さなので、
-        ///   <b>時間積分がちょうど 0</b> になる（0.6×(2/π) ＝ 0.4×1.5×(2/π)）。
-        ///   **これが「穴を残さない」の代数的な担保**である。
+        /// ★ Against the <c>0.6 : 0.4</c> split of time, the heights are <c>1 : 1.5</c>, so
+        ///   <b>the time integral is exactly 0</b> (0.6×(2/π) = 0.4×1.5×(2/π)).
+        ///   **This is the algebraic guarantee of "no hole is left".**
         /// </summary>
         public const float PushOvershoot = 1.5f;
 
-        /// <summary>①（引き込み）が終わる水ステップ。診断と試験のため。</summary>
+        /// <summary>The water step at which ① (the draw-in) ends. For diagnostics and
+        /// tests.</summary>
         public static float DrawInSteps { get { return TotalSteps * DrawInFraction; } }
 
-        /// <summary>②（押し出し）がいちばん強くなる水ステップ。</summary>
+        /// <summary>The water step at which ② (the push) is strongest.</summary>
         public static float PushSteps
         {
             get { return TotalSteps * (DrawInFraction + (1f - DrawInFraction) * 0.5f); } }
 
-        // ── 寸法 ──────────────────────────────────────────────
+        // ── Dimensions ──────────────────────────────────────────────
 
         /// <summary>
-        /// 発生源の半径（セル。1 セル 16 m）。
+        /// The source's radius (cells; one cell is 16 m).
         ///
-        /// ★ IL では <c>R = 1 + max(maxX-origX, origX-minX)</c> ——<b>X しか見ない。</b>
-        ///   80 セル ＝ 1280 m。震源の「隆起」の大きさそのものである。
+        /// ★ In the IL it is <c>R = 1 + max(maxX-origX, origX-minX)</c> — <b>it looks at X
+        ///   only.</b> 80 cells = 1280 m. It is the size of the hypocentre's "bulge" itself.
         ///
-        /// ★★ 120 -> 80（2026-08-30、オフライン再現の掃引）。大きくすると
-        ///   <b>源そのものが桶になって共振する</b> —— 半径 200 セルでは、
-        ///   縁で立った波が中心へ戻ってきて<b>中心が海底まで抜けたあと
-        ///   +111 m まで跳ね上がった</b>（掃引の shape 1）。
+        /// ★★ 120 -> 80 (2026-08-30, the offline reproduction's sweep). Make it larger and
+        ///   <b>the source itself becomes a tub and resonates</b> — at a radius of 200 cells
+        ///   the wave raised at the rim came back to the centre and <b>after the centre
+        ///   punched through to the seabed it rebounded to +111 m</b> (shape 1 of the sweep).
         /// </summary>
         public const int RadiusCells = 80;
 
-        /// <summary>同上をメートルで。</summary>
+        /// <summary>The same in metres.</summary>
         public const float RadiusMetres = RadiusCells * 16f;
 
-        // ── 外力の大きさ ───────────────────────────────────────
+        // ── The magnitude of the forcing ───────────────────────────────────────
 
-        /// <summary><c>WaterWave.m_delta</c> は Int16。**ここを超えると折り返す。**</summary>
+        /// <summary><c>WaterWave.m_delta</c> is an Int16. **Go past this and it wraps.**</summary>
         public const int MaxDeltaUnits = 32767;
 
         /// <summary>
-        /// 同じ場所に重ねる水波の数。
+        /// How many water waves are stacked at the same place.
         ///
-        /// ★ 外力は波ごとに加算されるので、Int16 を超える外力はこれで作る。
-        ///   費用は「波の数 × bbox に入るセル数」。**上げる前に実機で測ること。**
+        /// ★ The forcing is summed per wave, so this is how a forcing greater than an Int16
+        ///   is built. The cost is "the number of waves × the cells inside the bbox".
+        ///   **Measure it in-game before raising it.**
         /// </summary>
         public const int MaxStackedWaves = 8;
 
-        /// <summary>重ねた全部で出せる外力の上限。</summary>
+        /// <summary>The cap on the forcing the whole stack can produce.</summary>
         public const int MaxDriveUnits = MaxStackedWaves * MaxDeltaUnits;
 
-        /// <summary><c>m_delta</c> の 1 m ぶん（IL: <c>depth * 65536 / 1024</c>）。</summary>
+        /// <summary>One metre's worth of <c>m_delta</c> (IL:
+        /// <c>depth * 65536 / 1024</c>).</summary>
         public const int UnitsPerMetre = 64;
 
         /// <summary>
-        /// いちばん弱い地震の外力（<c>m_delta</c> の単位、水深
-        /// <see cref="ReferenceDepthMetres"/> のとき）。
-        /// **<c>tools/WaterSolverSim</c> で測って決めた値**であって、推測ではない。
+        /// The forcing for the weakest earthquake (in <c>m_delta</c> units, at a water depth
+        /// of <see cref="ReferenceDepthMetres"/>).
+        /// **A value measured and fixed in <c>tools/WaterSolverSim</c>**, not a guess.
         /// </summary>
         public const int MinDriveUnits = 780;
 
         /// <summary>
-        /// いちばん強い地震（強度 255 ＝ 強度解放の 25.5）の外力。同じく実測。
+        /// The forcing for the strongest earthquake (intensity 255, i.e. 25.5 with the
+        /// intensity unlock). Measured the same way.
         ///
-        /// ★★ **強度の帯が狭いのは手抜きではない。**
-        ///   波の大きさを決めているのは<b>海の深さ</b>である —— ソルバの流量は
-        ///   <c>v = min(v, m_height)</c> で頭打ちされるので、
-        ///   <b>浅い海はどんなに強い地震でも大きな波を運べない</b>。
-        ///   水深 40 m での実測（<c>tools/WaterSolverSim</c>、格子 1081、780 歩）:
+        /// ★★ **The narrow intensity band is not laziness.**
+        ///   What decides the size of the wave is <b>the depth of the sea</b> — the solver's
+        ///   flow is capped by <c>v = min(v, m_height)</c>, so <b>a shallow sea cannot carry
+        ///   a large wave however strong the earthquake</b>.
+        ///   Measured at a water depth of 40 m (<c>tools/WaterSolverSim</c>, grid 1081, 780 steps):
         ///
         /// <code>
-        ///     drive   隆起     いちばん深い中心   底に残る水   環（2km）
-        ///       896   18.1 m   -29.2 m (73%)     10.8 m      5.7 m   ← 安全な作動点
-        ///      1200   24.4 m   -38.8 m (97%)      1.25 m     8.2 m   ← **掘り抜き**
-        ///      1500   30.3 m   -40.00 m (100%)    0 m        —       ← 海底むき出し
+        ///     drive   bulge    deepest centre    water left on the bed   ring (2km)
+        ///       896   18.1 m   -29.2 m (73%)     10.8 m                  5.7 m   ← the safe operating point
+        ///      1200   24.4 m   -38.8 m (97%)      1.25 m                 8.2 m   ← **dug through**
+        ///      1500   30.3 m   -40.00 m (100%)    0 m                    —       ← seabed exposed
         /// </code>
         ///
-        /// ★★ **1200 は「強い」のではなく壊れている。**（2026-08-30、最終検証）
-        ///   1200 では震源の水柱が 40 m のうち 1.25 m しか残らず、
-        ///   画面には<b>2 km 幅の穴が 130 実秒</b>映る。強度スライダーは
-        ///   最初のクリックで 255 まで振れるので、これは隅ではなく<b>既定の最悪</b>だった。
+        /// ★★ **1200 is not "strong", it is broken.** (2026-08-30, final verification.)
+        ///   At 1200 only 1.25 m of the hypocentre's 40 m water column is left, and the
+        ///   screen shows <b>a 2 km wide hole for 130 real seconds</b>. The intensity slider
+        ///   swings all the way to 255 on the first click, so this was not a corner case but
+        ///   <b>the default worst case</b>.
         ///
-        /// ★ だから上限は 900 ——「掘る割合 ≦ 75%」で決めた値である。
-        ///   帯が狭いのは手抜きではない: <b>波の大きさを決めるのは海の深さ</b>で、
-        ///   ソルバの流量は <c>v = min(v, m_height)</c> で頭打ちされる。
+        /// ★ So the cap is 900 — a value fixed by "the dug-out fraction ≤ 75%".
+        ///   The narrow band is not laziness: <b>what decides the size of the wave is the
+        ///   depth of the sea</b>, and the solver's flow is capped by
+        ///   <c>v = min(v, m_height)</c>.
         /// </summary>
         public const int MaxIntensityDriveUnits = 900;
 
         /// <summary>
-        /// 上の数字を測ったときの水深（m）。
+        /// The water depth (m) at which the numbers above were measured.
         ///
-        /// ★★ **外力は水深で割らなければならない。**（2026-08-30、判定エージェント）
-        ///   ソルバの流量は <c>v = min(v, m_height)</c> で水深に頭打ちされるので、
-        ///   同じ外力でも<b>浅い海ほど掘り抜けてしまう</b>。水深 10 m で
-        ///   水深 40 m 用の外力を出すと、震源のセルが
-        ///   <b>136 水ステップ（≒145 実秒）のあいだ海底むき出しになった</b>。
-        ///   隆起の高さと掘り下げの深さはこのソルバでは同じ量なので、
-        ///   浅い海では隆起そのものを小さくするしかない。
+        /// ★★ **The forcing has to be scaled by the water depth.** (2026-08-30, the
+        ///   adjudicating agent.)
+        ///   The solver's flow is capped at the water depth by <c>v = min(v, m_height)</c>,
+        ///   so the same forcing <b>digs right through more easily the shallower the sea</b>.
+        ///   Apply the forcing meant for 40 m of water in 10 m of water and the hypocentre's
+        ///   cells had <b>the seabed exposed for 136 water steps (≈145 real seconds)</b>.
+        ///   The height of the bulge and the depth of the excavation are the same quantity
+        ///   in this solver, so in shallow water the only option is to make the bulge itself
+        ///   smaller.
         /// </summary>
         public const float ReferenceDepthMetres = 40f;
 
         /// <summary>
-        /// 水深の係数の下限。**0 にすると浅瀬で津波が消える。**
+        /// The floor on the depth factor. **Set it to 0 and the tsunami disappears in the
+        /// shallows.**
         ///
-        /// ★ 0.15 -> 0.08（2026-08-30）。0.15 だと水深 5 m の海に
-        ///   水深 6 m ぶんの外力が出て、震源が<b>海底むき出しになった</b>
-        ///   （実測 -5.00 m ＝ 水柱まるごと）。素の比（depth/40）が使える
-        ///   範囲を水深 3.2 m まで下げる。
+        /// ★ 0.15 -> 0.08 (2026-08-30). At 0.15, a sea 5 m deep got a forcing meant for 6 m
+        ///   of water and the hypocentre had <b>its seabed exposed</b> (measured -5.00 m,
+        ///   i.e. the whole water column). This lowers the range over which the plain ratio
+        ///   (depth/40) can be used down to a depth of 3.2 m.
         /// </summary>
         public const float MinDepthFactor = 0.08f;
 
         /// <summary>
-        /// 同じく上限。
+        /// The ceiling on the same.
         ///
-        /// ★★ **1.0 -> 12.5（2026-08-30、実機報告「津波が発生しない」）。**
+        /// ★★ **1.0 -> 12.5 (2026-08-30, the in-game report "the tsunami does not happen").**
         ///
-        ///   1.0 にした根拠は「CS の地形は標高 0 以上なので、海面 40 m のマップに
-        ///   40 m より深い海は作れない」だった。**この前提が間違っていた** ——
-        ///   海面はマップごとに違い、実機のマップは<b>海面 207 m・水深 174 m</b>
-        ///   だった。そこで出していた外力は 806、つまり
-        ///   <b>水柱の 15% しか掘っていない</b>（余力を 85% 使い残していた）。
-        ///   環は 2 〜 3 m にしかならず、水深 174 m の外洋では<b>見えない</b>。
+        ///   The grounds for 1.0 were "CS terrain is at or above elevation 0, so a map with
+        ///   a sea level of 40 m cannot have sea deeper than 40 m". **That premise was
+        ///   wrong** — the sea level differs per map, and the map in-game had
+        ///   <b>a sea level of 207 m and a water depth of 174 m</b>. The forcing being
+        ///   applied there was 806, which <b>dug out only 15% of the water column</b>
+        ///   (leaving 85% of the available margin unused).
+        ///   The ring only reached 2-3 m, which is <b>invisible</b> in 174 m of open ocean.
         ///
-        ///   <c>WaterSimulation.MAX_SEA_LEVEL</c> は 500（IL 実測）なので、
-        ///   ありうる最深は 500 m。上限はそれを割った 500/40 = 12.5 とする。
+        ///   <c>WaterSimulation.MAX_SEA_LEVEL</c> is 500 (measured from IL), so the deepest
+        ///   possible is 500 m. The ceiling is that divided through: 500/40 = 12.5.
         ///
-        /// ★★ **応答は水深に完全に無依存である**（<c>tools/WaterSolverSim</c>、
-        ///   格子 1081・1200 歩・drive 806 を水深 40 m と 174 m で回して
-        ///   <b>全列・全フレームが一致</b>した）。水深が効くのは
-        ///   <c>v = min(v, m_height)</c> の頭打ちだけで、そこに触れないうちは
-        ///   同じ外力が同じ波を作る。だから<b>掘る割合は外力に比例し水深に反比例する</b>:
+        /// ★★ **The response is completely independent of the water depth**
+        ///   (<c>tools/WaterSolverSim</c>: running grid 1081, 1200 steps and drive 806 at
+        ///   depths of 40 m and 174 m gave <b>identical values in every column and every
+        ///   frame</b>). The depth only enters through the <c>v = min(v, m_height)</c> cap,
+        ///   and until that is touched the same forcing makes the same wave. So
+        ///   <b>the dug-out fraction is proportional to the forcing and inversely
+        ///   proportional to the depth</b>:
         ///
         /// <code>
-        ///     掘る割合 ≒ 0.0329 * drive / depth        （水深 40・174 の実測から）
-        ///     -> 70% を超えないための線は  drive ≒ 21 * depth
+        ///     dug-out fraction ≈ 0.0329 * drive / depth        (from the measurements at depths 40 and 174)
+        ///     -> the line for staying under 70% is  drive ≈ 21 * depth
         /// </code>
         ///
-        ///   <see cref="DriveUnitsFor"/> は <c>base * depth/40</c>（base は 780〜900）
-        ///   ＝ <c>(19.5〜22.5) * depth</c> なので、**どの水深でも同じ割合**に収まる。
-        ///   水深 174 m での実測（drive 3500 ＝ 強度 55 相当）:
-        ///   隆起 72 m、最深 -110 m（63%）、環は 2.4 km で 23.7 m、8.2 km で 12.8 m。
+        ///   <see cref="DriveUnitsFor"/> gives <c>base * depth/40</c> (base being 780-900),
+        ///   i.e. <c>(19.5-22.5) * depth</c>, so it stays at **the same fraction at any
+        ///   depth**. Measured at a depth of 174 m (drive 3500, equivalent to intensity 55):
+        ///   a bulge of 72 m, a minimum of -110 m (63%), and a ring of 23.7 m at 2.4 km and
+        ///   12.8 m at 8.2 km.
         /// </summary>
         public const float MaxDepthFactor = 12.5f;
 
         /// <summary>
-        /// 地震の強度（0〜255）と<b>震源の水深</b>から外力の大きさを出す（符号なし）。
+        /// Derives the magnitude of the forcing (unsigned) from the earthquake's intensity
+        /// (0-255) and <b>the water depth at the hypocentre</b>.
         /// </summary>
         public static int DriveUnitsFor(byte intensity, float depthMetres)
         {
@@ -267,7 +290,8 @@ namespace DisasterPlus.Core.Earthquake
             return units;
         }
 
-        /// <summary>水深による割り引き。**上のクラス doc の理由で必須。**</summary>
+        /// <summary>The discount for water depth. **Essential, for the reason in the class doc
+        /// above.**</summary>
         public static float DepthFactor(float depthMetres)
         {
             if (IsBad(depthMetres) || depthMetres <= 0f) return MinDepthFactor;
@@ -278,21 +302,22 @@ namespace DisasterPlus.Core.Earthquake
             return f;
         }
 
-        // ── バニラの目盛り（比較のためだけに持つ）─────────────────────
+        // ── Vanilla's scale (kept purely for comparison) ─────────────────────
 
         /// <summary>
-        /// <c>TsunamiAI.m_height</c> のプレハブ実測値（m）。
-        /// sharedassets55 の GameObject <c>Tsunami</c> から読んだ。
+        /// The measured prefab value of <c>TsunamiAI.m_height</c> (m).
+        /// Read from the <c>Tsunami</c> GameObject in sharedassets55.
         /// </summary>
         public const float VanillaHeightMetres = 64f;
 
         /// <summary>
-        /// バニラの津波が外周の海面を持ち上げる高さ（<c>m_delta</c> の単位）。
+        /// How high vanilla's tsunami lifts the sea level at the rim (in <c>m_delta</c> units).
         /// <code>  round(m_height * 65536/1024 * intensity / 55)  </code>
         ///
-        /// ★ これは<b>境界条件の振幅</b>であって、こちらの<b>仮想の山</b>とは
-        ///   意味が違う。同じ単位なので並べて書けるだけである ——
-        ///   **「バニラより小さいから弱い」とは読めない。**
+        /// ★ This is <b>the amplitude of a boundary condition</b>, which means something
+        ///   different from our <b>virtual hill</b>. They can be written side by side only
+        ///   because the units are the same —
+        ///   **you cannot read it as "smaller than vanilla, therefore weaker".**
         /// </summary>
         public static int VanillaDeltaUnits(byte intensity)
         {
@@ -303,14 +328,14 @@ namespace DisasterPlus.Core.Earthquake
             return units;
         }
 
-        // ── 外力の形 ──────────────────────────────────────────
+        // ── The shape of the forcing ──────────────────────────────────────────
 
         /// <summary>
-        /// 地震から <paramref name="elapsedSteps"/> 水ステップ後に、
-        /// <b>重ねた波ぜんぶで</b>出す外力（<c>m_delta</c> の単位）。
+        /// The forcing produced by <b>the whole stack of waves</b> (in <c>m_delta</c> units)
+        /// <paramref name="elapsedSteps"/> water steps after the earthquake.
         ///
-        /// <b>負が「水を中心へ集める」、正が「外へ押し出す」。</b>
-        /// 終わったら 0 —— <b>呼び出し側はそれで波を解放する。</b>
+        /// <b>Negative gathers water towards the centre, positive pushes it outwards.</b>
+        /// 0 once it is over — <b>that is how the caller knows to release the waves.</b>
         /// </summary>
         public static int DeltaAt(float elapsedSteps, int driveUnits)
         {
@@ -327,10 +352,11 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 外力の形だけ（頂点を 1 に正規化）。<c>[-1, 1]</c>。
+        /// The shape of the forcing alone (normalised so the peak is 1). <c>[-1, 1]</c>.
         ///
-        /// ★★ **時間積分がほぼ 0 でなければならない。**（クラス doc）
-        ///   押しっぱなしにすると海底に穴が残るだけで、波にならない。
+        /// ★★ **The time integral must be as close to 0 as makes no difference.** (See the
+        ///   class doc.) Hold the push on and all you leave is a hole in the seabed; it does
+        ///   not become a wave.
         /// </summary>
         public static float DriveAt(float elapsedSteps)
         {
@@ -339,27 +365,29 @@ namespace DisasterPlus.Core.Earthquake
 
             double w = elapsedSteps / TotalSteps;
 
-            // ① 長く引く（負 ＝ 水が中心へ集まる ＝ 隆起が育つ）。
+            // ① Draw in for a long time (negative = the water gathers towards the centre =
+            //    the bulge grows).
             if (w < DrawInFraction)
             {
                 return (float)(-Math.Sin(Math.PI * w / DrawInFraction));
             }
 
-            // ②③ 短く強く押す（正 ＝ 外へ。隆起が台地→ドーナツ→環になる）。
+            // ②③ Push hard for a short time (positive = outwards. The bulge goes plateau →
+            //     doughnut → ring).
             double k = (w - DrawInFraction) / (1.0 - DrawInFraction);
             return (float)(Math.Sin(Math.PI * k) * PushOvershoot);
         }
 
         /// <summary>
-        /// 外力を切ったあと（＝④）か。ここから先は<b>ソルバだけが波を運ぶ</b>ので、
-        /// 呼び出し側は水波を解放してよい。
+        /// Whether the forcing has been switched off (i.e. we are in ④). From here on
+        /// <b>the solver alone carries the wave</b>, so the caller may release the water waves.
         /// </summary>
         public static bool IsFinished(float elapsedSteps)
         {
             return !IsBad(elapsedSteps) && elapsedSteps >= TotalSteps;
         }
 
-        /// <summary>今どの段か（**英語・診断用**）。</summary>
+        /// <summary>Which stage we are in (**English, for diagnostics**).</summary>
         public static string StageAt(float elapsedSteps)
         {
             if (IsBad(elapsedSteps) || elapsedSteps < 0f) return "not started";
@@ -370,11 +398,12 @@ namespace DisasterPlus.Core.Earthquake
             return "2 the bulge is pushed out into a spreading ring";
         }
 
-        // ── 重ねた波への配分 ─────────────────────────────────────
+        // ── Distributing across the stacked waves ─────────────────────────────────────
 
         /// <summary>
-        /// 重ねた波 <paramref name="index"/> 個目（0 基点）に入れる <c>m_delta</c>。
-        /// <paramref name="driveUnits"/> を <see cref="MaxDeltaUnits"/> ずつ分けて配る。
+        /// The <c>m_delta</c> to put into stacked wave number <paramref name="index"/>
+        /// (0-based). <paramref name="driveUnits"/> is handed out
+        /// <see cref="MaxDeltaUnits"/> at a time.
         /// </summary>
         public static int DeltaForWave(int index, int driveUnits)
         {
@@ -391,7 +420,7 @@ namespace DisasterPlus.Core.Earthquake
             return driveUnits < 0 ? -left : left;
         }
 
-        /// <summary>いま何本の波が要るか（診断用）。</summary>
+        /// <summary>How many waves are needed right now (for diagnostics).</summary>
         public static int WavesNeeded(int driveUnits)
         {
             int magnitude = driveUnits < 0 ? -driveUnits : driveUnits;

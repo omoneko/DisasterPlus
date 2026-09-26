@@ -14,13 +14,15 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         }
 
         /// <summary>
-        /// 既定の猶予は、燃焼中建物の走査 1 周ぶんより十分長くなければならない。
+        /// The default grace period must be comfortably longer than one full sweep of the
+        /// burning-building scan.
         ///
-        /// BurningBuildingScanner は 8 tick で 49152 スロットを 1 周する。ゲーム速度 3 では
-        /// 1 tick = 9 sim フレームなので、最悪 72 フレームぶんの結果が「古い」状態になる。
-        /// 1 ゲーム内分 = SimulationManager.DAYTIME_FRAMES(65536) / 1440 ≒ 45.51 フレーム。
-        /// 猶予がこれを下回ると、走査 1 周ぶんの古い結果だけで旋風が消えてしまう。
-        /// （旧既定 1 分は、フレーム換算の誤り 262144 を前提にしていたため実質 4 倍に見えていた）
+        /// BurningBuildingScanner sweeps all 49152 slots in 8 ticks. At game speed 3 one
+        /// tick = 9 sim frames, so in the worst case 72 frames' worth of results are "stale".
+        /// One in-game minute = SimulationManager.DAYTIME_FRAMES(65536) / 1440 ≈ 45.51 frames.
+        /// If the grace drops below that, a whirl dies on nothing but the stale results of a
+        /// single sweep. (The old default of 1 minute looked effectively four times longer
+        /// because it rested on the mistaken frame conversion of 262144.)
         /// </summary>
         [Fact]
         public void Defaults_GraceOutlastsOneFullScanSweep()
@@ -54,8 +56,9 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void MaxLifetime_AlwaysDissipates_EvenWhileFireRages()
         {
-            // 回帰テスト: 条件を満たし続けても絶対上限で必ず打ち切られること。
-            // これが無いと延焼拡大の自己強化ループで旋風が永久に居座る。
+            // Regression test: even while the conditions keep being met, the absolute cap
+            // must always cut it off. Without this the self-reinforcing loop of spreading
+            // fire lets a whirl sit there for ever.
             var life = FireWhirlLifecycle.Start();
             for (int i = 0; i < 100; i++) life = life.Advance(1f, true);
             Assert.Equal(FireWhirlVerdict.Dissipate, life.Evaluate(Config(maxLife: 10f)));
@@ -85,7 +88,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void ConditionRecovered_ResetsGraceCounter()
         {
-            // 火が一瞬弱まってもすぐ戻れば存続する。ちらつきで消えないこと。
+            // If the fire weakens for a moment but comes straight back, the whirl survives.
+            // It must not die on a flicker.
             var life = FireWhirlLifecycle.Start()
                 .Advance(0.9f, false)
                 .Advance(0.1f, true)
@@ -103,7 +107,8 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Advance_NegativeDelta_IsIgnored()
         {
-            // ポーズやセーブロードで時間が巻き戻ることがある。負値で寿命が伸びてはいけない。
+            // Time can run backwards across a pause or a save/load. A negative value must
+            // never extend the lifetime.
             var life = FireWhirlLifecycle.Start().Advance(5f, true).Advance(-3f, true);
             Assert.Equal(5f, life.ElapsedMinutes, 4);
         }
@@ -111,7 +116,7 @@ namespace DisasterPlus.Core.Tests.FireWhirl
         [Fact]
         public void Advance_ZeroDelta_ChangesNothing()
         {
-            // ポーズ中は経過ゼロ。呼ばれても状態が動かないこと。
+            // While paused the elapsed time is zero. Being called must not move the state.
             var life = FireWhirlLifecycle.Start().Advance(4f, false).Advance(0f, false);
             Assert.Equal(4f, life.ElapsedMinutes, 4);
             Assert.Equal(4f, life.ConditionBrokenMinutes, 4);

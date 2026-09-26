@@ -1,44 +1,48 @@
 namespace DisasterPlus.Core.Volcano
 {
     /// <summary>
-    /// **どの矩形を、いつ <c>UpdateArea</c> へ渡すか**を決める（呼ぶのは呼び出し側）。
+    /// Decides **which rectangle to hand to <c>UpdateArea</c>, and when** (the caller does
+    /// the calling).
     ///
-    /// ── なぜ型として切り出したか ────────────────────────────────
+    /// ── Why it was carved out as a type ────────────────────────────────
     ///
-    /// 実機の指摘⑤「噴火のアニメーションをもっとスムーズに（現在は断続的な
-    /// せり上がりです）」の正体は、**目に見える 1 段が「1 tick の上昇量」ではなく
-    /// 「そのタイルが再び流されるまでの上昇量」だった**ことである。
-    /// フットプリント全体（既定 R=1200 m で 151×151 セル）を 4 枚に割って
-    /// 1 tick 1 枚の総当たりで流していたので、1 枚が流れ直すまで 4 tick かかり、
-    /// 見える 1 段は 1 tick の 4 倍になっていた。
+    /// The real cause behind on-hardware observation ⑤, "make the eruption animation
+    /// smoother (at the moment it rises in fits and starts)", was that **one visible step
+    /// was not "one tick's worth of rise" but "the rise accumulated until that tile gets
+    /// flushed again"**. We were splitting the whole footprint (151×151 cells at the default
+    /// R=1200 m) into 4 tiles and flushing one tile per tick round-robin, so it took 4 ticks
+    /// before a tile was flushed again, and one visible step was 4 ticks' worth.
     ///
-    /// この判断は整数演算だけでできるので Core に置く。**ユニットテストと
-    /// <c>tools/VolcanoPreview</c> の両方が、ゲームを起動せずに同じ物を回せる。**
-    /// 「見た目の変更は自分でオフラインに描画・計測してから実機テストを頼む」
-    /// というこのプロジェクトの決まりが、この分離を要求している。
+    /// This decision is pure integer arithmetic, so it lives in Core. **Both the unit tests
+    /// and <c>tools/VolcanoPreview</c> can run the same thing without launching the game.**
+    /// This project's rule — "for a visual change, render and measure it yourself offline
+    /// before asking for a test on real hardware" — is what requires this separation.
     ///
-    /// ── 何をしているか ──────────────────────────────────
+    /// ── What it does ──────────────────────────────────
     ///
-    ///   1. その tick に**実際に書き換えたセルの外接矩形**を受け取る。
-    ///   2. まだ流し切っていない矩形へ union で足す（<b>足す</b>。上書きしない ——
-    ///      上書きすると、総当たりの途中で矩形が縮んだときに
-    ///      **まだ流していないタイルが消える**）。
-    ///   3. 1 回で出せるなら（<see cref="TileSplit.FitsSinglePass"/>）そのまま出して
-    ///      溜まりを空にする。隆起の前半はここを通るので、**変わった全域が
-    ///      毎 tick 画面に出る**。
-    ///   4. 出せないならタイルを 1 枚ずつ総当たりし、一周したところで空にする。
+    ///   1. Takes **the bounding rectangle of the cells actually rewritten** this tick.
+    ///   2. Unions it into the rectangle that has not yet been fully flushed (<b>unions</b>;
+    ///      it does not overwrite — overwriting would mean that when the rectangle shrinks
+    ///      part-way through the round-robin, **tiles that have not been flushed yet
+    ///      vanish**).
+    ///   3. If it fits in one pass (<see cref="TileSplit.FitsSinglePass"/>), emit it as-is
+    ///      and empty the backlog. The first half of the uplift goes through here, so
+    ///      **everything that changed reaches the screen every tick**.
+    ///   4. If it does not fit, work round the tiles one at a time and empty the backlog
+    ///      once a full round is done.
     ///
-    /// **1 回の呼び出しで返す矩形はちょうど 1 つ**（罠 3。2 枚目以降は
-    /// <c>merged &gt; 10000</c> の判定で毎回途中フラッシュする、§A-1 IL_00A8）。
-    /// 返す矩形は <see cref="TileSplit"/> が両方の閾値
-    /// （一辺 128 未満・面積 10000 未満）を守ったもので、
-    /// **呼び出し側で margin を足し直してはいけない。**
+    /// **Exactly one rectangle is returned per call** (trap 3: from the second one onwards,
+    /// the <c>merged &gt; 10000</c> test makes it flush mid-way every time, §A-1 IL_00A8).
+    /// The rectangle returned is one where <see cref="TileSplit"/> has respected both
+    /// thresholds (each side under 128, area under 10,000), and **the caller must not add
+    /// the margin back on.**
     ///
-    /// <see cref="HasPending"/> が false になった時点で「書いた分は全部画面に出た」。
-    /// 火口を彫ってよいかの判定にそのまま使える —— **枚数を数えて待たないこと**。
-    /// 数えると、待っている間に届いた最後の書き込みを取りこぼす。
+    /// The moment <see cref="HasPending"/> goes false, "everything written has reached the
+    /// screen". You can use that directly to decide whether it is safe to carve the crater —
+    /// **do not wait by counting tiles**. Count them and you drop the last write that
+    /// arrived while you were waiting.
     ///
-    /// スレッド安全ではない。sim スレッドからだけ触ること。
+    /// Not thread-safe. Touch it from the sim thread only.
     /// </summary>
     public class UpliftFlushPlan
     {
@@ -47,20 +51,25 @@ namespace DisasterPlus.Core.Volcano
         private int _tileCount;
         private int _cursor;
 
-        /// <summary>まだ画面に出ていない書き換えが残っているか。</summary>
+        /// <summary>Whether there are rewrites left that have not reached the screen
+        /// yet.</summary>
         public bool HasPending { get { return _hasPending; } }
 
         /// <summary>
-        /// 溜まっている矩形を出し切るのに要る <c>UpdateArea</c> の回数。
-        /// **1 なら「変わった全域が 1 tick で画面に出る」＝ いちばん滑らかな状態。**
-        /// 溜まりが無いときも 1 を返す（「次に何か変われば 1 回で出せる」）。
+        /// How many <c>UpdateArea</c> calls it takes to flush the accumulated rectangle.
+        /// **1 means "everything that changed reaches the screen in one tick" = the
+        /// smoothest possible state.**
+        /// It also returns 1 when there is no backlog ("if something changes next, one call
+        /// will do it").
         /// </summary>
         public int TileCount { get { return _hasPending ? _tileCount : 1; } }
 
-        /// <summary>総当たりの何枚目か。単発で出せているときは 0。</summary>
+        /// <summary>Which tile of the round-robin we are on. 0 while it fits in a single
+        /// pass.</summary>
         public int Cursor { get { return _hasPending ? _cursor : 0; } }
 
-        /// <summary>溜まりを捨てる。**地形は戻らない**（畳むのは予定だけ）。</summary>
+        /// <summary>Discards the backlog. **The terrain is not reverted** (only the plan is
+        /// folded away).</summary>
         public void Reset()
         {
             _hasPending = false;
@@ -73,12 +82,14 @@ namespace DisasterPlus.Core.Volcano
         }
 
         /// <summary>
-        /// この tick に書き換えた矩形を足し、**今回 <c>UpdateArea</c> へ渡す矩形**を返す。
-        /// 出すものが無ければ false（そのとき out はすべて 0）。
+        /// Unions in the rectangle rewritten this tick and returns **the rectangle to hand
+        /// to <c>UpdateArea</c> this time round**. Returns false when there is nothing to
+        /// emit (and then every out parameter is 0).
         ///
-        /// <paramref name="dirtyValid"/> が false なら「この tick は 1 セルも変わらなかった」。
-        /// それでも溜まりが残っていれば流し続ける —— 目標に届いたあと、
-        /// まだ画面に出ていない分を出し切るのがこの経路である。
+        /// A false <paramref name="dirtyValid"/> means "not a single cell changed this
+        /// tick". Even then, if a backlog remains we keep flushing — this is the path that
+        /// finishes emitting what has not reached the screen yet after the target height has
+        /// been met.
         /// </summary>
         public bool Next(bool dirtyValid, int dirtyMinX, int dirtyMinZ, int dirtyMaxX, int dirtyMaxZ,
                          out int passMinX, out int passMinZ, out int passMaxX, out int passMaxZ)
@@ -113,8 +124,9 @@ namespace DisasterPlus.Core.Volcano
 
             if (!_hasPending) return false;
 
-            // ★ 1 回で出せるなら分割しない。**「だいたい入る」で省かないこと** ——
-            //   はみ出した分は例外にならず、更新されないまま残る（§A-1）。
+            // ★ Do not split when it fits in one pass. **Never skip the check on the
+            //   grounds that it "roughly fits"** — anything that overflows raises no
+            //   exception and simply stays un-updated (§A-1).
             if (TileSplit.FitsSinglePass(_minX, _minZ, _maxX, _maxZ))
             {
                 bool ok = TileSplit.ExpandForPass(_minX, _minZ, _maxX, _maxZ,
@@ -127,8 +139,9 @@ namespace DisasterPlus.Core.Volcano
             if (!TileSplit.TileAt(_cursor, _minX, _minZ, _maxX, _maxZ,
                                   out passMinX, out passMinZ, out passMaxX, out passMaxZ))
             {
-                // 番号が範囲外。次の tick で 0 から引き直す（1 tick 遅れるだけで、
-                // 溜まりは捨てない —— 捨てると出していない範囲が永久に残る）。
+                // The index is out of range. Start again from 0 next tick (we only lose one
+                // tick, and we do not discard the backlog — discarding it would leave the
+                // un-emitted area behind forever).
                 _cursor = 0;
                 return false;
             }
@@ -136,7 +149,7 @@ namespace DisasterPlus.Core.Volcano
             _cursor++;
             if (_cursor >= _tileCount)
             {
-                // 一周した ＝ 溜まっていた範囲は全部画面に出た。
+                // A full round is done = the whole accumulated area has reached the screen.
                 _hasPending = false;
                 _tileCount = 0;
                 _cursor = 0;

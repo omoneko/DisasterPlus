@@ -4,41 +4,43 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 診断ログ。output_log.txt は
-    /// &lt;Steam&gt;\steamapps\common\Cities_Skylines\Cities_Data\output_log.txt にある（AppData ではない）。
-    /// Diag はキーごとにスロットリングする。毎 tick 垂れ流すとログが使い物にならなくなる。
+    /// Diagnostic logging. output_log.txt lives at
+    /// &lt;Steam&gt;\steamapps\common\Cities_Skylines\Cities_Data\output_log.txt (not under AppData).
+    /// Diag throttles per key. Letting it pour out every tick makes the log useless.
     ///
-    /// スレッド安全性: Diag は sim スレッド（FireWhirlFeature / FireWhirlDamage /
-    /// FireWhirlSpawner / FireWhirlPinner）と main スレッド（IntensityUnlock /
-    /// DisasterPanelBar / FireWhirlPlacementTool）の両方から呼ばれる。
-    /// System.Collections.Generic.Dictionary は書き込みと読み取りの並行実行が安全ではなく、
-    /// main スレッドの新規キー挿入がバケット再確保を起こしている最中に sim スレッドが
-    /// TryGetValue すると、例外か壊れたバケット連鎖の無限ループ（＝スタックトレースの
-    /// 出ないハング）になる。_lastDiag への全アクセスを _diagGate 1 本で直列化する
-    /// （FeatureHost._errorGate と同じ規律）。このロックを持ったまま他クラスのコードは
-    /// 呼ばない（Debug.Log もロックの外で行う）。
+    /// Thread safety: Diag is called from both the sim thread (FireWhirlFeature /
+    /// FireWhirlDamage / FireWhirlSpawner / FireWhirlPinner) and the main thread
+    /// (IntensityUnlock / DisasterPanelBar / FireWhirlPlacementTool).
+    /// System.Collections.Generic.Dictionary is not safe for concurrent reads and writes:
+    /// if the sim thread calls TryGetValue while the main thread is inserting a new key and
+    /// reallocating the buckets, you get either an exception or an endless loop over a
+    /// corrupted bucket chain (i.e. a hang with no stack trace). Every access to _lastDiag
+    /// is serialised through the single _diagGate (the same discipline as
+    /// FeatureHost._errorGate). Never call into another class while holding this lock
+    /// (Debug.Log also happens outside the lock).
     /// </summary>
     public static class Log
     {
         private const string Prefix = "[DisasterPlus] ";
 
         /// <summary>
-        /// 同一キーのスロットル間隔（sim フレーム）。
+        /// Throttle interval for one key (sim frames).
         ///
-        /// 時刻源に UnityEngine.Time.realtimeSinceStartup は使えない。UnityEngine.Time は
-        /// main スレッド専用で、この Unity ビルドでは sim スレッドからの読み取りに保証が無い。
-        /// 代わりに SimulationManager.m_currentFrameIndex を使う
-        /// （IL 実測: SimulationManager 上の public な instance フィールド、型 System.UInt32）。
-        /// ただの uint フィールドなのでどちらのスレッドから読んでも安全。
+        /// UnityEngine.Time.realtimeSinceStartup cannot be used as the time source.
+        /// UnityEngine.Time is main-thread only, and this Unity build gives no guarantee for
+        /// reads from the sim thread. Use SimulationManager.m_currentFrameIndex instead
+        /// (measured from the IL: a public instance field on SimulationManager, type
+        /// System.UInt32). It is a plain uint field, so reading it from either thread is safe.
         ///
-        /// 512 という値の根拠: SimulationManager.Update は IL 実測で
+        /// Why 512: measured from the IL, SimulationManager.Update advances the frame as
         ///   m_referenceTimer += Time.deltaTime / Time.fixedDeltaTime * FinalSimulationSpeed
-        /// としてフレームを進めるので、フレームは「(1 / fixedDeltaTime) × ゲーム速度」/実秒 で進む。
-        /// fixedDeltaTime の設定値は Assembly-CSharp 内に set_fixedDeltaTime の呼び出しが
-        /// 1 件も無く（全メソッドを IL 走査して確認）Unity のプロジェクト設定側にあるため、
-        /// Unity 既定の 0.02 なら通常速度で 50 フレーム/秒 ＝ 512 フレームは従来の 10 実秒に相当する。
-        /// ゲーム速度 2/3 では比例して短くなるが、ここはログ量の上限を決めるだけなので
-        /// 実秒との厳密な一致は要らない。
+        /// so frames advance at "(1 / fixedDeltaTime) × game speed" per real second.
+        /// The value of fixedDeltaTime is set on the Unity project-settings side — there is
+        /// not a single call to set_fixedDeltaTime anywhere in Assembly-CSharp (confirmed by
+        /// scanning the IL of every method) — so with Unity's default of 0.02 that is
+        /// 50 frames per second at normal speed, making 512 frames the equivalent of the
+        /// old 10 real seconds. At game speed 2/3 it shortens proportionally, but this only
+        /// caps the volume of logging, so it need not match real seconds exactly.
         /// </summary>
         private const uint DiagIntervalFrames = 512;
 
@@ -61,12 +63,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 同じ key では DiagIntervalFrames に 1 回しか出さない。
+        /// Emits at most once per DiagIntervalFrames for the same key.
         ///
-        /// チャンネル指定のないこの形は General 扱いになる（設計書 5.1）。
-        /// チャンネル付きのオーバーロードへ委譲しているので、設定画面の
-        /// 「General」チェックボックスは実際にこの経路を止められる。
-        /// 既定マスクは General なので、既存の呼び出しの見え方は変わらない。
+        /// This channel-less form counts as General (design doc 5.1). It delegates to the
+        /// overload that takes a channel, so the "General" checkbox on the settings screen
+        /// really can silence this path. General is in the default mask, so existing calls
+        /// look no different than before.
         /// </summary>
         public static void Diag(string key, string message)
         {
@@ -74,14 +76,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// チャンネル付きの診断ログ。マスクで無効なら何も出さない。
+        /// Diagnostic logging with a channel. Emits nothing if the mask disables it.
         ///
-        /// 本フェーズで既存呼び出しを機能チャンネルへ移行しないこと（設計書 5.2）。移行すると
-        /// 既定 OFF になり、docs/playtest-checklist.md の手順が壊れる。
+        /// Do not move existing calls onto feature channels in this phase (design doc 5.2).
+        /// Doing so would turn them off by default and break the procedure in
+        /// docs/playtest-checklist.md.
         ///
-        /// マスク判定はスロットル判定より先に行う。逆にすると、チャンネルが OFF の
-        /// 呼び出しがスロットル枠を消費してしまい、ON に切り替えた直後の 1 回が
-        /// 黙って落ちる。
+        /// The mask is checked before the throttle. The other way round, a call on a channel
+        /// that is OFF would consume the throttle slot, so the first call after switching the
+        /// channel ON would be silently dropped.
         /// </summary>
         public static void Diag(int channel, string key, string message)
         {
@@ -91,26 +94,27 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// channel の Diag が今の設定で出力されうるか。
+        /// Whether Diag on this channel could be emitted with the current settings.
         ///
-        /// <see cref="Diag(int, string, string)"/> は同じ判定を自分でも行うので、
-        /// これは**正しさのためではなく、引数の評価コストを避けるためだけ**にある。
-        /// C# は呼び出し前に引数を評価し切るので、Diag の内側でいくら弾いても
-        /// 文字列連結と ToString() は既に済んでしまっている。既定で OFF の
-        /// チャンネル（Forecast 等）を毎 sim tick 呼ぶ経路では、その組み立てが
-        /// 丸ごと無駄になる（全体レビュー指摘）。
+        /// <see cref="Diag(int, string, string)"/> performs the same check itself, so this
+        /// exists **not for correctness, but purely to avoid the cost of evaluating the
+        /// arguments**. C# evaluates the arguments fully before the call, so however much
+        /// Diag rejects on the inside, the string concatenation and ToString() have already
+        /// happened. On a path that calls a channel that is OFF by default (Forecast and the
+        /// like) every sim tick, all of that assembly work is wasted (raised in the overall
+        /// review).
         ///
-        /// スロットル判定（<see cref="ShouldEmit"/>）はここでは見ない。見てしまうと
-        /// この問い合わせ自体が枠を消費するか、あるいは呼び出し側が枠の状態に
-        /// 依存して分岐することになる。ここが true でも Diag が実際には
-        /// 出さないことはある（それで正しい）。
+        /// The throttle check (<see cref="ShouldEmit"/>) is deliberately not consulted here.
+        /// If it were, either this query itself would consume the slot, or the caller would
+        /// end up branching on the state of the slot. Diag may well emit nothing even when
+        /// this returns true (and that is correct).
         /// </summary>
         public static bool DiagEnabled(int channel)
         {
             return DisasterPlus.Core.Diagnostics.LogChannel.IsEnabled(channel, CurrentMask());
         }
 
-        /// <summary>レベルアンロード時に呼ぶ。都市をまたいでスロットル状態を持ち越さない。</summary>
+        /// <summary>Call on level unload. Never carry throttle state across cities.</summary>
         public static void Reset()
         {
             lock (_diagGate) { _lastDiag.Clear(); }
@@ -122,8 +126,9 @@ namespace DisasterPlus.Game
             lock (_diagGate)
             {
                 uint last;
-                // 減算は uint のまま行う。セーブのロードでフレーム番号が巻き戻っても
-                // 差が巨大な値になるだけで、「出さない」側には倒れない。
+                // Do the subtraction in uint. If loading a save winds the frame number back,
+                // the difference just becomes a huge value; it never falls on the
+                // "don't emit" side.
                 if (_lastDiag.TryGetValue(key, out last) && now - last < DiagIntervalFrames) return false;
                 _lastDiag[key] = now;
                 return true;
@@ -132,12 +137,13 @@ namespace DisasterPlus.Game
 
         private static uint CurrentFrame()
         {
-            // Singleton<T>.instance は sInstance が null のとき Object.FindObjectOfType と
-            // new GameObject + AddComponent を走らせる（IL 実測）。どちらも main スレッド専用
-            // API なので、sim スレッドから踏まないよう exists で先に確認する
-            // （exists は static フィールドの null 判定だけ・IL 実測）。
-            // メインメニュー等でまだ居なければ 0 を返す。その場合キーごとに初回 1 回だけ
-            // 出て以後は抑制されるが、ログを溢れさせないという目的は保たれる。
+            // When sInstance is null, Singleton<T>.instance runs Object.FindObjectOfType and
+            // new GameObject + AddComponent (measured from the IL). Both are main-thread-only
+            // APIs, so check exists first to keep the sim thread off them
+            // (exists is only a null check on a static field — measured from the IL).
+            // Returns 0 if it is not there yet, e.g. on the main menu. In that case each key
+            // emits once and is suppressed afterwards, but the goal of not flooding the log
+            // still holds.
             if (!SimulationManager.exists) return 0u;
             return SimulationManager.instance.m_currentFrameIndex;
         }
@@ -151,7 +157,7 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // 設定がまだ用意できていない場面でもログで落ちない。
+                // Never let logging throw in a situation where the settings are not ready yet.
                 return DisasterPlus.Core.Diagnostics.LogChannel.DefaultMask;
             }
         }

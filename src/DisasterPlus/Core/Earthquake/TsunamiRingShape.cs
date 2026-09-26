@@ -3,63 +3,73 @@ using System;
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// <b>震源から同心円状に立つ津波の「形」。</b>エンジンに触らない層。
+    /// <b>The "shape" of a tsunami rising in concentric rings from the hypocentre.</b>
+    /// The layer that does not touch the engine.
     ///
-    /// ── 何を作り直したのか（2026-08-31、所有者の指示）────────────────
+    /// ── What was rebuilt (2026-08-31, the owner's instruction) ────────────────
     ///
-    /// &gt; DLC そのまま使っちゃったら わざわざ MOD で出す意味ないじゃないですか。
-    /// &gt; 仕組みを解析して応用、震源付近から津波が同心円状に発生するのを作ってほしい
+    /// &gt; If you just use the DLC one as it is, there is no point going to the trouble of
+    /// &gt; doing it in a mod. Take the mechanism apart, apply it, and make a tsunami that
+    /// &gt; forms in concentric rings from around the hypocentre.
     ///
-    /// それまでの <c>TsunamiSource</c> は <c>TYPE_IMPACT</c> の水波、つまり
-    /// <b>海中に置く仮想の丘</b>を出していた。丘は水を押しのけるだけで<b>作らない</b>。
-    /// 正味ゼロの外力しか出せず、出せるのは双極子であって水の壁ではない。
-    /// オフライン実測（同じ棚・水深 174 m・同じ汀線、2026-08-31）:
+    /// The <c>TsunamiSource</c> up to that point produced a <c>TYPE_IMPACT</c> water wave,
+    /// i.e. <b>a virtual hill placed underwater</b>. A hill only displaces water; it does
+    /// not <b>make</b> any. All it can produce is a net-zero external force — a dipole, not
+    /// a wall of water. Measured offline (same shelf, 174 m water depth, same shoreline,
+    /// 2026-08-31):
     ///
     /// <list type="bullet">
-    /// <item>DLC の津波（強度 100）… 汀線 <b>84.8 m</b>（震源 88.8 m からほぼ減衰しない）</item>
-    /// <item>こちらの丘（drive 3857）… 汀線 <b>19.3 m</b>（震源 72.7 m から 1/4 に落ちる）</item>
+    /// <item>The DLC tsunami (intensity 100) … <b>84.8 m</b> at the shoreline (barely
+    ///   decaying from 88.8 m at the hypocentre)</item>
+    /// <item>Our hill (drive 3857) … <b>19.3 m</b> at the shoreline (down to a quarter of
+    ///   the 72.7 m at the hypocentre)</item>
     /// </list>
     ///
-    /// 差は振幅ではなく<b>仕掛け</b>だった。DLC は外周セルの海面を書き換え、
-    /// そこは Dirichlet 境界なので<b>水が湧く</b>。丘をどれだけ大きくしても真似できない。
+    /// The difference was not the amplitude but <b>the mechanism</b>. The DLC rewrites the
+    /// sea level of the outermost cells, and those are a Dirichlet boundary, so
+    /// <b>water wells up</b>. No amount of making the hill bigger can imitate that.
     ///
-    /// ★★ **そこでゲームの別の道具を使う。**<c>WaterSource</c> の
-    ///   <c>TYPE_NATURAL</c>（マップの川の湧き出し）は
-    ///   <b>「指定した円を指定した水位まで満たす／抜く」</b>装置で、
-    ///   置き場所が自由である —— <b>境界条件を震源へ持ってきたもの</b>。
-    ///   波形は DLC のものをそのまま使い、置き場所だけを移す。それが
-    ///   「仕組みを解析して応用」の中身である。
+    /// ★★ **So use a different tool the game already has.** <c>WaterSource</c>'s
+    ///   <c>TYPE_NATURAL</c> (the springs that feed the map's rivers) is a device that
+    ///   <b>"fills or drains a given circle to a given water level"</b>, and you can put it
+    ///   where you like — <b>the boundary condition brought over to the hypocentre</b>.
+    ///   The waveform is the DLC's, used as it stands; only where it is placed moves. That
+    ///   is the substance of "take the mechanism apart and apply it".
     ///
-    /// ── 波形（<c>WaterWave.GetSeaLevel</c> IL_0000-00B6 と同一）──────
+    /// ── The waveform (identical to <c>WaterWave.GetSeaLevel</c> IL_0000-00B6) ──────
     ///
     /// <code>
-    /// amp = delta * (65536 - t) / 65536                  // ゆっくり減衰
-    /// arg = amp * (1 - cos(2*pi * t / T))                // 0 -> 2amp -> 0 の包絡
-    /// off = arg * sin(2*pi * 1.5 * t / T) / 2            // 1.5 周期
+    /// amp = delta * (65536 - t) / 65536                  // slow decay
+    /// arg = amp * (1 - cos(2*pi * t / T))                // an envelope 0 -> 2amp -> 0
+    /// off = arg * sin(2*pi * 1.5 * t / T) / 2            // 1.5 cycles
     /// level = seaLevel - off
     /// </code>
     ///
-    /// t は 1 水ステップにつき +64、<c>T = 16384</c> ＝ **256 水ステップ**。
-    /// 押し波の頂点は <c>t = T/2</c> で <c>seaLevel + amp</c>。
-    /// 前後に引き波が来る —— <b>引き → 押し → 引き</b>。
+    /// t advances by +64 per water step, and <c>T = 16384</c> = **256 water steps**.
+    /// The crest of the push wave is at <c>t = T/2</c>, at <c>seaLevel + amp</c>.
+    /// A drawback comes either side of it — <b>draw → push → draw</b>.
     /// </summary>
     public static class TsunamiRingShape
     {
-        /// <summary>バニラの <c>m_duration</c>。<c>256 &lt;&lt; 6</c>。</summary>
+        /// <summary>Vanilla's <c>m_duration</c>. <c>256 &lt;&lt; 6</c>.</summary>
         public const int DurationTicks = 16384;
 
-        /// <summary>1 水ステップぶんの時計の進み（<c>m_currentTime</c> は +64）。</summary>
+        /// <summary>How far the clock advances in one water step (<c>m_currentTime</c> goes
+        /// +64).</summary>
         public const int TicksPerWaterStep = 64;
 
-        /// <summary>波形が続く水ステップ数。256 ＝ 16,384 sim フレーム ≒ 4.5 実分。</summary>
+        /// <summary>How many water steps the waveform lasts. 256 = 16,384 sim frames ≈ 4.5
+        /// real minutes.</summary>
         public const int WaterSteps = DurationTicks / TicksPerWaterStep;
 
-        /// <summary><c>m_target</c> は ushort。1023.98 m を超える水位は書けない。</summary>
+        /// <summary><c>m_target</c> is a ushort. A water level above 1023.98 m cannot be
+        /// written.</summary>
         public const int MaxLevelUnits = 65535;
 
         /// <summary>
-        /// 円の半径（m）。<c>TYPE_NATURAL</c> は施設と違い<b>上限が無い</b>
-        /// （IL_1D0D-1D21: <c>sqrt(rate)*0.4 + 10</c>、type 2/3 だけ clamp 10..50）。
+        /// The circle's radius (m). Unlike a building, <c>TYPE_NATURAL</c> has <b>no upper
+        /// bound</b> (IL_1D0D-1D21: <c>sqrt(rate)*0.4 + 10</c>, with the clamp to 10..50
+        /// applied only to types 2 and 3).
         /// </summary>
         public static float RadiusMetresForRate(long rate)
         {
@@ -68,9 +78,10 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// その半径を出すのに要る流量。<b>半径と流量は切り離せない</b> ——
-        /// 半径は流量の平方根で決まるので、広い震源は必ず大流量になる。
-        /// 高さを決めるのは流量ではなく <c>m_target</c> のほうである。
+        /// The flow rate needed to produce that radius. <b>Radius and rate cannot be
+        /// separated</b> — the radius goes as the square root of the rate, so a wide
+        /// hypocentre always means a large flow.
+        /// What decides the height is not the rate but <c>m_target</c>.
         /// </summary>
         public static long RateForRadiusMetres(float radiusMetres)
         {
@@ -80,8 +91,8 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// バニラの <c>m_delta</c>（1/64 m）。<c>round(64 * 64 * intensity / 55)</c>。
-        /// 強度 100 で 7447（116.4 m）、255 で 18991（296.7 m）。
+        /// Vanilla's <c>m_delta</c> (1/64 m). <c>round(64 * 64 * intensity / 55)</c>.
+        /// 7447 at intensity 100 (116.4 m), 18991 at 255 (296.7 m).
         /// </summary>
         public static int VanillaDeltaUnits(int intensity)
         {
@@ -90,27 +101,29 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 平常の海面からのずれ（1/64 m）。<b>正なら押し波、負なら引き波。</b>
+        /// The offset from normal sea level (1/64 m). <b>Positive is a push wave, negative
+        /// a drawback.</b>
         ///
-        /// バニラの式は <c>level = original - off</c> なので、ここではその
-        /// <c>-off</c> をそのまま返す（符号の取り違えを呼び出し側に持ち込まない）。
+        /// Vanilla's formula is <c>level = original - off</c>, so what is returned here is
+        /// that <c>-off</c> as it stands (so the caller is never handed a sign to get wrong).
         /// </summary>
-        /// <param name="elapsedTicks">経過（1 水ステップ = 64）。</param>
-        /// <param name="deltaUnits">振幅の元（<c>m_delta</c> 相当、1/64 m）。</param>
+        /// <param name="elapsedTicks">Elapsed time (one water step = 64).</param>
+        /// <param name="deltaUnits">The source of the amplitude (equivalent to <c>m_delta</c>,
+        /// 1/64 m).</param>
         /// <param name="durationTicks">
-        /// 波形の長さ。**周期でもあり打ち切りでもある。**
+        /// The waveform's length. **It is both the period and the cut-off.**
         ///
-        /// ★★ <b>これを定数にしてはいけない。</b>（2026-08-31、IL 相互検証で判明）
-        ///   ゲームも <c>den = m_duration &gt;&gt; 6</c> で周期をここから作っており
-        ///   （IL_0089）、<c>m_duration</c> は災害ごとに決まる<b>値</b>である。
-        ///   ここを <c>DurationTicks</c> に固定していたせいで、呼び出し側が
-        ///   768 水ステップのつもりでも<b>実際は 256 歩で終わっていた</b> ——
-        ///   オフラインで測った 768 歩（汀線 67 m）ではなく 256 歩相当の波しか
-        ///   出ていなかった。
+        /// ★★ <b>This must not be a constant.</b> (2026-08-31, discovered by cross-checking
+        ///   the IL.) The game builds the period from it too, as
+        ///   <c>den = m_duration &gt;&gt; 6</c> (IL_0089), and <c>m_duration</c> is a
+        ///   <b>value</b> decided per disaster. Pinning this to <c>DurationTicks</c> meant
+        ///   that when the caller thought it was running 768 water steps, <b>it actually
+        ///   finished in 256</b> — what came out was a wave equivalent to 256 steps, not the
+        ///   768 steps measured offline (67 m at the shoreline).
         ///
-        /// ★ 減衰項 <c>(65536 - t)/65536</c> は<b>絶対時刻</b>で効く（周期では割らない）。
-        ///   だから長い波形ほど後半の振幅が落ちる。65536 ティック
-        ///   ＝ 1024 水ステップで 0 になる。
+        /// ★ The decay term <c>(65536 - t)/65536</c> works on <b>absolute time</b> (it is
+        ///   not divided by the period). So the longer the waveform, the more the amplitude
+        ///   falls off in its second half. It reaches 0 at 65536 ticks = 1024 water steps.
         /// </param>
         public static int LevelOffsetUnits(int elapsedTicks, int deltaUnits, int durationTicks)
         {
@@ -127,15 +140,16 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 引き波の深さを抑える。**海を空にしてはいけない。**
+        /// Holds back the depth of the drawback. **The sea must not be emptied.**
         ///
-        /// ★★ オフライン実測（2026-08-31）で、抑えないと震源の水柱が
-        ///   <b>100% 抜けて海底が露出した</b>（強度 255・半径 1280 m で 20 水ステップ）。
-        ///   引き波は現実にも起きるが、海底が丸見えになるのは絵として壊れている。
-        ///   水深の <paramref name="maxFraction"/> までに留める。
+        /// ★★ Measured offline (2026-08-31): without this, the water column at the
+        ///   hypocentre <b>drained 100% and exposed the seabed</b> (intensity 255, radius
+        ///   1280 m, 20 water steps). Drawback does happen in reality, but a seabed in
+        ///   plain view is broken as a picture. Keep it to
+        ///   <paramref name="maxFraction"/> of the water depth.
         /// </summary>
-        /// <param name="offsetUnits">生の <see cref="LevelOffsetUnits"/>。</param>
-        /// <param name="depthUnits">震源の水深（1/64 m）。</param>
+        /// <param name="offsetUnits">The raw <see cref="LevelOffsetUnits"/>.</param>
+        /// <param name="depthUnits">The water depth at the hypocentre (1/64 m).</param>
         public static int ClampDraw(int offsetUnits, int depthUnits, float maxFraction)
         {
             if (offsetUnits >= 0) return offsetUnits;

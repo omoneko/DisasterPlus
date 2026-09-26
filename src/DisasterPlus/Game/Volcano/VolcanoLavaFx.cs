@@ -6,33 +6,35 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 溶岩の面を描くために何が取れたか（<c>Shader.Find</c> か、
-    /// 読み込み済み <c>Material</c> からの<b>シェーダの</b>借用か）。
+    /// What we managed to get hold of in order to draw the lava surface (either
+    /// <c>Shader.Find</c>, or borrowing <b>the shader</b> from an already-loaded
+    /// <c>Material</c>).
     ///
-    /// ★ <b><c>Shader.Find("Standard")</c> を「解決した」の判定に混ぜない。</b>
-    /// <c>Standard</c> は Unity の組み込みで**必ず非 null** なので、
-    /// <c>… || Shader.Find("Standard") != null</c> という検査は**構造上 1 度も
-    /// 失敗できない**（④のレビューがまさにこれを見つけている）。
-    /// ここは 2 つの事実を分けて持つ:
+    /// ★ <b>Do not fold <c>Shader.Find("Standard")</c> into the "did it resolve" test.</b>
+    /// <c>Standard</c> is built into Unity and is **never null**, so a check like
+    /// <c>… || Shader.Find("Standard") != null</c> **can structurally never fail**
+    /// (④'s review found exactly this).
+    /// Here the two facts are kept apart:
     ///
     /// <code>
-    /// ResolvedShaderName      実際に使うシェーダの名前（null なら 1 つも取れなかった）
-    /// ParticleShaderResolved  粒子系（加算 / アルファブレンド）が取れたか  ← 検査はこちら
+    /// ResolvedShaderName      the name of the shader actually used (null = nothing resolved)
+    /// ParticleShaderResolved  whether a particle shader (additive / alpha-blended) resolved  ← the check uses this
     /// </code>
     /// </summary>
     public struct VolcanoLavaShaderFacts
     {
-        /// <summary>実際に使うシェーダの名前。**null なら何も描かない。**</summary>
+        /// <summary>The name of the shader actually used. **If null, nothing is drawn.**</summary>
         public readonly string ResolvedShaderName;
 
         /// <summary>
-        /// 粒子系のシェーダ（加算またはアルファブレンド）が取れたか。
-        /// **これが false でも <c>Standard</c> を透過モードにして描く**が、
-        /// 光っては見えない。<c>Assumptions</c> の述語はこちらである。
+        /// Whether a particle shader (additive or alpha-blended) resolved.
+        /// **Even when this is false we still draw, with <c>Standard</c> put into transparent
+        /// mode**, but it will not look like it is glowing. This is the predicate
+        /// <c>Assumptions</c> uses.
         /// </summary>
         public readonly bool ParticleShaderResolved;
 
-        /// <summary>診断に出す 1 行（**英語**）。取れていなければ null。</summary>
+        /// <summary>The one line reported in the diagnostics (**English**). null if nothing resolved.</summary>
         public readonly string Detail;
 
         public VolcanoLavaShaderFacts(string resolvedShaderName, bool particleShaderResolved,
@@ -45,144 +47,151 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// 溶岩の光る面。**main スレッド専用。**
+    /// The glowing lava surface. **Main thread only.**
     ///
-    /// ── なぜゼロから作るのか ─────────────────────────────────
+    /// ── why it is built from scratch ───────────────────────────────────────────────────────
     ///
-    /// 溶岩・マグマ・溶融物のプレハブもマテリアルもシェーダも、**DLL の文字列ヒープに
-    /// 1 件も無い**（§B-5）。借りられる既製品が存在しないので、形（<c>LavaRibbon</c>）も
-    /// 面（マテリアルとテクスチャ）も⑤が作る。
+    /// There is not one prefab, material or shader for lava, magma or melt **anywhere in the
+    /// DLL's string heap** (§B-5). There is no off-the-shelf thing to borrow, so ⑤ builds both
+    /// the shape (<c>LavaRibbon</c>) and the surface (material and texture) itself.
     ///
-    /// ── 罠 1: CS のマテリアルを借りない（③が確定させた）────────────────
+    /// ── trap 1: do not borrow a Cities material (③ settled this) ───────────────────────────
     ///
-    /// CS のシェーダはエンジンが供給する per-instance データを要求する
-    /// （<c>VortexAI.RenderExtraStuff</c> は <c>m_materialBlock</c> に詰めてから
-    /// <c>DrawMesh</c> している）。それを自前の <c>DrawMesh</c> に載せると
-    /// **何も描画されないか真っ黒になる**（火災旋風 §4.9）。
-    /// マテリアルは自作する。**そのシェーダは <see cref="ShaderPool"/> が取ってくる**
-    /// —— 借りるのは<b>シェーダだけ</b>で、<c>Material</c> インスタンスは借りない
-    /// （2 つの違いはあちらのクラス doc）。
+    /// The Cities shaders demand per-instance data supplied by the engine
+    /// (<c>VortexAI.RenderExtraStuff</c> fills <c>m_materialBlock</c> before calling
+    /// <c>DrawMesh</c>). Put one on your own <c>DrawMesh</c> and
+    /// **nothing is drawn, or it comes out pitch black** (firestorm §4.9).
+    /// Build the material yourself. **<see cref="ShaderPool"/> fetches the shader for it** —
+    /// what is borrowed is <b>the shader only</b>, never the <c>Material</c> instance
+    /// (the difference between the two is in that class's doc).
     ///
-    /// **どのシェーダで解決したかは診断に出す**（<see cref="ShaderDetail"/>）——
-    /// 将来のゲーム更新で黙って不可視になったときに、そう名乗れるようにするためである。
+    /// **Which shader it resolved with goes into the diagnostics** (<see cref="ShaderDetail"/>) —
+    /// so that if a future game update makes it silently invisible, we can say so.
     ///
-    /// > ★★ **かつてここには「このビルドで実際に解決する名前は <c>Particles/Additive</c>
-    /// > である（§H-22）」と書いてあった。それは誤りだった**（本プロジェクトで 13 件目の
-    /// > 誤った「確認済み」）。根拠は出荷アセットのバイト走査で
-    /// > <c>globalgamemanagers</c> に文字列が在ったことだったが、
-    /// > **アセットに名前が在ることと <c>Shader.Find</c> が解決することは別である**。
-    /// > 実機では <c>Shader.Find</c> が**組み込みの <c>"Standard"</c> を含めて
-    /// > 全ての名前に null を返した**。いま名前で引けないときは
-    /// > 読み込み済み <c>Material</c> からシェーダを借りる（<see cref="ShaderPool"/>）。
-    /// <c>Assumptions</c> にも 1 件置いてあるが、その述語は
-    /// <b>「粒子系が取れたか」</b>であって「何か取れたか」ではない
-    /// （<see cref="VolcanoLavaShaderFacts"/> のクラス doc）。
+    /// > ★★ **This used to say "the name that actually resolves in this build is
+    /// > <c>Particles/Additive</c> (§H-22)". That was wrong** (the 13th false "verified" in this
+    /// > project). The evidence was that a byte scan of the shipped assets found the string in
+    /// > <c>globalgamemanagers</c>, but **a name existing in an asset and <c>Shader.Find</c>
+    /// > resolving it are two different things**.
+    /// > In the live game, <c>Shader.Find</c> **returned null for every name, including the
+    /// > built-in <c>"Standard"</c>**. Now, when a name cannot be looked up, we borrow the shader
+    /// > from an already-loaded <c>Material</c> (<see cref="ShaderPool"/>).
+    /// There is one entry in <c>Assumptions</c> too, but its predicate is
+    /// <b>"did a particle shader resolve"</b>, not "did anything resolve"
+    /// (the class doc of <see cref="VolcanoLavaShaderFacts"/>).
     ///
-    /// ── 罠 2: 静的キャッシュを配列にしない（③が出荷した不具合）────────────
+    /// ── trap 2: do not make the static cache an array (a bug ③ shipped) ────────────────────
     ///
-    /// <c>UnityEngine.Object</c> は <c>==</c> を多重定義していて破棄済みオブジェクトが
-    /// null と等価になるが、**配列要素の参照にはそれが効かない**。
-    /// <c>static Mesh[]</c> / <c>static Material[]</c> は破棄済みを抱えたまま非 null で
-    /// あり続け、**2 つ目の都市で無言・無ログのまま見えなくなる**（火災旋風 §4.8）。
-    /// ここは <c>Mesh</c> / <c>Material</c> / <c>Texture2D</c> を**1 個ずつの参照**で持ち、
-    /// 毎フレームその参照そのものを <c>== null</c> で見る。
+    /// <c>UnityEngine.Object</c> overloads <c>==</c> so that a destroyed object compares equal to
+    /// null, but **that does not apply to references held in array elements**.
+    /// A <c>static Mesh[]</c> / <c>static Material[]</c> keeps holding a destroyed object while
+    /// still being non-null, and **in the second city it goes invisible with no message and no
+    /// log** (firestorm §4.8).
+    /// Here the <c>Mesh</c> / <c>Material</c> / <c>Texture2D</c> are held as **one reference
+    /// each**, and every frame we test those references themselves with <c>== null</c>.
     ///
-    /// **3 つとも <c>Component</c> ではない**ので <c>GameObject</c> の道連れにならない。
-    /// <see cref="Destroy"/> が自分で <c>Object.Destroy</c> する。
+    /// **None of the three is a <c>Component</c>**, so they do not go down with the
+    /// <c>GameObject</c>. <see cref="Destroy"/> calls <c>Object.Destroy</c> on them itself.
     ///
-    /// ── 毎フレームの費用 ─────────────────────────────────
+    /// ── the per-frame cost ─────────────────────────────────────────────────────────────────
     ///
-    /// <c>Graphics.DrawMesh</c> **1 回**だけ（頂点は最大 8 本 × 128 点 × 2 = 2048、
-    /// 三角形の添字は最大 6096。影は落とさず受けない）。
-    /// **ヒープ確保は 0 バイト**（<c>Matrix4x4</c> は struct）。
-    /// 色を書き直すのは冷え具合が <see cref="TintStep"/> 動いたときだけである。
+    /// **One** <c>Graphics.DrawMesh</c> (at most 8 flows × 128 points × 2 = 2048 vertices and at
+    /// most 6096 triangle indices. It neither casts nor receives shadows).
+    /// **Zero bytes of heap allocation** (<c>Matrix4x4</c> is a struct).
+    /// The colour is rewritten only when the cooling has moved by <see cref="TintStep"/>.
     ///
-    /// メッシュを組み直すのは <b>スナップショットの軌跡配列が差し替わったフレームだけ</b>
-    /// である。<c>VolcanoLava</c> は前進した回にしか配列を作り直さないので、
-    /// 参照が同じなら組み直す理由が無い（<c>ReferenceEquals</c> 1 回で判定できる）。
-    /// 前進は 8 sim フレームぶんのゲーム内時間に 1 回までなので、
-    /// **組み直しは毎秒 6 回を超えない。**
+    /// The mesh is rebuilt only <b>on frames where the snapshot's trail array was swapped</b>.
+    /// <c>VolcanoLava</c> only rebuilds the array on ticks where it advanced, so if the reference
+    /// is the same there is no reason to rebuild (one <c>ReferenceEquals</c> decides it).
+    /// An advance happens at most once per 8 sim frames' worth of in-game time, so
+    /// **rebuilds never exceed 6 per second.**
     ///
-    /// ── ★★ 時間で動くものが 1 つも無い（2026-08-22、実機の指摘④）─────────────
+    /// ── ★★ nothing moves with time any more (2026-08-22, live report ④) ───────────────────
     ///
-    /// > 熔岩流の光り方が点滅しているのはリアルではありません。
-    /// > 噴火が終わっても光り続けているのは修正してください。
+    /// > The way the lava flow glows, flickering, is not realistic.
+    /// > Please fix it still glowing after the eruption has finished.
     ///
-    /// 以前はここが UV を毎秒 0.35 流していた。帯の全長に明暗の縞が 3 本しか
-    /// 無いところへ流していたので、**地面のある 1 点は 1 秒弱で明 → 暗 → 明を
-    /// 繰り返していた**。それが「点滅」である。いまは
+    /// This used to scroll the UVs at 0.35 per second. It was scrolling them across a band whose
+    /// whole length holds only three light-and-dark stripes, so **a given point on the ground
+    /// cycled bright → dark → bright in under a second**. That is the "flicker". Now:
     ///
     /// <list type="bullet">
-    /// <item><b>輝きは場所の関数</b>（<c>Core/Volcano/LavaGlow</c>）—— 冷えた地殻と、
-    ///   板と板のあいだの光る割れ目と、火口・前進端の熱い帯</item>
-    /// <item><b>年齢で冷える</b> —— 溶岩が前へ進むと軌跡に点が増え、既に置かれた
-    ///   場所の <c>v</c> が前進端の帯から外れて地殻の側へ入る。時間は参照しない</item>
-    /// <item><b>冷え切ったら面ごと畳む</b>（<c>LavaGlow.Visible</c>）——
-    ///   軌跡の配列は火山が終わっても残るので、ここで止めないと帯が地面に残り続ける</item>
+    /// <item><b>The glow is a function of position</b> (<c>Core/Volcano/LavaGlow</c>) — the
+    ///   cooled crust, the glowing cracks between the plates, and the hot bands at the crater
+    ///   and the advancing front</item>
+    /// <item><b>It cools with age</b> — as the lava advances, points are added to the trail and
+    ///   the <c>v</c> of an already-laid place moves out of the advancing-front band and into
+    ///   the crust. Time is never consulted</item>
+    /// <item><b>Once it has cooled out, the whole surface is folded away</b>
+    ///   (<c>LavaGlow.Visible</c>) — the trail arrays survive the end of the volcano, so without
+    ///   stopping here the bands would stay on the ground</item>
     /// </list>
     ///
-    /// したがって<b>ポーズ中に動くものはもう 1 つも無い</b>（④のレビューが挙げた
-    /// 「止まった都市の上で雲だけが回る」欠陥は、構造的に起こしようがなくなった）。
+    /// So <b>there is no longer a single thing that moves while paused</b> (the defect ④'s review
+    /// raised, "only the clouds turn above a stopped city", has become structurally impossible).
     ///
-    /// ── この型は sim スレッドから 1 度も呼ばれない ────────────────────
+    /// ── this type is never called from the sim thread ──────────────────────────────────────
     ///
-    /// **それが T9 を⑤の他の要素から独立させている実体である。**
-    /// 読むのは <c>VolcanoHub.Latest</c> の不変配列だけで、
-    /// <c>VolcanoLava</c> の内部配列には触らない。
+    /// **That is the substance of what makes T9 independent of the rest of ⑤.**
+    /// All it reads is the immutable arrays in <c>VolcanoHub.Latest</c>; it never touches
+    /// <c>VolcanoLava</c>'s internal arrays.
     ///
-    /// **レビューの grep（実際に走らせて件数を合わせてある）**:
+    /// **Review grep (actually run, with the counts made to match)**:
     /// <code>
     /// grep -rl "VolcanoLavaFx" src/DisasterPlus --include=*.cs
-    /// # -> ちょうど 4 ファイル:
-    /// #      Game/Volcano/VolcanoLavaFx.cs        （この file）
-    /// #      Game/Volcano/VolcanoFeature.cs       （OnMainThreadUpdate / OnLevelUnloading /
-    /// #                                            WriteDiagnostics の 3 箇所だけ）
-    /// #      Game/Volcano/VolcanoEffectRows.cs    （描画中の点数と、材料が無いときの注記）
-    /// #      Game/Diagnostics/Assumptions.Volcano.cs（シェーダの前提 1 件）
+    /// # -> exactly 4 files:
+    /// #      Game/Volcano/VolcanoLavaFx.cs        (this file)
+    /// #      Game/Volcano/VolcanoFeature.cs       (only 3 places: OnMainThreadUpdate /
+    /// #                                            OnLevelUnloading / WriteDiagnostics)
+    /// #      Game/Volcano/VolcanoEffectRows.cs    (the point count while drawing, and the note
+    /// #                                            for when there is no material)
+    /// #      Game/Diagnostics/Assumptions.Volcano.cs (one shader assumption)
     ///
     /// grep -l "VolcanoLavaFx" src/DisasterPlus/Game/Volcano/VolcanoState.cs     ///                         src/DisasterPlus/Game/Volcano/VolcanoSurvey.cs     ///                         src/DisasterPlus/Game/Volcano/VolcanoClearing.cs     ///                         src/DisasterPlus/Game/Volcano/VolcanoUplift.cs     ///                         src/DisasterPlus/Game/Volcano/VolcanoLava.cs
-    /// # -> 1 件も出ない（sim スレッド側から呼ばれていない証拠）
+    /// # -> not a single hit (proof that it is not called from the sim-thread side)
     /// </code>
     /// </summary>
     public static class VolcanoLavaFx
     {
-        /// <summary>地面からどれだけ浮かせるか（m）。地形の量子 1/64 m よりずっと大きく取る。</summary>
+        /// <summary>How far to lift it off the ground (m). Kept far larger than the terrain quantum of 1/64 m.</summary>
         private const float HeightOffsetMetres = 1.5f;
 
-        // ★★ かつてここに ScrollPerSecond（UV を毎秒 0.35 流す）が在った。
-        //    **あれが「点滅」の正体である**（2026-08-22、実機の指摘④）。
-        //    帯の全長に明暗の縞が 3 本しか無いところへ UV を流していたので、
-        //    地面のある 1 点は 1 秒弱で明 → 暗 → 明を繰り返していた。
-        //    **輝きは時間ではなく場所の関数にする**（Core/Volcano/LavaGlow）。
-        //    戻さないこと。
+        // ★★ ScrollPerSecond (scrolling the UVs at 0.35 per second) used to live here.
+        //    **That was what the "flicker" really was** (2026-08-22, live report ④).
+        //    It was scrolling the UVs across a band whose whole length holds only three
+        //    light-and-dark stripes, so a given point on the ground cycled
+        //    bright → dark → bright in under a second.
+        //    **Make the glow a function of position, not of time** (Core/Volcano/LavaGlow).
+        //    Do not put it back.
 
-        /// <summary>描画に使うレイヤー。0 ＝ Default はどのカメラのカリングマスクにも入る。</summary>
+        /// <summary>The layer used for drawing. 0 = Default, which is in every camera's culling mask.</summary>
         private const int LavaLayer = 0;
 
-        /// <summary>色を書き直す冷え具合の刻み（毎フレーム書かないため）。</summary>
+        /// <summary>The cooling step at which the colour is rewritten (so it is not written every frame).</summary>
         private const float TintStep = 0.02f;
 
         /// <summary>
-        /// 自作テクスチャの 1 辺（帯を横切る方向 × 帯に沿う方向）。
-        /// **Core が持っている**（tools/VolcanoPreview と同じ絵を焼くため。
-        /// 32 → 128 に上げたのは、割れ目の線が 32 では階段になるからである）。
+        /// One side of the generated texture (across the band × along the band).
+        /// **Core holds it** (so that tools/VolcanoPreview bakes the same picture.
+        /// It was raised from 32 to 128 because at 32 the crack lines come out as stair steps).
         /// </summary>
         private const int TextureSize = LavaGlow.TextureSize;
 
-        /// <summary>シェーダを探し直すまでに空けるフレーム数（④の <c>TyphoonCloud</c> と同じ間引き）。</summary>
+        /// <summary>Frames to leave before looking for the shader again (the same throttling as ④'s <c>TyphoonCloud</c>).</summary>
         private const int ShaderRetryFrames = 300;
 
-        // ★ 配列にしない（罠 2）。参照 1 個ずつで持ち、fake-null の自己修復を効かせる。
+        // ★ Do not use an array (trap 2). Hold one reference each so the fake-null self-repair
+        //   works.
         private static Mesh _mesh;
         private static Material _material;
         private static Texture2D _texture;
 
-        /// <summary>直近に組んだ軌跡配列（**参照の同一性だけを見る**）。</summary>
+        /// <summary>The trail array the mesh was last built from (**only its reference identity is examined**).</summary>
         private static Vec2[] _builtPoints;
 
         /// <summary>
-        /// <see cref="_builtPoints"/> からはメッシュを組めなかったか
-        /// （点が 2 個に満たない流れしか無い等）。**毎フレームの組み直しを止めるため**に在る。
+        /// Whether a mesh could not be built from <see cref="_builtPoints"/>
+        /// (e.g. no flow has as many as two points). It exists **to stop rebuilding every frame**.
         /// </summary>
         private static bool _buildFailed;
 
@@ -197,17 +206,18 @@ namespace DisasterPlus.Game
         private static int _drawCalls;
         private static int _pointsDrawn;
 
-        /// <summary>今フレーム溶岩の面を描いたか。</summary>
+        /// <summary>Whether the lava surface was drawn this frame.</summary>
         public static bool Drawing { get { return _drawCalls > 0; } }
 
-        /// <summary>マテリアルを作れているか。</summary>
+        /// <summary>Whether the material could be built.</summary>
         public static bool MaterialResolved { get { return _material != null; } }
 
         /// <summary>
-        /// 診断に出す 1 行（**英語**）。**T9 の見た目についての唯一の診断出力**である。
-        /// <c>Assumptions</c> は同じ答えを <see cref="ScanShaderFacts"/> から引くので、
-        /// ここに「粒子系か」を別の口として生やさない
-        /// （同じ事実の口が 2 つあると、必ず片方が古くなる）。
+        /// The one line reported in the diagnostics (**English**). It is **T9's only diagnostic
+        /// output about how it looks**.
+        /// <c>Assumptions</c> gets the same answer from <see cref="ScanShaderFacts"/>, so do not
+        /// grow a separate "is it a particle shader" entry point here
+        /// (with two entry points for the same fact, one of them always goes stale).
         /// </summary>
         public static string ShaderDetail
         {
@@ -219,24 +229,25 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>直近のフレームで出した <c>DrawMesh</c> の回数（0 か 1）。</summary>
+        /// <summary>How many <c>DrawMesh</c> calls were issued in the last frame (0 or 1).</summary>
         public static int DrawCalls { get { return _drawCalls; } }
 
-        /// <summary>今描いている軌跡の点数（診断用）。</summary>
+        /// <summary>The number of trail points currently being drawn (for diagnostics).</summary>
         public static int PointsDrawn { get { return _pointsDrawn; } }
 
         /// <summary>
-        /// **main スレッド専用。** どのシェーダが取れるかを調べるだけの純粋な走査。
-        /// <c>Assumptions</c> と <see cref="BuildMaterial"/> の両方がこれを使う。
+        /// **Main thread only.** A pure probe that only checks which shader can be obtained.
+        /// Both <c>Assumptions</c> and <see cref="BuildMaterial"/> use it.
         /// </summary>
         public static VolcanoLavaShaderFacts ScanShaderFacts()
         {
             try
             {
-                // ★ 解決の順序と手段は ShaderPool に 1 か所だけ置いてある。
-                //   ここで別の順序を書くと、検査が報告する名前と実際に使うシェーダが
-                //   ずれる（④の Assumptions が同じ理由で同じ注記を持っている）。
-                //   Standard は「粒子系が取れた」に数えない（クラス doc）。
+                // ★ The order and the means of resolution live in exactly one place, ShaderPool.
+                //   Write a different order here and the name the check reports drifts from the
+                //   shader actually used (④'s Assumptions carries the same note for the same
+                //   reason).
+                //   Standard does not count as "a particle shader resolved" (class doc).
                 ShaderPick pick = ShaderPool.Resolve(ShaderPreference.Additive);
                 return new VolcanoLavaShaderFacts(pick.Name, pick.Particle, pick.Describe());
             }
@@ -246,7 +257,7 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>**main スレッド、毎フレーム。**</summary>
+        /// <summary>**Main thread, every frame.**</summary>
         public static void Update(VolcanoSnapshot snapshot)
         {
             try
@@ -273,29 +284,30 @@ namespace DisasterPlus.Game
                 || snapshot.LavaTrailPoints == null || snapshot.LavaTrailCounts == null
                 || snapshot.LavaTrailPoints.Length < 2)
             {
-                // 溶岩が消えたフレームで**自分で**後始末する。sim 側からは呼ばれない。
+                // Clean up **ourselves** on the frame the lava disappears. Never called from the
+                // sim side.
                 Destroy();
                 return;
             }
 
-            // ★★ **冷え切ったら面ごと畳む**（2026-08-22、実機の指摘④
-            //    「噴火が終わっても光り続けているのは修正してください」）。
-            //    軌跡の配列は火山が終わっても残る（次の山まで捨てない）ので、
-            //    ここで止めないと帯はいつまでも地面に在り続ける。
-            //    冷える途中は CoolFade が 0 へ向かって暗くしていく。
+            // ★★ **Once it has cooled out, fold the whole surface away** (2026-08-22, live
+            //    report ④: "please fix it still glowing after the eruption has finished").
+            //    The trail arrays survive the end of the volcano (they are not discarded until
+            //    the next mountain), so without stopping here the bands would stay on the ground
+            //    for ever. While it is cooling, CoolFade darkens it towards 0.
             if (!LavaGlow.Visible(snapshot.LavaCoolUnit))
             {
                 Destroy();
                 return;
             }
 
-            // ★ 参照が変わったときだけ組み直す（クラス doc の費用表）。
-            //   VolcanoLava は前進した回にしか配列を作り直さない。
+            // ★ Rebuild only when the reference changed (the cost table in the class doc).
+            //   VolcanoLava only rebuilds the array on ticks where it advanced.
             //
-            // ★ 2 つ目の条件は fake-null の自己修復である（メッシュだけが
-            //   破棄されて参照は同じ、という状態から戻る）。**_buildFailed で
-            //   守っている** —— 守らないと「組めなかった軌跡」を毎フレーム
-            //   組み直そうとして、確保だけが毎フレーム走る。
+            // ★ The second condition is the fake-null self-repair (recovering from a state where
+            //   only the mesh was destroyed while the reference stayed the same). **It is guarded
+            //   by _buildFailed** — without that guard we would try to rebuild "a trail that
+            //   could not be built" every frame, and the allocation alone would run every frame.
             if (!ReferenceEquals(_builtPoints, snapshot.LavaTrailPoints)
                 || (_mesh == null && !_buildFailed))
             {
@@ -305,16 +317,19 @@ namespace DisasterPlus.Game
             if (_material == null) _material = BuildMaterial();
             if (_mesh == null || _material == null) return;
 
-            // ★★ UV は 1 mm も動かさない。**輝きは場所の関数である**（LavaGlow）。
-            //    ゆっくり変わるのは「溶岩が前へ進んで、既に置かれた場所の v が
-            //    前進端の帯から外れていく」ためで、時間を参照した結果ではない。
+            // ★★ The UVs do not move by a millimetre. **The glow is a function of position**
+            //    (LavaGlow). What changes slowly does so because "the lava advances and the v of
+            //    an already-laid place moves out of the advancing-front band", not as a result of
+            //    consulting time.
             ApplyTint(snapshot.LavaCoolUnit);
 
-            // ★ 影を落とさない・受けない（④のレビューが同じ指摘をしている）。
-            //   半透明で光る面が影のパスに入ると、都市に帯の影が落ちる。
-            //   camera は null（＝全カメラ）—— 1 台に絞るとそこだけ溶岩が消える。
+            // ★ Neither cast nor receive shadows (④'s review made the same point).
+            //   Put a translucent glowing surface into the shadow pass and the band casts a
+            //   shadow over the city.
+            //   camera is null (= all cameras) — narrow it to one and the lava disappears there
+            //   alone.
             Graphics.DrawMesh(_mesh, Matrix4x4.identity, _material, LavaLayer,
-                              null,     // camera: 全カメラ
+                              null,     // camera: all cameras
                               0,        // submeshIndex
                               null,     // MaterialPropertyBlock
                               false,    // castShadows
@@ -324,16 +339,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 全流路のリボンを 1 枚のメッシュへ詰め合わせる。**流れごとに
-        /// <c>LavaRibbon.Build</c> を呼ぶ** —— 別々の流れの点を 1 本の折れ線として
-        /// 渡すと、流れの間を飛び回る帯になる（<c>LavaRibbon</c> のクラス doc）。
+        /// Pack the ribbons of all the flows into a single mesh. **Call
+        /// <c>LavaRibbon.Build</c> once per flow** — hand the points of different flows over as
+        /// one polyline and you get a band flying back and forth between the flows
+        /// (the class doc of <c>LavaRibbon</c>).
         ///
-        /// 幅は軌跡そのものから測った累積距離で決める（<c>LavaPath.SpreadRadiusFor</c>）。
-        /// 各流路の走行距離をスナップショットに増やさずに済むうえ、
-        /// 間引かれた軌跡でも正しい値になる。
+        /// The width is decided from the cumulative distance measured off the trail itself
+        /// (<c>LavaPath.SpreadRadiusFor</c>). That avoids having to add each flow's travelled
+        /// distance to the snapshot, and it still gives the right value for a decimated trail.
         ///
-        /// 高さは <c>SampleDetailHeight</c>（読み取りなのでどちらのスレッドからでも安全。
-        /// <c>TerrainHeightSampler</c> の doc）に <see cref="HeightOffsetMetres"/> を足す。
+        /// The height is <c>SampleDetailHeight</c> (a read, so safe from either thread; see the
+        /// doc of <c>TerrainHeightSampler</c>) plus <see cref="HeightOffsetMetres"/>.
         /// </summary>
         private static void RebuildMesh(VolcanoSnapshot snapshot)
         {
@@ -342,9 +358,10 @@ namespace DisasterPlus.Game
             Vec2[] points = snapshot.LavaTrailPoints;
             int[] counts = snapshot.LavaTrailCounts;
 
-            // ★ 太さの倍率は**純関数なのでこちらでも同じ値が出る**。
-            //   sim 側（着火）と同じ <c>LavaVolume.WidthFactor</c> を見るので、
-            //   描いた帯と火を付ける範囲がずれる経路が無い。
+            // ★ The width factor is **a pure function, so it comes out the same here**.
+            //   It looks at the same <c>LavaVolume.WidthFactor</c> as the sim side (the
+            //   ignition), so there is no path by which the band drawn and the range set alight
+            //   can drift apart.
             float widthFactor = LavaVolume.WidthFactor(snapshot.Footprint.RadiusMetres);
 
             int totalVertices = 0;
@@ -397,10 +414,10 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // ★ 使わなかった頂点を先頭へ畳む。<c>LavaRibbon.Build</c> が 1 本でも
-            //   断ると、その流れのぶんの頂点が (0,0,0) のまま残る。三角形は 1 つも
-            //   指していないので何も描かれないが、<c>RecalculateBounds</c> が
-            //   **マップの原点まで境界を伸ばして視錐台カリングを殺す**。
+            // ★ Fold the unused vertices onto the first one. If <c>LavaRibbon.Build</c> refuses
+            //   even one flow, that flow's vertices are left at (0,0,0). No triangle points at
+            //   them so nothing is drawn, but <c>RecalculateBounds</c>
+            //   **stretches the bounds all the way to the map origin and kills frustum culling**.
             for (int i = vOut; i < vertices.Length; i++) vertices[i] = vertices[0];
 
             var mesh = new Mesh();
@@ -416,7 +433,7 @@ namespace DisasterPlus.Game
             _buildFailed = false;
         }
 
-        /// <summary>1 本ぶんのリボンを詰め合わせ先へ足す。</summary>
+        /// <summary>Add one flow's ribbon to the packed destination.</summary>
         private static void AppendRibbon(Vec2[] points, int start, int count, float widthFactor,
                                          Vector3[] vertices, Vector2[] uvs, int[] triangles,
                                          ref int vOut, ref int tOut)
@@ -436,7 +453,7 @@ namespace DisasterPlus.Game
                     float dz = slice[i].Z - slice[i - 1].Z;
                     travelled += (float)Math.Sqrt(dx * dx + dz * dz);
                 }
-                // 幅は半径の 2 倍。
+                // The width is twice the radius.
                 widths[i] = LavaPath.SpreadRadiusFor(travelled, widthFactor) * 2f;
             }
 
@@ -465,8 +482,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 地面の高さ（m）。読み取りだけなので main スレッドから安全
-        /// （<c>TerrainHeightSampler</c> のクラス doc）。**組み直しのときにしか呼ばない。**
+        /// The ground height (m). It is a read only, so it is safe from the main thread
+        /// (the class doc of <c>TerrainHeightSampler</c>). **Called only when rebuilding.**
         /// </summary>
         private static float SampleGround(float x, float z)
         {
@@ -482,18 +499,19 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **CS のマテリアルは借りない**（罠 1）。<see cref="ShaderPool"/> が
-        /// 選んだ<b>シェーダ</b>で自作し、<c>Standard</c> まで落ちたときだけ透過を入れる
-        /// （既定の <c>Standard</c> は不透明なので、地面に不透明な灰色の帯が乗る）。
+        /// **Do not borrow a Cities material** (trap 1). Build it ourselves on the <b>shader</b>
+        /// <see cref="ShaderPool"/> picked, and add transparency only when we fell all the way
+        /// back to <c>Standard</c> (<c>Standard</c> is opaque by default, which would put an
+        /// opaque grey band on the ground).
         ///
-        /// ★ **解決したシェーダはここで掴んだ参照をそのまま使う。**
-        ///   名前で引き直してはいけない —— 借りてきたシェーダは
-        ///   <c>Shader.Find</c> では引けないからこそ借りたのであって、
-        ///   名前で引き直すと必ず null になり、溶岩が永久に描かれなくなる。
+        /// ★ **Use the reference grabbed here for the resolved shader as it is.**
+        ///   Never look it up again by name — a borrowed shader was borrowed precisely because
+        ///   <c>Shader.Find</c> cannot find it, so looking it up by name always returns null and
+        ///   the lava would never be drawn again.
         /// </summary>
         private static Material BuildMaterial()
         {
-            // ★ 毎フレーム探しに行かない（④の TyphoonCloud と同じ間引き）。
+            // ★ Do not go looking every frame (the same throttling as ④'s TyphoonCloud).
             if (_shaderMissCount > 0)
             {
                 _shaderMissCount--;
@@ -509,8 +527,8 @@ namespace DisasterPlus.Game
                 if (!_shaderWarned)
                 {
                     _shaderWarned = true;
-                    // ★ Log.Warn はスロットルされない。ここは毎フレームの経路なので
-                    //   1 回だけ鳴らして以後は黙る。
+                    // ★ Log.Warn is not throttled. This is on the per-frame path, so sound it
+                    //   once and keep quiet afterwards.
                     Log.Warn("volcano lava: no usable shader resolved; the lava surface is not "
                              + "drawn (Disaster + does not borrow a Cities material - that "
                              + "renders invisible or black in a hand-rolled DrawMesh). The lava "
@@ -527,7 +545,8 @@ namespace DisasterPlus.Game
             _hasMainTex = _texture != null && m.HasProperty("_MainTex");
             if (_hasMainTex) m.SetTexture("_MainTex", _texture);
 
-            // ★ 借りてきた別のシェーダには掛けない（_Mode / _SrcBlend は Standard の契約）。
+            // ★ Do not apply it to some other borrowed shader (_Mode / _SrcBlend are Standard's
+            //   contract).
             if (pick.StandardFallback) ShaderPool.MakeStandardTransparent(m);
 
             m.renderQueue = 3000;   // Transparent
@@ -536,15 +555,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 帯のテクスチャ 1 枚。<c>u</c> が帯を横切る方向、
-        /// <c>v</c> が帯に沿う方向（<b>0 が火口、1 が前進端</b>）。
-        /// **模様は <c>Core/Volcano/LavaGlow</c> が決める** —— 冷えた地殻と、
-        /// 板と板のあいだの光る割れ目と、両端（火口と前進端）の熱い帯である。
+        /// One texture for the band. <c>u</c> runs across the band and <c>v</c> along it
+        /// (<b>0 is the crater, 1 is the advancing front</b>).
+        /// **The pattern is decided by <c>Core/Volcano/LavaGlow</c>** — the cooled crust, the
+        /// glowing cracks between the plates, and the hot bands at both ends (the crater and the
+        /// advancing front).
         ///
-        /// ★★ **UV は動かさない。** 以前はここに明暗の縞を焼いて毎フレーム
-        ///   流していたが、それが指摘④の「点滅」だった（あちらのクラス doc）。
+        /// ★★ **The UVs do not move.** This used to bake light-and-dark stripes here and scroll
+        ///   them every frame, and that was the "flicker" of report ④ (that class's doc).
         ///
-        /// 作れなければ割り当てないだけで、べた塗りになる。
+        /// If it cannot be built we simply do not assign it, and the band comes out flat-coloured.
         /// </summary>
         private static Texture2D BuildTexture()
         {
@@ -563,7 +583,7 @@ namespace DisasterPlus.Game
                         float glow = LavaGlow.GlowUnit(u, v);
                         float alpha = LavaGlow.AcrossFalloff(u) * (0.30f + 0.70f * glow);
 
-                        // 熱いところは黄白、冷えたところは暗い赤褐色へ落ちる。
+                        // Hot places go yellow-white; cooled ones fall to a dark reddish brown.
                         float g2 = glow * glow;
                         pixels[y * TextureSize + x] = new Color32(
                             Byte(0.10f + 0.90f * glow),
@@ -575,8 +595,9 @@ namespace DisasterPlus.Game
 
                 var t = new Texture2D(TextureSize, TextureSize, TextureFormat.RGBA32, false);
                 t.name = "DisasterPlus_VolcanoLavaBand";
-                // ★ どちらの向きも [0,1] を 1 枚で覆う。**繰り返さない** ——
-                //   v = 0 は火口、v = 1 は前進端という意味を持つ軸である。
+                // ★ Both axes cover [0,1] with a single tile. **It does not repeat** —
+                //   v = 0 means the crater and v = 1 means the advancing front; the axis carries
+                //   meaning.
                 t.wrapMode = TextureWrapMode.Clamp;
                 t.filterMode = FilterMode.Bilinear;
                 t.SetPixels32(pixels);
@@ -585,12 +606,13 @@ namespace DisasterPlus.Game
             }
             catch
             {
-                // 作れなくても溶岩は出る（模様が無くなるだけ）。ログは出さない。
+                // The lava still appears if this cannot be built (it just loses its pattern).
+                // Nothing is logged.
                 return null;
             }
         }
 
-        /// <summary>[0,1] を 0-255 のバイトへ。</summary>
+        /// <summary>[0,1] to a byte in 0-255.</summary>
         private static byte Byte(float v)
         {
             int i = Mathf.RoundToInt(v * 255f);
@@ -598,15 +620,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 冷え具合で色を落とす。**止まった溶岩が永久に光っていないこと**が要件で、
-        /// <c>VolcanoLava.CoolUnit</c> が 1 → 0 に落ちるあいだに暗くなり、
-        /// <b>0 でちょうど消える</b>（<c>LavaGlow.CoolFade</c>）。
+        /// Fade the colour with the cooling. The requirement is that **stopped lava does not glow
+        /// for ever**: it darkens as <c>VolcanoLava.CoolUnit</c> falls from 1 to 0 and
+        /// <b>disappears exactly at 0</b> (<c>LavaGlow.CoolFade</c>).
         ///
-        /// ★★ かつてここは <c>k = 0.15 + 0.85 × cool</c> /
-        ///   <c>α = 0.55 + 0.45 × cool</c> だった。**冷え切っても k = 0.15 / α = 0.55 が
-        ///   残る式**で、どれだけ待っても消えなかった（指摘④の後半そのもの）。
+        /// ★★ This used to be <c>k = 0.15 + 0.85 × cool</c> /
+        ///   <c>α = 0.55 + 0.45 × cool</c>. **A formula that leaves k = 0.15 / α = 0.55 even once
+        ///   it has cooled out**, so it never disappeared however long you waited (exactly the
+        ///   second half of report ④).
         ///
-        /// **毎フレームは書かない**（<see cref="TintStep"/>）。
+        /// **Do not write it every frame** (<see cref="TintStep"/>).
         /// </summary>
         private static void ApplyTint(float coolUnit)
         {
@@ -618,18 +641,19 @@ namespace DisasterPlus.Game
             if (_tintedCool >= 0f && Mathf.Abs(cool - _tintedCool) < TintStep) return;
             _tintedCool = cool;
 
-            // 冷えるほど暗い赤へ。**0 で完全に消える。**
+            // The cooler it gets, the darker the red. **At 0 it disappears completely.**
             float k = LavaGlow.CoolFade(cool);
             var tint = new Color(k, k * 0.55f, k * 0.2f, k);
 
-            // 粒子系のティントは _TintColor、Standard は _Color（③が確定させた区別）。
-            // **効かないほうを書いて満足しない**ので、実在するプロパティにだけ入れる。
+            // Particle shaders tint through _TintColor, Standard through _Color (the distinction
+            // ③ settled). **Do not settle for writing the one that has no effect**, so write only
+            // to properties that actually exist.
             if (_material.HasProperty("_TintColor")) _material.SetColor("_TintColor", tint);
             if (_material.HasProperty("_Color")) _material.SetColor("_Color", tint);
         }
 
-        // ★ かつてここに SimulationIsPaused（UV のスクロールをポーズ中に止めるため）が
-        //   在った。**動かすものが 1 つも無くなったので消した**（LavaGlow）。
+        // ★ SimulationIsPaused (to stop the UV scrolling while paused) used to live here.
+        //   **It was deleted because there is no longer anything that moves** (LavaGlow).
 
         private static void DestroyMesh()
         {
@@ -641,11 +665,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **レベルアンロードと、設定で溶岩の描画を切ったときに呼ぶ。** main スレッド専用。
+        /// **Call on level unload, and when the lava rendering is turned off in the settings.**
+        /// Main thread only.
         ///
-        /// <c>Mesh</c> / <c>Material</c> / <c>Texture2D</c> はどれも <c>Component</c> では
-        /// ないので、<c>GameObject</c> を消しても道連れにならない。
-        /// **自分で <c>Object.Destroy</c> する。** 冪等。
+        /// None of <c>Mesh</c> / <c>Material</c> / <c>Texture2D</c> is a <c>Component</c>, so
+        /// destroying the <c>GameObject</c> does not take them with it.
+        /// **Call <c>Object.Destroy</c> on them ourselves.** Idempotent.
         /// </summary>
         public static void Destroy()
         {
@@ -661,10 +686,10 @@ namespace DisasterPlus.Game
             _tintedCool = -1f;
             _drawCalls = 0;
             _shaderMissCount = 0;
-            // ★ _shaderName / _shaderDetail は診断が「何で解決したか」を名乗るための
-            //   事実なので、都市を出ても消さない。_shaderWarned / _errorLogged も
-            //   同じ理由で戻さない（ゲームのビルドに対する事実であって
-            //   都市ごとの状態ではない）。
+            // ★ _shaderName / _shaderDetail are the facts the diagnostics use to state "what it
+            //   resolved with", so they are not cleared when leaving a city. _shaderWarned /
+            //   _errorLogged are not reset for the same reason (they are facts about the build of
+            //   the game, not per-city state).
         }
 
         private static int Min(int a, int b)

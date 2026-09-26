@@ -8,7 +8,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheCellCountGrowsWithTheSquareOfTheRadius()
         {
-            // セルは 16 m 角（§A-1）。半径を 2 倍にすればセルは約 4 倍。
+            // The cells are 16 m square (§A-1). Double the radius and the cell count roughly
+            // quadruples.
             int small = ClearanceEstimate.CellsInside(400f);
             int large = ClearanceEstimate.CellsInside(800f);
             Assert.True(large > small * 3, "expected roughly 4x, got " + large + " vs " + small);
@@ -18,9 +19,10 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheFootprintAreaIsTheAreaOfTheCircle()
         {
-            // 計画は Assert.Equal(..., -1) と書いていたが、xunit の precision 版は
-            // Math.Round(value, digits) に渡すので負の桁数は実行時例外になる。
-            // 意図（「円の面積であること」）はそのままに、絶対誤差で書く。
+            // The plan said Assert.Equal(..., -1), but xunit's precision overload passes the
+            // value to Math.Round(value, digits), so a negative digit count is a run-time
+            // exception. The intent ("it is the area of the circle") is kept, expressed as
+            // an absolute tolerance.
             float area = ClearanceEstimate.FootprintAreaSquareMetres(1000f);
             Assert.InRange(area, 3141592.6f - 1f, 3141592.6f + 1f);
         }
@@ -38,7 +40,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void SmallCountsAreShownExactly()
         {
-            // 「およそ 3 棟」は嘘くさい。10 未満はそのまま出す。
+            // "About 3 buildings" sounds like a fib. Below 10 we report the figure as it is.
             for (int i = 0; i <= 9; i++)
             {
                 Assert.Equal(i, ClearanceEstimate.RoundedEstimate(i));
@@ -48,8 +50,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void LargeCountsAreRoundedToTwoSignificantDigits()
         {
-            // ★ 設計書 §7.2:「概数であることも明示する」。実数をそのまま出すと
-            //   プレイヤーは「ぴったりその数だけ壊れる」と読む。
+            // ★ Design doc §7.2: "state explicitly that it is an approximation". Report the
+            //   exact number and the player reads it as "exactly that many will be destroyed".
             Assert.Equal(240, ClearanceEstimate.RoundedEstimate(243));
             Assert.Equal(240, ClearanceEstimate.RoundedEstimate(238));
             Assert.Equal(1200, ClearanceEstimate.RoundedEstimate(1234));

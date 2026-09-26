@@ -7,128 +7,151 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 台風の風害。<b>sim スレッド専用。</b>既定 ON。
+    /// Typhoon wind damage. <b>Sim thread only.</b> On by default.
     ///
-    /// ── これは可視化ではなく、まったく新しい物理である ──────────────────
+    /// ── This is not a visualisation but entirely new physics ──────────────
     ///
-    /// バニラには風による破壊機構が 1 つも無く、**風速を上げるフィールドすら存在しない**
-    /// （IL 事実文書 §A-5 / §B5）。ここで倒れる建物は**バニラなら絶対に倒れなかった
-    /// 建物**である。モデルの中身と「単位が無い」ことは
-    /// <see cref="WindDamageModel"/> のクラス doc にある。
+    /// Vanilla has no wind destruction mechanism at all, and **there is not even a field
+    /// that raises the wind speed** (IL facts document §A-5 / §B5). The buildings that fall
+    /// here are **buildings that in vanilla would never have fallen**. What is inside the
+    /// model, and the fact that it has no units, are in
+    /// <see cref="WindDamageModel"/>'s class doc.
     ///
-    /// ── 既定 ON にする理由（②の第 2 層とは判断が違う）────────────────
+    /// ── Why it is on by default (a different decision from ②'s second layer) ──
     ///
-    /// ②の第 2 層は既定 OFF だった。「バニラに存在しない挙動を既定で入れると、
-    /// プレイヤーは地震のあと勝手に津波が来る原因が MOD だと気付く手段を持たない」
-    /// からである。**④にはその問題が無い。** 台風はプレイヤーが「台風を発生させる」を
-    /// 押さない限り 1 個も起きないので、押した直後に起きることは全部台風に帰属する。
-    /// ただし強さは <c>ModSettings.TyphoonWindStrength</c> で 0 まで下げられる。
+    /// ②'s second layer was off by default, because "if you turn on behaviour that does not
+    /// exist in vanilla by default, the player has no way of realising that the mod is why
+    /// a tsunami arrives on its own after an earthquake". **④ does not have that problem.**
+    /// Not one typhoon happens unless the player presses "raise a typhoon", so everything
+    /// that happens right after they press it is attributable to the typhoon.
+    /// The strength can still be taken down to 0 with
+    /// <c>ModSettings.TyphoonWindStrength</c>.
     ///
-    /// ── <c>DisasterHelpers</c> を経由しない（§F-1）───────────────────
+    /// ── Do not go through <c>DisasterHelpers</c> (§F-1) ───────────────────
     ///
-    /// Natural Disasters Renewal は <c>DisasterHelpers.DestroyBuildings</c> /
-    /// <c>DestroyNetSegments</c>（＋前者を呼ぶ <c>DestroyStuff</c>）を Prefix で完全置換し、
-    /// <c>burnRadiusMin == 0 &amp;&amp; burnRadiusMax == 0</c> を「竜巻だ」、
-    /// <c>probability == 0.02f</c> を「地震だ」と嗅ぎ分ける。
-    /// <c>BuildingAI.CollapseBuilding</c> を直接呼べばそのパッチ面を**完全に迂回できる**。
+    /// Natural Disasters Renewal completely replaces
+    /// <c>DisasterHelpers.DestroyBuildings</c> / <c>DestroyNetSegments</c> (plus
+    /// <c>DestroyStuff</c>, which calls the former) with a Prefix, and sniffs out
+    /// <c>burnRadiusMin == 0 &amp;&amp; burnRadiusMax == 0</c> as "that is a tornado" and
+    /// <c>probability == 0.02f</c> as "that is an earthquake".
+    /// Call <c>BuildingAI.CollapseBuilding</c> directly and that patch surface is
+    /// **completely bypassed**.
     ///
-    /// **<c>Building.m_fireIntensity</c> は絶対に直接書かない。** 消費するのは
-    /// <c>CommonBuildingAI</c> の系だけで、それ以外の AI に書くと誰も消さない永久の
-    /// 幽霊火災になり、**バニラの建物配列に入るのでセーブに焼き付き、MOD を外しても
-    /// 残る**。本プロジェクトは一度これを出荷している。ここで渡す <c>burnAmount</c> は
-    /// <b>0</b>（風は吹き飛ばして潰すのであって焼損ではない）。
+    /// **Never write <c>Building.m_fireIntensity</c> directly.** Only the
+    /// <c>CommonBuildingAI</c> family consumes it; write it on any other AI and you get a
+    /// permanent ghost fire that nobody puts out, and **because it lives in vanilla's
+    /// building array it burns into the save and survives removing the mod**. This project
+    /// has shipped that once. The <c>burnAmount</c> passed here is <b>0</b> (the wind blows
+    /// things over and crushes them; it does not scorch them).
     ///
-    /// **拒否する AI はそのままにする**（§F-2）。<c>demolish: false</c> では
-    /// Shelter / DoomsdayVault / DamPowerHouse / DecorationBuilding / TsunamiBuoy が
-    /// 黙って false を返す。**防災施設が台風で壊れないのは正しい挙動なので、
-    /// <c>demolish: true</c> へ逃げない。** これらは <see cref="LastRefused"/> に積まれるので、
-    /// 診断で「壊れていない」と「壊せない」が区別できる。
+    /// **Leave the AIs that refuse alone** (§F-2). Under <c>demolish: false</c>, Shelter /
+    /// DoomsdayVault / DamPowerHouse / DecorationBuilding / TsunamiBuoy quietly return
+    /// false. **Disaster response facilities not being destroyed by a typhoon is correct
+    /// behaviour, so do not run away to <c>demolish: true</c>.** They are counted in
+    /// <see cref="LastRefused"/>, so the diagnostics can distinguish "nothing broke" from
+    /// "it cannot be broken".
     ///
-    /// **dry-run が false でも本番は必ず呼ぶ。** <c>PowerPoleAI</c> /
-    /// <c>CableCarPylonAI</c> は <c>if (testOnly) return false;</c> の直後に本物の倒壊を
-    /// 行う（§F-2）。dry-run を信じて呼ばないと、実際には壊せる送電柱を取りこぼす。
+    /// **Always make the real call even when the dry run returns false.**
+    /// <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> perform the real collapse immediately
+    /// after <c>if (testOnly) return false;</c> (§F-2). Trust the dry run and skip the call
+    /// and you miss power poles that really can be knocked down.
     ///
-    /// ── 1 tick あたりの仕事量の上限（明示する）──────────────────────
+    /// ── The ceiling on work per tick (stated explicitly) ──────────────────
     ///
-    /// 走査が走るのは台風が動いている間だけで、間隔は <see cref="IntervalFrames"/>
-    /// フレームぶんの**経過ゲーム内時間**である（<c>frameIndex % N</c> にしない ——
-    /// <c>m_currentFrameIndex</c> は 1 tick で <c>FinalSimulationSpeed</c>（1/3/9）進むので、
-    /// 剰余だとゲーム速度で判定がまばらになる。③ 付録 A-4）。
+    /// The sweep only runs while a typhoon is moving, and the interval is the **elapsed
+    /// in-game time** corresponding to <see cref="IntervalFrames"/> frames (not
+    /// <c>frameIndex % N</c> — <c>m_currentFrameIndex</c> advances by
+    /// <c>FinalSimulationSpeed</c> (1/3/9) per tick, so a modulo makes the test fire
+    /// patchily depending on the game speed. ③ appendix A-4).
     ///
-    /// 1 回の走査の上限は<b>グリッドセル <see cref="MaxCellsPerPass"/> 個</b>と
-    /// <b>建物 <see cref="MaxBuildingsPerPass"/> 棟</b>。強風域は暴風域の 2.2 倍あるので
-    /// 矩形は②の地震よりさらに大きくなりうる。上限に達したら打ち切り、
-    /// 次回は <see cref="_cursorOrdinal"/> から再開する。
+    /// One sweep is capped at <b><see cref="MaxCellsPerPass"/> grid cells</b> and
+    /// <b><see cref="MaxBuildingsPerPass"/> buildings</b>. The gale radius is 2.2× the
+    /// storm radius, so the bounding box can be bigger still than ②'s earthquake. On
+    /// reaching a cap we break off and resume from <see cref="_cursorOrdinal"/> next time.
     ///
-    /// **走査の順序は台風の中心から外側へ**（<see cref="OutwardCellOrder"/>）。行優先だと
-    /// 最初に見るのが矩形の角＝中心からいちばん遠い＝確率がほぼ 0 の場所になり、
-    /// 上限が**いちばん壊れやすい建物を切り捨てる**（②の第 2 層レビュー I1）。
+    /// **The sweep order runs outwards from the typhoon's centre**
+    /// (<see cref="OutwardCellOrder"/>). In row-major order the first thing we look at is a
+    /// corner of the box, i.e. the furthest point from the centre, where the probability is
+    /// close to 0, and the cap then **throws away the buildings most likely to break** (②'s
+    /// second-layer review I1).
     ///
-    /// ④に固有の違いが 1 つある: **中心が毎 tick 動く。** 矩形もリングの中心も毎回
-    /// 変わるので、<see cref="_cursorOrdinal"/> を持ち越す意味は「同じ中心セルのまま
-    /// 打ち切られた続き」しか無い。**中心のセルが前回と変わったら 0 に戻す。**
-    /// ただし<b>間隔の累積（<see cref="_minutesSincePass"/>）は巻き戻さない</b> ——
-    /// 巻き戻すと中心が動くたびに 0 に戻り、**走査が 1 度も走らない**
-    /// （②の第 2 層レビュー I3 がまさにこれ）。
+    /// There is one difference peculiar to ④: **the centre moves every tick.** Both the box
+    /// and the centre of the rings change each time, so carrying
+    /// <see cref="_cursorOrdinal"/> over only means "the continuation of a sweep cut short
+    /// with the same centre cell". **Reset it to 0 once the centre cell differs from last
+    /// time.** But <b>do not rewind the interval accumulator
+    /// (<see cref="_minutesSincePass"/>)</b> — rewind it and it returns to 0 every time the
+    /// centre moves, so **the sweep never runs once** (②'s second-layer review I3 was
+    /// exactly this).
     ///
-    /// ── 打ち切りの続きは、実際にはほぼ起きない（全体レビュー I1）──────────────
+    /// ── The truncated continuation almost never actually happens (whole-project review I1) ──
     ///
-    /// <b>そしてその「持ち越し」は、動いている台風ではまず成立しない。</b>
-    /// <c>TyphoonTrack.SpeedFor</c> は進行速度を <c>[0.25, 6]</c> m/frame に
-    /// クランプし、走査の間隔は <see cref="IntervalFrames"/> ＝ 256 フレームぶんの
-    /// ゲーム内時間である。つまり眼は 1 走査のあいだに **64〜1536 m** 動く ——
-    /// グリッドのセルは 64 m なので、中心のセルはほぼ毎回変わり、
-    /// <see cref="_cursorOrdinal"/> は 0 に戻る。
+    /// <b>And that "carry over" barely ever holds for a moving typhoon.</b>
+    /// <c>TyphoonTrack.SpeedFor</c> clamps the travel speed to <c>[0.25, 6]</c> m/frame,
+    /// and the sweep interval is the in-game time corresponding to
+    /// <see cref="IntervalFrames"/> = 256 frames. So the eye moves **64-1536 m** during one
+    /// sweep — a grid cell is 64 m, so the centre cell changes almost every time and
+    /// <see cref="_cursorOrdinal"/> goes back to 0.
     ///
-    /// **したがって「上限で打ち切られた外縁が次の走査で続きから判定される」ことは
-    /// 起きない。** 次の走査はまた眼から始まり、内側のリングをもう一度舐める。
-    /// 診断ダンプはかつて「次の走査で続きから」と書いていたが、それは嘘だったので
-    /// 消した（パネルの文言はもともと続きに触れていない）。今の文言は
-    /// 「この走査では外縁まで届かなかった」だけを言う。
+    /// **So "the outer rim cut off by the cap gets rolled from where it stopped on the next
+    /// sweep" does not happen.** The next sweep starts at the eye again and licks the inner
+    /// rings once more. The diagnostics dump used to say "continues on the next sweep", but
+    /// that was a lie, so it was deleted (the panel's wording never mentioned continuation
+    /// in the first place). The current wording only says "this sweep did not reach the
+    /// outer rim".
     ///
-    /// 仕組みそのものは残してある。最低速度で斜めに進むと、稀に中心のセルが
-    /// 変わらない走査があり、そのときだけ本当に続きから走る。**上限は安全側に
-    /// 外す方向**（判定されない ＝ 倒れない）なので、これで害は無い。
-    /// リング半径で持ち越す形に変えることもできるが、それは「中心が動いても
-    /// 内側は再抽選しない」という別の挙動になるので、実機で挙動を見る前に
-    /// 入れ替えない。
+    /// The machinery itself is kept. At the minimum speed and travelling diagonally, there
+    /// is rarely a sweep where the centre cell does not change, and only then does it truly
+    /// continue. **The cap errs on the safe side** (not tested = not knocked down), so this
+    /// does no harm.
+    /// It could be changed to carry over by ring radius, but that would be different
+    /// behaviour — "do not re-roll the inside even when the centre moves" — so do not swap
+    /// it in before watching the behaviour in the game.
     ///
-    /// ── 進行方向右側の危険半円（持ち主の指摘）─────────────────────────
+    /// ── The dangerous semicircle on the right of the track (the owner's note) ──
     ///
-    /// > 台風直下の範囲内で、進行方向〔右〕側に被害半径や被害の確率を若干強化して
+    /// > Within the area directly under the typhoon, strengthen the damage radius and the
+    /// > probability of damage slightly on the [right] of the direction of travel
     ///
-    /// 実在の台風は左右対称ではない。渦の回転と台風自身の移動が足し算になる側を
-    /// 危険半円と呼び、北半球では**進行方向の右**である（<see cref="TrackBias"/>）。
-    /// ④はそこで
+    /// A real typhoon is not left-right symmetric. The side where the vortex's rotation and
+    /// the storm's own travel add up is called the dangerous semicircle, and in the northern
+    /// hemisphere it is **the right of the direction of travel** (<see cref="TrackBias"/>).
+    /// There, ④
     ///
-    /// - **被害半径**を最大 +18 %: 風速の場そのものを引き伸ばす
-    ///   （<c>WindAt(距離 ÷ RadiusFactor, …)</c>）。半径の定数は書き換えない
-    /// - **倒壊確率**を最大 +30 %: <c>CollapseChance</c> の結果に掛ける
+    /// - stretches the **damage radius** by up to +18%: it stretches the wind-speed field
+    ///   itself (<c>WindAt(distance ÷ RadiusFactor, …)</c>). The radius constants are not
+    ///   rewritten
+    /// - raises the **collapse probability** by up to +30%: multiplied onto
+    ///   <c>CollapseChance</c>'s result
     ///
-    /// **走査の矩形も同じ倍率だけ広げる。** 広げないと、伸びた側の外縁の建物が
-    /// そもそも走査に入らず、半径を伸ばした意味が消える（例外の出ない壊れ方）。
-    /// 広げるのは矩形だけで、**リングの順序（眼から外へ）は 1 ビットも変えない。**
+    /// **Widen the sweep's bounding box by the same factor.** Without that, the buildings on
+    /// the outer rim of the stretched side never enter the sweep at all and stretching the
+    /// radius means nothing (a breakage with no exception). Only the box is widened;
+    /// **the ring order (from the eye outwards) does not change by one bit.**
     ///
-    /// 偏りは<b>毎走査 <c>TyphoonController.HeadingRadians</c> を読み直す</b>ので、
-    /// 経路が曲がればその場で回る。方位をここへキャッシュしないこと。
+    /// The bias <b>re-reads <c>TyphoonController.HeadingRadians</c> on every sweep</b>, so
+    /// it turns on the spot when the track bends. Do not cache the heading here.
     ///
-    /// 南半球（左が危険半円）は <c>ModSettings.TyphoonSouthernHemisphere</c> で切り替わる。
+    /// The southern hemisphere (where the left is the dangerous semicircle) is switched with
+    /// <c>ModSettings.TyphoonSouthernHemisphere</c>.
     ///
-    /// ── 乱数にフレームを混ぜない ──────────────────────────────
+    /// ── Do not mix the frame into the random draw ────────────────────────
     ///
-    /// 選定は (台風 ID, 建物 ID) だけで決まる。混ぜると同じ建物が走査のたびに
-    /// 抽選し直され、時間とともに壊れる建物が際限なく増える。
+    /// Selection is determined by (typhoon ID, building ID) alone. Mix the frame in and the
+    /// same building is re-drawn on every sweep, so the number of buildings destroyed grows
+    /// without limit over time.
     ///
-    /// **それでも被害は広がる。** ④は②と違い中心が動くので、台風が近づけば同じ建物の
-    /// <c>wind</c> が上がり、<c>roll</c> が固定でも <c>chance</c> が上がっていずれ閾値を
-    /// 超える。**これが「台風が来ると被害が広がる」の実装であり、乱数にフレームを
-    /// 混ぜる必要が無い理由でもある。**
+    /// **And yet the damage still spreads.** Unlike ②, ④'s centre moves, so as the typhoon
+    /// approaches the same building's <c>wind</c> rises and, with <c>roll</c> fixed, its
+    /// <c>chance</c> rises and eventually crosses the threshold. **That is the
+    /// implementation of "the damage spreads as the typhoon comes", and it is also why there
+    /// is no need to mix the frame into the random draw.**
     ///
-    /// ── 演出と倒木 ─────────────────────────────────────
+    /// ── The presentation and the felled trees ─────────────────────────────
     ///
-    /// <c>DisasterHelpers.AddWind</c> / <c>DestroyTrees</c> はどちらも NDR の
-    /// パッチ対象外（§F-1）。**本タスクで両方の宣言を IL で直接確認した**
-    /// （§B-1 は <c>DestroyStuff</c> の転送から並びを導いていただけだった）:
+    /// Neither <c>DisasterHelpers.AddWind</c> nor <c>DestroyTrees</c> is patched by NDR
+    /// (§F-1). **Both declarations were confirmed directly from the IL in this task**
+    /// (§B-1 had only derived the parameter order from <c>DestroyStuff</c>'s forwarding):
     ///
     /// ```
     /// public static void DisasterHelpers.AddWind(
@@ -142,161 +165,183 @@ namespace DisasterPlus.Game
     ///     float burnRadiusMin, float burnRadiusMax)
     /// ```
     ///
-    /// **<c>burnRadiusMin</c> / <c>burnRadiusMax</c> は 0 を渡す。** 台風で木が
-    /// **燃える**のはおかしい（<c>TreeManager.BurnTree</c> も使わない）。
+    /// **Pass 0 for <c>burnRadiusMin</c> / <c>burnRadiusMax</c>.** Trees **catching fire**
+    /// in a typhoon makes no sense (we do not use <c>TreeManager.BurnTree</c> either).
     /// </summary>
     public static partial class TyphoonWind
     {
-        /// <summary>走査の間隔（フレーム相当のゲーム内時間）。②の長周期と同じ 256。</summary>
+        /// <summary>The sweep interval (in-game time equivalent to a frame count). 256, the
+        /// same as ②'s long-period damage.</summary>
         private const int IntervalFrames = 256;
-        /// <summary>1 回の走査で見るグリッドセルの上限。</summary>
+        /// <summary>The ceiling on grid cells looked at in one sweep.</summary>
         private const int MaxCellsPerPass = 32768;
 
-        /// <summary>1 回の走査で調べる建物の上限。</summary>
+        /// <summary>The ceiling on buildings examined in one sweep.</summary>
         private const int MaxBuildingsPerPass = 2048;
 
-        /// <summary>建物グリッドの 1 辺のセル数（1 セル 64 m）。</summary>
+        /// <summary>The number of cells along one side of the building grid (one cell is
+        /// 64 m).</summary>
         private const int GridSide = 270;
 
         /// <summary>
-        /// 1 セルの連結リストを辿る回数の上限（壊れた保存データ対策）。
-        /// バニラの <c>DisasterHelpers.DestroyBuildings</c> の内側ループと同じ
-        /// 49152 ＝ 建物バッファの大きさ。
+        /// The ceiling on how many links of one cell's chain we walk (a guard against
+        /// corrupt save data).
+        /// 49152, the same as the inner loop of vanilla's
+        /// <c>DisasterHelpers.DestroyBuildings</c> = the size of the building buffer.
         /// </summary>
         private const int GridChainGuard = 49152;
 
         /// <summary>
-        /// 候補にするフラグ条件。②の <c>LongPeriodDamage.CandidateMask</c> と同じ。
-        /// <c>Collapsed</c> を弾くのは <c>CollapseBuilding</c> が必ず false を返すからで、
-        /// 弾かないと跡地の瓦礫が毎回 refused に積まれて診断の数字が読めなくなる。
+        /// The flag condition for a candidate. The same as ②'s
+        /// <c>LongPeriodDamage.CandidateMask</c>.
+        /// We reject <c>Collapsed</c> because <c>CollapseBuilding</c> always returns false
+        /// for those; without rejecting them the rubble left behind would be counted in
+        /// refused every time and the diagnostic figures would become unreadable.
         /// </summary>
         private const Building.Flags CandidateMask =
             Building.Flags.Created | Building.Flags.Deleted
             | Building.Flags.Untouchable | Building.Flags.Demolishing
             | Building.Flags.Collapsed;
 
-        /// <summary>倒木の <c>Degraded</c> 自己申告キー（<c>FeatureHost.NoteDegraded</c>）。</summary>
+        /// <summary>The <c>Degraded</c> self-report key for felling trees
+        /// (<c>FeatureHost.NoteDegraded</c>).</summary>
         private const string TreeNoteKey = "typhoonWindTrees";
 
         /// <summary>
-        /// 倒木の破壊半径を強風域半径に対してどれだけ取るか。
-        /// **④が選んだ数字。** 建物より広く、演出として木がまとまって倒れる程度。
+        /// How much of the gale radius the tree destruction radius takes.
+        /// **A figure ④ chose.** Wider than for buildings, enough that trees visibly go
+        /// down in groups.
         /// </summary>
         private const float TreeRadiusFraction = 0.5f;
 
-        /// <summary>倒木の「確実に倒れる」内側半径（<see cref="TreeRadiusFraction"/> に対する比）。</summary>
+        /// <summary>The inner radius within which trees definitely fall (as a fraction of
+        /// <see cref="TreeRadiusFraction"/>).</summary>
         private const float TreeInnerFraction = 0.3f;
 
         /// <summary>
-        /// <c>AddWind</c> の高さオフセットと半径倍率。§B-1 の竜巻の実引数を手本にした
-        /// （<c>position.y + rMax * 0.75</c> / <c>radius = rMax * 1.5</c>）。
+        /// <c>AddWind</c>'s height offset and radius multiplier. Modelled on the tornado's
+        /// actual arguments in §B-1 (<c>position.y + rMax * 0.75</c> /
+        /// <c>radius = rMax * 1.5</c>).
         /// </summary>
         private const float WindHeightFraction = 0.75f;
 
         private const float WindRadiusFactor = 1.5f;
 
         /// <summary>
-        /// 車と歩行者を<b>掴む</b>ための鉛直成分。
+        /// The vertical component needed to <b>grab</b> cars and pedestrians.
         ///
-        /// ── ★★ 19.62 は動かせない壁である（2026-09-02、IL で確定）──────────
+        /// ── ★★ 19.62 is an immovable wall (2026-09-02, settled from the IL) ──────
         ///
-        /// <c>CarAI.AddWind</c> IL_0018–0031 と <c>HumanAI.AddWind</c> IL_000E–002B:
+        /// <c>CarAI.AddWind</c> IL_0018-0031 and <c>HumanAI.AddWind</c> IL_000E-002B:
         ///
         /// <code>
         /// if ((v.m_flags2 &amp; 2) == 0 &amp;&amp; wind.y &lt;= 19.62f) return false;
         /// </code>
         ///
-        /// <b>19.62 = 2g である。</b>まだ吹き飛ばされていない車と市民は、
-        /// <b>ここを越えない風には一切反応しない</b> —— 速度も向きも 1 ビットも
-        /// 変わらず、false が返るだけである。
+        /// <b>19.62 = 2g.</b> Cars and citizens that have not yet been blown about
+        /// <b>do not react at all to a wind that does not exceed this</b> — neither their
+        /// speed nor their direction changes by one bit; it simply returns false.
         ///
-        /// ★★ **これが「走っている車や歩いている人にも影響がない」の正体だった。**
-        ///   （2026-08-25 に 80 → 8 へ、2026-09-02 に 8 → 1.5 へ落としていた。
-        ///     どちらも壁の下で、<b>移動中の車には最初から何も起きていなかった</b>。
-        ///     止まっている車が飛んでいたのは、駐車車両にこの門が無いからである。）
+        /// ★★ **This was the whole of "it has no effect on moving cars or walking people"
+        ///   either.**
+        ///   (We had lowered it 80 → 8 on 2026-08-25 and 8 → 1.5 on 2026-09-02.
+        ///    Both were below the wall, and <b>nothing had ever happened to moving cars at
+        ///    all</b>. Stationary cars were flying because parked vehicles do not have this
+        ///    gate.)
         ///
-        /// だから壁の<b>すぐ上</b>を取る。バニラの竜巻は 80（＝壁の 4 倍）で、
-        /// あれが「本当に飛んで行く」の正体である。
+        /// So we take a value <b>just above</b> the wall. Vanilla's tornado uses 80 (four
+        /// times the wall), and that is what "really flying away" is.
         /// </summary>
         private const float WindUpwardLatch = 19.7f;
 
         /// <summary>
-        /// 掴んだ<b>あと</b>の鉛直成分。
+        /// The vertical component <b>after</b> the grab.
         ///
-        /// ★ 一度 <c>m_flags2 |= 2</c> が立つと上の門は素通しになる（IL_00A7–00C6）。
-        ///   つまり<b>2 回目からは低い値で押せる</b>。
-        ///   速度は <c>v = v*0.875 + wind*0.125</c> で混ざるので、毎回 19.7 を
-        ///   渡し続けると<b>浮き上がり続けて落ちてこない</b> ——
-        ///   所有者が 2026-08-25 に苦情を言った「ほんとに飛んで行ってます」がこれ。
+        /// ★ Once <c>m_flags2 |= 2</c> is set, the gate above lets everything through
+        ///   (IL_00A7-00C6). In other words <b>from the second time on we can push with a
+        ///   lower value</b>.
+        ///   The velocity is mixed as <c>v = v*0.875 + wind*0.125</c>, so keep handing it
+        ///   19.7 every time and <b>it keeps rising and never comes down</b> — which is what
+        ///   the owner complained about on 2026-08-25: "they really are flying away".
         ///
-        ///   <b>掴むのは時々、押すのは毎回。</b>（<c>LatchEveryNthPush</c>）
+        ///   <b>Grab occasionally, push every time.</b> (<c>LatchEveryNthPush</c>)
         /// </summary>
         private const float WindUpwardSustain = 2f;
 
         /// <summary>
-        /// 何回に 1 回、<see cref="WindUpwardLatch"/> の高い風を撃つか。
-        /// 残りは <see cref="WindUpwardSustain"/> で、既に掴んだ相手だけを押す。
+        /// How often — once every how many rounds — we fire the high
+        /// <see cref="WindUpwardLatch"/> wind. The rest use
+        /// <see cref="WindUpwardSustain"/> and only push what has already been grabbed.
         /// </summary>
         private const int LatchEveryNthPush = 4;
 
         /// <summary>
-        /// 渦の<b>外周での接線速度</b>（単位/フレーム）。
+        /// The vortex's <b>tangential speed at the rim</b> (units per frame).
         ///
-        /// ── ★★ 竜巻の 0.5 をそのまま使ってはいけない（2026-09-02、IL）──────
+        /// ── ★★ Do not just reuse the tornado's 0.5 (2026-09-02, from the IL) ──────
         ///
-        /// <c>DisasterHelpers.AddWindVehicles</c> の中身（IL_00F8–0145）は
+        /// The body of <c>DisasterHelpers.AddWindVehicles</c> (IL_00F8-0145) is
         ///
         /// <code>
-        /// delta = 車の位置 - 風の位置          ← <b>メートル。正規化されない</b>
+        /// delta = car position - wind position   ← <b>metres. Not normalised</b>
         /// w = directional
-        /// w.x -= delta.z * rotational          ← <b>距離に比例して増える</b>
+        /// w.x -= delta.z * rotational            ← <b>grows in proportion to distance</b>
         /// w.z += delta.x * rotational
-        /// w += (delta * radial) / Max(1, |delta|)   ← こちらは正規化済み
+        /// w += (delta * radial) / Max(1, |delta|)   ← this one is normalised
         /// </code>
         ///
-        /// ★★ <b>回転成分だけが距離で割られていない。</b>竜巻の半径は 100〜200 m
-        ///   なので 0.5 × 150 ＝ 75 で収まるが、<b>台風の半径は数千 m である</b> ——
-        ///   同じ 0.5 を渡すと外周で <c>0.5 × 3000 = 1500</c> 単位/フレームになる。
-        ///   <b>車が建物をすり抜けて飛んで行っていたのはこれである。</b>
-        ///   竜巻の定数は、竜巻の大きさとセットでしか正しくない。
+        /// ★★ <b>Only the rotational component is not divided by the distance.</b> A
+        ///   tornado's radius is 100-200 m, so 0.5 × 150 = 75 stays contained, but
+        ///   <b>a typhoon's radius is thousands of metres</b> — pass the same 0.5 and at the
+        ///   rim you get <c>0.5 × 3000 = 1500</c> units per frame.
+        ///   <b>That is why cars were flying away through buildings.</b>
+        ///   The tornado's constants are only correct together with the tornado's size.
         ///
-        /// だからここは<b>速度で指定し、半径で割って</b>回転成分に直す。
-        /// そうすると台風がどんな大きさでも外周の速さは同じになる。
+        /// So here we <b>specify a speed and divide by the radius</b> to turn it into the
+        /// rotational component. Then the speed at the rim is the same whatever size the
+        /// typhoon is.
         /// </summary>
         private const float WindRimSpeed = 4f;
 
         /// <summary>
-        /// 中心へ吸い込む成分（負が内向き、単位/フレーム）。
+        /// The component drawing in towards the centre (negative is inwards, units per
+        /// frame).
         ///
-        /// ★ こちらは <c>/ Max(1, |delta|)</c> で割られているので、<b>大きさが
-        ///   そのまま速度</b>になる（回転成分と違って半径に依らない）。
-        ///   竜巻は -40。台風でそれをやると中心へ射出される。
+        /// ★ This one is divided by <c>/ Max(1, |delta|)</c>, so <b>the magnitude is
+        ///   directly the speed</b> (unlike the rotational component it does not depend on
+        ///   the radius).
+        ///   A tornado uses -40. Do that on a typhoon and things are fired into the centre.
         /// </summary>
         private const float WindRadial = -3f;
 
         /// <summary>
-        /// 進行方向へ押す強さ（単位/フレーム、強度 255 のとき）。
+        /// How hard we push along the direction of travel (units per frame, at intensity
+        /// 255).
         ///
-        /// ★ 2.5 -> 6（2026-09-02、所有者「台風で車をもう少し動かせることができれば」）。
-        ///   <b>ここだけが「風下へ流される距離」を素直に決める</b> ——
-        ///   回転と求心は向きを変えるだけで、街を横切らせるのはこの成分である。
+        /// ★ 2.5 -> 6 (2026-09-02, the owner: "if the typhoon could move the cars a little
+        ///   more"). <b>This is the only thing that plainly decides how far things are blown
+        ///   downwind</b> — rotation and inflow only change the direction, and this is the
+        ///   component that carries things across the city.
         /// </summary>
         private const float WindDirectionalScale = 6f;
 
         /// <summary>
-        /// 「掴む」風を撃った周期の数え手。**sim スレッドからのみ。**
+        /// The counter for how many rounds of the "grab" wind we have fired. **Sim thread
+        /// only.**
         /// </summary>
         private static int _pushOrdinal;
 
         /// <summary>
-        /// 今回の一巡を「掴む」風にするか。**1 巡につき 1 回だけ呼ぶこと。**
+        /// Whether this round should be a "grab" wind. **Call it exactly once per round.**
         ///
-        /// ★★ <b>押す場所ごとに呼んではいけない。</b>（2026-09-02、書いた直後に気付いた。）
-        ///   1 巡で中心と<b>カメラの前</b>の 2 発を撃つので、場所ごとに数えると
-        ///   偶数と奇数で固定され、<b>カメラの前の風は永久に「掴む」側に来ない</b>。
-        ///   暴風域の中でも中心の押しが届かない帯（暴風域は強風域の 1/2.2）では、
-        ///   <b>目の前の車だけが最後まで動かない</b>という形で出る。
-        ///   1 巡に 1 回だけ決めて、その巡の全ての押しに同じ答えを配る。
+        /// ★★ <b>Do not call it per push location.</b> (2026-09-02, noticed right after
+        ///   writing it.) One round fires two shots — the centre and <b>what the camera is
+        ///   looking at</b> — so counting per location pins them to the even and odd
+        ///   positions and <b>the camera's wind never once lands on the "grab" side</b>.
+        ///   In the band inside the gale radius that the centre's push does not reach (the
+        ///   storm radius is 1/2.2 of the gale radius), it shows up as
+        ///   <b>only the cars right in front of you never moving</b>.
+        ///   Decide once per round and hand the same answer to every push in that round.
         /// </summary>
         internal static bool NextLatch()
         {
@@ -309,8 +354,9 @@ namespace DisasterPlus.Game
         private static int _centreCellZ = -1;
 
         /// <summary>
-        /// 次に見るセルの序数（<see cref="OutwardCellOrder"/> の順序）。0 が中心のセル。
-        /// 上限で打ち切られたときだけ 0 以外で残る。
+        /// The ordinal of the next cell to look at (in <see cref="OutwardCellOrder"/>'s
+        /// order). 0 is the centre cell.
+        /// It only stays non-zero when a sweep was cut short at a cap.
         /// </summary>
         private static int _cursorOrdinal;
 
@@ -318,12 +364,13 @@ namespace DisasterPlus.Game
         private static bool _treeNotePosted;
 
         /// <summary>
-        /// <c>DestroyTrees</c> がこの環境で解決できないと分かったか。
-        /// 一度立てたら以後は倒木を呼ばない（毎走査で例外を出さない）。
+        /// Whether we have found that <c>DestroyTrees</c> cannot be resolved in this
+        /// environment. Once raised we never call the tree felling again (so it does not
+        /// throw on every sweep).
         /// </summary>
         private static bool _treesUnavailable;
 
-        // ── 診断カウンタ（全て sim スレッドからのみ読み書きする）──────────────
+        // ── Diagnostic counters (all read and written from the sim thread only) ──
         private static int _passes;
         private static int _lastScanned;
         private static int _lastSelected;
@@ -334,54 +381,61 @@ namespace DisasterPlus.Game
         private static bool _lastCapped;
         private static int _totalCollapsed;
 
-        /// <summary>これまでに走った走査の回数（セッション累計）。</summary>
+        /// <summary>How many sweeps have run so far (cumulative for the session).</summary>
         public static int Passes { get { return _passes; } }
 
-        /// <summary>直近 1 回で調べた建物数（候補マスクを通り、強風域内にあったもの）。</summary>
+        /// <summary>How many buildings the most recent sweep examined (those that passed the
+        /// candidate mask and were inside the gale radius).</summary>
         public static int LastScanned { get { return _lastScanned; } }
 
-        /// <summary>直近 1 回で確率選定を通った棟数。</summary>
+        /// <summary>How many buildings passed the probability selection in the most recent
+        /// sweep.</summary>
         public static int LastSelected { get { return _lastSelected; } }
 
-        /// <summary>直近 1 回で「バニラが dry-run で受け付ける」と答えた棟数。</summary>
+        /// <summary>How many buildings vanilla answered "accepted" for in the dry run, in
+        /// the most recent sweep.</summary>
         public static int LastAttempted { get { return _lastAttempted; } }
 
         /// <summary>
-        /// 直近 1 回で「バニラが設計上断る」と答えた棟数
-        /// （dry-run も本番も false ＝ 本当に壊れなかったもの）。
-        /// **0 でないのは正常**（防災施設は台風で壊れない。§F-2）。
+        /// How many buildings vanilla answered "refused by design" for in the most recent
+        /// sweep (false in both the dry run and the real call, i.e. genuinely not
+        /// destroyed).
+        /// **Non-zero is normal** (disaster response facilities are not destroyed by a
+        /// typhoon. §F-2).
         ///
-        /// ★ <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> はここに入らない。
-        ///   あれらは dry-run で false を返した直後に本物の倒壊を行うので
-        ///   （§F-2）、<see cref="LastCollapsed"/> にだけ積まれる。
+        /// ★ <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> do not appear here.
+        ///   They perform the real collapse immediately after returning false to the dry run
+        ///   (§F-2), so they only add to <see cref="LastCollapsed"/>.
         /// </summary>
         public static int LastRefused { get { return _lastRefused; } }
 
-        /// <summary>直近 1 回で実際に倒壊した棟数。</summary>
+        /// <summary>How many buildings actually collapsed in the most recent sweep.</summary>
         public static int LastCollapsed { get { return _lastCollapsed; } }
 
         /// <summary>
-        /// 直近 1 回で**高さが読めなかった**棟数。②と違い、これらは対象から
-        /// 外れていない（高さボーナスを辞退しただけ）。
+        /// How many buildings the most recent sweep **could not read a height for**. Unlike
+        /// ②, these are not excluded from consideration (they merely forgo the height
+        /// bonus).
         /// </summary>
         public static int LastUnknownHeight { get { return _lastUnknownHeight; } }
 
-        /// <summary>直近 1 回が上限で打ち切られたか（続きは次回）。</summary>
+        /// <summary>Whether the most recent sweep was cut short at a cap (it continues next
+        /// time).</summary>
         public static bool LastCapped { get { return _lastCapped; } }
 
-        /// <summary>セッション累計の倒壊棟数。</summary>
+        /// <summary>Buildings collapsed, cumulative for the session.</summary>
         public static int TotalCollapsed { get { return _totalCollapsed; } }
 
         /// <summary>
-        /// 台風を手放すとき（<c>TyphoonController.Forget</c>）とレベルアンロードで呼ぶ。
-        /// 冪等である（重ねて呼んでよい）。
+        /// Call when letting go of a typhoon (<c>TyphoonController.Forget</c>) and on level
+        /// unload. It is idempotent (calling it repeatedly is fine).
         /// </summary>
         public static void Reset()
         {
             _minutesSincePass = 0f;
             _minutesSinceGale = 0f;
             _galePushes = 0;
-            // ★ 次の台風の 1 発目は必ず「掴む」風から始める（NextLatch）。
+            // ★ Always start the next typhoon's first shot with a "grab" wind (NextLatch).
             _pushOrdinal = 0;
             _typhoonId = 0;
             _centreCellX = -1;
@@ -402,20 +456,22 @@ namespace DisasterPlus.Game
                 _treeNotePosted = false;
                 FeatureHost.ClearDegraded(TyphoonFeature.FeatureName, TreeNoteKey);
             }
-            // ★ _errorLogged / _treesUnavailable は戻さない。どちらも「この DLL が
-            //    参照しているゲームのビルドに対する事実」であって都市ごとの状態ではない
-            //    （TyphoonLightning / TyphoonReader と同じ判断）。
+            // ★ _errorLogged / _treesUnavailable are not reset. Both are "facts about the
+            //    game build this DLL is referencing", not per-city state
+            //    (the same decision as TyphoonLightning / TyphoonReader).
         }
 
         /// <summary>
-        /// sim スレッド。**必ず <c>TyphoonFeature.OnSimulationTick</c> のポーズガードより
-        /// 下から、台風が動いているときだけ呼ぶこと**（ポーズ中に建物が倒れる）。
-        /// 設定が OFF のときは呼び出し側が呼ばない。
+        /// Sim thread. **Always call it from below the pause guard in
+        /// <c>TyphoonFeature.OnSimulationTick</c>, and only while a typhoon is running**
+        /// (otherwise buildings fall while the game is paused).
+        /// When the setting is OFF the caller does not call it.
         ///
-        /// <paramref name="snapshot"/> は**前 tick の状態**なので位置も強度も読まない
-        /// （<see cref="TyphoonSnapshot"/> の T3 節の注記）。<see cref="TyphoonController"/> の
-        /// static から同じスレッドで直接読む。引数に残してあるのは他の要素と
-        /// 呼び出しの形をそろえるためである。
+        /// <paramref name="snapshot"/> holds **the previous tick's state**, so neither the
+        /// position nor the intensity is read from it (the note in
+        /// <see cref="TyphoonSnapshot"/>'s T3 section). They are read directly from
+        /// <see cref="TyphoonController"/>'s statics on the same thread. It is kept as a
+        /// parameter to give every element the same call shape.
         /// </summary>
         public static void Apply(TyphoonSnapshot snapshot, float deltaMinutes)
         {
@@ -440,8 +496,9 @@ namespace DisasterPlus.Game
 
         private static void Step(float deltaMinutes)
         {
-            // ★ 間隔の累積は**対象の台風より先に**進める。台風が入れ替わっても、
-            //    無くなっても、時間は流れているという扱いにする（クラス doc / I3）。
+            // ★ Advance the interval accumulator **before looking at the typhoon**. Whether
+            //    the typhoon changes or disappears, we treat time as still passing
+            //    (class doc / I3).
             float framesPerMinute = FeatureHost.FramesPerMinute;
             float interval = framesPerMinute > 0f ? IntervalFrames / framesPerMinute : 0f;
 
@@ -464,14 +521,15 @@ namespace DisasterPlus.Game
                 _cursorOrdinal = 0;
                 _centreCellX = -1;
                 _centreCellZ = -1;
-                // **累積は巻き戻さない**（クラス doc）。
+                // **Do not rewind the accumulator** (class doc).
             }
 
             if (framesPerMinute <= 0f) return;
             if (_minutesSincePass < interval) return;
 
-            // 余りを繰り越さない。ロード直後などに大きな deltaMinutes が来ても
-            // 次 tick に連続発火せず「間隔ごとに 1 回」を保つ。
+            // Do not carry the remainder over. Even if a large deltaMinutes arrives right
+            // after a load, we do not fire repeatedly on consecutive ticks but keep "once
+            // per interval".
             _minutesSincePass = 0f;
 
             int strength = ModSettings.TyphoonWindStrength.value;
@@ -482,20 +540,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 1 回ぶんの走査。上限に達したら打ち切り、次回は <see cref="_cursorOrdinal"/> から
-        /// 再開する（クラス doc の「1 tick あたりの仕事量の上限」）。
+        /// One sweep. On reaching a cap it breaks off and resumes from
+        /// <see cref="_cursorOrdinal"/> next time (the class doc's "ceiling on work per
+        /// tick").
         /// </summary>
         private static void Sweep(ushort typhoonId, int strength)
         {
             float range = TyphoonController.GaleRadius;
-            // プレハブ半径が読めていなければ 0。**推測した半径で走らない**（設計書 §6）。
+            // 0 if the prefab radius could not be read. **Do not run on a guessed radius**
+            // (design doc §6).
             if (!(range > 0f)) return;
 
             byte intensity = TyphoonController.Intensity;
 
-            // ★ 半径の**結果**（GaleRadius）から割り戻さない。強度 0 のとき
-            //   StormRadiusOf は 0 になり、0 除算で NaN の風速相当が全棟に配られる。
-            //   入力そのものを読む（TyphoonController.PrefabRadius の doc）。
+            // ★ Do not divide back out of the radius **result** (GaleRadius). At intensity
+            //   0, StormRadiusOf is 0 and a division by zero hands a NaN wind-speed
+            //   equivalent to every building. Read the input itself (the doc on
+            //   TyphoonController.PrefabRadius).
             float prefabRadius = TyphoonController.PrefabRadius;
             if (!(prefabRadius > 0f)) return;
 
@@ -503,8 +564,9 @@ namespace DisasterPlus.Game
             if (float.IsNaN(centre3.X) || float.IsNaN(centre3.Z)) return;
             var centre = new Vec2(centre3.X, centre3.Z);
 
-            // ★ Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-            //    new GameObject を走らせる main スレッド専用 API なので、exists で先に確認する。
+            // ★ Singleton<T>.instance runs FindObjectOfType and new GameObject when
+            //    sInstance is null, which makes it a main thread only API, so we check
+            //    exists first.
             if (!Singleton<BuildingManager>.exists) return;
 
             var bm = Singleton<BuildingManager>.instance;
@@ -514,14 +576,15 @@ namespace DisasterPlus.Game
             var grid = bm.m_buildingGrid;
             if (buildings == null || grid == null) return;
 
-            // ★ 危険半円側で風速の場を引き伸ばすぶん、**矩形も同じ倍率だけ広げる**
-            //   （クラス doc）。片側だけ広げることもできるが、矩形の 4 辺はどのみち
-            //   セル境界に丸められるので全周に掛けたほうが読みやすく、広げすぎても
-            //   「風速 0 の建物を数えずに飛ばす」だけで害が無い。
+            // ★ Since we stretch the wind-speed field on the dangerous-semicircle side,
+            //   **widen the box by the same factor** (class doc). We could widen only one
+            //   side, but the box's four edges get rounded to cell boundaries anyway, so
+            //   applying it all round reads better, and over-widening only means "counting
+            //   nothing and skipping buildings at wind speed 0", which does no harm.
             float scanRange = range * (1f + TrackBias.MaxRadiusBoost);
 
-            // 建物グリッドは 1 セル 64m、270x270（バニラの DestroyBuildings と同じ
-            // セル 64・オフセット 135・[0,269] クランプ）。
+            // The building grid is 64 m per cell, 270x270 (the same cell size 64, offset
+            // 135 and [0,269] clamp as vanilla's DestroyBuildings).
             int minX = Clamp((int)((centre.X - scanRange) / 64f + 135f));
             int maxX = Clamp((int)((centre.X + scanRange) / 64f + 135f));
             int minZ = Clamp((int)((centre.Z - scanRange) / 64f + 135f));
@@ -530,13 +593,14 @@ namespace DisasterPlus.Game
             int cellCount = (maxX - minX + 1) * (maxZ - minZ + 1);
             if (cellCount <= 0) return;
 
-            // リングの中心は台風のセル。矩形と同じクランプを掛けるので、中心が
-            // マップの外でもグリッドの中に落ちる。
+            // The rings are centred on the typhoon's cell. We apply the same clamp as the
+            // box, so even with the centre off the map it lands inside the grid.
             int centreX = Clamp((int)(centre.X / 64f + 135f));
             int centreZ = Clamp((int)(centre.Z / 64f + 135f));
 
-            // ★ 中心のセルが動いたら走査位置を捨てる。矩形もリングも別物になるので
-            //    「続きから」に意味が無い（クラス doc）。**累積は触らない。**
+            // ★ Throw the sweep position away once the centre cell has moved. Both the box
+            //    and the rings become different things, so "continuing" is meaningless
+            //    (class doc). **Do not touch the accumulator.**
             if (centreX != _centreCellX || centreZ != _centreCellZ)
             {
                 _centreCellX = centreX;
@@ -549,9 +613,9 @@ namespace DisasterPlus.Game
 
             var group = GroupOf(typhoonId);
 
-            // ★ 偏りは**毎走査読み直す**（クラス doc）。ここでキャッシュした値は
-            //   この 1 走査のあいだだけ有効で、次の走査ではまた読み直される ——
-            //   だから経路が曲がれば偏りも回る。
+            // ★ The bias is **re-read every sweep** (class doc). The value cached here is
+            //   valid only for this one sweep and is read again on the next — which is why
+            //   the bias turns when the track bends.
             float heading = TyphoonController.HeadingRadians;
             bool southern = ModSettings.TyphoonSouthernHemisphere.value;
             int biasedSelected = 0;
@@ -580,7 +644,8 @@ namespace DisasterPlus.Game
                 int x = centreX + dx;
                 int z = centreZ + dz;
 
-                // ★ 矩形の外は**数えずに飛ばす**（OutwardCellOrder のクラス doc）。
+                // ★ Skip anything outside the box **without counting it**
+                //   (OutwardCellOrder's class doc).
                 if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
 
                 cells++;
@@ -593,9 +658,10 @@ namespace DisasterPlus.Game
 
                 while (id != 0 && id < buildings.Length)
                 {
-                    // ★ 次の ID は**行動する前に**控える（②の LongPeriodDamage と同じ）。
-                    //    倒壊で建物を解放するサードパーティの AI が居ると
-                    //    buildings[id] が 0 で埋まり、このセルの残りが黙って飛ぶ。
+                    // ★ Take down the next ID **before acting** (the same as ②'s
+                    //    LongPeriodDamage). If a third-party AI releases the building on
+                    //    collapse, buildings[id] is filled with 0 and the rest of this cell
+                    //    is silently skipped.
                     ushort next = buildings[id].m_nextGridBuilding;
 
                     if ((buildings[id].m_flags & CandidateMask) == Building.Flags.Created)
@@ -605,10 +671,11 @@ namespace DisasterPlus.Game
                         float offsetZ = p.z - centre.Z;
                         float d = Distance(centre, p.x, p.z);
 
-                        // ★★ 危険半円（クラス doc）。**半径の定数は書き換えず、
-                        //    「もっと眼に近い」ことにして風速の場を引き伸ばす。**
-                        //    左側と正面・真後ろでは倍率がちょうど 1 なので、
-                        //    そちらは今日までと 1 ビットも変わらない。
+                        // ★★ The dangerous semicircle (class doc). **We do not rewrite the
+                        //    radius constants; we stretch the wind-speed field by pretending
+                        //    things are closer to the eye.**
+                        //    On the left side, and dead ahead and dead astern, the factor is
+                        //    exactly 1, so those are unchanged from today by one bit.
                         float radiusFactor = TrackBias.RadiusFactor(heading, offsetX, offsetZ, southern);
                         float wind = TyphoonProfile.WindAt(d / radiusFactor,
                                                            intensity, prefabRadius);
@@ -616,8 +683,9 @@ namespace DisasterPlus.Game
                         {
                             scanned++;
 
-                            // ★ 高さは**係数**であって足切りではない（②と違う点）。
-                            //    読めなければボーナスを辞退するだけで、対象には残す。
+                            // ★ The height is a **coefficient**, not a cut-off (the point
+                            //    where we differ from ②). If it cannot be read we simply
+                            //    forgo the bonus and keep the building in scope.
                             float metres = BuildingHeight.MetresOf(ref buildings[id]);
                             if (metres <= 0f) unknownHeight++;
 
@@ -630,12 +698,14 @@ namespace DisasterPlus.Game
                                 bool accepted;
                                 bool fell = Collapse(buildings, id, group, out accepted);
 
-                                // ★★ **倒れたものを「断られた」に数えない**（全体レビュー）。
-                                //    dry-run は診断専用で、PowerPoleAI / CableCarPylonAI は
-                                //    `if (testOnly) return false;` の直後に本物の倒壊を行う
-                                //    （§F-2）。以前はそれらを refused と collapsed の
-                                //    **両方**に積んでおり、診断の refused が
-                                //    「シェルター等が設計上断った数」を名乗れなくなっていた。
+                                // ★★ **Do not count what fell as "refused"** (whole-project
+                                //    review). The dry run is for diagnostics only, and
+                                //    PowerPoleAI / CableCarPylonAI perform the real collapse
+                                //    immediately after `if (testOnly) return false;`
+                                //    (§F-2). They used to be counted in **both** refused and
+                                //    collapsed, which stopped the diagnostics' refused from
+                                //    meaning "how many shelters and the like refused by
+                                //    design".
                                 if (fell) collapsed++;
                                 else if (accepted) attempted++;
                                 else refused++;
@@ -645,12 +715,13 @@ namespace DisasterPlus.Game
 
                     id = next;
 
-                    // 連結リストが壊れている保存データで無限ループしないための保険。
+                    // Insurance against an infinite loop on save data with a corrupt chain.
                     if (++guard > GridChainGuard) break;
                 }
             }
 
-            // 1 周し終えていれば次回は中心から。打ち切りなら続きから。
+            // If we got all the way round, next time starts from the centre. If we were cut
+            // short, it continues.
             _cursorOrdinal = ordinal >= ordinalCount ? 0 : ordinal;
             _passes++;
             _lastScanned = scanned;
@@ -662,21 +733,25 @@ namespace DisasterPlus.Game
             _lastCapped = capped;
             _totalCollapsed += collapsed;
 
-            // 演出は走査 1 回につき 1 度、台風の中心で。**建物とは独立**に呼ぶ
-            // （倒壊 0 でも風は吹くし、木は倒れる）。
+            // The presentation runs once per sweep, at the typhoon's centre. It is called
+            // **independently of the buildings** (the wind blows and trees fall even with 0
+            // collapsed).
             //
-            // ★★ **吹き飛ばしは <c>TyphoonStormFx</c> のつまみに属する。**
-            //    （2026-09-02、Codex レビュー。ここは以前から素通しだった。）
-            //    あの設定の doc が「吹き飛ばしは AddWind（市民と車だけ）…
-            //    だから風害とは別のつまみにしてある」と名乗っている以上、
-            //    <b>演出を切った人の街で車が飛んではいけない</b>。
+            // ★★ **The blow-away belongs to <c>TyphoonStormFx</c>'s knob.**
+            //    (2026-09-02, Codex review. This had been passing through unconditionally.)
+            //    Since that setting's doc states "the blow-away is AddWind (citizens and
+            //    vehicles only) … which is why it is on a different knob from wind damage",
+            //    <b>cars must not fly about in the city of someone who switched the
+            //    presentation off</b>.
             //
-            //    以前は上向きが 2g の門（19.62）の下だったので、素通しでも
-            //    走っている車には何も起きず、誰も気付かなかった。
-            //    門を越えた今、この漏れは<b>目に見える</b>。
+            //    Previously the upward component was below the 2g gate (19.62), so even
+            //    passing through unconditionally nothing happened to moving cars and nobody
+            //    noticed.
+            //    Now that we are over the gate, this leak is <b>visible</b>.
             //
-            //    ★ 切っているときは <see cref="NextLatch"/> も進めない ——
-            //      進めると「何回に 1 回掴むか」の数えが、撃っていない回で狂う。
+            //    ★ When it is switched off we do not advance <see cref="NextLatch"/> either
+            //      — advance it and the "grab once every how many" count is thrown off by
+            //      the rounds where we fired nothing.
             if (ModSettings.TyphoonStormFx.value)
             {
                 PushWind(centre3, group, range, NextLatch());
@@ -684,8 +759,9 @@ namespace DisasterPlus.Game
 
             FellTrees(typhoonId, centre3, group, range);
 
-            // ★ collapsed > 0 で囲ってはいけない。「機能が死んでいる」と
-            //    「近くに建物が無い」がログ上で区別できなくなる（③で実際に起きた形）。
+            // ★ Do not wrap this in collapsed > 0. That would make "the feature is dead" and
+            //    "there are no buildings nearby" indistinguishable in the log (the shape that
+            //    actually happened in ③).
             WriteDiag(typhoonId, strength, range, cells, cellCount,
                       startOrdinal, ordinal, scanned, selected, attempted,
                       refused, collapsed, unknownHeight, capped,
@@ -693,11 +769,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// この建物を選ぶか。**乱数は <see cref="DeterministicRandom"/>**
-        /// （<c>VanillaRandomizer</c> ではない）——これは④が発明した判断で、
-        /// バニラが引く値と一致する必要が無い。
+        /// Whether to select this building. **The randomness is
+        /// <see cref="DeterministicRandom"/>** (not <c>VanillaRandomizer</c>) — this is a
+        /// judgement ④ invented and does not need to agree with any value vanilla draws.
         ///
-        /// **フレームを混ぜない**（クラス doc）。
+        /// **Do not mix the frame in** (class doc).
         /// </summary>
         private static bool IsSelected(ushort typhoonId, ushort buildingId,
                                        float wind, float heightMetres, int strength,
@@ -706,9 +782,10 @@ namespace DisasterPlus.Game
             float chance = WindDamageModel.CollapseChance(wind, heightMetres, strength);
             if (chance <= 0f) return false;
 
-            // ★ 危険半円の上乗せは**モデルの外**で掛ける。WindDamageModel は
-            //   「風速と高さと設定から確率を出す」ことだけを持ち、台風の向きを
-            //   知らない。壊れた倍率が来ても抽選を狂わせない。
+            // ★ The dangerous semicircle's uplift is applied **outside the model**.
+            //   WindDamageModel only knows how to turn wind speed, height and the setting
+            //   into a probability; it does not know the typhoon's heading. A broken factor
+            //   arriving here must not derange the draw.
             if (!float.IsNaN(chanceFactor) && chanceFactor > 1f) chance *= chanceFactor;
             if (chance > 1f) chance = 1f;
 
@@ -717,15 +794,16 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 実際に倒す。**<c>DisasterHelpers</c> を経由しない**（クラス doc）。
+        /// Actually knock it down. **Do not go via <c>DisasterHelpers</c>** (class doc).
         ///
-        /// **dry-run が false でも本番は必ず呼ぶ** —— <c>PowerPoleAI</c> /
-        /// <c>CableCarPylonAI</c> は <c>if (testOnly) return false;</c> の直後に本物の
-        /// 倒壊を行う（§F-2）。dry-run でフィルタすると送電柱を 1 本も倒せない。
+        /// **Always make the real call even when the dry run returns false** —
+        /// <c>PowerPoleAI</c> / <c>CableCarPylonAI</c> perform the real collapse immediately
+        /// after <c>if (testOnly) return false;</c> (§F-2). Filter on the dry run and not one
+        /// power pole ever comes down.
         /// </summary>
         /// <param name="accepted">
-        /// バニラ自身が dry-run に「受け付ける」と答えたか。false は
-        /// 「設計上断られた」（防災施設 or 送電柱）であって不具合ではない。
+        /// Whether vanilla itself answered "accepted" to the dry run. false means "refused
+        /// by design" (a disaster response facility, or a power pole) and is not a fault.
         /// </param>
         private static bool Collapse(Building[] buildings, ushort id,
                                      InstanceManager.Group group, out bool accepted)
@@ -737,24 +815,27 @@ namespace DisasterPlus.Game
 
             var ai = info.m_buildingAI;
 
-            // demolish: false（瓦礫を残す。防災施設は断る＝正しい挙動）、
-            // burnAmount: 0（風は吹き飛ばして潰すのであって焼損ではない）。
-            // ★ m_fireIntensity には触れない（罠 5）。
+            // demolish: false (leave the rubble; disaster response facilities refuse, which
+            // is correct behaviour), burnAmount: 0 (the wind blows things over and crushes
+            // them; it does not scorch them).
+            // ★ Do not touch m_fireIntensity (trap 5).
             accepted = ai.CollapseBuilding(id, ref buildings[id], group, true, false, 0);
             return ai.CollapseBuilding(id, ref buildings[id], group, false, false, 0);
         }
 
         /// <summary>
-        /// 市民と車両を吹き飛ばす。**無害**（<c>AddWindCitizens</c> ＋
-        /// <c>AddWindVehicles</c> の 2 行だけで、建物・道路・樹木には一切触らない。§B-1）。
-        /// 引数の形は §B-1 の竜巻の実引数を手本にしたが、**回転成分だけは違う**
-        /// （<see cref="WindRimSpeed"/> の ★★）。
+        /// Blow citizens and vehicles about. **Harmless** (it is just the two lines
+        /// <c>AddWindCitizens</c> + <c>AddWindVehicles</c> and touches neither buildings,
+        /// roads nor trees. §B-1).
+        /// The shape of the arguments is modelled on the tornado's actual arguments in §B-1,
+        /// **except for the rotational component** (the ★★ on
+        /// <see cref="WindRimSpeed"/>).
         ///
         /// </summary>
         /// <param name="latch">
-        /// <see cref="NextLatch"/> の答え。<c>true</c> なら
-        /// <see cref="WindUpwardLatch"/> の高い風で**まだ掴んでいない車と市民を掴み**、
-        /// <c>false</c> なら低い風で**既に掴んだ相手だけ**を押す。
+        /// <see cref="NextLatch"/>'s answer. <c>true</c> means **grab the cars and citizens
+        /// not yet grabbed** with the high <see cref="WindUpwardLatch"/> wind; <c>false</c>
+        /// means push **only what has already been grabbed** with the low wind.
         /// </param>
         private static void PushWind(Vec3 centre, InstanceManager.Group group, float range,
                                      bool latch)
@@ -774,8 +855,9 @@ namespace DisasterPlus.Game
                 latch ? WindUpwardLatch : WindUpwardSustain,
                 Mathf.Sin(heading) * speed);
 
-            // ★★ 回転成分は<b>半径で割ってから</b>渡す（WindRimSpeed の doc の ★★）。
-            //    ここを定数にすると、台風が大きいほど車が速く飛ぶ。
+            // ★★ Pass the rotational component <b>after dividing by the radius</b> (the ★★
+            //    in WindRimSpeed's doc). Make it a constant here and cars fly faster the
+            //    bigger the typhoon.
             float rotational = WindRimSpeed / radius;
 
             DisasterHelpers.AddWind(position, radius, directional,
@@ -783,11 +865,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 倒木。**燃やさない**（<c>burnRadiusMin</c> / <c>burnRadiusMax</c> は 0）——
-        /// 台風で木が燃えるのはおかしい。<c>TreeManager.BurnTree</c> も使わない。
+        /// Fell trees. **Do not set them alight** (<c>burnRadiusMin</c> /
+        /// <c>burnRadiusMax</c> are 0) — trees catching fire in a typhoon makes no sense.
+        /// We do not use <c>TreeManager.BurnTree</c> either.
         ///
-        /// この 1 経路だけが解決できない環境がありうる（そのときは倒木を諦め、
-        /// 風害の残りはそのまま動かす。<c>FeatureHost.NoteDegraded</c> で自己申告する）。
+        /// This one route may be unresolvable in some environments (in which case we give up
+        /// on felling trees and keep the rest of the wind damage running, self-reporting
+        /// through <c>FeatureHost.NoteDegraded</c>).
         /// </summary>
         private static void FellTrees(ushort typhoonId, Vec3 centre,
                                       InstanceManager.Group group, float range)
@@ -803,15 +887,16 @@ namespace DisasterPlus.Game
             try
             {
                 DisasterHelpers.DestroyTrees(typhoonId, group, position,
-                                             outer,      // totalRadius（一次カリング）
-                                             0f,         // removeRadius（跡形も無く消す範囲）
+                                             outer,      // totalRadius (the first-pass culling)
+                                             0f,         // removeRadius (the range wiped without trace)
                                              inner,      // destructionRadiusMin
                                              outer,      // destructionRadiusMax
-                                             0f, 0f);    // ★ 燃やさない
+                                             0f, 0f);    // ★ do not set alight
             }
             catch (System.Exception e)
             {
-                // 一度でも投げたら以後呼ばない。**黙って諦めない。**
+                // Once it throws even once, never call it again. **Do not give up
+                // silently.**
                 _treesUnavailable = true;
                 Log.Warn("typhoon wind: DisasterHelpers.DestroyTrees is unusable in this build ("
                          + e.GetType().Name + "); the wind sweep keeps running without felling "
@@ -830,14 +915,15 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 災害グループ。渡すとバニラ側の集計（災害ごとの被害棟数）が正しく積まれる。
-        /// <c>InstanceManager</c> がまだ居なければ <c>null</c>（バニラ自身も null を渡す
-        /// 経路を持つ。集計が積まれないだけで倒壊も風も走る）。
+        /// The disaster group. Passing it makes vanilla's own tally (buildings damaged per
+        /// disaster) add up correctly.
+        /// <c>null</c> if <c>InstanceManager</c> is not there yet (vanilla itself has routes
+        /// that pass null. Only the tally is lost; the collapses and the wind still run).
         /// </summary>
         private static InstanceManager.Group GroupOf(ushort disasterId)
         {
-            // Singleton<T>.instance は sInstance が null のとき FindObjectOfType と
-            // new GameObject を走らせる main スレッド専用 API。ここは sim スレッド。
+            // Singleton<T>.instance runs FindObjectOfType and new GameObject when sInstance
+            // is null, which makes it a main thread only API. This is the sim thread.
             if (disasterId == 0 || !Singleton<InstanceManager>.exists) return null;
 
             var groupId = InstanceID.Empty;
@@ -846,9 +932,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// **倒壊 0 のときも毎回出す。** <c>Log.Diag</c> は同一キーで 512 sim フレームに
-        /// 1 回に間引かれるが、**引数の文字列連結は毎回走ってしまう**ので
-        /// <c>DiagEnabled</c> で先に落とす（C# は引数を呼び出し前に評価し切る）。
+        /// **Written every time, even when 0 collapsed.** <c>Log.Diag</c> thins the same key
+        /// down to once per 512 sim frames, but **the string concatenation in the arguments
+        /// would still run every time**, so we bail out first with <c>DiagEnabled</c>
+        /// (C# evaluates the arguments fully before the call).
         /// </summary>
         private static void WriteDiag(ushort typhoonId, int strength, float range,
                                       int cells, int cellCount, int startOrdinal, int ordinal,
@@ -863,23 +950,26 @@ namespace DisasterPlus.Game
                 + " strength=" + strength
                 + " galeRadius=" + range.ToString("F0")
                 + " cells=" + cells + "/" + cellCount
-                // 走査は中心のセル（序数 0）から外へ。次回の再開点も出す
-                // ——「中心まで届いていない」を診断から見えるようにするため。
+                // The sweep goes outwards from the centre cell (ordinal 0). We also print
+                // where it will resume — so that "it has not even reached the centre" is
+                // visible in the diagnostics.
                 + " ringOrder=" + startOrdinal + ".." + (ordinal - 1)
                 + " next=" + _cursorOrdinal
                 + " scanned=" + scanned + " selected=" + selected
                 + " attempted=" + attempted + " refused=" + refused
                 + " collapsed=" + collapsed
                 + " unknownHeight=" + unknownHeight
-                // ★ 危険半円がどちらを向いていて、何棟がその側に居たか。
-                //   偏りが「効いていない」と「その側に建物が無い」を見分ける唯一の手。
+                // ★ Which way the dangerous semicircle faces, and how many buildings were on
+                //   that side. The only way to tell "the bias is not working" from "there are
+                //   no buildings on that side".
                 + " dangerousSide=" + (southern ? "left" : "right")
                 + " heading=" + (heading * 57.29578f).ToString("F0") + "deg"
                 + " onDangerousSide=" + biasedSelected
                 + (_treesUnavailable ? " trees=unavailable" : " trees=felled")
-                // ★ 「次回続きから」とは書かない（全体レビュー I1）。中心のセルが
-                //   変わると _cursorOrdinal は 0 に戻り、次の走査は眼から
-                //   やり直す —— 詳しくはクラス doc の「打ち切りの続き」節。
+                // ★ Do not write "continues next time" (whole-project review I1). Once the
+                //   centre cell changes, _cursorOrdinal goes back to 0 and the next sweep
+                //   starts again from the eye — see the class doc's "truncated continuation"
+                //   section for details.
                 + (capped ? " (capped; the outer edge was not rolled this pass)" : ""));
         }
 

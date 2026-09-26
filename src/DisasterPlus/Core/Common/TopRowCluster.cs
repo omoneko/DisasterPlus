@@ -3,51 +3,57 @@ using System;
 namespace DisasterPlus.Core.Common
 {
     /// <summary>
-    /// 画面最上段の**左から続く一団**がどこで終わるかだけを決める純算術。
-    /// <b>Core なのでエンジンには一切触らない。</b>
+    /// Pure arithmetic that decides one thing only: where the **run that continues from the
+    /// left** along the top row of the screen ends.
+    /// <b>This is Core, so it never touches the engine.</b>
     ///
-    /// ── なぜ要るのか（2026-08-22、実機で 2 回外した）─────────────────────
+    /// ── Why it is needed (2026-08-22, got it wrong twice on real hardware) ────────
     ///
-    /// 所有者の指示は最初からこうだった:
+    /// The owner's instruction was the same from the start:
     ///
-    /// > WF ボタン ＞ ！ボタン ＞ D＋ボタンの順に左上のところに並ぶように
+    /// > Line them up at the top left in the order WF button ＞ ! button ＞ D+ button
     ///
-    /// 1 回目は「最上段を**左端から**探す」にした ——
-    /// **先に間に合った者がいちばん左を取る**ので、この MOD が 1 番だと
-    /// 画面の左端に張り付いた（「まだ左すぎます」）。
+    /// The first attempt was "search the top row **from the left edge**" —
+    /// **whoever gets there first takes the leftmost slot**, so when this mod was first
+    /// it stuck to the left edge of the screen ("still too far left").
     ///
-    /// 2 回目は「最上段で**いちばん右の端**の右へ置く」にした ——
-    /// CS の最上段には**右上にもバニラの UI がある**（設定のボタン等）ので、
-    /// いちばん右の端はそちらになり、**画面の右端でバニラのボタンと重なった**。
+    /// The second attempt was "place it to the right of **the rightmost edge** on the top
+    /// row" — CS also has **vanilla UI at the top right** (the settings button and so on),
+    /// so the rightmost edge turned out to be that, and **it overlapped the vanilla buttons
+    /// at the right edge of the screen**.
     ///
-    /// 正しいのは<b>「左から続いている一団の、右端」</b>である。
-    /// 左端から歩き、<see cref="DefaultMaxGapPixels"/> より広い隙間で打ち切る ——
-    /// 右上のバニラ UI との間には画面幅ぶんの隙間があるので、そこで必ず切れる。
+    /// What is correct is <b>"the right edge of the run that continues from the left"</b>.
+    /// Walk from the left edge and stop at any gap wider than
+    /// <see cref="DefaultMaxGapPixels"/> — there is a screen-width-sized gap before the
+    /// vanilla UI at the top right, so the walk is guaranteed to stop there.
     ///
-    /// ★ **一団が 1 つも無ければ 0 を返す。** 呼び出し側はそのとき左端から始める
-    ///   （MOD が 1 つも居ない環境では、左端が正しい）。
+    /// ★ **If there is no run at all, return 0.** The caller then starts from the left edge
+    ///   (with no other mods present, the left edge is the right answer).
     /// </summary>
     public static class TopRowCluster
     {
         /// <summary>
-        /// これより広く空いていたら**別の一団**とみなす（px）。
+        /// A gap wider than this counts as **a different run** (px).
         ///
-        /// 32〜44 px のボタンが 8 px 空けて並ぶのが左上の慣習なので、
-        /// ボタン 2 個ぶんに満たない 96 px を境にする。
-        /// 右上のバニラ UI との隙間は画面幅の半分以上あるので、確実に切れる。
+        /// The convention at the top left is 32-44 px buttons spaced 8 px apart, so the
+        /// cut-off is 96 px, which is less than two buttons' worth.
+        /// The gap before the vanilla UI at the top right is more than half the screen
+        /// width, so the walk reliably stops there.
         /// </summary>
         public const float DefaultMaxGapPixels = 96f;
 
         /// <summary>
-        /// <paramref name="fromX"/> から右へ、隙間が <paramref name="maxGap"/> 以下の
-        /// あいだ繋がっている一団の**右端**。1 つも繋がらなければ 0。
+        /// The **right edge** of the run that stays connected going right from
+        /// <paramref name="fromX"/> while each gap is at most <paramref name="maxGap"/>.
+        /// 0 if nothing connects at all.
         ///
-        /// <paramref name="starts"/> / <paramref name="ends"/> は帯に居る要素の左右端で、
-        /// **並び順は問わない**（この中で選び出す。呼び出し側に整列を要求しない）。
-        /// 有効なのは先頭 <paramref name="count"/> 件。
+        /// <paramref name="starts"/> / <paramref name="ends"/> are the left and right edges
+        /// of the elements in the row, and **the order does not matter** (we pick them out
+        /// in here; the caller is not required to sort). Only the first
+        /// <paramref name="count"/> entries are used.
         ///
-        /// 異常な値（NaN・∞・end &lt;= start）は**その 1 件だけ無視する** ——
-        /// 1 件のせいで探索そのものを諦めない。
+        /// A bad value (NaN, infinity, end &lt;= start) makes us **skip that one entry
+        /// only** — one bad entry must not make us give up the whole search.
         /// </summary>
         public static float RightEdge(float[] starts, float[] ends, int count,
                                       float fromX, float maxGap)
@@ -63,8 +69,9 @@ namespace DisasterPlus.Core.Common
             float edge = 0f;
             bool any = false;
 
-            // 端から届く範囲を広げていく。1 周で 1 件以上伸びなくなったら終わり。
-            // 件数は最上段に居る要素の数（数十）なので、O(n²) で十分速い。
+            // Keep extending the reach from the edge. Stop once a pass grows nothing.
+            // The count is the number of elements on the top row (a few dozen), so O(n²)
+            // is quick enough.
             for (int pass = 0; pass < count; pass++)
             {
                 bool grew = false;
@@ -75,11 +82,12 @@ namespace DisasterPlus.Core.Common
                     float e = ends[i];
                     if (IsBad(s) || IsBad(e) || e <= s) continue;
 
-                    // 右端より左で終わっているものは、もう飲み込んでいる。
+                    // Anything ending left of the right edge has already been swallowed.
                     float reach = any ? edge : fromX;
                     if (e <= reach) continue;
 
-                    // 届く範囲（reach + maxGap）より右で始まるなら、まだ別の一団。
+                    // Starting right of the reach (reach + maxGap) means it is still a
+                    // different run.
                     if (s > reach + maxGap) continue;
 
                     edge = e;

@@ -7,55 +7,62 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 進行中の地震・地震計カバレッジ・sim スレッドの時刻を読む。
+    /// Reads the earthquakes in progress, the seismograph coverage and the sim thread's
+    /// time of day.
     ///
-    /// **sim スレッドから呼ぶこと。** <c>DisasterManager</c> /
-    /// <c>ImmaterialResourceManager</c> / <c>SimulationManager</c> はいずれも
-    /// シミュレーションが所有する。main スレッドから直接触ると、スタックトレースの
-    /// 出ない <c>IndexOutOfRangeException</c> ポップアップが後になってバニラ側から出る
-    /// （この MOD の try/catch では捕まえられない）。走査の形は①の
-    /// <c>WeatherReader.CountLocatedStorms</c> をそのまま手本にしている。
+    /// **Call it from the sim thread.** <c>DisasterManager</c>,
+    /// <c>ImmaterialResourceManager</c> and <c>SimulationManager</c> are all owned by the
+    /// simulation. Touch them directly from the main thread and an
+    /// <c>IndexOutOfRangeException</c> popup with no stack trace turns up later, out of
+    /// vanilla's own code (where this mod's try/catch cannot catch it). The shape of the
+    /// sweep follows ①'s <c>WeatherReader.CountLocatedStorms</c> exactly.
     ///
-    /// **時刻の読み方（§F-1 の罠）。** <c>SimulationManager.m_currentDayTimeHour</c> は
-    /// **メインスレッドが** <c>m_referenceFrameIndex</c>（描画補間側）から書くフィールドで、
-    /// sim スレッドから読むとスレッド境界を跨ぐ上に、そもそも別の量を読むことになる。
-    /// sim スレッドの正解は <c>m_dayTimeFrame * DAYTIME_FRAME_TO_HOUR</c> の 1 つだけ。
-    /// このファイルに <c>m_currentDayTimeHour</c> が現れたら、それは欠陥である。
+    /// **How to read the time (the trap in §F-1).**
+    /// <c>SimulationManager.m_currentDayTimeHour</c> is a field written by **the main
+    /// thread** from <c>m_referenceFrameIndex</c> (the render-interpolation side). Read
+    /// it from the sim thread and you both cross a thread boundary and read a different
+    /// quantity to begin with. On the sim thread there is exactly one right answer:
+    /// <c>m_dayTimeFrame * DAYTIME_FRAME_TO_HOUR</c>. If <c>m_currentDayTimeHour</c> ever
+    /// appears in this file, that is a defect.
     /// </summary>
     public static class EarthquakeReader
     {
         /// <summary>
-        /// 直近のプレハブ走査が失敗してから何回呼ばれたか。<see cref="Read"/> は毎 sim tick
-        /// 呼ばれるので、失敗を毎回リトライすると全 prefab 走査が毎 tick 走る。
-        /// <c>FireWhirlSpawner._missCallCount</c> と同じ間引き。
+        /// How many calls there have been since the last prefab scan failed.
+        /// <see cref="Read"/> is called every sim tick, so retrying a failure every time
+        /// would run a scan of every prefab every tick. The same throttle as
+        /// <c>FireWhirlSpawner._missCallCount</c>.
         /// </summary>
         private static int _missCallCount;
 
-        /// <summary>失敗キャッシュを効かせる呼び出し回数。0 にはしない（＝毎回リトライになる）。</summary>
+        /// <summary>How many calls the failure cache holds for. Never set it to 0 (that means retrying every time).</summary>
         private const int MissRetryCalls = 64;
 
         private static EarthquakePrefabFacts _prefab;
         private static bool _prefabSearched;
 
         /// <summary>
-        /// <see cref="Read"/> 内の想定外例外を <c>Log.Error</c> で鳴らしたか。
+        /// Whether an unexpected exception inside <see cref="Read"/> has already been
+        /// shouted about with <c>Log.Error</c>.
         ///
-        /// <c>Log.Warn</c> / <c>Log.Error</c> はスロットルされない。Read() は sim tick ごと
-        /// （通常速度でおよそ 50 回/秒）に呼ばれるので、恒常的に投げる状態になると
-        /// 毎秒 50 行を output_log.txt に書き続けてログを使い物にならなくする。
-        /// 1 回目だけ確実に目立たせ、以後は <c>Log.Diag</c> のキー単位スロットル
-        /// （512 sim フレームに 1 回）へ落とす（<c>WeatherReader._readErrorLogged</c> /
-        /// <c>HazardMapReader._sampleErrorLogged</c> が確立した形）。
+        /// <c>Log.Warn</c> / <c>Log.Error</c> are not throttled. Read() is called every
+        /// sim tick (roughly 50 times a second at normal speed), so a state where it
+        /// throws consistently would write 50 lines a second into output_log.txt and
+        /// render the log useless. Make the first one impossible to miss, then drop down
+        /// to <c>Log.Diag</c>'s per-key throttle (once every 512 sim frames) — the shape
+        /// established by <c>WeatherReader._readErrorLogged</c> /
+        /// <c>HazardMapReader._sampleErrorLogged</c>.
         ///
-        /// **レベルアンロードでリセットしない。** 「投げる」はこの DLL が参照している
-        /// ゲームのビルドに対する事実であって、都市ごとの状態ではない。
+        /// **Do not reset this on level unload.** "It throws" is a fact about the game
+        /// build this DLL is referencing, not per-city state.
         /// </summary>
         private static bool _readErrorLogged;
 
         /// <summary>
-        /// レベルのロード／アンロードで呼ぶ。都市をまたいでプレハブキャッシュを持ち越さない。
-        /// （2 つ目の都市が DLC 構成の違う環境で開かれる可能性は低いが、
-        ///  「全セッション状態はレベルアンロードでリセットする」がこの MOD の規則）。
+        /// Call this on level load and unload. Never carry the prefab cache across cities.
+        /// (It is unlikely that a second city would be opened in an environment with a
+        ///  different DLC set-up, but "all session state resets on level unload" is this
+        ///  mod's rule.)
         /// </summary>
         public static void Reset()
         {
@@ -64,7 +71,7 @@ namespace DisasterPlus.Game
             _missCallCount = 0;
         }
 
-        /// <summary>**sim スレッド専用。**</summary>
+        /// <summary>**Sim thread only.**</summary>
         public static EarthquakeSnapshot Read()
         {
             try
@@ -77,18 +84,21 @@ namespace DisasterPlus.Game
 
                 var sim = SimulationManager.instance;
 
-                // ★ m_currentDayTimeHour は読まない（§F-1）。これが sim スレッドの唯一の正解。
+                // ★ Never read m_currentDayTimeHour (§F-1). This is the sim thread's only
+                //   correct answer.
                 float hour = sim.m_dayTimeFrame * SimulationManager.DAYTIME_FRAME_TO_HOUR;
 
-                // 日夜サイクル OFF だと hour は永久に 12.0 に固定される。ここでは黙って通し、
-                // その事実をスナップショットに載せて表示側に判断させる
-                // （EarthquakeSnapshot.DayNightEnabled の doc 参照）。
+                // With the day/night cycle off, hour is pinned at 12.0 forever. Let it
+                // through silently here and put the fact on the snapshot so the display
+                // side can decide what to do (see EarthquakeSnapshot.DayNightEnabled's
+                // doc).
                 bool dayNight = sim.m_enableDayNight;
 
-                // ★ カーソルは 1 回だけ取る。建物の走査（地震があるときだけ）と
-                //    カバレッジの読み取り（地震の有無に関わらず）で共有する。
-                //    2 回 TakeCursor すると、その間に main スレッドが publish し直した
-                //    別の座標について 2 つの値を作ることになる。
+                // ★ Take the cursor exactly once and share it between the building sweep
+                //   (only when there is an earthquake) and the coverage read (regardless
+                //   of whether there is one). Call TakeCursor twice and, if the main
+                //   thread republishes in between, you end up producing two values for
+                //   two different positions.
                 Vec3 cursor;
                 bool haveCursor = EarthquakeHub.TakeCursor(out cursor);
 
@@ -99,31 +109,33 @@ namespace DisasterPlus.Game
                                                          out cursorQuakeId, out cursorProbe,
                                                          out cursorHeight);
 
-                // カーソル地点のカバレッジは**地震が 1 個も無くても読む**。
-                // 「ここに地震計は届いているか」は都市の性質であって、
-                // 今地震が起きているかとは関係が無い（設計書 §3.4）。
+                // The coverage at the cursor is read **even when there is no earthquake
+                // at all**. "Does a seismograph reach here" is a property of the city and
+                // has nothing to do with whether a quake is happening (design doc §3.4).
                 int cursorCoverage = 0;
                 bool cursorCoverageValid = haveCursor
                     && TryReadCoverage(new Vector3(cursor.X, cursor.Y, cursor.Z),
                                        out cursorCoverage);
 
-                // 波形は**前の tick までに貯まったもの**である。今 tick ぶんの
-                // サンプリングは EarthquakeFeature がポーズガードより下で行うので、
-                // ここで読めるのは常に 1 tick 前までの状態になる（BuildingProbe の
-                // カーソル追従と同じ性質の、設計上の遅延）。
+                // The waveforms are **what accumulated up to the previous tick**. This
+                // tick's sampling is done by EarthquakeFeature below the pause guard, so
+                // what can be read here is always the state as of one tick ago (the same
+                // sort of designed-in lag as BuildingProbe's cursor tracking).
                 //
-                // ★ RecordingQuakeId も同じ 1 tick ぶん古い。新しい地震が選ばれる
-                //    tick では、ここで載る WaveformQuakeId は**前の地震の ID**
-                //    （あるいは 0）になる。Sample() がまだ走っていないためで、
-                //    次の tick で自動的に揃う。Traces は同じ時点の値なので、
-                //    ID と中身が食い違うことはない（両方が 1 tick 古い）。
+                // ★ RecordingQuakeId is one tick stale in the same way. On the tick where
+                //    a new earthquake is chosen, the WaveformQuakeId put here is **the
+                //    previous quake's ID** (or 0), because Sample() has not run yet; it
+                //    lines up again by itself on the next tick. Traces come from the same
+                //    moment, so the ID and the contents never disagree (both are one tick
+                //    old).
                 var traces = SeismographRecorder.Snapshot();
 
-                // ★ 第 2 層（津波連鎖）の状態も sim スレッドのここで読む。TsunamiChain は
-                //    同じスレッドの持ち物なので、これは単なるローカルな読み出しである
-                //    （main スレッドへ渡す唯一の経路をスナップショットに一本化している）。
-                //    Read() は TsunamiChain.Tick() より前に走るので、載るのは最大
-                //    1 tick 前の状態になる（EarthquakeSnapshot.TsunamiState の doc）。
+                // ★ Layer 2's state (the tsunami chain) is read here on the sim thread
+                //    too. TsunamiChain belongs to this same thread, so this is just a
+                //    local read (it funnels the one route to the main thread through the
+                //    snapshot). Read() runs before TsunamiChain.Tick(), so what lands
+                //    here is up to one tick old (see EarthquakeSnapshot.TsunamiState's
+                //    doc).
                 return new EarthquakeSnapshot(quakes, prefab, sim.m_currentFrameIndex,
                                               hour, dayNight, cursorBuilding, cursorQuakeId,
                                               cursorProbe, cursorHeight,
@@ -131,9 +143,10 @@ namespace DisasterPlus.Game
                                               traces, SeismographRecorder.RecordingQuakeId,
                                               TsunamiChain.State, TsunamiChain.DueFrame,
                                               TsunamiChain.QuakeId,
-                                              // ★ 第 2 層（長周期）の打ち切りフラグも同じ経路で。
-                                              //    main スレッドが LongPeriodDamage の静的状態を
-                                              //    直接読まないための一本化（TsunamiChain と同じ）。
+                                              // ★ Layer 2's long-period cut-off flag goes the
+                                              //    same way: funnelled through here so the main
+                                              //    thread never reads LongPeriodDamage's static
+                                              //    state directly (as with TsunamiChain).
                                               LongPeriodDamage.LastCapped, true);
             }
             catch (System.Exception e)
@@ -152,12 +165,13 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 生きている地震を全部拾う。**sim スレッド専用。**
+        /// Picks up every live earthquake. **Sim thread only.**
         ///
-        /// <c>DisasterData.Info</c> は <c>PrefabCollection&lt;DisasterInfo&gt;.GetPrefab(m_infoIndex)</c>
-        /// を呼ぶだけで境界検査をしない（IL 実測: <c>get_Info</c> は 4 命令）。壊れたセーブや
-        /// MOD 由来の不正な <c>m_infoIndex</c> で投げうるので、**要素ごとに** try/catch で
-        /// 囲んで 1 件の失敗が集計全体を落とさないようにする。
+        /// <c>DisasterData.Info</c> just calls
+        /// <c>PrefabCollection&lt;DisasterInfo&gt;.GetPrefab(m_infoIndex)</c> with no bounds
+        /// check (measured in the IL: <c>get_Info</c> is 4 instructions). It can throw on
+        /// a corrupt save or an invalid <c>m_infoIndex</c> left by another mod, so wrap
+        /// **each element** in try/catch and stop one failure taking down the whole tally.
         /// </summary>
         private static IList<EarthquakeReading> CollectQuakes(DisasterManager d,
                                                              EarthquakePrefabFacts prefab)
@@ -168,13 +182,14 @@ namespace DisasterPlus.Game
             var buffer = list.m_buffer;
             if (buffer == null) return EarthquakeSnapshot.EmptyQuakeList;
 
-            // m_size を信用しきらない。バニラは m_size までしか回さないが、こちらは
-            // 配列長でも頭を押さえておく（sim スレッドで IndexOutOfRange を出すと
-            // スタックトレース無しのポップアップになる）。
+            // Don't take m_size entirely on trust. Vanilla only iterates up to m_size,
+            // but we cap it by the array length as well (an IndexOutOfRange on the sim
+            // thread becomes a popup with no stack trace).
             int size = list.m_size;
             if (size > buffer.Length) size = buffer.Length;
 
-            // 地震はふつう 0 個なので、見つかるまでリストを確保しない。
+            // There are normally zero earthquakes, so don't allocate the list until one
+            // is found.
             List<EarthquakeReading> found = null;
 
             for (int i = 0; i < size; i++)
@@ -186,7 +201,8 @@ namespace DisasterPlus.Game
                 try
                 {
                     var info = buffer[i].Info;
-                    // UnityEngine.Object の == オーバーロードで破棄済み(fake-null)も弾く。
+                    // UnityEngine.Object's == overload also rejects a destroyed
+                    // (fake-null) object.
                     if (info == null) continue;
                     ai = info.m_disasterAI;
                 }
@@ -195,16 +211,18 @@ namespace DisasterPlus.Game
                     continue;
                 }
 
-                // ai の静的型は DisasterAI なのでこの is はダウンキャスト検査であり、
-                // 「常に false」で CS0184（このプロジェクトではエラー扱い）にはならない。
+                // ai's static type is DisasterAI, so this `is` is a downcast check and
+                // will not be "always false" and trigger CS0184 (which this project
+                // treats as an error).
                 if (!(ai is EarthquakeAI)) continue;
 
                 if (found == null) found = new List<EarthquakeReading>();
                 found.Add(BuildReading((ushort)i, ref buffer[i], flags, prefab));
             }
 
-            // 読み取り専用に包んでから渡す。スナップショットは不変であることが
-            // スレッド境界の前提なので、「変更しない約束」ではなく型で保証する。
+            // Wrap it read-only before handing it over. The snapshot being immutable is a
+            // precondition of the thread boundary, so guarantee it with the type rather
+            // than with a promise not to modify it.
             return found == null ? EarthquakeSnapshot.EmptyQuakeList : found.AsReadOnly();
         }
 
@@ -217,8 +235,8 @@ namespace DisasterPlus.Game
             int coverage;
             bool coverageKnown = TryReadCoverage(pos, out coverage);
 
-            // §A-3 の L / W。プレハブが解決できていなければ 0 を入れ、
-            // 受け取った側（Task 4 の FaultBand）が「不明」として扱う。
+            // L / W from §A-3. If the prefab could not be resolved, put 0 in and let the
+            // receiving side (Task 4's FaultBand) treat it as "unknown".
             float scale = 0.5f + intensity * 0.005f;
             float crackLength = prefab.Resolved ? prefab.CrackLength * scale : 0f;
             float crackWidth = prefab.Resolved ? prefab.CrackWidth * scale : 0f;
@@ -232,8 +250,9 @@ namespace DisasterPlus.Game
                 DisasterPhases.IsLocated(flags),
                 data.m_startFrame,
                 data.m_activationFrame,
-                // ★ 0 は「今」ではなく「未定」。SelfTrigger(64) が立っていない地震は
-                //    ここが 0 のまま Emerging で永久に固まる（§A-1）。
+                // ★ 0 means "not yet decided", not "now". An earthquake without
+                //    SelfTrigger(64) set stays at 0 here and sits in Emerging forever
+                //    (§A-1).
                 data.m_activationFrame != 0u,
                 coverage,
                 coverageKnown,
@@ -242,19 +261,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// カーソル直下の建物の余裕度。**sim スレッド専用**（建物バッファに触る）。
+        /// The headroom of the building under the cursor. **Sim thread only** (it touches
+        /// the building buffers).
         ///
-        /// 対象にするのは**破壊判定がこれから走る、あるいは今走っている地震 1 個だけ**で、
-        /// 全地震ぶんは走査しない（毎 sim tick のコストを地震の数に比例させない）。
+        /// It considers **only the one earthquake whose destruction pass is about to run
+        /// or is running now**; it does not sweep for every earthquake (that would make
+        /// the per-sim-tick cost proportional to the number of quakes).
         ///
-        /// Clearing / Finished を外しているのは性能のためではなく**正確さのため**である。
-        /// 全体円盤の <c>DestroyBuildings</c> は <c>EarthquakeAI.SimulationStep</c> の
-        /// **Active 分岐にしか無い**（§A-3）。収束済みの地震について「倒壊します」と
-        /// 出すのは、もう起きないことを起きると言うことになる。
+        /// Excluding Clearing / Finished is **for accuracy, not performance**. The
+        /// whole-quake disc's <c>DestroyBuildings</c> exists **only in the Active
+        /// branch** of <c>EarthquakeAI.SimulationStep</c> (§A-3). Saying "it will
+        /// collapse" about an earthquake that has already subsided is saying that
+        /// something which can no longer happen will happen.
         ///
-        /// 選定順は <see cref="QuakeSelection.SelectDamaging"/> に任せる（順位付けを
-        /// 複数箇所に写さないため。あちらのクラス doc に経緯がある）。
-        /// どの地震を選んだかは <see cref="EarthquakeSnapshot.CursorQuakeId"/> で名乗る。
+        /// The choice is left to <see cref="QuakeSelection.SelectDamaging"/> (so the
+        /// ranking is not copied into several places; the background is in its class
+        /// doc). Which earthquake was chosen is stated by
+        /// <see cref="EarthquakeSnapshot.CursorQuakeId"/>.
         /// </summary>
         private static BuildingMargin ProbeCursorBuilding(IList<EarthquakeReading> quakes,
                                                           bool haveCursor, Vec3 cursor,
@@ -267,44 +290,47 @@ namespace DisasterPlus.Game
             heightMetres = 0f;
             if (quakes.Count == 0) return BuildingMargin.None();
 
-            // main スレッドが「今カーソルはここ」と言っていないなら何も調べない
-            // （パネルが閉じている、マウスが UI の上にある、地形を外している）。
+            // If the main thread has not said "the cursor is here right now", look at
+            // nothing (panel closed, mouse over the UI, or off the terrain).
             if (!haveCursor) return BuildingMargin.None();
 
             var target = QuakeSelection.SelectDamaging(quakes);
             if (target == null) return BuildingMargin.None();
 
-            // ★ 建物が見つかる前にここで立てる。CursorQuakeId != 0 は
-            //    「この地震について、この座標を実際に調べた」の印であって
-            //    「建物があった」の印ではない。区別しないと、収束中の地震しか
-            //    無いとき（破壊判定はもう走らない）に、表示側が建物の上で
-            //    「カーソルの下に建物がありません」という誤った説明を出す。
+            // ★ Set this here, before any building is found. CursorQuakeId != 0 is the
+            //    mark of "we actually looked at this position for this earthquake", not
+            //    of "there was a building". Without that distinction, when the only
+            //    quakes are subsiding ones (whose destruction pass no longer runs) the
+            //    display puts out the wrong explanation — "there is no building under the
+            //    cursor" — while the cursor sits on one.
             cursorQuakeId = target.DisasterId;
 
             var band = new FaultBand(target.Epicentre.ToVec2(), target.AngleRadians,
                                      target.CrackLength, target.CrackWidth);
 
-            // ★ 破壊コードが他 MOD に置き換えられていれば、余裕度は結論を出さない
-            //    （§E-2。BuildingMargin.Evaluate の damageModelReplaced）。
-            //    ModCompat.NdrPresent は起動時に 1 回だけ評価してキャッシュされる
-            //    ので、ここが毎 tick 走っても PluginManager は舐め直されない。
+            // ★ If the destruction code has been replaced by another mod, the headroom
+            //    gives no verdict (§E-2; BuildingMargin.Evaluate's damageModelReplaced).
+            //    ModCompat.NdrPresent is evaluated once at startup and cached, so even
+            //    though this runs every tick, PluginManager is not walked again.
             return BuildingProbe.ProbeAt(cursor, target, band, ModCompat.NdrPresent,
                                          out outcome, out heightMetres);
         }
 
         /// <summary>
-        /// 指定地点の地震計カバレッジ。**クランプしない**（生値を持ち、
-        /// <c>Min(cov, 100)</c> は表示側の <see cref="WarningLeadTime"/> が行う）。
+        /// The seismograph coverage at a given position. **Not clamped** (it carries the
+        /// raw value; the <c>Min(cov, 100)</c> is done on the display side by
+        /// <see cref="WarningLeadTime"/>).
         ///
-        /// 呼び出し箇所は 2 つあり、**意味がまったく違う**:
-        ///   - 震央（<c>m_targetPosition</c>）… バニラが警報リードタイムと
-        ///     <c>located</c> の判定に実際に使う 1 点（§A-2）。
-        ///   - カーソル地点 … 「今この場所に地震計は届いているか」を確かめるためだけの値。
-        ///     **ここからリードタイムを出してはいけない。**
+        /// There are two call sites, and they **mean completely different things**:
+        ///   - the epicentre (<c>m_targetPosition</c>) … the single point vanilla really
+        ///     uses for the warning lead time and the <c>located</c> decision (§A-2).
+        ///   - the cursor position … a value that exists only so the player can check
+        ///     whether a seismograph reaches this spot.
+        ///     **Never derive the lead time from this.**
         ///
-        /// 読めなかったときに 0 を返して true にしてはいけない。カバレッジ 0 は
-        /// 「地震計が無い＝ハザードマップが空なのは正常」という**意味のある実測値**で、
-        /// 読み取り失敗と同じ値になってしまう。
+        /// Never return 0 and true when the read failed. A coverage of 0 is a
+        /// **meaningful measurement** — "there is no seismograph, so an empty hazard map
+        /// is correct" — and it would end up as the same value as a failed read.
         /// </summary>
         private static bool TryReadCoverage(Vector3 position, out int coverage)
         {
@@ -324,16 +350,17 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// プレハブ 4 値をキャッシュ越しに返す。**sim スレッド専用**
-        /// （<c>_prefabSearched</c> / <c>_missCallCount</c> を書き換える）。
+        /// Returns the four prefab values through the cache. **Sim thread only** (it
+        /// writes <c>_prefabSearched</c> / <c>_missCallCount</c>).
         /// </summary>
         private static EarthquakePrefabFacts ResolvePrefabFacts()
         {
             if (_prefabSearched && _prefab.Resolved) return _prefab;
 
-            // 直前の走査が失敗している場合は、レベルロード直後で prefab がまだ
-            // 揃っていないだけの可能性がある。「二度と探さない」にはせず、
-            // かといって毎 tick 全 prefab を舐めもしない。呼び出し回数で間引く。
+            // If the previous scan failed, it may simply be that we are just after a
+            // level load and the prefabs are not all in place yet. So do not make it
+            // "never look again", but do not walk every prefab every tick either.
+            // Throttle by call count.
             if (_prefabSearched)
             {
                 _missCallCount++;
@@ -346,8 +373,8 @@ namespace DisasterPlus.Game
 
             if (!_prefab.Resolved)
             {
-                // Warn はスロットルされないので Diag に落とす。DLC 非所持環境では
-                // これが恒常的な正常状態になる。
+                // Warn is not throttled, so drop down to Diag. Without the DLC this is
+                // the permanent, correct state of affairs.
                 Log.Diag("EqPrefab",
                     "no EarthquakeAI DisasterInfo found; Natural Disasters DLC required for earthquakes");
             }
@@ -355,17 +382,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// プレハブを走査するだけの純粋関数。キャッシュもミス回数も一切触らないので、
-        /// **どのスレッドから呼んでもこのクラスの状態を壊さない**。
-        /// <c>Assumptions.Run()</c>（main スレッド）はこちらを使うこと
-        /// —— <see cref="ResolvePrefabFacts"/> を呼ぶと、sim スレッドが回している
-        /// キャッシュを main スレッドから巻き戻すことになる
-        /// （<c>FireWhirlSpawner.HasTornadoPrefab</c> で同じ欠陥を直した経緯がある）。
+        /// A pure function that only scans the prefabs. It touches neither the cache nor
+        /// the miss count, so **calling it from any thread cannot corrupt this class's
+        /// state**. <c>Assumptions.Run()</c> (main thread) must use this one — calling
+        /// <see cref="ResolvePrefabFacts"/> would mean the main thread rewinding a cache
+        /// the sim thread is driving (we fixed exactly this defect once before, in
+        /// <c>FireWhirlSpawner.HasTornadoPrefab</c>).
         ///
-        /// <c>DisasterManager.FindDisasterInfo&lt;T&gt;()</c> は public static generic で、
-        /// <c>PrefabCollection&lt;DisasterInfo&gt;</c> を走査して <c>m_disasterAI is T</c> の
-        /// 最初のプレハブを返すだけ（IL 事実文書 §B-5）。DLC 判定は中に無く、
-        /// **DLC が無ければプレハブ自体が存在せず null が返る**のが権威。
+        /// <c>DisasterManager.FindDisasterInfo&lt;T&gt;()</c> is a public static generic
+        /// that walks <c>PrefabCollection&lt;DisasterInfo&gt;</c> and returns the first
+        /// prefab whose <c>m_disasterAI is T</c>, and nothing more (IL facts doc §B-5).
+        /// There is no DLC check inside it; the authority is that
+        /// **without the DLC the prefab simply does not exist and null comes back**.
         /// </summary>
         public static EarthquakePrefabFacts ScanPrefabFacts()
         {

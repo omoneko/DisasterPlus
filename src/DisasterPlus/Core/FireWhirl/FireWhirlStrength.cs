@@ -1,32 +1,34 @@
 namespace DisasterPlus.Core.FireWhirl
 {
     /// <summary>
-    /// 燃焼棟数から旋風の大きさと破壊力を決める。
-    /// 小さい火災なら小さい旋風、大火災なら大きい旋風。
+    /// Decides the whirl's size and destructive power from the number of burning buildings.
+    /// A small fire gives a small whirl, a large fire a large one.
     /// </summary>
     public static class FireWhirlStrength
     {
         public const float MinRadius = 40f;
         public const float MaxRadius = 220f;
 
-        /// <summary>この棟数で MaxRadius に到達する。</summary>
+        /// <summary>At this many buildings the radius reaches MaxRadius.</summary>
         private const int SaturationCount = 120;
 
-        /// <summary>旋風の半径（メートル）。</summary>
+        /// <summary>The whirl's radius (metres).</summary>
         public static float RadiusFor(int burningCount)
         {
             return MinRadius + (MaxRadius - MinRadius) * Curve(burningCount);
         }
 
-        /// <summary>破壊力の倍率 [0, 1]。Game 層が VortexAI の破壊半径に掛ける。</summary>
+        /// <summary>Destructive-power multiplier [0, 1]. The Game layer multiplies VortexAI's
+        /// destruction radius by it.</summary>
         public static float DamageScaleFor(int burningCount)
         {
             return Curve(burningCount);
         }
 
         /// <summary>
-        /// 0 から 1 へ単調増加し、SaturationCount で 1 に達して飽和する曲線。
-        /// 平方根なので序盤の伸びが大きく、大火災でも半径が発散しない。
+        /// A curve rising monotonically from 0 to 1, reaching 1 and saturating at
+        /// SaturationCount. Being a square root, it climbs fast early on and the radius
+        /// does not run away even in a huge fire.
         /// </summary>
         private static float Curve(int burningCount)
         {

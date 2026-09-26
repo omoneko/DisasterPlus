@@ -3,8 +3,8 @@ using DisasterPlus.Core.Forecast;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// sim スレッドで作り main スレッドで読む不変スナップショット。
-    /// 一度作ったら書き換えない。
+    /// An immutable snapshot built on the sim thread and read on the main thread.
+    /// Once built it is never written to again.
     /// </summary>
     public class WeatherSnapshot
     {
@@ -17,71 +17,78 @@ namespace DisasterPlus.Game
         public readonly int DisasterCooldown;
 
         /// <summary>
-        /// 現在「測位済み（Located）かつ進行中（Emerging|Active）」の雷雨の数。
+        /// The number of thunderstorms that are currently both "located" (Located) and
+        /// under way (Emerging|Active).
         ///
-        /// なぜこれを運ぶか（全体レビューの最重要指摘、IL 実測で確定）:
-        /// バニラのハザードマップは**静的なリスク面ではない**。
-        /// <c>ThunderStormAI.UpdateHazardMap</c> / <c>TornadoAI.UpdateHazardMap</c> は
-        /// どちらも先頭 2 命令ブロックが
-        ///   <c>(m_flags &amp; 4096) == 0 -&gt; return</c>（4096 = DisasterData.Flags.Located）
-        ///   <c>(m_flags &amp; 12)   == 0 -&gt; return</c>（12 = Emerging|Active）
-        /// というゲートで、どちらも地形・建物を一切参照しない（IL 全走査で確認）。
-        /// 通過した場合だけ m_targetPosition の周りに半径と強度で決まる円盤を塗る。
-        /// さらに <c>DisasterManager.UpdateTexture</c> は毎回 256x256 セルを全てゼロで
-        /// 埋めてから、このゲートを通った災害だけを書き込む。
+        /// Why we carry this (the most important finding of the full review, confirmed by
+        /// reading the IL): vanilla's hazard map is **not a static risk surface**.
+        /// <c>ThunderStormAI.UpdateHazardMap</c> and <c>TornadoAI.UpdateHazardMap</c> both
+        /// open with the same two instruction blocks, a gate:
+        ///   <c>(m_flags &amp; 4096) == 0 -&gt; return</c> (4096 = DisasterData.Flags.Located)
+        ///   <c>(m_flags &amp; 12)   == 0 -&gt; return</c> (12 = Emerging|Active)
+        /// and neither one looks at the terrain or the buildings at all (checked by
+        /// sweeping the whole IL). Only if it gets past the gate does it paint a disc
+        /// around m_targetPosition whose size comes from the radius and the intensity.
+        /// On top of that, <c>DisasterManager.UpdateTexture</c> fills all 256x256 cells
+        /// with zero every time before writing in only the disasters that passed the gate.
         ///
-        /// つまりグリッドの中身は「レーダーで測位済みの進行中の嵐の予測被害範囲」であり、
-        /// 該当する嵐が 1 つも無ければ**全セルが 0** になる。
+        /// So what the grid holds is "the predicted damage area of storms the radar has
+        /// located and that are under way", and if there is not a single such storm
+        /// **every cell is 0**.
         ///
-        /// この数を運ばないと、DLC はあるが気象レーダーを建てていないプレイヤーが
-        /// 「マップに表示」を押して都市のどこにカーソルを置いても
-        /// 「落雷: 0」と読むことになる。<c>SampleAt</c> はサブモードが一致していて
-        /// グリッドも実在するので ok=true を返す——ただ中身が全部ゼロなだけである。
-        /// プレイヤーは「どこにも落雷リスクが無い」と結論するが、真実は
-        /// 「今どの嵐も検知されていない」。本機能がまさに防ぐために書かれた
-        /// 「確信を持って誤った数値」そのものになる。
+        /// Without this count, a player who owns the DLC but has not built a weather radar
+        /// presses "show on map", puts the cursor anywhere in the city and reads
+        /// "Lightning: 0". <c>SampleAt</c> returns ok=true, because the submode does match
+        /// and the grid really is there — it is just that its contents are all zero. The
+        /// player concludes "there is no lightning risk anywhere", when the truth is "no
+        /// storm is detected right now". That is exactly the sort of confidently wrong
+        /// number this feature was written to prevent.
         ///
-        /// <see cref="DisasterInfoAvailable"/> が false のときこの値は無意味
-        /// （読めなかったので 0 のまま）。呼び出し側は必ずそちらを先に見ること。
+        /// When <see cref="DisasterInfoAvailable"/> is false this value is meaningless
+        /// (we could not read it, so it stays 0). Callers must always check that first.
         /// </summary>
         public readonly int LocatedLightningStorms;
 
         /// <summary>
-        /// 現在「測位済みかつ進行中」の竜巻の数。
-        /// 意味と注意点は <see cref="LocatedLightningStorms"/> と同じ。
+        /// The number of tornadoes that are currently both located and under way.
+        /// The meaning and the caveats are the same as for
+        /// <see cref="LocatedLightningStorms"/>.
         ///
-        /// 補足（IL 実測）: <c>TornadoAI.SimulationStep</c> は自分で
-        /// <c>DisasterManager.DetectDisaster(disasterID, located: false)</c> を呼ぶ
-        /// （IL_0038 が <c>ldc.i4.0</c>）。<c>ThunderStormAI</c> は
-        /// <c>DetectDisaster</c> を一切呼ばない。<c>located: true</c> を渡す呼び出し元は
-        /// <c>WeatherRadarAI</c> / <c>SpaceRadarAI</c> / <c>TsunamiBuoyAI</c> の
-        /// <c>ProduceGoods</c>、<c>FirewatchTowerAI.NearObjectInFire</c>、
-        /// <c>SinkholeAI.SimulationStep</c>、および <c>DisasterWrapper.DetectDisaster</c>
-        /// （MOD/シナリオ用スクリプト API）だけで、雷雨・竜巻に Located を立てられるのは
-        /// このうち**気象レーダー（WeatherRadarAI）だけ**である。
+        /// A note from reading the IL: <c>TornadoAI.SimulationStep</c> calls
+        /// <c>DisasterManager.DetectDisaster(disasterID, located: false)</c> itself
+        /// (IL_0038 is <c>ldc.i4.0</c>). <c>ThunderStormAI</c> never calls
+        /// <c>DetectDisaster</c> at all. The only callers that pass <c>located: true</c>
+        /// are <c>ProduceGoods</c> on <c>WeatherRadarAI</c> / <c>SpaceRadarAI</c> /
+        /// <c>TsunamiBuoyAI</c>, <c>FirewatchTowerAI.NearObjectInFire</c>,
+        /// <c>SinkholeAI.SimulationStep</c>, and <c>DisasterWrapper.DetectDisaster</c>
+        /// (the scripting API for mods and scenarios) — and of those, the only thing that
+        /// can set Located on a thunderstorm or a tornado is **the weather radar
+        /// (WeatherRadarAI)**.
         /// </summary>
         public readonly int LocatedTornadoes;
 
         /// <summary>
-        /// DisasterProbability / DisasterCooldown / LocatedLightningStorms /
-        /// LocatedTornadoes が実際に DisasterManager から読めたか。
+        /// Whether DisasterProbability / DisasterCooldown / LocatedLightningStorms /
+        /// LocatedTornadoes were actually read from DisasterManager.
         ///
-        /// レビュー指摘（コーディネーターからのフィードバック）: DisasterManager が
-        /// 居ない場合、以前は DisasterProbability を黙って 0f のまま返していた。
-        /// これは「確率 0%」という実際の読み取り結果と外見上区別が付かない
-        /// **捏造されたゼロ**であり、ハザード数値を表示中でない種別のラベルで出す
-        /// のと同種の「確信を持って誤った数値」になる。このフラグで
-        /// 「読めなかった（不明）」と「読んだ結果 0 だった」を呼び出し側が
-        /// 区別できるようにする。false のときパネルは確率の行そのものを出さない
-        /// （0.0% と表示しない）。
+        /// Review finding (feedback from the coordinator): when DisasterManager was absent,
+        /// DisasterProbability used to be returned silently as 0f. That is a
+        /// **fabricated zero** — outwardly indistinguishable from a genuine reading of
+        /// "0% probability" — and it is the same kind of confidently wrong number as
+        /// putting a hazard figure under the label of a type that is not on display. This
+        /// flag lets the caller tell "could not read it (unknown)" apart from "read it and
+        /// it was 0". When it is false the panel leaves the probability line out entirely
+        /// (it does not print 0.0%).
         ///
-        /// 測位済み嵐の数にも同じ理屈が効く。false のときに「嵐は検知されていません」
-        /// と言い切ると、それ自体が読めていない事実を隠した断定になるので、
-        /// パネルは汎用の「不明」に落とすこと。
+        /// The same reasoning applies to the located-storm counts. Stating flatly that
+        /// "no storm is detected" while this is false would itself be an assertion that
+        /// hides the fact that we could not read anything, so the panel must fall back to
+        /// the generic "unknown".
         /// </summary>
         public readonly bool DisasterInfoAvailable;
 
-        /// <summary>読み取りに成功したか。false ならパネルは「読み取れません」と出す。</summary>
+        /// <summary>Whether the read succeeded. If false the panel says "cannot
+        /// read".</summary>
         public readonly bool Valid;
 
         public WeatherSnapshot(ForecastReading temperature, ForecastReading rain,

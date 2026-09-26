@@ -7,31 +7,37 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ③火災旋風。密集火災を検出して竜巻を生成し、その場に留めて延焼を撒く。
+    /// ③ The fire whirl. Detects a dense fire, creates a vortex, holds it in place and
+    /// scatters the fire around.
     ///
-    /// ── ★★ 火災旋風はプレイヤーが起こすものではない ────────────────────
+    /// ── ★★ A fire whirl is not something the player raises ────────────────
     ///
-    /// 以前は災害パネルに③のタイルがあり、<c>FireWhirlPlacementTool</c> で
-    /// クリック地点に強制発生させられた。**その経路は撤去した**（設計書 §5.3）。
-    /// 火災旋風は大火災の**結果**として自然に生まれる現象であって、召喚できる
-    /// ものではない、というのが本 MOD の立場である。したがって
-    /// <see cref="TrySpawnNew"/> が唯一の発生経路になった。
+    /// The disaster panel used to have a tile for ③, and
+    /// <c>FireWhirlPlacementTool</c> would force one to spawn wherever you clicked.
+    /// **That route has been removed** (design document §5.3). This mod's position is
+    /// that a fire whirl is a phenomenon that arises naturally as the **result** of a
+    /// large fire, not something you can summon. So <see cref="TrySpawnNew"/> is now the
+    /// only route by which one can occur.
     ///
-    /// 経路が 1 本になった代償は「既定の状態が『何も起きない』になった」ことで、
-    /// 実機テストではそれが「壊れているのか、まだ火が足りないのか分からない」に
-    /// 直結する（実際に <c>DIAG fireWhirl: burning=0 active=0</c> だけが出た
-    /// セッションの報告がある）。だから**発生条件の不足そのものを診断に出す** ——
-    /// <see cref="DisasterPlus.Core.FireWhirl.FireWhirlProspect"/> がその値で、
-    /// <see cref="_prospect"/> に毎 tick 控えて <see cref="WriteDiagnostics"/> が出す。
+    /// The price of having a single route is that the default state became "nothing
+    /// happens", and in an in-game test that leads straight to "I cannot tell whether it
+    /// is broken or whether there is simply not enough fire yet" (there is a report of a
+    /// session where the only thing printed was <c>DIAG fireWhirl: burning=0 active=0</c>).
+    /// So **the shortfall in the spawn condition itself goes into the diagnostics** —
+    /// <see cref="DisasterPlus.Core.FireWhirl.FireWhirlProspect"/> is that value, noted
+    /// into <see cref="_prospect"/> every tick and printed by
+    /// <see cref="WriteDiagnostics"/>.
     /// </summary>
     public class FireWhirlFeature : IDisasterFeature
     {
-        /// <summary>FeatureHost.NoteDegraded に渡すキー。Name と必ず同じ文字列にすること。</summary>
+        /// <summary>The key passed to FeatureHost.NoteDegraded. It must always be the same
+        /// string as Name.</summary>
         public const string FeatureName = "FireWhirl";
 
         /// <summary>
-        /// 自己申告した Degraded の識別キー。1 機能が複数の理由で Degraded に
-        /// なりうるので、回復時に「自分が立てた分だけ」を下ろせるようにする。
+        /// The keys identifying the Degraded states we report ourselves. One feature can
+        /// be Degraded for several reasons, so this lets recovery clear only the ones it
+        /// raised itself.
         /// </summary>
         private const string EndingStallNote = "endingStall";
         private const string BarrenSpreadNote = "barrenSpread";
@@ -40,47 +46,54 @@ namespace DisasterPlus.Game
 
         private readonly BurningBuildingScanner _scanner = new BurningBuildingScanner();
 
-        /// <summary>強度は byte。竜巻としては中程度の 60 から始める（表示 6.0）。</summary>
+        /// <summary>The intensity is a byte. We start at 60, a middling tornado (displayed
+        /// as 6.0).</summary>
         /// <summary>
-        /// 渦を作るときの災害強度。
+        /// The disaster intensity used when creating the vortex.
         ///
-        /// ── ★★ 3 倍にした（2026-08-22、所有者の指示「火災旋風の竜巻を 3 倍に」）──
+        /// ── ★★ Tripled (2026-08-22, the owner's instruction "make the fire whirl's
+        ///    tornado three times bigger") ─────────────────────────────────────
         ///
-        /// <b>渦の見かけの大きさは強度そのものである。</b> IL 実測
-        /// （<c>VortexAI.RenderExtraStuff</c>、IL_00C0〜00C6）:
+        /// <b>The vortex's apparent size is the intensity itself.</b> From the IL
+        /// (<c>VortexAI.RenderExtraStuff</c>, IL_00C0-00C6):
         ///
         /// <code>
-        ///   scale = DisasterData.m_intensity * 0.01454545      // = 強度 / 68.75
-        ///   ... Mathf.Max(m_destructionRadiusMax, m_upgradeRadiusMax) と組み合わせる
+        ///   scale = DisasterData.m_intensity * 0.01454545      // = intensity / 68.75
+        ///   ... combined with Mathf.Max(m_destructionRadiusMax, m_upgradeRadiusMax)
         /// </code>
         ///
-        /// 60 では 0.87 倍にしかならなかった。180 なら 2.62 倍で、**ちょうど 3 倍**である。
+        /// At 60 that came to only 0.87×. At 180 it is 2.62×, which is **exactly three
+        /// times** as big.
         ///
-        /// ★ <b>壊す範囲は 3 倍にならない。</b> 破壊半径はプレハブ側の
-        ///   <c>m_destructionRadiusMin/Max</c> で頭打ちなので、大きくなるのは見た目だけ
-        ///   （火災旋風自身の被害は <c>FireWhirlDamage</c> が別に決めている）。
+        /// ★ <b>The destruction area does not triple.</b> The destruction radius is capped
+        ///   by the prefab's own <c>m_destructionRadiusMin/Max</c>, so only the appearance
+        ///   grows (the fire whirl's own damage is decided separately by
+        ///   <c>FireWhirlDamage</c>).
         ///
-        /// ★ 生成位置は <c>targetPosition</c> から <c>強度×10 + 400</c> ＝ 2200 m
-        ///   離れた点である（<c>TornadoAI.ActivateDisaster</c>）。
-        ///   <c>FireWhirlPinner.MaxAttachDistance</c>（3000 m）の内側に収まっている ——
-        ///   <b>ここを上げるときは必ずあちらも確かめること。</b>超えると渦が
-        ///   永久に紐づかず、追跡不能なドリフト竜巻になる。
+        /// ★ The spawn position is a point <c>intensity × 10 + 400</c> = 2200 m away from
+        ///   <c>targetPosition</c> (<c>TornadoAI.ActivateDisaster</c>). That sits inside
+        ///   <c>FireWhirlPinner.MaxAttachDistance</c> (3000 m) —
+        ///   <b>always check that one too when raising this.</b> Go past it and the vortex
+        ///   never attaches, leaving an untrackable drifting tornado.
         ///
-        /// ★ 255 を超えないこと（<c>m_intensity</c> は byte）。
+        /// ★ Do not exceed 255 (<c>m_intensity</c> is a byte).
         /// </summary>
         private const byte SpawnIntensityBase = 180;
 
-        /// <summary>終了処理が終わらない旋風を一度でも報告したか。ログを 1 回に留めるため。</summary>
+        /// <summary>Whether we have reported a whirl whose ending never completes, even
+        /// once. Keeps the log to a single line.</summary>
         private bool _endingStallLogged;
 
         /// <summary>
-        /// 直近の判定パスが見た「発生条件の充足ぐあい」。**sim スレッドだけが読み書きする**
-        /// （<see cref="OnSimulationTick"/> が書き、<c>WriteDiagnostics</c> が読む。
-        /// どちらも sim スレッドなのでロックは要らない）。
+        /// How close the spawn condition was to being met, as seen by the most recent
+        /// check. **Read and written only by the sim thread**
+        /// (<see cref="OnSimulationTick"/> writes it and <c>WriteDiagnostics</c> reads it;
+        /// both are on the sim thread, so no lock is needed).
         /// </summary>
         private FireWhirlProspect _prospect;
 
-        /// <summary>この tick に判定パスを回したか。false のときの <see cref="_prospect"/> は古い。</summary>
+        /// <summary>Whether a check ran this tick. When false, <see cref="_prospect"/> is
+        /// stale.</summary>
         private bool _prospectFresh;
 
         public void OnLevelLoaded()
@@ -93,26 +106,30 @@ namespace DisasterPlus.Game
             _prospectFresh = false;
             HarmonyBootstrap.Install();
 
-            // ★ ここに ToolRegistration.Register<...>() は無い。③に配置ツールは無く、
-            //   プレイヤーが火災旋風を起こす経路も無い（クラス doc）。
-            // ボタンの設置は DisasterPanelBar が行う（FeatureHost が呼ぶ）。③のタイルは無い。
+            // ★ There is no ToolRegistration.Register<...>() here. ③ has no placement
+            //   tool, and there is no route by which a player raises a fire whirl (see the
+            //   class doc).
+            // DisasterPanelBar installs the buttons (FeatureHost calls it). There is no
+            // tile for ③.
         }
 
         public void OnSimulationTick(uint frameIndex, float deltaMinutes)
         {
-            // Natural Disasters DLC が無いと竜巻の DisasterInfo が存在しない。
-            // FindTornadoInfo はその都度警告を出すので、DLC 無しの都市では毎 tick 呼ばない。
+            // Without the Natural Disasters DLC the tornado's DisasterInfo does not exist.
+            // FindTornadoInfo warns each time it is called, so do not call it every tick
+            // in a city without the DLC.
             if (!ModCompat.NaturalDisastersOwned) { _prospectFresh = false; return; }
 
-            // ★★ **バニラの竜巻をランダム抽選から外す**（所有者の指示）。
-            //    冪等で、状態が変わったときしか何も書かない。プレハブが読み込まれる
-            //    のはレベルロードのあとなので、OnLevelLoaded ではなくここで呼ぶ ——
-            //    ロード直後は LoadedCount が 0 のことがある。
+            // ★★ **Take vanilla's tornado out of the random draw** (the owner's
+            //    instruction). It is idempotent and writes nothing unless the state has
+            //    changed. The prefabs are loaded after the level load, so we call it here
+            //    rather than in OnLevelLoaded — right after a load LoadedCount can be 0.
             VanillaTornadoSuppressor.Apply(ModSettings.NoVanillaTornado.value);
 
-            // 保守処理（紐づけ・解体済みの回収・クールダウン）は設定に関係なく必ず回す。
-            // ここを設定で止めると、機能を OFF にした瞬間にレジストリだけが残り、
-            // VortexPinPatch が固定を続け FireWhirlFlameFx が描画を続ける不死の渦になる。
+            // The housekeeping (attaching, collecting the torn down, the cooldowns) always
+            // runs, regardless of the setting. Gate it on the setting and the moment the
+            // feature is switched off only the registry is left, giving an immortal vortex
+            // that VortexPinPatch keeps pinning and FireWhirlFlameFx keeps drawing.
             FireWhirlPinner.AttachVehicles();
             FireWhirlPinner.CollectFinished();
             FireWhirlRegistry.AdvanceCooldowns(deltaMinutes);
@@ -121,8 +138,9 @@ namespace DisasterPlus.Game
 
             if (!ModSettings.FireWhirlEnabled.value)
             {
-                // 途中で OFF にされた / OFF のままセーブを読んだ場合。
-                // 生存中の旋風はバニラの解体経路に乗せて畳む。
+                // Either it was switched off part-way through, or a save was loaded with
+                // it off. Fold up any live whirls by putting them on vanilla's teardown
+                // path.
                 EndAllLiveWhirls();
                 _prospectFresh = false;
                 return;
@@ -138,9 +156,10 @@ namespace DisasterPlus.Game
 
             FireWhirlDamage.Apply(frameIndex, deltaMinutes, config.SpreadStrength);
 
-            // 「選ばれているのに 1 棟も燃えない」が続いた瞬間を 1 回だけ拾う。
-            // m_fireIntensity 直接書込という 3 件目の IL 誤りが再発したときの
-            // 唯一の兆候がこれで、例外もログも出ないまま延焼だけが死ぬ。
+            // Catch, once only, the moment a run of "buildings are being selected but not
+            // one catches" sets in. This is the only sign that the third IL error —
+            // writing m_fireIntensity directly — has come back; the spread alone dies,
+            // with no exception and no log line.
             if (FireWhirlDamage.ConsumeBarrenAlert())
             {
                 Log.Warn("fire spread attempted ignition but lit nothing in "
@@ -154,18 +173,20 @@ namespace DisasterPlus.Game
                     + " consecutive passes");
             }
 
-            // 延焼が戻ったら申告も取り下げる。Core 側の streak だけを 0 に戻しても
-            // オーバーレイのバッジは Degraded のまま残り、「barren passes」の行が
-            // 消えているのにセクションだけ赤い、という自己矛盾になる。
+            // Withdraw the report once the spread comes back. Resetting only the streak on
+            // the Core side would leave the overlay's badge stuck at Degraded, so the
+            // "barren passes" line would be gone while the section stayed red — a
+            // contradiction.
             if (FireWhirlDamage.ConsumeBarrenRecovery())
             {
                 Log.Info("fire spread ignited again; clearing the barren-spread alert");
                 FeatureHost.ClearDegraded(FeatureName, BarrenSpreadNote);
             }
 
-            // ★ 「何も起きていない」を 1 行で読み解けるようにする。burning=0 active=0 だけを
-            //   出していた頃は、これが「まだ火が足りない」なのか「壊れている」なのか
-            //   実機テストから判断できなかった（クラス doc）。
+            // ★ Make "nothing is happening" readable from a single line. Back when all we
+            //   printed was burning=0 active=0, an in-game test could not tell whether
+            //   that meant "there is not enough fire yet" or "it is broken" (see the class
+            //   doc).
             Log.Diag("fireWhirl",
                 "burning=" + burning.Count + " active=" + FireWhirlRegistry.Count
                 + " densest=" + _prospect.DensestCount + "/" + _prospect.RequiredCount
@@ -173,11 +194,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 終了処理に入ったまま終わらない旋風を検出する。
+        /// Detects whirls that entered the ending sequence and never finish.
         ///
-        /// これは m_targetPos0 の取り違え（＝終了処理が原理的に発火しない）が
-        /// 再発したときのシグネチャそのもの。パッチが当たっているかという
-        /// 存在検査は通ってしまうので、実際に終わったかどうかで見るしかない。
+        /// This is the exact signature of the m_targetPos0 mix-up coming back — the case
+        /// where the ending can never fire in principle. An existence check for whether
+        /// the patch is applied would pass, so the only way to see it is by whether it
+        /// actually finished.
         /// </summary>
         private void CheckEndingStall()
         {
@@ -208,14 +230,15 @@ namespace DisasterPlus.Game
                 return;
             }
 
-            // 詰まりが解消した（あるいは詰まった旋風が回収された）。バッジを下ろす。
-            // 下ろさないと、オーバーレイが Degraded のまま「STUCK な旋風は 1 基も無い」
-            // 本文を出し続けて自己矛盾する。
+            // The stall has cleared (or the stalled whirl has been collected). Take the
+            // badge down. Leave it up and the overlay stays Degraded while its body text
+            // keeps saying there is not a single STUCK whirl — a contradiction.
             FeatureHost.ClearDegraded(FeatureName, EndingStallNote);
             _endingStallLogged = false;
         }
 
-        /// <summary>設定が OFF になったときに、生存中の旋風をすべて終了処理へ送る。</summary>
+        /// <summary>Sends every live whirl into its ending sequence when the setting is
+        /// turned off.</summary>
         private static void EndAllLiveWhirls()
         {
             var views = FireWhirlRegistry.Snapshot();
@@ -236,20 +259,23 @@ namespace DisasterPlus.Game
                 var v = views[i];
                 if (v.Ending) continue;
 
-                // この旋風の周りにまだ発生条件ぶんの火災が残っているか。
+                // Is there still enough fire around this whirl to meet the condition?
                 var centre2d = v.Center.ToVec2();
                 int near = 0;
                 for (int b = 0; b < burning.Count; b++)
                 {
                     if (centre2d.DistanceSquaredTo(burning[b].Position) <= r2) near++;
                 }
-                // 手動発生は発生条件の割り込み判定を免除する。火の無い場所に置けるのが
-                // 手動発生の存在意義で、免除しないと次 tick に near=0 と数えられて
-                // 猶予ぶんだけで消える（絶対上限は下の Evaluate でそのまま効く）。
+                // A manual spawn is exempt from the interrupt check on the spawn
+                // condition. Being able to place one where there is no fire is the whole
+                // point of a manual spawn; without the exemption it is counted as near=0
+                // on the very next tick and dies after nothing but the grace period (the
+                // absolute cap still applies as normal, in the Evaluate below).
                 bool conditionMet = v.Manual || near >= config.DetectCount;
 
-                // 手動発生は初期規模より小さくしない。周囲に火が無いと RadiusFor(0) まで
-                // 縮み、発生した次のフレームで目に見えて小さくなってしまう。
+                // A manual spawn never shrinks below its initial scale. With no fire
+                // around it, it would shrink to RadiusFor(0) and visibly get smaller on
+                // the very frame after it spawned.
                 int strengthCount = v.Manual && near < v.BurningCount ? v.BurningCount : near;
 
                 FireWhirlRegistry.UpdateStrength(
@@ -257,9 +283,9 @@ namespace DisasterPlus.Game
                 FireWhirlRegistry.AdvanceLife(v.DisasterId, deltaMinutes, conditionMet);
             }
 
-            // 寿命判定は更新後の値で行う。
-            // 判定そのものは Core の FireWhirlLifecycle.Evaluate が持っており、
-            // Life をレジストリの外に出さないので評価もレジストリ経由で行う。
+            // The lifetime verdict is taken on the updated values.
+            // The verdict itself belongs to Core's FireWhirlLifecycle.Evaluate, and since
+            // Life never leaves the registry the evaluation goes through the registry too.
             var updated = FireWhirlRegistry.Snapshot();
             for (int i = 0; i < updated.Count; i++)
             {
@@ -273,14 +299,16 @@ namespace DisasterPlus.Game
 
         private void TrySpawnNew(FireWhirlConfig config, IList<BurningBuilding> burning)
         {
-            // ★ 判定と「なぜ出なかったか」は同じ 1 パスで受け取る。別に数え直すと、
-            //   診断が本判定と食い違う（FireWhirlProspect のクラス doc）。
+            // ★ Take the verdict and "why nothing appeared" from the same single pass.
+            //   Count it again separately and the diagnostics disagree with the real
+            //   verdict (see the class doc on FireWhirlProspect).
             var candidates = FireWhirlDetector.Detect(burning, config,
                                                       FireWhirlRegistry.Centers(), out _prospect);
             _prospectFresh = true;
             if (candidates.Count == 0) return;
 
-            // 1 tick に 1 基まで。連鎖的に湧いて都市が一瞬で消えるのを防ぐ。
+            // At most one per tick. Stops them spawning in a chain and wiping out the
+            // city in an instant.
             var c = candidates[0];
 
             float y = TerrainManager.instance.SampleDetailHeight(new Vector3(c.Center.X, 0f, c.Center.Z));
@@ -297,8 +325,9 @@ namespace DisasterPlus.Game
         {
             FireWhirlFlameFx.Sync();
 
-            // ★ ③に災害パネルのタイルは無い（クラス doc）。ここで設置の再試行を
-            //   することも、DisasterPanelBar に③の行があることも、もう無い。
+            // ★ ③ has no tile on the disaster panel (see the class doc). There is no
+            //   longer any retry of the installation here, nor any row for ③ in
+            //   DisasterPanelBar.
         }
 
         public void OnLevelUnloading()
@@ -309,22 +338,25 @@ namespace DisasterPlus.Game
             FireWhirlRegistry.Clear();
             FireWhirlFlameFx.Clear();
             HarmonyBootstrap.Uninstall();
-            // ★ 控えを捨てるだけ。値は書き戻さない —— 次のロードで
-            //   DisasterManager.InitializeProperties が計算し直す（あちらの doc）。
+            // ★ Only discard the notes; do not write the values back — the next load has
+            //   DisasterManager.InitializeProperties recompute them (see its doc).
             VanillaTornadoSuppressor.Forget();
-            // ボタンの撤去は FeatureHost.LevelUnloading が DisasterPanelBar.Remove で行う。
+            // The buttons are removed by FeatureHost.LevelUnloading, via
+            // DisasterPanelBar.Remove.
             _endingStallLogged = false;
         }
 
         public void WriteDiagnostics(DiagnosticBuilder b)
         {
             b.Line(1, "enabled", ModSettings.FireWhirlEnabled.value ? "yes" : "no");
-            // ★ ③に災害パネルのタイルは無い。プレイヤーが起こす経路が無いことを
-            //   診断でも名乗る（「ボタンが出ていない＝壊れている」と読まれないため）。
+            // ★ ③ has no tile on the disaster panel. State in the diagnostics too that
+            //   there is no route by which a player raises one (so that "no button
+            //   appeared" is not read as "it is broken").
             b.Line(1, "trigger", "natural only - a fire whirl cannot be placed by hand");
 
-            // ★ バニラの竜巻を止めているかを必ず名乗る。**「竜巻が起きない」は
-            //   壊れているのか設定なのか、これが無いと区別できない。**
+            // ★ Always state whether vanilla's tornado is being stopped. **Without this
+            //   there is no telling whether "no tornadoes happen" is a fault or a
+            //   setting.**
             b.Line(1, "vanilla tornado", ModSettings.NoVanillaTornado.value
                 ? (VanillaTornadoSuppressor.Suppressing
                     ? "suppressed (" + VanillaTornadoSuppressor.SuppressedCount
@@ -359,28 +391,31 @@ namespace DisasterPlus.Game
                 b.Line(2, s);
             }
 
-            // ★ 炎のシェーダ。**「渦は出ているのに何も見えない」の唯一の手がかり**である。
-            //   ④⑤は最初からこの行を持っていて、③だけが持っていなかった
-            //   （そして③だけが FAIL を報告する代わりに毎フレーム落ちていた）。
+            // ★ The flame shader. **It is the only clue to "the vortex is there but
+            //   nothing is visible".** ④ and ⑤ had this line from the start and only ③
+            //   did not (and only ③ threw every frame instead of reporting a FAIL).
             b.Line(1, "flame material", FireWhirlFlameFx.ShaderDetail);
 
-            // 設計書 7.1 のオーバーレイ例の末尾。「大火災なのに旋風が出ない」の
-            // 最有力の原因なので必ず出す。
+            // The end of the overlay example in §7.1 of the design document. Always print
+            // it: it is the most likely cause of "a huge fire but no whirl appears".
             b.Line(1, "cooldown", FireWhirlRegistry.CoolingCount.ToString());
 
             WriteSpreadDiagnostics(b);
         }
 
         /// <summary>
-        /// **「まだ火が足りない」と「壊れている」を見分けるための行。**
+        /// **The lines that tell "there is not enough fire yet" apart from "it is
+        /// broken".**
         ///
-        /// ③は自然発生しか経路を持たないので、実機テストの既定の状態は「何も起きない」で
-        /// ある。その状態で出せる情報が <c>burning=0 active=0</c> だけだと、テスターは
-        /// 「どれだけ燃やせばいいのか」も「そもそも動いているのか」も判断できない ——
-        /// 実際にそれで③の修正が確認できないまま 1 セッションが終わっている。
+        /// ③ has no route but natural spawning, so the default state in an in-game test is
+        /// "nothing happens". If all we can report in that state is
+        /// <c>burning=0 active=0</c>, the tester can judge neither how much needs to burn
+        /// nor whether it is running at all — and indeed one whole session ended without
+        /// ③'s fix being confirmed for exactly that reason.
         ///
-        /// 出す順序は**プレイヤーが動かせるものから**: 必要条件 → 今どこまで来ているか →
-        /// 抑制（クールダウン／離隔）→ 前提（DLC・prefab）。
+        /// The order is **what the player can act on first**: the requirement → how far
+        /// along we are → the suppressors (cooldown / separation) → the prerequisites (the
+        /// DLC, the prefab).
         /// </summary>
         private void WriteConditionDiagnostics(DiagnosticBuilder b)
         {
@@ -394,8 +429,9 @@ namespace DisasterPlus.Game
 
             if (!ModCompat.NaturalDisastersOwned)
             {
-                // ★ 前提が無いときは条件の話をしない。ここで「火が足りない」と出すと、
-                //   DLC が無い環境のテスターが永久に火を増やすことになる。
+                // ★ Do not talk about the conditions when the prerequisite is missing.
+                //   Print "not enough fire" here and a tester on a setup without the DLC
+                //   will go on adding fire for ever.
                 b.Line(1, "conditions", "not evaluated: " + Strings.FireWhirlNeedsDlc);
                 return;
             }
@@ -423,11 +459,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 延焼の診断。
+        /// The diagnostics for the fire spread.
         ///
-        /// ここが無いあいだ、WriteDiagnostics は enabled / scan / active しか出しておらず、
-        /// 「延焼が 1 棟も燃やしていない」と「近くに燃やす物が無い」が区別できなかった。
-        /// SpreadStrength が 0 なら Apply() は即 return するので、そこも明示する。
+        /// While this was missing, WriteDiagnostics printed only enabled / scan / active,
+        /// and "the spread has not lit a single building" could not be told apart from
+        /// "there is nothing nearby to burn". Apply() returns immediately when
+        /// SpreadStrength is 0, so we state that explicitly too.
         /// </summary>
         private static void WriteSpreadDiagnostics(DiagnosticBuilder b)
         {

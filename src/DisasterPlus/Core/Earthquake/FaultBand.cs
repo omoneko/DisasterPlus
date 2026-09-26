@@ -3,81 +3,87 @@ using DisasterPlus.Core.Common;
 namespace DisasterPlus.Core.Earthquake
 {
     /// <summary>
-    /// 断層に沿った 4 個の破壊円盤が**落ちうる範囲**の幾何。
+    /// The geometry of the region the four destruction discs along the fault **can land in**.
     ///
-    /// 典拠は IL 事実文書 §A-3。毎ステップ 4 回、断層上の正規化位置
-    /// t ∈ [-0.4, 0.4] を引き直し、そこに幅 w = W(1 - 4t²) の円盤を置いて
-    /// probability = 1 で建物を壊す。
+    /// The authority is §A-3 of the IL facts document. Four times per step it re-draws a
+    /// normalised position t ∈ [-0.4, 0.4] along the fault, places a disc of width
+    /// w = W(1 - 4t²) there and destroys buildings at probability = 1.
     ///
-    /// ── 円盤 1 個の到達距離は w である（2w ではない）─────────────────────
+    /// ── One disc's reach is w (not 2w) ─────────────────────
     ///
-    /// この帯は以前 destructionRadiusMax = 2w を到達距離として組まれていたが、
-    /// **それは 33% 広すぎた。** 呼び出しの実引数は
-    /// <c>preRadius: w</c>（IL_0270–0298: ldloc.s 17 が w、arg3 に w がそのまま入る）で、
-    /// <c>DisasterHelpers.DestroyBuildings</c> は
-    /// <c>if (dist &gt;= preRadius) continue;</c>（IL_0130 の <c>bge.un</c>）を
-    /// **種の生成よりもランプの計算よりも前**に置いている。
-    /// 2w が効くのは fD の分子だけで、<c>dist &lt; w</c> の範囲では fD &gt; 1、
-    /// そこへ probability = 1 が掛かるので比較は無条件に真になる。
-    /// **つまり円盤の到達距離は w ちょうどで、2w はどこにも現れない。**
+    /// This band used to be built with destructionRadiusMax = 2w as the reach, and **that
+    /// was 33% too wide.** The actual argument at the call site is
+    /// <c>preRadius: w</c> (IL_0270-0298: ldloc.s 17 is w, and w goes into arg3 unchanged),
+    /// and <c>DisasterHelpers.DestroyBuildings</c> puts
+    /// <c>if (dist &gt;= preRadius) continue;</c> (the <c>bge.un</c> at IL_0130)
+    /// **ahead of both the seed generation and the ramp calculation**.
+    /// 2w only affects fD's numerator, and over the range <c>dist &lt; w</c> we have
+    /// fD &gt; 1, which is then multiplied by probability = 1, so the comparison is
+    /// unconditionally true.
+    /// **In other words a disc's reach is exactly w, and 2w appears nowhere.**
     ///
-    /// **これは「当たる場所」ではなく「当たりうる場所」である。**
-    /// 位置は毎ステップ振り直されるので、帯の中にいても当たらないことがある。
-    /// 呼び出し側は必ずその旨を併記すること（Strings.EarthquakeFaultBandNote）。
-    /// 逆に、全体円盤について「倒れません」と断定してよいのは
-    /// **この帯の外側の建物だけ**である（Task 5 の BuildingMargin が使う）。
+    /// **This is "where it can hit", not "where it hits".**
+    /// The positions are re-drawn every step, so a building inside the band may well never be
+    /// hit. Callers must always state that alongside (Strings.EarthquakeFaultBandNote).
+    /// Conversely, the only buildings about which we may assert "it will not fall" for the
+    /// whole-quake disc are **those outside this band** (used by Task 5's BuildingMargin).
     ///
-    /// **全体円盤（SeismicIntensity）と混ぜないこと。** あちらは
-    /// probability = 0.02 の線形ランプで、建物ごとに固定されたしきい値と比べる
-    /// 決定論的な判定である。こちらは probability = 1、つまり帯に入った建物は
-    /// しきい値に関係なく壊れる。**2 つは別のモデル**なので、断層帯を
-    /// 「s が高い状態」として表示してはいけない（設計書 §3.1 の最終段落）。
+    /// **Do not mix this up with the whole-quake disc (SeismicIntensity).** That one is a
+    /// linear ramp at probability = 0.02 compared against a threshold fixed per building — a
+    /// deterministic test. This one is probability = 1, i.e. a building caught in the band is
+    /// destroyed regardless of its threshold. **They are two different models**, so the fault
+    /// band must not be displayed as "a region where s is high" (the final paragraph of
+    /// design document §3.1).
     ///
-    /// 蛇行（<c>p.x += dir.y * (s*w*0.5)</c> / <c>p.y -= dir.x * (s*w*0.5)</c>、
-    /// IL_0201–023E）は円盤の中心を断層線から**直交方向へ最大 0.5w** ずらす
-    /// （s = sin(...) ∈ [-1, 1]）。到達距離 w と合わせて
-    /// **直交方向の包絡線は 1.5w** になる。以前の doc は「2w の内側に収まるので
-    /// 算入しない」としていたが、その 2w 自体が誤りだったので、蛇行は算入する。
+    /// The meander (<c>p.x += dir.y * (s*w*0.5)</c> / <c>p.y -= dir.x * (s*w*0.5)</c>,
+    /// IL_0201-023E) shifts a disc's centre **up to 0.5w perpendicular** to the fault line
+    /// (s = sin(...) ∈ [-1, 1]). Combined with the reach w, **the perpendicular envelope is
+    /// 1.5w**. The previous doc said the meander was "not counted because it fits inside
+    /// 2w", but that 2w was itself wrong, so we do count the meander.
     ///
-    /// 沿走方向も同じ理屈で、円盤中心の上限 0.4·L に到達距離 w が足される。
+    /// The same reasoning applies along strike: the reach w is added to the 0.4·L limit on
+    /// the disc centres.
     ///
-    /// ── 到達範囲は「1 つの t」では決まらない ──────────────────────────
+    /// ── The reach is not determined by "a single t" ──────────────────────────
     ///
-    /// <see cref="Contains"/> は最初、点にいちばん近い**ただ 1 つ**の t
-    /// （＝ along/L をクランプしたもの）で円との交差を見ていた。**これは誤りである。**
-    /// w は t とともに細るので、沿走方向の残差を最小にする t が到達距離を最大にする t
-    /// とは限らない。**もっと中央寄りの、より太い円盤が、沿走方向に少し離れていても
-    /// 届く**ことがある。
+    /// <see cref="Contains"/> originally tested intersection with the circle at **exactly
+    /// one** t — the one nearest the point (along/L, clamped). **That is wrong.**
+    /// w tapers with t, so the t that minimises the along-strike residual is not necessarily
+    /// the t that maximises the reach. **A fatter disc nearer the centre can reach the point
+    /// even from a little further away along strike.**
     ///
-    /// 反例（L = 1000、W = 100、点は 沿走 300 / 直交 99）:
-    ///   t = 0.30 … w = 64.00、残差 0、直交の余り 99 - 32.00 = 67.00 → 67.00² &gt; 64.00² で外
-    ///   t = 0.28 … w = 68.64、残差 20、直交の余り 99 - 34.32 = 64.68
-    ///              → 20² + 64.68² = 4583 &lt; 68.64² = 4712 で**内側**
-    /// L : W = 10 : 1 はバニラの断層の代表的な比なので、これは稀な縁の話ではない。
-    /// 誤りの向きも最悪で、**帯の内側の建物を外側と言い**、その建物について
-    /// 全体円盤の「倒壊しません」を名乗ることになる（probability = 1 の円盤が
-    /// 別に判定しているのに、である）。
+    /// A counter-example (L = 1000, W = 100, point at along 300 / across 99):
+    ///   t = 0.30 … w = 64.00, residual 0, across left over 99 - 32.00 = 67.00 → 67.00² &gt; 64.00², outside
+    ///   t = 0.28 … w = 68.64, residual 20, across left over 99 - 34.32 = 64.68
+    ///              → 20² + 64.68² = 4583 &lt; 68.64² = 4712, **inside**
+    /// L : W = 10 : 1 is a typical ratio for a vanilla fault, so this is not some rare edge
+    /// case. The direction of the error is the worst one too: **it calls a building inside
+    /// the band "outside"** and then claims the whole-quake disc's "it will not collapse"
+    /// about it — while a probability = 1 disc is judging it separately.
     ///
-    /// したがって <see cref="Contains"/> は t の**全域**を探す。詳細はそちらの doc。
+    /// So <see cref="Contains"/> searches the **whole range** of t. See its own doc for the
+    /// details.
     ///
-    /// Length / Width が 0（＝プレハブ 4 値が読めなかった）ときは
-    /// <see cref="Known"/> が false になり、Contains は常に false を返す。
-    /// 「分からない」を「外側」と言い換えないため、呼び出し側は Known を必ず見る。
+    /// When Length / Width are 0 (i.e. the four prefab values could not be read),
+    /// <see cref="Known"/> is false and Contains always returns false.
+    /// So as not to restate "we do not know" as "outside", callers must always check Known.
     /// </summary>
     public struct FaultBand
     {
-        /// <summary>円盤中心が落ちる正規化位置の上限（IL: Randomizer.Int32(-400, 400) * 0.001）。</summary>
+        /// <summary>The limit on the normalised position a disc centre lands at
+        /// (IL: Randomizer.Int32(-400, 400) * 0.001).</summary>
         public const float MaxOffset = 0.4f;
 
         public readonly Vec2 Centre;
 
-        /// <summary>断層の走向。IL: new Vector2(-sin(m_angle), cos(m_angle))。</summary>
+        /// <summary>The fault's strike. IL: new Vector2(-sin(m_angle), cos(m_angle)).</summary>
         public readonly Vec2 Direction;
 
-        /// <summary>L = m_crackLength * (0.5 + intensity * 0.005)。呼び出し側が計算済みの値を渡す。</summary>
+        /// <summary>L = m_crackLength * (0.5 + intensity * 0.005). The caller passes the
+        /// already-computed value.</summary>
         public readonly float Length;
 
-        /// <summary>W = m_crackWidth * (0.5 + intensity * 0.005)。同上。</summary>
+        /// <summary>W = m_crackWidth * (0.5 + intensity * 0.005). Likewise.</summary>
         public readonly float Width;
 
         public FaultBand(Vec2 centre, float angleRadians, float length, float width)
@@ -89,15 +95,16 @@ namespace DisasterPlus.Core.Earthquake
             Width = width > 0f && !float.IsNaN(width) ? width : 0f;
         }
 
-        /// <summary>幾何が確定しているか。false なら内外を判定してはいけない。</summary>
+        /// <summary>Whether the geometry is settled. If false, do not judge inside from
+        /// outside.</summary>
         public bool Known { get { return Length > 0f && Width > 0f; } }
 
         public Vec2 EndA { get { return Centre + Direction * (-Length * 0.5f); } }
         public Vec2 EndB { get { return Centre + Direction * (Length * 0.5f); } }
 
         /// <summary>
-        /// 正規化位置 t に落ちた円盤 1 個の**幅** w = W(1 - 4t²)（IL_01D6–01EA）。
-        /// これが <c>preRadius</c> であり、そのまま到達距離になる。
+        /// The **width** w = W(1 - 4t²) of one disc landing at normalised position t
+        /// (IL_01D6-01EA). This is <c>preRadius</c>, and it is the reach directly.
         /// </summary>
         public float PatchRadiusAt(float t)
         {
@@ -108,8 +115,8 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 正規化位置 t における、断層線からの直交方向の到達距離
-        /// ＝ **到達距離 w ＋ 蛇行 0.5w = 1.5w**（クラス doc の導出）。
+        /// The perpendicular reach from the fault line at normalised position t
+        /// = **reach w + meander 0.5w = 1.5w** (derived in the class doc).
         /// </summary>
         public float HalfWidthAt(float t)
         {
@@ -117,38 +124,43 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 円盤中心の沿走位置を走査する分割数。
+        /// How many divisions we scan the disc centres' along-strike position in.
         ///
-        /// 探しているのは <c>u ∈ [-0.4L, 0.4L]</c> における <see cref="Gap"/> の最小値だが、
-        /// <c>w(u)</c> が 2 次なので Gap は 4 次の区分多項式であり、**単峰である保証が無い**
-        /// （三分探索も黄金分割も使えない）。一様走査で谷を掴んでから
-        /// <see cref="RefineSteps"/> で詰める。
+        /// What we are after is the minimum of <see cref="Gap"/> over
+        /// <c>u ∈ [-0.4L, 0.4L]</c>, but <c>w(u)</c> is quadratic, so Gap is a piecewise
+        /// quartic and **is not guaranteed to be unimodal** (neither ternary search nor
+        /// golden-section search applies). We catch the trough with a uniform scan and then
+        /// close in with <see cref="RefineSteps"/>.
         ///
-        /// 刻みは <c>0.8L / 96</c>。L : W = 10 : 1 のとき成立する u の区間はおよそ 2w ≒ 0.2L
-        /// 幅あるので、刻み <c>0.0083L</c> は 20 倍以上細かい。判定がぶれうるのは
-        /// 真の境界からこの刻みの半分ぶん以内だけで、そこは細分が拾う。
+        /// The step is <c>0.8L / 96</c>. At L : W = 10 : 1 the interval of u that satisfies
+        /// the condition is about 2w ≒ 0.2L wide, so a step of <c>0.0083L</c> is more than
+        /// 20 times finer. The verdict can only waver within half a step of the true
+        /// boundary, and the refinement picks that up.
         /// </summary>
         private const int ScanSteps = 96;
 
-        /// <summary>走査で掴んだ谷を半分ずつ詰める回数。0.8L/96 が 2^-24 倍まで縮む。</summary>
+        /// <summary>How many times we halve in on the trough the scan caught. 0.8L/96 shrinks
+        /// by a factor of 2^-24.</summary>
         private const int RefineSteps = 24;
 
         /// <summary>
-        /// p が破壊円盤の落ちうる範囲の内側か。**「当たる」ではない。**
+        /// Whether p is inside the region the destruction discs can land in. **Not "gets
+        /// hit".**
         ///
-        /// 円盤中心は <c>(u, s·w(u)·0.5)</c>（<c>u = t·L ∈ [-0.4L, 0.4L]</c>、
-        /// <c>s ∈ [-1, 1]</c>）に落ち、そこから半径 <c>w(u)</c> まで届く。
-        /// s は連続なので、ある u に対する到達範囲は
-        /// **長さ <c>w(u)</c> の縦線分から距離 <c>w(u)</c> 以内**（＝スタジアム形）である。
-        /// 求める答えは、それを u について**全部合わせた**集合に p が入るか。
+        /// A disc centre lands at <c>(u, s·w(u)·0.5)</c> (<c>u = t·L ∈ [-0.4L, 0.4L]</c>,
+        /// <c>s ∈ [-1, 1]</c>) and reaches out to radius <c>w(u)</c> from there.
+        /// s is continuous, so the reach for a given u is **everything within <c>w(u)</c> of
+        /// a vertical segment of length <c>w(u)</c>** (a stadium shape).
+        /// The answer we want is whether p lies in the union of all of those over u.
         ///
-        /// <c>u = along</c> の 1 点だけを見るのでは足りない —— クラス doc の反例のとおり、
-        /// **もっと中央寄りの太い円盤が届く**ことがある。1 点だけを見ていた版は
-        /// 帯の内側の建物を外側と誤判定し、その建物について「倒壊しません」を
-        /// 名乗っていた。
+        /// Looking at the single point <c>u = along</c> is not enough — as the counter-example
+        /// in the class doc shows, **a fatter disc nearer the centre can reach**. The version
+        /// that looked at one point alone misjudged buildings inside the band as outside and
+        /// then claimed "it will not collapse" about them.
         ///
-        /// <c>u = along</c> が置ける（<c>|along| ≤ 0.4L</c>）ときは沿走方向の残差が 0 になり、
-        /// 条件は <c>across ≤ 1.5·w</c> に退化して <see cref="HalfWidthAt"/> と厳密に一致する。
+        /// When <c>u = along</c> is attainable (<c>|along| ≤ 0.4L</c>) the along-strike
+        /// residual is 0 and the condition degenerates to <c>across ≤ 1.5·w</c>, which agrees
+        /// exactly with <see cref="HalfWidthAt"/>.
         /// </summary>
         public bool Contains(Vec2 p)
         {
@@ -157,16 +169,16 @@ namespace DisasterPlus.Core.Earthquake
             float dx = p.X - Centre.X;
             float dz = p.Z - Centre.Z;
 
-            // 断層に沿った成分と、それに直交する成分に分解する。
+            // Decompose into the component along the fault and the one perpendicular to it.
             float along = dx * Direction.X + dz * Direction.Z;
             float across = dx * Direction.Z - dz * Direction.X;
             if (across < 0f) across = -across;
             if (float.IsNaN(along) || float.IsNaN(across)) return false;
 
-            float half = MaxOffset * Length;   // 円盤中心が置ける沿走方向の上限
+            float half = MaxOffset * Length;   // the along-strike limit on disc centres
 
-            // 早い棄却。どの円盤も W より太くならないので、この 2 つを外れていれば
-            // 走査するまでもなく外側である（カーソルは普通ここで落ちる）。
+            // Early rejection. No disc is ever fatter than W, so anything outside these two
+            // is outside without needing the scan (the cursor normally drops out here).
             if (across > 1.5f * Width) return false;
             if (along > half + Width || along < -(half + Width)) return false;
 
@@ -183,7 +195,8 @@ namespace DisasterPlus.Core.Earthquake
                 if (gap < bestGap) { bestGap = gap; bestU = u; }
             }
 
-            // 走査の谷間に最小が落ちている場合を拾う。左右を半分ずつ詰める。
+            // Catch the case where the minimum falls between scan samples, halving in from
+            // both sides.
             float h = step * 0.5f;
             for (int i = 0; i < RefineSteps; i++)
             {
@@ -206,21 +219,23 @@ namespace DisasterPlus.Core.Earthquake
         }
 
         /// <summary>
-        /// 沿走位置 <paramref name="u"/> に落ちた円盤の到達範囲から見た、点の**はみ出し**。
-        /// 0 以下なら、その u の円盤（蛇行を最大限使った位置）が点に届く。
+        /// By how much the point **overshoots** the reach of a disc landing at along-strike
+        /// position <paramref name="u"/>. Zero or below means the disc at that u (with the
+        /// meander used to the full) reaches the point.
         ///
         ///   Gap(u) = (along - u)² + max(0, across - 0.5·w(u))² - w(u)²
         ///
-        /// 第 2 項の <c>max</c> が、蛇行で中心を点の側へ 0.5w まで寄せられることを表す。
-        /// 点が線分の真横にある（<c>across ≤ 0.5w</c>）ときは 0 になり、条件は
-        /// <c>|along - u| ≤ w</c> に退化する。
+        /// The <c>max</c> in the second term expresses that the meander can bring the centre
+        /// up to 0.5w towards the point. When the point is directly beside the segment
+        /// (<c>across ≤ 0.5w</c>) it is 0 and the condition degenerates to
+        /// <c>|along - u| ≤ w</c>.
         /// </summary>
         private float Gap(float u, float along, float across)
         {
             float ratio = u / Length;
             float w = Width * (1f - 4f * ratio * ratio);
 
-            // ここには円盤が落ちない（|t| ≧ 0.5 で幅が 0 に細る）。
+            // No disc lands here (at |t| ≧ 0.5 the width has tapered to 0).
             if (w <= 0f) return float.MaxValue;
 
             float da = along - u;

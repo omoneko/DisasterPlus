@@ -9,21 +9,23 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.VolcanoPreview
 {
     /// <summary>
-    /// 火山の起伏と隆起アニメーションを**ゲームを起動せずに**描いて確かめる。
+    /// Draws and checks the volcano's relief and its uplift animation **without launching the
+    /// game**.
     ///
-    /// 「見た目の変更は自分でオフラインに描画・計測してから実機テストを頼む」という
-    /// このプロジェクトの決まりのための道具である。Core の実物
-    /// （<see cref="VolcanoRelief"/> / <see cref="VolcanoShape"/> / <see cref="UpliftSchedule"/>）
-    /// をそのままコンパイルして呼ぶので、**書き直した近似ではない**。
+    /// This is the tool for this project's rule that "visual changes are drawn and measured
+    /// offline by yourself before asking for a test in the game". It compiles and calls the
+    /// real thing from Core (<see cref="VolcanoRelief"/> / <see cref="VolcanoShape"/> /
+    /// <see cref="UpliftSchedule"/>) directly, so it is **not a rewritten approximation**.
     ///
     ///   dotnet run --project tools/VolcanoPreview -- docs/images/volcano
     /// </summary>
     internal static class Program
     {
-        /// <summary>raw セルの一辺（m）。ゲームの地形格子そのもの。</summary>
+        /// <summary>Side of a raw cell (m). The game's terrain grid itself.</summary>
         private const float Cell = VolcanoShape.RawCellSizeMetres;
 
-        /// <summary>画像の目標の一辺（px）。倍率は整数倍にして格子を残す。</summary>
+        /// <summary>Target side of the image (px). The zoom is an integer factor so the grid
+        /// stays visible.</summary>
         private const int TargetPixels = 720;
 
         private static int ZoomFor(int cells)
@@ -32,7 +34,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
             return z < 1 ? 1 : (z > 16 ? 16 : z);
         }
 
-        /// <summary>山の地点から出す種（<c>VolcanoUplift</c> と同じ作り方）。</summary>
+        /// <summary>The seed derived from the volcano's location (built the same way as
+        /// <c>VolcanoUplift</c>).</summary>
         private static readonly uint Seed = DeterministicRandom.Hash(275u, unchecked((uint)(-283)));
 
         private static readonly VolcanoForm[] Forms =
@@ -81,7 +84,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             return 0;
         }
 
-        // ── 高さ場 ──────────────────────────────────────────────
+        // ── The height field ──────────────────────────────────────────────
 
         private sealed class Field
         {
@@ -94,7 +97,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
             public float At(int x, int z) { return H[z * Size + x]; }
         }
 
-        /// <summary>ゲームと同じ 16 m 格子で、山を覆う正方形ぶんだけ評価する。</summary>
+        /// <summary>Evaluates just the square that covers the mountain, on the same 16 m grid
+        /// as the game.</summary>
         private static Field Build(VolcanoForm form, float radius, float height, float strength)
         {
             int half = (int)Math.Ceiling(radius / Cell) + 1;
@@ -115,19 +119,21 @@ namespace DisasterPlus.Tools.VolcanoPreview
                 for (int x = 0; x < size; x++)
                 {
                     float dx = (x - half) * Cell;
-                    // ★ ゲームが実際に書く形そのもの（火口はプロファイルの一部である）。
+                    // ★ Exactly the shape the game actually writes (the crater is part of the
+                    //   profile).
                     f.H[z * size + x] = VolcanoCrater.ProfileAt(f.Relief, dx, dz, radius, height);
                 }
             }
             return f;
         }
 
-        // ── 描画 ────────────────────────────────────────────────
+        // ── Rendering ────────────────────────────────────────────────
 
         /// <summary>
-        /// 陰影（北西 45 度からの平行光）＋標高の色＋等高線。
-        /// **16 m 格子のまま**描く（ゲームが実際に書く解像度そのもの）。
-        /// 等高線を入れてあるのは、谷の刻みを目でなく数えて確かめるためである。
+        /// Hill shading (parallel light from 45 degrees to the north-west) + elevation colour +
+        /// contours. Drawn **on the 16 m grid as it is** (exactly the resolution the game
+        /// actually writes). The contours are there so the notches of the gullies can be
+        /// confirmed by counting rather than by eye.
         /// </summary>
         private static byte[] Shade(Field f, float displayMax, float contourMetres)
         {
@@ -142,7 +148,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                     float hx = f.At(Math.Min(x + 1, n - 1), z) - f.At(Math.Max(x - 1, 0), z);
                     float hz = f.At(x, Math.Min(z + 1, n - 1)) - f.At(x, Math.Max(z - 1, 0));
 
-                    // 高さを 2 倍に誇張して法線を出す（細かい起伏を目で追えるように）。
+                    // Exaggerate the height by 2 to get the normal (so fine relief can be
+                    // followed by eye).
                     const float Exaggeration = 2f;
                     float nx = -hx * Exaggeration / (2f * Cell);
                     float nz = -hz * Exaggeration / (2f * Cell);
@@ -161,15 +168,19 @@ namespace DisasterPlus.Tools.VolcanoPreview
                     if (hc <= 0f) { rr = 0.42f; gg = 0.47f; bb = 0.40f; shade = 1f; }
                     else Ramp(t, out rr, out gg, out bb);
 
-                    // 等高線: 隣のセルとのあいだで刻みをまたいだら線を引く。
-                    // ★ 隣との差が刻みより大きい（＝急斜面）ところでは線を描かない ——
-                    //   描くと線ではなく市松模様になる（16 m 格子では線が引けない密度）。
+                    // Contours: draw a line wherever a step is crossed between neighbouring
+                    // cells.
+                    // ★ Where the difference to the neighbour is larger than the step (i.e. a
+                    //   steep slope), no line is drawn —— drawing one gives a checkerboard
+                    //   rather than a line (a density at which no line can be drawn on a 16 m
+                    //   grid).
                     if (hc > 0f && contourMetres > 0f)
                     {
                         int c0 = (int)(hc / contourMetres);
                         float hr = f.At(Math.Min(x + 1, n - 1), z);
                         float hd = f.At(x, Math.Min(z + 1, n - 1));
-                        // 線の間隔が 3 セルを割るところでは描かない（描くと市松模様になる）。
+                        // Do not draw where the line spacing falls below 3 cells (drawing there
+                        // gives a checkerboard).
                         float sparse = contourMetres / 3f;
                         bool edge = (Math.Abs(hr - hc) < sparse && c0 != (int)(hr / contourMetres))
                                  || (Math.Abs(hd - hc) < sparse && c0 != (int)(hd / contourMetres));
@@ -185,7 +196,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             return rgb;
         }
 
-        /// <summary>低: 緑 → 中: 土 → 高: 岩 → 頂: 明るい灰。</summary>
+        /// <summary>Low: green -&gt; mid: earth -&gt; high: rock -&gt; summit: light grey.</summary>
         private static void Ramp(float t, out float r, out float g, out float b)
         {
             if (t < 0.35f) { float u = t / 0.35f; r = 0.30f + 0.32f * u; g = 0.52f + 0.09f * u; b = 0.24f + 0.12f * u; }
@@ -200,8 +211,9 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// 等高線の刻み。**16 m 格子で線が引ける密度まで粗くする** ——
-        /// 細かくすると線ではなく市松模様になる（急斜面では 1 セルで刻みを跨ぐ）。
+        /// The contour step. **Coarsened until lines can actually be drawn on the 16 m grid**
+        /// —— any finer and you get a checkerboard instead of lines (on a steep slope a single
+        /// cell crosses the step).
         /// </summary>
         private static float ContourFor(float h, float r)
         {
@@ -220,9 +232,11 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// 山肌そのものを見るための切り出し（**北西の斜面**、等高線なし）。
-        /// 北西なのは陰影の光源がそちらから来ているからで、南東を切ると影で真っ暗になる。
-        /// **上からの俯瞰では等高線が細かい溝を隠す** —— 谷の刻みを目で見るための絵である。
+        /// A crop for looking at the mountainside itself (**the north-west flank**, no
+        /// contours). North-west because that is where the shading's light comes from; crop
+        /// the south-east and it is pitch black in shadow.
+        /// **Seen from directly above, the contours hide the fine grooves** —— this picture is
+        /// for seeing the notches of the gullies with your own eyes.
         /// </summary>
         private static void SaveFlank(string dir, string name, Field f)
         {
@@ -265,7 +279,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             return dst;
         }
 
-        // ── 計測 ────────────────────────────────────────────────
+        // ── Measurement ────────────────────────────────────────────────
 
         private static string Name(VolcanoForm f)
         {
@@ -275,7 +289,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
         private static void Report(StringBuilder log, VolcanoForm form, float r, float h,
                                    Field on, Field off)
         {
-            // 制約の実測: R の外はきっかり 0 / H を超えない / 強さ 0 は今日と完全一致。
+            // Measuring the constraints: exactly 0 beyond R / never above H / strength 0 agrees
+            // exactly with today.
             float maxOn = 0f, maxOff = 0f;
             float worstOutside = 0f;
             double diff = 0f;
@@ -294,8 +309,9 @@ namespace DisasterPlus.Tools.VolcanoPreview
                     if (b > maxOff) maxOff = b;
                     if (d >= r && a > worstOutside) worstOutside = a;
 
-                    // 強さ 0 は「立て直した円錐 ∧ 火口の天井」そのものでなければならない
-                    // （ここだけは VolcanoCrater を通さず、式を独立に組み直して比べる）。
+                    // Strength 0 must be exactly "the rescaled cone AND the crater ceiling"
+                    // (here alone we do not go through VolcanoCrater but rebuild the formula
+                    // independently and compare).
                     float cone = VolcanoShape.ProfileAt(form, d, r,
                                                         h * VolcanoCrater.SummitScale(form, r));
                     float ceiling = VolcanoCrater.CeilingMetres(d, r, h);
@@ -321,14 +337,15 @@ namespace DisasterPlus.Tools.VolcanoPreview
                            + " m   (must be 0)");
         }
 
-        /// <summary>山頂を通る断面。**傾斜と谷の深さを数字で読めるようにする。**</summary>
+        /// <summary>A section through the summit. **So the slope and the depth of the gullies
+        /// can be read as numbers.**</summary>
         private static void CrossSection(string dir, StringBuilder log, VolcanoForm form,
                                          float r, float h, Field on, Field off)
         {
             int half = (on.Size - 1) / 2;
             int samples = half + 1;
 
-            // 東西の 1 本と、いちばん深い谷を通る 1 本。
+            // One line east-west, and one through the deepest gully.
             var eastOn = new float[samples];
             var eastOff = new float[samples];
             for (int i = 0; i < samples; i++)
@@ -337,7 +354,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                 eastOff[i] = off.At(half + i, half);
             }
 
-            // 中腹（0.55R）の円周を 720 分割して、最深と最浅の方位を探す。
+            // Divide the circle at mid-flank (0.55R) into 720 and find the azimuths of the
+            // deepest and the shallowest point.
             float ring = 0.55f * r;
             float deep = float.MaxValue, shallow = float.MinValue;
             double deepAngle = 0, shallowAngle = 0;
@@ -363,23 +381,25 @@ namespace DisasterPlus.Tools.VolcanoPreview
             RingSpread(log, on.Relief, r, h, 0.85f);
             Relief.Continuity(log, "continuity", on.Relief, form, r, h);
             Relief.Continuity(log, "continuity(off)", off.Relief, form, r, h);
-            // ★★ 溝が「線」として続いているかは**本数で割った指標でしか測れない。**
-            //    最初に使った「陰影を半径方向に歩いて明暗の反転を数える」指標は、
-            //    対照実験（谷を 18→36 本に増やしただけの単層の山）でも同じ値を返した ——
-            //    数えていたのは途切れではなく本数だった。GroovePersistence の doc 参照。
+            // ★★ Whether the grooves continue as "lines" **can only be measured by a metric
+            //    that is divided by the number of them.** The first metric used ("walk the
+            //    shading outwards along the radius and count light/dark reversals") returned
+            //    the same value in a control experiment (a single-tier mountain with the
+            //    gullies merely increased from 18 to 36) —— what it was counting was not the
+            //    breaks but the number of grooves. See the doc of GroovePersistence.
             log.AppendLine("    groove persistence (1.0 = every trough continues into the next"
                            + " 16 m ring = a solid line; master's single tier scores 0.856):");
             log.AppendLine("      relief=1  inner 0.15-0.50R "
                            + F3(GroovePersistence(on, 0.15f, 0.50f))
                            + " | outer 0.50-0.98R " + F3(GroovePersistence(on, 0.50f, 0.98f)));
 
-            // 半径方向の傾斜（平均、度）。
+            // Radial slope (mean, degrees).
             log.AppendLine("    mean slope        : " + F1(Deg(Math.Atan(h / r))) + " deg (smooth cone)");
             log.AppendLine("    footprint radius  : min " + F(MinReach(on, r, h)) + " m / max "
                            + F(MaxReach(on, r, h)) + " m  (R = " + F(r) + ")");
             log.AppendLine();
 
-            // 断面のグラフ。上が起伏あり、薄い線が今日の滑らかな円錐。
+            // The section graph. The upper trace has relief; the faint line is today's smooth cone.
             var gully = new float[samples];
             for (int i = 0; i < samples; i++)
             {
@@ -404,8 +424,9 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// 半径 <paramref name="fraction"/>R の円周に沿った起伏の刻み。
-        /// **細谷が効いているかはここでしか数字にならない**（0.55R はまだ出はじめる前）。
+        /// The notches of the relief around the circle at radius <paramref name="fraction"/>R.
+        /// **This is the only place where "are the rills working" becomes a number** (at 0.55R
+        /// they have not started to appear yet).
         /// </summary>
         private static void RingSpread(StringBuilder log, VolcanoRelief relief,
                                        float r, float h, float fraction)
@@ -439,23 +460,27 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// **溝が「線」として続いているか（本数に依らない指標）。**
+        /// **Whether the grooves continue as "lines" (a metric independent of how many there
+        /// are).**
         ///
-        /// ★★ 2026-08-22。最初に使った「破線度」（陰影を半径方向に歩いて明暗の反転を
-        ///   数える）は<b>役に立たなかった</b> —— 対照実験で、谷を 18 本から 36 本へ
-        ///   増やしただけの<u>単層</u>の山でも同じ 0.28 を返したからである。
-        ///   あれが数えていたのは「溝が途切れているか」ではなく
-        ///   **「溝が何本あるか」**で、階段状に歩く自分の足跡を測っていた。
+        /// ★★ 2026-08-22. The first metric used, the "dashedness" (walk the shading outwards
+        ///   along the radius and count light/dark reversals), was <b>useless</b> —— in a
+        ///   control experiment it returned the same 0.28 for a <u>single-tier</u> mountain
+        ///   whose gullies had merely been increased from 18 to 36. What it was counting was
+        ///   not "are the grooves broken" but **"how many grooves are there"**; it was
+        ///   measuring its own staircase-shaped footsteps.
         ///
-        /// こちらは<b>本数で割ってある</b>。16 m の環を 1 本ずつ外へ進みながら、
-        /// ある環で見つけた谷が**次の環にも同じ方位で在るか**を数える:
+        /// This one <b>is divided by the number of grooves</b>. Stepping outwards one 16 m ring
+        /// at a time, it counts whether a trough found on one ring is **also present at the
+        /// same azimuth on the next ring**:
         ///
         /// <code>
-        /// 1.0 に近い = どの谷も次の環へ続いている ＝ 実線
-        /// 低い       = 谷が現れては消える        ＝ 点線
+        /// close to 1.0 = every trough continues to the next ring = a solid line
+        /// low          = troughs appear and vanish               = a dotted line
         /// </code>
         ///
-        /// 谷は蛇行する（<c>WarpRadians</c>）ので、許容は 1 環あたり弧 2 セルぶん。
+        /// The gullies meander (<c>WarpRadians</c>), so the tolerance is an arc of 2 cells per
+        /// ring.
         /// </summary>
         private static float GroovePersistence(Field f, float fromFraction, float toFraction)
         {
@@ -473,7 +498,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
 
                 if (previous.Count > 0 && current.Count > 0)
                 {
-                    // 蛇行と 1 セルの丸めを許す（弧 2 セルぶんの角度）。
+                    // Allow for meandering and one cell of rounding (the angle of a 2-cell arc).
                     double tolerance = 2.0 * Cell / d;
 
                     for (int i = 0; i < previous.Count; i++)
@@ -496,9 +521,10 @@ namespace DisasterPlus.Tools.VolcanoPreview
         }
 
         /// <summary>
-        /// 半径 <paramref name="d"/> の環を**格子のセルで**読み、谷（極小）の方位を集める。
-        /// 解析値ではなく格子に焼いた高さを読むのが要点である
-        /// （破線は「溝」と「動かせない 16 m 格子」が噛み合って初めて現れる）。
+        /// Reads the ring at radius <paramref name="d"/> **through the grid cells** and
+        /// collects the azimuths of the troughs (the minima). The point is to read the heights
+        /// as baked into the grid rather than the analytic values (the dashing only appears
+        /// once the "grooves" and the immovable 16 m grid interact).
         /// </summary>
         private static void TroughAzimuths(Field f, float d,
                                            System.Collections.Generic.List<double> into)
@@ -521,8 +547,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                 float after = SampleCell(f, half, d, thNext);
                 if (here <= 0f) continue;
 
-                // 極小で、かつ両隣より 0.3 m 以上低いものだけを谷と数える
-                // （量子化の 1 段や float の丸めを谷にしない）。
+                // Only count as a trough what is a minimum and is at least 0.3 m below both
+                // neighbours (so a single quantisation step or float rounding is not a trough).
                 if (before - here >= 0.3f && after - here >= 0.3f) into.Add(th);
             }
         }
@@ -562,7 +588,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             return last;
         }
 
-        // ── 隆起アニメーション ────────────────────────────────────
+        // ── The uplift animation ────────────────────────────────────
 
         private static void GrowthFrames(string dir, StringBuilder log)
         {
@@ -632,11 +658,12 @@ namespace DisasterPlus.Tools.VolcanoPreview
             log.AppendLine();
         }
 
-        // ── 火口（実機の指摘①「最初から窪みとして」）─────────────────────
+        // ── The crater (point 1 from the in-game report: "a depression from the start") ─────────────────────
 
         /// <summary>
-        /// 山頂まわりを拡大して、**隆起の途中の各時刻で火口が窪んでいること**を描いて数える。
-        /// 「見た目の変更は自分でオフラインに描画・計測してから実機テストを頼む」の実体である。
+        /// Zooms in around the summit and draws and counts **that the crater is a depression at
+        /// every moment during the uplift**. This is the substance of "visual changes are drawn
+        /// and measured offline by yourself before asking for a test in the game".
         /// </summary>
         private static void CraterFrames(string dir, StringBuilder log)
         {
@@ -685,7 +712,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                     }
                 }
 
-                // 縁と底を東西の走査から実測する（式ではなく、描いた高さ場から読む）。
+                // Measure the rim and the floor from an east-west scan (read from the height
+                // field that was drawn, not from the formula).
                 float rim = 0f, rimAt = 0f;
                 for (int x = half; x < n; x++)
                 {
@@ -725,7 +753,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             log.AppendLine();
         }
 
-        // ── 断面のグラフ ──────────────────────────────────────────
+        // ── The section graph ──────────────────────────────────────────
 
         private static void Plot(string path, float h, float r, float[][] series, int[] colours)
         {
@@ -733,7 +761,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             var rgb = new byte[W * H * 3];
             for (int i = 0; i < rgb.Length; i++) rgb[i] = 0xFF;
 
-            // 目盛り（100 m ごとの水平線）。
+            // The scale (a horizontal line every 100 m).
             for (float m = 0; m <= h; m += 100f)
             {
                 int y = PadT + (int)((1f - m / h) * (H - PadT - PadB));
@@ -792,9 +820,10 @@ namespace DisasterPlus.Tools.VolcanoPreview
         private static string F4(double v) { return v.ToString("F4", CultureInfo.InvariantCulture); }
 
         /// <summary>
-        /// 出来上がった高さ場そのものの極値密度（山の内側だけ）。
-        /// <c>Relief.Report</c> が測るのは 1 本のノイズの折り返しで、こちらは
-        /// **実際に地形へ書かれる形**が格子の上で折り返していないかである。
+        /// The density of extrema in the finished height field itself (inside the mountain
+        /// only). What <c>Relief.Report</c> measures is the aliasing of a single noise source;
+        /// this measures whether **the shape actually written to the terrain** aliases on the
+        /// grid.
         /// </summary>
         private static float ExtremaDensity(Field f)
         {

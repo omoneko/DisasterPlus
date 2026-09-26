@@ -5,91 +5,97 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ⑤が「影響範囲に入っている建物と道路」を決める**唯一の場所**。
-    /// 数える側（<see cref="VolcanoSurvey"/>）と壊す側（<see cref="VolcanoClearing"/>）の
-    /// 両方がここを通る。**sim スレッド専用**（ゲームのバッファを読む）。
+    /// The **one and only place** where ⑤ decides "which buildings and roads are inside the
+    /// affected range". Both the counting side (<see cref="VolcanoSurvey"/>) and the destroying
+    /// side (<see cref="VolcanoClearing"/>) go through here.
+    /// **Sim thread only** (it reads the game's buffers).
     ///
-    /// ── なぜ型を 1 つ作ったのか（全体レビュー I2 / I4）─────────────────
+    /// ── why a single type was created (whole-project review I2 / I4) ───────────────────────
     ///
-    /// 元は同じ規則が 2 つのファイルに写してあり、<c>VolcanoClearing</c> の doc が
-    /// 「<c>SegmentGridMargin</c> は <c>VolcanoSurvey</c> と同じ値でなければ、
-    /// 数えた本数と壊す本数がずれる」と**注意書きで**担保していた。
-    /// レビューはその隣で**マスクが実際にずれていた**ことを見つけている ——
-    /// 調査側だけが <c>Untouchable</c> と <c>Collapsed</c> を弾いており、
-    /// **不可逆の操作の直前に、壊れる数を実際より少なく見せていた**。
+    /// The same rules used to be copied into two files, with <c>VolcanoClearing</c>'s doc
+    /// guaranteeing **by a note** that "<c>SegmentGridMargin</c> must be the same value as in
+    /// <c>VolcanoSurvey</c>, or the number counted and the number destroyed will drift apart".
+    /// The review found, right next to it, that **the masks had actually drifted** —
+    /// the survey side alone was excluding <c>Untouchable</c> and <c>Collapsed</c>, so
+    /// **immediately before an irreversible operation it was showing fewer things about to be
+    /// destroyed than there really were**.
     ///
-    /// > 注意書きは同じ間違いを 2 度目に防げなかった。**だから定数を共有する。**
-    /// > 調査と準備でマスク・余白・当たり判定のどれか 1 つでも変えたくなったら、
-    /// > ここを変えるしかなく、変えれば必ず両方に効く。
+    /// > The note did not prevent the same mistake a second time. **So the constants are shared.**
+    /// > If you ever want to change any one of the mask, the margin or the hit test between the
+    /// > survey and the clearing, here is the only place to change it, and changing it necessarily
+    /// > affects both.
     ///
-    /// ── マスク（IL 事実文書 §G-16 (c)(d)）───────────────────────
+    /// ── the mask (IL facts doc §G-16 (c)(d)) ───────────────────────────────────────────────
     ///
-    /// ⑤が取り除かなければならないのは「<b>地形を自分の高さに固定し続けるもの</b>」
-    /// である。<c>Building.TerrainUpdated</c> は <c>m_flags &amp; 524291</c>
-    /// （<c>Created|Deleted|Demolishing</c>）しか見ず、<c>NetSegment.TerrainUpdated</c> は
-    /// <c>m_flags &amp; 3</c> しか見ない。したがって:
+    /// What ⑤ has to remove is "<b>anything that keeps pinning the terrain to its own height</b>".
+    /// <c>Building.TerrainUpdated</c> only looks at <c>m_flags &amp; 524291</c>
+    /// (<c>Created|Deleted|Demolishing</c>), and <c>NetSegment.TerrainUpdated</c> only at
+    /// <c>m_flags &amp; 3</c>. Therefore:
     ///
-    ///   - <c>Untouchable</c> の建物・道路も**固定する**ので候補に含める
-    ///   - <c>Collapsed</c> の瓦礫と倒壊済みの道路も**固定する**ので候補に含める。
-    ///     しかも <c>demolish: true</c> は既に <c>Collapsed</c> の建物にも効き、
-    ///     <c>Demolishing</c> を立てて <b>true を返す</b>（§G-16 (d) の IL_0210。
-    ///     本タスクで再度逆アセンブルして確認した）
-    ///   - <c>Demolishing</c> だけは弾く —— そこは既に地形固定が止まっている
-    ///     （<c>NetSegment.Flags</c> に <c>Demolishing</c> は無い。§F-15）
+    ///   - <c>Untouchable</c> buildings and roads **also pin**, so they are candidates
+    ///   - <c>Collapsed</c> rubble and already-collapsed roads **also pin**, so they are
+    ///     candidates. On top of that, <c>demolish: true</c> already works on <c>Collapsed</c>
+    ///     buildings: it sets <c>Demolishing</c> and <b>returns true</b> (IL_0210 in §G-16 (d);
+    ///     re-disassembled and confirmed in this task)
+    ///   - Only <c>Demolishing</c> is excluded — there the terrain pinning has already stopped
+    ///     (<c>NetSegment.Flags</c> has no <c>Demolishing</c>. §F-15)
     ///
-    /// ── 道路の当たり判定（§F-15 / <see cref="FootprintReach"/>）──────────────
+    /// ── the road hit test (§F-15 / <see cref="FootprintReach"/>) ──────────────────────────
     ///
-    /// セルを決める位置は**両端ノードの中点**、位置を持っているフィールドは
-    /// <c>m_middlePosition</c>（ベジェの中点の平均）で、**この 2 つは同じではない**。
-    /// だから矩形を <see cref="SegmentGridMargin"/> セルだけ広げ、距離は
-    /// <b>両端ノード → 中点 → 両端ノードの折れ線</b>で測る。
-    /// 中点 1 点で測ると、中心へ向かって伸びる幹線道路が取り除かれずに残り、
-    /// **完成した山の中に平らな溝が残る**（あちらのクラス doc）。
+    /// The position that decides the cell is **the midpoint of the two end nodes**, while the
+    /// field that holds a position is <c>m_middlePosition</c> (the mean of the beziers'
+    /// midpoints), and **the two are not the same**.
+    /// So the rectangle is widened by <see cref="SegmentGridMargin"/> cells, and the distance is
+    /// measured along <b>the polyline end node → midpoint → end node</b>.
+    /// Measure at the single midpoint and arterial roads running in towards the centre are left in
+    /// place, so **a flat trench is left inside the finished mountain** (that class's doc).
     /// </summary>
     internal static class VolcanoScan
     {
         /// <summary>
-        /// 道路の矩形を広げるセル数。セルを決める位置（両端ノードの中点）と、
-        /// 折れ線が届く範囲は同じではない（クラス doc / §F-15）。
+        /// The number of cells by which the road rectangle is widened. The position that decides
+        /// the cell (the midpoint of the two end nodes) and the extent the polyline reaches are
+        /// not the same (class doc / §F-15).
         ///
-        /// **これでも取りこぼしうる**: 128 m より長く矩形の外へ出ている道路は、
-        /// 折れ線が円に掛かっていてもセルが矩形の外にある。実際の道路 1 本の
-        /// 長さ（ゲームの上限は概ね数百 m）に対して 2 セルは十分だが、
-        /// 「必ず全部」ではないことを名乗っておく。
+        /// **Even this can miss some**: a road sticking more than 128 m outside the rectangle has
+        /// its cell outside the rectangle even when its polyline touches the circle. Two cells is
+        /// ample against the length of an actual road segment (the game's limit is on the order of
+        /// a few hundred metres), but it is worth stating that this is not "always all of them".
         /// </summary>
         internal const int SegmentGridMargin = 2;
 
         /// <summary>
-        /// 建物の候補条件。<c>Untouchable</c> と <c>Collapsed</c> を**含める**
-        /// のが⑤に固有の判断で、理由はクラス doc にある。
+        /// The candidate condition for buildings. **Including** <c>Untouchable</c> and
+        /// <c>Collapsed</c> is the call specific to ⑤; the reason is in the class doc.
         /// </summary>
         internal const Building.Flags BuildingCandidateMask =
             Building.Flags.Created | Building.Flags.Deleted | Building.Flags.Demolishing;
 
         /// <summary>
-        /// 道路の候補条件。<c>NetSegment.Flags</c> に <c>Demolishing</c> は無い（§F-15）ので、
-        /// <c>Created</c> かつ <c>Deleted</c> でないことだけを見る。
+        /// The candidate condition for roads. <c>NetSegment.Flags</c> has no <c>Demolishing</c>
+        /// (§F-15), so all that is checked is <c>Created</c> and not <c>Deleted</c>.
         /// </summary>
         internal const NetSegment.Flags SegmentCandidateMask =
             NetSegment.Flags.Created | NetSegment.Flags.Deleted;
 
-        /// <summary>この建物は⑤の相手か（<see cref="BuildingCandidateMask"/>）。</summary>
+        /// <summary>Whether this building is ⑤'s business (<see cref="BuildingCandidateMask"/>).</summary>
         internal static bool IsCandidate(Building.Flags flags)
         {
             return (flags & BuildingCandidateMask) == Building.Flags.Created;
         }
 
-        /// <summary>この道路は⑤の相手か（<see cref="SegmentCandidateMask"/>）。</summary>
+        /// <summary>Whether this road is ⑤'s business (<see cref="SegmentCandidateMask"/>).</summary>
         internal static bool IsCandidate(NetSegment.Flags flags)
         {
             return (flags & SegmentCandidateMask) == NetSegment.Flags.Created;
         }
 
         /// <summary>
-        /// 建物が影響範囲に入っているか。距離は <c>m_position</c> で測る ——
-        /// 大きな建物は角が範囲の中にあっても中心が外なら入らないが、
-        /// **それは概算であり、そう名乗るほうが「全部壊れる」と嘘をつくより正しい**
-        /// （設計書 §7.2）。
+        /// Whether a building is inside the affected range. The distance is measured from
+        /// <c>m_position</c> — a large building whose corner is inside the range is not included
+        /// if its centre is outside, but
+        /// **that is an approximation, and saying so is better than lying that "everything gets
+        /// destroyed"** (design doc §7.2).
         /// </summary>
         internal static bool BuildingInside(Vector3 position, Vec2 origin, float radiusSquared)
         {
@@ -97,12 +103,12 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 道路が影響範囲に入っているか（クラス doc の折れ線判定）。
+        /// Whether a road is inside the affected range (the polyline test in the class doc).
         ///
-        /// <paramref name="nodes"/> が null（ノードのバッファが読めない）なら
-        /// <c>m_middlePosition</c> の 1 点だけで判定する。**そのときは
-        /// 中心へ伸びる道路を取りこぼしうる**が、数える側と壊す側で同じ関数を
-        /// 通っている以上、両者は同じ答えを出す。
+        /// If <paramref name="nodes"/> is null (the node buffer cannot be read), the test uses the
+        /// single point <c>m_middlePosition</c>. **That can miss roads running in towards the
+        /// centre**, but since the counting side and the destroying side go through the same
+        /// function, the two still give the same answer.
         /// </summary>
         internal static bool SegmentInside(NetSegment[] segments, NetNode[] nodes, ushort id,
                                            Vec2 origin, float radiusMetres)
@@ -135,8 +141,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 道路のノードのバッファ。読めなければ null（<see cref="SegmentInside"/> が
-        /// 中点だけの判定に落ちる）。**例外を投げない。**
+        /// The road node buffer. null if it cannot be read (<see cref="SegmentInside"/> then falls
+        /// back to the midpoint-only test). **It never throws.**
         /// </summary>
         internal static NetNode[] NodeBuffer(NetManager nm)
         {

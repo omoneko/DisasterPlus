@@ -11,7 +11,7 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void NeverMoreThanTheDeclaredNumberOfPatchesIsAlive()
         {
-            // ★ これが 1 tick あたりの仕事量の上限そのものである。
+            // ★ This is precisely the upper bound on the amount of work per tick.
             for (uint elapsed = 0; elapsed < 20000u; elapsed += 7u)
             {
                 uint first, last;
@@ -31,16 +31,16 @@ namespace DisasterPlus.Core.Tests.Typhoon
 
             uint first, last;
 
-            // 生まれた瞬間は生きている。
+            // Alive at the instant it is born.
             Assert.True(GustPatchPlan.AliveRange(birth, out first, out last));
             Assert.True(first <= ordinal && ordinal <= last);
 
-            // 寿命の 1 フレーム前も生きている。
+            // Still alive one frame before the end of its lifetime.
             Assert.True(GustPatchPlan.AliveRange(birth + GustPatchPlan.LifetimeFrames - 1u,
                                                  out first, out last));
             Assert.True(first <= ordinal && ordinal <= last);
 
-            // 寿命を過ぎたら生きていない。
+            // Once the lifetime has passed it is no longer alive.
             Assert.True(GustPatchPlan.AliveRange(birth + GustPatchPlan.LifetimeFrames,
                                                  out first, out last));
             Assert.True(ordinal < first,
@@ -50,8 +50,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void PatchesAreShortLivedComparedToAStorm()
         {
-            // 「短命であること」を数字で固定する。台風は m_activeDuration
-            // （数千〜数万フレーム）だけ生きるので、パッチはその何十分の一。
+            // Pins down "being short-lived" as a number. A typhoon only lives for
+            // m_activeDuration (thousands to tens of thousands of frames), so a patch
+            // lasts a few tens of times less than that.
             Assert.True(GustPatchPlan.LifetimeFrames <= 1024u);
             Assert.True(GustPatchPlan.SpawnIntervalFrames < GustPatchPlan.LifetimeFrames);
         }
@@ -73,7 +74,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void MostPatchesLandOnTheDangerousSemicircle()
         {
-            // 「危険半円に寄る」を分布で固定する。反対側にも出るが多数派ではない。
+            // Pins down "leaning towards the dangerous semicircle" as a distribution.
+            // Patches do appear on the opposite side, but they are not the majority.
             int onDangerous = 0;
             const int samples = 400;
 
@@ -83,7 +85,9 @@ namespace DisasterPlus.Core.Tests.Typhoon
                 GustPatchPlan.Patch(17, ordinal, false, out angle, out orbit, out radius,
                                     out strength);
 
-                // 北半球の危険半円は相対角 -90 度。相対角の sin が負なら右側。
+                // In the northern hemisphere the dangerous semicircle is at a relative
+                // angle of -90 degrees. A negative sin of the relative angle means the
+                // right-hand side.
                 if (System.Math.Sin(angle) < 0.0) onDangerous++;
             }
 
@@ -134,7 +138,8 @@ namespace DisasterPlus.Core.Tests.Typhoon
         [Fact]
         public void ThePlacementNeverMovesForTheSamePatch()
         {
-            // フレームを混ぜていないことの試験。混ぜるとパッチが毎 tick 瞬間移動する。
+            // A test that the frame is not mixed in. If it were, the patches would
+            // teleport on every tick.
             for (uint ordinal = 0; ordinal < 20; ordinal++)
             {
                 float a1, o1, r1, s1, a2, o2, r2, s2;

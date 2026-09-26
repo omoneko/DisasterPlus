@@ -1,32 +1,37 @@
 namespace DisasterPlus.Tools.WaterSolverSim
 {
     /// <summary>
-    /// <c>WaterSimulation.Cell</c> の写し。**フィールドの順も型もゲームのまま。**
+    /// A copy of <c>WaterSimulation.Cell</c>. **Field order and types are exactly as in the game.**
     ///
-    /// 逆アセンブルで確認した宣言（Marshal.OffsetOf でも一致）:
+    /// The declaration confirmed by disassembly (Marshal.OffsetOf agrees):
     /// <code>
     ///   struct Cell { ushort m_height @0; ushort m_pollution @2;
     ///                 short m_velocityX @4; short m_velocityZ @6; }   // 8 bytes
     /// </code>
     ///
-    /// ★ <b>単位</b>: <see cref="Height"/> は 1/64 m の水柱。
-    ///   <see cref="VelocityX"/> / <see cref="VelocityZ"/> は<b>同じ単位</b>で、
-    ///   「1 フレームにセル境界を越えて動く水柱の量」そのものである
-    ///   （IL_1137 で <c>m = a.m_velocityX</c> を<b>そのまま</b>高さの増減に使う。
-    ///   係数も時間刻みも掛からない）。速度と言いながら実体は<b>流量</b>。
+    /// ★ <b>Units</b>: <see cref="Height"/> is a water column in 1/64 m.
+    ///   <see cref="VelocityX"/> / <see cref="VelocityZ"/> use the <b>same unit</b> and are
+    ///   literally "the amount of water column that crosses the cell boundary in one frame"
+    ///   (at IL_1137 <c>m = a.m_velocityX</c> is used <b>as is</b> to add to and subtract from
+    ///   the height; no coefficient and no time step are applied). Despite the name "velocity",
+    ///   what it really holds is a <b>flow rate</b>.
     /// </summary>
     internal struct Cell
     {
-        /// <summary>水柱の高さ（1/64 m）。地形の上に乗っている量で、標高ではない。</summary>
+        /// <summary>Height of the water column (1/64 m). The amount sitting on top of the
+        /// terrain, not an elevation.</summary>
         public ushort Height;
 
-        /// <summary>汚染。**水の運動には一切影響しない**（IL 上、汚染は m_height を書かない）。</summary>
+        /// <summary>Pollution. **Has no effect whatsoever on the motion of the water** (in the
+        /// IL, pollution never writes m_height).</summary>
         public ushort Pollution;
 
-        /// <summary>+X 方向へ流し出す量（1/64 m）。負なら x+1 から流れ込む。</summary>
+        /// <summary>Amount flowing out in the +X direction (1/64 m). Negative means it flows in
+        /// from x+1.</summary>
         public short VelocityX;
 
-        /// <summary>+Z 方向へ流し出す量（1/64 m）。負なら z+1 から流れ込む。</summary>
+        /// <summary>Amount flowing out in the +Z direction (1/64 m). Negative means it flows in
+        /// from z+1.</summary>
         public short VelocityZ;
     }
 }

@@ -5,20 +5,22 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Earthquake
 {
     /// <summary>
-    /// 地図に描く断層帯の輪郭。**<see cref="FaultBand.Contains"/> と一致すること**が
-    /// このファイルの全てである。
+    /// The outline of the fault band drawn on the map. **Agreeing with
+    /// <see cref="FaultBand.Contains"/>** is the whole point of this file.
     ///
-    /// 帯の縁は閉じた式で書けない（<c>Gap</c> は 4 次の区分多項式で単峰ですらない、
-    /// 全体レビュー C1 追記）。だから輪郭は述語そのものを二分探索して測る。
-    /// ここで別の近似式を持ち込むと、**パネルが「帯の内側」と言っている建物が
-    /// 地図では帯の外に描かれる**という食い違いが起きる。
+    /// The edge of the band cannot be written in closed form (<c>Gap</c> is a piecewise
+    /// quartic and is not even unimodal, per the addendum to overall review C1). So the
+    /// outline is measured by binary-searching the predicate itself. Bring in a different
+    /// approximation here and you get a mismatch where **a building the panel calls
+    /// "inside the band" is drawn outside the band on the map**.
     /// </summary>
     public class FaultBandOutlineTests
     {
         private const float L = 1000f;
         private const float W = 100f;
 
-        // 角度 0 のとき dir = (0, 1)、つまり断層は Z 軸に沿う（FaultBandTests と同じ）。
+        // At angle 0, dir = (0, 1), i.e. the fault runs along the Z axis
+        // (same as FaultBandTests).
         private static FaultBand Sample()
         {
             return new FaultBand(new Vec2(0f, 0f), 0f, length: L, width: W);
@@ -37,8 +39,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
             var outline = new FaultBandOutline();
             outline.Rebuild(default(FaultBand));
 
-            // 「分からない」を「たぶんこのくらい」で描かない。プレハブ 4 値は
-            // DLL に無く、実機でしか読めない（IL 事実文書 §A-0）。
+            // Do not draw "unknown" as "probably about this much". The four prefab values
+            // are not in the DLL and can only be read in-game (IL facts doc §A-0).
             Assert.False(outline.Known);
             Assert.Equal(0f, outline.AlongExtent, 4);
             Assert.Equal(0f, outline.HalfWidthAt(0), 4);
@@ -62,8 +64,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
             var band = Sample();
             var outline = Built();
 
-            // 円盤中心の上限 0.4L に、その位置での到達距離 w(0.4) が足される
-            // （設計書 §3.1 の末尾。旧実装は両端をちょうど w ぶん取りこぼしていた）。
+            // The reach at that position, w(0.4), is added to the 0.4L limit on the disc
+            // centre (end of design doc §3.1. The old implementation dropped exactly w at
+            // each end).
             Assert.Equal(FaultBand.MaxOffset * L + band.PatchRadiusAt(FaultBand.MaxOffset),
                          outline.AlongExtent, 3);
         }
@@ -83,8 +86,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
             var band = Sample();
             var outline = Built();
 
-            // 中央（t = 0）では w = W、蛇行 0.5w を足して 1.5W。
-            // FaultBand.HalfWidthAt と一致しなければならない。
+            // At the centre (t = 0), w = W, plus the meander of 0.5w gives 1.5W.
+            // It must agree with FaultBand.HalfWidthAt.
             int middle = FaultBandOutline.Segments / 2;
             Assert.Equal(band.HalfWidthAt(0f), outline.HalfWidthAt(middle), 1);
             Assert.Equal(1.5f * W, outline.HalfWidthAt(middle), 1);
@@ -103,14 +106,16 @@ namespace DisasterPlus.Core.Tests.Earthquake
                             > outline.HalfWidthAt(FaultBandOutline.Segments - i + 1));
             }
 
-            // 端は幅がほとんど無い（円盤 1 個が最後に届く 1 点に近づく）。
+            // At the ends there is almost no width (it approaches the single point that the
+            // last disc reaches).
             Assert.True(outline.HalfWidthAt(0) < 0.05f * W);
             Assert.True(outline.HalfWidthAt(FaultBandOutline.Segments) < 0.05f * W);
         }
 
         /// <summary>
-        /// **このファイルの中心。** 測った輪郭のすぐ内側は <c>Contains</c> が真、
-        /// すぐ外側は偽であること ＝ 描く形と判定する形が一致すること。
+        /// **The centre of this file.** Just inside the measured outline <c>Contains</c>
+        /// must be true and just outside it false = the shape drawn and the shape tested
+        /// against agree.
         /// </summary>
         [Fact]
         public void TheOutlineAgreesWithContainsOnBothSides()
@@ -140,7 +145,8 @@ namespace DisasterPlus.Core.Tests.Earthquake
             var band = Sample();
             var outline = Built();
 
-            // 蛇行 sin(...) は ±0.5w の両側に等しく振れるので、帯は線対称になる。
+            // The meander sin(...) swings equally to either side of ±0.5w, so the band is
+            // symmetric about the line.
             for (int i = 0; i <= FaultBandOutline.Segments; i++)
             {
                 float u = outline.AlongAt(i);
@@ -155,8 +161,9 @@ namespace DisasterPlus.Core.Tests.Earthquake
         {
             var outline = Built();
 
-            // L と W だけの関数なので、この 2 つが同じなら測り直さない
-            // （震央の位置と m_angle には依存しない ＝ 局所座標で持っている）。
+            // It is a function of L and W alone, so if those two are the same we do not
+            // re-measure (it does not depend on the epicentre position or m_angle = it is
+            // held in local coordinates).
             Assert.True(outline.Matches(L, W));
             Assert.False(outline.Matches(L, W * 1.1f));
             Assert.False(outline.Matches(L * 1.1f, W));

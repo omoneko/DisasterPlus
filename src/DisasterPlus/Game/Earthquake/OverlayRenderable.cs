@@ -3,87 +3,90 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// <c>RenderManager</c> の**オーバーレイ描画の呼び出し口**。
-    /// この 1 個のインスタンスがゲームの描画ループに刺さり、
-    /// <see cref="EarthquakeOverlay.Render"/> を毎フレーム呼ぶ。
+    /// **The entry point for <c>RenderManager</c>'s overlay drawing.**
+    /// This single instance hooks into the game's render loop and calls
+    /// <see cref="EarthquakeOverlay.Render"/> every frame.
     ///
-    /// ── IL で確定させた経路（この機能の土台。憶測は 1 つも無い）─────────────
+    /// ── The path, pinned down in the IL (the foundation of this feature; not one
+    ///    guess in it) ──────────────────────────────────────────────
     ///
     /// <code>
-    /// // 登録（public static、追加するだけ。取り外す API は存在しない）
+    /// // Registration (public static, add-only. There is no API to remove one.)
     /// RenderManager::RegisterRenderableManager(IRenderableManager)
-    ///   IL_0000 ldarg.0 ; brfalse IL_0011          // null なら何もしない
+    ///   IL_0000 ldarg.0 ; brfalse IL_0011          // null does nothing
     ///   IL_0006 ldsfld  RenderManager::m_renderables
     ///   IL_000C callvirt FastList`1::Add
     ///
-    /// // 呼び出し（カメラの OnPostRender の中）
+    /// // The call (inside the camera's OnPostRender)
     /// OverlayEffect::OnPostRender
-    ///   IL_0039 RenderTexture::GetTemporary        // オーバーレイ専用の RGBA バッファ
-    ///   IL_0059 Graphics::SetRenderTarget(color: そのバッファ, depth: 画面の深度バッファ)
+    ///   IL_0039 RenderTexture::GetTemporary        // an RGBA buffer just for overlays
+    ///   IL_0059 Graphics::SetRenderTarget(color: that buffer, depth: the screen's depth buffer)
     ///   IL_0079 GL::Clear(clearDepth: false, clearColor: true, (0,0,0,0))
-    ///   IL_007E Application::get_isPlaying          → false なら呼ばない
-    ///   IL_008F LoadingManager::m_loadingComplete   → false なら呼ばない  ★
+    ///   IL_007E Application::get_isPlaying          → false means it is not called
+    ///   IL_008F LoadingManager::m_loadingComplete   → false means it is not called  ★
     ///   IL_009E RenderManager::get_CurrentCameraInfo
     ///   IL_00A3 RenderManager::Managers_RenderOverlay(cameraInfo)
     ///
     /// RenderManager::Managers_RenderOverlay(CameraInfo)
-    ///   IL_0014 全 renderable の BeginOverlay
+    ///   IL_0014 BeginOverlay on every renderable
     ///   IL_0037 Graphics::ExecuteCommandBuffer(m_overlayBuffer)
-    ///   IL_0050 全 renderable の EndOverlay          ★ ここで描く
+    ///   IL_0050 EndOverlay on every renderable      ★ this is where we draw
     /// </code>
     ///
-    /// **<see cref="EndOverlay"/> を使う理由**は、バニラのツール類が
-    /// （<c>ToolManager.EndOverlayImpl</c> 経由で）オーバーレイを描いているのが
-    /// 同じ位置だからである。<c>OverlayEffect.DrawCircle</c> / <c>DrawQuad</c> は
-    /// 最終的に <c>Graphics.DrawMeshNow</c> を呼ぶ**即時描画**（<c>DrawEffect</c>
-    /// IL_0070 / IL_00AE）なので、カメラの描画コールバックの外——たとえば
-    /// <c>ThreadingExtensionBase.OnUpdate</c>——から呼んでも**何も出ない**。
+    /// **The reason for using <see cref="EndOverlay"/>** is that it is exactly where
+    /// vanilla's own tools draw their overlays (via <c>ToolManager.EndOverlayImpl</c>).
+    /// <c>OverlayEffect.DrawCircle</c> / <c>DrawQuad</c> end up calling
+    /// <c>Graphics.DrawMeshNow</c>, i.e. **immediate-mode drawing** (<c>DrawEffect</c>
+    /// IL_0070 / IL_00AE), so calling them outside a camera render callback — from
+    /// <c>ThreadingExtensionBase.OnUpdate</c>, say — **draws nothing at all**.
     ///
-    /// ★ の <c>m_loadingComplete</c> ゲートのおかげで、ロード中・メインメニューでは
-    /// そもそも呼ばれない。それでも <see cref="EarthquakeOverlay"/> 側に
-    /// 独自のセッションガードを持つ（都市をアンロードした瞬間から
-    /// <c>m_loadingComplete</c> が落ちるまでの間に描かないため）。
+    /// Thanks to the <c>m_loadingComplete</c> gate marked ★, this is never called while
+    /// loading or in the main menu. Even so, <see cref="EarthquakeOverlay"/> keeps its
+    /// own session guard (so that nothing is drawn between the moment a city is unloaded
+    /// and the moment <c>m_loadingComplete</c> drops).
     ///
-    /// ── 登録は取り消せない ──────────────────────────────────
+    /// ── Registration cannot be undone ────────────────────────────────
     ///
-    /// <c>m_renderables</c> は <c>RenderManager</c> の**静的**フィールドで、
-    /// 全アセンブリを走査しても <c>Clear</c> も <c>Remove</c> も呼ばれていない
-    /// （書き手は <c>.cctor</c> の <c>newobj</c> と <c>RegisterRenderableManager</c> の
-    /// <c>Add</c> だけ）。つまり一度登録したらプロセスが終わるまで外れない。
-    /// したがって:
-    ///   - 登録は**プロセスにつき 1 回**（<see cref="EarthquakeOverlay.EnsureRegistered"/>）
-    ///   - このクラスは<b>ゲームのオブジェクトを 1 つも掴まない</b>。掴むと
-    ///     都市をアンロードしても解放されず、しかも fake-null 化した参照を
-    ///     次の都市へ持ち越すことになる（③で実際に起きた壊れ方）
-    ///   - 描かない条件は全て <see cref="EarthquakeOverlay"/> 側の状態で判定する
+    /// <c>m_renderables</c> is a **static** field of <c>RenderManager</c>, and scanning
+    /// every assembly turns up no call to <c>Clear</c> or <c>Remove</c> (the only writers
+    /// are the <c>newobj</c> in the <c>.cctor</c> and the <c>Add</c> in
+    /// <c>RegisterRenderableManager</c>). So once registered, it stays until the process
+    /// exits. Therefore:
+    ///   - register **once per process** (<see cref="EarthquakeOverlay.EnsureRegistered"/>)
+    ///   - this class <b>holds not one game object</b>. Hold one and it is never released
+    ///     when the city unloads, and on top of that a reference that has gone fake-null
+    ///     is carried over into the next city (the exact breakage feature ③ actually hit)
+    ///   - every condition for not drawing is decided from state on the
+    ///     <see cref="EarthquakeOverlay"/> side
     ///
-    /// ── 実装していないメソッドについて ────────────────────────────
+    /// ── About the methods that are not implemented ───────────────────
     ///
-    /// <c>IRenderableManager</c> は 11 個のメソッドを要求する。実際に使うのは
-    /// <see cref="EndOverlay"/> だけで、残りは無害な既定値を返す。
-    /// 特に <see cref="CalculateGroupData"/> は
-    /// <c>RenderGroup.UpdateMeshData</c> から**全描画グループについて**呼ばれる
-    /// （<c>RenderManager::Managers_CalculateGroupData</c> は戻り値を OR で畳む）。
-    /// <c>false</c> を返す＝「このマネージャはこのグループに何も出さない」で、
-    /// バニラの畳み込みに一切影響しない。
+    /// <c>IRenderableManager</c> demands 11 methods. The only one actually used is
+    /// <see cref="EndOverlay"/>; the rest return harmless defaults.
+    /// <see cref="CalculateGroupData"/> in particular is called from
+    /// <c>RenderGroup.UpdateMeshData</c> **for every render group**
+    /// (<c>RenderManager::Managers_CalculateGroupData</c> folds the return values with
+    /// OR). Returning <c>false</c> means "this manager puts nothing in this group", which
+    /// has no effect whatsoever on vanilla's fold.
     /// </summary>
     public sealed class OverlayRenderable : IRenderableManager
     {
         /// <summary>
-        /// 登録済みか。**<c>RenderManager.m_renderables</c> は外す API を持たない**
-        /// ので、プロセスにつき 1 個に絞る（クラス doc の IL）。
+        /// Whether we are registered. **<c>RenderManager.m_renderables</c> has no API to
+        /// remove one**, so this is kept to one per process (see the IL in the class doc).
         /// </summary>
         private static bool _registered;
 
         /// <summary>
-        /// **1 個だけ登録する。** ②（震度）と①（台風の進路・暴風域・風）の
-        /// どちらから呼ばれても同じ 1 個で足りる —— 増やしても外せないので、
-        /// 機能ごとに 1 個ずつ登録すると<b>都市を出入りするたびに増えていく</b>。
+        /// **Register exactly one.** The same single instance serves whether the call
+        /// comes from ② (seismic intensity) or ① (typhoon track, storm area, wind) —
+        /// since extras cannot be removed, registering one per feature would mean
+        /// <b>the count growing every time you enter and leave a city</b>.
         /// </summary>
         /// <summary>
-        /// 本当に登録できたか。**診断はこれを見ること。**
-        /// 呼んだ回数ではなく、<c>RegisterRenderableManager</c> が例外を投げずに
-        /// 通ったかを表す。
+        /// Whether registration really succeeded. **This is what to look at when
+        /// diagnosing.** It is not a count of calls: it says whether
+        /// <c>RegisterRenderableManager</c> got through without throwing.
         /// </summary>
         public static bool Registered { get { return _registered; } }
 
@@ -100,7 +103,7 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 構築時の 1 回だけなのでスロットル不要。
+                // This happens once at construction, so no throttling is needed.
                 Log.Error("failed to register the map overlay", e);
             }
         }
@@ -112,8 +115,8 @@ namespace DisasterPlus.Game
 
         public DrawCallData GetDrawCallData()
         {
-            // プロファイラ表示用の集計。オーバーレイの実コール数は
-            // EarthquakeOverlay.LastDrawCalls が診断ダンプに出す。
+            // Totals for the profiler display. The overlay's real draw-call count is
+            // reported in the diagnostic dump by EarthquakeOverlay.LastDrawCalls.
             return new DrawCallData();
         }
 
@@ -124,10 +127,12 @@ namespace DisasterPlus.Game
         public void BeginOverlay(RenderManager.CameraInfo cameraInfo) { }
 
         /// <summary>
-        /// **ここだけが実装。** カメラの <c>OnPostRender</c> の中＝メインスレッド。
+        /// **This is the only one implemented.** Inside the camera's <c>OnPostRender</c>,
+        /// i.e. the main thread.
         ///
-        /// ★ 2 つとも、自分が出るべきでないときは<b>先頭で即座に戻る</b>ので、
-        ///   ここで設定や状態を見分けない（見分けると条件が 2 か所に散る）。
+        /// ★ Both of them <b>return immediately at the top</b> when they should not be
+        ///   drawing, so do not sort out settings or state here (doing so would scatter
+        ///   the conditions across two places).
         /// </summary>
         public void EndOverlay(RenderManager.CameraInfo cameraInfo)
         {

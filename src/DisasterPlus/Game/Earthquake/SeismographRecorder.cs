@@ -6,76 +6,79 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 観測点 1 個ぶんの、不変な波形スナップショット。
-    /// sim スレッドが作り、main スレッドが読むだけで書き換えない
-    /// （<see cref="EarthquakeReading"/> と同じ規律）。
+    /// An immutable waveform snapshot for one observation point.
+    /// Built by the sim thread; the main thread only reads it and never modifies it (the
+    /// same discipline as <see cref="EarthquakeReading"/>).
     ///
-    /// <see cref="Frames"/> / <see cref="Values"/> は容量ぶんの長さを持つことがある。
-    /// **有効なのは先頭 <see cref="Count"/> 件だけ**で、それより後ろは
-    /// リングバッファの未使用領域に対応する 0 である。0 は変位 0（＝揺れていない）と
-    /// 見分けが付かないので、長さではなく必ず <see cref="Count"/> で回すこと。
+    /// <see cref="Frames"/> / <see cref="Values"/> can be as long as the capacity.
+    /// **Only the first <see cref="Count"/> entries are valid**; beyond that they are the
+    /// zeros of the ring buffer's unused region. A zero there is indistinguishable from a
+    /// displacement of 0 (i.e. not shaking), so always iterate by <see cref="Count"/> and
+    /// never by the array's length.
     /// </summary>
     public class SeismographTrace
     {
-        /// <summary>観測点になった地震計の建物 ID。</summary>
+        /// <summary>The building ID of the seismograph that became this observation point.</summary>
         public readonly ushort BuildingId;
 
         public readonly Vec3 Position;
 
-        /// <summary>震央からこの観測点までの水平距離（m）。</summary>
+        /// <summary>Horizontal distance from the epicentre to this observation point (m).</summary>
         public readonly float DistanceToEpicentre;
 
         public readonly uint[] Frames;
         public readonly float[] Values;
 
         /// <summary>
-        /// **合成記象**（<see cref="SeismogramModel"/>）の同じフレームでの値。
-        /// <see cref="Frames"/> と 1 対 1 で、有効なのは同じく先頭 <see cref="Count"/> 件。
+        /// The **synthetic seismogram**'s (<see cref="SeismogramModel"/>) value on the same
+        /// frames. One-to-one with <see cref="Frames"/>, and likewise only the first
+        /// <see cref="Count"/> entries are valid.
         ///
-        /// **null は「モデルを記録していない」であって「変位 0」ではない。**
-        /// <c>ModSettings.EarthquakeSeismogram</c> が OFF のときはここが null になり、
-        /// 表示側は第 2 層の線を 1 本も描かない。0 で埋めて渡すと、
-        /// 「モデルは動いていたが揺れていなかった」という別の意味になる。
+        /// **Null means "the model was not recorded", not "displacement 0".**
+        /// When <c>ModSettings.EarthquakeSeismogram</c> is off this is null and the
+        /// display draws no layer-2 line at all. Fill it with zeros instead and it means
+        /// something else: "the model was running and it was not shaking".
         /// </summary>
         public readonly float[] ModelValues;
 
         /// <summary>
-        /// **火山性微動**（第 3 層、<c>Core/Volcano/VolcanicTremor</c>）の同じフレームでの値。
-        /// <see cref="Frames"/> と 1 対 1 で、有効なのは同じく先頭 <see cref="Count"/> 件。
+        /// The **volcanic tremor**'s (layer 3, <c>Core/Volcano/VolcanicTremor</c>) value on
+        /// the same frames. One-to-one with <see cref="Frames"/>, and likewise only the
+        /// first <see cref="Count"/> entries are valid.
         ///
-        /// **null は「記録していない」であって「揺れていない」ではない**
-        /// （<see cref="ModelValues"/> とまったく同じ約束）。火山が揺れていない
-        /// あいだはここが null になり、表示側は第 3 層の線を 1 本も描かない。
+        /// **Null means "not recorded", not "not shaking"** (exactly the same contract as
+        /// <see cref="ModelValues"/>). While no volcano is shaking this is null and the
+        /// display draws no layer-3 line at all.
         ///
-        /// ★ これは<b>この MOD のモデル</b>であって、バニラの式ではない
-        ///   （<c>Game/Volcano/VolcanoTremorTrace</c> のクラス doc）。
-        ///   凡例も第 2 層と同じ側に置くこと。
+        /// ★ This is <b>this mod's model</b>, not vanilla's formula (see
+        ///   <c>Game/Volcano/VolcanoTremorTrace</c>'s class doc). Put its legend on the
+        ///   same side as layer 2's.
         /// </summary>
         public readonly float[] TremorValues;
 
         /// <summary>
-        /// <see cref="Values"/>（第 1 層）に**意味があるか** ——
-        /// バニラの地震が実際に進行しているか。
+        /// Whether <see cref="Values"/> (layer 1) **means anything** — i.e. whether a
+        /// vanilla earthquake is actually in progress.
         ///
-        /// **false のとき <see cref="Values"/> は全部 0 で、それは
-        /// 「バニラの地震が無い」という値である**（読めなかったのではない。
-        /// 火山だけが揺れている状態がこれで、そのとき第 1 層の線は描かない）。
+        /// **When false, <see cref="Values"/> is all zeros, and that is the value meaning
+        /// "there is no vanilla earthquake"** (not "it could not be read"). That is the
+        /// state where only a volcano is shaking, and the layer-1 line is not drawn then.
         /// </summary>
         public readonly bool HasQuake;
 
-        /// <summary>この観測点から⑤の影響範囲の中心までの水平距離（m）。火山が無ければ 0。</summary>
+        /// <summary>Horizontal distance from this point to the centre of ⑤'s affected area (m). 0 if there is no volcano.</summary>
         public readonly float DistanceToVolcano;
 
-        /// <summary><see cref="Frames"/> / <see cref="Values"/> の**有効な**件数。</summary>
+        /// <summary>The number of **valid** entries in <see cref="Frames"/> / <see cref="Values"/>.</summary>
         public readonly int Count;
 
-        /// <summary>保持しているサンプルの中の最大振幅（絶対値）。</summary>
+        /// <summary>The peak amplitude (absolute value) among the samples held.</summary>
         public readonly float PeakAbsolute;
 
-        /// <summary>合成記象の側の最大振幅（絶対値）。記録していなければ 0。</summary>
+        /// <summary>The peak amplitude (absolute value) on the synthetic seismogram side. 0 if not recorded.</summary>
         public readonly float ModelPeakAbsolute;
 
-        /// <summary>火山性微動の側の最大振幅（絶対値）。記録していなければ 0。</summary>
+        /// <summary>The peak amplitude (absolute value) on the volcanic tremor side. 0 if not recorded.</summary>
         public readonly float TremorPeakAbsolute;
 
         public SeismographTrace(ushort buildingId, Vec3 position, float distanceToEpicentre,
@@ -99,19 +102,19 @@ namespace DisasterPlus.Game
             DistanceToVolcano = distanceToVolcano;
         }
 
-        /// <summary>合成記象の線を描いてよいか（記録があり、件数と噛み合っている）。</summary>
+        /// <summary>Whether the synthetic seismogram line may be drawn (it was recorded and its length agrees with the count).</summary>
         public bool HasModel
         {
             get { return ModelValues != null && ModelValues.Length >= Count && Count > 0; }
         }
 
-        /// <summary>火山性微動の線を描いてよいか（記録があり、件数と噛み合っている）。</summary>
+        /// <summary>Whether the volcanic tremor line may be drawn (it was recorded and its length agrees with the count).</summary>
         public bool HasTremor
         {
             get { return TremorValues != null && TremorValues.Length >= Count && Count > 0; }
         }
 
-        /// <summary>最も新しいサンプルのフレーム。空なら 0。</summary>
+        /// <summary>The frame of the newest sample. 0 when empty.</summary>
         public uint NewestFrame
         {
             get { return Count <= 0 ? 0u : Frames[Count - 1]; }
@@ -119,86 +122,101 @@ namespace DisasterPlus.Game
     }
 
     /// <summary>
-    /// 地震計の位置で地動を観測して貯める。**sim スレッド専用。**
+    /// Observes and accumulates ground motion at the seismographs' positions.
+    /// **Sim thread only.**
     ///
-    /// ── 何を記録しているのか（捏造しないための境界）───────────────────
+    /// ── What is being recorded (the boundary that stops us fabricating) ──────
     ///
-    /// バニラの地震計（<c>EarthquakeSensorAI</c>）は**時系列データを一切持たない**
-    /// （IL 事実文書 §C-1、ABSENT）。フィールドは <c>m_detectionRange</c> だけで、
-    /// 毎 tick 半径内に <c>EarthquakeCoverage</c> を撒くだけの装置である。
-    /// 波形も履歴も直近の揺れも、ゲーム側には**存在しない**。したがってここに
-    /// 出る線は「ゲーム内のセンサーが計測した値」では**ない**。
+    /// Vanilla's seismograph (<c>EarthquakeSensorAI</c>) **holds no time-series data
+    /// whatsoever** (IL facts doc §C-1, ABSENT). Its only field is
+    /// <c>m_detectionRange</c>, and it is a device that does nothing but scatter
+    /// <c>EarthquakeCoverage</c> within that radius each tick. Waveforms, history, even
+    /// the most recent shaking: **none of it exists** on the game's side. So the lines
+    /// shown here are **not** "values measured by an in-game sensor".
     ///
-    /// 出る線が第 1 層（＝バニラの実測）を名乗ってよい理由は 1 つだけ:
-    /// **バニラ自身の揺れの式**（<c>EarthquakeAI.RenderInstance</c>、§A-7）を、
-    /// 別の点で評価しているからである。カメラを動かしているのと同じ式・同じ定数・
-    /// 同じ窓を、カメラの代わりに地震計の位置で評価する。これは同じ式の別評価であって
-    /// 近似でも模擬でもない。**その差は UI にも書く**（<c>Strings.EarthquakeWaveformNote</c>、
-    /// 設計書 §3.5 が設計書と UI の両方に書けと要求している）。
+    /// There is exactly one reason these lines may declare themselves layer 1 (measured
+    /// out of vanilla): they are **vanilla's own shaking formula**
+    /// (<c>EarthquakeAI.RenderInstance</c>, §A-7) evaluated at a different point. The
+    /// same formula, the same constants and the same window that move the camera,
+    /// evaluated at the seismograph's position instead of the camera's. That is a
+    /// different evaluation of the same formula, not an approximation and not a
+    /// simulation. **Write that difference in the UI too**
+    /// (<c>Strings.EarthquakeWaveformNote</c>; design doc §3.5 requires it in both the
+    /// design doc and the UI).
     ///
-    /// **Task 6 の追加シェイクは混ぜない。** <c>ShakeWaveform.IntensityFactor</c> は
-    /// この MOD の補正であって、バニラの式ではない。波形はバニラの式そのものを出す。
+    /// **Never mix in Task 6's added shake.** <c>ShakeWaveform.IntensityFactor</c> is
+    /// this mod's correction, not vanilla's formula. The waveform shows vanilla's formula
+    /// as it stands.
     ///
-    /// ── 観測点の探索コスト ────────────────────────────────
+    /// ── The cost of finding observation points ──────────────────────
     ///
-    /// 地震計を探すには建物バッファ全スロットの走査が要る。**地震が新しく始まった
-    /// ときに 1 回だけ**走査し、震央に近い順に <see cref="MaxObservationPoints"/> 個まで
-    /// 覚える。毎 tick は走査しない。
+    /// Finding seismographs means sweeping every slot of the building buffer. We sweep
+    /// **once, when a new earthquake starts**, and remember up to
+    /// <see cref="MaxObservationPoints"/> of them, nearest to the epicentre first. We do
+    /// not sweep every tick.
     ///
-    /// **例外が 1 つだけある: 観測点が 0 個のとき。** その状態のパネルは
-    /// 「地動を記録するには地震計を建ててください」と書いており、言われたとおりに
-    /// 建てても次の地震まで何も起きない —— 説明の直後に、その説明どおりに
-    /// 動かない画面が出る。ここだけは <see cref="RescanIntervalFrames"/> フレームに
-    /// 1 回だけ走査をやり直す。**観測点が 1 個でも見つかっていれば二度と走査しない**
-    /// ので、通常のプレイでは追加コストはゼロである（走査が走るのは、地震計を
-    /// 持たない都市で地震が起きている間だけ）。地震の途中で**2 個目以降**を建てても
-    /// その地震には反映されない —— これは既知の制限として残す。
+    /// **There is exactly one exception: when there are zero observation points.** In
+    /// that state the panel says "build a seismograph to record ground motion", and if
+    /// you do as it says nothing happens until the next earthquake — a screen that does
+    /// not behave the way the instructions directly above it said it would. In that one
+    /// case we redo the sweep once every <see cref="RescanIntervalFrames"/> frames.
+    /// **Once even one observation point has been found we never sweep again**, so in
+    /// normal play the added cost is zero (the sweep only runs while an earthquake is
+    /// happening in a city with no seismographs). Building a **second or later** one
+    /// mid-earthquake is not reflected in that earthquake — that is left as a known
+    /// limitation.
     ///
-    /// ── セーブには残さない（設計書 §3.5）──────────────────────────
+    /// ── Nothing is kept in the save (design doc §3.5) ──────────────────
     ///
-    /// 進行中の地震が無くなったら捨てる。レベルアンロードでも捨てる（<see cref="Reset"/>）。
+    /// It is thrown away once there is no earthquake in progress, and on level unload
+    /// (<see cref="Reset"/>).
     /// </summary>
     public static class SeismographRecorder
     {
-        /// <summary>観測点の上限。グラフは 1 枚しか描かないので、多く持っても使い道が無い。</summary>
+        /// <summary>The cap on observation points. Only one graph is ever drawn, so there is no use for more.</summary>
         public const int MaxObservationPoints = 4;
 
         /// <summary>
-        /// 1 観測点あたりの保持サンプル数。サンプルは**フレームごと**に取る
-        /// （ゲーム速度によらず 1 フレーム 1 点。<see cref="MaxSubSamplesPerTick"/>）ので、
-        /// 512 件はちょうど表示窓の <see cref="PlotFrameWindow"/> フレームぶんになる。
+        /// How many samples are held per observation point. Samples are taken **per
+        /// frame** (one point per frame regardless of game speed; see
+        /// <see cref="MaxSubSamplesPerTick"/>), so 512 is exactly the
+        /// <see cref="PlotFrameWindow"/> frames of the display window.
         /// </summary>
         public const int Capacity = 512;
 
-        /// <summary>表示窓の幅（フレーム）。包絡線 2 周期ぶん（§A-7、256 フレーム周期）。</summary>
+        /// <summary>The width of the display window (frames). Two periods of the envelope (§A-7, a 256-frame period).</summary>
         public const int PlotFrameWindow = 512;
 
         /// <summary>
-        /// 不変スナップショットを組み直す最短間隔（フレーム）。
+        /// The minimum interval (frames) between rebuilds of the immutable snapshot.
         ///
-        /// <see cref="Snapshot"/> は毎 sim tick 呼ばれる（<c>EarthquakeReader.Read</c> から）。
-        /// 毎回 <see cref="Capacity"/> 件ぶんの配列を新しく作ると、揺れている間ずっと
-        /// 毎秒数百 KB のごみを出し続けることになる。**変化していないときは前回と
-        /// 同じ参照を返し**、変化していても最短この間隔でしか組み直さない。
-        /// 512 フレームの窓を 320 px で描くので、8 フレームは 5 px 未満のずれである。
+        /// <see cref="Snapshot"/> is called every sim tick (from
+        /// <c>EarthquakeReader.Read</c>). Building fresh <see cref="Capacity"/>-sized
+        /// arrays every time would mean producing hundreds of KB of garbage per second
+        /// for the whole duration of the shaking. **When nothing has changed we return
+        /// the same reference as last time**, and even when it has, we rebuild no more
+        /// often than this interval. A 512-frame window is drawn across 320 px, so 8
+        /// frames is a discrepancy of under 5 px.
         /// </summary>
         private const int SnapshotIntervalFrames = 8;
 
         /// <summary>
-        /// 観測点が 0 個のときだけ走る、地震計の再走査の間隔（フレーム）。
-        /// 512 フレームは速度 1 でおよそ 10 秒。建てた地震計が「そのうち」出てくる
-        /// 程度には短く、全スロット走査（65536 件）が体感に出ない程度には長い。
+        /// The interval (frames) for re-sweeping for seismographs, which only runs when
+        /// there are zero observation points. 512 frames is roughly 10 seconds at speed 1
+        /// — short enough that a seismograph you build shows up "before long", and long
+        /// enough that the full-slot sweep (65,536 entries) is not felt.
         /// </summary>
         private const int RescanIntervalFrames = 512;
 
         /// <summary>
-        /// 1 sim tick で埋める最大サンプル数。<c>FinalSimulationSpeed</c> の最大値
-        /// （ゲーム速度 3 で 9）に合わせてある。<see cref="ShakeWaveform.FirstUnsampledFrame"/>
-        /// の doc に、なぜ 1 tick 1 サンプルでは足りないかの導出がある。
+        /// The maximum number of samples filled in one sim tick. It matches the largest
+        /// value of <c>FinalSimulationSpeed</c> (9, at game speed 3). The derivation of
+        /// why one sample per tick is not enough is in
+        /// <see cref="ShakeWaveform.FirstUnsampledFrame"/>'s doc.
         /// </summary>
         private const int MaxSubSamplesPerTick = 9;
 
-        /// <summary>観測点 1 個。バッファは使い回し、識別情報だけを再走査で上書きする。</summary>
+        /// <summary>One observation point. The buffers are reused; a re-sweep overwrites only the identifying data.</summary>
         private class ObservationPoint
         {
             public ushort BuildingId;
@@ -207,33 +225,36 @@ namespace DisasterPlus.Game
             public readonly WaveformBuffer Buffer = new WaveformBuffer(Capacity);
 
             /// <summary>
-            /// 合成記象（第 2 層）の側。**バニラの側と同じフレームに同じ件数だけ**
-            /// 入れる —— 片方にしか入れないと、表示側で 2 本の線の時間軸がずれる。
-            /// 設定が OFF のあいだは 1 件も入らない（<see cref="_modelRecorded"/>）。
+            /// The synthetic seismogram (layer 2) side. **The same number of entries on
+            /// the same frames as the vanilla side** — fill only one of them and the two
+            /// lines' time axes come apart on the display side. While the setting is off,
+            /// not a single entry goes in (<see cref="_modelRecorded"/>).
             /// </summary>
             public readonly WaveformBuffer ModelBuffer = new WaveformBuffer(Capacity);
 
             /// <summary>
-            /// 火山性微動（第 3 層）の側。**他の 2 本と同じフレームに同じ件数だけ**入れる。
-            /// 火山が揺れていないあいだは 1 件も入らない（<see cref="_tremorRecorded"/>）。
+            /// The volcanic tremor (layer 3) side. **The same number of entries on the
+            /// same frames as the other two.** While no volcano is shaking, not a single
+            /// entry goes in (<see cref="_tremorRecorded"/>).
             /// </summary>
             public readonly WaveformBuffer TremorBuffer = new WaveformBuffer(Capacity);
 
-            /// <summary>この観測点から⑤の影響範囲の中心までの水平距離（m）。毎 tick 引き直す。</summary>
+            /// <summary>Horizontal distance from this point to the centre of ⑤'s affected area (m). Re-measured every tick.</summary>
             public float DistanceToVolcano;
         }
 
         private static readonly ObservationPoint[] _points = CreatePoints();
 
-        /// <summary>震央に近い順に埋まっている件数。</summary>
+        /// <summary>How many slots are filled, ordered nearest to the epicentre first.</summary>
         private static int _pointCount;
 
-        // 再走査で使う一時領域。毎回確保しないためだけに static にしてある（sim 専用）。
+        // Scratch space used by the re-sweep. It is static solely to avoid allocating it
+        // every time (sim thread only).
         private static readonly ushort[] _scanIds = new ushort[MaxObservationPoints];
         private static readonly Vector3[] _scanPositions = new Vector3[MaxObservationPoints];
         private static readonly float[] _scanDistances = new float[MaxObservationPoints];
 
-        /// <summary>今記録している地震の ID。0 は「記録していない」。</summary>
+        /// <summary>The ID of the earthquake currently being recorded. 0 means "not recording".</summary>
         private static ushort _quakeId;
 
         private static IList<SeismographTrace> _cached;
@@ -242,31 +263,34 @@ namespace DisasterPlus.Game
         private static uint _lastSampleFrame;
 
         /// <summary>
-        /// <see cref="_lastSampleFrame"/> に意味があるか。フレーム 0 は実在しうるので、
-        /// 「まだ 1 件も取っていない」を 0 で表さない（この機能が他の全ての行で
-        /// 守っている、ゼロと未読を分ける規律の内部版）。
+        /// Whether <see cref="_lastSampleFrame"/> means anything. Frame 0 can genuinely
+        /// occur, so "we have not taken a single sample yet" is not expressed as 0 (the
+        /// internal version of the separate-zero-from-unread discipline this feature
+        /// keeps in every other row).
         /// </summary>
         private static bool _hasLastSample;
 
-        /// <summary>観測点 0 個での再走査を最後に行ったフレーム。0 は「まだ」。</summary>
+        /// <summary>The frame of the last zero-observation-point re-sweep. 0 means "not yet".</summary>
         private static uint _lastRescanFrame;
 
         /// <summary>
-        /// 今のバッファに合成記象（第 2 層）が入っているか。
+        /// Whether the current buffers hold a synthetic seismogram (layer 2).
         ///
-        /// **設定を途中で切り替えたときのため**にある。ON にした瞬間、バニラ側の
-        /// バッファには既に数百件入っているのにモデル側は空なので、そのまま
-        /// 2 本並べると時間軸が食い違った絵になる。切り替わりを見たら
-        /// **両方まとめて捨てて**、そこから揃えて貯め直す。
+        /// It exists **for when the setting is toggled mid-run**. At the moment it is
+        /// switched on, the vanilla side's buffer already holds hundreds of entries while
+        /// the model side is empty, so putting the two lines side by side gives a picture
+        /// with mismatched time axes. When the toggle is seen, **throw both away
+        /// together** and start accumulating again in step.
         /// </summary>
         private static bool _modelRecorded;
 
         /// <summary>
-        /// 今のバッファに火山性微動（第 3 層）が入っているか。
-        /// <see cref="_modelRecorded"/> と同じ理由で要る —— 噴火が途中で始まると、
-        /// 他の 2 本には既に数百件入っているのにこちらは空なので、
-        /// そのまま並べると時間軸が食い違う。切り替わりを見たら**全部まとめて
-        /// 捨てて**、そこから揃えて貯め直す。
+        /// Whether the current buffers hold a volcanic tremor (layer 3).
+        /// Needed for the same reason as <see cref="_modelRecorded"/> — if an eruption
+        /// starts mid-run, the other two lines already hold hundreds of entries while
+        /// this one is empty, so putting them side by side mismatches the time axes. When
+        /// the toggle is seen, **throw all of them away together** and start accumulating
+        /// again in step.
         /// </summary>
         private static bool _tremorRecorded;
 
@@ -275,22 +299,23 @@ namespace DisasterPlus.Game
         private static readonly IList<SeismographTrace> NoTraces =
             new List<SeismographTrace>(0).AsReadOnly();
 
-        /// <summary>共有の空リスト。読み取り側専用。</summary>
+        /// <summary>The shared empty list. Readers only.</summary>
         public static IList<SeismographTrace> EmptyTraceList
         {
             get { return NoTraces; }
         }
 
         /// <summary>
-        /// 今どの地震を記録しているか（災害バッファ上の添字）。0 は記録していない。
-        /// **sim スレッドから読むこと**（<c>EarthquakeReader</c> が snapshot に載せる）。
+        /// Which earthquake is being recorded (an index into the disaster buffer). 0 means
+        /// nothing is being recorded. **Read it from the sim thread**
+        /// (<c>EarthquakeReader</c> puts it on the snapshot).
         /// </summary>
         public static ushort RecordingQuakeId
         {
             get { return _quakeId; }
         }
 
-        /// <summary>レベルアンロード／ロード時。都市をまたいで何も持ち越さない。</summary>
+        /// <summary>On level load and unload. Carry nothing across from one city to the next.</summary>
         public static void Reset()
         {
             for (int i = 0; i < _points.Length; i++)
@@ -313,35 +338,38 @@ namespace DisasterPlus.Game
             _lastSampleFrame = 0u;
             _hasLastSample = false;
             _lastRescanFrame = 0u;
-            // _scanErrorLogged は戻さない。「投げる」はこの DLL が参照しているゲームの
-            // ビルドに対する事実であって、都市ごとの状態ではない
-            // （EarthquakeReader._readErrorLogged と同じ判断）。
+            // _scanErrorLogged is not reset. "It throws" is a fact about the game build
+            // this DLL is referencing, not per-city state (the same judgement as
+            // EarthquakeReader._readErrorLogged).
         }
 
         /// <summary>
-        /// 1 sim tick ぶんのサンプリング。**sim スレッド専用**（建物バッファに触る）。
+        /// One sim tick's worth of sampling. **Sim thread only** (it touches the building
+        /// buffers).
         ///
-        /// **ポーズガードより下から呼ぶこと。** これは状態を進める処理で、
-        /// ポーズ中に波形が伸び続けるのは嘘になる（ポーズ中はゲーム内時間が
-        /// 進んでいないので、地動も進んでいない）。
+        /// **Call it below the pause guard.** This advances state, and a waveform that
+        /// keeps extending while the game is paused would be a lie (no game time passes
+        /// while paused, so no ground motion does either).
         /// </summary>
         public static void Sample(EarthquakeSnapshot snapshot, uint frame)
         {
             if (snapshot == null || !snapshot.Valid) return;
 
-            // 順位付けは QuakeSelection に一本化してある（以前ここには
-            // EarthquakeReader.SelectDamagingQuake と 1 バイトも違わない複製があった）。
+            // The ranking is funnelled through QuakeSelection (this used to hold a copy
+            // of EarthquakeReader.SelectDamagingQuake that did not differ by a byte).
             var quake = QuakeSelection.SelectDamaging(snapshot.Quakes);
 
-            // ★★ **バニラの地震が無くても、火山が揺れていれば記録する**
-            //    （2026-08-22、所有者の依頼「火山性地震は震度計に記録されていない」）。
-            //    以前はここが「地震が無い ⇒ 観測点ごと捨てる」だったので、
-            //    火山だけが揺れているあいだ地震計は空欄のままだった。
+            // ★★ **Record even with no vanilla earthquake, as long as a volcano is
+            //    shaking** (2026-08-22, at the owner's request: "volcanic earthquakes are
+            //    not recorded on the seismograph"). This used to be "no earthquake means
+            //    throw the observation points away too", so while only a volcano was
+            //    shaking the seismograph stayed blank.
             bool tremor = VolcanoTremorTrace.Active;
 
             if (quake == null && !tremor)
             {
-                // 揺らしている者が 1 つも無い。設計書 §3.5 のとおり、ここで捨てる。
+                // There is nothing shaking at all. As design doc §3.5 says, throw it away
+                // here.
                 if (_quakeId != 0 || _pointCount != 0) ClearAll();
                 return;
             }
@@ -355,16 +383,19 @@ namespace DisasterPlus.Game
             }
             else if (quake == null && _quakeId != 0)
             {
-                // ★ 地震だけが終わった。**観測点は捨てない** —— 火山はまだ揺れており、
-                //   ここで捨てると記象が 1 度途切れてから貯め直しになる。
-                //   第 1 層はこの先 0 になり、<c>HasQuake</c> が false を名乗る。
+                // ★ Only the earthquake has ended. **Do not throw the observation points
+                //   away** — the volcano is still shaking, and throwing them away here
+                //   would break the seismogram and start it accumulating again from
+                //   scratch. Layer 1 will be 0 from here on, and <c>HasQuake</c> declares
+                //   false.
                 _quakeId = 0;
             }
 
             if (_pointCount == 0)
             {
-                // ★ 唯一の再走査経路（クラス doc）。地震計を 1 個も持たない都市で
-                //    揺れが続いている間だけ走り、1 個でも見つかれば以後は走らない。
+                // ★ The only re-sweep path (see the class doc). It runs only while the
+                //    shaking continues in a city with no seismographs at all, and once
+                //    even one is found it never runs again.
                 if (frame - _lastRescanFrame >= RescanIntervalFrames)
                 {
                     _lastRescanFrame = frame;
@@ -375,8 +406,9 @@ namespace DisasterPlus.Game
                 if (_pointCount == 0) return;
             }
 
-            // ★ ⑤の中心までの距離は**毎 tick 引き直す**。観測点は 4 個までなので
-            //   費用は無視できるし、地震で並べ直した観測点にも必ず入る。
+            // ★ The distance to ⑤'s centre is **re-measured every tick**. With at most 4
+            //   observation points the cost is negligible, and it is certain to be
+            //   populated even for points reordered by an earthquake.
             if (tremor)
             {
                 for (int i = 0; i < _pointCount; i++)
@@ -386,11 +418,13 @@ namespace DisasterPlus.Game
                 }
             }
 
-            // ★ バニラの地震の側が「実際に評価できる」か。
-            //   m_activationFrame == 0 は「今」ではなく「未定」（§A-1 の罠）。
-            //   m_activeDuration はプレハブ値で、読めていなければ揺れの窓が分からない
-            //   （§A-0）—— そこを決め打つと、地震が終わった後も伸び続ける波形になる。
-            //   **どれか 1 つでも欠けたら第 1 層は評価しない。火山の側は止めない。**
+            // ★ Whether the vanilla earthquake side can actually be evaluated.
+            //   m_activationFrame == 0 means "not yet decided", not "now" (the trap in
+            //   §A-1). m_activeDuration is a prefab value, and without it we do not know
+            //   the shaking window (§A-0) — hard-code a guess there and you get a
+            //   waveform that keeps extending after the earthquake has ended.
+            //   **If any one of them is missing, layer 1 is not evaluated. The volcano
+            //   side is not stopped.**
             uint activeDuration = 0u;
             bool quakeUsable = false;
             if (quake != null && quake.ActivationScheduled && snapshot.Prefab.Resolved)
@@ -401,13 +435,15 @@ namespace DisasterPlus.Game
 
             if (!quakeUsable && !tremor) return;
 
-            // ★ 第 2 層の合成記象。**設定が OFF なら 1 件も貯めない**（既定 OFF）。
-            //   **バニラの地震が無いときも貯めない** —— あれは 1 回の断層破壊の
-            //   モデルであって、火山性微動はそこに載らない。
+            // ★ Layer 2's synthetic seismogram. **With the setting off, not a single
+            //   entry is accumulated** (it is off by default).
+            //   **Nothing is accumulated with no vanilla earthquake either** — it is a
+            //   model of one fault rupture, and volcanic tremor does not ride on it.
             bool wantModel = ModSettings.EarthquakeSeismogram.value && quakeUsable;
 
-            // 3 本のうちどれかの「入れる／入れない」が変わったら、**まとめて捨てる**。
-            // 片方だけ空のまま並べると、時間軸の食い違った絵になる。
+            // If the "record / do not record" of any of the three changes, **throw them
+            // all away together**. Leaving one empty alongside the others gives a picture
+            // with mismatched time axes.
             if (wantModel != _modelRecorded || tremor != _tremorRecorded)
             {
                 for (int i = 0; i < _points.Length; i++)
@@ -423,9 +459,9 @@ namespace DisasterPlus.Game
                 _hasLastSample = false;
             }
 
-            // 種は地震そのものから出す（フレーム番号を混ぜない）ので、
-            // **同じ地震なら同じ記象になる**。VanillaRandomizer は使わない
-            // —— 合成記象はこの MOD が自分で決めることである。
+            // The seed comes from the earthquake itself (no frame number mixed in), so
+            // **the same earthquake gives the same seismogram**. VanillaRandomizer is not
+            // used — the synthetic seismogram is something this mod decides for itself.
             SeismogramModel model = wantModel
                 ? SeismogramModel.For(SeismogramSeed(quake), activeDuration)
                 : new SeismogramModel();
@@ -436,12 +472,14 @@ namespace DisasterPlus.Game
             bool wrote = false;
             for (uint f = first; f <= frame; f++)
             {
-                // ★ 1 tick に 1 サンプルでは足りない。m_currentFrameIndex は
-                //    FinalSimulationSpeed（1/3/9）ずつ飛ぶのに、揺れの主成分は
-                //    0.63 rad/frame（周期 ≒10 フレーム）なので、速度 3 では
-                //    周期 ≒92 フレームの**偽の長周期波**に折り返す。
-                //    DisplacementAt は e の閉じた式なので、飛んだフレームで評価するのは
-                //    1 回評価するのと同じだけ「実測」である（ShakeWaveform の doc）。
+                // ★ One sample per tick is not enough. m_currentFrameIndex jumps by
+                //    FinalSimulationSpeed (1/3/9), while the shaking's principal
+                //    component is 0.63 rad/frame (a period of about 10 frames), so at
+                //    speed 3 it aliases into a **spurious long-period wave** with a
+                //    period of about 92 frames.
+                //    DisplacementAt is a closed-form expression in e, so evaluating it on
+                //    a skipped frame is exactly as "measured" as evaluating it once (see
+                //    ShakeWaveform's doc).
                 long e = 0L;
                 bool quakeShaking = false;
                 if (quakeUsable)
@@ -450,28 +488,33 @@ namespace DisasterPlus.Game
                     quakeShaking = ShakeWaveform.IsShaking(e, activeDuration);
                 }
 
-                // 誰も揺らしていないフレームは 1 件も入れない（3 本とも入れない）。
+                // On a frame where nothing is shaking, add nothing at all (none of the
+                // three lines).
                 if (!quakeShaking && !_tremorRecorded) continue;
 
-                // t に m_referenceTimer は足さない。あれは main スレッドの描画補間用の
-                // 値で、sim スレッドから読むべきものではない（フレーム単位の整数で足りる）。
+                // Do not add m_referenceTimer to t. That is a value for the main thread's
+                // render interpolation and is not something the sim thread should read
+                // (whole frames are enough here).
                 float t = e;
 
                 for (int i = 0; i < _pointCount; i++)
                 {
                     var point = _points[i];
 
-                    // ★ バニラ式の distance を「カメラから」→「震源から」に置き換えた版
-                    //    （設計書 §3.5）。式・定数・窓はバニラのまま。
-                    //    ★ 揺れていないフレームの 0 は**「バニラの地震が無い」という値**
-                    //      であって「読めなかった」ではない（<c>HasQuake</c> が名乗る）。
+                    // ★ Vanilla's formula with the distance swapped from "from the
+                    //    camera" to "from the hypocentre" (design doc §3.5). The formula,
+                    //    the constants and the window are vanilla's as they stand.
+                    //    ★ A 0 on a non-shaking frame is **the value meaning "there is no
+                    //      vanilla earthquake"**, not "it could not be read"
+                    //      (<c>HasQuake</c> declares which).
                     float value = quakeShaking
                         ? ShakeWaveform.DisplacementAt(point.DistanceToEpicentre, t)
                         : 0f;
                     point.Buffer.Add(f, value);
 
-                    // ★ 3 本は**同じフレーム・同じ観測点**で評価する。
-                    //   1 本だけ間引くと線の時間軸がずれる。
+                    // ★ All three are evaluated **on the same frame at the same
+                    //   observation point**. Throttle just one of them and its time axis
+                    //   drifts away from the others.
                     if (_modelRecorded)
                     {
                         point.ModelBuffer.Add(
@@ -497,12 +540,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// main スレッドへ渡す不変スナップショット。**震央に近い順**に並ぶ。
-        /// **sim スレッド専用**（<see cref="Sample"/> と同じスレッドから呼ぶこと）。
+        /// The immutable snapshot handed to the main thread. **Ordered nearest to the
+        /// epicentre first.** **Sim thread only** (call it from the same thread as
+        /// <see cref="Sample"/>).
         ///
-        /// 中身が変わっていなければ**前回と同じ参照**を返す。毎 sim tick 配列を
-        /// 作り直すのはこの機能が最も出しやすい無駄で、しかも描画側は
-        /// <see cref="SnapshotIntervalFrames"/> より細かい更新を見分けられない。
+        /// When nothing has changed it returns **the same reference as last time**.
+        /// Rebuilding the arrays every sim tick is the easiest waste this feature can
+        /// produce, and on top of that the render side cannot tell apart updates finer
+        /// than <see cref="SnapshotIntervalFrames"/>.
         /// </summary>
         public static IList<SeismographTrace> Snapshot()
         {
@@ -524,7 +569,8 @@ namespace DisasterPlus.Game
                 var values = new float[count];
                 int written = point.Buffer.CopyTo(frames, values);
 
-                // ★ null は「記録していない」。0 で埋めて渡すと「揺れていない」に化ける。
+                // ★ Null means "not recorded". Fill it with zeros and it turns into "it
+                //   was not shaking".
                 float[] modelValues = null;
                 float modelPeak = 0f;
                 if (_modelRecorded && point.ModelBuffer.Count == count)
@@ -535,7 +581,7 @@ namespace DisasterPlus.Game
                     modelPeak = point.ModelBuffer.PeakAbsolute;
                 }
 
-                // ★ 第 3 層も同じ約束（null は「記録していない」）。
+                // ★ Layer 3 follows the same contract (null means "not recorded").
                 float[] tremorValues = null;
                 float tremorPeak = 0f;
                 if (_tremorRecorded && point.TremorBuffer.Count == count)
@@ -562,9 +608,11 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 合成記象の種。**地震そのものから出す**（ID と発動フレーム）ので、
-        /// 同じ地震のあいだは何度作り直しても同じ形になり、地震が変われば形も変わる。
-        /// **フレーム番号そのものを混ぜないこと** —— 混ぜると tick ごとに別の記象になる。
+        /// The synthetic seismogram's seed. **It comes from the earthquake itself** (its
+        /// ID and activation frame), so within one earthquake it gives the same shape
+        /// however many times it is rebuilt, and a different earthquake gives a different
+        /// shape. **Never mix in the frame number itself** — do so and you get a different
+        /// seismogram on every tick.
         /// </summary>
         private static uint SeismogramSeed(EarthquakeReading quake)
         {
@@ -592,19 +640,23 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 地震計を探し、震央に近い順に <see cref="MaxObservationPoints"/> 個まで覚える。
-        /// 呼んでよいのは**地震が新しく始まったとき**と、**観測点が 0 個のまま
-        /// <see cref="RescanIntervalFrames"/> フレーム経ったとき**の 2 箇所だけ
-        /// （全スロット走査なので毎 tick は不可。クラス doc に経緯がある）。
+        /// Finds the seismographs and remembers up to <see cref="MaxObservationPoints"/>
+        /// of them, nearest to the epicentre first. There are only two places it may be
+        /// called from: **when a new earthquake starts**, and **when
+        /// <see cref="RescanIntervalFrames"/> frames have passed with zero observation
+        /// points** (it sweeps every slot, so it cannot run every tick; the background is
+        /// in the class doc).
         ///
-        /// 条件は <c>Created</c> が立っていることと <c>m_buildingAI is EarthquakeSensorAI</c>
-        /// の 2 つだけ。稼働率は見ない —— 見るとしたら
-        /// <c>ImmaterialResourceManager</c> の側であり、ここは「地震計という建物が
-        /// どこに建っているか」を知るための走査である。
+        /// There are only two conditions: <c>Created</c> being set, and
+        /// <c>m_buildingAI is EarthquakeSensorAI</c>. Operating efficiency is not
+        /// considered — that would be a matter for
+        /// <c>ImmaterialResourceManager</c>, whereas this sweep is about finding out
+        /// where the buildings called seismographs stand.
         /// </summary>
         /// <param name="origin">
-        /// 近い順を決める起点。**バニラの地震があればその震央、無ければ⑤の
-        /// 影響範囲の中心**である（火山だけが揺れているときも観測点は要る）。
+        /// The origin for the nearest-first ordering. **The epicentre when there is a
+        /// vanilla earthquake, and the centre of ⑤'s affected area otherwise** (we still
+        /// need observation points when only a volcano is shaking).
         /// </param>
         private static void Rescan(Vec2 origin)
         {
@@ -621,7 +673,7 @@ namespace DisasterPlus.Game
                 Vec2 epicentre = origin;
                 int found = 0;
 
-                // 添字 0 は「無効」の予約枠なので 1 から回す。
+                // Index 0 is the reserved "invalid" slot, so start at 1.
                 for (int i = 1; i < buildings.Length; i++)
                 {
                     if ((buildings[i].m_flags & Building.Flags.Created) == Building.Flags.None) continue;
@@ -636,7 +688,8 @@ namespace DisasterPlus.Game
                         continue;
                     }
 
-                    // UnityEngine.Object の == オーバーロードで破棄済み(fake-null)も弾く。
+                    // UnityEngine.Object's == overload also rejects a destroyed
+                    // (fake-null) object.
                     if (info == null) continue;
                     if (!(info.m_buildingAI is EarthquakeSensorAI)) continue;
 
@@ -653,8 +706,9 @@ namespace DisasterPlus.Game
                                               _scanPositions[i].z);
                     point.DistanceToEpicentre = _scanDistances[i];
                     point.DistanceToVolcano = 0f;
-                    // ClearAll() で既に空だが、観測点の入れ替えとバッファの中身が
-                    // 食い違う経路を将来作らないための保険。
+                    // ClearAll() has already emptied these, but this is insurance against
+                    // anyone later creating a path where swapping the observation points
+                    // and the buffers' contents get out of step.
                     point.Buffer.Clear();
                     point.ModelBuffer.Clear();
                     point.TremorBuffer.Clear();
@@ -663,8 +717,8 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 地震 1 回につき 1 度しか通らない経路だが、Log.Error はスロットル
-                // されないので確立した形に揃える（1 回大きく鳴らし、以後は Diag）。
+                // This path is taken only once per earthquake, but Log.Error is not
+                // throttled, so it follows the established shape (shout once, then Diag).
                 if (!_scanErrorLogged)
                 {
                     _scanErrorLogged = true;
@@ -679,8 +733,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 走査結果を距離の昇順に保つ挿入。戻り値は挿入後の件数。
-        /// 上限を超える遠い地震計は捨てる（グラフは最も近い 1 個しか描かない）。
+        /// An insertion that keeps the sweep's results in ascending order of distance.
+        /// Returns the count after insertion. Seismographs too far away to fit within the
+        /// cap are dropped (the graph only ever draws the nearest one).
         /// </summary>
         private static int InsertNearest(int count, ushort id, Vector3 position, float distance)
         {

@@ -5,8 +5,8 @@ using System.IO.Compression;
 namespace DisasterPlus.Tools
 {
     /// <summary>
-    /// 最小限の PNG 書き出し（24bit RGB）。外部パッケージを足さないため自前。
-    /// **オフライン確認用の道具どうしで共有する**（VolcanoPreview / WaveformPreview）。
+    /// Minimal PNG writer (24-bit RGB). Home-grown so that no external package is needed.
+    /// **Shared between the offline checking tools** (VolcanoPreview / WaveformPreview).
     /// </summary>
     internal static class Png
     {

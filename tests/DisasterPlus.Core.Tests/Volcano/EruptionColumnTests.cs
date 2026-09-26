@@ -5,14 +5,18 @@ using Xunit;
 namespace DisasterPlus.Core.Tests.Volcano
 {
     /// <summary>
-    /// 噴火柱（実機の指摘③「噴煙がただの煙だまりになってしまっています」）。
+    /// The eruption column (in-game report no. 3: "the eruption plume has become nothing
+    /// but a puddle of smoke").
     ///
-    /// ここで固定するのは、**キノコ雲ではなく噴火柱である**ことを決めている 5 つ:
-    ///   1. 柱は火口から傘まで**途切れずに積み上がる**（段が隙間なく並ぶ）
-    ///   2. 上へ行くほど**太る**（巻き込み）。傘はそれよりずっと広い
-    ///   3. 上昇は中立浮力高度で**止まる**（傘では 0）
-    ///   4. 風下へ**倒れる**。倒れ方は高いほど強い
-    ///   5. 粒子の総量は今までの噴煙 1 回ぶんと同じ（面積で正規化してある）
+    /// The five things pinned down here are what make it **an eruption column rather than
+    /// a mushroom cloud**:
+    ///   1. the column **stacks up without a break** from the vent to the umbrella
+    ///      (the segments line up with no gaps)
+    ///   2. it **thickens** with height (entrainment). The umbrella is far wider still
+    ///   3. the rise **stops** at the neutral buoyancy height (0 at the umbrella)
+    ///   4. it **bends** downwind, and the higher it is the more strongly it bends
+    ///   5. the total number of particles is the same as one of the old plumes
+    ///      (it is normalised by area)
     /// </summary>
     public class EruptionColumnTests
     {
@@ -40,10 +44,10 @@ namespace DisasterPlus.Core.Tests.Volcano
                 expected += s.HalfHeightMetres;
             }
 
-            // 最後の柱の段の天面が、そのまま傘の下端である。
+            // The top face of the last column segment is exactly the base of the umbrella.
             Assert.Equal(c.UmbrellaBaseMetres, expected, 1);
 
-            // 傘は天面が柱の高さにちょうど届く。
+            // The top face of the umbrella reaches exactly the height of the column.
             EruptionColumnSegment core = c.SegmentAt(EruptionColumn.ColumnSegments);
             Assert.True(core.Umbrella);
             Assert.Equal(c.HeightMetres, core.OffsetY + core.HalfHeightMetres, 1);
@@ -66,7 +70,8 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.True(c.UmbrellaRadiusMetres > top * 2f,
                 "the umbrella is not much wider than the column");
 
-            // 噴出口では火口いっぱいには噴かない（口の内側から立ち上がる）。
+            // At the vent it does not erupt across the whole crater (it rises from inside
+            // the mouth).
             Assert.True(c.RadiusAt(0f) < Vent);
         }
 
@@ -80,7 +85,8 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.Equal(0f, c.RiseAt(c.UmbrellaBaseMetres), 4);
             Assert.Equal(0f, c.RiseAt(c.HeightMetres), 4);
 
-            // 傘の本体は上がらない。風下の 2 つは灰が落ちるので沈む。
+            // The body of the umbrella does not rise. The two downwind ones sink, because
+            // ash is falling out of them.
             Assert.Equal(0f, c.SegmentAt(EruptionColumn.ColumnSegments).DriftY, 4);
             Assert.True(c.SegmentAt(EruptionColumn.ColumnSegments + 1).DriftY < 0f);
             Assert.True(c.SegmentAt(EruptionColumn.ColumnSegments + 2).DriftY
@@ -92,7 +98,7 @@ namespace DisasterPlus.Core.Tests.Volcano
         {
             EruptionColumn c = Default(1f);
 
-            // 風は +X。倒れ方は高いほど強い。
+            // The wind is towards +X. The higher it is the more strongly it bends.
             Assert.Equal(0f, c.BendAt(0f), 4);
             Assert.True(c.BendAt(c.HeightMetres * 0.5f) > 0f);
             Assert.True(c.BendAt(c.HeightMetres) > c.BendAt(c.HeightMetres * 0.5f) * 2f);
@@ -101,7 +107,8 @@ namespace DisasterPlus.Core.Tests.Volcano
             float upper = c.SegmentAt(EruptionColumn.ColumnSegments - 1).OffsetX;
             Assert.True(upper > lower);
 
-            // 風下側の傘は、本体より遠くて低い（＝底から灰が落ちる側）。
+            // The downwind part of the umbrella is further out and lower than the body
+            // (i.e. the side where ash falls from the underside).
             EruptionColumnSegment core = c.SegmentAt(EruptionColumn.ColumnSegments);
             EruptionColumnSegment tail = c.SegmentAt(EruptionColumn.ColumnSegments + 2);
             Assert.True(tail.OffsetX > core.OffsetX);
@@ -110,7 +117,7 @@ namespace DisasterPlus.Core.Tests.Volcano
                         < core.Magnitude * core.RadiusMetres * core.RadiusMetres,
                 "the fallout tail should be thinner than the umbrella itself");
 
-            // 無風なら 1 mm も倒れない。
+            // With no wind it does not bend by even 1 mm.
             var calm = new EruptionColumn(Vent, 1f, 0f, 0f, 0f);
             Assert.Equal(0f, calm.BendMetres, 4);
             for (int i = 0; i < calm.SegmentCount; i++)
@@ -123,9 +130,10 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheParticleBudgetIsTheSameAsTheOldSinglePlume()
         {
-            // ★ 粒子数は max(100, PI r^2) x dt x magnitude x 0.01 x rate（IL §B-4）なので、
-            //   r^2 x magnitude が「その段の粒子数」に比例する。全段の和が
-            //   従来の 1 回ぶん（refRadius^2 x PlumeMagnitude）に一致すること。
+            // ★ The particle count is max(100, PI r^2) x dt x magnitude x 0.01 x rate
+            //   (IL §B-4), so r^2 x magnitude is proportional to "the particle count of that
+            //   segment". The sum over all segments must match one of the old plumes
+            //   (refRadius^2 x PlumeMagnitude).
             for (float unit = 0f; unit <= 1.0001f; unit += 0.25f)
             {
                 EruptionColumn c = Default(unit);
@@ -154,7 +162,8 @@ namespace DisasterPlus.Core.Tests.Volcano
             Assert.True(strong.UmbrellaRadiusMetres > weak.UmbrellaRadiusMetres);
             Assert.True(strong.BendMetres > weak.BendMetres);
 
-            // 火口が大きいほど柱も高い（小さい山に巨大な柱は乗らない）。
+            // The bigger the crater the taller the column (a huge column does not sit on a
+            // small mountain).
             var small = new EruptionColumn(40f, 1f, 1f, 0f, 12f);
             Assert.True(small.HeightMetres < strong.HeightMetres);
         }
@@ -162,7 +171,8 @@ namespace DisasterPlus.Core.Tests.Volcano
         [Fact]
         public void TheSwayIsOneSlowSineAndNothingElse()
         {
-            // **点滅ではなくゆらぎ**。振れ幅は宣言どおりで、周期でちょうど戻る。
+            // **A sway, not a flicker.** The amplitude is exactly as declared and it returns
+            // precisely at the period.
             Assert.Equal(0f, EruptionColumn.SwayAt(0f), 4);
             Assert.Equal(0f, EruptionColumn.SwayAt(EruptionColumn.SwaySeconds), 3);
             Assert.Equal(EruptionColumn.SwayRadians,
@@ -215,7 +225,8 @@ namespace DisasterPlus.Core.Tests.Volcano
                     Assert.True(s.HalfHeightMetres >= 0f);
                     Assert.True(s.Magnitude >= 0f);
 
-                    // 範囲外は「密度 0 の段」であって、例外でも作り話でもない。
+                    // Out of range is "a segment with density 0" —— neither an exception nor
+                    // an invention.
                     if (i < 0 || i >= column.SegmentCount) Assert.Equal(0f, s.Magnitude, 4);
                 }
             }

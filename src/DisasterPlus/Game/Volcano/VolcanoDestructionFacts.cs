@@ -1,42 +1,47 @@
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// 準備段（<see cref="VolcanoClearing"/>）が使う破壊経路の実測。
-    /// **IL 事実文書 §G-16 が典拠**で、設計書 付録が「未確定」と書いていた
-    /// 2 項目の答えそのものである。
+    /// The measured destruction path used by the clearing stage
+    /// (<see cref="VolcanoClearing"/>).
+    /// **The source is IL facts doc §G-16**, and this is precisely the answer to the two items the
+    /// design doc appendix wrote down as "unsettled".
     ///
-    /// struct なのは <see cref="VolcanoTerrainFacts"/> と同じ理由（bool しか持たないので
-    /// キャッシュしても Unity の fake-null 自己修復問題を持ち込まない）。
-    /// 既定値は全て false ＝「まだ／もう読めていない」。
+    /// It is a struct for the same reason as <see cref="VolcanoTerrainFacts"/> (it holds nothing
+    /// but bools, so caching it does not drag in Unity's fake-null self-repair problem).
+    /// All defaults are false = "not read yet / no longer readable".
     ///
-    /// **専用ファイルにしてあるのは 800 行の規則のため**である
-    /// （<see cref="VolcanoClearing"/> は⑤でいちばん doc の厚い型で、
-    /// 同居させると規則を割る）。型としては <see cref="VolcanoClearing"/> の付属物で、
-    /// 他から参照するのは <see cref="Assumptions"/> の 1 件だけである。
+    /// **It has its own file because of the 800-line rule**
+    /// (<see cref="VolcanoClearing"/> is the type with the thickest docs in ⑤, and putting them
+    /// together would break the rule). As a type it is an appendage of
+    /// <see cref="VolcanoClearing"/>, and the only thing outside that references it is a single
+    /// entry in <see cref="Assumptions"/>.
     /// </summary>
     public struct VolcanoDestructionFacts
     {
         /// <summary>
-        /// <c>BuildingAI.CollapseBuilding(ushort, ref Building, InstanceManager.Group,
-        /// bool testOnly, bool demolish, int burnAmount)</c> を解決できたか。
-        /// ②が既に使っている 6 引数版と同じもの。
+        /// Whether <c>BuildingAI.CollapseBuilding(ushort, ref Building, InstanceManager.Group,
+        /// bool testOnly, bool demolish, int burnAmount)</c> could be resolved.
+        /// The same six-argument version ② already uses.
         /// </summary>
         public readonly bool BuildingCollapseResolved;
 
         /// <summary>
-        /// <c>NetAI.CollapseSegment(ushort, ref NetSegment, InstanceManager.Group,
-        /// bool demolish)</c> を解決できたか。**⑤が道路を取り除く唯一の入口**（§G-16 (a)）。
+        /// Whether <c>NetAI.CollapseSegment(ushort, ref NetSegment, InstanceManager.Group,
+        /// bool demolish)</c> could be resolved. **The only entrance through which ⑤ removes
+        /// roads** (§G-16 (a)).
         /// </summary>
         public readonly bool SegmentCollapseResolved;
 
         /// <summary>
-        /// <c>NetManager.ReleaseSegment(ushort, bool keepNodes)</c>（public / instance /
-        /// 非 virtual）を解決できたか。
+        /// Whether <c>NetManager.ReleaseSegment(ushort, bool keepNodes)</c> (public / instance /
+        /// non-virtual) could be resolved.
         ///
-        /// ★ ⑤はこれを**自分では呼ばない**。見るのは、<c>demolish: true</c> が
-        /// 「フラグを立てるだけ」ではなく**本当にセグメントを解放する**という §G-16 (a) の
-        /// 委譲の鎖が、この環境でも同じ形をしていることの最も安い証拠だからである。
-        /// これが無ければ、鎖の終端が変わっている ＝ 測ったのとは別のビルドである。
+        /// ★ ⑤ **never calls it itself**. It is checked because it is the cheapest evidence that
+        /// the chain of delegation in §G-16 (a) — the one showing that <c>demolish: true</c> does
+        /// not merely set a flag but **really releases the segment** — still has the same shape in
+        /// this environment.
+        /// Without it, the end of the chain has changed = this is a different build from the one
+        /// that was measured.
         /// </summary>
         public readonly bool SegmentReleaseResolved;
 
@@ -50,8 +55,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 道路を取り除く経路がこの環境で成立するか。**成立しなければ⑤は山を作らない**
-        /// （設計書 §1.2）。
+        /// Whether the path for removing roads holds in this environment. **If it does not, ⑤
+        /// builds no mountain** (design doc §1.2).
         /// </summary>
         public bool RoadPathUsable
         {
@@ -59,8 +64,8 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 準備段そのものが成立するか。**これが⑤の 2 つ目の門である**
-        /// （1 つ目は <see cref="VolcanoTerrainFacts.Usable"/>）。
+        /// Whether the clearing stage itself holds. **This is ⑤'s second gate**
+        /// (the first is <see cref="VolcanoTerrainFacts.Usable"/>).
         /// </summary>
         public bool Usable
         {

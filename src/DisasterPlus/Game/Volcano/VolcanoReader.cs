@@ -5,45 +5,48 @@ using ColossalFramework;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// ⑤が読む唯一の場所。地形 API の到達経路を解決し、
-    /// <see cref="VolcanoSnapshot"/> にして publish する。
+    /// The only place ⑤ reads. It resolves the terrain API's reach paths and publishes them as a
+    /// <see cref="VolcanoSnapshot"/>.
     ///
-    /// **<see cref="Read"/> は sim スレッドから呼ぶこと。**
-    /// <c>TerrainManager</c> / <c>SimulationManager</c> / <c>ToolManager</c> は
-    /// いずれもシミュレーションが所有する。main スレッドから書き換え系を触ると、
-    /// スタックトレースの出ない <c>IndexOutOfRangeException</c> ポップアップが
-    /// 後になってバニラ側から出る（この MOD の try/catch では捕まえられない）。
-    /// 形は②の <c>EarthquakeReader</c>・④の <see cref="TyphoonReader"/> をそのまま手本にしている。
+    /// **Call <see cref="Read"/> from the sim thread.**
+    /// <c>TerrainManager</c> / <c>SimulationManager</c> / <c>ToolManager</c> are all owned by the
+    /// simulation. Touch the write-side of them from the main thread and an
+    /// <c>IndexOutOfRangeException</c> popup with no stack trace comes out of vanilla later
+    /// (this mod's try/catch cannot catch it).
+    /// The shape follows ②'s <c>EarthquakeReader</c> and ④'s <see cref="TyphoonReader"/> exactly.
     ///
-    /// **読み取りだけはどちらのスレッドからでも安全である**（既存の
-    /// <c>TerrainHeightSampler</c> の doc がそう名乗っている）。だから
-    /// <see cref="ScanTerrainFacts"/> は main スレッドの <see cref="Assumptions"/> からも呼べる。
+    /// **Reads alone are safe from either thread** (the existing doc of
+    /// <c>TerrainHeightSampler</c> says so). That is why <see cref="ScanTerrainFacts"/> can also
+    /// be called from the main thread's <see cref="Assumptions"/>.
     ///
-    /// <c>Singleton&lt;T&gt;.exists</c> を**必ず先に見る**。<c>Singleton&lt;T&gt;.instance</c> は
-    /// <c>sInstance</c> が null のとき <c>FindObjectOfType</c> と <c>new GameObject</c> を
-    /// 走らせる **main スレッド専用 API** で、sim スレッドから踏むと落ちる
-    /// （<c>LongPeriodDamage.Sweep</c> / <c>TyphoonWind.Sweep</c> の同じ注記）。
+    /// **Always check <c>Singleton&lt;T&gt;.exists</c> first.** <c>Singleton&lt;T&gt;.instance</c>
+    /// is a **main-thread-only API** that runs <c>FindObjectOfType</c> and <c>new GameObject</c>
+    /// when <c>sInstance</c> is null, and stepping on it from the sim thread crashes
+    /// (the same note in <c>LongPeriodDamage.Sweep</c> / <c>TyphoonWind.Sweep</c>).
     ///
-    /// > **⑤は災害まわりの型に一切触らない。** 設計書 §2 が「災害スロットに
-    /// > 載せない」と決めており、事実文書 §D-11 がその理由（ND 無しではバニラの
-    /// > プレハブが 1 つも無く、検出の経路は内部のラッパが null で NRE になる）を
-    /// > 確定させている（罠 6）。担保は grep なので、**その API 名を doc にも書かない**
-    /// > —— 名前が要るときは §D-11 を指すこと（<see cref="VolcanoFeature"/> の
-    /// > クラス doc がそう決めており、ここは一度それを破っていた。全体レビュー M15）。
+    /// > **⑤ does not touch the disaster-related types at all.** Design doc §2 decided not to
+    /// > occupy a disaster slot, and the facts doc §D-11 settled the reason (without ND there is
+    /// > not one vanilla prefab, and the detection path NREs because an internal wrapper is null)
+    /// > (trap 6). The guarantee is a grep, so **do not write those API names in the docs
+    /// > either** — when the names are needed, point at §D-11 (the class doc of
+    /// > <see cref="VolcanoFeature"/> decided that, and this file broke it once.
+    /// > Whole-project review M15).
     /// </summary>
     public static class VolcanoReader
     {
         /// <summary>
-        /// <see cref="Read"/> 内の想定外例外を <c>Log.Error</c> で鳴らしたか。
+        /// Whether an unexpected exception inside <see cref="Read"/> has been sounded with
+        /// <c>Log.Error</c>.
         ///
-        /// <c>Log.Warn</c> / <c>Log.Error</c> はスロットルされない。<see cref="Read"/> は
-        /// sim tick ごと（通常速度でおよそ 50 回/秒）に呼ばれるので、恒常的に投げる状態に
-        /// なると毎秒 50 行を output_log.txt に書き続けてログを使い物にならなくする。
-        /// 1 回目だけ確実に目立たせ、以後は <c>Log.Diag</c> のキー単位スロットル
-        /// （512 sim フレームに 1 回）へ落とす。
+        /// <c>Log.Warn</c> / <c>Log.Error</c> are not throttled. <see cref="Read"/> is called on
+        /// every sim tick (about 50 times a second at normal speed), so if it gets into a state
+        /// where it throws permanently it would write 50 lines a second into output_log.txt and
+        /// make the log useless.
+        /// Make the first one impossible to miss, then drop to <c>Log.Diag</c>'s per-key
+        /// throttling (once per 512 sim frames).
         ///
-        /// **レベルアンロードでリセットしない。** 「投げる」はこの DLL が参照している
-        /// ゲームのビルドに対する事実であって、都市ごとの状態ではない。
+        /// **Not reset on level unload.** "It throws" is a fact about the build of the game this
+        /// DLL references, not per-city state.
         /// </summary>
         private static bool _readErrorLogged;
 
@@ -51,10 +54,10 @@ namespace DisasterPlus.Game
         private static bool _factsScanned;
 
         /// <summary>
-        /// レベルのロード／アンロードで呼ぶ。都市をまたいで地形キャッシュを持ち越さない
-        /// （「全セッション状態はレベルアンロードでリセットする」がこの MOD の規則）。
-        /// <c>RawHeights</c> の配列は都市ごとに作り直されるので、**長さの実測を
-        /// 持ち越すと 2 つ目の都市で前の都市の事実を名乗ることになる。**
+        /// Call on level load and unload. Do not carry the terrain cache across cities
+        /// ("all session state is reset on level unload" is this mod's rule).
+        /// The <c>RawHeights</c> array is rebuilt per city, so **carrying the measured length over
+        /// would make the second city quote the previous city's facts.**
         /// </summary>
         public static void Reset()
         {
@@ -62,7 +65,7 @@ namespace DisasterPlus.Game
             _factsScanned = false;
         }
 
-        /// <summary>**sim スレッド専用。**</summary>
+        /// <summary>**Sim thread only.**</summary>
         public static VolcanoSnapshot Read()
         {
             try
@@ -71,11 +74,12 @@ namespace DisasterPlus.Game
 
                 uint frame = SimulationManager.instance.m_currentFrameIndex;
 
-                // ★ 位相と調査結果は sim スレッドの VolcanoState から直接読む。
-                //   この Read はポーズガードより上で走るので、載るのは
-                //   **この tick で VolcanoState.Tick が走る前の状態**である
-                //   （VolcanoSnapshot.Phase の doc）。
-                // 準備の実績も sim スレッドの static から直接読む（同じスレッド）。
+                // ★ The phase and the survey result are read directly from the sim thread's
+                //   VolcanoState. This Read runs above the pause guard, so what gets carried is
+                //   **the state before VolcanoState.Tick runs on this tick**
+                //   (the doc of VolcanoSnapshot.Phase).
+                // The clearing's tally is likewise read straight from sim-thread statics (same
+                // thread).
                 return new VolcanoSnapshot(true, ResolveTerrainFacts(), frame, ReadGameMode(),
                                            VolcanoState.Phase, VolcanoState.Footprint,
                                            VolcanoState.ProgressUnit, VolcanoState.LastRefusal,
@@ -96,8 +100,9 @@ namespace DisasterPlus.Game
                                            VolcanoEruption.IntensityUnit,
                                            VolcanoEruption.VentWorld,
                                            VolcanoEruption.InClimax,
-                                           // ★ 環状火口列はカルデラのふちそのものである。
-                                           //   陥没していない噴火では 0（＝環は無い）。
+                                           // ★ The ring of fissures is the caldera's edge itself.
+                                           //   0 for an eruption that is not foundering (= there
+                                           //   is no ring).
                                            VolcanoState.RingFissureRadiusMetres,
                                            VolcanoLava.FlowCount,
                                            VolcanoLava.AliveCount,
@@ -105,10 +110,10 @@ namespace DisasterPlus.Game
                                            VolcanoLava.BuildingsIgnited,
                                            VolcanoLava.TreesIgnited,
                                            VolcanoLava.TreesAvailable,
-                                           // ★ publish 後に書き換えられない配列である
-                                           //   （VolcanoLava は前進のたびに丸ごと差し替える）。
-                                           //   コピーを取らないのはそのためで、
-                                           //   main スレッドが参照を持ったままでも安全。
+                                           // ★ These arrays cannot be rewritten after publishing
+                                           //   (VolcanoLava swaps them out whole on every
+                                           //   advance). That is why no copy is taken, and why it
+                                           //   is safe for the main thread to hold the reference.
                                            VolcanoLava.TrailPoints,
                                            VolcanoLava.TrailPointCounts,
                                            VolcanoLava.CoolUnit);
@@ -129,18 +134,18 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// ゲームモードか（マップエディタなら false）。
+        /// Whether this is game mode (false in the map editor).
         ///
-        /// <c>m_blockHeights</c> の追随速度が変わる（ゲームで上へ 2 m、エディタで 8 m、§A-2）。
-        /// **読めなければ true（ゲームモード）を返す** —— 遅いほうを名乗るのが安全側で、
-        /// 「もう建てられます」と早まって言わない。
+        /// The catch-up speed of <c>m_blockHeights</c> changes (2 m upwards in the game, 8 m in
+        /// the editor, §A-2).
+        /// **If it cannot be read, return true (game mode)** — reporting the slower one is the
+        /// safe direction, so we never say "you can build here now" prematurely.
         ///
-        /// ★ **計画 §2.3 の記述を 1 箇所訂正する。** 計画は
-        /// <c>ToolController.m_mode</c> と書いているが、<c>m_mode</c> は
-        /// <c>ToolController</c> の **public インスタンスフィールド**（型は
-        /// <c>ItemClass.Availability</c>）であって static ではない。
-        /// 到達経路は <c>ToolManager.instance.m_properties.m_mode</c> である
-        /// （本 MOD 側でリフレクションにより確認済み）。
+        /// ★ **One correction to what plan §2.3 says.** The plan writes
+        /// <c>ToolController.m_mode</c>, but <c>m_mode</c> is a **public instance field** on
+        /// <c>ToolController</c> (of type <c>ItemClass.Availability</c>), not a static.
+        /// The reach path is <c>ToolManager.instance.m_properties.m_mode</c>
+        /// (confirmed by reflection on this mod's side).
         /// </summary>
         private static bool ReadGameMode()
         {
@@ -160,13 +165,14 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 地形の事実をキャッシュ越しに返す。**sim スレッド専用**（<c>_factsScanned</c> を書く）。
+        /// Returns the terrain facts through the cache. **Sim thread only** (it writes
+        /// <c>_factsScanned</c>).
         ///
-        /// ④の <c>ResolvePrefabFacts</c> と違って**間引きつきの再走査をしない。**
-        /// あちらが見ているのはプレハブで、レベルロード直後にはまだ揃っていない
-        /// ことがあった。こちらが見ているのは <c>TerrainManager.Awake</c> が確保した
-        /// 配列とアセンブリのメソッド表で、**レベルがロードされた時点で確定している**。
-        /// 毎 tick 走査しないのは純粋にコストの都合である。
+        /// Unlike ④'s <c>ResolvePrefabFacts</c>, it **does not re-scan on a throttle.**
+        /// That one is looking at prefabs, which were sometimes not yet in place immediately after
+        /// a level load. This one is looking at the array <c>TerrainManager.Awake</c> allocated
+        /// and at the assembly's method table, and **both are settled the moment the level is
+        /// loaded**. Not scanning every tick is purely about cost.
         /// </summary>
         private static VolcanoTerrainFacts ResolveTerrainFacts()
         {
@@ -177,7 +183,7 @@ namespace DisasterPlus.Game
 
             if (!_facts.Usable)
             {
-                // Warn はスロットルされないので Diag に落とす。
+                // Warn is not throttled, so drop to Diag.
                 Log.Diag("VolcTerrain",
                     "the terrain write path is not usable: RawHeights=" + _facts.RawArrayLength
                     + " updateArea=" + (_facts.UpdateAreaResolved ? "ok" : "MISSING")
@@ -187,20 +193,21 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 地形 API を走査するだけの純粋関数。キャッシュを一切触らないので、
-        /// **どのスレッドから呼んでもこのクラスの状態を壊さない**。
-        /// <see cref="Assumptions"/>（main スレッド）はこちらを使うこと
-        /// —— <see cref="ResolveTerrainFacts"/> を呼ぶと、sim スレッドが回している
-        /// キャッシュを main スレッドから巻き戻すことになる
-        /// （<c>FireWhirlSpawner.HasTornadoPrefab</c> で同じ欠陥を直した経緯がある）。
+        /// A pure function that only probes the terrain API. It touches no cache, so
+        /// **calling it from any thread cannot corrupt this class's state**.
+        /// <see cref="Assumptions"/> (main thread) should use this one —
+        /// call <see cref="ResolveTerrainFacts"/> and the main thread would be rewinding a cache
+        /// the sim thread is driving
+        /// (the same defect was fixed once in <c>FireWhirlSpawner.HasTornadoPrefab</c>).
         ///
-        /// **項目ごとに別々の try で囲む。** 片方の失敗でもう片方まで諦めると、
-        /// 「溶岩が流れないだけ」の環境で山まで止まる。
+        /// **Wrap each item in its own try.** Give up on one because the other failed, and an
+        /// environment where only the lava cannot flow stops the mountain too.
         ///
-        /// メソッドは <c>GetMethod</c> で**引数の型まで指定**して見る。名前だけの
-        /// <c>GetMethod</c> はオーバーロードで <c>AmbiguousMatchException</c> を投げるうえ、
-        /// シグネチャ変更を見逃す（②が確立した形）。
-        /// <c>SampleDetailHeight</c> は同名 4 本のオーバーロードがあるので特にそうである。
+        /// Methods are looked up with <c>GetMethod</c> **specifying the parameter types too**. A
+        /// name-only <c>GetMethod</c> throws <c>AmbiguousMatchException</c> on overloads and also
+        /// misses signature changes (the form ② established).
+        /// That goes double for <c>SampleDetailHeight</c>, which has four overloads of the same
+        /// name.
         /// </summary>
         public static VolcanoTerrainFacts ScanTerrainFacts()
         {
@@ -209,12 +216,12 @@ namespace DisasterPlus.Game
 
             try
             {
-                // ★ exists を先に見る（クラス doc）。
+                // ★ Check exists first (class doc).
                 if (Singleton<TerrainManager>.exists)
                 {
-                    // 読み取りなのでどちらのスレッドからでも安全。
-                    // RawHeights は public プロパティで、型は ushort[]
-                    //（コンパイル時に検証される。§C-8 / §B-6）。
+                    // It is a read, so it is safe from either thread.
+                    // RawHeights is a public property of type ushort[]
+                    // (verified at compile time. §C-8 / §B-6).
                     ushort[] raw = Singleton<TerrainManager>.instance.RawHeights;
                     if (raw != null)
                     {
@@ -242,8 +249,9 @@ namespace DisasterPlus.Game
                     typeof(UnityEngine.Vector2), typeof(float), typeof(float)
                 });
 
-            // ★ 3 引数版（out float slopeX, out float slopeZ）。1 引数版では勾配が取れず、
-            //   溶岩は下り方向を見つけられない（§B-6）。out は MakeByRefType で指定する。
+            // ★ The three-argument version (out float slopeX, out float slopeZ). The
+            //   one-argument version gives no gradient, so the lava cannot find downhill (§B-6).
+            //   out is specified with MakeByRefType.
             bool slopeSampleResolved = HasMethod(typeof(TerrainManager), "SampleDetailHeight", false,
                 new Type[]
                 {
@@ -267,9 +275,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 引数の型まで指定した <c>GetMethod</c>。見つからない・例外が出たときは false。
-        /// **「解決できなかった」を「例外」にしない** —— <see cref="ScanTerrainFacts"/> は
-        /// <see cref="Assumptions"/> の <c>Check</c> の外側からも呼ばれうる。
+        /// A <c>GetMethod</c> that specifies the parameter types too. false when it is not found
+        /// or something throws.
+        /// **Do not turn "could not resolve" into "an exception"** — <see cref="ScanTerrainFacts"/>
+        /// can be called from outside <see cref="Assumptions"/>'s <c>Check</c> as well.
         /// </summary>
         private static bool HasMethod(Type declaringType, string name, bool isStatic,
                                       Type[] parameterTypes)

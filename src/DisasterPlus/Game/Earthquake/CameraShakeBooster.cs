@@ -7,133 +7,151 @@ using UnityEngine;
 namespace DisasterPlus.Game
 {
     /// <summary>
-    /// バニラのカメラの揺れに、**強度と距離を入れた分を足す**。
-    /// **main スレッド専用、毎フレーム。**
+    /// Adds to vanilla's camera shake **the part that accounts for intensity and
+    /// distance**. **Main thread only, every frame.**
     ///
-    /// ── 何を直しているのか（IL 事実文書 §A-7）─────────────────────
+    /// ── What is being fixed (IL facts doc §A-7) ─────────────────────
     ///
-    /// <c>EarthquakeAI.RenderInstance</c> の振幅は <c>0.3 / (1 + dist*0.001)</c> で、
-    /// **<c>m_intensity</c> が式に入っていない**。強度 25.5 の地震も 5.5 の地震と
-    /// 完全に同じ強さで画面を揺らす。依頼の「震度分布の概念が無い」の、
-    /// いちばん体感に近い部分がこれである。
+    /// The amplitude in <c>EarthquakeAI.RenderInstance</c> is
+    /// <c>0.3 / (1 + dist*0.001)</c>, and **<c>m_intensity</c> is not in the formula at
+    /// all**. An earthquake of intensity 25.5 shakes the screen exactly as hard as one of
+    /// 5.5. This is the part of the request's "there is no notion of a seismic intensity
+    /// distribution" that you feel most directly.
     ///
-    /// 直し方は**加算のみ**。バニラの計算を抑制も置換もしない（Harmony も要らない）:
-    ///
-    /// <code>
-    /// 追加分 = バニラと同じ波 × (intensity / 55 - 1)
-    /// 合計   = バニラの揺れ × (intensity / 55)
-    /// </code>
-    ///
-    ///   - 強度 55（<c>CreateDisaster</c> の既定値）で追加分は**厳密に 0**。
-    ///     そのときこのクラスは <c>m_cameraShake</c> に**一切書き込まない**ので、
-    ///     挙動はバニラとビット単位で同一になる。既定 ON にできる根拠がこれ。
-    ///   - 55 未満では負。弱い地震はより弱く揺れる。
-    ///   - 上限は <see cref="ShakeWaveform.MaxIntensityFactor"/> と
-    ///     <see cref="MaxAddedShake"/> の二段。強度 255 で画面が使い物に
-    ///     ならなくなるのは迫力ではなく不具合。
-    ///   - <c>DisasterManager.m_disableCameraShake</c> が true なら**何も足さない**。
-    ///     プレイヤーが「揺らすな」と言っているのだから、この機能より優先する。
-    ///
-    /// ── バニラと同位相にするための 3 点 ──────────────────────────
-    ///
-    ///   1. 時刻は <c>m_referenceFrameIndex</c> と <c>m_referenceTimer</c>（描画側の時計）。
-    ///      <c>m_currentFrameIndex</c> ではない。どちらも main スレッドが所有する。
-    ///   2. 距離も**バニラと同じカメラ空間**で測る
-    ///      （<c>InverseTransformPoint</c> して <c>z *= 0.25</c> してから長さ）。
-    ///      震央距離に変えると、同じ波に別の振幅が掛かって形が崩れる。
-    ///      観測点版（震源からの距離）は波形グラフ（Task 8）の仕事で、別物である
-    ///      —— 同じ式の別評価であって近似ではない（設計書 §3.5）。
-    ///   3. 窓も同じ（<c>e &lt;= 0</c> / <c>e &gt;= m_activeDuration</c> で何もしない）。
-    ///      <c>m_activeDuration</c> は**プレハブ値でまだ誰も実測していない**ので、
-    ///      読めていないときは <see cref="ShakeWaveform.IsShaking"/> が false を返し、
-    ///      このクラスは何も足さない。窓が分からないまま足すと、地震が終わった後も
-    ///      揺れ続ける。**マグニチュードを決め打ちで書かないこと。**
-    ///
-    /// ── 第 2 層: 合成記象へ差し替える（<c>ModSettings.EarthquakeSeismogram</c>）──
-    ///
-    /// 依頼②「揺れ方がリアルではない（同じ波形が連続している）」への回答。
-    /// **既定 OFF。** ON のとき、このクラスは
+    /// The fix is **purely additive**. Vanilla's calculation is neither suppressed nor
+    /// replaced (no Harmony needed):
     ///
     /// <code>
-    /// 足す分 = 合成記象 × (intensity / 55) − バニラの項
+    /// added = the same wave as vanilla's × (intensity / 55 - 1)
+    /// total = vanilla's shake × (intensity / 55)
     /// </code>
     ///
-    /// を書き込む。バニラの項は**このクラスがバニラと同じ式・同じ点・同じ窓で
-    /// 計算したもの**（上の 3 点）なので、合計はちょうど合成記象になる。
-    /// Harmony もリフレクションも要らない —— <c>m_cameraShake</c> は加算で
-    /// 消費されるフィールドなので、打ち消しも加算で書ける。
+    ///   - At intensity 55 (<c>CreateDisaster</c>'s default) the added part is
+    ///     **exactly 0**. In that case this class **writes nothing at all** to
+    ///     <c>m_cameraShake</c>, so the behaviour is bit-for-bit identical to vanilla.
+    ///     That is what makes it safe to have this on by default.
+    ///   - Below 55 it is negative. Weaker earthquakes shake less.
+    ///   - The ceiling is two-stage: <see cref="ShakeWaveform.MaxIntensityFactor"/> and
+    ///     <see cref="MaxAddedShake"/>. A screen made unusable at intensity 255 is not
+    ///     drama, it is a defect.
+    ///   - If <c>DisasterManager.m_disableCameraShake</c> is true, **nothing is added**.
+    ///     The player has said "do not shake the camera", and that outranks this feature.
     ///
-    /// **打ち消してよいことの根拠**（§A-7 の適用経路）: バニラは
-    /// <c>DisasterManager.EndRenderingImpl</c> で <c>(m_flags &amp; 3) == Created</c> の
-    /// 災害**すべて**について <c>RenderInstance</c> を呼ぶ。可視判定も距離打ち切りも
-    /// 無いので、こちらが同じ条件（位相 Emerging|Active、<c>e</c> の窓、
-    /// <c>m_disableCameraShake</c>）で評価すれば、バニラが足す量と 1 対 1 で対応する。
-    /// 残差は <c>Mathf.Sin</c>(float) と <c>System.Math.Sin</c>(double) の最下位ビットだけである。
+    /// ── Three things needed to stay in phase with vanilla ───────────────
     ///
-    /// ★ **OFF のときの経路は 1 命令も変えていない。** 強度 55 で追加分が厳密に 0 に
-    ///   なる既定の道はそのまま残っている（それがこの機能を既定 ON にできる唯一の根拠）。
+    ///   1. The time comes from <c>m_referenceFrameIndex</c> and <c>m_referenceTimer</c>
+    ///      (the render-side clock), not <c>m_currentFrameIndex</c>. Both are owned by the
+    ///      main thread.
+    ///   2. The distance is measured **in the same camera space as vanilla's**
+    ///      (<c>InverseTransformPoint</c>, then <c>z *= 0.25</c>, then the length).
+    ///      Switch to epicentral distance and the same wave gets a different amplitude,
+    ///      which distorts the shape. The observer-point version (distance from the
+    ///      hypocentre) is the waveform graph's job (Task 8) and is a different thing
+    ///      entirely — a different evaluation of the same formula, not an approximation
+    ///      (design doc §3.5).
+    ///   3. The window is the same too (do nothing when <c>e &lt;= 0</c> or
+    ///      <c>e &gt;= m_activeDuration</c>). <c>m_activeDuration</c> is **a prefab value
+    ///      nobody has measured yet**, so when it cannot be read
+    ///      <see cref="ShakeWaveform.IsShaking"/> returns false and this class adds
+    ///      nothing. Add without knowing the window and the shaking carries on after the
+    ///      earthquake has ended. **Never hard-code a magnitude.**
     ///
-    /// ── 残留しないことの根拠 ──────────────────────────────
+    /// ── Layer 2: swapping in the synthetic seismogram
+    ///    (<c>ModSettings.EarthquakeSeismogram</c>) ──
     ///
-    /// <c>CameraController.LateUpdate</c> の**最後の 1 行**が
-    /// <c>m_cameraShake = Vector3.zero</c>（IL_0281–0287、本タスクで実測）。
-    /// 消費とリセットが毎フレーム走るので、足すのを止めればオフセットは
-    /// 次のフレームで必ず消える。だからこそ**毎フレーム足し続ける**必要がある
-    /// （sim tick ごとでは 1/n のフレームしか揺れない）。
+    /// The answer to request ②, "the shaking is not realistic (the same waveform repeats
+    /// over and over)". **Off by default.** When on, this class writes
     ///
-    /// ── 毎フレームの経路であることの制約 ─────────────────────────
+    /// <code>
+    /// added = synthetic seismogram × (intensity / 55) − vanilla's term
+    /// </code>
     ///
-    /// 割り当てとログを置かない。<c>Log.Warn</c> / <c>Log.Error</c> は
-    /// スロットルされないので、例外時も 1 回だけ鳴らして以後は
-    /// <c>Log.Diag</c> のキー単位スロットルへ落とす
-    /// （<c>EarthquakeReader._readErrorLogged</c> が確立した形）。
+    /// Vanilla's term is **what this class computed with vanilla's own formula, at the
+    /// same point, over the same window** (the three points above), so the total comes
+    /// out as exactly the synthetic seismogram. Neither Harmony nor reflection is needed
+    /// — <c>m_cameraShake</c> is a field consumed by addition, so the cancellation can be
+    /// written by addition too.
+    ///
+    /// **Why cancelling is legitimate** (§A-7's application path): in
+    /// <c>DisasterManager.EndRenderingImpl</c>, vanilla calls <c>RenderInstance</c> for
+    /// **every** disaster with <c>(m_flags &amp; 3) == Created</c>. There is no visibility
+    /// test and no distance cut-off, so evaluating under the same conditions here (phase
+    /// Emerging|Active, the <c>e</c> window, <c>m_disableCameraShake</c>) corresponds
+    /// one-to-one with what vanilla adds. The residual is only the low bits of
+    /// <c>Mathf.Sin</c>(float) versus <c>System.Math.Sin</c>(double).
+    ///
+    /// ★ **The path taken when this is off has not changed by a single instruction.**
+    ///   The default route where intensity 55 gives exactly 0 added is still there (and
+    ///   that is the only thing that makes it safe to have this feature on by default).
+    ///
+    /// ── Why nothing is left behind ──────────────────────────────
+    ///
+    /// The **last line** of <c>CameraController.LateUpdate</c> is
+    /// <c>m_cameraShake = Vector3.zero</c> (IL_0281-0287, measured as part of this task).
+    /// Consumption and reset run every frame, so stop adding and the offset is certain to
+    /// be gone by the next frame. That is exactly why we must **keep adding every
+    /// frame** (once per sim tick would only shake 1 frame in n).
+    ///
+    /// ── Constraints that come with being a per-frame path ───────────────
+    ///
+    /// No allocations and no logging. <c>Log.Warn</c> / <c>Log.Error</c> are not
+    /// throttled, so even on an exception we shout once and then drop down to
+    /// <c>Log.Diag</c>'s per-key throttle (the shape established by
+    /// <c>EarthquakeReader._readErrorLogged</c>).
     /// </summary>
     public static class CameraShakeBooster
     {
         /// <summary>
-        /// 1 フレームに足せる変位の絶対値の上限。バニラの理論最大は
-        /// |sin + sin| = 2 × 0.3 = 0.6 なので、これはその 2 倍にあたる。
+        /// The ceiling on the absolute displacement that can be added in one frame.
+        /// Vanilla's theoretical maximum is |sin + sin| = 2 × 0.3 = 0.6, so this is twice
+        /// that.
         /// </summary>
         private const float MaxAddedShake = 1.2f;
 
         /// <summary>
-        /// 合成記象に差し替えたときに**カメラが受け取る合計**の上限。
-        /// バニラの理論最大 0.6 の 3 倍で、<c>ShakeWaveform.MaxIntensityFactor</c>
-        /// （＝強度倍率の上限 3.0）と揃えてある。**足す分ではなく合計を押さえる** ——
-        /// 足す分を押さえると打ち消しが崩れて、バニラの波が残って混ざる。
+        /// The ceiling on **the total the camera receives** when the synthetic seismogram
+        /// is swapped in. Three times vanilla's theoretical maximum of 0.6, matching
+        /// <c>ShakeWaveform.MaxIntensityFactor</c> (the intensity multiplier's ceiling of
+        /// 3.0). **It caps the total, not the added part** — cap the added part and the
+        /// cancellation breaks down, leaving vanilla's wave mixed in.
         /// </summary>
         private const float MaxTotalShake = 3f * ShakeWaveform.MaxDisplacement;
 
-        /// <summary>同時に覚えておく地震の数（§E-1 で複数同時に起こりうる）。</summary>
+        /// <summary>How many earthquakes we remember at once (§E-1: several can run simultaneously).</summary>
         private const int MaxTrackedQuakes = 8;
 
         /// <summary>
-        /// 合成記象の**観測距離を地震ごとに 1 回だけ控える**ための表。
+        /// The table that **records the synthetic seismogram's observation distance once
+        /// per earthquake**.
         ///
-        /// P 波と S 波の到達時刻は距離で決まるので、毎フレーム測り直すと
-        /// **カメラを動かしただけで到達時刻が動く**（揺れの途中で振幅が跳ねる）。
-        /// 揺れの窓に入って最初に評価したフレームの距離をその地震の観測距離として
-        /// 固定し、地震が消えたら枠を空ける。ID 0 は「空き」。
+        /// The arrival times of the P and S waves are set by the distance, so measuring
+        /// afresh every frame means **the arrival times move just because the camera
+        /// moved** (the amplitude jumps mid-shake). We pin the distance from the first
+        /// frame evaluated after entering the shaking window as that earthquake's
+        /// observation distance, and free the slot once the quake is gone. ID 0 means
+        /// "free".
         ///
-        /// ★ **鍵は ID だけではなく (ID, 発動フレーム) の組である。** 災害バッファの
-        ///   添字は解放後すぐ再利用されるので（§E-1）、ID だけを鍵にすると
-        ///   前の地震の観測距離を次の地震が引き継ぎうる。
+        /// ★ **The key is the pair (ID, activation frame), not the ID alone.** Indices
+        ///   into the disaster buffer are reused as soon as they are freed (§E-1), so
+        ///   keying on the ID alone would let a new earthquake inherit the previous one's
+        ///   observation distance.
         /// </summary>
         private static readonly ushort[] _trackedIds = new ushort[MaxTrackedQuakes];
         private static readonly uint[] _trackedFrames = new uint[MaxTrackedQuakes];
         private static readonly float[] _trackedDistances = new float[MaxTrackedQuakes];
 
         /// <summary>
-        /// <c>CameraController</c> の参照。**静的キャッシュを素の参照比較で
-        /// 検査してはいけない**（③で、破棄済みオブジェクトを掴んだまま
-        /// 2 つ目の都市で無言で死んだ前例がある）。毎回 Unity の
-        /// <c>== null</c>（fake-null も拾う）で確認し、駄目なら引き直す。
+        /// The <c>CameraController</c> reference. **Never test a static cache with a
+        /// plain reference comparison** (in ③ we once held a destroyed object and died
+        /// silently in the second city). Check it every time with Unity's <c>== null</c>
+        /// (which also catches a fake-null) and re-fetch when it fails.
         /// </summary>
         private static CameraController _controllerCache;
 
         /// <summary>
-        /// Unity 5.6 の <c>Camera.main</c> はタグ検索なので毎フレーム呼ばない
-        /// （<c>ForecastPanel._mainCameraCache</c> / <c>EarthquakePanel</c> と同じ形）。
+        /// <c>Camera.main</c> in Unity 5.6 is a tag search, so it is not called every
+        /// frame (the same shape as <c>ForecastPanel._mainCameraCache</c> /
+        /// <c>EarthquakePanel</c>).
         /// </summary>
         private static Camera _mainCameraCache;
 
@@ -142,13 +160,14 @@ namespace DisasterPlus.Game
         private static float _lastAdded;
 
         /// <summary>
-        /// 直近のフレームで実際に足した変位の大きさ。**診断表示のためだけにある。**
-        /// 実機で「効いているのか、それとも 0 を足し続けているのか」を確かめる
-        /// 手段がこれ以外に無い（画面の揺れは目で見て区別できない）。
+        /// The magnitude of the displacement actually added on the most recent frame.
+        /// **It exists purely for the diagnostic display.** In the game there is no other
+        /// way to tell "it is working" from "it is adding 0 over and over" (you cannot
+        /// tell the difference by eye from the shaking on screen).
         /// </summary>
         public static float LastAdded { get { return _lastAdded; } }
 
-        /// <summary>レベルアンロード時。都市をまたいで参照も数値も持ち越さない。</summary>
+        /// <summary>On level unload. Carry neither references nor numbers across cities.</summary>
         public static void Reset()
         {
             _controllerCache = null;
@@ -160,15 +179,16 @@ namespace DisasterPlus.Game
                 _trackedFrames[i] = 0u;
                 _trackedDistances[i] = 0f;
             }
-            // _errorLogged は戻さない。「投げる」はこの DLL が参照しているゲームの
-            // ビルドに対する事実であって、都市ごとの状態ではない
-            // （EarthquakeReader._readErrorLogged と同じ判断）。
+            // _errorLogged is not reset. "It throws" is a fact about the game build this
+            // DLL is referencing, not per-city state (the same judgement as
+            // EarthquakeReader._readErrorLogged).
         }
 
-        /// <summary>**main スレッドから毎フレーム。**</summary>
+        /// <summary>**Every frame, from the main thread.**</summary>
         public static void Update()
         {
-            // 効いていないときに古い数値が診断に残らないよう、最初に落とす。
+            // Clear it first, so that a stale number does not linger in the diagnostics
+            // while nothing is being applied.
             _lastAdded = 0f;
 
             if (!ModSettings.EarthquakeEnabled.value) return;
@@ -179,23 +199,26 @@ namespace DisasterPlus.Game
                 var snapshot = EarthquakeHub.Latest;
                 if (snapshot == null || !snapshot.Valid) return;
 
-                // m_activeDuration（＝バニラの表示窓）が読めていないなら何もしない。
-                // ここを通してしまうと地震が終わっても揺れ続ける。
+                // If m_activeDuration (vanilla's display window) could not be read, do
+                // nothing. Let this through and the shaking carries on after the
+                // earthquake has ended.
                 if (!snapshot.Prefab.Resolved || snapshot.Prefab.ActiveDuration == 0u) return;
 
                 var quakes = snapshot.Quakes;
                 if (quakes.Count == 0) return;
 
-                // ★ プレイヤーが揺れを切っているなら、この機能は存在しない。
-                //    バニラの加算そのものが同じ条件で止まる（§A-7 の EndRenderingImpl）。
+                // ★ If the player has turned shaking off, this feature does not exist.
+                //    Vanilla's own addition stops under the same condition (§A-7's
+                //    EndRenderingImpl).
                 if (!Singleton<DisasterManager>.exists) return;
                 if (Singleton<DisasterManager>.instance.m_disableCameraShake) return;
 
                 if (!SimulationManager.exists) return;
                 var sim = SimulationManager.instance;
 
-                // ここから先で初めて Unity オブジェクトを探す。地震が 1 個も無い
-                // 通常のフレームでは、上の早期 return より先には来ない。
+                // Only from here on do we go looking for Unity objects. On an ordinary
+                // frame with no earthquakes at all, we never get past the early returns
+                // above.
                 var cam = ResolveMainCamera();
                 if (cam == null) return;
 
@@ -204,8 +227,9 @@ namespace DisasterPlus.Game
 
                 Vector3 added = Accumulate(quakes, snapshot.Prefab.ActiveDuration, sim, cam);
 
-                // ★ 追加分が厳密に 0 のときは**書き込まない**。強度 55（バニラ既定）は
-                //    必ずここへ来るので、その場合の挙動はバニラとビット単位で同一になる。
+                // ★ When the added part is exactly 0, **write nothing**. Intensity 55
+                //    (vanilla's default) always lands here, so in that case the behaviour
+                //    is bit-for-bit identical to vanilla.
                 if (added.x == 0f && added.y == 0f && added.z == 0f) return;
 
                 controller.m_cameraShake += added;
@@ -213,7 +237,7 @@ namespace DisasterPlus.Game
             }
             catch (System.Exception e)
             {
-                // 毎フレームの経路。1 回だけ大きく鳴らし、以後はキー単位スロットルへ。
+                // A per-frame path. Shout once, then drop to the per-key throttle.
                 if (!_errorLogged)
                 {
                     _errorLogged = true;
@@ -227,23 +251,27 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// 進行中の地震ぶんの追加変位を合計し、<see cref="MaxAddedShake"/> で頭を押さえる。
+        /// Sums the added displacement over the earthquakes in progress and caps it at
+        /// <see cref="MaxAddedShake"/>.
         ///
-        /// 割り当てを一切しない（<c>Vector3</c> は構造体、リストは添字走査）。
+        /// It allocates nothing (<c>Vector3</c> is a struct and the list is walked by
+        /// index).
         /// </summary>
         private static Vector3 Accumulate(IList<EarthquakeReading> quakes,
                                           uint activeDuration, SimulationManager sim, Camera cam)
         {
             bool seismogram = ModSettings.EarthquakeSeismogram.value;
 
-            // ★ 設定の ON / OFF に関わらず毎フレーム掃除する。OFF のあいだ掃除を
-            //   止めると、次に ON にしたとき前の地震の枠が残ったままになる。
+            // ★ Sweep every frame regardless of whether the setting is on or off. Stop
+            //   sweeping while it is off and, when it is next turned on, the previous
+            //   earthquake's slots are still occupied.
             ForgetGoneQuakes(quakes);
 
             Vector3 added = Vector3.zero;
 
-            // 合成記象に差し替えるときだけ使う。target は「カメラが受け取るべき合計」、
-            // vanilla は「バニラが自分で足す量」で、その差だけを書き込む。
+            // Only used when swapping in the synthetic seismogram. target is "the total
+            // the camera should receive", vanilla is "what vanilla adds by itself", and
+            // we write only the difference.
             Vector3 target = Vector3.zero;
             Vector3 vanilla = Vector3.zero;
 
@@ -253,17 +281,19 @@ namespace DisasterPlus.Game
             {
                 var q = quakes[i];
 
-                // バニラの (m_flags & 12) != 0 と同じ条件。位相ビットは互いに排他なので
-                // （§A-1、DisasterPhases の doc とユニットテスト）、位相 2 種の比較で足りる。
+                // The same condition as vanilla's (m_flags & 12) != 0. The phase bits are
+                // mutually exclusive (§A-1, plus DisasterPhases' doc and its unit tests),
+                // so comparing against the two phases is enough.
                 if (q.Phase != EarthquakePhase.Emerging && q.Phase != EarthquakePhase.Active) continue;
 
-                // m_activationFrame == 0 は「今」ではなく「未定」。引き算に使うと
-                // 途方も無い e になる（§A-1 の罠）。
+                // m_activationFrame == 0 means "not yet decided", not "now". Use it in the
+                // subtraction and you get an absurd e (the trap in §A-1).
                 if (!q.ActivationScheduled) continue;
 
                 float factor = ShakeWaveform.IntensityFactor(q.Intensity);
-                // ★ 強度 55 ではここで打ち切られる（合成記象が OFF のときだけ）。
-                //   以後の三角関数も実行されない ＝ バニラとビット単位で同一。
+                // ★ At intensity 55 we bail out here (only while the synthetic seismogram
+                //   is off). None of the trigonometry below runs either, so it is
+                //   bit-for-bit identical to vanilla.
                 if (!seismogram && factor == 0f) continue;
 
                 long e = (long)sim.m_referenceFrameIndex - q.ActivationFrame + ShakeWaveform.FrameOffset;
@@ -271,13 +301,15 @@ namespace DisasterPlus.Game
 
                 float t = e + sim.m_referenceTimer;
 
-                // §A-7 IL_003F と同じカメラ空間の距離。z を 0.25 倍するところまで写す。
+                // The same camera-space distance as §A-7 IL_003F. Copied right down to
+                // multiplying z by 0.25.
                 Vector3 v = camTransform.InverseTransformPoint(
                     new Vector3(q.Epicentre.X, q.Epicentre.Y, q.Epicentre.Z));
                 v.z *= 0.25f;
                 float cameraDistance = v.magnitude;
 
-                // §A-7 IL_00AA / IL_00F2: 揺れは断層に直交する 1 方向。
+                // §A-7 IL_00AA / IL_00F2: the shaking is along one direction, normal to
+                // the fault.
                 float dirX = -Mathf.Sin(q.AngleRadians);
                 float dirZ = Mathf.Cos(q.AngleRadians);
 
@@ -291,15 +323,17 @@ namespace DisasterPlus.Game
                     continue;
                 }
 
-                // ── 第 2 層: 合成記象に差し替える ──────────────────────
-                // 観測距離は地震ごとに 1 回だけ控える（カメラを動かしても
-                // P/S の到達時刻を動かさないため。_trackedDistances の doc）。
+                // ── Layer 2: swap in the synthetic seismogram ────────────────
+                // The observation distance is recorded once per earthquake (so that
+                // moving the camera does not move the P/S arrival times; see
+                // _trackedDistances' doc).
                 float observed = ObservationDistance(q.DisasterId, q.ActivationFrame, cameraDistance);
 
                 var model = SeismogramModel.For(
                     DeterministicRandom.Hash(q.DisasterId, q.ActivationFrame), activeDuration);
 
-                // 1 + factor ＝ intensity / 55（クランプ済み）。強度 55 でちょうど等倍。
+                // 1 + factor = intensity / 55 (already clamped). At intensity 55 it is
+                // exactly unity.
                 float wanted = model.DisplacementAt(observed, t) * (1f + factor);
                 float replaced = ShakeWaveform.DisplacementAt(cameraDistance, t);
 
@@ -311,14 +345,15 @@ namespace DisasterPlus.Game
 
             if (seismogram)
             {
-                // ★ 押さえるのは**合計**であって足す分ではない。足す分を押さえると
-                //   打ち消しが崩れ、消したはずのバニラの波が残って混ざる。
+                // ★ What is capped is **the total**, not the added part. Cap the added
+                //   part and the cancellation breaks down, leaving the vanilla wave we
+                //   meant to remove mixed back in.
                 float total = target.magnitude;
                 if (total > MaxTotalShake) target *= MaxTotalShake / total;
                 return target - vanilla;
             }
 
-            // 地震が同時に複数起きうる（§E-1）ので、頭は合計に対して押さえる。
+            // Several earthquakes can run at once (§E-1), so the cap applies to the total.
             float magnitude = added.magnitude;
             if (magnitude > MaxAddedShake)
             {
@@ -328,8 +363,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// この地震の観測距離。**初めて見たフレームの距離をそのまま覚える。**
-        /// 表が満杯なら覚えずに今の距離を返す（覚えられないだけで、揺れは出る）。
+        /// This earthquake's observation distance. **It remembers the distance from the
+        /// first frame it was seen on, as it was.** If the table is full it returns the
+        /// current distance without remembering it (only the memory is lost; the shaking
+        /// still happens).
         /// </summary>
         private static float ObservationDistance(ushort disasterId, uint activationFrame,
                                                  float current)
@@ -357,9 +394,10 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// もう揺れていない地震の枠を空ける。**空けないと表が埋まったまま**になり、
-        /// 次の地震が観測距離を控えられなくなる（毎フレーム測り直しに落ちる）。
-        /// 毎フレームの経路なので割り当ては無い（添字走査だけ）。
+        /// Frees the slots of earthquakes that are no longer shaking. **Without this the
+        /// table stays full** and the next earthquake cannot record its observation
+        /// distance (falling back to measuring afresh every frame). This is a per-frame
+        /// path, so it allocates nothing (it only walks by index).
         /// </summary>
         private static void ForgetGoneQuakes(IList<EarthquakeReading> quakes)
         {
@@ -386,7 +424,7 @@ namespace DisasterPlus.Game
 
         private static Camera ResolveMainCamera()
         {
-            // Unity の == null なので、破棄済み（fake-null）なら引き直しになる。
+            // This is Unity's == null, so a destroyed (fake-null) camera is re-fetched.
             if (_mainCameraCache == null) _mainCameraCache = Camera.main;
             return _mainCameraCache;
         }

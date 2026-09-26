@@ -9,32 +9,38 @@ using DisasterPlus.Tools;
 namespace DisasterPlus.Tools.VolcanoPreview
 {
     /// <summary>
-    /// 土煙の扇を**上から見て**描く（実機の指摘⑤の確認）。ゲームは起動しない。
+    /// Draws the ash-cloud fan **seen from above** (checking point 5 from the in-game report).
+    /// The game is not launched.
     ///
-    /// 3 つを 1 枚に重ねる:
+    /// Three things are overlaid in one image:
     /// <list type="number">
-    /// <item>山（<c>VolcanoCrater.ProfileAt</c> の陰影）</item>
-    /// <item><b>溶岩の軌跡</b> —— <c>LavaPath</c> の実物で、山の勾配を実際に下らせたもの</item>
-    /// <item><b>扇が 1 周で覆う範囲</b> —— <c>PyroclasticSurge</c> の舌 5 本の帯を、
-    ///   頭が火口から端まで走るあいだ全部について足し合わせたもの</item>
+    /// <item>the mountain (the shading of <c>VolcanoCrater.ProfileAt</c>)</item>
+    /// <item><b>the lava trails</b> —— the real <c>LavaPath</c>, actually run down the
+    ///   mountain's slope</item>
+    /// <item><b>the area the fan covers over one full cycle</b> —— the bands of
+    ///   <c>PyroclasticSurge</c>'s 5 lobes, summed over the whole time the head travels from
+    ///   the crater to the far end</item>
     /// </list>
     ///
-    /// 指摘⑤は「溶岩流の上だけを流れ落ちている」だった。したがって確かめるのは
-    /// <b>灰色（扇）が赤（溶岩）よりずっと広い範囲を覆っていること</b>である。
-    /// 数字でも出す（<c>measurements.txt</c> の surge 表）。
+    /// Point 5 was "it only flows down on top of the lava flows". So what is being checked is
+    /// <b>that the grey (the fan) covers a far wider area than the red (the lava)</b>.
+    /// It is also printed as numbers (the surge table in <c>measurements.txt</c>).
     /// </summary>
     internal static class Surge
     {
-        /// <summary>1 ピクセルあたりのメートル。</summary>
+        /// <summary>Metres per pixel.</summary>
         private const float MetresPerPixel = 8f;
 
-        /// <summary>山の外側にどれだけ余白を取るか（半径に対する比）。</summary>
+        /// <summary>How much margin to leave outside the mountain (as a fraction of the
+        /// radius).</summary>
         private const float Margin = 1.35f;
 
-        /// <summary>溶岩の本数（<c>ModSettings.VolcanoLavaFlows</c> の既定値）。</summary>
+        /// <summary>Number of lava flows (the default of
+        /// <c>ModSettings.VolcanoLavaFlows</c>).</summary>
         private const int LavaFlows = 4;
 
-        /// <summary>勾配を読む刻み（m）。ゲームの詳細セルと同じ 4 m。</summary>
+        /// <summary>Step at which the slope is read (m). 4 m, the same as the game's detail
+        /// cell.</summary>
         private const float SampleMetres = 4f;
 
         internal static void Report(string dir, StringBuilder log)
@@ -52,7 +58,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
             int half = (int)(radius * Margin / MetresPerPixel);
             int n = half * 2 + 1;
 
-            // ── 溶岩を実際に下らせる（LavaPath の実物）──────────────────
+            // ── Actually run the lava downhill (the real LavaPath) ──────────────────
             var trails = new Vec2[LavaFlows][];
             var counts = new int[LavaFlows];
             float ventRadius = LavaPath.VentRadiusMetres(crater);
@@ -87,7 +93,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
                 counts[f] = count;
             }
 
-            // ── 扇が 1 周で覆う範囲 ────────────────────────────────
+            // ── The area the fan covers over one full cycle ────────────────────────────────
             var bearings = new float[LavaFlows];
             int channels = 0;
             for (int f = 0; f < LavaFlows; f++)
@@ -140,7 +146,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
                 }
             }
 
-            // ── 測る ─────────────────────────────────────────
+            // ── Measure ─────────────────────────────────────────
             int lavaCells = 0, surgeCells = 0, both = 0;
             for (int i = 0; i < surge.Length; i++)
             {
@@ -165,7 +171,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
                            + " %   (the rest is flank the lava never touched)");
             log.AppendLine();
 
-            // ── 描く ─────────────────────────────────────────
+            // ── Draw ─────────────────────────────────────────
             var rgb = new byte[n * n * 3];
             for (int z = 0; z < n; z++)
             {
@@ -196,7 +202,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
 
                     int c = z * n + x;
 
-                    // 扇（灰）。1 周ぶんを足したものなので、濃さは「何回なぞられたか」である。
+                    // The fan (grey). It is summed over one full cycle, so the density is
+                    // "how many times it was swept over".
                     if (surge[c] > 0f)
                     {
                         float k = surge[c] > 1f ? 1f : surge[c];
@@ -206,7 +213,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
                         b = b + (0.69f - b) * k;
                     }
 
-                    // 溶岩（赤）。扇の上から描く（下に隠れると比べられない）。
+                    // The lava (red). Drawn on top of the fan (hidden underneath it there
+                    // would be nothing to compare).
                     if (lava[c] > 0f)
                     {
                         r = 0.95f; g = 0.32f; b = 0.08f;
@@ -221,7 +229,8 @@ namespace DisasterPlus.Tools.VolcanoPreview
             Console.WriteLine("wrote " + Path.Combine(dir, "surge-strato-fan.png"));
         }
 
-        /// <summary>山肌の勾配（上り方向）。ゲームの <c>SampleDetailHeight</c> と同じ 4 m 刻み。</summary>
+        /// <summary>The slope of the mountainside (uphill direction). The same 4 m step as the
+        /// game's <c>SampleDetailHeight</c>.</summary>
         private static void Slope(VolcanoRelief relief, Vec2 p, float radius, float height,
                                   out float dx, out float dz)
         {
@@ -245,7 +254,7 @@ namespace DisasterPlus.Tools.VolcanoPreview
                             a.Z * w0 + b.Z * w1 + c.Z * w2 + d.Z * w3);
         }
 
-        /// <summary>半径 <paramref name="radiusMetres"/> の円を 1 個足す。</summary>
+        /// <summary>Adds one disc of radius <paramref name="radiusMetres"/>.</summary>
         private static void Stamp(float[] field, int n, int half, Vec2 p, float radiusMetres)
         {
             float cx = half + p.X / MetresPerPixel;

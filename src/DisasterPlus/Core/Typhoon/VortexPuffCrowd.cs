@@ -3,25 +3,28 @@ using DisasterPlus.Core.Common;
 
 namespace DisasterPlus.Core.Typhoon
 {
-    /// <summary>群れの粒 1 個。位置は**渦の中心を原点とした比**である。</summary>
+    /// <summary>One puff of the crowd. Its position is **a ratio, with the vortex centre as
+    /// the origin**.</summary>
     public struct CrowdPuff
     {
-        /// <summary>渦の中心からの角度（ラジアン、回転を足す前）。</summary>
+        /// <summary>The angle from the vortex centre (radians, before the rotation is
+        /// added).</summary>
         public readonly float AngleRadians;
 
-        /// <summary>渦の半径に対する比。</summary>
+        /// <summary>As a fraction of the vortex radius.</summary>
         public readonly float RadiusFraction;
 
-        /// <summary>雲の厚みに対する比。</summary>
+        /// <summary>As a fraction of the cloud's thickness.</summary>
         public readonly float HeightFraction;
 
-        /// <summary>渦の半径に対する、粒の**半径**の比。</summary>
+        /// <summary>The puff's **radius**, as a fraction of the vortex radius.</summary>
         public readonly float SizeFraction;
 
-        /// <summary>濃さ <c>[0,1]</c>。腕の先ほど薄い。</summary>
+        /// <summary>Density <c>[0,1]</c>. Thinner further out along the arms.</summary>
         public readonly float DensityFraction;
 
-        /// <summary>元になった段（甲板・塔・傘）。色と並び順に使う。</summary>
+        /// <summary>The tier it came from (deck, tower, umbrella). Used for colour and draw
+        /// order.</summary>
         public readonly VortexCloudLayer Layer;
 
         public CrowdPuff(float angleRadians, float radiusFraction, float heightFraction,
@@ -37,83 +40,96 @@ namespace DisasterPlus.Core.Typhoon
     }
 
     /// <summary>
-    /// <see cref="VortexPuffLayout"/> の <b>88 個の円盤</b>を、**中を埋める雲の粒の群れ**へ広げる。
-    /// <b>Core なのでエンジンには一切触らない</b>（状態も持たない）。
+    /// Expands <see cref="VortexPuffLayout"/>'s <b>88 discs</b> into **a crowd of cloud
+    /// puffs that fill them in**.
+    /// <b>This is Core, so it touches the engine not at all</b> (and holds no state).
     ///
-    /// ── なぜ要るのか（2026-08-22、オフラインで測って分かった）───────────────
+    /// ── Why it is needed (2026-08-22, found by measuring offline) ───────────────
     ///
-    /// 白い雲の粒を自前で置く作り直し（<c>Game/Typhoon/TyphoonVortexPuffFx</c>）の
-    /// 最初の版は、<see cref="VortexPuffLayout"/> の 88 個をそのまま 1 粒ずつ置いた。
-    /// <c>tools/TyphoonPreview</c> で描いて測ると:
+    /// The first version of the rebuild that places white cloud puffs itself
+    /// (<c>Game/Typhoon/TyphoonVortexPuffFx</c>) placed one puff per disc for
+    /// <see cref="VortexPuffLayout"/>'s 88. Drawn and measured in
+    /// <c>tools/TyphoonPreview</c>:
     ///
     /// <code>
-    /// 粒の面積 ÷ 渦の面積 = 0.41   ← 1.0 を割ると穴が空く
+    /// puff area ÷ vortex area = 0.41   ← below 1.0 and holes open up
     /// </code>
     ///
-    /// 絵も数字どおりで、**渦ではなく点々**だった。原因ははっきりしている ——
-    /// あの 88 個は<b>円盤</b>であって粒ではない。旧実装はその円盤の中へ
-    /// バニラの粒子を数千個<b>撒いて</b>いたので埋まっていた。
-    /// 撒くのをやめて置くなら、**円盤の中身もこちらで作らなければならない。**
+    /// The picture matched the number: **it was a scatter of dots, not a vortex**. The
+    /// cause is clear — those 88 are <b>discs</b>, not puffs. The old implementation
+    /// <b>scattered</b> thousands of vanilla particles inside those discs, which is why
+    /// they were filled. If we stop scattering and start placing, **we have to build the
+    /// discs' insides ourselves too.**
     ///
-    /// ── 何個置くか ────────────────────────────────────
+    /// ── How many to place ────────────────────────────────────
     ///
-    /// 円盤の面積に比例して配り、合計を <see cref="TotalCount"/> に収める。
-    /// 面積に比例させるのは、そうしないと**外側の大きい円盤だけがすかすかになる**
-    /// からである（旧実装が <c>MagnitudeFor</c> で密度を解き直していたのと同じ理由）。
+    /// They are handed out in proportion to each disc's area, with the total kept to
+    /// <see cref="TotalCount"/>. Proportional to area because otherwise **only the large
+    /// discs on the outside come out sparse** (the same reason the old implementation
+    /// re-solved for density in <c>MagnitudeFor</c>).
     ///
-    /// <see cref="TotalCount"/> はミサイル MOD のキノコ雲（620 個）と同じ桁である。
-    /// あちらは 1 都市に 1 つだが、台風も同時に 1 つなので釣り合う。
+    /// <see cref="TotalCount"/> is the same order as the missile mod's mushroom cloud (620).
+    /// That one is one per city, and a typhoon is also one at a time, so it balances out.
     ///
-    /// ── ★★ 種にフレーム番号を混ぜない ─────────────────────────
+    /// ── ★★ Do not mix the frame number into the seed ─────────────────────────
     ///
-    /// 粒の位置は<b>添字だけ</b>から決まる（<see cref="DeterministicRandom"/>）。
-    /// 混ぜると毎フレーム別の場所へ跳んで、雲ではなく砂嵐になる。
-    /// 動きは呼び出し側が足す回転だけで、**群れの形は動かない**。
+    /// A puff's position is decided by <b>its indices alone</b> (see
+    /// <see cref="DeterministicRandom"/>). Mix it in and everything jumps somewhere else
+    /// every frame, giving a sandstorm rather than a cloud.
+    /// The only movement is the rotation the caller adds; **the crowd's shape does not
+    /// move**.
     /// </summary>
     public static class VortexPuffCrowd
     {
-        /// <summary>置く粒の総数。</summary>
+        /// <summary>The total number of puffs placed.</summary>
         public const int TotalCount = 640;
 
         /// <summary>
-        /// 1 つの円盤に配る粒の下限。**0 にしない** —— 0 にすると
-        /// いちばん内側の細い円盤（眼の壁の下段）が消えて、眼が広がって見える。
+        /// The floor on how many puffs go to a single disc. **Not 0** — at 0 the innermost
+        /// thin discs (the lower tier of the eyewall) vanish and the eye looks wider than
+        /// it is.
         /// </summary>
         public const int MinPerDisc = 2;
 
         /// <summary>
-        /// 粒 1 個の半径（**渦の半径**に対する比）の基準に掛ける倍率。
+        /// The multiplier applied to the baseline for one puff's radius (as a fraction of
+        /// **the vortex radius**).
         ///
-        /// ★★ <b>円盤の大きさには比例させない。</b>（2026-08-22、描いて分かった。）
-        ///   最初は「その円盤の半径の 0.62 倍」にしていたが、外周の円盤は
-        ///   中心付近の何倍も大きいので、**外側だけ 1.8 km の塊**になり、
-        ///   腕が読めない一枚の綿になった（<c>docs/images/typhoon</c> で確認）。
+        /// ★★ <b>Do not make it proportional to the disc's size.</b> (2026-08-22, found by
+        ///   drawing it.) It started out as "0.62 times that disc's radius", but the discs
+        ///   round the rim are several times larger than the ones near the centre, so
+        ///   **only the outside became 1.8 km blobs** and it turned into a single sheet of
+        ///   cotton wool with no readable arms (confirmed in <c>docs/images/typhoon</c>).
         ///
-        ///   実際の雲は、渦のどこにあっても<b>似た大きさの塔</b>の集まりである。
-        ///   だから基準は段ごとの比（<c>VortexPuffLayout.SizeFractionOf</c> ——
-        ///   甲板 0.055 / 塔 0.040 / 傘 0.070）で、そこにこの倍率を掛ける。
+        ///   Real cloud is a gathering of <b>similarly sized towers</b> wherever in the
+        ///   vortex it sits. So the baseline is the per-tier fraction
+        ///   (<c>VortexPuffLayout.SizeFractionOf</c> — deck 0.055 / tower 0.040 /
+        ///   umbrella 0.070), and this multiplier is applied to that.
         /// </summary>
         public const float PuffSizeGain = 1.0f;
 
-        /// <summary>粒ごとの大きさの散らばり（±この比）。**揃うと人工物に見える。**</summary>
+        /// <summary>The spread of sizes between puffs (± this fraction). **Uniform sizes look
+        /// artificial.**</summary>
         public const float SizeJitter = 0.30f;
 
         /// <summary>
-        /// **半径方向**にどこまで散らすか（円盤の半径に対する比）。腕の太さになる。
+        /// How far to scatter **radially** (as a fraction of the disc's radius). This
+        /// becomes the thickness of the arms.
         /// </summary>
         public const float RadialScatterRatio = 1.15f;
 
         /// <summary>
-        /// **腕に沿う向き**にどこまで散らすか（渦の半径に対する比、片側）。
+        /// How far to scatter **along the arm** (as a fraction of the vortex radius, one side).
         ///
-        /// ★★ <b>これが無いと腕が繋がらない。</b>（2026-08-22、描いて分かった。）
-        ///   円盤の中だけに散らしていた頃は、88 個の円盤がそのまま
-        ///   **88 個の綿の塊**として見え、腕は「点線」だった
-        ///   （<c>docs/images/typhoon/vortex-owned-plan.png</c> の 2 版目）。
+        /// ★★ <b>Without this the arms do not join up.</b> (2026-08-22, found by drawing it.)
+        ///   While the scattering was confined inside the discs, the 88 discs read as
+        ///   **88 blobs of cotton wool** and the arms were "dotted lines"
+        ///   (the second version of <c>docs/images/typhoon/vortex-owned-plan.png</c>).
         ///
-        ///   腕に沿った隣の円盤との間隔は、渦の半径に対しておよそ 0.2〜0.3 である
-        ///   （3 本の腕 × 5 列を <c>SpiralTurns</c> ＝ 0.45 回転に配っている）。
-        ///   その半分より広く散らせば、隣どうしが重なって 1 本の帯になる。
+        ///   The spacing to the next disc along an arm is roughly 0.2-0.3 of the vortex
+        ///   radius (three arms × five columns spread over <c>SpiralTurns</c> = 0.45 of a
+        ///   turn). Scatter wider than half of that and neighbours overlap into a single
+        ///   band.
         /// </summary>
         public const float AlongArmScatterRatio = 0.16f;
 
@@ -123,16 +139,16 @@ namespace DisasterPlus.Core.Typhoon
         private const uint SizeSalt = 0x43524F5Au;
 
         /// <summary>
-        /// 群れを <paramref name="into"/> へ書く。書いた数を返す
-        /// （<paramref name="into"/> が <see cref="TotalCount"/> 未満なら 0）。
+        /// Writes the crowd into <paramref name="into"/>. Returns how many were written
+        /// (0 if <paramref name="into"/> is shorter than <see cref="TotalCount"/>).
         ///
-        /// **毎フレーム呼んでよい**（確保 0 バイト、分岐だけ）。
+        /// **It may be called every frame** (zero bytes allocated, branches only).
         /// </summary>
         public static int Build(CrowdPuff[] into)
         {
             if (into == null || into.Length < TotalCount) return 0;
 
-            // 1) 円盤ごとの面積。**比例配分の分母である。**
+            // 1) The area of each disc. **This is the denominator of the proportional share.**
             float totalArea = 0f;
             for (int i = 0; i < VortexPuffLayout.PuffCount; i++)
             {
@@ -141,7 +157,8 @@ namespace DisasterPlus.Core.Typhoon
             }
             if (!(totalArea > 0f)) return 0;
 
-            // 2) 面積に比例して配る。端数と下限のぶんは 3) で詰める。
+            // 2) Hand them out in proportion to area. The rounding remainder and the floor
+            //    are made up in 3).
             int written = 0;
 
             for (int i = 0; i < VortexPuffLayout.PuffCount && written < TotalCount; i++)
@@ -160,8 +177,9 @@ namespace DisasterPlus.Core.Typhoon
                 }
             }
 
-            // 3) まだ余っていたら、**大きい円盤から**順に足して埋める。
-            //    余りを捨てると、置く数が回ごとに変わって見える。
+            // 3) If there is still slack, fill it by adding **starting from the large discs**.
+            //    Throw the remainder away and the number placed appears to change from one
+            //    run to the next.
             for (int pass = 0; written < TotalCount; pass++)
             {
                 bool grew = false;
@@ -176,23 +194,25 @@ namespace DisasterPlus.Core.Typhoon
                     grew = true;
                 }
 
-                if (!grew) break;   // 円盤が 1 つも無い（起こらないが、無限に回らない）
+                if (!grew) break;   // not a single disc (cannot happen, but do not loop for ever)
             }
 
             return written;
         }
 
         /// <summary>
-        /// 円盤 <paramref name="discIndex"/> の中の <paramref name="k"/> 番目の粒。
-        /// **添字だけで決まる**（クラス doc）。
+        /// The <paramref name="k"/>th puff inside disc <paramref name="discIndex"/>.
+        /// **Decided by the indices alone** (see the class doc).
         /// </summary>
         private static CrowdPuff Scatter(VortexPuff disc, int discIndex, int k)
         {
             uint seed = unchecked((uint)(discIndex * 7919 + k * 104729));
 
-            // ★★ **円盤の局所座標で散らす** —— 半径方向は腕の太さ、
-            //    腕に沿う向きは隣の円盤との繋がりになる（<c>AlongArmScatterRatio</c>）。
-            //    円の中へ一様に散らすのをやめたのは、それでは腕が点線になったからである。
+            // ★★ **Scatter in the disc's local coordinates** — radially it becomes the
+            //    thickness of the arm, and along the arm it becomes the join to the next
+            //    disc (<c>AlongArmScatterRatio</c>).
+            //    We stopped scattering uniformly inside a circle because that made the arms
+            //    into dotted lines.
             float radial = (2f * DeterministicRandom.Unit(seed, RadiusSalt) - 1f)
                            * disc.DiscFraction * RadialScatterRatio;
             float along = (2f * DeterministicRandom.Unit(seed, AngleSalt) - 1f)
@@ -201,15 +221,18 @@ namespace DisasterPlus.Core.Typhoon
             float radius = disc.RadiusFraction + radial;
             if (radius < 0.001f) radius = 0.001f;
 
-            // 弧長 → 角度。**半径で割る**ので、内側ほど角度としては大きく散る
-            // （腕の内側は詰まっている、という実際の形と同じ向きである）。
+            // Arc length → angle. **Dividing by the radius** means the scatter is larger in
+            // angle further in (which is the same way round as the real shape, where the
+            // inside of an arm is packed tighter).
             float angle = disc.AngleRadians + along / radius;
 
-            // 帯の中の高さ。円盤は段の下端なので、上へだけ散らす（旧実装と同じ約束）。
+            // Height within the band. The disc is the bottom of the tier, so scatter upwards
+            // only (the same promise as the old implementation).
             float height = disc.HeightFraction
                            + disc.BandFraction * DeterministicRandom.Unit(seed, HeightSalt);
 
-            // ★ 大きさは**段**で決まる（クラス doc）。円盤の大きさには比例させない。
+            // ★ The size is decided by the **tier** (see the class doc). It is not made
+            //   proportional to the disc's size.
             float size = VortexPuffLayout.SizeFractionOf(disc.Layer) * PuffSizeGain
                          * (1f + SizeJitter * (2f * DeterministicRandom.Unit(seed, SizeSalt) - 1f));
             if (size < 0.001f) size = 0.001f;
