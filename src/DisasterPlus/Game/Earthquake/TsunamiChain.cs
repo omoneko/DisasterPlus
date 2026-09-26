@@ -180,6 +180,12 @@ namespace DisasterPlus.Game
         /// <summary>The frame the schedule comes due. Only meaningful while <see cref="State"/> is Scheduled.</summary>
         public static uint DueFrame { get { return _dueFrame; } }
 
+        /// <summary>Whether a wave has already been raised for that earthquake. **Needed to choose the panel's wording.**</summary>
+        public static bool HasRaisedFor(ushort quakeId)
+        {
+            return quakeId != 0 && _raisedQuakeId == quakeId;
+        }
+
         /// <summary>
         /// Whether we <b>still owe this earthquake a tsunami</b>.
         ///
@@ -198,12 +204,6 @@ namespace DisasterPlus.Game
         /// ★ Once the disaster slot is freed, <c>IsTrenchQuake</c> forgets it, so this
         ///   lock can never outlive the earthquake.
         /// </summary>
-        /// <summary>Whether a wave has already been raised for that earthquake. **Needed to choose the panel's wording.**</summary>
-        public static bool HasRaisedFor(ushort quakeId)
-        {
-            return quakeId != 0 && _raisedQuakeId == quakeId;
-        }
-
         public static bool StillOwes(ushort quakeId)
         {
             if (quakeId == 0) return false;

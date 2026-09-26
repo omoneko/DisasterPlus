@@ -147,7 +147,11 @@ namespace DisasterPlus.Game
     /// #                                            for when there is no material)
     /// #      Game/Diagnostics/Assumptions.Volcano.cs (one shader assumption)
     ///
-    /// grep -l "VolcanoLavaFx" src/DisasterPlus/Game/Volcano/VolcanoState.cs     ///                         src/DisasterPlus/Game/Volcano/VolcanoSurvey.cs     ///                         src/DisasterPlus/Game/Volcano/VolcanoClearing.cs     ///                         src/DisasterPlus/Game/Volcano/VolcanoUplift.cs     ///                         src/DisasterPlus/Game/Volcano/VolcanoLava.cs
+    /// grep -l "VolcanoLavaFx" src/DisasterPlus/Game/Volcano/VolcanoState.cs \
+    ///                         src/DisasterPlus/Game/Volcano/VolcanoSurvey.cs \
+    ///                         src/DisasterPlus/Game/Volcano/VolcanoClearing.cs \
+    ///                         src/DisasterPlus/Game/Volcano/VolcanoUplift.cs \
+    ///                         src/DisasterPlus/Game/Volcano/VolcanoLava.cs
     /// # -> not a single hit (proof that it is not called from the sim-thread side)
     /// </code>
     /// </summary>

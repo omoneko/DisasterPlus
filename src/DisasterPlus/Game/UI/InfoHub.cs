@@ -230,11 +230,6 @@ namespace DisasterPlus.Game
         private static UIButton _closeButton;
 
 
-        /// <summary>Frames since the button was placed. -1 means "not placed yet".</summary>
-
-        /// <summary>The index of the next <see cref="RecheckFrames"/> to re-check at.</summary>
-
-
         /// <summary>The <see cref="Tab.Id"/> of the currently selected tab. null means none is selected.</summary>
         private static string _activeId;
 

@@ -162,8 +162,10 @@ namespace DisasterPlus.Game
     /// immediately before an irreversible operation**.
     ///
     /// **Even so, it cannot correctly represent a case where only part of one long road falls
-    /// inside the range.** So this is an approximation, and
-    /// <see cref="VolcanoConfirmRows"/> says so (design doc §7.2).
+    /// inside the range.** So this is an approximation, and the row heading says so in
+    /// as many words — <c>Strings.VolcanoFootprintRow</c> is "Footprint (approx.)"
+    /// (design doc §7.2; the confirmation window that used to carry the caveat was
+    /// removed on 2026-08-21).
     /// </summary>
     public static class VolcanoSurvey
     {

@@ -40,8 +40,10 @@ namespace DisasterPlus.Core.Earthquake
         /// </code>
         ///
         /// ★★ <b>The seabed alone decides the depth.</b> Demand a minimum depth of the
-        ///   water column and the open ocean becomes "not sea" while the water draws back
-        ///   (the fourth failure).
+        ///   water column and the open ocean becomes "not sea" while the water draws back.
+        ///   This is a fourth way in, separate from the three in the class doc: there the
+        ///   open ocean was rejected by its <b>surface height</b>, here by the
+        ///   <b>thickness of the column</b>.
         ///
         /// ★ The seabed does not move, so <b>the sea stays sea even in the middle of a
         ///   storm surge</b>.

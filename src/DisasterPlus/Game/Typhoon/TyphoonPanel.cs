@@ -35,11 +35,10 @@ namespace DisasterPlus.Game
     ///    <b>arm a placement cursor</b> when pressed
     ///    (<see cref="TyphoonPlacementTool"/>). Same contract as vanilla's disaster
     ///    buttons: the typhoon begins at the point you click on the map.
-    ///    <see cref="ArmPlacement"/> is the entry point, and **the tile calls it**.
+    ///    <see cref="TyphoonPlacementTool.Arm"/> is the entry point, and **the tile calls
+    ///    it**.
     ///
-    /// The "stop" button alone needs no point, so as before it just queues a request on
-    /// <see cref="TyphoonHub.Request"/>.
-    /// Neither one **touches <c>DisasterManager</c> from the main thread**. What actually
+    /// It **does not touch <c>DisasterManager</c> from the main thread**. What actually
     /// creates the disaster is <see cref="TyphoonController"/> on the next sim tick.
     /// So there is **a one-tick delay** between pointing and anything changing on screen.
     /// To stop it looking as though pointing twice raised two, "waiting for the first

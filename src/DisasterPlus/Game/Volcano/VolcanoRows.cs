@@ -62,9 +62,8 @@ namespace DisasterPlus.Game
     /// # 2. UILabel.text is assigned in exactly one place, SetPlain           -> 1
     /// grep -rn --include=*.cs "label.text = " $V | grep -v '///' | wc -l
     ///
-    /// # 3. Strings.SourceVanilla is referenced in exactly two places in this file  -> 2
-    /// #    (SetMeasured and SetModelNote. Both in VolcanoRows.cs)
-    /// grep -rn --include=*.cs "Strings.SourceVanilla" $V | grep -v '///'
+    /// # 3. SetMeasured is the only place that references Strings.SourceVanilla     -> 1
+    /// grep -rn --include=*.cs "Strings.SourceVanilla" $V | grep -v '///' | wc -l
     ///
     /// # 4. Strings.SourceModel never appears                                 -> 0
     /// grep -rn --include=*.cs "Strings.SourceModel" $V | grep -v '///' | wc -l
@@ -73,11 +72,12 @@ namespace DisasterPlus.Game
     /// grep -rn --include=*.cs "VolcanoRows.SetMeasured(" $V | grep -v '///' | wc -l
     /// </code>
     ///
-    /// Rows can only be created through the five families
-    /// <see cref="AddTitleRow"/> / <see cref="AddSectionHeader"/> /
+    /// Rows can only be created through the four families
+    /// <see cref="AddTitleRow"/> /
     /// <see cref="AddRow(UIPanel,string,ref float)"/> /
     /// <see cref="AddRow(UIPanel,string,ref float,float)"/> /
-    /// <see cref="AddMeasuredRow"/>.
+    /// <see cref="AddMeasuredRow"/>. A section heading is an ordinary row written
+    /// through <see cref="SetSectionHeader"/> — unlike ④'s, it creates nothing.
     ///
     /// **Why ④'s <see cref="TyphoonRows"/> is not reused as a type.** That one bakes
     /// <c>"Typhoon"</c> into <c>UILabel.name</c>, and its class doc states ④'s own specific
@@ -204,8 +204,7 @@ namespace DisasterPlus.Game
         /// <summary>
         /// Writes a row holding a value merely read out of the game's arrays. **Do not let the
         /// caller choose the prefix.**
-        /// Along with <see cref="SetModelNote"/>, this is one of the two places that reference
-        /// <c>Strings.SourceVanilla</c> (both inside this file).
+        /// This is the only place in ⑤ that references <c>Strings.SourceVanilla</c>.
         /// </summary>
         internal static void SetMeasured(UILabel label, string body)
         {

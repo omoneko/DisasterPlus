@@ -38,7 +38,7 @@ namespace DisasterPlus.Game
     ///    would have to invent the "where" for itself.
     ///
     /// <see cref="Point"/> is not read when <see cref="Kind"/> is
-    /// <see cref="TyphoonRequest.None"/> or <see cref="TyphoonRequest.Stop"/>.
+    /// <see cref="TyphoonRequest.None"/>.
     /// </summary>
     public struct TyphoonRequestData
     {

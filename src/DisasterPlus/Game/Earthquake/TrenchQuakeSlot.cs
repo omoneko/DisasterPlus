@@ -532,7 +532,6 @@ namespace DisasterPlus.Game
         /// </summary>
         private const int SearchRings = 24;
 
-        /// <summary>The number of azimuths probed around the source (8 of them).</summary>
         /// <summary>The number of 16 m cells. <c>BlockHeights</c> is indexed <c>z*(1080+1)+x</c>.</summary>
         private const int GridCells = 1080;
 
@@ -543,6 +542,7 @@ namespace DisasterPlus.Game
             return c < 0 ? 0 : (c > GridCells ? GridCells : c);
         }
 
+        /// <summary>The number of azimuths probed around the source (8 of them).</summary>
         private const int OpenSeaProbes = 8;
 
         /// <summary>

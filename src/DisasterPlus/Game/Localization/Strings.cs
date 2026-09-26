@@ -259,8 +259,13 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// The token meaning "the measured-value marker goes here" inside a translated string.
-        /// It is replaced with <see cref="SourceVanilla"/> immediately before display
-        /// (<c>TyphoonRows.SetModelNote</c> is the only place that does the replacement).
+        ///
+        /// ★★ <b>Nothing substitutes it today.</b> The panel headings that carried it
+        ///   (<c>TyphoonModelNote</c> / <c>VolcanoModelNote</c>) are gone, so no locale value
+        ///   contains the token and no code path replaces it. **Write it into a locale string
+        ///   as things stand and it renders literally as "{measured}".** It is kept because
+        ///   <c>tools\CheckLocales.ps1</c> names it when it refuses a hard-coded marker;
+        ///   restore the substitution before telling anyone to use it.
         ///
         /// ★ <b>It must not be a <c>public static string</c>.</b>
         ///   <c>LocaleLoader</c> treats every string from <c>GetFields(Public | Static)</c> as
@@ -820,11 +825,10 @@ namespace DisasterPlus.Game
         //    carries the meaning", so if this one sentence breaks then ④'s display convention
         //    itself is never conveyed.
         //
-        //    The marker is produced in exactly one place
-        //    (TyphoonRows.SetMeasured / SetModelNote).
-        //    The translated string carries **<see cref="MeasuredToken"/> rather than the
-        //    marker itself**, and it is replaced with Strings.SourceVanilla immediately before
-        //    display — **structurally, it can never drift again.**
+        //    The marker is produced in exactly one place (TyphoonRows.SetMeasured), which
+        //    prepends Strings.SourceVanilla itself. **No translated string may spell the
+        //    marker out**, and tools\CheckLocales.ps1 refuses any locale value that does —
+        //    that is what keeps it from drifting again.
         //
         //    Not using string.Format is a discipline of this mod, but that is to avoid
         //    positional arguments (get the number of {0}s wrong and it throws at runtime).
@@ -1042,9 +1046,9 @@ namespace DisasterPlus.Game
         // ★★ **Do not write the marker string itself into this sentence** (the same trap as
         //    ④'s overall review I5). ja.txt's SourceVanilla is "[実測]", so embedding the
         //    English "[measured]" in the body **leaves Japanese players hunting for a string
-        //    that never appears on screen**. The translated string carries MeasuredToken, and
-        //    VolcanoRows.SetModelNote replaces it with SourceVanilla immediately before display.
-        //    tools\CheckLocales.ps1 checks that the token is present in this key.
+        //    that never appears on screen**. The marker is prepended at runtime by
+        //    VolcanoRows.SetMeasured and is never written into a translated string;
+        //    tools\CheckLocales.ps1 refuses any locale value that spells one out.
 
         // ★ **A permanent warning** (design doc §7.1). Shown even when there is no volcano.
         //   Do not make it conditional because "it is noisy" — the owner decided that

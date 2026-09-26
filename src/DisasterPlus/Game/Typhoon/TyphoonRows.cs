@@ -51,9 +51,8 @@ namespace DisasterPlus.Game
     /// # 2. SetPlain is the only place that assigns to UILabel.text           -> 1
     /// grep -rn --include=*.cs "label.text = " $T | grep -v '///' | wc -l
     ///
-    /// # 3. Only two places in this file reference Strings.SourceVanilla      -> 2
-    /// #    (SetMeasured and SetModelNote, both in TyphoonRows.cs)
-    /// grep -rn --include=*.cs "Strings.SourceVanilla" $T | grep -v '///'
+    /// # 3. SetMeasured is the only place that references Strings.SourceVanilla -> 1
+    /// grep -rn --include=*.cs "Strings.SourceVanilla" $T | grep -v '///' | wc -l
     ///
     /// # 4. Strings.SourceModel never appears at all                         -> 0
     /// grep -rn --include=*.cs "Strings.SourceModel" $T | grep -v '///' | wc -l
@@ -197,9 +196,8 @@ namespace DisasterPlus.Game
 
         /// <summary>
         /// Write into a row holding a vanilla measured value. **The caller does not get
-        /// to choose the prefix.** Along with <see cref="SetModelNote"/>, this is one of
-        /// the two places that reference <c>Strings.SourceVanilla</c> (both inside this
-        /// file).
+        /// to choose the prefix.** This is the only place in ④ that references
+        /// <c>Strings.SourceVanilla</c>.
         /// </summary>
         internal static void SetMeasured(UILabel label, string body)
         {

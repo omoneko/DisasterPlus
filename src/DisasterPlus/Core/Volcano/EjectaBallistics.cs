@@ -70,7 +70,7 @@ namespace DisasterPlus.Core.Volcano
     ///
     ///   - <see cref="GravityMetresPerSecondSquared"/> = 9.81 is **real physics**
     ///   - The launch angles <see cref="MinElevationDegrees"/> to
-    ///     <see cref="MaxElevationDegrees"/> (55-80°) are also close to real observations of
+    ///     <see cref="MaxElevationDegrees"/> (42-65°) are also close to real observations of
     ///     ejecta (they leave the crater at steep angles)
     ///   - **The range is decided first, not derived from the initial speed.** It is fixed
     ///     as a fraction of the mountain's radius (<see cref="MinRangeFraction"/> to

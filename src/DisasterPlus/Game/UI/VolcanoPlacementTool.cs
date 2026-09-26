@@ -7,7 +7,8 @@ namespace DisasterPlus.Game
 {
     /// <summary>
     /// The tool for pointing at where the volcano goes. **Main thread only.**
-    /// Copied straight from ③'s <see cref="FireWhirlPlacementTool"/>.
+    /// Copied straight from ③'s <c>FireWhirlPlacementTool</c>, which has since been
+    /// removed — ③ picks its own spot now (see the <see cref="FireWhirlFeature"/> class doc).
     ///
     /// ★★ <b>The click is "make it" (changed 2026-08-21).</b> It queues a single
     /// <see cref="VolcanoRequest.Place"/>, and **there is no confirmation window any more** —

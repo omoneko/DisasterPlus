@@ -232,7 +232,7 @@ namespace DisasterPlus.Game
         ///   <c>bounds</c> is the mesh's local bounds, so it is directly the height of the
         ///   origin.
         ///
-        /// ★ Re-read it per city (<see cref="Reset"/>). Unity objects become fake-null
+        /// ★ Re-read it per city (<see cref="Destroy"/>). Unity objects become fake-null
         ///   across cities, so do not hold on to it in a static
         ///   (this project's "static cache trap").
         /// </summary>

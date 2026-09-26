@@ -249,12 +249,12 @@ namespace DisasterPlus.Game
         private const float MaxDrawFraction = 0.5f;
 
         /// <summary>
-        /// <summary>
         /// The largest number of discs laid along the fault. **5 is the ceiling**
         /// (see the table on <see cref="_sources"/>).
         /// </summary>
         private const int MaxSegments = 5;
 
+        /// <summary>
         /// Length of the waveform (water steps). Vanilla uses 256.
         ///
         /// ★★ **Length matters.** At the same 40 m cap, 512 steps gives 52.77 m at the

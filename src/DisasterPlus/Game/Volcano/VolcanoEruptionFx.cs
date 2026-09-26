@@ -239,11 +239,6 @@ namespace DisasterPlus.Game
             }
         }
 
-        /// <summary>
-        /// **Main thread.** Call when turned off in the settings and on level unload.
-        /// The borrowed effects themselves are held by <see cref="VolcanoVanillaFx"/>, so all that
-        /// is folded away here is ⑤'s own clock. Idempotent.
-        /// </summary>
         /// <summary>Whether the swarm of puffs was drawn in the last frame (for diagnostics).</summary>
         public static bool PuffsDrawn { get { return _puffsDrawn; } }
 
@@ -252,6 +247,11 @@ namespace DisasterPlus.Game
         /// <summary>Say exactly once that the puffs could not be drawn and we fell back to the ash column.</summary>
         private static bool _puffFallbackLogged;
 
+        /// <summary>
+        /// **Main thread.** Call when turned off in the settings and on level unload.
+        /// The borrowed effects themselves are held by <see cref="VolcanoVanillaFx"/>, so all that
+        /// is folded away here is ⑤'s own clock. Idempotent.
+        /// </summary>
         public static void Destroy()
         {
             VolcanoBlastFx.Reset();

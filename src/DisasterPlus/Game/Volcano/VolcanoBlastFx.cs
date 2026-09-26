@@ -36,10 +36,11 @@ namespace DisasterPlus.Game
     /// use a different formula and the moment of detonation drifts out of step with the fountain's
     /// peaks, and it reads as two unrelated effects.
     ///
-    /// ★ On top of that, each blast is split into <see cref="BlastPulses"/> bursts, offset via
+    /// ★ On top of that, each blast is split into several bursts, offset via
     ///   <c>DispatchEffect</c>'s <c>startFrame</c> (IL fact §C: firing can be delayed until
-    ///   <c>m_startFrame</c>). One burst ends with a "pop", but three offset bursts look like a
-    ///   **ba-da-boom**.
+    ///   <c>m_startFrame</c>). One burst ends with a "pop", but offset bursts look like a
+    ///   **ba-da-boom**. The count comes from <c>Core.Volcano.BlastCluster.CountFor</c>, which
+    ///   varies it with the mountain's size and whether it is a great explosion.
     ///
     /// ── ★ what is passed to <c>DispatchEffect</c> is not a clone ──────────────────────────
     ///
@@ -178,9 +179,9 @@ namespace DisasterPlus.Game
         }
 
         /// <summary>
-        /// The moment of detonation. **Queues the one-shot as <see cref="BlastPulses"/> offset
-        /// bursts** and, at the same time, solves the rocks' ballistics and bakes them into the
-        /// array.
+        /// The moment of detonation. **Queues the one-shot as the offset bursts
+        /// <c>Core.Volcano.BlastCluster</c> lays out** and, at the same time, solves the
+        /// rocks' ballistics and bakes them into the array.
         /// </summary>
         private static void Detonate(uint seed, int blastIndex, Vec3 vent,
                                      VolcanoFootprint footprint, float craterRadiusMetres,

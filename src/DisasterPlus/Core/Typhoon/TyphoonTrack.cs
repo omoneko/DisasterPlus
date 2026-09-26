@@ -60,14 +60,16 @@ namespace DisasterPlus.Core.Typhoon
         /// The assumed total path length (m). <see cref="SpeedFor"/> divides this by
         /// <c>m_activeDuration</c> to get the speed.
         ///
-        /// ★★ <b>Halved on 2026-08-22 after the owner's report "make it travel more slowly".</b>
-        ///   From the map's side (17280 m) = "cross the map once within the full duration",
-        ///   to <b>the map's half-side (8640 m) = "get only halfway across the map within
-        ///   the full duration"</b>.
-        ///   At the measured <c>m_activeDuration</c> of 8192 the speed is
-        ///   <c>8640 / 8192 = 1.055 m/frame</c> (previously 2.109 m/frame), and at that
-        ///   speed crossing the map's full side takes <b>16384 frames = 360 in-game minutes
-        ///   (6 hours) = exactly twice the typhoon's lifetime</b>.
+        /// ★★ <b>It is the map's full side (17280 m)</b>, so at the measured
+        ///   <c>m_activeDuration</c> of 8192 the speed is <c>17280 / 8192 = 2.109 m/frame</c>
+        ///   = "cross the map once within the full duration".
+        ///
+        /// ★★ <b>Halved to the half-side on 2026-08-22 after the owner's report "make it
+        ///   travel more slowly", then put back on 2026-09-02 — see the remarks below.</b>
+        ///   At the half-side the speed was <c>8640 / 8192 = 1.055 m/frame</c> and the
+        ///   approach leg had nowhere near enough room. The record is kept because the
+        ///   reason the halving looked right is still the reason not to reach for the
+        ///   lifetime instead:
         ///
         /// ★★ <b>"More slowly" was not achieved by extending the lifetime. Here is why.</b>
         ///   <c>ThunderStormAI.IsStillActive</c> is
@@ -376,9 +378,10 @@ namespace DisasterPlus.Core.Typhoon
         /// <summary>
         /// The <b>fraction of the lifetime spent approaching</b>.
         ///
-        /// ★★ It is set to 0.5. <see cref="IntensityAt"/>'s envelope <b>peaks in the middle
-        ///   of the lifetime</b> (the same trapezium as the host's lightning ramp), so
-        ///   <b>the moment it reaches the clicked point is the peak</b>.
+        /// ★★ <see cref="IntensityAt"/>'s envelope <b>peaks in the middle of the
+        ///   lifetime</b> (the same trapezium as the host's lightning ramp), so an approach
+        ///   ending near half the lifetime puts <b>the moment it reaches the clicked point
+        ///   at the peak</b>.
         ///
         /// ★★ Since <see cref="RampFraction"/> is 0.25, the intensity trapezium is
         ///   <b>flat from 25% to 75% of the lifetime</b>. Arriving anywhere in there gives

@@ -56,7 +56,7 @@ namespace DisasterPlus.Game
         /// same explanatory text takes fewer rows.
         ///
         /// **The vertical problem itself was solved with tabs**
-        /// (<see cref="EarthquakePanelLayout"/>). There is no longer any need to widen
+        /// (<see cref="InfoHub"/>). There is no longer any need to widen
         /// the panel further to buy vertical space.
         /// </summary>
         internal const float PanelWidth = 640f;
